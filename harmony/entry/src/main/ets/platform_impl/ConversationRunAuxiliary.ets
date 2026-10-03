@@ -1,10 +1,10 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { conversationHasPendingOrUnexecutedTools, currentMessages, makeTextGenerationParams,
-  makeUserMessage, memoryWorkerModelReferences, patchConversation, runAutoTitle, runMemoryExtraction,
+  makeUserMessage, memoryWorkerModelReferences, patchConversation, recapEligible, runAutoTitle, runMemoryExtraction,
   runSuggestion, toChatModel, toText } from '@amber/chat-domain';
 import type { AutoTitleDeps, Conversation, ConversationStore, MemoryExtractionDeps,
   MemoryWorkerModelResolution, MessageChunk, OpenAIChatApi, ReasoningLevel, SuggestionDeps, UIMessage } from '@amber/chat-domain';
-import { buildProviderApi, readTaskModelReference, TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY,
+import { prepareProviderApi, readTaskModelReference, TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY,
   TASK_COMPRESS_MODEL_KEY, loadTaskPrompts, resolveTaskModelReference,
   resolveTaskModelReferenceChain, taskModelReferenceForChoice } from '../di/AppContainer.ets';
 import type { ChatProviderChoice, TaskPrompts } from '../di/AppContainer.ets';
@@ -13,6 +13,7 @@ import { systemLanguage } from './AgentRuntimePrefs.ets';
 import { beginConversationRun } from './ConversationRunGuard.ets';
 import { getMemoryExtractionStoreOps } from './MemoryStore.ets';
 import { notifyGenerationDone } from './NotificationNotifier.ets';
+import { getConversationRecapService } from './ConversationRecapSupport.ets';
 
 const HILOG_DOMAIN: number = 0x0000;
 const HILOG_TAG: string = 'AmberChat';
@@ -38,7 +39,7 @@ const generateAuxiliaryText = async (
     const name: string = header.name.trim();
     if (name.length > 0) headers[name] = header.value.trim();
   }
-  const api: OpenAIChatApi = buildProviderApi(choice.provider, headers);
+  const api: OpenAIChatApi = await prepareProviderApi(choice.provider, headers);
   return chunkText(await api.generateText([makeUserMessage(prompt)], makeTextGenerationParams({
     model: toChatModel(choice.model), reasoningLevel, customBody: choice.model.customBodies,
   })));
@@ -140,6 +141,15 @@ export const completeConversationAuxiliary = (
     maybeAutoTitle(ctx, finalized);
     maybeSuggestions(ctx, finalized);
     maybeMemoryExtraction(ctx, finalized);
+  }
+  if (recapEligible(finalized) && !conversationHasPendingOrUnexecutedTools(finalized)) {
+    const recapService = getConversationRecapService();
+    recapService.request(finalized.id).then((): void => {
+      const error: string = recapService.state(finalized.id).error;
+      if (error.length > 0) hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'conversation recap failed: %{public}s', error);
+    }).catch((error: Error): void => {
+      hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'conversation recap failed: %{public}s', error.message);
+    });
   }
   if (!ctx.seed.enableGenerationNotification || !(AppStorage.get<boolean>('appBackgrounded') ?? false)) return;
   const messages: UIMessage[] = currentMessages(finalized);

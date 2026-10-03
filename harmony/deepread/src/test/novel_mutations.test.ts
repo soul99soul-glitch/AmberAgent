@@ -12,6 +12,7 @@ import type {
   NovelProject, NovelCollectionTarget, NovelSettingProposal,
 } from '../main/ets/novel/models.ts';
 import { isNovelError } from '../main/ets/novel/error.ts';
+import { buildSuggestionAdoption, buildSettingProposalAdoption } from '../main/ets/novel/material_adoption.ts';
 
 const NOW = 1_000_000;
 const base = (): NovelProject => makeNovelProject({ name: '测试小说', now: NOW });
@@ -191,7 +192,7 @@ test('normalizeTitle: lowercase + strip whitespace', () => {
   assert.equal(normalizeTitle(' 主角 A '), '主角a');
 });
 
-test('resolveSuggestion accept: updates existing material by kind+title', () => {
+test('resolveSuggestion accept: updates only an explicitly selected material', () => {
   let p = base();
   const mat = upsertMaterial(p, null, 'character', '主角', '旧设定', true, NOW);
   p = mat.project;
@@ -199,7 +200,8 @@ test('resolveSuggestion accept: updates existing material by kind+title', () => 
   p = c.project;
   const sug = makeNovelSuggestion({ sourceChapterId: c.value.id, kind: 'character', title: '主角', content: '新设定', now: NOW });
   p = replacePendingSuggestions(p, c.value.id, [sug], NOW);
-  const res = resolveSuggestion(p, sug.id, true, NOW + 1);
+  const edit = buildSuggestionAdoption(p, sug, mat.value.id);
+  const res = resolveSuggestion(p, sug.id, true, NOW + 1, edit);
   assert.ok(res.value !== null);
   assert.equal(res.value?.content, '新设定');
   assert.equal(res.project.materials.length, 1, 'updated in place, not duplicated');
@@ -230,7 +232,7 @@ test('resolveSuggestion reject: no material, status rejected', () => {
   assert.equal(res.project.materialSuggestions.find(s => s.id === sug.id)?.status, 'rejected');
 });
 
-test('historical setting proposal accepts and upserts material by kind+normalized title', () => {
+test('historical setting proposal accepts with an explicit existing target', () => {
   let project = upsertMaterial(base(), null, 'character', '主 角', '旧设定', true, NOW).project;
   project = {
     ...project,
@@ -240,7 +242,8 @@ test('historical setting proposal accepts and upserts material by kind+normalize
   assert.equal(project.settingProposals[0].sourceMessageId, 'assistant-1');
   assert.equal(project.settingProposals[0].status, 'pending');
 
-  const resolved = resolveSettingProposal(project, project.settingProposals[0].id, true, NOW + 2);
+  const edit = buildSettingProposalAdoption(project, project.settingProposals[0], project.materials[0].id);
+  const resolved = resolveSettingProposal(project, project.settingProposals[0].id, true, NOW + 2, edit);
   assert.equal(resolved.project.materials.length, 1);
   assert.equal(resolved.value?.content, '新设定');
   assert.equal(resolved.project.settingProposals[0].status, 'accepted');

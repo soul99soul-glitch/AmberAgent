@@ -1,0 +1,99 @@
+{
+  "scope": "Device actual localhost fixture HTTP requests; no auth secrets or production credential use",
+  "runs": [
+    {
+      "topic": "P6 Standalone Reader Verification",
+      "requests": [
+        {
+          "time": 1790976807.557037,
+          "path": "/v1/chat/completions",
+          "model": "fixture-context-16k",
+          "toolsCount": 0,
+          "stage": "规划",
+          "bodySha256": "a0196992da431db1ddae02d7b6cd3015247d5b5c0f8b124c9b3a712529d5e7c4"
+        },
+        {
+          "time": 1790976807.592063,
+          "path": "/v1/chat/completions",
+          "model": "fixture-context-16k",
+          "toolsCount": 0,
+          "stage": "概览",
+          "bodySha256": "18f76c2aeeaeed095a1596053ca4f0fa6b76906a4d8927d481340fbb193c6974"
+        },
+        {
+          "time": 1790976807.6177971,
+          "path": "/v1/chat/completions",
+          "model": "fixture-context-16k",
+          "toolsCount": 0,
+          "stage": "时间轴叙事",
+          "bodySha256": "d116ac339e8093dec8dfdd9e7ced22e64a8726463c363ff60cd0971c3c1ead49"
+        },
+        {
+          "time": 1790976807.64594,
+          "path": "/v1/chat/completions",
+          "model": "fixture-context-16k",
+          "toolsCount": 0,
+          "stage": "深度分析",
+          "bodySha256": "3dbf25e597e478df4be3d832f1b8d430f366f4f42bf01df2146fa14f9528a2f0"
+        },
+        {
+          "time": 1790976807.6642292,
+          "path": "/v1/chat/completions",
+          "model": "fixture-context-16k",
+          "toolsCount": 0,
+          "stage": "扩展阅读",
+          "bodySha256": "64226bd6f932c80a7cfcb3ea246356e9ac3b7dc1503ecc0fd180d6722e9fc0cc"
+        }
+      ],
+      "completeStageChain": true,
+      "allRequestsWithoutTools": true
+    },
+    {
+      "topic": "Local Reader Source Verification",
+      "requests": [
+        {
+          "time": 1790977122.900797,
+          "path": "/v1/chat/completions",
+          "model": "fixture-context-16k",
+          "toolsCount": 0,
+          "stage": "规划",
+          "bodySha256": "d4b66d862106c0e2314ba48ba093a46c01e0fa994a076eaf8c93f1634df9c576"
+        },
+        {
+          "time": 1790977122.934591,
+          "path": "/v1/chat/completions",
+          "model": "fixture-context-16k",
+          "toolsCount": 0,
+          "stage": "概览",
+          "bodySha256": "463c29fcbfd7ee38abea209486691299f8b92dcb40b202015679a1a9e6b36e5a"
+        },
+        {
+          "time": 1790977122.95007,
+          "path": "/v1/chat/completions",
+          "model": "fixture-context-16k",
+          "toolsCount": 0,
+          "stage": "时间轴叙事",
+          "bodySha256": "f8bc861b17f42e89a741de0c6f8737dd019cb189ee0f1360e3aa56bd86331eb3"
+        },
+        {
+          "time": 1790977122.986015,
+          "path": "/v1/chat/completions",
+          "model": "fixture-context-16k",
+          "toolsCount": 0,
+          "stage": "深度分析",
+          "bodySha256": "b19e815f94c8ee03a4b4e0879b14ce474cc8ceb54fe39220ad855cc66eec6e46"
+        },
+        {
+          "time": 1790977123.023674,
+          "path": "/v1/chat/completions",
+          "model": "fixture-context-16k",
+          "toolsCount": 0,
+          "stage": "扩展阅读",
+          "bodySha256": "c42580cda111177a06bd3e70264b029944c260421207cf5399517ae4b6ec6c7c"
+        }
+      ],
+      "completeStageChain": true,
+      "allRequestsWithoutTools": true
+    }
+  ]
+}

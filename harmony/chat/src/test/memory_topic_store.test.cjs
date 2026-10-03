@@ -55,9 +55,15 @@ test('actual topic source/model/document chain is durable, idempotent, guarded a
   const calls = [], candidateChains = []; let model = async () => response();
   const response = () => ({ choices: [{ message: domain.makeAssistantMessage(JSON.stringify({ topics: [
     { title: '工程', summary: '两条已存事实的主题', memberIds: [1, 2] }] })) }] });
-  const appContainer = { getChatKvStore: () => kv, loadTaskModelIds: async () => ({ compressModelId: 'compress-choice' }),
-    currentChatModelUuid: async () => 'chat-choice', resolveTaskModelChain: async ids => { candidateChains.push(ids); return choice; },
-    buildProviderApi: (provider, headers) => ({ generateText: async (messages, params, options) => {
+  const appContainer = { getChatKvStore: () => kv, TASK_COMPRESS_MODEL_KEY: 'compress_model',
+    readTaskModelReference: async key => {
+      assert.equal(key, 'compress_model'); return domain.taskModelReferenceFromId('compress-choice');
+    },
+    currentChatModelReference: async () => domain.taskModelReferenceFromId('chat-choice'),
+    resolveTaskModelReferenceChain: async references => {
+      candidateChains.push(references.map(domain.taskModelReferenceId)); return choice;
+    },
+    prepareProviderApi: async (provider, headers) => ({ generateText: async (messages, params, options) => {
       calls.push({ provider, headers, messages, params, options }); return model(); } }) };
   const imports = { '@amber/chat-domain': domain, '@kit.CoreFileKit': { fileIo },
     '@kit.PerformanceAnalysisKit': { hilog: { warn: () => {} } },

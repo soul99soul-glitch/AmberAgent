@@ -123,7 +123,7 @@ const prepareCommitting = async (
 const lineCount = (raw: string | null): number =>
   raw === null || raw.trim().length === 0 ? 0 : raw.trim().split('\n').length;
 
-test('polish start snapshots a continuous closed interval, selected context and consistency warnings', async () => {
+test('polish start requires synchronized plot and snapshots selected context after sync', async () => {
   const repository = createFileNovelRepository(createMemoryFileStore());
   await repository.createProject(projectFixture('start'));
   const created = await repository.workspaceStatus('start');
@@ -147,29 +147,37 @@ test('polish start snapshots a continuous closed interval, selected context and 
   assert.equal(status.plotStale, true);
   assert.equal(status.unresolvedFromOrdinal, 2);
 
-  const job = await repository.startPolishJob(
+  await assert.rejects(repository.startPolishJob(
     'start', status.cas, 'polish-1-3', 1, 3, ALL_CONTEXT, NOW + 4,
+  ), /润色前必须同步剧情/);
+  await repository.syncPlot('start', status.cas, 'sync-before-polish');
+  const ready = await repository.workspaceStatus('start');
+  const job = await repository.startPolishJob(
+    'start', ready.cas, 'polish-1-3', 1, 3, ALL_CONTEXT, NOW + 4,
   );
   assert.deepEqual(job.targets.map(target => target.ordinal), [1, 2, 3]);
   assert.deepEqual(job.targets.map(target => target.id), ['chapter-1', 'chapter-2', 'chapter-3']);
   assert.equal(job.targets[0].sourceContent, '第一章启动前修订。');
   assert.equal(job.targets[0].sourceDigest, defaultGhostwriteDigest('第一章启动前修订。'));
   assert.deepEqual(job.contextSnapshot.map(item => item.kind), [
-    'plot', 'foreshadow', 'character', 'decision',
+    'material', 'character', 'plot', 'plot', 'plot', 'plot', 'foreshadow', 'decision',
   ]);
   assert.deepEqual(job.contextSnapshot.map(item => item.sourcePath), [
-    'branches/main/plan/plot.md',
-    'branches/main/setting/catalog.json/foreshadow/ferry',
+    'branches/main/setting/world/world.md',
     'branches/main/setting/character/hero.md',
+    'branches/main/plan/plot.md',
+    'branches/main/plot/chapters/chapter-1.md',
+    'branches/main/plot/chapters/chapter-2.md',
+    'branches/main/plot/chapters/chapter-3.md',
+    'branches/main/setting/catalog.json/foreshadow/ferry',
     'branches/main/setting/catalog.json/decision/tone',
   ]);
   assert.equal(job.contextSnapshot.some(item => item.content.includes('未采用角色')), false);
-  assert.equal(job.contextSnapshot.some(item => item.content.includes('不属于角色上下文')), false);
+  assert.equal(job.contextSnapshot.some(item => item.content.includes('不属于角色上下文')), true);
   for (let i: number = 0; i < job.contextSnapshot.length; i++) {
     assert.equal(job.contextSnapshot[i].digest, defaultGhostwriteDigest(job.contextSnapshot[i].content));
   }
-  assert.deepEqual(job.warnings.map(warning => warning.kind), ['plot_stale', 'unresolved']);
-  assert.match(job.warnings[1].message, /第 2 章起/);
+  assert.deepEqual(job.warnings, []);
   assert.deepEqual((await repository.listPolishJobs('start')).map(item => item.jobId), ['polish-1-3']);
 
   const missingRepository = createFileNovelRepository(createMemoryFileStore());
@@ -360,6 +368,7 @@ test('polish checkpoints and atomic commits preserve backups, replay receipts an
   assert.equal(afterFirst.chapterVersions[0].chapterId, 'chapter-1');
   assert.equal(afterFirst.chapterVersions[0].kind, 'polish');
   assert.equal(afterFirst.chapterVersions[0].content, '第一章旧正文。');
+  assert.deepEqual(afterFirst.chapterPlots.map(pointer => pointer.stale), [false, true, true]);
   assert.equal(lineCount(await store.readText(LEDGER_PATH('commit'))), 2);
   assert.deepEqual(job.expectedCas, (await repository.workspaceStatus('commit')).cas);
 
@@ -386,6 +395,8 @@ test('polish checkpoints and atomic commits preserve backups, replay receipts an
   assert.deepEqual(completed.chapterVersions.map(version => version.content), [
     '第一章旧正文。', '第二章旧正文。',
   ]);
+  assert.deepEqual(completed.chapterPlots.map(pointer => pointer.stale), [false, false, true]);
+  assert.equal((await repository.workspaceStatus('commit')).unresolvedFromOrdinal, 3);
   assert.equal(lineCount(await store.readText(LEDGER_PATH('commit'))), 3);
 
   const cold = createFileNovelRepository(store);
@@ -495,7 +506,7 @@ test('polish pause, waiting-system, resume, fail, retry and cancel persist acros
   assert.equal(job.resumeStage, 'writing');
   assert.equal(job.failure, 'provider timeout');
   job = await repository.retryPolishJob('lifecycle', 'lifecycle-job', NOW + 11);
-  assert.equal(job.stage, 'writing');
+  assert.equal(job.stage, 'queued');
   assert.equal(job.failure, null);
   job = await repository.cancelPolishJob('lifecycle', 'lifecycle-job', NOW + 12);
   assert.equal(job.stage, 'cancelled');
@@ -541,4 +552,44 @@ test('v1 ghostwrite jobs store migrates through public repository operations wit
   assert.equal(rewritten.version, 2);
   assert.equal(rewritten.jobs?.[0].kind, 'ghostwrite');
   assert.equal(rewritten.jobs?.[0].jobId, 'legacy-ghost');
+});
+
+
+test('arbitrary selection commits only selected chapters and survives a cold recovery between commits', async () => {
+  const store = createMemoryFileStore();
+  let repository = createFileNovelRepository(store);
+  await repository.createProject(projectFixture('subset'));
+  const status = await repository.workspaceStatus('subset');
+  let job = await repository.startPolishJob(
+    'subset', status.cas, 'polish-subset', 1, 3, ALL_CONTEXT, NOW + 1, [3, 1],
+  );
+  assert.deepEqual(job.targets.map(target => target.ordinal), [1, 3]);
+  job = await repository.claimPolishJob('subset', job.jobId, 'owner', NOW + 2, 1_000);
+  const claim = claimRef(job);
+  const first = await prepareCommitting(repository, 'subset', job, claim, 'first', NOW + 3);
+  job = await repository.commitPolishChapter('subset', job.jobId, claim, first.receipt, NOW + 6);
+  repository = createFileNovelRepository(store);
+  job = await repository.loadPolishJob('subset', job.jobId);
+  assert.equal(job.targets[job.cursor].ordinal, 3);
+  const second = await prepareCommitting(repository, 'subset', job, claim, 'third', NOW + 7);
+  job = await repository.commitPolishChapter('subset', job.jobId, claim, second.receipt, NOW + 10);
+  const project = await repository.loadProject('subset');
+  assert.equal(job.stage, 'completed');
+  assert.deepEqual(project.chapters.map(chapter => chapter.content), [
+    first.candidate.content, '第二章旧正文。', second.candidate.content,
+  ]);
+  assert.deepEqual(project.chapterVersions.map(version => version.chapterId), ['chapter-1', 'chapter-3']);
+  assert.deepEqual(job.progress.map(progress => progress.chapterOrdinal), [1, 3]);
+});
+
+test('selected ordinals reject empty, duplicate, invalid or missing chapters before persistence', async () => {
+  const repository = createFileNovelRepository(createMemoryFileStore());
+  await repository.createProject(projectFixture('invalid-subset'));
+  const status = await repository.workspaceStatus('invalid-subset');
+  for (const selected of [[], [1, 1], [0], [1.5], [4]]) {
+    await assert.rejects(repository.startPolishJob(
+      'invalid-subset', status.cas, 'bad-subset', 1, 3, ALL_CONTEXT, NOW + 1, selected,
+    ));
+  }
+  assert.deepEqual(await repository.listPolishJobs('invalid-subset'), []);
 });

@@ -1,0 +1,81 @@
+{
+  "scope": "local synthetic HTTP fixture; no cloud/provider quality claim",
+  "ghostwrite": {
+    "5": [
+      {
+        "chapterOrdinal": 5,
+        "candidateId": "candidate:nv_murhpvub_4_5c7web2u",
+        "candidateDigest": "9c668c5a",
+        "planId": "nv_murhpm3v_1_1aqyle9i:plan:5",
+        "planDigest": "627c51a3",
+        "isFinalChapter": true,
+        "time": "2026-10-03 05:43:48",
+        "bodySha256": "96fa7a4e755be6667a46543fc1c85a7e25860125e90e12de848ceb0549cf0b0a"
+      },
+      {
+        "chapterOrdinal": 5,
+        "candidateId": "candidate:nv_murhpvub_4_5c7web2u",
+        "candidateDigest": "9c668c5a",
+        "planId": "nv_murhpm3v_1_1aqyle9i:plan:5",
+        "planDigest": "627c51a3",
+        "isFinalChapter": true,
+        "time": "2026-10-03 05:49:38",
+        "bodySha256": "96fa7a4e755be6667a46543fc1c85a7e25860125e90e12de848ceb0549cf0b0a"
+      }
+    ],
+    "6": [
+      {
+        "chapterOrdinal": 6,
+        "candidateId": "candidate:nv_muriei28_9_fvp7xx8q",
+        "candidateDigest": "9c668c5a",
+        "planId": "nv_muriehq8_6_uyvpnjpx:plan:6",
+        "planDigest": "6b56d646",
+        "isFinalChapter": true,
+        "time": "2026-10-03 06:02:56",
+        "bodySha256": "905f1e1d9b6271ad3faead26b2d9a376e1e5e2b8b9492e0d04976d11ee114efd"
+      },
+      {
+        "chapterOrdinal": 6,
+        "candidateId": "candidate:nv_muriei28_9_fvp7xx8q",
+        "candidateDigest": "9c668c5a",
+        "planId": "nv_muriehq8_6_uyvpnjpx:plan:6",
+        "planDigest": "6b56d646",
+        "isFinalChapter": true,
+        "time": "2026-10-03 06:03:45",
+        "bodySha256": "905f1e1d9b6271ad3faead26b2d9a376e1e5e2b8b9492e0d04976d11ee114efd"
+      }
+    ]
+  },
+  "deepreadNative": [
+    {
+      "time": "05:56:23",
+      "tools": 0,
+      "stage": "planner",
+      "model": "fixture-context-16k"
+    },
+    {
+      "time": "05:56:35",
+      "tools": 0,
+      "stage": "概览",
+      "model": "fixture-context-16k"
+    },
+    {
+      "time": "05:56:47",
+      "tools": 0,
+      "stage": "时间轴叙事",
+      "model": "fixture-context-16k"
+    },
+    {
+      "time": "05:56:59",
+      "tools": 0,
+      "stage": "深度分析",
+      "model": "fixture-context-16k"
+    },
+    {
+      "time": "05:57:11",
+      "tools": 0,
+      "stage": "扩展阅读",
+      "model": "fixture-context-16k"
+    }
+  ]
+}

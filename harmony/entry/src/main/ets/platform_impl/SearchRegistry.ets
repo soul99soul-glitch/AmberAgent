@@ -4,10 +4,10 @@
 import type { AbortSignalLike, HttpClient, HttpRequest, HttpResponse, Storage, SearchProviderRegistry, SearchProvider, SearchHit } from '@amber/deepread-domain';
 import { createTavilyProvider } from '@amber/deepread-domain';
 import { createNewsNowProvider } from './NewsNowProvider.ets';
-import type { FreeEngineId, SearchServiceOptions, SearchSettings } from '@amber/chat-domain';
+import type { FreeEngineId, SearchServiceOptions, SearchSettings, DeepReadSearchGoogle } from '@amber/chat-domain';
 import {
   FREE_ENGINE_NAMES, SEARCH_SERVICE_TYPES, enabledServices, freeEngineCoolingDown, getSearchService,
-  looksTechnicalQuery, runFreeEngine,
+  looksTechnicalQuery, runFreeEngine, createDeepReadSearchProviders,
 } from '@amber/chat-domain';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
@@ -219,10 +219,10 @@ class SearXNGProvider implements SearchProvider {
 // 旧实现(DDG Lite 正则抓链接 / 无 Key Jina 搜索 / HN 全话题)已移除:
 // Lite 首个请求即 202 验证页;s.jina.ai 无 Key 返回 401 且把搜索页当来源 URL。
 // 每个引擎单独一个 provider:慢/被拦的引擎只丢自己的 bucket,不拖累其它引擎。
+// Historical first-four cap is no longer used; the wall budget limits queries.
 const FREE_ENGINE_MAX_QUERIES: number = 4;
-// 须小于预抓总预算(PREFETCH_WALL_BUDGET_MS=15s),否则整个 bucket 会被 deadline 丢弃
-const PROVIDER_SOFT_BUDGET_MS: number = 10_000;
-const PER_QUERY_RESULTS: number = 6;
+// 严格早于 search 的 10s 外层截止,让内部超时先返回已经获得的 hits。
+const PROVIDER_SOFT_BUDGET_MS: number = 9_000;
 
 const isUrlQuery = (q: string): boolean => /^https?:\/\//i.test(q);
 
@@ -260,17 +260,21 @@ class FreeEngineProvider implements SearchProvider {
     this.ensureSdk = ensureSdk;
   }
 
-  // Wikipedia 只查主题本身;HN 只在技术话题查主题本身;网页引擎查前几个角度
+  // Wikipedia/HN 保留主题检索;网页引擎在预算内尝试全部研究角度。
   private pickQueries(queries: string[]): string[] {
     const plain: string[] = queries.filter((q: string) => !isUrlQuery(q));
     if (plain.length === 0) return [];
     if (this.id === 'wikipedia') return [plain[0]];
     if (this.id === 'hackernews') return looksTechnicalQuery(plain[0]) ? [plain[0]] : [];
-    return plain.slice(0, FREE_ENGINE_MAX_QUERIES);
+    return plain;
   }
 
-  async search(queries: string[], signal?: AbortSignalLike): Promise<SearchHit[]> {
-    if (!freeEngineEnabled(this.id, await this.loadSettings())) return [];
+  async search(
+    queries: string[], signal?: AbortSignalLike, onFailure?: (query: string, error: string) => void,
+  ): Promise<SearchHit[]> {
+    const settings: SearchSettings = await this.loadSettings();
+    if (!freeEngineEnabled(this.id, settings)) return [];
+    const resultSize: number = settings.searchCommonOptions.resultSize;
     this.ensureSdk();
     const startedAt: number = Date.now();
     const hits: SearchHit[] = [];
@@ -282,7 +286,7 @@ class FreeEngineProvider implements SearchProvider {
       if (remaining <= 0) break;
       try {
         const result = await withinBudget(
-          runFreeEngine(this.id, picked[qi], { resultSize: PER_QUERY_RESULTS }), remaining);
+          runFreeEngine(this.id, picked[qi], { resultSize }, { signal }), remaining);
         for (let i = 0; i < result.items.length; i++) {
           const item = result.items[i];
           hits.push({ title: item.title, url: item.url, snippet: item.text, source: this.name,
@@ -290,6 +294,7 @@ class FreeEngineProvider implements SearchProvider {
         }
       } catch (e) {
         if (isAborted(signal)) break;
+        onFailure?.(picked[qi], `${this.name}: ${e instanceof Error ? e.message : String(e)}`);
         hilog.warn(DOMAIN, TAG, '%{public}s failed: %{public}s', this.name, String(e));
       }
     }
@@ -310,7 +315,8 @@ class ConfiguredServicesProvider implements SearchProvider {
   }
 
   private async searchOne(
-    options: SearchServiceOptions, queries: string[], startedAt: number, signal?: AbortSignalLike,
+    options: SearchServiceOptions, queries: string[], startedAt: number, resultSize: number, signal?: AbortSignalLike,
+    onFailure?: (query: string, error: string) => void,
   ): Promise<SearchHit[]> {
     const hits: SearchHit[] = [];
     const serviceName: string = SEARCH_SERVICE_TYPES[options.type] ?? 'Search';
@@ -320,7 +326,7 @@ class ConfiguredServicesProvider implements SearchProvider {
       if (remaining <= 0) break;
       try {
         const result = await withinBudget(getSearchService(options).search(
-          { query: queries[qi] }, { resultSize: PER_QUERY_RESULTS }, options), remaining);
+          { query: queries[qi] }, { resultSize }, options, { signal }), remaining);
         for (let i = 0; i < result.items.length; i++) {
           const item = result.items[i];
           hits.push({ title: item.title, url: item.url, snippet: item.text, source: serviceName,
@@ -328,24 +334,38 @@ class ConfiguredServicesProvider implements SearchProvider {
         }
       } catch (e) {
         if (isAborted(signal)) break;
+        onFailure?.(queries[qi], `${serviceName}: ${e instanceof Error ? e.message : String(e)}`);
         hilog.warn(DOMAIN, TAG, '%{public}s failed: %{public}s', serviceName, String(e));
       }
     }
     return hits;
   }
 
-  async search(queries: string[], signal?: AbortSignalLike): Promise<SearchHit[]> {
+  async search(
+    queries: string[], signal?: AbortSignalLike, onFailure?: (query: string, error: string) => void,
+  ): Promise<SearchHit[]> {
     this.ensureSdk();
     const startedAt: number = Date.now();
-    const services: SearchServiceOptions[] = enabledServices(await this.loadSettings());
+    const settings: SearchSettings = await this.loadSettings();
+    const services: SearchServiceOptions[] = enabledServices(settings);
     if (services.length === 0) return [];
-    const picked: string[] = queries.filter((q: string) => !isUrlQuery(q)).slice(0, FREE_ENGINE_MAX_QUERIES);
+    const picked: string[] = queries.filter((q: string) => !isUrlQuery(q));
     const buckets: SearchHit[][] = await Promise.all(services.map(
-      (o: SearchServiceOptions) => this.searchOne(o, picked, startedAt, signal)));
+      (o: SearchServiceOptions) => this.searchOne(o, picked, startedAt, settings.searchCommonOptions.resultSize, signal, onFailure)));
     const hits: SearchHit[] = [];
     for (let i = 0; i < buckets.length; i++) hits.push(...buckets[i]);
     return hits;
   }
+}
+
+interface RegistrySnapshot {
+  providers: SearchProvider[];
+  readerEnabled: boolean;
+  cacheKey: string;
+}
+
+export interface DeepReadSearchRegistryOptions {
+  searchGoogle?: DeepReadSearchGoogle;
 }
 
 class MultiProviderRegistry implements SearchProviderRegistry {
@@ -355,23 +375,51 @@ class MultiProviderRegistry implements SearchProviderRegistry {
 
   private loadSearchSettings: () => Promise<SearchSettings>;
   private ensureSdk: () => void;
+  private searchGoogle: DeepReadSearchGoogle | undefined;
 
   constructor(
     http: HttpClient, storage: Storage,
     loadSearchSettings: () => Promise<SearchSettings>, ensureSdk: () => void,
+    options?: DeepReadSearchRegistryOptions,
   ) {
     this.http = http;
     this.storage = storage;
     this.loadSearchSettings = loadSearchSettings;
     this.ensureSdk = ensureSdk;
-    // 初始只放国内可直连的源(NewsNow),避免国外源超时阻塞
-    this.cachedEnabled = [
-      createNewsNowProvider(http),
-    ];
-    // 异步加载其他源(国外源 + 需 key 的源)
-    this.loadKeyedProviders();
+    this.searchGoogle = options?.searchGoogle;
+    // The first call has the same configured/free sources as later calls.
+    // NewsNow is consumed through explicit topic seeds, not another hot-list fetch.
+    this.cachedEnabled = [{ name: 'deepread', search: async (
+      queries: string[], signal?: AbortSignalLike, onFailure?: (query: string, error: string) => void,
+    ): Promise<SearchHit[]> => {
+      const settings: SearchSettings = await this.loadSearchSettings();
+      return this.providersForSettings(settings)[0].search(queries, signal, onFailure);
+    } }];
   }
 
+  private providersForSettings(settings: SearchSettings): SearchProvider[] {
+    const loadSettings = (): Promise<SearchSettings> => Promise.resolve(settings);
+    const providers: SearchProvider[] = [];
+    for (let i = 0; i < DEEPREAD_FREE_ENGINES.length; i++) {
+      providers.push(new FreeEngineProvider(DEEPREAD_FREE_ENGINES[i], loadSettings, this.ensureSdk));
+    }
+    return createDeepReadSearchProviders(settings, {
+      freeProviders: providers, ensureSdk: this.ensureSdk, searchGoogle: this.searchGoogle,
+    });
+  }
+
+  async snapshot(): Promise<RegistrySnapshot> {
+    const settings: SearchSettings = await this.loadSearchSettings();
+    return {
+      providers: this.providersForSettings(settings),
+      readerEnabled: settings.searchBuiltinJinaEnabled,
+      // Only held by the prefetch cache; never printed or sent to providers.
+      cacheKey: JSON.stringify(settings),
+    };
+  }
+
+  // Historical independent-key adapters remain for reference. They are not
+  // activated: the search settings page is the source of truth for each run.
   private async loadKeyedProviders(): Promise<void> {
     // 用户配置的 API 源排最前(质量最好)
     const providers: SearchProvider[] = [
@@ -425,6 +473,7 @@ export const createTavilyAndFallbackRegistry = (
   storage: Storage,
   loadSearchSettings: () => Promise<SearchSettings>,
   ensureSdk: () => void,
+  options?: DeepReadSearchRegistryOptions,
 ): SearchProviderRegistry => {
-  return new MultiProviderRegistry(http, storage, loadSearchSettings, ensureSdk);
+  return new MultiProviderRegistry(http, storage, loadSearchSettings, ensureSdk, options);
 };

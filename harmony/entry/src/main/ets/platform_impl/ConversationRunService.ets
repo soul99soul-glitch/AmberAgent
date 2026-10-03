@@ -5,7 +5,7 @@ import type {
   PendingUserMessage, PendingUserMessageMode, ConversationCompact, KernelPhase,
   SandboxActivityUiState, ToolApprovalVerdict, ToolApprovalPartLocator, AgentTool,
   ToolLoopOptions, ChatTurnDeps, ChatKernelHost, DeepReadOpenEvent,
-  SearchSettings, MiniAppSetting,
+  SearchSettings, MiniAppSetting, Assistant, JevCompletionNotice, JevCompletionFacts,
 } from '@amber/chat-domain';
 import {
   newId, nowIso, currentMessages, nodeRole, makeUIMessage, makeUserMessage,
@@ -18,14 +18,14 @@ import {
   makePendingUserMessage, enqueuePendingUserMessage, cancelPendingUserMessage,
   dequeueNextPendingUserMessage, preparePendingMessageForDispatch, convertSteerToFollowup,
   loadPendingQueue, persistPendingQueue, persistPendingQueueWithEvent, recordPendingQueueEvent,
-  invalidateCompacts, AgentToolActivityStore,
+  invalidateCompacts, AgentToolActivityStore, applyUserInputRegexes, jevUnverifiedChanges, jevCompletionBindingMatches,
 } from '@amber/chat-domain';
 import type { ChatRuntime, ChatProviderChoice, TaskPrompts } from '../di/AppContainer.ets';
-import { getChatRepository, getChatKvStore, getCompactStore } from '../di/AppContainer.ets';
+import { getChatRepository, getChatKvStore, getCompactStore, getChatAssistants } from '../di/AppContainer.ets';
 import type { AgentRuntimeSnapshot } from './AgentRuntimePrefs.ets';
 import type { OcrSeed } from './OcrSupport.ets';
 import { EntryAbortController } from './EntryAbortController.ets';
-import { beginConversationRun } from './ConversationRunGuard.ets';
+import { beginConversationRun, beginConversationCompaction, isConversationCompacting } from './ConversationRunGuard.ets';
 import { reportGenerationProgress } from './BackgroundGenerationKeepAlive.ets';
 import { GenerationProgressTracker } from './GenerationProgressTracker.ets';
 import { prepareConversationSeed, buildConversationTurnDeps } from './ConversationRunDependencies.ets';
@@ -33,7 +33,11 @@ import { buildConversationToolLoop } from './ConversationRunTools.ets';
 import { completeConversationAuxiliary } from './ConversationRunAuxiliary.ets';
 import { releaseConversationBrowserRun } from './ConversationBrowserGuard.ets';
 import { cancelNativePluginJsConversation } from './NativePluginJsTransport.ets';
+import { evaluateJevCompletion } from './JevCompletionSupport.ets';
 import { cancelJevApprovalTriage, scheduleJevApprovalTriage } from './JevApprovalTriage.ets';
+import { compactConversationNow } from './ContextCompactionSupport.ets';
+import type { ManualCompactionOutcome } from './ContextCompactionSupport.ets';
+import { materializeDocumentParts, materializeConversationDocuments } from './DocumentAttachmentSupport.ets';
 
 export interface ConversationRunSnapshot {
   conversationId: string; runId: string; phase: KernelPhase; sending: boolean;
@@ -42,6 +46,7 @@ export interface ConversationRunSnapshot {
   retryStatus: string; errorMsg: string; liveActivity: SandboxActivityUiState | null;
   pendingQueue: PendingUserMessage[]; contextCompacts: ConversationCompact[];
   contextWindowTokens: number | null; compactActiveCount: number;
+  completionNotice: JevCompletionNotice | null;
   modelLabel: string; awaitingTools: boolean; jsSandboxNeeded: boolean; historyNodeCount: number;
 }
 export interface ConversationRunHandle {
@@ -124,6 +129,8 @@ interface ActiveRun {
 interface ConversationSession {
   id: string;
   record: ActiveRun | null;
+  completionController: EntryAbortController | null;
+  completionSourceFingerprint: string;
   latest: Conversation | null;
   newConversation: Conversation | null;
   state: ConversationRunSnapshot;
@@ -145,7 +152,7 @@ const emptySnapshot = (id: string): ConversationRunSnapshot => ({
   visualConversation: null, conversationDeleted: false,
   streamingTail: [], regenTail: null, regenNodeId: '', retryStatus: '', errorMsg: '', liveActivity: null,
   pendingQueue: [], contextCompacts: [], contextWindowTokens: null, compactActiveCount: 0,
-  modelLabel: '', awaitingTools: false, jsSandboxNeeded: false, historyNodeCount: 0,
+  completionNotice: null, modelLabel: '', awaitingTools: false, jsSandboxNeeded: false, historyNodeCount: 0,
 });
 const copySnapshot = (s: ConversationRunSnapshot): ConversationRunSnapshot => ({
   conversationId: s.conversationId, runId: s.runId, phase: s.phase, sending: s.sending,
@@ -155,7 +162,7 @@ const copySnapshot = (s: ConversationRunSnapshot): ConversationRunSnapshot => ({
   pendingQueue: s.pendingQueue.slice(), contextCompacts: s.contextCompacts.slice(),
   contextWindowTokens: s.contextWindowTokens, compactActiveCount: s.compactActiveCount,
   modelLabel: s.modelLabel, awaitingTools: s.awaitingTools, jsSandboxNeeded: s.jsSandboxNeeded,
-  historyNodeCount: s.historyNodeCount,
+  historyNodeCount: s.historyNodeCount, completionNotice: s.completionNotice,
 });
 
 export class ConversationRunService {
@@ -167,7 +174,7 @@ export class ConversationRunService {
     const previous: ConversationSession | undefined = this.sessions.get(id);
     if (previous !== undefined) return previous;
     const created: ConversationSession = {
-      id: id, record: null, latest: null, newConversation: null, state: emptySnapshot(id), queue: [], queueLoaded: false,
+      id: id, record: null, completionController: null, completionSourceFingerprint: '', latest: null, newConversation: null, state: emptySnapshot(id), queue: [], queueLoaded: false,
       queueTail: Promise.resolve(), writeTail: Promise.resolve(), pendingWrites: 0, pendingQueueWrites: 0,
       drainActive: false, appendActive: false, listeners: [], navigation: [],
     };
@@ -185,6 +192,7 @@ export class ConversationRunService {
     if (session.record === null && session.newConversation === null && !session.drainActive && !session.appendActive && session.queue.length === 0
       && session.pendingWrites === 0 && session.pendingQueueWrites === 0
       && session.listeners.length === 0 && session.navigation.length === 0 && this.sessions.get(session.id) === session) {
+      this.clearCompletion(session);
       this.sessions.delete(session.id);
     }
   }
@@ -200,12 +208,14 @@ export class ConversationRunService {
     // E13:后台任务的停止由活动集驱动(末个 run 报告 inactive 即触发),此处不再直停
   }
 
-  private reportRunProgress(record: ActiveRun, active: boolean): void {
+  private reportRunProgress(record: ActiveRun, active: boolean, conversationId: string = ''): void {
     const context: Context | undefined = AppStorage.get<Context>('abilityContext');
     if (context === undefined) return;
     const totals = record.tracker.totals();
     reportGenerationProgress(context, { source: 'chat', runId: record.id, generationActive: active,
-      receivedChars: totals.chars, receivedBytes: totals.bytes });
+      receivedChars: totals.chars, receivedBytes: totals.bytes,
+      conversationId: record.context?.conversationId ?? conversationId,
+      title: record.context?.conversation.title ?? '' });
   }
   private write<T>(session: ConversationSession, operation: () => Promise<T>): Promise<T> {
     session.pendingWrites++;
@@ -232,6 +242,10 @@ export class ConversationRunService {
     return result.finally((): void => { session.pendingQueueWrites--; release(); this.releaseIdle(session); });
   }
   private applyConversation(session: ConversationSession, conversation: Conversation): void {
+    if (session.completionController !== null || session.state.completionNotice !== null) {
+      const facts: JevCompletionFacts | null = jevUnverifiedChanges(currentMessages(conversation));
+      if (facts === null || facts.sourceFingerprint !== session.completionSourceFingerprint) this.clearCompletion(session);
+    }
     session.latest = conversation;
     session.state.conversation = conversation;
     session.state.awaitingTools = conversationHasPendingOrUnexecutedTools(conversation);
@@ -274,6 +288,37 @@ export class ConversationRunService {
     const session: ConversationSession | undefined = this.sessions.get(conversationId);
     return session !== undefined && (session.record !== null || session.appendActive || session.drainActive);
   }
+  async compact(conversationId: string): Promise<ManualCompactionOutcome> {
+    const session: ConversationSession = this.session(conversationId);
+    if (this.isBusy(conversationId) || isConversationCompacting(conversationId)) {
+      throw new Error('该会话仍在生成或压缩，请稍后重试。');
+    }
+    const release: () => void = beginConversationCompaction(session.id);
+    // Reuse the existing non-generation admission lock; reserve/append/drain
+    // all consult it synchronously before their first await.
+    session.appendActive = true;
+    session.state.compactActiveCount = 1;
+    this.emit(session);
+    try {
+      return await this.write(session, async (): Promise<ManualCompactionOutcome> => {
+        const conversation: Conversation | null = await this.loadCanonical(session);
+        if (conversation === null) throw new Error('会话不存在或已删除');
+        this.applyConversation(session, conversation);
+        const result: ManualCompactionOutcome = await compactConversationNow(conversation);
+        session.state.contextCompacts = result.compacts;
+        if (result.contextWindowTokens !== null) session.state.contextWindowTokens = result.contextWindowTokens;
+        this.emit(session);
+        return result;
+      });
+    } finally {
+      session.appendActive = false;
+      session.state.compactActiveCount = 0;
+      release();
+      this.emit(session);
+      this.drain(session);
+      this.releaseIdle(session);
+    }
+  }
   activeCount(): number {
     let count: number = 0;
     for (const session of this.sessions.values()) if (session.record !== null && session.state.sending) count++;
@@ -296,6 +341,7 @@ export class ConversationRunService {
   forgetDeletedConversation(conversationId: string): void {
     cancelJevApprovalTriage(conversationId);
     const session: ConversationSession | undefined = this.sessions.get(conversationId);
+    if (session !== undefined) this.clearCompletion(session);
     if (session === undefined) { cancelNativePluginJsConversation(conversationId); return; }
     if (this.isBusy(conversationId) || session.pendingWrites > 0 || session.pendingQueueWrites > 0) {
       throw new Error('该会话仍在运行或保存，请稍后删除');
@@ -322,7 +368,15 @@ export class ConversationRunService {
   }
   private async loadCanonical(session: ConversationSession): Promise<Conversation | null> {
     const saved: Conversation | null = await getChatRepository().getById(session.id);
-    if (saved !== null) { session.newConversation = null; return saved; }
+    if (saved !== null) {
+      session.newConversation = null;
+      const materialized: Conversation = await materializeConversationDocuments(saved);
+      if (materialized !== saved) {
+        await getChatRepository().save(materialized);
+        this.applyConversation(session, materialized);
+      }
+      return materialized;
+    }
     const created: Conversation | null = session.newConversation;
     if (created === null) return null;
     const release: () => void = beginConversationRun(session.id);
@@ -361,6 +415,7 @@ export class ConversationRunService {
       throw new Error('该会话仍在运行，请先停止或将消息排队');
     }
     cancelJevApprovalTriage(session.id);
+    this.clearCompletion(session);
     const release: () => void = beginConversationRun(session.id);
     const id: string = newId();
     const record: ActiveRun = {
@@ -371,7 +426,7 @@ export class ConversationRunService {
       release: release, unsubscribeActivity: null,
     };
     // E13:preparing 即以零进度登记活动;真实增长在 captureRaw 测量,终态在 finally 注销
-    this.reportRunProgress(record, true);
+    this.reportRunProgress(record, true, session.id);
     session.record = record; // Synchronous admission precedes every repository/seed await.
     session.state.runId = id; session.state.phase = 'preparing'; session.state.sending = true;
     session.state.conversation = null; session.state.errorMsg = ''; session.state.retryStatus = '';
@@ -533,8 +588,20 @@ export class ConversationRunService {
         context.publish({ liveActivity: activity });
       });
       let conversation: Conversation = context.conversation;
+      const userParts: UIMessagePart[] = command.kind === 'send'
+        ? applyUserInputRegexes(command.parts, seed.runtime.assistant.regexes) : [];
       if (command.kind === 'edit') {
-        conversation = editMessage(conversation, command.messageId, makeUserMessage(command.text).parts);
+        let original: UIMessage | null = null;
+        for (const node of conversation.messageNodes) {
+          const found: UIMessage | undefined = node.messages.find((message): boolean => message.id === command.messageId);
+          if (found !== undefined) { original = found; break; }
+        }
+        if (original === null) throw new Error('待编辑消息已不存在');
+        const editParts: UIMessagePart[] = makeUserMessage(command.text).parts.concat(
+          original.parts.filter((part: UIMessagePart): boolean => part.type !== 'text'));
+        const accepted: UIMessagePart[] = await materializeDocumentParts(
+          applyUserInputRegexes(editParts, seed.runtime.assistant.regexes));
+        conversation = editMessage(conversation, command.messageId, accepted);
         await invalidateCompacts(getCompactStore(), session.id, 'message_edited');
         await context.save(conversation);
         record.regenerateNodeId = command.nodeId; record.visualNodeId = command.nodeId;
@@ -561,8 +628,8 @@ export class ConversationRunService {
         await invalidateCompacts(getCompactStore(), session.id, 'message_regenerated');
       }
       if (command.kind === 'send') {
-        const pureText: boolean = command.parts.every((part: UIMessagePart): boolean => part.type === 'text');
-        const answer: string = command.parts.filter((part: UIMessagePart): boolean => part.type === 'text')
+        const pureText: boolean = userParts.every((part: UIMessagePart): boolean => part.type === 'text');
+        const answer: string = userParts.filter((part: UIMessagePart): boolean => part.type === 'text')
           .map((part: UIMessagePart): string => (part as UIMessagePartText).text).join('\n');
         const blocker = resolveIdleToolBlocker(conversation, answer, pureText);
         if (blocker.changed) {
@@ -602,7 +669,9 @@ export class ConversationRunService {
               context.conversation, record.regenerateNodeId, runtimeDeps, loop);
             if (record.resumeMode) return await runToolLoopContinuation(context.conversation, runtimeDeps, loop);
             if (command.kind !== 'send') throw new Error('会话命令没有生成入口');
-            return await runChatTurnWithTools(context.conversation, command.parts, runtimeDeps, loop);
+            const accepted: UIMessagePart[] = await materializeDocumentParts(userParts);
+            if (record.controller.signal.aborted) throw new Error('会话运行已取消');
+            return await runChatTurnWithTools(context.conversation, accepted, runtimeDeps, loop);
           });
         finalized = outcome.conversation;
       }
@@ -628,6 +697,16 @@ export class ConversationRunService {
     } catch (error) {
       failure = error instanceof Error ? error : new Error(String(error));
       await session.writeTail;
+      // Failure must drain the same latest raw tail as cancellation. Periodic
+      // checkpoints can legitimately lag by fewer than 512 characters.
+      if (record.writeError === null && record.context !== null && record.raw.length > 0) {
+        const context: DetachedConversationContext = record.context;
+        const partial: Conversation = record.regenerateNodeId.length > 0
+          ? checkpointRegenerateConversation(context.conversation, record.regenerateNodeId, record.raw)
+          : checkpointConversationTail(context.conversation, record.raw);
+        try { await this.saveContext(context, partial, true); }
+        catch (persistError) { failure = persistError instanceof Error ? persistError : new Error(String(persistError)); }
+      }
       if (record.writeError !== null) failure = record.writeError;
       try {
         const saved: Conversation | null = await getChatRepository().getById(session.id);
@@ -662,15 +741,52 @@ export class ConversationRunService {
     }
     if (finalized !== null && record.context !== null && !record.controller.signal.aborted && !session.state.awaitingTools) {
       completeConversationAuxiliary(record.context, finalized, manualToolCallId);
+      if (manualToolCallId.length === 0 && session.state.phase === 'completed') {
+        this.scheduleCompletion(session, record.id, finalized);
+      }
     }
     if (manualToolCallId.length === 0) this.drain(session);
     this.releaseIdle(session);
+  }
+
+  private clearCompletion(session: ConversationSession): void {
+    session.completionController?.abort();
+    session.completionController = null;
+    session.completionSourceFingerprint = '';
+    session.state.completionNotice = null;
+  }
+
+  dismissCompletion(conversationId: string, runId: string): void {
+    const session: ConversationSession | undefined = this.sessions.get(conversationId);
+    if (session === undefined || session.state.runId !== runId) return;
+    this.clearCompletion(session);
+    this.emit(session);
+  }
+
+  private scheduleCompletion(session: ConversationSession, runId: string, conversation: Conversation): void {
+    const facts: JevCompletionFacts | null = jevUnverifiedChanges(currentMessages(conversation));
+    if (facts === null) return;
+    const controller: EntryAbortController = new EntryAbortController();
+    session.completionController = controller;
+    session.completionSourceFingerprint = facts.sourceFingerprint;
+    evaluateJevCompletion(conversation, controller.signal).then((candidate: JevCompletionFacts | null): void => {
+      if (candidate === null || controller.signal.aborted || this.sessions.get(session.id) !== session
+        || session.completionController !== controller || session.record !== null || session.state.runId !== runId
+        || session.state.phase !== 'completed' || session.state.awaitingTools || session.latest === null
+        || !jevCompletionBindingMatches(candidate, currentMessages(session.latest))) return;
+      session.state.completionNotice = { runId: runId, finalMessageId: candidate.finalMessageId,
+        finalContentFingerprint: candidate.finalContentFingerprint, sourceFingerprint: candidate.sourceFingerprint };
+      this.emit(session);
+    }).catch((): void => {}).finally((): void => {
+      if (session.completionController === controller) session.completionController = null;
+    });
   }
 
   cancel(conversationId: string, runId: string): void {
     cancelJevApprovalTriage(conversationId);
     const session: ConversationSession | undefined = this.sessions.get(conversationId);
     const record: ActiveRun | null = session?.record ?? null;
+    if (session !== undefined) this.clearCompletion(session);
     if (session === undefined || record === null || record.id !== runId || record.controller.signal.aborted) return;
     record.kernel?.cancel('user'); record.controller.abort();
     record.cancelQueue = this.queueOperation(session, async (): Promise<void> => {
@@ -695,6 +811,12 @@ export class ConversationRunService {
       const previous: PendingUserMessage[] = session.queue;
       const steers: PendingUserMessage[] = previous.filter((message): boolean => message.mode === 'STEER');
       if (steers.length === 0) return [];
+      const accepted: UIMessage[] = [];
+      for (const message of steers) {
+        const parts: UIMessagePart[] = await materializeDocumentParts(
+          applyUserInputRegexes(message.parts, context.seed.runtime.assistant.regexes));
+        accepted.push(makeUIMessage('user', parts));
+      }
       session.queue = previous.filter((message): boolean => message.mode !== 'STEER');
       try {
         await persistPendingQueue(getChatKvStore(), session.id, session.queue);
@@ -703,7 +825,7 @@ export class ConversationRunService {
         });
       } catch (error) { session.queue = previous; this.emit(session); throw error instanceof Error ? error : new Error(String(error)); }
       this.emit(session);
-      return steers.map((message): UIMessage => makeUIMessage('user', message.parts));
+      return accepted;
     });
   }
   enqueue(conversationId: string, parts: UIMessagePart[], answer: boolean,
@@ -735,6 +857,22 @@ export class ConversationRunService {
       this.emit(session);
     });
   }
+  takePending(conversationId: string, messageId: string): Promise<PendingUserMessage | null> {
+    const session: ConversationSession = this.session(conversationId);
+    return this.queueOperation(session, async (): Promise<PendingUserMessage | null> => {
+      const message: PendingUserMessage | undefined = session.queue.find((item): boolean => item.id === messageId);
+      if (message === undefined) return null;
+      const previous: PendingUserMessage[] = session.queue;
+      session.queue = previous.filter((item): boolean => item.id !== messageId);
+      try {
+        await persistPendingQueueWithEvent(getChatKvStore(), session.id, session.queue, {
+          event: 'cancel', messageId: messageId, detail: 'restore_to_input',
+        });
+      } catch (error) { session.queue = previous; throw error instanceof Error ? error : new Error(String(error)); }
+      this.emit(session);
+      return message;
+    });
+  }
   clearPending(conversationId: string): Promise<void> {
     const session: ConversationSession = this.session(conversationId);
     return this.queueOperation(session, async (): Promise<void> => {
@@ -755,7 +893,10 @@ export class ConversationRunService {
       await this.write(session, async (): Promise<void> => {
         const latest: Conversation | null = await this.loadCanonical(session);
         if (latest === null) throw new Error('会话不存在或已删除');
-        const out: Conversation = await runAppendUserMessage(latest, parts, getChatRepository());
+        const assistants: Assistant[] = await getChatAssistants();
+        const assistant: Assistant = assistants.find((item): boolean => item.id === latest.assistantId) ?? assistants[0];
+        const accepted: UIMessagePart[] = await materializeDocumentParts(applyUserInputRegexes(parts, assistant.regexes));
+        const out: Conversation = await runAppendUserMessage(latest, accepted, getChatRepository());
         this.applyConversation(session, out);
       });
     } finally { session.appendActive = false; release(); this.releaseIdle(session); }

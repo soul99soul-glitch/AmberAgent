@@ -1,6 +1,7 @@
 // grok_service — Grok(xAI Responses API)搜索(D-068c)
 // Android 基准: search/.../GrokSearchService.kt(全文 178 行)
 // 偏差: Log.i(query) 省略(隐私:用户查询不入日志,章程禁止)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -27,6 +28,7 @@ export const grokSearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: GrokOptions = asOptions(serviceOptions);
     if (opts.apiKey.trim().length === 0) throw new Error('Grok API key is required');
@@ -53,7 +55,7 @@ export const grokSearchService: SearchService = {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`response failed #${resp.status}: ${resp.body}`);
     }

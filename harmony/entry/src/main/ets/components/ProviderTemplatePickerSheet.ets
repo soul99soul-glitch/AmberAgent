@@ -1,5 +1,5 @@
 // ProviderTemplatePickerSheet — 添加提供商(amber-zhenji / Android ProviderTemplatePickerSheet 同构)
-// 结构:// OAUTH 区(Codex/Gemini OAuth,鸿蒙暂不支持 → 回调提示)+
+// 结构:// OAUTH 区(Codex → 登录配置, Gemini → 暂不支持提示)+
 //   // 预置 区(DEFAULT_PROVIDERS 减去已存在的 id),行 = monogram34 + 名称 +
 //   subtitle(slug)+ auth 徽标。选择 → onPickPreset(整份 ProviderSetting)。
 import {
@@ -8,15 +8,18 @@ import {
 import type { ProviderSetting } from '@amber/chat-domain';
 import { DEFAULT_PROVIDERS, toProviderMonogram, providerSlug } from '../di/ProviderDefaults.ets';
 
+export type OAuthTemplateKind = 'codex' | 'gemini';
+
 interface OAuthRow {
+  kind: OAuthTemplateKind;
   monogram: string;
   name: string;
   subtitle: string;
 }
 
 const OAUTH_ROWS: OAuthRow[] = [
-  { monogram: 'OC', name: 'OpenAI Codex OAuth', subtitle: 'openai · chatgpt.com 后端' },
-  { monogram: 'GO', name: 'Gemini OAuth', subtitle: 'google-gemini · cloudcode-pa' },
+  { kind: 'codex', monogram: 'OC', name: 'OpenAI Codex OAuth', subtitle: 'openai · chatgpt.com 后端' },
+  { kind: 'gemini', monogram: 'GO', name: 'Gemini OAuth', subtitle: 'google-gemini · cloudcode-pa' },
 ];
 
 @Component
@@ -25,7 +28,7 @@ export struct ProviderTemplatePickerSheet {
   @Prop show: boolean = false;
   @Prop existingIds: string = ''; // JSON 数组字符串(ArkTS @Prop 传数组受限,序列化传递)
   onPickPreset: (p: ProviderSetting) => void = (_p: ProviderSetting): void => {};
-  onOauthPick: () => void = (): void => {};
+  onOauthPick: (kind: OAuthTemplateKind) => void = (_kind: OAuthTemplateKind): void => {};
   onDismiss: () => void = (): void => {};
 
   private bundled(): ProviderSetting[] {
@@ -115,7 +118,7 @@ export struct ProviderTemplatePickerSheet {
                 }
                 .width('100%')
                 .padding({ left: 4, right: 4, top: 10, bottom: 10 })
-                .onClick((): void => { this.onOauthPick(); })
+                .onClick((): void => { this.onOauthPick(row.kind); })
               }, (row: OAuthRow): string => `oa-${row.monogram}`)
 
               this.sectionLabel('预置')

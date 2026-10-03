@@ -1,5 +1,6 @@
 // exa_service — Exa 搜索(D-068b)
 // Android 基准: search/.../ExaSearchService.kt(全文 178 行)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -33,6 +34,7 @@ export const exaSearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: ExaOptions = asOptions(serviceOptions);
     const query: string = requireQuery(params);
@@ -50,7 +52,7 @@ export const exaSearchService: SearchService = {
         type: primitiveContentOrNull(params, 'type') ?? 'auto',
         contents: { text: true },
       }),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`Exa response failed #${resp.status}`);
     }

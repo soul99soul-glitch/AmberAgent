@@ -195,7 +195,7 @@ describe('重试(:289-342)', () => {
       throw new Error('network timeout');
     });
     const out = await d.execute(
-      toolCall('file_write'), def, false, false, [], 'normal',
+      toolCall('file_write', '{}', { type: 'approved' }), def, false, false, [], 'normal',
       makeGenerationRetrySetting({ enabled: true, maxRetries: 5 }));
     assert.equal(attempts, 1);
     const payload = JSON.parse(outputText(out as UIMessagePartTool));
@@ -282,10 +282,8 @@ describe('executeBatch(:63-117)', () => {
     ]);
     const out = await d.executeBatch([
       toolCall('file_read', '{}', { type: 'auto' }, 'c1'),
-      toolCall('file_write', '{}', { type: 'auto' }, 'c2'),
-    ], defs, true); // autoApprove 让 write 过审批(file_write fail-closed → ASK… 用 ALLOW? 见下)
-    // file_write:autoApproveTools=true 但 fail-closed → resolver ASK?不 — execute 分支只在 DENY 时短路;
-    // ASK 在 execute 中不阻断(暂停决策在生成循环层),故照常执行
+      toolCall('file_write', '{}', { type: 'approved' }, 'c2'),
+    ], defs, true); // Explicitly approved write still follows sequential batch ordering.
     assert.equal(out.length, 2);
     assert.deepEqual(order, ['read', 'write']);
   });

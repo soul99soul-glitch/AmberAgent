@@ -1,0 +1,2 @@
+- Rhea opens the sealed letter.
+- Rider reveals a clue.

@@ -1,5 +1,7 @@
 // C4 工作区历史的纯域契约。持久化、原子安装和文件树变更由宿主 adapter 负责。
 
+import { validateNovelSpecializedOperation } from './specialized_operations.ts';
+import type { NovelSpecializedOperation } from './specialized_operations.ts';
 import { invalidInput } from './error.ts';
 import { validateNovelWorkspacePath } from './workspace_contract.ts';
 
@@ -22,6 +24,7 @@ export interface WorkspaceCommit {
   changedPaths: string[];
   changedChapterOrdinal: number | null;
   createdAt: number;
+  restoredFromHead?: string;
 }
 
 export interface WorkspaceBranchMetadata {
@@ -43,11 +46,29 @@ export interface WorkspaceProposalPatch {
   content: string | null;
 }
 
+export interface WorkspaceProposalPreview {
+  label: string;
+  oldText: string;
+  newText: string;
+  chapterId?: string;
+  startParagraph?: number;
+  endParagraph?: number;
+  start?: number;
+  end?: number;
+  sourceDigest?: string;
+}
+export interface WorkspaceProposalReview {
+  summary: string;
+  sourceDigest: string;
+  previews: WorkspaceProposalPreview[];
+}
 export interface DurableWorkspaceProposal {
   proposalId: string;
   status: WorkspaceProposalStatus;
   expectedCas: WorkspaceCas;
   patches: WorkspaceProposalPatch[];
+  operation?: NovelSpecializedOperation;
+  review?: WorkspaceProposalReview;
   createdAt: number;
   resolvedAt: number | null;
 }
@@ -195,6 +216,9 @@ export const validateWorkspaceCommit = (commit: WorkspaceCommit): WorkspaceCommi
     changedPaths: validateChangedPaths(commit.changedPaths),
     changedChapterOrdinal,
     createdAt: requireNonNegativeInteger(commit.createdAt, 'createdAt'),
+    ...(commit.restoredFromHead === undefined ? {} : {
+      restoredFromHead: validateDigest(requireString(commit.restoredFromHead, 'restoredFromHead'), 'restoredFromHead'),
+    }),
   };
 };
 
@@ -212,6 +236,7 @@ export const parseWorkspaceCommit = (raw: string): WorkspaceCommit => {
     changedPaths: value.changedPaths as string[],
     changedChapterOrdinal: value.changedChapterOrdinal === null ? null : value.changedChapterOrdinal as number,
     createdAt: value.createdAt as number,
+    restoredFromHead: value.restoredFromHead as string | undefined,
   });
 };
 
@@ -288,13 +313,26 @@ export const validateWorkspaceProposalPatch = (patch: WorkspaceProposalPatch,
   return { operation: 'delete', path, content: null };
 };
 
+const validateWorkspaceProposalReview = (review: WorkspaceProposalReview): WorkspaceProposalReview => {
+  if (!isString(review.summary) || !isString(review.sourceDigest) || !Array.isArray(review.previews)) throw invalidInput('作者预览无效');
+  for (const preview of review.previews) {
+    if (!isString(preview.label) || !isString(preview.oldText) || !isString(preview.newText)) throw invalidInput('作者预览缺少原文与新稿');
+    if (preview.start !== undefined) requireNonNegativeInteger(preview.start, 'preview start');
+    if (preview.end !== undefined) requireNonNegativeInteger(preview.end, 'preview end');
+    if ((preview.start === undefined) !== (preview.end === undefined) ||
+      (preview.start !== undefined && preview.end! < preview.start)) throw invalidInput('作者预览范围无效');
+  }
+  return review;
+};
+
 export const validateDurableWorkspaceProposal = (proposal: DurableWorkspaceProposal): DurableWorkspaceProposal => {
   const status: string = requireString(proposal.status, 'proposal status');
   if (status !== 'pending' && status !== 'accepted' && status !== 'rejected') {
     throw invalidInput('proposal status 无效');
   }
   const expectedCas: WorkspaceCas = validateWorkspaceCas(proposal.expectedCas);
-  if (proposal.patches.length === 0) throw invalidInput('proposal patches 不能为空');
+  if (proposal.patches.length === 0 && proposal.operation === undefined) throw invalidInput('proposal patches 不能为空');
+  if (proposal.operation !== undefined && (proposal.patches.length !== 0 || proposal.review === undefined)) throw invalidInput('专属操作需要独立的作者预览');
   const patches: WorkspaceProposalPatch[] = [];
   const paths: Set<string> = new Set<string>();
   for (let i: number = 0; i < proposal.patches.length; i++) {
@@ -315,6 +353,8 @@ export const validateDurableWorkspaceProposal = (proposal: DurableWorkspacePropo
     status: status as WorkspaceProposalStatus,
     expectedCas,
     patches,
+    ...(proposal.operation === undefined ? {} : { operation: validateNovelSpecializedOperation(proposal.operation) }),
+    ...(proposal.review === undefined ? {} : { review: validateWorkspaceProposalReview(proposal.review) }),
     createdAt,
     resolvedAt,
   };
@@ -342,6 +382,8 @@ export const parseDurableWorkspaceProposal = (raw: string): DurableWorkspaceProp
     status: value.status as WorkspaceProposalStatus,
     expectedCas: { branchId: cas.branchId as string, head: cas.head as string, treeDigest: cas.treeDigest as string },
     patches: sourcePatches,
+    operation: value.operation as NovelSpecializedOperation | undefined,
+    review: value.review as WorkspaceProposalReview | undefined,
     createdAt: value.createdAt as number,
     resolvedAt: value.resolvedAt === null ? null : value.resolvedAt as number,
   });
@@ -359,6 +401,8 @@ export const resolveDurableWorkspaceProposal = (proposal: DurableWorkspacePropos
       status: accept ? 'accepted' : 'rejected',
       expectedCas: checked.expectedCas,
       patches: checked.patches,
+      ...(checked.operation === undefined ? {} : { operation: checked.operation }),
+      ...(checked.review === undefined ? {} : { review: checked.review }),
       createdAt: checked.createdAt,
       resolvedAt,
     },

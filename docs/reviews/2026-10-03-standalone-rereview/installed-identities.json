@@ -1,0 +1,23 @@
+{
+  "novel": {
+    "name": "app.amber.novel",
+    "uid": 20020074,
+    "versionCode": 2,
+    "versionName": "0.0.2",
+    "expectedBundle": "app.amber.novel"
+  },
+  "deepread": {
+    "name": "app.amber.deepread.reader",
+    "uid": 20020075,
+    "versionCode": 2,
+    "versionName": "0.0.2",
+    "expectedBundle": "app.amber.deepread.reader"
+  },
+  "host": {
+    "name": "app.amber.deepread",
+    "uid": 20020073,
+    "versionCode": 2,
+    "versionName": "0.0.2",
+    "expectedBundle": "app.amber.deepread"
+  }
+}

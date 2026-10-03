@@ -1,6 +1,7 @@
 // perplexity_service — Perplexity 搜索(D-068b)
 // Android 基准: search/.../PerplexitySearchService.kt(全文 176 行)
 // 偏差登记:Log.i(body/images) 不移植(宪章隐私)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -29,6 +30,7 @@ export const perplexitySearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: PerplexityOptions = asOptions(serviceOptions);
     if (opts.apiKey.trim().length === 0) throw new Error('Perplexity API key is required');
@@ -50,7 +52,7 @@ export const perplexitySearchService: SearchService = {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`response failed #${resp.status}: ${resp.body}`);
     }

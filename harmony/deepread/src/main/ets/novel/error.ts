@@ -3,7 +3,7 @@
 
 export type NovelErrorCode =
   | 'invalid_input' | 'not_found' | 'project_busy'
-  | 'already_collected' | 'provider' | 'output_too_large';
+  | 'already_collected' | 'provider' | 'output_too_large' | 'invalid_output';
 
 const ENTITY_NAMES: Record<string, string> = {
   project: '项目',
@@ -11,6 +11,7 @@ const ENTITY_NAMES: Record<string, string> = {
   material: '资料',
   message: '消息',
   suggestion: '建议',
+  setting_proposal: '设定提案',
 };
 
 export class NovelError extends Error {
@@ -44,6 +45,9 @@ export const alreadyCollected = (messageId: string): NovelError =>
 
 export const providerError = (msg: string): NovelError =>
   new NovelError('provider', `模型生成失败：${msg}`);
+
+export const invalidModelOutput = (msg: string): NovelError =>
+  new NovelError('invalid_output', msg);
 
 export const outputTooLarge = (limit: number): NovelError =>
   new NovelError('output_too_large', `输出超过上限 ${limit} 字`);

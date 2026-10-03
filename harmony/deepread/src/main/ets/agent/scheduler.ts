@@ -1,51 +1,56 @@
-// DeepReadScheduler — 照搬设计文档 §6.3-6.5
-//
-// interface + 前台主路径实现。后台任务/续跑/中断检测:
-// - 逻辑可测部分(topicMutex / runningJobs REPLACE 语义 / abort / observeRunning /
-//   detectInterrupted 推导)在本文件实现
-// - 真正调 @kit 后台 API(ContinuousTask / notificationManager / UIAbility 生命周期)
-//   的部分留接口 + 注释,标注需运行时(Phase 6-7 接 ArkTS)
-//
-// 0.2:不申请 ContinuousTask(LLM 不符合任何合法 BackgroundMode)。
-// 切后台 → 下个 stage 边界暂停(由 UIAbility.onBackground + runStageSupervisorLoop
-// 之间的 isBackgrounded 检查实现,Phase 6 接)。
+// DeepReadScheduler — topic-level admission, cancellation and actual job ownership.
+// Entry registers each admitted token in the existing shared generation activity
+// set. That platform layer requests dataTransfer while backgrounded and reports
+// actual received model content; neither layer promises cross-process resumption.
 
 import type { Observable } from '../platform/observable.ts';
-import type { DeepReadOutput } from '../domain/models.ts';
-import type { DeepReadGenerationStage } from '../domain/enums.ts';
+import type { DeepReadOutput, DeepReadTemplateSnapshot } from '../domain/models.ts';
+import type { DeepReadGenerationStage, DeepReadGenerationPhase } from '../domain/enums.ts';
 import type { RunResult, RunManagerDeps } from '../agent/run_manager.ts';
 import { run, runSection, isAborted } from '../agent/run_manager.ts';
-import { isComplete } from '../domain/helpers.ts';
+import { isComplete, hasDisplayableDeepReadOutput, hasAnyReadySection, withSectionStatus } from '../domain/helpers.ts';
 import type { AbortControllerLike } from '../platform/runtime_api.ts';
 
 // ===== Scheduler interface(照搬设计 §6.3) =====
 
 export interface SchedulerRunOptions {
+  onProgress?: (stage: DeepReadGenerationPhase, label: string) => void;
   force?: boolean;
   seedUrl?: string | null;
+  seedUrls?: string[];
+  templateSnapshot?: DeepReadTemplateSnapshot;
 }
+
+export interface DeepReadActiveRun { topicId: string; title: string; startedAt: number; stage?: DeepReadGenerationPhase; label?: string; }
 
 export interface DeepReadScheduler {
   // 主入口:UI 调
   run(topicId: string, title: string, opts?: SchedulerRunOptions): Promise<RunResult>;
   // 单 stage 重试:UI"重试该段"按钮调
-  runSection(topicId: string, title: string, stage: DeepReadGenerationStage, seedUrl?: string | null): Promise<RunResult>;
+  runSection(topicId: string, title: string, stage: DeepReadGenerationStage, seedUrl?: string | null, seedUrls?: string[]): Promise<RunResult>;
   // 取消
   abort(topicId: string): void;
-  // 观察运行状态(derive 自 RDB)
+  // 观察真实活动作业(缓存 phase 仅用于检测中断)
   observeRunning(topicId: string): Observable<boolean>;
+  observeActiveRuns(): Observable<DeepReadActiveRun[]>;
   // 检测中断态(UI 回前台时调)
   detectInterrupted(topicId: string): Promise<boolean>;
   // isBackgrounded 切换(由 UIAbility onBackground/onForeground 调)
   setBackgrounded(topicId: string, backgrounded: boolean): void;
   /** 测试用:runningJobs 是否含 topicId */
   isRunning(topicId: string): boolean;
+  /** Actual jobs, including source collection before the first draft is saved. */
+  getActiveRuns?(): DeepReadActiveRun[];
 }
 
 // ===== 前台主路径实现(照搬设计 §6.4) =====
 
 export interface SchedulerDeps {
   runManager: RunManagerDeps;
+  /** 每轮准入后读取一次配置,返回只归属该轮的模型、凭据与规则依赖。 */
+  createRunManager?: (topicId: string, title: string, runToken?: number, options?: SchedulerRunOptions) => Promise<RunManagerDeps>;
+  /** Entry uses the existing shared background activity set, keyed by this exact job token. */
+  onRunActivity?: (topicId: string, runToken: number, active: boolean, title: string) => void;
   // 持久化 observe(真实由 RDB observe;测试注入内存 observable)
   observeOutput: (topicId: string) => Observable<DeepReadOutput>;
   // notifier(真实由 notificationManager;测试 noop)
@@ -53,6 +58,7 @@ export interface SchedulerDeps {
   notifier?: {
     notifyRunning: (topicId: string, title: string, runToken?: number) => Promise<void>;
     notifyCompleted: (topicId: string, title: string, complete: boolean, runToken?: number) => Promise<void>;
+    notifyFailed?: (topicId: string, title: string, errorMessage: string, runToken?: number) => Promise<void>;
     cancelRunning: (topicId: string, runToken?: number) => Promise<void>;
   };
   // 检查 phase 是否为中断态(COLLECTING/PLANNING/WRITING)
@@ -62,14 +68,31 @@ export interface SchedulerDeps {
 }
 
 // runningJobs 条目:token 防迟到 finally 误删 REPLACE 后的新注册
-interface RunningJob { controller: AbortControllerLike; token: number }
+interface RunningJob { controller: AbortControllerLike; token: number; title: string; startedAt: number; stage: DeepReadGenerationPhase; label: string; }
 
 export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
   // runningJobs:topicId → RunningJob(REPLACE 语义;token 防 A 轮
   // finally 误删 B 轮已注册的条目)
   const runningJobs = new Map<string, RunningJob>();
+  const runningObservers = new Map<string, Set<(running: boolean) => void>>();
+  const activeRunObservers = new Set<(runs: DeepReadActiveRun[]) => void>();
+  const publishActiveRuns = (): void => {
+    const activeRuns: DeepReadActiveRun[] = getActiveRuns();
+    for (const observer of activeRunObservers) {
+      try { observer(activeRuns); } catch { /* one UI observer cannot interrupt the job */ }
+    }
+  };
+  const publishRunning = (topicId: string): void => {
+    publishActiveRuns();
+    const observers = runningObservers.get(topicId);
+    if (observers === undefined) return;
+    const running = runningJobs.has(topicId);
+    for (const observer of observers) {
+      try { observer(running); } catch { /* 单个 UI 观察者不影响作业收口。 */ }
+    }
+  };
   let jobTokenSeq = 0;
-  // backgrounded 标志(切后台暂停用)
+  // Legacy background marker retained for API compatibility; Entry owns keep-alive.
   const backgroundedTopics = new Set<string>();
 
   // topicMutex:同 topicId 串行(REPLACE:abort 现有 + 等结束 + 启新)
@@ -116,121 +139,156 @@ export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
     }
   };
 
-  const runImpl = async (
+  // Running, terminal notifications and activity lifetime are shared by full
+  // generation and section retries; only their domain operation differs.
+  const executeJob = async (
     topicId: string,
     title: string,
-    opts: SchedulerRunOptions,
+    operation: (manager: RunManagerDeps, controller: AbortControllerLike) => Promise<RunResult>,
+    options?: SchedulerRunOptions,
   ): Promise<RunResult> => {
     const controller = deps.createAbortController();
-    const job: RunningJob = { controller, token: ++jobTokenSeq };
-    // dedup:REPLACE 语义(准入段整体串行,防并发双注册)
-    await withAdmissionLock(topicId, async (): Promise<void> => {
-      if (runningJobs.has(topicId)) {
-        abort(topicId);
-        await waitForAbort(topicId);
-      }
-      runningJobs.set(topicId, job);
+    const job: RunningJob = { controller, token: ++jobTokenSeq, title, startedAt: Date.now(), stage: 'IDLE', label: '准备运行' };
+    let activityStarted: boolean = false;
+    let terminalPublished: boolean = false;
+    const ownsJob = (): boolean => runningJobs.get(topicId)?.token === job.token;
+    const onProgress = (stage: DeepReadGenerationPhase, label: string): void => {
+      if (!ownsJob() || controller.signal.aborted) return;
+      job.stage = stage;
+      job.label = label;
+      publishActiveRuns();
+      options?.onProgress?.(stage, label);
+    };
+    const abortedResult = (): RunResult => ({
+      ok: false, output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(), error: 'aborted',
     });
-    const registered: boolean = runningJobs.get(topicId) === job;
-    if (!registered) {
-      // 准入被后到者取代:本作业直接作废
-      return { ok: false, output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(), error: 'aborted' };
-    }
-
-    // R22:完成通知是否已真实发布(成功发布后 finally 不得撤同 id)
-    let completedPublished: boolean = false;
+    const publishFailed = async (message: string): Promise<void> => {
+      if (!ownsJob() || deps.notifier?.notifyFailed === undefined) return;
+      try {
+        await deps.notifier.notifyFailed(topicId, title, message, job.token);
+        terminalPublished = true;
+      } catch (_notifyError) {
+        // Failed terminal delivery leaves cleanup responsible for the ongoing
+        // notification, while preserving the original article result/error.
+        terminalPublished = false;
+      }
+    };
     try {
-      // 不申请 ContinuousTask(0.2);只 ongoing notification。
-      // 在 try 内:notifyRunning 拒绝时 finally 兜底清理注册,不泄漏
-      await deps.notifier?.notifyRunning(topicId, title, job.token);
-      const result = await withTopicLock(topicId, async () => {
-        // 检查 abort(在锁内再确认;per-job signal,不受他轮影响)
-        if (controller.signal.aborted) {
-          return { ok: false, output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(), error: 'aborted' };
+      await withAdmissionLock(topicId, async (): Promise<void> => {
+        if (runningJobs.has(topicId)) {
+          abort(topicId);
+          await waitForAbort(topicId);
         }
-        return run(deps.runManager, topicId, title, { force: opts.force, seedUrl: opts.seedUrl, signal: controller.signal });
+        runningJobs.set(topicId, job);
+        activityStarted = true;
+        // Zero-byte preparing/source-collection activity is registered before
+        // any notification, configuration resolution or network await.
+        deps.onRunActivity?.(topicId, job.token, true, job.title);
+        publishRunning(topicId);
       });
-      const finalResult: RunResult = await result;
-      // R22/P2-3:完成通知必须真实发布(await)且成功才算「已发布」。
-      // 发布失败(reject)时置 false → finally 仍撤同一 id 的 ongoing 通知,
-      // 不留下永久「正在深度阅读」;通知失败不影响深读结果本身。
-      if (!(finalResult.ok === false && finalResult.error === 'aborted')) {
+      if (!ownsJob()) return abortedResult();
+      await deps.notifier?.notifyRunning(topicId, title, job.token);
+      const finalResult: RunResult = await withTopicLock(topicId, async (): Promise<RunResult> => {
+        if (controller.signal.aborted) return abortedResult();
+        let manager: RunManagerDeps;
         try {
-          await deps.notifier?.notifyCompleted(topicId, title, finalResult.output.generationComplete, job.token);
-          completedPublished = true;
-        } catch (_notifyError) {
-          completedPublished = false;
+          manager = deps.createRunManager
+            ? await deps.createRunManager(topicId, title, job.token, { ...options, onProgress }) : deps.runManager;
+        } catch (error) {
+          // Configuration fails before run() can record its first failed stage.
+          // Keep an existing article intact; an empty composer entry needs a
+          // persisted failure so cold reentry offers an explicit retry.
+          if (controller.signal.aborted || !ownsJob()) return abortedResult();
+          if (error instanceof Error && error.name === 'AbortError') throw error;
+          const repository = deps.runManager.repository;
+          const cached = repository?.get(topicId, title) ?? null;
+          if (repository !== undefined && (cached === null
+            || (!hasDisplayableDeepReadOutput(cached) && !hasAnyReadySection(cached)))) {
+            const message: string = error instanceof Error ? error.message : String(error);
+            await repository.save(topicId, title,
+              withSectionStatus(cached ?? makeEmpty(), 'OVERVIEW', 'FAILED', message));
+          }
+          throw error;
         }
+        if (controller.signal.aborted) return abortedResult();
+        const managerProgress = manager.onProgress;
+        manager = { ...manager, onProgress: (stage: DeepReadGenerationPhase, label: string): void => {
+          if (!ownsJob() || controller.signal.aborted) return;
+          onProgress(stage, label);
+          if (managerProgress !== onProgress) managerProgress?.(stage, label);
+        } };
+        return operation(manager, controller);
+      });
+      if (ownsJob() && finalResult.ok && deps.notifier !== undefined) {
+        try {
+          await deps.notifier.notifyCompleted(topicId, title, finalResult.output.generationComplete, job.token);
+          terminalPublished = true;
+        } catch (_notifyError) {
+          terminalPublished = false;
+        }
+      } else if (!finalResult.ok && finalResult.error !== 'aborted') {
+        await publishFailed(finalResult.error ?? '深度阅读生成失败');
       }
       return finalResult;
     } catch (error) {
-      // R20:取消以 signal 状态归一为统一 aborted RunResult(不宽判 message)
-      if (isAborted(controller.signal)) {
-        return { ok: false, output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(), error: 'aborted' };
+      // A rejected real save is not a cancellation merely because the signal
+      // was aborted at the same moment; only the explicit AbortError is normalized.
+      if (isAborted(controller.signal) && error instanceof Error && error.name === 'AbortError') {
+        return abortedResult();
+      }
+      if (!(error instanceof Error && error.name === 'AbortError')) {
+        await publishFailed(error instanceof Error ? error.message : String(error));
       }
       throw error;
     } finally {
-      const current = runningJobs.get(topicId);
-      const owner: boolean = current !== undefined && current.token === job.token;
-      // 仅注册条目仍是本轮(token 匹配)才清除:避免 A 轮迟到 finally
-      // 误删 REPLACE 后 B 轮的注册
-      if (owner) runningJobs.delete(topicId);
-      // R22:旧 run 的 finally 不得撤新 run 的通知;完成通知发布成功也不撤
-      if (owner && !completedPublished) {
-        await deps.notifier?.cancelRunning(topicId, job.token);
+      // Every admitted job releases its own activity, including a late job
+      // whose topic registration was already replaced by a newer token.
+      if (activityStarted) deps.onRunActivity?.(topicId, job.token, false, job.title);
+      const owner: boolean = ownsJob();
+      if (owner) {
+        runningJobs.delete(topicId);
+        publishRunning(topicId);
+      }
+      if (owner && !terminalPublished) {
+        // Notification cleanup failure must not replace a saved article result
+        // or the original provider/storage error.
+        await deps.notifier?.cancelRunning(topicId, job.token).catch((): void => {});
       }
     }
   };
 
-  const runSectionImpl = async (
-    topicId: string,
-    title: string,
-    stage: DeepReadGenerationStage,
-    seedUrl: string | null,
-  ): Promise<RunResult> => {
-    const controller = deps.createAbortController();
-    const job: RunningJob = { controller, token: ++jobTokenSeq };
-    await withAdmissionLock(topicId, async (): Promise<void> => {
-      if (runningJobs.has(topicId)) {
-        abort(topicId);
-        await waitForAbort(topicId);
-      }
-      runningJobs.set(topicId, job);
-    });
-    if (runningJobs.get(topicId) !== job) {
-      return { ok: false, output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(), error: 'aborted' };
-    }
-    try {
-      return await withTopicLock(topicId, () => {
-        // 排队期间被 abort(等锁时)→ 不再进 prefetch/plan,不写仓库状态
-        if (controller.signal.aborted) {
-          return Promise.resolve({
-            ok: false,
-            output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(),
-            error: 'aborted',
-          } as RunResult);
-        }
-        return runSection(deps.runManager, topicId, title, stage, seedUrl, controller.signal);
-      });
-    } catch (error) {
-      // R20:取消统一归一为 aborted RunResult,不把 abort 泄露成业务失败
-      if (isAborted(controller.signal)) {
-        return { ok: false, output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(), error: 'aborted' };
-      }
-      throw error;
-    } finally {
-      const current = runningJobs.get(topicId);
-      if (current !== undefined && current.token === job.token) {
-        runningJobs.delete(topicId);
-      }
-    }
-  };
+  const runImpl = (
+    topicId: string, title: string, opts: SchedulerRunOptions = {},
+  ): Promise<RunResult> => executeJob(topicId, title, (manager, controller): Promise<RunResult> =>
+    run(manager, topicId, title, {
+      force: opts.force, seedUrl: opts.seedUrl, seedUrls: opts.seedUrls, templateSnapshot: opts.templateSnapshot, signal: controller.signal,
+    }), opts);
+
+  const runSectionImpl = (
+    topicId: string, title: string, stage: DeepReadGenerationStage,
+    seedUrl: string | null = null, seedUrls?: string[],
+  ): Promise<RunResult> => executeJob(topicId, title, (manager, controller): Promise<RunResult> =>
+    runSection(manager, topicId, title, stage, seedUrl, controller.signal, seedUrls));
 
   const observeRunning = (topicId: string): Observable<boolean> => {
-    // derive 自 output observable:phase ∈ 中断态 → running
-    const outputObs = deps.observeOutput(topicId);
-    // 包一层:map phase → boolean
-    return mapObservable(outputObs, o => deps.isInterruptedPhase(o));
+    return {
+      subscribe: (callback: (running: boolean) => void): (() => void) => {
+        let observers = runningObservers.get(topicId);
+        if (observers === undefined) {
+          observers = new Set<(running: boolean) => void>();
+          runningObservers.set(topicId, observers);
+        }
+        observers.add(callback);
+        callback(runningJobs.has(topicId));
+        return (): void => {
+          const current = runningObservers.get(topicId);
+          if (current === undefined) return;
+          current.delete(callback);
+          if (current.size === 0) runningObservers.delete(topicId);
+        };
+      },
+      getCurrent: (): boolean => runningJobs.has(topicId),
+    };
   };
 
   const detectInterrupted = async (topicId: string): Promise<boolean> => {
@@ -246,15 +304,28 @@ export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
   };
 
   const isRunning = (topicId: string): boolean => runningJobs.has(topicId);
+  const getActiveRuns = (): DeepReadActiveRun[] => Array.from(runningJobs.entries()).map(entry => ({
+    topicId: entry[0], title: entry[1].title, startedAt: entry[1].startedAt, stage: entry[1].stage, label: entry[1].label,
+  }));
+  const observeActiveRuns = (): Observable<DeepReadActiveRun[]> => ({
+    subscribe: (callback: (runs: DeepReadActiveRun[]) => void): (() => void) => {
+      activeRunObservers.add(callback);
+      callback(getActiveRuns());
+      return (): void => { activeRunObservers.delete(callback); };
+    },
+    getCurrent: (): DeepReadActiveRun[] => getActiveRuns(),
+  });
 
   return {
     run: runImpl,
     runSection: runSectionImpl,
     abort,
     observeRunning,
+    observeActiveRuns,
     detectInterrupted,
     setBackgrounded,
     isRunning,
+    getActiveRuns,
   };
 };
 
@@ -270,15 +341,15 @@ export const isInterruptedPhase = (output: DeepReadOutput): boolean =>
 // - 'idle'     :无本次活动痕迹(首次或无进度空壳),可直接启动新 run
 // - 'complete' :完整缓存 → 仅展示,绝不启动新生成
 // - 'subscribe':已有 run 在跑 / 有部分或取消缓存 → 仅订阅或显示显式「继续」,不自动 REPLACE
-// 判定顺序与 DeepReadArticlePage.loadArticle 一致(先完整缓存,再活动 run,再进度痕迹)
+// 活动作业优先:重生成期间旧稿可以保持 COMPLETE,但仍须显示本轮状态/取消入口。
 export type DeepReadReentryAction = 'idle' | 'complete' | 'subscribe';
 
 export const decideReentryAction = (
   isRunning: boolean,
   cached: DeepReadOutput | null,
 ): DeepReadReentryAction => {
-  if (cached !== null && (cached.generationPhase === 'COMPLETE' || isComplete(cached))) return 'complete';
   if (isRunning) return 'subscribe';
+  if (cached !== null && (cached.generationPhase === 'COMPLETE' || isComplete(cached))) return 'complete';
   if (cached === null) return 'idle';
   // 有部分进度/取消/失败痕迹 → 显式继续,不自动 REPLACE
   if (cached.generationPhase !== 'IDLE' || Object.keys(cached.sectionStates).length > 0) return 'subscribe';
@@ -299,8 +370,7 @@ const makeEmpty = (): DeepReadOutput => {
   };
 };
 
-// Observable<T>.map → Observable<U>(简化包装;真实 Observable interface 无 map,
-// 这里用 subscribe 转发 + transform — Phase 6 接 ArkTS 时换成真实 derive)
+// 旧 phase 派生 helper 已不用于 observeRunning;保留至独立清理,活动状态只认 runningJobs。
 const mapObservable = <T, U>(obs: Observable<T>, fn: (t: T) => U): Observable<U> => {
   return {
     subscribe: (cb: (value: U) => void): (() => void) => obs.subscribe(t => cb(fn(t))),

@@ -199,7 +199,9 @@ const hasAnalysisContent = (o: DeepReadOutput): boolean => {
 };
 
 const hasExtendedReadingContent = (o: DeepReadOutput): boolean =>
-  o.extendedReading.some(l => isHttpUrl(l.url));
+  o.extendedReading.some(l => isHttpUrl(l.url))
+  || (o.heroImageUrl !== null && o.heroImageConfidence === IMAGE_CONFIDENCE.HERO)
+  || (o.diagram?.nodes.length ?? 0) >= 2;
 
 const statusReadyFor = (o: DeepReadOutput, stage: DeepReadGenerationStage): boolean => {
   switch (stage) {
@@ -461,7 +463,7 @@ export const createSectionWriterTools = (
       if (statusOf(updated, 'EXTENDED_READING') === 'READY') {
         return [makeSuccessOutput({ section: 'extended_reading', generation_complete: updated.generationComplete && sectionsReady(updated) })];
       }
-      return [makeWriterOutput('missing_required_content', { section: 'extended_reading', required: 'links' })];
+      return [makeWriterOutput('missing_required_content', { section: 'extended_reading', required: 'links, validated hero or diagram' })];
     },
   });
 
@@ -469,7 +471,13 @@ export const createSectionWriterTools = (
   const visualsTool = (): ToolDefinition => ({
     name: VISUALS_TOOL_NAME,
     description: 'Internal Deep Read visual selector. Select hero/inline images only from the pre-fetched candidate pool; never submit arbitrary URLs.',
-    schema: { type: 'object', properties: { hero: { type: 'object' }, inline: { type: 'array' } } },
+    schema: { type: 'object', properties: {
+      hero_image_url: { type: 'string' }, hero_caption: { type: 'string' }, hero_reason: { type: 'string' },
+      image_assets: { type: 'array', items: { type: 'object', required: ['url'], properties: {
+        url: { type: 'string' }, caption: { type: 'string' }, source: { type: 'string' },
+        quality_hint: { type: 'string' }, selection_reason: { type: 'string' },
+      } } },
+    } },
     allowsAutoApproval: true,
     isHighRisk: false,
     execute: async (input: string): Promise<UIMessagePartText[]> => {
@@ -519,7 +527,16 @@ export const createSectionWriterTools = (
   const diagramTool = (): ToolDefinition => ({
     name: DIAGRAM_TOOL_NAME,
     description: 'Internal Deep Read diagram writer. Submit only a compact structured diagram spec; raw SVG/HTML/JS forbidden. Use 3-6 short nodes.',
-    schema: { type: 'object', properties: { title: { type: 'string' }, nodes: { type: 'array' }, edges: { type: 'array' }, caption: { type: 'string' } } },
+    schema: { type: 'object', required: ['type', 'title', 'nodes'], properties: {
+      type: { type: 'string', enum: ['causal_chain', 'process_flow', 'stakeholder_map', 'system_structure', 'comparison_matrix'] },
+      title: { type: 'string' }, reason: { type: 'string' }, caption: { type: 'string' },
+      nodes: { type: 'array', items: { type: 'object', required: ['id', 'label'], properties: {
+        id: { type: 'string' }, label: { type: 'string' }, note: { type: 'string' }, group: { type: 'string' },
+      } } },
+      edges: { type: 'array', items: { type: 'object', required: ['from', 'to'], properties: {
+        from: { type: 'string' }, to: { type: 'string' }, label: { type: 'string' },
+      } } },
+    } },
     allowsAutoApproval: true,
     isHighRisk: false,
     execute: async (input: string): Promise<UIMessagePartText[]> => {

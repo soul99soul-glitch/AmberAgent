@@ -376,11 +376,17 @@ export const buildChatCompletionRequest = (input: BuildChatCompletionRequestInpu
   const isMiMo = isMiMoProvider(setting, host, params.model.modelId);
   const forceReasoningContentForToolCalls = shouldForceReasoningContentForToolCalls(
     setting, host, params.model, params.reasoningLevel);
+  // 官方 DeepSeek thinking + tools 请求要求回传所有历史轮的完整 reasoning_content。
+  // 第三方兼容端点继续沿用原来的历史裁剪策略。
+  const preserveDeepSeekReasoning = host === 'api.deepseek.com'
+    && forceReasoningContentForToolCalls
+    && params.model.abilities.indexOf('tool') >= 0
+    && params.tools.length > 0;
 
   const req: JsonObject = {
     model: params.model.modelId,
     messages: buildMessages(messages, {
-      preserveHistoricalReasoningContent: isMiMo,
+      preserveHistoricalReasoningContent: isMiMo || preserveDeepSeekReasoning,
       forceReasoningContentForToolCalls,
     }, encodeImage) as unknown as JsonValue,
   };

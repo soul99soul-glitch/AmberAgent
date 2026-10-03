@@ -21,6 +21,8 @@ export interface InputSchemaObj {
   type: 'object';
   properties: JsonObject;
   required: string[] | null;
+  // MCP may include root composition/definitions beyond the local shorthand.
+  jsonSchema?: JsonObject;
 }
 
 export interface McpToolIdentity { serverId: string; toolName: string; }
@@ -82,6 +84,7 @@ export const makeAgentTool = (opts: AgentToolOpts): AgentTool => ({
 // Android 各 provider 请求构建层把 Tool.parameters 序列化为
 //   {"type":"object","properties":{...},"required":[...]};required 为 null 时省略
 export const toolParametersToJson = (schema: InputSchemaObj | null): JsonObject => {
+  if (schema?.jsonSchema !== undefined) return schema.jsonSchema;
   const out: JsonObject = { type: 'object', properties: schema !== null ? schema.properties : {} };
   if (schema !== null && schema.required !== null) {
     out['required'] = schema.required;
@@ -89,8 +92,13 @@ export const toolParametersToJson = (schema: InputSchemaObj | null): JsonObject 
   return out;
 };
 
-export const toChatToolDefinition = (tool: AgentTool): ChatToolDefinition => ({
-  name: tool.name,
-  description: tool.description,
-  parameters: toolParametersToJson(tool.parameters()),
-});
+export const toChatToolDefinition = (tool: AgentTool): ChatToolDefinition => {
+  const schema: InputSchemaObj | null = tool.parameters();
+  const definition: ChatToolDefinition = {
+    name: tool.name,
+    description: tool.description,
+    parameters: toolParametersToJson(schema),
+  };
+  if (schema?.jsonSchema !== undefined) definition.parametersJsonSchema = schema.jsonSchema;
+  return definition;
+};

@@ -6,6 +6,8 @@ import type { DeepReadGenerationStage, DeepReadGenerationPhase } from '../domain
 import type { Observable } from './observable.ts';
 
 export interface DeepReadCacheEntry {
+  /** Indexed projection of output.templateId; persisted in the existing output JSON. */
+  templateId?: string;
   topicId: string;
   title: string;
   sourceUrl: string | null;
@@ -29,6 +31,7 @@ export interface DeepReadRepository {
   incrementAttempt(topicId: string, error: string): Promise<void>;
   resetAttempt(topicId: string): Promise<void>;
   observe(topicId: string): Observable<DeepReadCacheEntry | null>;
+  observeHistory(limit: number): Observable<DeepReadCacheEntry[]>;
   listHistory(limit: number): Promise<DeepReadCacheEntry[]>;
   delete(topicId: string): Promise<void>;
   purgeExpired(): Promise<number>;

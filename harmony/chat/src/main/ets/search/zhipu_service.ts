@@ -1,6 +1,7 @@
 // zhipu_service — 智谱搜索(D-068a)
 // Android 基准: search/.../ZhipuSearchService.kt(全文 128 行)
 // 偏差登记:okhttp body 可空 → Port body string;空串视为缺失('Failed to get response body')
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -27,6 +28,7 @@ export const zhipuSearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: ZhipuOptions = asOptions(serviceOptions);
     const query: string = requireQuery(params);
@@ -42,7 +44,7 @@ export const zhipuSearchService: SearchService = {
         search_engine: 'search_std',
         count: commonOptions.resultSize,
       }),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`Zhipu response failed #${resp.status}`);
     }

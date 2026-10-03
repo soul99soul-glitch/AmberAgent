@@ -51,100 +51,106 @@ export struct NovelChapterVerdictCard {
   }
 
   @Builder
-  private reviewDetails(review: GhostwriteReview): void {
-    Column() {
-      if (!review.blocking && !review.rewriteRequired) {
-        Text('审稿通过不代表已收录；收录以提交记录为准。')
-          .fontSize(11).fontColor(INK3).lineHeight(16).width('100%').margin({ top: 8 })
-      }
-      Text(`候选 ${review.candidateId} · ${this.shortDigest(review.candidateDigest)}`)
-        .fontSize(11).fontColor(INK3).width('100%').margin({ top: 8 })
-      Text(`计划 ${review.planId} · ${this.shortDigest(review.planDigest)}`)
-        .fontSize(11).fontColor(INK3).width('100%').margin({ top: 3 })
-      if (review.rewriteInstructions.trim().length > 0) {
-        Text('重写说明').fontSize(12).fontWeight(FontWeight.Medium).fontColor(INK)
-          .width('100%').margin({ top: 10 })
-        Text(review.rewriteInstructions).fontSize(12).fontColor(INK2).lineHeight(18)
-          .width('100%').margin({ top: 4 })
-      }
-      ForEach(review.findings, (finding: GhostwriteFinding, index: number): void => {
-        Column() {
-          Text(`${this.findingLabel(finding)} · ${finding.code}`)
-            .fontSize(11).fontColor(INK3).width('100%')
-          Text(finding.message).fontSize(12).fontColor(INK2).lineHeight(18)
-            .width('100%').margin({ top: 2 })
-          if (finding.location.trim().length > 0) {
-            Text(`位置:${finding.location}`).fontSize(11).fontColor(INK3).lineHeight(16)
-              .width('100%').margin({ top: 2 })
-          }
+  private reviewDetails(): void {
+    if (this.review !== null) {
+      Column() {
+        if (!this.review.blocking && !this.review.rewriteRequired) {
+          Text('审稿通过不代表已收录；收录以提交记录为准。')
+            .fontSize(11).fontColor(INK3).lineHeight(16).width('100%').margin({ top: 8 })
         }
-        .width('100%').alignItems(HorizontalAlign.Start)
-        .padding({ top: 7, bottom: 7 })
-        .border({ width: { top: 0.5 }, color: { top: LINE } }).margin({ top: 8 })
-      }, (finding: GhostwriteFinding, index: number): string => `${index}:${finding.kind}:${finding.code}`)
-      if (review.nextPlan !== null && review.nextPlan.trim().length > 0) {
-        Text('下一版计划').fontSize(12).fontWeight(FontWeight.Medium).fontColor(INK)
-          .width('100%').margin({ top: 10 })
-        Text(review.nextPlan).fontSize(12).fontColor(INK2).lineHeight(18)
-          .width('100%').margin({ top: 4 })
-      }
-      if (review.stateDelta.chapterHighlight.trim().length > 0) {
-        Text(`状态增量:${review.stateDelta.chapterHighlight}`).fontSize(12).fontColor(INK2)
-          .lineHeight(18).width('100%').margin({ top: 8 })
-      }
-      if (review.stateDelta.plotState.trim().length > 0) {
-        Text(`情节状态:${review.stateDelta.plotState}`).fontSize(12).fontColor(INK2)
-          .lineHeight(18).width('100%').margin({ top: 6 })
-      }
-    }
-    .width('100%')
-    .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
-      .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
-  }
-
-  @Builder
-  private reviewCard(review: GhostwriteReview, candidate: GhostwriteCandidate | null, frozenPlan: FrozenPlan | null): void {
-    Column() {
-      NovelApprovalShell({
-        iconName: 'ph_gavel',
-        title: candidate !== null ? `第 ${candidate.chapterOrdinal} 章 · 第 ${candidate.attempt + 1} 稿` : '章节裁决',
-        subtitle: this.summaryLine(review, frozenPlan),
-        statusLabel: this.verdictLabel(review),
-        statusIcon: this.verdictIcon(review),
-        statusTone: this.verdictTone(review),
-        content: (): void => { this.Body(review); },
-      })
-    }
-    .width('100%')
-    // 挂在代笔卡内的分隔(壳自带描边,顶部分发丝线取消)
-    .margin({ top: 12 })
-  }
-
-  @Builder
-  private Body(review: GhostwriteReview): void {
-    Column() {
-      Row() {
-        Blank()
-        Text(this.expanded ? '收起' : '查看').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
-          .constraintSize({ minHeight: 44 }).padding({ left: 12 })
-          .accessibilityText(`${this.expanded ? '收起' : '查看'}章节裁决`)
-          .onClick((): void => {
-            this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
-              this.expanded = !this.expanded;
-            });
-          })
+        Text(`候选 ${this.review.candidateId} · ${this.shortDigest(this.review.candidateDigest)}`)
+          .fontSize(11).fontColor(INK3).width('100%').margin({ top: 8 })
+        Text(`计划 ${this.review.planId} · ${this.shortDigest(this.review.planDigest)}`)
+          .fontSize(11).fontColor(INK3).width('100%').margin({ top: 3 })
+        if (this.review.rewriteInstructions.trim().length > 0) {
+          Text('重写说明').fontSize(12).fontWeight(FontWeight.Medium).fontColor(INK)
+            .width('100%').margin({ top: 10 })
+          Text(this.review.rewriteInstructions).fontSize(12).fontColor(INK2).lineHeight(18)
+            .width('100%').margin({ top: 4 })
+        }
+        ForEach(this.review.findings, (finding: GhostwriteFinding, index: number): void => {
+          Column() {
+            Text(`${this.findingLabel(finding)} · ${finding.code}`)
+              .fontSize(11).fontColor(INK3).width('100%')
+            Text(finding.message).fontSize(12).fontColor(INK2).lineHeight(18)
+              .width('100%').margin({ top: 2 })
+            if (finding.location.trim().length > 0) {
+              Text(`位置:${finding.location}`).fontSize(11).fontColor(INK3).lineHeight(16)
+                .width('100%').margin({ top: 2 })
+            }
+          }
+          .width('100%').alignItems(HorizontalAlign.Start)
+          .padding({ top: 7, bottom: 7 })
+          .border({ width: { top: 0.5 }, color: { top: LINE } }).margin({ top: 8 })
+        }, (finding: GhostwriteFinding, index: number): string => JSON.stringify([index, finding.kind, finding.code, finding.message, finding.location]))
+        if (this.review.nextPlan !== null && this.review.nextPlan.trim().length > 0) {
+          Text('下一版计划').fontSize(12).fontWeight(FontWeight.Medium).fontColor(INK)
+            .width('100%').margin({ top: 10 })
+          Text(this.review.nextPlan).fontSize(12).fontColor(INK2).lineHeight(18)
+            .width('100%').margin({ top: 4 })
+        }
+        if (this.review.stateDelta.chapterHighlight.trim().length > 0) {
+          Text(`状态增量:${this.review.stateDelta.chapterHighlight}`).fontSize(12).fontColor(INK2)
+            .lineHeight(18).width('100%').margin({ top: 8 })
+        }
+        if (this.review.stateDelta.plotState.trim().length > 0) {
+          Text(`情节状态:${this.review.stateDelta.plotState}`).fontSize(12).fontColor(INK2)
+            .lineHeight(18).width('100%').margin({ top: 6 })
+        }
       }
       .width('100%')
-      if (this.expanded) {
-        this.reviewDetails(review)
-      }
+      .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
-    .width('100%')
+  }
+
+  @Builder
+  private reviewCard(): void {
+    if (this.review !== null) {
+      Column() {
+        NovelApprovalShell({
+          iconName: 'ph_gavel',
+          title: this.candidate !== null ? `第 ${this.candidate.chapterOrdinal} 章 · ${this.candidate.attempt === 0 ? '本轮候选' : `自动返修 ${this.candidate.attempt} 次`}` : '章节裁决',
+          subtitle: this.summaryLine(this.review, this.frozenPlan),
+          statusLabel: this.verdictLabel(this.review),
+          statusIcon: this.verdictIcon(this.review),
+          statusTone: this.verdictTone(this.review),
+          content: (): void => { this.Body(); },
+        })
+      }
+      .width('100%')
+      // 挂在代笔卡内的分隔(壳自带描边,顶部分发丝线取消)
+      .margin({ top: 12 })
+    }
+  }
+
+  @Builder
+  private Body(): void {
+    if (this.review !== null) {
+      Column() {
+        Row() {
+          Blank()
+          Text(this.expanded ? '收起' : '查看').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
+            .constraintSize({ minWidth: 44, minHeight: 44 }).padding({ left: 12 })
+            .accessibilityText(`${this.expanded ? '收起' : '查看'}章节裁决`)
+            .onClick((): void => {
+              this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                this.expanded = !this.expanded;
+              });
+            })
+        }
+        .width('100%')
+        if (this.expanded) {
+          this.reviewDetails()
+        }
+      }
+      .width('100%')
+    }
   }
 
   build(): void {
     if (this.themeEpoch >= 0 && this.review !== null) {
-      this.reviewCard(this.review, this.candidate, this.frozenPlan)
+      this.reviewCard()
     }
   }
 

@@ -1,0 +1,22 @@
+[
+  {
+    "path": "/v1/chat/completions",
+    "model": "fixture-context-16k",
+    "materialBodyPresent": false,
+    "materialAliasesPresent": false,
+    "materialTagsPresent": false,
+    "materialHeader": []
+  },
+  {
+    "path": "/v1/chat/completions",
+    "model": "fixture-context-16k",
+    "materialBodyPresent": true,
+    "materialAliasesPresent": true,
+    "materialTagsPresent": true,
+    "materialHeader": [
+      "[人物] Rhea",
+      "Aliases: CaptainRhea",
+      "Tags: storm"
+    ]
+  }
+]

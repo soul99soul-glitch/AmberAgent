@@ -1,3 +1,5 @@
+import type { NovelModelPolicy, NovelModelTarget } from './models.ts';
+import type { NovelModelRole } from './standalone_defaults.ts';
 // ghostwrite_runner — C6 单一前台 durable executor。
 // 只编排 repository 的 durable stage/checkpoint/atomic commit；模型流、工具循环、重试与
 // stop 继续由 NovelModelRunning(Chat adapter)拥有。
@@ -26,6 +28,7 @@ export type GhostwriteRunnerRepository = Pick<NovelProjectRepository,
 export interface GhostwriteRunnerDeps {
   repository: GhostwriteRunnerRepository;
   modelRunning: NovelModelRunning;
+  resolveModelTarget?: (policy: NovelModelPolicy, role: NovelModelRole) => Promise<NovelModelTarget>;
   nowMs?: () => number;
   makeId?: (prefix: string) => string;
 }
@@ -181,12 +184,18 @@ const writerSystemPrompt = (): string =>
 const writerUserPrompt = (job: DurableGhostwriteJob): string => {
   const plan = job.frozenPlan;
   if (plan === null) throw invalidInput('ghostwrite job 缺少冻结计划');
+  const arc: string = plan.upcomingArc === undefined ? '' : '\n后续走向（不替代本章合同）：\n' + plan.upcomingArc.map(beat => '- ' + beat).join('\n');
+  if (job.authorBrief !== undefined) {
+    return `按作者修订要求改写第 ${job.currentChapterOrdinal} 章，返回完整章节。冻结计划:${plan.content}${arc}\n` +
+      `作者修订要求:${job.authorBrief}\n` +
+      (job.candidate === null ? '' : `上一稿:${job.candidate.content.slice(0, 12000)}\n`);
+  }
   if (job.stage === 'rewriting_1' || job.stage === 'rewriting_2') {
     if (job.candidate === null || job.review === null) throw invalidInput('重写缺少候选或审核说明');
-    return `重写第 ${job.currentChapterOrdinal} 章。冻结计划:${plan.content}\n` +
+    return `重写第 ${job.currentChapterOrdinal} 章。冻结计划:${plan.content}${arc}\n` +
       `原候选:${job.candidate.content}\n定向修复:${job.review.rewriteInstructions}`;
   }
-  return `写第 ${job.currentChapterOrdinal} 章。冻结计划:${plan.content}`;
+  return `写第 ${job.currentChapterOrdinal} 章。冻结计划:${plan.content}${arc}`;
 };
 
 const reviewSystemPrompt = (): string =>
@@ -205,6 +214,7 @@ const reviewUserPrompt = (job: DurableGhostwriteJob): string => {
     planId: job.frozenPlan.planId,
     planDigest: job.frozenPlan.digest,
     plan: job.frozenPlan.content,
+    upcomingArc: job.frozenPlan.upcomingArc ?? [],
     candidate: job.candidate.content,
     isFinalChapter: job.currentChapterOrdinal === job.endChapterOrdinal,
   });
@@ -218,6 +228,7 @@ const plannerUserPrompt = (job: DurableGhostwriteJob): string => {
   if (job.candidate === null || job.review === null) throw invalidInput('规划缺少候选或审核');
   return JSON.stringify({
     nextChapterOrdinal: job.currentChapterOrdinal + 1,
+    upcomingArc: job.frozenPlan?.upcomingArc ?? [],
     chapterHighlight: job.review.stateDelta.chapterHighlight,
     plotState: job.review.stateDelta.plotState,
     committedCandidate: job.candidate.content,
@@ -346,12 +357,13 @@ class DefaultGhostwriteRunner implements GhostwriteRunner {
     job: DurableGhostwriteJob, role: 'writer' | 'reviewer' | 'planner',
     systemPrompt: string, userPrompt: string,
   ): Promise<ModelCallResult> {
-    const modelTarget = role === 'writer'
+    const modelTarget = this.deps.resolveModelTarget !== undefined
+      ? await this.deps.resolveModelTarget(job.modelPolicyAtStart, role === 'writer' ? 'writing' : role === 'reviewer' ? 'review' : 'stateSync')
+      : role === 'writer'
       ? job.modelPolicyAtStart.writing
       : role === 'reviewer'
         ? (job.modelPolicyAtStart.review ?? job.modelPolicyAtStart.writing)
-        : (job.modelPolicyAtStart.stateSync ?? job.modelPolicyAtStart.review ??
-          job.modelPolicyAtStart.writing);
+        : (job.modelPolicyAtStart.stateSync ?? job.modelPolicyAtStart.writing);
     await this.deps.modelRunning.validate(modelTarget, job.projectId);
     const runId: string = this.makeId(`ghostwrite-${role}`);
     const request: NovelModelRequest = {

@@ -1,0 +1,1 @@
+Rhea follows the author direction and returns the storm map.

@@ -394,7 +394,7 @@ test('request: tools 形状;无 TOOL 能力或空 tools 不输出', () => {
 
   const noAbility = buildChatCompletionRequest({
     messages: [makeUserMessage('hi')],
-    params: makeTextGenerationParams({ tools: [tool] }),
+    params: makeTextGenerationParams({ model: makeChatModel({ abilities: [] }), tools: [tool] }),
     setting: makeProviderSettingOpenAI({}),
     stream: false,
     encodeImage: encoder,

@@ -1,10 +1,12 @@
+import { normalizeNovelMaterialFields } from './material_fields.ts';
+import type { NovelMaterialFields } from './models.ts';
 // novel/mutations — 项目纯函数变更(移植自 Android NovelMutations.kt)
 // 每个函数取 (project, …, now) 返回新 NovelProject(不可变 spread)。校验失败抛 NovelError。
 
 import {
   MAX_PROJECT_NAME_CHARS, MAX_TITLE_CHARS, MAX_CHAPTER_CHARS, MAX_MATERIAL_CHARS,
   makeNovelProject, makeNovelChapter, makeNovelMaterial,
-  makeNovelChapterVersion, makeNovelBranch,
+  makeNovelChapterVersion, makeNovelBranch, nextNovelChapterOrdinal, novelChapterOrdinal,
 } from './models.ts';
 import type {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
@@ -12,6 +14,9 @@ import type {
   NovelChapterVersion, NovelSettingProposal, NovelModelPolicy, NovelBranchSettings,
 } from './models.ts';
 import { invalidInput, notFound, alreadyCollected } from './error.ts';
+import { assertNovelCandidateCurrent } from './candidate_provenance.ts';
+import { applyMaterialAdoption, buildSuggestionAdoption, buildSettingProposalAdoption } from './material_adoption.ts';
+import type { NovelMaterialAdoption } from './material_adoption.ts';
 
 // ===== N1:分支 / 版本 / 撤销 / 废弃(Android Branch/Version/Checkpoint 语义)=====
 
@@ -160,7 +165,7 @@ export const saveChapter = (
   const cleanT: string = cleanTitle(title);
   const body: string = content.slice(0, MAX_CHAPTER_CHARS);
   if (chapterId === null) {
-    const chapter: NovelChapter = makeNovelChapter({ title: cleanT, content: body, now: now });
+    const chapter: NovelChapter = makeNovelChapter({ ordinal: nextNovelChapterOrdinal(project.chapters), title: cleanT, content: body, now: now });
     return {
       project: { ...project, chapters: [...project.chapters, chapter], updatedAt: now },
       value: chapter,
@@ -180,7 +185,9 @@ export const deleteChapter = (
   project: NovelProject, chapterId: string, now: number,
 ): NovelProject => {
   if (!project.chapters.some(c => c.id === chapterId)) throw notFound('chapter', chapterId);
-  const chapters: NovelChapter[] = project.chapters.filter(c => c.id !== chapterId);
+  const chapters: NovelChapter[] = project.chapters.map((chapter: NovelChapter, index: number): NovelChapter =>
+    chapter.ordinal !== undefined ? chapter : { ...chapter, ordinal: novelChapterOrdinal(chapter, index + 1) })
+    .filter(c => c.id !== chapterId);
   // 清空指向该章的 collectedChapterId
   const messages: NovelMessage[] = project.messages.map(m =>
     m.collectedChapterId === chapterId ? { ...m, collectedChapterId: null } : m);
@@ -192,13 +199,13 @@ export const deleteChapter = (
 
 export const upsertMaterial = (
   project: NovelProject, materialId: string | null, kind: NovelMaterialKind,
-  title: string, content: string, enabled: boolean, now: number,
+  title: string, content: string, enabled: boolean, now: number, fields?: NovelMaterialFields,
 ): NovelMutation<NovelMaterial> => {
   const cleanT: string = cleanTitle(title);
   const body: string = content.slice(0, MAX_MATERIAL_CHARS);
   if (materialId === null) {
     const material: NovelMaterial =
-      makeNovelMaterial({ kind: kind, title: cleanT, content: body, enabled: enabled, now: now });
+      makeNovelMaterial({ kind: kind, title: cleanT, content: body, enabled: enabled, now: now, ...fields });
     return {
       project: { ...project, materials: [...project.materials, material], updatedAt: now },
       value: material,
@@ -206,8 +213,12 @@ export const upsertMaterial = (
   }
   const idx: number = project.materials.findIndex(m => m.id === materialId);
   if (idx < 0) throw notFound('material', materialId);
+  const current: NovelMaterial = project.materials[idx];
+  const metadata = normalizeNovelMaterialFields({ ...current, ...fields, injectionMode: fields?.injectionMode ??
+    (enabled === current.enabled ? current.injectionMode : enabled ? 'always' : 'off') }, enabled);
   const updated: NovelMaterial = {
-    ...project.materials[idx], kind: kind, title: cleanT, content: body, enabled: enabled, updatedAt: now,
+    ...project.materials[idx], ...metadata, kind, title: cleanT, content: body,
+    enabled: metadata.injectionMode !== 'off', updatedAt: now,
   };
   const materials: NovelMaterial[] = project.materials.slice();
   materials[idx] = updated;
@@ -225,6 +236,7 @@ export const deleteMaterial = (
 export const collect = (
   project: NovelProject, messageId: string, target: NovelCollectionTarget, now: number,
   editedContent: string | null = null,
+  branchId: string | null = null,
 ): NovelMutation<NovelChapter> => {
   const msgIdx: number = project.messages.findIndex(m => m.id === messageId);
   if (msgIdx < 0) throw notFound('message', messageId);
@@ -233,11 +245,12 @@ export const collect = (
   const content: string = editedContent !== null ? editedContent : msg.content;
   if (content.trim().length === 0) throw invalidInput('该回复没有正文');
   if (msg.collectedChapterId !== null) throw alreadyCollected(messageId);
+  if (msg.candidate !== undefined) assertNovelCandidateCurrent(project, msg.candidate, branchId);
 
   let chapters: NovelChapter[] = project.chapters.slice();
   let chapter: NovelChapter;
   if (target.kind === 'new_chapter') {
-    chapter = makeNovelChapter({ title: cleanTitle(target.title), content: content, now: now });
+    chapter = makeNovelChapter({ ordinal: nextNovelChapterOrdinal(project.chapters), title: cleanTitle(target.title), content: content, now: now });
     chapters = [...chapters, chapter];
   } else {
     const idx: number = chapters.findIndex(c => c.id === target.chapterId);
@@ -271,9 +284,10 @@ export const replacePendingSuggestions = (
   };
 };
 
-// 采用/忽略建议;采用时按 kind+归一标题 upsert 素材
+// 采用/忽略建议；旧调用默认新建，只有作者明确选择的资料可更新。
 export const resolveSuggestion = (
   project: NovelProject, suggestionId: string, accept: boolean, now: number,
+  edit?: NovelMaterialAdoption,
 ): NovelMutation<NovelMaterial | null> => {
   const idx: number = project.materialSuggestions.findIndex(s => s.id === suggestionId);
   if (idx < 0) throw notFound('suggestion', suggestionId);
@@ -287,19 +301,10 @@ export const resolveSuggestion = (
   let material: NovelMaterial | null = null;
 
   if (accept) {
-    const norm: string = normalizeTitle(sug.title);
-    const matchIdx: number = project.materials.findIndex(
-      m => m.kind === sug.kind && normalizeTitle(m.title) === norm);
-    if (matchIdx >= 0) {
-      material = { ...project.materials[matchIdx], content: sug.content, updatedAt: now };
-      materials = project.materials.slice();
-      materials[matchIdx] = material;
-    } else {
-      material = makeNovelMaterial({
-        kind: sug.kind, title: sug.title, content: sug.content, enabled: true, now: now,
-      });
-      materials = [...project.materials, material];
-    }
+    const baseline: NovelMaterialAdoption = buildSuggestionAdoption(project, sug);
+    const adopted = applyMaterialAdoption(project, edit ?? baseline, baseline.sourceDigest, now);
+    material = adopted.material;
+    materials = adopted.materials;
   }
 
   suggestions[idx] = {
@@ -311,9 +316,10 @@ export const resolveSuggestion = (
   };
 };
 
-// 采纳按 kind+normalizeTitle upsert 活资料；拒绝只结案，不改变 materials。
+// 设定提案使用与章节建议一致的显式采用目标；拒绝只结案。
 export const resolveSettingProposal = (
   project: NovelProject, proposalId: string, accept: boolean, now: number,
+  edit?: NovelMaterialAdoption,
 ): NovelMutation<NovelMaterial | null> => {
   const idx: number = project.settingProposals.findIndex(
     (proposal: NovelSettingProposal): boolean => proposal.id === proposalId);
@@ -324,29 +330,10 @@ export const resolveSettingProposal = (
   let materials: NovelMaterial[] = project.materials;
   let material: NovelMaterial | null = null;
   if (accept) {
-    const normalizedTitle: string = normalizeTitle(proposal.title);
-    const materialIdx: number = project.materials.findIndex(
-      (item: NovelMaterial): boolean => item.kind === proposal.kind
-        && normalizeTitle(item.title) === normalizedTitle);
-    if (materialIdx >= 0) {
-      material = {
-        ...project.materials[materialIdx],
-        title: proposal.title,
-        content: proposal.content,
-        updatedAt: now,
-      };
-      materials = project.materials.slice();
-      materials[materialIdx] = material;
-    } else {
-      material = makeNovelMaterial({
-        kind: proposal.kind,
-        title: proposal.title,
-        content: proposal.content,
-        enabled: true,
-        now: now,
-      });
-      materials = [...project.materials, material];
-    }
+    const baseline: NovelMaterialAdoption = buildSettingProposalAdoption(project, proposal);
+    const adopted = applyMaterialAdoption(project, edit ?? baseline, baseline.sourceDigest, now);
+    material = adopted.material;
+    materials = adopted.materials;
   }
 
   const proposals: NovelSettingProposal[] = project.settingProposals.slice();

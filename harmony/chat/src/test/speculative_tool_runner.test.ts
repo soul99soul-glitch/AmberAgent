@@ -184,16 +184,20 @@ test('reusableResults:final name/input 与 state 不符 → 跳过', async () =>
 
 test('reusableResults:job 未完结 → cancel + discarded + 跳过(JS Promise 仅标志位)', async () => {
   let resolveGate: ((parts: UIMessagePart[]) => void) | null = null;
+  let markStarted: () => void = (): void => {};
+  const started = new Promise<void>((resolve): void => { markStarted = resolve; });
   const tool: AgentTool = readOnlyTool('spec_eta', (input: JsonValue): Promise<UIMessagePart[]> =>
     new Promise((resolve): void => {
       resolveGate = (): void => {
         resolve([{ type: 'text', text: 'late', metadata: null }]);
       };
+      markStarted();
     }));
   const runner: SpeculativeToolRunner = createSpeculativeToolRunner({
     dispatcher: new AgentToolDispatcher(),
   });
   runner.observe([toolPart('c1', 'spec_eta', '{}')], defsOf([tool]));
+  await started; // The late-completion scenario requires a primitive already in flight.
   const reused: Map<string, UIMessagePartTool> = await runner.reusableResults(
     [toolPart('c1', 'spec_eta', '{}')]);
   assert.equal(reused.size, 0);

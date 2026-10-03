@@ -47,6 +47,7 @@ export const resolveResponseProviderCapabilities = (host: string): ResponseProvi
 export const supportsResponsesResume = (setting: ProviderSettingOpenAI): boolean =>
   setting.useResponseApi === true &&
   setting.authMode === 'api_key' &&
+  setting.baseUrl.startsWith('https://') &&
   resolveResponseProviderCapabilities(hostOf(setting.baseUrl)).supportsStoredResponses === true;
 
 // openAIResponsesReasoningEffort(:1391) — AUTO→null; OFF→low; xhigh/max→high
@@ -69,6 +70,7 @@ export interface ResponseCursor {
   responseId: string;
   sequence: number;
   providerId: string;
+  terminalStatus?: 'completed';
 }
 
 export interface ResponsesResumeRequest {
@@ -81,6 +83,16 @@ export interface ResponseResumeStore {
   load(runId: string): Promise<ResponseCursor | null>;
   clear(runId: string): Promise<void>;
 }
+
+export const responsesResumeUrl = (setting: ProviderSettingOpenAI, cursor: ResponseCursor): string => {
+  if (!supportsResponsesResume(setting) || cursor.providerId !== setting.id) {
+    throw new Error('Responses resume requires the original official OpenAI provider');
+  }
+  if (!/^resp_[A-Za-z0-9_-]+$/.test(cursor.responseId) || !Number.isSafeInteger(cursor.sequence) || cursor.sequence < 0) {
+    throw new Error('Invalid Responses resume cursor');
+  }
+  return `${setting.baseUrl.replace(/\/$/, '')}/responses/${cursor.responseId}?stream=true&starting_after=${cursor.sequence}`;
+};
 
 export interface BuildResponsesRequestOpts {
   messages: UIMessage[];
@@ -101,7 +113,7 @@ const isOnlyTextParts = (parts: UIMessagePart[]): boolean => {
 
 const metaStr = (part: UIMessagePart, key: string): string | null => {
   const meta = (part as { metadata?: JsonObject }).metadata;
-  if (meta === undefined) return null;
+  if (meta === undefined || meta === null) return null;
   const v = meta[key];
   return typeof v === 'string' ? v : null;
 };
@@ -164,14 +176,15 @@ const addAssistantItems = (out: JsonValue[], message: UIMessage, encodeImage?: I
     if (group.kind === 'content') {
       for (const part of group.parts) {
         if (part.type === 'reasoning') {
+          const reasoningId = metaStr(part, 'reasoning_id');
+          if (reasoningId === null || reasoningId.trim().length === 0) continue;
           flushContent();
           const r = part as UIMessagePartReasoning;
           const item: JsonObject = {
             type: 'reasoning',
             summary: [{ type: 'summary_text', text: r.reasoning }],
           };
-          const reasoningId = metaStr(part, 'reasoning_id');
-          if (reasoningId !== null) item['id'] = reasoningId;
+          item['id'] = reasoningId;
           const encrypted = metaStr(part, 'encrypted_content');
           if (encrypted !== null) item['encrypted_content'] = encrypted;
           out.push(item);
@@ -190,9 +203,10 @@ const addAssistantItems = (out: JsonValue[], message: UIMessage, encodeImage?: I
     } else {
       flushContent();
       for (const tool of group.tools) {
+        const callId: string = metaStr(tool, 'openai_call_id') ?? tool.toolCallId;
         out.push({
           type: 'function_call',
-          call_id: tool.toolCallId,
+          call_id: callId,
           name: tool.toolName,
           arguments: tool.input,
         });
@@ -202,7 +216,7 @@ const addAssistantItems = (out: JsonValue[], message: UIMessage, encodeImage?: I
           .join('\n');
         out.push({
           type: 'function_call_output',
-          call_id: tool.toolCallId,
+          call_id: callId,
           output: outputText,
         });
       }
@@ -308,5 +322,10 @@ export const buildResponsesRequestBody = (opts: BuildResponsesRequestOpts): Json
     out = clone;
   }
   out = { ...out, stream };
+  // An explicit resumable stream must keep running when its local connection drops.
+  if (resume !== null && stream) {
+    out['background'] = true;
+    out['store'] = true;
+  }
   return out;
 };

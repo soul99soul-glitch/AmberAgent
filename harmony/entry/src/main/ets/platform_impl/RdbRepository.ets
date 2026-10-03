@@ -38,6 +38,12 @@ interface ListenerSet {
   version: number;
 }
 
+interface HistoryListenerSet {
+  listeners: Set<(value: DeepReadCacheEntry[]) => void>;
+  current: DeepReadCacheEntry[] | undefined;
+  version: number;
+}
+
 const schemaStatements: string[] = [
   `CREATE TABLE IF NOT EXISTS ${TABLE} (topic_id TEXT PRIMARY KEY, title TEXT NOT NULL, source_url TEXT NULL, output_json TEXT NOT NULL, phase TEXT NOT NULL, attempt_count INTEGER NOT NULL DEFAULT 0, last_error TEXT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS idx_deepread_cache_title ON ${TABLE}(title)`,
@@ -79,6 +85,7 @@ const rowToEntry = (row: CacheRow): DeepReadCacheEntry | null => {
     title: row.title,
     sourceUrl: row.sourceUrl,
     output: output,
+    templateId: output.templateSnapshot?.id ?? output.templateId,
     phase: row.phase as DeepReadGenerationPhase,
     attemptCount: row.attemptCount,
     lastError: row.lastError,
@@ -113,6 +120,7 @@ const entryWithFields = (
   title: entry.title,
   sourceUrl: entry.sourceUrl,
   output: output,
+  templateId: output.templateSnapshot?.id ?? output.templateId,
   phase: phase,
   attemptCount: attemptCount,
   lastError: lastError,
@@ -147,6 +155,12 @@ const outputWithSectionState = (
     references: output.references,
     sectionStates: sectionStates,
     sectionQualities: output.sectionQualities,
+    inputSourceUrls: output.inputSourceUrls,
+    inputSources: output.inputSources,
+    inputText: output.inputText,
+    inputUrlsText: output.inputUrlsText,
+    templateId: output.templateId,
+    templateSnapshot: output.templateSnapshot,
   };
 };
 
@@ -155,6 +169,7 @@ class RdbDeepReadRepository implements DeepReadRepository {
   private initPromise: Promise<relationalStore.RdbStore> | null = null;
   private mutationTail: Promise<void> = Promise.resolve();
   private observers: Map<string, ListenerSet> = new Map();
+  private historyObservers: Map<number, HistoryListenerSet> = new Map();
 
   private enqueueMutation<T>(op: () => Promise<T>): Promise<T> {
     const next: Promise<T> = this.mutationTail.catch((): void => {}).then(op);
@@ -178,9 +193,10 @@ class RdbDeepReadRepository implements DeepReadRepository {
     if (this.initPromise === null) {
       const attempt: Promise<relationalStore.RdbStore> = this.initializeStore();
       this.initPromise = attempt;
-      attempt.finally((): void => {
+      const clearPending = (): void => {
         if (this.initPromise === attempt) this.initPromise = null;
-      });
+      };
+      attempt.then(clearPending, clearPending);
     }
     return this.initPromise;
   }
@@ -204,12 +220,23 @@ class RdbDeepReadRepository implements DeepReadRepository {
 
   private async notify(topicId: string): Promise<void> {
     const state: ListenerSet | undefined = this.observers.get(topicId);
-    if (state === undefined) return;
-    state.version += 1;
-    const current: DeepReadCacheEntry | null = await this.queryById(topicId);
-    state.current = current;
-    for (const listener of state.listeners) {
-      try { listener(current); } catch (_) { /* one listener must not block others */ }
+    if (state !== undefined) {
+      state.version += 1;
+      const current: DeepReadCacheEntry | null = await this.queryById(topicId);
+      state.current = current;
+      for (const listener of state.listeners) {
+        try { listener(current); } catch (_) { /* one listener must not block others */ }
+      }
+    }
+    for (const item of this.historyObservers) {
+      const limit: number = item[0];
+      const history: HistoryListenerSet = item[1];
+      history.version += 1;
+      const entries: DeepReadCacheEntry[] = await this.listHistory(limit);
+      history.current = entries;
+      for (const listener of history.listeners) {
+        try { listener(entries); } catch (_) { /* one listener must not block others */ }
+      }
     }
   }
 
@@ -260,6 +287,7 @@ class RdbDeepReadRepository implements DeepReadRepository {
       title: title,
       sourceUrl: url ?? candidate.sourceUrl,
       output: candidate.output,
+      templateId: candidate.output.templateSnapshot?.id ?? candidate.output.templateId,
       phase: candidate.phase,
       attemptCount: candidate.attemptCount,
       lastError: candidate.lastError,
@@ -361,6 +389,39 @@ class RdbDeepReadRepository implements DeepReadRepository {
     } finally {
       resultSet.close();
     }
+  }
+
+  observeHistory(limit: number): Observable<DeepReadCacheEntry[]> {
+    const bound: number = limit > 0 ? Math.floor(limit) : 0;
+    let current: DeepReadCacheEntry[] | undefined;
+    return {
+      subscribe: (listener: (value: DeepReadCacheEntry[]) => void): (() => void) => {
+        let state: HistoryListenerSet | undefined = this.historyObservers.get(bound);
+        if (state === undefined) {
+          state = { listeners: new Set<(value: DeepReadCacheEntry[]) => void>(), current: undefined, version: 0 };
+          this.historyObservers.set(bound, state);
+        }
+        const local: HistoryListenerSet = state;
+        const callback = (entries: DeepReadCacheEntry[]): void => { current = entries; listener(entries); };
+        local.listeners.add(callback);
+        if (local.current !== undefined) callback(local.current);
+        else {
+          const initialVersion: number = local.version;
+          this.listHistory(bound).then((entries: DeepReadCacheEntry[]): void => {
+            if (!local.listeners.has(callback) || local.version !== initialVersion) return;
+            local.current = entries;
+            callback(entries);
+          }).catch((error: Error): void => {
+            hilog.warn(DOMAIN, TAG, 'history subscription initial load failed: %{public}s', error.message);
+          });
+        }
+        return (): void => {
+          local.listeners.delete(callback);
+          if (local.listeners.size === 0 && this.historyObservers.get(bound) === local) this.historyObservers.delete(bound);
+        };
+      },
+      getCurrent: (): DeepReadCacheEntry[] | undefined => current,
+    };
   }
 
   async delete(topicId: string): Promise<void> {

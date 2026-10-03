@@ -1,7 +1,7 @@
 // wikipedia_service — Wikipedia 内置源(D-066)
 // Android 基准: search/.../WikipediaSearchService.kt(全文 74 行;普通 object 非 SearchService)
 import type { JsonObject, JsonValue } from '../chat/json.ts';
-import type { SearchCommonOptions, SearchResult, SearchResultItem } from './search_service.ts';
+import type { SearchCommonOptions, SearchRequestContext, SearchResult, SearchResultItem } from './search_service.ts';
 import { searchSdkRuntime } from './search_service.ts';
 import { buildQuery, javaUrlEncodeForm } from './url_codec.ts';
 
@@ -17,6 +17,7 @@ const strOrNull = (v: JsonValue | undefined): string | null =>
 
 export const wikipediaSearch = async (
   query: string, commonOptions: SearchCommonOptions,
+  context?: SearchRequestContext,
 ): Promise<SearchResult> => {
   // any { it.code in 0x4E00..0x9FFF }(UTF-16 code unit 语义 = charCodeAt)
   let hasCjk: boolean = false;
@@ -42,7 +43,7 @@ export const wikipediaSearch = async (
     url,
     method: 'GET',
     headers: { 'User-Agent': 'AmberAgent/1.0 search (Android)' },
-  });
+  }, context);
   if (resp.status < 200 || resp.status >= 300) {
     throw new Error(`Wikipedia request failed #${resp.status}`);
   }

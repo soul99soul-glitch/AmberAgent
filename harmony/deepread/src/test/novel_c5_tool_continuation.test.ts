@@ -80,6 +80,7 @@ const toolModel = (
           return;
         }
         const continuation = request.operation;
+        if (continuation.kind !== 'tool_continuation') throw new Error('Expected tool continuation');
         const verdict = continuation.verdict.kind;
         let updated: UIMessage[] = replaceTool(
           request.history, continuation.toolCallId, verdict);

@@ -36,6 +36,9 @@ export interface OpenAIChatApiDeps {
   resumeStore?: import('./openai_responses_request.ts').ResponseResumeStore;
   enableResponsesResume?: boolean;
   runId?: string;
+  resumeFrom?: import('./openai_responses_request.ts').ResponseCursor | null;
+  resumeMessages?: UIMessage[];
+  onResumeCheckpoint?: (cursor: import('./openai_responses_request.ts').ResponseCursor) => Promise<void>;
 }
 
 export interface CallOpts {
@@ -82,7 +85,8 @@ const errorFromFailureBody = (status: number, bodyRaw: string): Error => {
       const normalized = normalizeOpenAIStreamDataLines(bodyRaw);
       const candidate = normalized.length > 0 ? normalized[0] : bodyRaw;
       const parsed: unknown = JSON.parse(candidate);
-      return parseOpenAiErrorDetail(parsed as JsonValue);
+      const detail: Error = parseOpenAiErrorDetail(parsed as JsonValue);
+      return new Error(`Failed to get response: ${status} ${detail.message}`);
     } catch {
       // body 解析失败 → 落到根因错误(不要用 parse 异常覆盖)
     }
@@ -101,6 +105,9 @@ export const createOpenAIChatApi = (deps: OpenAIChatApiDeps): OpenAIChatApi => {
       resumeStore: deps.resumeStore,
       enableResponsesResume: deps.enableResponsesResume,
       runId: deps.runId,
+      resumeFrom: deps.resumeFrom,
+      resumeMessages: deps.resumeMessages,
+      onResumeCheckpoint: deps.onResumeCheckpoint,
     });
     return {
       streamText: (messages, params, onChunk, opts) =>

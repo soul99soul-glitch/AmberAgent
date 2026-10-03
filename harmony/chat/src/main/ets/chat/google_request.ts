@@ -181,8 +181,11 @@ export const toGooglePart = (
 // ===== toFunctionCallPart / toFunctionResponsePart(:838-859) =====
 
 export const toGoogleFunctionCallPart = (tool: UIMessagePartTool): JsonObject => {
+  const call: JsonObject = { name: tool.toolName, args: toolInputAsJson(tool) };
+  const wireId: JsonValue | undefined = tool.metadata?.['gemini_wire_call_id'];
+  if (typeof wireId === 'string' && wireId.trim().length > 0) call['id'] = wireId;
   const obj: JsonObject = {
-    functionCall: { name: tool.toolName, args: toolInputAsJson(tool) },
+    functionCall: call,
   };
   if (tool.metadata !== null && typeof tool.metadata === 'object' &&
     !Array.isArray(tool.metadata)) {
@@ -197,7 +200,10 @@ export const toGoogleFunctionResponsePart = (tool: UIMessagePartTool): JsonObjec
     .filter((p: UIMessagePart): p is UIMessagePart & { type: 'text' } => p.type === 'text')
     .map((p): string => p.text)
     .join('\n');
-  return { functionResponse: { name: tool.toolName, response: { result } } };
+  const response: JsonObject = { name: tool.toolName, response: { result } };
+  const wireId: JsonValue | undefined = tool.metadata?.['gemini_wire_call_id'];
+  if (typeof wireId === 'string' && wireId.trim().length > 0) response['id'] = wireId;
+  return { functionResponse: response };
 };
 
 // ===== buildContents(:729-791) =====
@@ -347,11 +353,15 @@ export const buildGoogleCompletionRequestBody = (
     req['tools'] = builtInTools;
   } else if (params.tools.length > 0 && params.model.abilities.indexOf('tool') >= 0) {
     // 没有 Google 内置工具时保留 functionDeclarations + schema 键裁剪。
-    const declarations: JsonValue[] = params.tools.map((tool): JsonObject => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: removeJsonElements(tool.parameters, GEMINI_SCHEMA_DROP_KEYS),
-    }));
+    const declarations: JsonValue[] = params.tools.map((tool): JsonObject => {
+      const declaration: JsonObject = { name: tool.name, description: tool.description };
+      if (tool.parametersJsonSchema !== undefined) {
+        declaration['parametersJsonSchema'] = tool.parametersJsonSchema;
+      } else {
+        declaration['parameters'] = removeJsonElements(tool.parameters, GEMINI_SCHEMA_DROP_KEYS);
+      }
+      return declaration;
+    });
     req['tools'] = [{ functionDeclarations: declarations as unknown as JsonValue }] as unknown as JsonValue;
   }
 

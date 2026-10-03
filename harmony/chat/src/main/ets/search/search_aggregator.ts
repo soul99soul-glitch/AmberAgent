@@ -10,7 +10,7 @@
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import { newId } from '../chat/ids.ts';
 import type {
-  SearchCommonOptions, SearchResult, SearchResultItem, SearchServiceOptions,
+  SearchCommonOptions, SearchRequestContext, SearchResult, SearchResultItem, SearchServiceOptions,
 } from './search_service.ts';
 import { SEARCH_SERVICE_TYPES } from './search_service.ts';
 import { getSearchService } from './service_registry.ts';
@@ -44,6 +44,7 @@ export type SearchExecutor = (
   options: SearchServiceOptions,
   params: JsonObject,
   commonOptions: SearchCommonOptions,
+  context?: SearchRequestContext,
 ) => Promise<SearchResult>;
 
 interface SourceOutcome {
@@ -397,7 +398,8 @@ const defaultExecutor: SearchExecutor = async (
   options: SearchServiceOptions,
   params: JsonObject,
   commonOptions: SearchCommonOptions,
-): Promise<SearchResult> => getSearchService(options).search(params, commonOptions, options);
+  context?: SearchRequestContext,
+): Promise<SearchResult> => getSearchService(options).search(params, commonOptions, options, context);
 
 // :33-127 主入口
 export const searchAggregatorSearch = async (
@@ -405,7 +407,15 @@ export const searchAggregatorSearch = async (
   params: JsonObject,
   executor: SearchExecutor = defaultExecutor,
   deps: AggregatorDeps = {},
+  context: SearchRequestContext = {},
 ): Promise<JsonObject> => {
+  const throwIfCancelled = (): void => {
+    if (!context.signal?.aborted) return;
+    const error = new Error('search aborted');
+    error.name = 'AbortError';
+    throw error;
+  };
+  throwIfCancelled();
   const queryMaybe: string | null = stringContentOrNull(params, 'query') ?? stringContentOrNull(params, 'q');
   if (queryMaybe === null) throw new Error('query is required');
   const query: string = queryMaybe;
@@ -443,13 +453,18 @@ export const searchAggregatorSearch = async (
       const serviceParams: JsonObject = buildServiceParams(query, topic, timeRange, recencyDays, options, deps);
       let outcome: SourceOutcome;
       try {
+        throwIfCancelled();
         const result: SearchResult = await executor(
           options,
           serviceParams,
           { resultSize: Math.min(Math.max(perServiceSize, 1), 20) },
+          context,
         );
+        throwIfCancelled();
         outcome = { ok: true, result };
       } catch (e) {
+        throwIfCancelled();
+        if (e instanceof Error && e.name === 'AbortError') throw e;
         outcome = { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
       }
       return { options, sourceIndex, serviceName: name, params: serviceParams, outcome };

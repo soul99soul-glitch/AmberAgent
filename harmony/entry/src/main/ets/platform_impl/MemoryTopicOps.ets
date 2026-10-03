@@ -7,7 +7,7 @@ import {
   makeTextGenerationParams, makeUserMessage, toChatModel, toText,
 } from '@amber/chat-domain';
 import type { ChatProviderChoice } from '../di/AppContainer.ets';
-import { buildProviderApi, getChatKvStore } from '../di/AppContainer.ets';
+import { prepareProviderApi, getChatKvStore } from '../di/AppContainer.ets';
 import type { MemoryWorkerGateSnapshot } from './AgentRuntimePrefs.ets';
 import { loadAgentRuntimeSnapshot } from './AgentRuntimePrefs.ets';
 import { sharedKvMutex } from './AtomicJsonFile.ets';
@@ -125,7 +125,7 @@ export class MemoryTopicCoordinator {
       const name: string = header.name.trim();
       if (name.length > 0) headers[name] = header.value.trim();
     }
-    const api: OpenAIChatApi = buildProviderApi(choice.provider, headers);
+    const api: OpenAIChatApi = await prepareProviderApi(choice.provider, headers);
     const timer: number = setTimeout((): void => { this.timedOut = true; this.controller?.abort(); }, worker.timeoutMs);
     let chunk: MessageChunk;
     try {

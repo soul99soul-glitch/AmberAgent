@@ -1,3 +1,4 @@
+import { advancePolishOutcome, projectPolishOutcomes, retryPolishOutcomes } from './polish_outcomes.ts';
 // polish — C7 durable batch-polish pure domain.
 // Repository owns persistence and atomic workspace writes; runner owns model execution.
 
@@ -10,6 +11,9 @@ import { invalidInput } from './error.ts';
 export const MAX_POLISH_CONTEXT_ITEMS: number = 32;
 export const MAX_POLISH_CONTEXT_ITEM_CHARS: number = 8_000;
 export const MAX_POLISH_CONTEXT_TOTAL_CHARS: number = 24_000;
+
+export type PolishChapterOutcome = 'success' | 'driftSkipped' | 'failed' | 'unprocessed';
+export interface PolishChapterResult { chapterId: string; chapterOrdinal: number; status: PolishChapterOutcome; message: string | null; updatedAt: number; }
 
 export type PolishStage =
   | 'queued'
@@ -31,7 +35,7 @@ export interface PolishContextOptions {
   includeDecisions: boolean;
 }
 
-export type PolishContextSnapshotKind = 'plot' | 'foreshadow' | 'character' | 'decision';
+export type PolishContextSnapshotKind = 'plot' | 'foreshadow' | 'character' | 'decision' | 'material';
 
 export interface PolishContextSnapshotItem {
   kind: PolishContextSnapshotKind;
@@ -139,6 +143,9 @@ export interface DurablePolishJob {
   claimEpoch: number;
   modelPolicyAtStart: NovelModelPolicy;
   progress: PolishProgress[];
+  polishPreferenceAtStart?: string;
+  outcomes?: PolishChapterResult[];
+  retryChapterIds?: string[];
   failure: string | null;
   createdAt: number;
   updatedAt: number;
@@ -154,6 +161,7 @@ export interface MakePolishJobInput {
   warnings: PolishWarning[];
   expectedCas: WorkspaceCas;
   modelPolicyAtStart: NovelModelPolicy;
+  polishPreferenceAtStart?: string;
   now: number;
 }
 
@@ -235,6 +243,7 @@ const contextKindEnabled = (kind: PolishContextSnapshotKind, options: PolishCont
     case 'foreshadow': return options.includeForeshadows;
     case 'character': return options.includeCharacters;
     case 'decision': return options.includeDecisions;
+    case 'material': return true;
   }
 };
 
@@ -250,7 +259,7 @@ const validateContextOptions = (options: PolishContextOptions): PolishContextOpt
 
 const validateContextItem = (item: PolishContextSnapshotItem): PolishContextSnapshotItem => {
   if (item.kind !== 'plot' && item.kind !== 'foreshadow' && item.kind !== 'character' &&
-    item.kind !== 'decision') throw invalidInput('context kind 无效');
+    item.kind !== 'decision' && item.kind !== 'material') throw invalidInput('context kind 无效');
   requireSourcePath(item.sourcePath);
   requireId(item.digest, 'context digest');
   if (item.content.trim().length === 0 || item.content.length > MAX_POLISH_CONTEXT_ITEM_CHARS) {
@@ -329,8 +338,8 @@ const validateTargets = (targets: PolishChapterTarget[]): PolishChapterTarget[] 
   for (let i: number = 0; i < targets.length; i++) {
     const target: PolishChapterTarget = validateTarget(targets[i]);
     if (ids.has(target.id) || ordinals.has(target.ordinal)) throw invalidInput('润色章节目标重复');
-    if (i > 0 && target.ordinal !== targets[i - 1].ordinal + 1) {
-      throw invalidInput('润色章节必须按连续 ordinal 的闭区间排列');
+    if (i > 0 && target.ordinal <= targets[i - 1].ordinal) {
+      throw invalidInput('润色章节必须按 ordinal 升序排列');
     }
     ids.add(target.id);
     ordinals.add(target.ordinal);
@@ -456,6 +465,9 @@ const copyJob = (
   claimEpoch: job.claimEpoch,
   modelPolicyAtStart: job.modelPolicyAtStart,
   progress,
+  polishPreferenceAtStart: job.polishPreferenceAtStart,
+  outcomes: job.outcomes,
+  retryChapterIds: job.retryChapterIds,
   failure,
   createdAt: job.createdAt,
   updatedAt,
@@ -489,6 +501,8 @@ export const makePolishJob = (input: MakePolishJobInput): DurablePolishJob => {
     claimEpoch: 0,
     modelPolicyAtStart: validateModelPolicy(input.modelPolicyAtStart),
     progress: [],
+    polishPreferenceAtStart: input.polishPreferenceAtStart ?? '',
+    outcomes: targets.map(target => ({ chapterId: target.id, chapterOrdinal: target.ordinal, status: 'unprocessed', message: null, updatedAt: now })),
     failure: null,
     createdAt: now,
     updatedAt: now,
@@ -507,17 +521,22 @@ const effectiveExecutionStage = (job: DurablePolishJob): PolishStage => {
 };
 
 const validateProgress = (job: DurablePolishJob): void => {
-  if (job.progress.length !== job.cursor) throw invalidInput('polish progress 与 cursor 不一致');
+  if (job.outcomes === undefined && job.progress.length !== job.cursor) throw invalidInput('polish progress 与 cursor 不一致');
+  if (job.outcomes !== undefined && job.progress.length !== job.outcomes.filter(item => item.status === 'success').length) throw invalidInput('polish 成功结果与 receipt 不一致');
   const commits: Set<string> = new Set<string>();
+  const chapters: Set<string> = new Set<string>();
   for (let i: number = 0; i < job.progress.length; i++) {
     const entry: PolishProgress = job.progress[i];
-    const target: PolishChapterTarget = job.targets[i];
-    if (entry.chapterId !== target.id || entry.chapterOrdinal !== target.ordinal ||
+    const target: PolishChapterTarget | undefined = job.outcomes === undefined ? job.targets[i] : job.targets.find(item => item.id === entry.chapterId);
+    if (target === undefined || entry.chapterId !== target.id || entry.chapterOrdinal !== target.ordinal ||
       entry.sourceDigest !== target.sourceDigest || entry.branchId !== job.branchId ||
       entry.receipt !== polishReceipt(
         job.jobId, entry.chapterId, entry.chapterOrdinal, entry.sourceDigest,
         entry.candidateId, entry.candidateDigest,
       )) throw invalidInput('polish progress 绑定或 receipt 无效');
+    if (chapters.has(entry.chapterId) || (job.outcomes !== undefined
+      && job.outcomes.find(item => item.chapterId === entry.chapterId)?.status !== 'success')) throw invalidInput('polish 成功 receipt 章节重复或结果不匹配');
+    chapters.add(entry.chapterId);
     requireId(entry.commitId, 'progress commitId');
     if (commits.has(entry.commitId)) throw invalidInput('polish progress commitId 重复');
     commits.add(entry.commitId);
@@ -549,6 +568,22 @@ export const validateDurablePolishJob = (job: DurablePolishJob): DurablePolishJo
   if (!Number.isInteger(job.rewriteCount) || job.rewriteCount < 0 ||
     job.rewriteCount > MAX_GHOSTWRITE_REWRITE_COUNT) throw invalidInput('rewriteCount 无效');
   if (!Number.isInteger(job.claimEpoch) || job.claimEpoch < 0) throw invalidInput('claim epoch 无效');
+  if (job.polishPreferenceAtStart !== undefined && typeof job.polishPreferenceAtStart !== 'string') throw invalidInput('冻结润色偏好无效');
+  if (job.outcomes !== undefined) {
+    if (job.outcomes.length !== job.targets.length) throw invalidInput('润色逐章结果不完整');
+    job.outcomes.forEach((item, index) => {
+      const target = job.targets[index];
+      if (item.chapterId !== target.id || item.chapterOrdinal !== target.ordinal || !['success', 'driftSkipped', 'failed', 'unprocessed'].includes(item.status)
+        || (item.message !== null && typeof item.message !== 'string')) throw invalidInput('润色逐章结果无效');
+      requireTimestamp(item.updatedAt, 'outcome time');
+    });
+    if (job.retryChapterIds !== undefined && (new Set(job.retryChapterIds).size !== job.retryChapterIds.length
+      || job.retryChapterIds.some(id => !job.targets.some(target => target.id === id)))) throw invalidInput('润色重试集合无效');
+    if (job.cursor < job.targets.length && job.stage !== 'cancelled' && job.stage !== 'failed'
+      && job.outcomes[job.cursor].status !== 'unprocessed') throw invalidInput('润色游标不能指向已处理章节');
+    if (job.stage === 'completed' && job.outcomes.some(item => item.status === 'unprocessed'
+      && (job.retryChapterIds === undefined || job.retryChapterIds.includes(item.chapterId)))) throw invalidInput('完成的润色批次仍有待处理目标');
+  }
   validateProgress(job);
 
   if (job.stage === 'completed') {
@@ -582,7 +617,9 @@ export const validateDurablePolishJob = (job: DurablePolishJob): DurablePolishJo
     const executionStage: PolishStage = effectiveExecutionStage(job);
     const expectedAttempt: number = executionStage === 'rewriting_1' || executionStage === 'rewriting_2'
       ? job.rewriteCount - 1 : job.rewriteCount;
-    if (candidate.attempt !== expectedAttempt) throw invalidInput('candidate attempt 与 job 不匹配');
+    if (job.stage !== 'cancelled' && candidate.attempt !== expectedAttempt) {
+      throw invalidInput('candidate attempt 与 job 不匹配');
+    }
   }
   if (job.review !== null) {
     if (job.candidate === null) throw invalidInput('review 缺少 candidate');
@@ -758,14 +795,17 @@ export const failPolishJob = (
   validateDurablePolishJob(job);
   assertPolishClaim(job, claim, now);
   if (!isActive(job.stage) || failure.trim().length === 0) throw invalidInput('当前 polish job 不可标记失败');
-  return copyJob(
+  const failed = copyJob(
     job, 'failed', job.stage, job.expectedCas, job.cursor, job.candidate, job.review,
     job.rewriteCount, null, job.progress, failure.trim(), requireTimestamp(now, 'updatedAt'),
   );
+  return job.outcomes === undefined ? failed : { ...failed, outcomes: projectPolishOutcomes(job).map((item, index) =>
+    index === job.cursor ? { ...item, status: 'failed', message: failure.trim(), updatedAt: now } : item) };
 };
 
-export const retryPolishJob = (job: DurablePolishJob, now: number): DurablePolishJob => {
+export const retryPolishJob = (job: DurablePolishJob, now: number, chapterIds?: string[]): DurablePolishJob => {
   validateDurablePolishJob(job);
+  if (job.outcomes !== undefined || chapterIds !== undefined) return retryPolishOutcomes(job, requireTimestamp(now, 'updatedAt'), chapterIds);
   if (job.stage !== 'failed' || job.resumeStage === null) throw invalidInput('当前 polish job 不可重试');
   return copyJob(
     job, job.resumeStage, null, job.expectedCas, job.cursor, job.candidate, job.review,
@@ -826,6 +866,7 @@ export const commitPolishChapter = (
     commitId: input.commitId,
     branchId: input.branchId,
   });
+  if (job.outcomes !== undefined) return advancePolishOutcome(job, 'success', null, requireTimestamp(now, 'updatedAt'), nextCas, progress);
   const cursor: number = job.cursor + 1;
   const completed: boolean = cursor === job.targets.length;
   return copyJob(
@@ -843,3 +884,11 @@ export const projectPolishProgress = (
       entry.candidateId, entry.candidateDigest,
     ),
 );
+
+export { projectPolishOutcomes } from './polish_outcomes.ts';
+export const recordPolishChapterResult = (job: DurablePolishJob, claim: GhostwriteClaimRef, status: 'failed' | 'driftSkipped', message: string, now: number): DurablePolishJob => {
+  validateDurablePolishJob(job);
+  assertPolishClaim(job, claim, now);
+  if (!isActive(job.stage) || message.trim().length === 0) throw invalidInput('润色逐章结案状态无效');
+  return validateDurablePolishJob(advancePolishOutcome(job, status, message.trim(), requireTimestamp(now, 'updatedAt')));
+};

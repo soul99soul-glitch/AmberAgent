@@ -1,24 +1,26 @@
+import { beginJevContextRun } from './JevContextSupport.ets';
+import { beginConversationCompaction } from './ConversationRunGuard.ets';
 // Detached Chat dependencies: existing Entry loaders and chat-domain factories.
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   ChatTurnDeps, ChatStreamProvider, CompactPolicy, CompactResult, Conversation,
   ConversationSummary, DisplaySetting, MemoryRecallRuntimeGate, MemoryRecallSelection,
   MessageTransformer, MiniAppRecord, PreparedContext, RecentChatItem,
-  SubAgentRuntimeSetting, UIMessage,
+  SubAgentRuntimeSetting, UIMessage, MessageChunk, StreamOpts, JevPreparedToolResults,
 } from '@amber/chat-domain';
 import {
   asChatStreamProvider, buildAgentSoulPrompt, buildMemoryRecallPrompt,
   buildRecentChatsPrompt, conversationWithMessagesAsNodes, createDocumentTransformer,
   createMiniAppOutputTransformer, createMiniAppPromptTransformer,
-  createPlaceholderTransformer, createTemplateTransformer,
+  createPlaceholderTransformer, createTemplateTransformer, createReasoningLevelMetadataTransformer,
   createTimeReminderTransformer, currentMessages, dayOfWeekFullName, estimateContextWindow,
   javaLocalDateTimeString, loadDisplaySetting, loadMiniAppSetting, loadSearchPrefs,
   makeCompactPolicy, makeGenerationRetrySetting, makeSubAgentRuntimeSetting,
   makeTextGenerationParams, prepareContext, RECENT_CHATS_PROMPT_LIMIT,
-  regexOutputTransformer, thinkTagTransformer, toChatModel, toText,
+  regexOutputTransformer, createThinkTagTransformer, toChatModel, toText,
 } from '@amber/chat-domain';
 import {
-  buildProviderApi, getAgentCronTools, getAgentTaskTools, getChatKvStore,
+  prepareProviderApi, getAgentCronTools, getAgentTaskTools, getChatKvStore,
   getChatRepository, getCompactStore, hydrateSubAgentSetting, initMcpManager,
   readTaskModelReference, TASK_COMPRESS_MODEL_KEY, loadTaskPrompts, resolveChatRuntime, resolveTaskModelReference,
 } from '../di/AppContainer.ets';
@@ -190,15 +192,22 @@ export const buildConversationCompressProvider = (seed: PreparedConversationSeed
     const name: string = header.name.trim();
     if (name.length > 0) headers[name] = header.value.trim();
   }
-  const api = buildProviderApi(choice.provider, headers);
-  return asChatStreamProvider(api, () => makeTextGenerationParams({
+  const params = makeTextGenerationParams({
     model: toChatModel(choice.model), customBody: choice.model.customBodies,
-  }));
+  });
+  return {
+    streamText: async (messages: UIMessage[], onChunk: (chunk: MessageChunk) => void,
+      opts?: StreamOpts): Promise<void> => {
+      const api = await prepareProviderApi(choice.provider, headers);
+      await api.streamText(messages, params, onChunk, opts);
+    },
+  };
 };
 
 const prepareMessages = (ctx: DetachedConversationContext):
   ((messages: UIMessage[]) => Promise<UIMessage[]>) => {
   const rt: ChatRuntime = ctx.seed.runtime;
+  const jev = beginJevContextRun(ctx.conversationId, ctx.runId, ctx.signal);
   const cc = ctx.seed.agentRuntime.contextCompaction;
   const policy: CompactPolicy = makeCompactPolicy({
     enabled: cc.enabled,
@@ -220,14 +229,17 @@ const prepareMessages = (ctx: DetachedConversationContext):
     const prompts: TaskPrompts = await loadTaskPrompts();
     const prepared: PreparedContext = await prepareContext(effective, policy,
       rt.modelContextWindowTokens, messages, rt.contextMessageSize, {
+        abortSignal: ctx.signal,
+        prepareToolResults: (source: UIMessage[], keep: number): Promise<JevPreparedToolResults> => jev.prepare(source, keep),
         provider,
         store: getCompactStore(),
         compressPrompt: prompts.compressPrompt,
         launchPrecompact: (run: () => Promise<CompactResult>): void => {
+          const release: () => void = beginConversationCompaction(ctx.conversationId);
           changeCompactCount(1);
           run().catch((e: Error): void => {
             hilog.warn(DOMAIN, TAG, 'precompact failed: %{public}s', e.message);
-          }).then((): void => { changeCompactCount(-1); });
+          }).finally((): void => { changeCompactCount(-1); release(); });
         },
         onCompactActiveChange: (active: boolean): void => { changeCompactCount(active ? 1 : -1); },
       });
@@ -246,7 +258,9 @@ export const buildConversationTurnDeps = (ctx: DetachedConversationContext): Cha
     inputTransformers: inputTransformers(ctx),
     modelSupportsImageInput: rt.modelSupportsImageInput,
     outputTransformers: [
-      thinkTagTransformer, createEntryBase64ImageTransformer(),
+      createThinkTagTransformer(),
+      createReasoningLevelMetadataTransformer(rt.params.reasoningLevel, currentMessages(ctx.conversation)),
+      createEntryBase64ImageTransformer(),
       createMiniAppOutputTransformer({
         enabled: (): boolean => seed.miniAppSetting.enabled,
         repository: getMiniAppRepositorySync(),

@@ -137,7 +137,7 @@ const syncAccessTokenToProvider = async (providerId: string, accessToken: string
   const next: ProviderSetting[] = list.map((p: ProviderSetting): ProviderSetting => {
     if (p.id !== providerId || p.type !== 'openai') return p;
     const v: ProviderSettingOpenAIVariant = p as ProviderSettingOpenAIVariant;
-    if (v.apiKey === accessToken) return p;
+    if (v.authMode !== 'grok_oauth' || v.apiKey === accessToken) return p;
     dirty = true;
     return {
       id: v.id, enabled: v.enabled, name: v.name, models: v.models,
@@ -194,6 +194,7 @@ const postForm = async (form: string): Promise<HttpTextResult> => {
 
 export const exchangeGrokCode = async (
   providerId: string, code: string, codeVerifier: string,
+  shouldCancel?: () => boolean,
 ): Promise<GrokTokens> => {
   const formFields: Record<string, string> = {
     'grant_type': 'authorization_code',
@@ -204,6 +205,7 @@ export const exchangeGrokCode = async (
   };
   const form: string = formEncode(formFields);
   const resp = await postForm(form);
+  if (shouldCancel?.() === true) throw new Error('已取消登录');
   if (resp.status < 200 || resp.status >= 300) {
     throw new Error(`Grok OAuth 令牌交换失败(${resp.status})`);
   }

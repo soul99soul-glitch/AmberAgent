@@ -1,3 +1,4 @@
+import { getAppBundleName } from './ProductIdentity.ets';
 // NovelPolishWorkScheduler — C7 WorkScheduler 平台壳。
 // 官方约束：API 9+、系统择机触发、单次回调最长 2 分钟；因此这里只注册/取消
 // durable job 的恢复信号，绝不把 WorkScheduler 当成业务状态机或长驻进程。
@@ -9,7 +10,6 @@ const DOMAIN: number = 0x0001;
 const TAG: string = 'Novel.PolishScheduler';
 
 export const NOVEL_POLISH_WORK_ABILITY: string = 'NovelPolishWorkAbility';
-const BUNDLE_NAME: string = 'app.amber.deepread';
 
 export interface NovelPolishWorkKey {
   projectId: string;
@@ -32,7 +32,7 @@ const workInfoFor = (key: NovelPolishWorkKey): workScheduler.WorkInfo => {
   parameters['jobId'] = key.jobId;
   return {
     workId: novelPolishWorkId(key.jobId),
-    bundleName: BUNDLE_NAME,
+    bundleName: getAppBundleName(),
     abilityName: NOVEL_POLISH_WORK_ABILITY,
     networkType: workScheduler.NetworkType.NETWORK_TYPE_ANY,
     isRepeat: false,

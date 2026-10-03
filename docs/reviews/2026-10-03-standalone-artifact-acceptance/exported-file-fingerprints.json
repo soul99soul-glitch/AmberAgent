@@ -1,0 +1,42 @@
+[
+  {
+    "file": "p9-novel-manuscript.txt",
+    "bytes": 1154,
+    "sha256": "7df6771ee971b1bfd22c42fadb45d75e974f8c4a9f73f702894e236b145d25ba"
+  },
+  {
+    "file": "p9-novel-native.zip",
+    "bytes": 523746,
+    "sha256": "291f10b3bf759407222ae1d851c449daf66c52282562b05e8ef0614f1c964caa"
+  },
+  {
+    "file": "p9-novel-public.zip",
+    "bytes": 11630,
+    "sha256": "56d475db0fa9c1e7ba875302928f83e51b83151e3a9090db949a7aedc9f9e550"
+  },
+  {
+    "file": "p9-novel-toast-final.txt",
+    "bytes": 1154,
+    "sha256": "7df6771ee971b1bfd22c42fadb45d75e974f8c4a9f73f702894e236b145d25ba"
+  },
+  {
+    "file": "p9-novel-toast-verified.txt",
+    "bytes": 1154,
+    "sha256": "7df6771ee971b1bfd22c42fadb45d75e974f8c4a9f73f702894e236b145d25ba"
+  },
+  {
+    "file": "p9-reader-175.pdf",
+    "bytes": 467732,
+    "sha256": "ab856db13f2131a20d919745e936ad7ea1c9c4d5e630a39e0161bd8b5035ffa7"
+  },
+  {
+    "file": "p9-reader-180.pdf",
+    "bytes": 467493,
+    "sha256": "25d9d9f451d7f06754a0da4884c40aa6a04e4ecccf93519767ee0686c7d40493"
+  },
+  {
+    "file": "p9-reader-normal.pdf",
+    "bytes": 467094,
+    "sha256": "7145e9646e1b01647a4777cb1215ece85262ca032f59a7dcf273fe9ebd624a5d"
+  }
+]

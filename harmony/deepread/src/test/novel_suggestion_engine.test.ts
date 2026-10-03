@@ -7,6 +7,8 @@ import {
 import type { NovelModelRunning, NovelModelEvent, NovelModelRequest } from '../main/ets/novel/model_running.ts';
 import { makeAssistantMessage } from '../main/ets/agent/message.ts';
 import { makeNovelProject, makeNovelChapter, makeNovelMaterial } from '../main/ets/novel/models.ts';
+import { isNovelError } from '../main/ets/novel/error.ts';
+import { materialSuggestionChapterDigest } from '../main/ets/novel/material_adoption.ts';
 
 const NOW = 1_000_000;
 
@@ -71,9 +73,9 @@ test('parseSuggestions: empty suggestions', () => {
   assert.deepEqual(parseSuggestions('{"suggestions":[]}', 'ch1', NOW), []);
 });
 
-test('parseSuggestions: skips empty title/content', () => {
+test('parseSuggestions: rejects invalid items instead of claiming no suggestions', () => {
   const text = '{"suggestions":[{"kind":"world","title":"","content":"c"},{"kind":"world","title":"t","content":""}]}';
-  assert.equal(parseSuggestions(text, 'ch1', NOW).length, 0);
+  assert.throws(() => parseSuggestions(text, 'ch1', NOW), error => isNovelError(error) && error.code === 'invalid_output');
 });
 
 test('parseSuggestions: caps at MAX_SUGGESTIONS', () => {
@@ -86,9 +88,12 @@ test('parseSuggestions: caps at MAX_SUGGESTIONS', () => {
   assert.equal(out.length, MAX_SUGGESTIONS);
 });
 
-test('parseSuggestions: malformed JSON → empty', () => {
-  assert.deepEqual(parseSuggestions('not json at all', 'ch1', NOW), []);
-  assert.deepEqual(parseSuggestions('{broken', 'ch1', NOW), []);
+test('parseSuggestions: malformed JSON and wrong schemas are distinct from valid empty results', () => {
+  for (const text of ['not json at all', '{broken}', '{}', '{"suggestions":{}}',
+    '{"suggestions":[null]}', '{"suggestions":[{"kind":"world","title":1,"content":"c"}]}',
+    '{"suggestions":[{"kind":"unknown","title":"t","content":"c"}]}']) {
+    assert.throws(() => parseSuggestions(text, 'ch1', NOW), error => isNovelError(error) && error.code === 'invalid_output');
+  }
 });
 
 test('buildSuggestionUserPrompt: includes project, materials, chapter', () => {
@@ -153,13 +158,46 @@ test('analyzeChapterSuggestions: parses model JSON into suggestions', async () =
     model, project, chapter, { kind: 'global' }, NOW, 1000);
   assert.equal(out.length, 1);
   assert.equal(out[0].title, '主角');
+  assert.equal(out[0].sourceDigest, materialSuggestionChapterDigest(chapter));
 });
 
-test('analyzeChapterSuggestions: model failure → empty (no throw)', async () => {
+test('analyzeChapterSuggestions: model failure remains a provider error', async () => {
   const model = scriptedModel([{ kind: 'failed', message: 'down' }]);
   const project = makeNovelProject({ name: 'p', now: NOW });
   const chapter = makeNovelChapter({ title: '第一章', content: '正文', now: NOW });
-  const out = await analyzeChapterSuggestions(
-    model, project, chapter, { kind: 'global' }, NOW, 1000);
-  assert.deepEqual(out, []);
+  await assert.rejects(analyzeChapterSuggestions(
+    model, project, chapter, { kind: 'global' }, NOW, 1000),
+  error => isNovelError(error) && error.code === 'provider' && error.message.includes('down'));
+});
+
+test('analyzeChapterSuggestions: validates the model and disables authoring tools', async () => {
+  const observed: string[] = [];
+  const model = scriptedModel([
+    { kind: 'snapshot', messages: [makeAssistantMessage('{"suggestions":[]}')],
+      generationActive: false, textDeltasLive: false, transport: 'unavailable' },
+    { kind: 'completed' },
+  ]);
+  const originalStart = model.start;
+  model.validate = async (): Promise<void> => { observed.push('validate'); };
+  model.start = req => {
+    observed.push('start');
+    assert.equal(req.toolProfile, 'none');
+    return originalStart(req);
+  };
+  const project = makeNovelProject({ name: 'p', now: NOW });
+  const chapter = makeNovelChapter({ title: '第一章', content: '正文', now: NOW });
+  assert.deepEqual(await analyzeChapterSuggestions(model, project, chapter, { kind: 'global' }, NOW, 1000), []);
+  assert.deepEqual(observed, ['validate', 'start']);
+});
+
+test('analyzeChapterSuggestions: malformed model output is an output error, not a provider failure', async () => {
+  const model = scriptedModel([
+    { kind: 'snapshot', messages: [makeAssistantMessage('{"wrong":[]}')],
+      generationActive: false, textDeltasLive: false, transport: 'unavailable' },
+    { kind: 'completed' },
+  ]);
+  const project = makeNovelProject({ name: 'p', now: NOW });
+  const chapter = makeNovelChapter({ title: '第一章', content: '正文', now: NOW });
+  await assert.rejects(analyzeChapterSuggestions(model, project, chapter, { kind: 'global' }, NOW, 1000),
+    error => isNovelError(error) && error.code === 'invalid_output');
 });

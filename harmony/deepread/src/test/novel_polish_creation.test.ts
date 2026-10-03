@@ -349,8 +349,9 @@ for (const action of ['resume', 'retry'] as const) {
     const activated: DurablePolishJob = action === 'resume'
       ? await creation.resumePolish(projectId, job.jobId)
       : await creation.retryPolish(projectId, job.jobId);
-    assert.equal(activated.stage, 'writing');
-    assert.deepEqual(effects.events, ['notify:writing:0', 'schedule:writing:0']);
+    const stage = action === 'resume' ? 'writing' : 'queued';
+    assert.equal(activated.stage, stage);
+    assert.deepEqual(effects.events, [`notify:${stage}:0`, `schedule:${stage}:0`]);
   });
 }
 
@@ -455,4 +456,24 @@ test('cold open leaves waiting_system durable and only reschedules it', async ()
   assert.equal((await coldRepository.loadPolishJob('cold-waiting', job.jobId)).stage, 'waiting_system');
   assert.deepEqual(effects.events, ['notify:waiting_system:0', 'schedule:waiting_system:0']);
   assert.equal(model.requests.length, 0);
+});
+
+
+test('startSelectedPolish runs a sparse selection without writing the skipped chapter', async () => {
+  const repository = createFileNovelRepository(createMemoryFileStore());
+  await repository.createProject(projectFixture('sparse-driver', 3));
+  const model = new FakeModel(automaticResponder);
+  const creation = createNovelCreation({ repository, modelRunning: model, nowMs: makeNow() });
+  const started = await creation.startSelectedPolish('sparse-driver', [3, 1], CONTEXT);
+  const completed = await eventually(
+    () => repository.loadPolishJob('sparse-driver', started.jobId),
+    job => job.stage === 'completed', 'sparse polish job did not complete',
+  );
+  assert.deepEqual(completed.targets.map(target => target.ordinal), [1, 3]);
+  assert.deepEqual(completed.progress.map(progress => progress.chapterOrdinal), [1, 3]);
+  const project = await repository.loadProject('sparse-driver');
+  assert.deepEqual(project.chapters.map(chapter => chapter.content), [
+    '第 1 章润色正文。', '第 2 章旧正文。', '第 3 章润色正文。',
+  ]);
+  assert.equal(model.requests.length, 4);
 });

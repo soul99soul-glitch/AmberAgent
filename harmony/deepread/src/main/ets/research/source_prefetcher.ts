@@ -1,12 +1,13 @@
-// DeepReadSourcePrefetcher — 36s wall budget 并行预取
+// DeepReadSourcePrefetcher — 15s wall budget 并行预取
 // 照搬 Android DeepReadSourcePrefetcher.kt(collect / fetchSource / LRU cache)
 //
 // 含 LRU cache(P0-9)、seed source 单独 fetch(低阈值)、并行 scrape + reader + image score。
 // 注意:用 factory function(createSourcePrefetcher)+ 闭包捕获状态,
 // 而非 class mutation(ArkTS 友好,与 observable.ts 一致)。
 
+import type { DeepReadCollectionIssue } from '../domain/input_sources.ts';
 import type { HttpClient } from '../platform/http.ts';
-import type { AbortSignalLike } from '../platform/runtime_api.ts';
+import type { AbortControllerLike, AbortSignalLike } from '../platform/runtime_api.ts';
 import type { SearchProviderRegistry, SearchHit } from '../platform/search.ts';
 import type { ScoredImageCandidate, ImageCandidate } from './image_scorer.ts';
 import {
@@ -17,6 +18,7 @@ import { extractReadableText } from './reader_extractor.ts';
 import { scoreAndDedup } from './image_scorer.ts';
 import { interleaveSearchResults } from './search_merger.ts';
 import { urlAllowedForBackgroundFetch } from './url_filter.ts';
+import { extractPageImageCandidates } from './page_image_candidates.ts';
 
 export type SourceCredibility = 'high' | 'medium' | 'low';
 export type SourceFreshness = 'fresh' | 'recent' | 'old' | 'unknown';
@@ -42,6 +44,8 @@ export interface SourcePrefetcher {
     // 取消贯穿(R20):provider search / HTTP fetch 均透传 signal,取消即真实中止;
     // 可选参数,既有调用方不变。
     signal?: AbortSignalLike,
+    seedUrls?: string[],
+    onCollected?: (sources: DeepReadSource[], issues: DeepReadCollectionIssue[]) => void,
   ): Promise<DeepReadSource[]>;
   /** 测试/诊断用:查看 LRU cache 大小 */
   cacheSize(): number;
@@ -53,6 +57,7 @@ interface CacheEntry {
 }
 
 const TOP_SCRAPE_CANDIDATES = 20;
+const SEARCH_WALL_BUDGET_MS = 10_000;
 
 // 直连抓正文带浏览器 UA:不带 UA 的请求常被站点直接 403 或返回精简页
 const BROWSER_FETCH_HEADERS: Record<string, string> = {
@@ -66,7 +71,7 @@ const BROWSER_FETCH_HEADERS: Record<string, string> = {
 const READER_FALLBACK_MAX = 6;
 const JINA_READER_PREFIX = 'https://r.jina.ai/';
 
-interface ReaderBudget { remaining: number; }
+interface ReaderBudget { remaining: number; enabled: boolean; }
 
 interface ReaderPage { text: string; publishedAt: string | null; }
 
@@ -91,6 +96,7 @@ export const parseJinaReaderBody = (body: string): ReaderPage | null => {
 export const createSourcePrefetcher = (
   http: HttpClient,
   searchRegistry: SearchProviderRegistry,
+  createAbortController?: () => AbortControllerLike,
 ): SourcePrefetcher => {
   const cache = new Map<string, CacheEntry>();
   const cacheOrder: string[] = [];
@@ -112,7 +118,7 @@ export const createSourcePrefetcher = (
     url: string, fallbackTitle: string, source: string, minChars: number,
     budget: ReaderBudget, signal?: AbortSignalLike,
   ): Promise<DeepReadSource | null> => {
-    if (budget.remaining <= 0 || isAborted(signal)) return null;
+    if (!budget.enabled || budget.remaining <= 0 || isAborted(signal)) return null;
     budget.remaining -= 1;
     const resp = await http.fetch({ url: JINA_READER_PREFIX + url, method: 'GET', headers: {} }, { signal });
     if (resp.status !== 200) return null;
@@ -178,10 +184,18 @@ export const createSourcePrefetcher = (
     seedUrl: string | null,
     force: boolean,
     signal?: AbortSignalLike,
+    seedUrls: string[] = [],
+    onCollected?: (sources: DeepReadSource[], issues: DeepReadCollectionIssue[]) => void,
   ): Promise<DeepReadSource[]> => {
+    const issues: DeepReadCollectionIssue[] = [];
     // 取消已发生 → 不查缓存/不发起任何请求,立即返回空(调用方统一归一 aborted)
     if (isAborted(signal)) return [];
-    const cacheKey = `${topicId}|${seedUrl ?? ''}`;
+    const seeds = Array.from(new Set([seedUrl ?? '', ...seedUrls].map(url => url.trim()).filter(url => url.length > 0)));
+    const snapshot = searchRegistry.snapshot ? await searchRegistry.snapshot() : {
+      providers: [...searchRegistry.enabled(), ...searchRegistry.fallback()], readerEnabled: true, cacheKey: '',
+    };
+    if (isAborted(signal)) return [];
+    const cacheKey = `${topicId}|${title}|${JSON.stringify(seeds)}|${snapshot.cacheKey}`;
     if (!force) {
       const cached = cache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
@@ -190,65 +204,96 @@ export const createSourcePrefetcher = (
         const idx = cacheOrder.indexOf(cacheKey);
         if (idx >= 0) cacheOrder.splice(idx, 1);
         cacheOrder.push(cacheKey);
-        return cached.value.slice();
+        onCollected?.(cached.value.slice(), []);
+        return cached.value.slice(0, MAX_SOURCES);
       }
     }
 
-    // 36s wall budget
+    // All seed reads start with search and share the actual 15s wall budget.
     const deadline = Date.now() + PREFETCH_WALL_BUDGET_MS;
-    const readerBudget: ReaderBudget = { remaining: READER_FALLBACK_MAX };
+    const searchDeadline = Math.min(deadline, Date.now() + SEARCH_WALL_BUDGET_MS);
+    const readerBudget: ReaderBudget = { remaining: READER_FALLBACK_MAX, enabled: snapshot.readerEnabled };
+    // 来源预算只结束本轮预取请求,不取消后续 LLM 使用的父 signal。
+    const child: AbortControllerLike | undefined = createAbortController?.();
+    const collectSignal: AbortSignalLike | undefined = child?.signal ?? signal;
+    const onParentAbort = (): void => { child?.abort(); };
+    if (child !== undefined) signal?.addEventListener?.('abort', onParentAbort);
+    const budgetTimer: ReturnType<typeof setTimeout> | null = child === undefined ? null
+      : setTimeout((): void => { child.abort(); }, Math.max(0, deadline - Date.now()));
 
-    // 1. 多 provider 并行搜索(失败 provider → 空 bucket;signal 透传真实取消)
-    const queries = buildDeepReadQueries(title, seedUrl);
-    const providers = [...searchRegistry.enabled(), ...searchRegistry.fallback()];
-    // catch 在 withDeadline 外:provider 超时只丢该 bucket,
-    // 不让 Promise.all 整体失败丢掉其它 provider 已完成的结果
-    const searchBuckets = await Promise.all(
-      providers.map(p => withDeadline(deadline, p.search(queries, signal), signal).catch(() => [] as SearchHit[])),
-    );
-    if (isAborted(signal)) return [];
-    const interleaved = interleaveSearchResults(searchBuckets);
-
-    // 2. seed URL 直接 fetch(优先,低阈值)— 即使私网也走 gate
-    const sources: DeepReadSource[] = [];
-    if (seedUrl) {
-      const seedSource = await withDeadline(
+    try {
+      const seedReads = Promise.all(seeds.map(url => withDeadline(
         deadline,
-        fetchSource(seedUrl, title, 'seed', MIN_SEED_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }, readerBudget, signal),
-        signal,
-      ).catch(() => null); // catch 在外:seed 超时只丢 seed,不中止整个 collect
-      if (seedSource) sources.push(seedSource);
-    }
-    if (isAborted(signal)) return [];
+        fetchSource(url, title, 'seed', MIN_SEED_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }, readerBudget, collectSignal),
+        collectSignal,
+      ).then(source => {
+        if (source === null) issues.push({ url, title: url, error: '网页正文获取失败（访问受限、正文过短或超时）。' });
+        return source;
+      }).catch(error => {
+        issues.push({ url, title: url, error: error instanceof Error ? error.message : String(error) });
+        return null;
+      })));
 
-    // 3. 并行 scrape + extract + score(失败单个 → null,不影响其他)
-    const scraped = await Promise.all(
-      interleaved.slice(0, TOP_SCRAPE_CANDIDATES).map(hit =>
-        withDeadline(
-          deadline,
-          fetchSource(hit.url, hit.title, hit.source, MIN_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }, readerBudget, signal),
-          signal,
-        ).catch(() => null),
-      ),
-    );
-    if (isAborted(signal)) return [];
-    for (const s of scraped) {
-      if (s) sources.push(s);
-    }
+      // 1. 多 provider 并行搜索(失败 provider → 空 bucket;signal 透传真实取消)
+      const queries = buildDeepReadQueries(title, seedUrl);
+      const providers = snapshot.providers;
+      // catch 在 withDeadline 外:provider 超时只丢该 bucket,
+      // 不让 Promise.all 整体失败丢掉其它 provider 已完成的结果
+      const searchBuckets = await Promise.all(
+        providers.map(p => withDeadline(searchDeadline, p.search(queries, collectSignal, (query, error): void => {
+          issues.push({ url: '', title: `搜索：${p.name} · ${query}`, error });
+        }), collectSignal).catch(error => {
+          issues.push({ url: '', title: `搜索：${p.name}`, error: error instanceof Error ? error.message : String(error) });
+          return [] as SearchHit[];
+        })),
+      );
+      if (isAborted(signal)) return [];
+      const interleaved = interleaveSearchResults(searchBuckets);
 
-    // 4. 去重(同 URL 取第一个)+ cap MAX_SOURCES
-    const seen = new Set<string>();
-    const deduped: DeepReadSource[] = [];
-    for (const s of sources) {
-      if (seen.has(s.url)) continue;
-      seen.add(s.url);
-      deduped.push(s);
-      if (deduped.length >= MAX_SOURCES) break;
-    }
+      // 2. 搜索页面在 seed 完成前开始抓取;慢 seed 不占掉它们剩余的正文预算。
+      const searchReads = Promise.all(
+        interleaved.filter(hit => !seeds.includes(hit.url)).slice(0, TOP_SCRAPE_CANDIDATES).map(hit =>
+          withDeadline(
+            deadline,
+            fetchSource(hit.url, hit.title, hit.source, MIN_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }, readerBudget, collectSignal),
+            collectSignal,
+          ).then(source => {
+            if (source === null) issues.push({ url: hit.url, title: hit.title, error: '网页正文获取失败（访问受限、正文过短或超时）。' });
+            return source;
+          }).catch(error => {
+            issues.push({ url: hit.url, title: hit.title, error: error instanceof Error ? error.message : String(error) });
+            return null;
+          }),
+        ),
+      );
+      // 3. 同时等待两组;只在组装输出时让 seed 优先。
+      const readGroups = await Promise.all([seedReads, searchReads]);
+      const sources = readGroups[0].filter((source): source is DeepReadSource => source !== null);
+      const scraped = readGroups[1];
+      if (isAborted(signal)) return [];
+      for (const s of scraped) {
+        if (s) sources.push(s);
+      }
 
-    // 5. 写 LRU cache(返回副本:调用方变异不得污染缓存)
-    setCache(cacheKey, deduped);
-    return deduped.slice();
+      // 4. 去重(同 URL 取第一个)+ cap MAX_SOURCES
+      const seen = new Set<string>();
+      const deduped: DeepReadSource[] = [];
+      for (const s of sources) {
+        if (seen.has(s.url)) continue;
+        seen.add(s.url);
+        deduped.push(s);
+
+      }
+
+      // 5. 写 LRU cache(返回副本:调用方变异不得污染缓存)
+      onCollected?.(deduped.slice(), issues);
+      setCache(cacheKey, deduped);
+      return deduped.slice(0, MAX_SOURCES);
+    } finally {
+      if (budgetTimer !== null) clearTimeout(budgetTimer);
+      signal?.removeEventListener?.('abort', onParentAbort);
+      child?.abort();
+    }
   };
 
   return {
@@ -257,53 +302,17 @@ export const createSourcePrefetcher = (
   };
 };
 
-// 查询变体生成(简化版)
-// Android buildDeepReadQueries 生成 ~13 变体 + 话题特定加成,这里取核心 7 个够测试。
-// 完整变体集留增量(本 plan 测试用不到那么多)。
-const buildDeepReadQueries = (title: string, seedUrl: string | null): string[] => {
-  const queries: string[] = [];
-  if (seedUrl) queries.push(seedUrl);
-  queries.push(title);
-  queries.push(`${title} 最新进展`);
-  queries.push(`${title} 分析 评论`);
-  queries.push(`${title} 背景 起因`);
-  queries.push(`${title} 影响 利益相关方`);
-  queries.push(`${title} 各方观点 争议`);
-  return queries.filter(q => q.length > 0).slice(0, 7);
+// Seed pages are fetched directly. Search queries cover complementary facts and images.
+const buildDeepReadQueries = (title: string, _seedUrl: string | null): string[] => {
+  const topic = title.trim();
+  if (topic.length === 0) return [];
+  return [topic, `${topic} 最新进展`, `${topic} 官方 声明 通报`, `${topic} 背景 起因 时间线`,
+    `${topic} 影响 利益相关方`, `${topic} 各方观点 争议 反方证据`, `${topic} 图片 现场图 截图`];
 };
 
-// 从 HTML 提取 <img> 标签(简化;Android 用 jsoup + og:image/twitter:image)
-// OG/twitter image 提取留增量
+// 保留旧 helper 入口,由小图片采集模块处理真实页面候选。
 const extractImgTags = (html: string, baseUrl: string): ImageCandidate[] => {
-  const candidates: ImageCandidate[] = [];
-  const imgRe = /<img\s+([^>]*)>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = imgRe.exec(html)) !== null) {
-    const attrs = m[1];
-    const srcMatch = attrs.match(/\bsrc\s*=\s*["']([^"']+)["']/i);
-    if (!srcMatch) continue;
-    let url = srcMatch[1];
-    if (url.startsWith('//')) {
-      url = 'https:' + url;
-    } else if (url.startsWith('/')) {
-      // 相对路径解析:取 baseUrl 的 origin + url(ArkTS 兼容,不依赖 URL 类)
-      const originMatch = /^[^:]+:\/\/[^/]+/.exec(baseUrl);
-      if (originMatch !== null) {
-        url = originMatch[0] + url;
-      } else {
-        continue;
-      }
-    } else if (!url.startsWith('http')) continue;
-
-    const altMatch = attrs.match(/\balt\s*=\s*["']([^"']*)["']/i);
-    const altText = altMatch ? altMatch[1] : '';
-    const widthMatch = attrs.match(/\bwidth\s*=\s*["']?(\d+)/i);
-    const heightMatch = attrs.match(/\bheight\s*=\s*["']?(\d+)/i);
-    const width = widthMatch ? parseInt(widthMatch[1], 10) : 200;
-    const height = heightMatch ? parseInt(heightMatch[1], 10) : 200;
-    candidates.push({ url, width, height, altText, sourceUrl: baseUrl });
-  }
-  return candidates;
+  return extractPageImageCandidates(html, baseUrl);
 };
 
 const scoreCredibility = (url: string): SourceCredibility => {
@@ -341,12 +350,10 @@ const withDeadline = async <T>(deadline: number, p: Promise<T>, signal?: AbortSi
   let onAbort: (() => void) | null = null;
   let abortPromise: Promise<T> = new Promise<T>((): void => {}); // 无 signal 时永挂,race 不误触
   if (signal !== undefined) {
-    // 捕获局部引用:可选方法在闭包内不再被 TS 收窄
-    const addListener = signal.addEventListener;
-    if (typeof addListener === 'function') {
+    if (typeof signal.addEventListener === 'function') {
       abortPromise = new Promise<T>((_, reject): void => {
         onAbort = (): void => { reject(makeAbortedError()); };
-        addListener('abort', onAbort);
+        signal.addEventListener?.('abort', onAbort);
       });
       abortPromise.catch((): void => {});
     }

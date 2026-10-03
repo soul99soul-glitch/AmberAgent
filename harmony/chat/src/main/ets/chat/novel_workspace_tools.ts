@@ -4,9 +4,12 @@
 // 宿主应为当前项目/分支绑定 port，并由 C4 durable proposal/receipt 路径处理 write。
 
 import type { JsonObject, JsonValue } from './json.ts';
+import type { NovelAuditReport, AbortSignalLike } from '@amber/deepread-domain';
 import type { UIMessagePart } from './message.ts';
 import type { AgentTool, InputSchemaObj } from './tool.ts';
 import { makeAgentTool } from './tool.ts';
+import { createNovelProjectOperationTools } from './novel_project_operations.ts';
+import type { NovelProjectOperationPort } from './novel_project_operations.ts';
 
 export interface NovelWorkspaceListToolInput {
   path?: string;
@@ -42,9 +45,11 @@ export interface NovelWorkspaceToolPort {
   status(): Promise<JsonObject>;
   write(input: NovelWorkspaceWriteToolInput): Promise<JsonObject>;
   /** LLM 全文连续性审计(iOS 对齐);宿主委托 NovelCreation.runContinuityAudit */
-  audit(): Promise<JsonObject>;
+  audit(signal?: AbortSignalLike): Promise<JsonObject>;
   /** 解析 assistant 正文中的设定提案并入库;返回 ingested 条数 */
   ingestSettingProposals(sourceMessageId: string, text: string): Promise<JsonObject>;
+  /** Optional specialized project tools; existing workspace-only callers keep their catalog. */
+  projectOperation?: NovelProjectOperationPort;
 }
 
 interface CompleteInputSchema extends InputSchemaObj {
@@ -119,6 +124,26 @@ const writeSchema = (): CompleteInputSchema => objectSchema({
   },
 }, ['proposal_id', 'patches']);
 
+// 保留工具既有字符串问题列表，同时说明未完成或无效证据，避免空列表被误读为通过。
+export const novelAuditToolResult = (report: NovelAuditReport): JsonObject => ({
+  ok: report.ok,
+  issue_count: report.issues.length,
+  issues: report.issues.map((issue): string =>
+    `[${issue.severity}] ${issue.chapterRef}: ${issue.summary}`
+    + (issue.suggestion.length > 0 ? ` → ${issue.suggestion}` : '')),
+  coverage: {
+    checked_chars: report.coverage.checkedChars,
+    total_chars: report.coverage.totalChars,
+    complete: report.coverage.complete,
+  },
+  cancelled: report.cancelled,
+  invalid_evidence_count: report.invalidEvidenceCount,
+  failed_blocks: report.blocks.filter((block): boolean => block.status !== 'checked')
+    .map((block): JsonObject => ({
+      id: block.chapterId, start: block.start, end: block.end, status: block.status, error: block.error,
+    })),
+});
+
 export const createNovelWorkspaceTools = (port: NovelWorkspaceToolPort): AgentTool[] => [
   makeAgentTool({
     name: 'novel_workspace_list',
@@ -159,9 +184,9 @@ export const createNovelWorkspaceTools = (port: NovelWorkspaceToolPort): AgentTo
   makeAgentTool({
     name: 'novel_continuity_audit',
     description: 'Run an LLM continuity audit over the whole novel (plot, names, timeline). '
-      + 'Returns JSON issues with severity/chapterRef/summary/suggestion. Uses the stateSync model.',
+      + 'Returns JSON issues, coverage, failed blocks and invalid evidence count; incomplete or cancelled audits do not pass. Uses the stateSync model.',
     parameters: (): CompleteInputSchema => objectSchema({}, []),
-    execute: (): Promise<UIMessagePart[]> => port.audit().then(textPart),
+    execute: (_input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => port.audit(signal).then(textPart),
   }),
   makeAgentTool({
     name: 'novel_ingest_setting_proposals',
@@ -183,4 +208,5 @@ export const createNovelWorkspaceTools = (port: NovelWorkspaceToolPort): AgentTo
       return port.ingestSettingProposals(sourceMessageId, text).then(textPart);
     },
   }),
+  ...(port.projectOperation === undefined ? [] : createNovelProjectOperationTools(port.projectOperation)),
 ];

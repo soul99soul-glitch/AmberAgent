@@ -7,6 +7,8 @@
 import type {
   NovelModelEvent, NovelModelRequest, NovelModelRunning, NovelModelStream, NovelModelTarget,
   StreamTransportState,
+  NovelContextPreviewReceipt,
+  NovelRuntimeSnapshot, NovelPreparedRuntime,
 } from '@amber/deepread-domain';
 import type { Context } from '@kit.AbilityKit';
 import type { NovelInteractiveRuntimeConfig } from '@amber/chat-domain';
@@ -21,9 +23,10 @@ const TAG: string = 'Novel.Transport';
 
 export const createEntryNovelChatRunAdapter = (
   resolveRuntime: (
-    modelTarget: NovelModelTarget, projectId: string,
+    modelTarget: NovelModelTarget, projectId: string, snapshot?: NovelRuntimeSnapshot,
   ) => Promise<NovelInteractiveRuntimeConfig | null>,
 ): NovelModelRunning => {
+  const projectIds: Map<string, string> = new Map();
   const trackers: Map<string, GenerationProgressTracker> = new Map();
 
   const report = (runId: string, active: boolean): void => {
@@ -32,6 +35,7 @@ export const createEntryNovelChatRunAdapter = (
     const totals = trackers.get(runId)?.totals() ?? { chars: 0, bytes: 0 };
     reportGenerationProgress(context, {
       source: 'novel', runId: runId, generationActive: active,
+      novelWorkspaceProjectId: projectIds.get(runId) ?? '',
       receivedChars: totals.chars, receivedBytes: totals.bytes,
     });
   };
@@ -62,10 +66,18 @@ export const createEntryNovelChatRunAdapter = (
   });
 
   return {
+    prepareOrdinaryRequest: (request: NovelModelRequest): Promise<NovelPreparedRuntime> =>
+      inner.prepareOrdinaryRequest!(request),
+    previewContext: (request: NovelModelRequest): Promise<NovelContextPreviewReceipt> => inner.previewContext!(request),
+    inputBudgetTokens: (target: NovelModelTarget, projectId: string, outputTokens: number): Promise<number> =>
+      inner.inputBudgetTokens!(target, projectId, outputTokens),
+    estimateInputTokens: (systemPrompt: string, userPrompt: string): number =>
+      inner.estimateInputTokens!(systemPrompt, userPrompt),
     validate: (modelTarget: NovelModelTarget, projectId: string): Promise<void> =>
       inner.validate(modelTarget, projectId),
     start: (request: NovelModelRequest): NovelModelStream => {
       const stream: NovelModelStream = inner.start(request);
+      projectIds.set(request.runId, request.projectId);
       // 同步订阅(先于返回),早期 terminal 不会漏
       const unsubscribe: () => void = stream.subscribe((event: NovelModelEvent): void => {
         if (event.kind === 'snapshot') {
@@ -75,6 +87,7 @@ export const createEntryNovelChatRunAdapter = (
         if (event.kind === 'waiting_user' || event.kind === 'completed' || event.kind === 'failed') {
           report(request.runId, false);
           trackers.delete(request.runId);
+          projectIds.delete(request.runId);
           unsubscribe();
         }
       });
@@ -85,6 +98,7 @@ export const createEntryNovelChatRunAdapter = (
     cancel: (runId: string): void => {
       report(runId, false);
       trackers.delete(runId);
+      projectIds.delete(runId);
       inner.cancel(runId);
     },
   };

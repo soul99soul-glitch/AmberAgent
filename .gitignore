@@ -47,3 +47,6 @@ harmony/*/.hvigor/
 
 # Local ZCode workflow review artifacts (screens/logs, large, regeneratable)
 .workflow/
+
+# Generated standalone product snapshots and local build outputs
+/.harmony-standalone/

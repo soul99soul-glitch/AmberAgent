@@ -71,9 +71,9 @@ test('isInterruptedPhase: COLLECTING/PLANNING/WRITING → true; IDLE/COMPLETE �
   assert.equal(isInterruptedPhase({ ...makeEmptyDeepReadOutput(), generationPhase: 'COMPLETE' }), false);
 });
 
-// ===== createRunContext: 空 prefetch → 降级用标题构造 fallback source (非 hard fail) =====
+// ===== createRunContext: 空 prefetch 不冒充有效研究资料 =====
 
-test('createRunContext: empty prefetch → 降级 ok=true with fallback source', async () => {
+test('createRunContext: empty prefetch fails without a fabricated title source', async () => {
   const emptyPrefetcher: SourcePrefetcher = {
     collect: async () => [],
     cacheSize: () => 0,
@@ -83,8 +83,7 @@ test('createRunContext: empty prefetch → 降级 ok=true with fallback source',
     model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23',
   };
   const result = await createRunContext(deps, 't1', '标题', null, false);
-  // 降级后应该 ok=true(用标题构造了 fallback source)
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, false);
 });
 
 // ===== createRunContext: 有 sources → ok=true =====
@@ -204,9 +203,9 @@ test('run(): cached complete output → short-circuit, no prefetch', async () =>
   assert.equal(result.output.generationComplete, true);
 });
 
-// ===== run(): force=true → clear cache =====
+// ===== run(): force=true 保留旧稿至新结果保存成功 =====
 
-test('run(): force=true clears cache before run', async () => {
+test('run(): force=true never clears the old cache before generation', async () => {
   const repo = makeMemoryRepo();
   repo.save('t1', '标题', makeEmptyDeepReadOutput());
   let cleared = false;
@@ -223,7 +222,7 @@ test('run(): force=true clears cache before run', async () => {
     onWriterCreated: (w) => { writerRef.w = w; },
   };
   await run(deps, 't1', '标题', { force: true });
-  assert.equal(cleared, true);
+  assert.equal(cleared, false);
 });
 
 // ===== runSection(): 单 stage 重试 =====

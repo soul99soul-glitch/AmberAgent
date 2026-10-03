@@ -1,5 +1,6 @@
 // serpapi_service — SerpAPI 搜索(D-068a)
 // Android 基准: search/.../SerpApiSearchService.kt(全文 111 行)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -30,6 +31,7 @@ export const serpApiSearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: SerpApiOptions = asOptions(serviceOptions);
     if (opts.apiKey.trim().length === 0) throw new Error('SerpAPI key is required');
@@ -47,7 +49,7 @@ export const serpApiSearchService: SearchService = {
       url: `https://serpapi.com/search.json?${buildQuery(qp)}`,
       method: 'GET',
       headers: {},
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`SerpAPI request failed #${resp.status}`);
     }

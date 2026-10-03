@@ -136,6 +136,7 @@ const raceAbort = <T>(run: Promise<T>, signal: AbortSignalLike): Promise<T> =>
     if (signal.addEventListener !== undefined) {
       listener = (): void => { settle((): void => { reject(abortError()); }); };
       signal.addEventListener('abort', listener);
+      if (signal.aborted) listener();
     }
     run.then(
       (value: T): void => { settle((): void => { resolve(value); }); },
@@ -201,13 +202,12 @@ export const createSearchTools = (settings: SearchSettings, deps: OrchestratorDe
       description: searchWebDescription,
       parameters: searchWebParameters,
       execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
-        // Stop 取消:即时以 AbortError 结算工具(底层 HTTP 有自身超时上限;
-        // provider 级 signal 贯穿登记为后续接线)
+        // Each run owns its signal; stopping also cancels the actual provider HTTP.
         if (signal !== undefined && signal.aborted) {
           throw abortError();
         }
         const run: Promise<JsonObject> =
-          searchOrchestratorSearch(settings, asInputObject(input), undefined, deps);
+          searchOrchestratorSearch(settings, asInputObject(input), undefined, deps, { signal });
         if (signal === undefined) {
           const results: JsonObject = await run;
           return [{ type: 'text', text: JSON.stringify(results), metadata: null }];
@@ -254,7 +254,7 @@ export const createSearchTools = (settings: SearchSettings, deps: OrchestratorDe
         const obj: JsonObject = asInputObject(input);
         const options: SearchServiceOptions = resolveScrapeService(settings, obj);
         const run: Promise<ScrapedResult> = getSearchService(options).scrape(
-          obj, settings.searchCommonOptions, options,
+          obj, settings.searchCommonOptions, options, { signal },
         );
         const result: ScrapedResult = signal === undefined ? await run : await raceAbort(run, signal);
         const payload: JsonObject = scrapedResultToJson(result);

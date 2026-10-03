@@ -64,7 +64,7 @@ async function fixture(mode = 'active') {
       if (Object.hasOwn(imports, name)) return imports[name];
       if (name.startsWith('./') && name.endsWith('.ets')) return load(name.slice(2));
       throw new Error('Unexpected import ' + name);
-    }, Error, Promise, Map, Set, Date, JSON, String, Number, RegExp }, { filename: file });
+    }, Error, Promise, Map, Set, Date, JSON, String, Number, RegExp, setTimeout, clearTimeout }, { filename: file });
     return exports;
   }
   const support = load('JevSupport.ets');
@@ -93,11 +93,12 @@ async function fixture(mode = 'active') {
   };
 }
 
-test('actual Jev HTTP preserves the caller signal, cancellation is not an error cooldown', async () => {
+test('actual Jev HTTP uses a bounded child signal, cancellation is not an error cooldown', async () => {
   const f = await fixture();
   const signal = { aborted: false };
   await f.support.jevEvaluate({}, { fact: { kind: 'noul', instructions: 'x', trueCriteria: '', falseCriteria: '' } }, signal);
-  assert.equal(f.requests[0].signal, signal);
+  assert.notEqual(f.requests[0].signal, signal);
+  assert.equal(f.requests[0].signal.aborted, false);
   signal.aborted = true;
   const before = f.requests.length;
   await f.support.jevEvaluate({}, { fact: { kind: 'noul', instructions: 'x', trueCriteria: '', falseCriteria: '' } }, signal);

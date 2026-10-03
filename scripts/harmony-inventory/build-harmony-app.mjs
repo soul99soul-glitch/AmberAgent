@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const root = path.resolve(import.meta.dirname, '../..');
-const harmonyDir = path.join(root, 'harmony');
+const harmonyDir = path.resolve(process.env.AMBER_HARMONY_DIR || path.join(root, 'harmony'));
 
 function existing(...candidates) {
   return candidates.find((candidate) => fs.existsSync(candidate));

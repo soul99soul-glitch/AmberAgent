@@ -186,7 +186,11 @@ const withoutToolDisplayMetadata = (input: JsonValue): JsonValue => {
 const isAbortError = (e: unknown): boolean =>
   e instanceof Error && e.name === 'AbortError';
 
+export type AutoApprovalReview = (part: UIMessagePartTool, decision: PermissionDecision,
+  signal?: AbortSignalLike) => Promise<string[]>;
+
 export interface AgentToolDispatcherDeps {
+  autoApprovalReview?: AutoApprovalReview;
   resolver?: PermissionDecisionResolver;
   hooks?: ToolInvocationHook[];
   log?: (message: string) => void;
@@ -203,6 +207,8 @@ export interface ToolBatchResultPair {
 
 export class AgentToolDispatcher {
   private readonly resolver: PermissionDecisionResolver;
+  private readonly autoApprovalReview: AutoApprovalReview | undefined;
+  private readonly reviewedCalls: Map<string, Promise<string[]>> = new Map();
   private readonly hooks: ToolInvocationHook[];
   private readonly log: (message: string) => void;
   private readonly nowMs: () => number;
@@ -210,6 +216,7 @@ export class AgentToolDispatcher {
 
   constructor(deps: AgentToolDispatcherDeps = {}) {
     this.resolver = deps.resolver ?? new PermissionDecisionResolver();
+    this.autoApprovalReview = deps.autoApprovalReview;
     this.hooks = deps.hooks ?? [];
     this.log = deps.log ?? ((): void => {});
     this.nowMs = deps.nowMs ?? Date.now;
@@ -243,6 +250,30 @@ export class AgentToolDispatcher {
       toolDef, tool, autoApproveTools, autoApproveHighRiskTools,
       autoApprovedToolNames, invocationContext,
     );
+  }
+
+  public async resolveReviewedDecision(
+    toolDef: AgentTool | null, tool: UIMessagePartTool, autoApproveTools: boolean,
+    autoApproveHighRiskTools: boolean = false, autoApprovedToolNames: string[] = [],
+    invocationContext: ToolInvocationContext = 'normal', signal?: AbortSignalLike,
+  ): Promise<PermissionDecision> {
+    const decision = this.resolveDecision(toolDef, tool, autoApproveTools,
+      autoApproveHighRiskTools, autoApprovedToolNames, invocationContext);
+    const policy = decision.trace.policy;
+    if (decision.action !== 'allow' || tool.approvalState.type !== 'auto'
+      || this.autoApprovalReview === undefined || signal?.aborted
+      || (policy?.mutates === false && policy.risk === 'normal')) return decision;
+    const key = JSON.stringify([tool.toolCallId, tool.toolName, tool.input]);
+    let review = this.reviewedCalls.get(key);
+    if (review === undefined) {
+      review = this.autoApprovalReview(tool, decision, signal).catch(() => [] as string[]);
+      this.reviewedCalls.set(key, review);
+    }
+    const reasons = await review;
+    if (signal?.aborted || reasons.length === 0) return decision;
+    const reason = '自动批准复核：' + reasons.join('、');
+    return { ...decision, action: 'ask', source: 'jev_auto_approval', reason,
+      trace: { ...decision.trace, action: 'ask', source: 'jev_auto_approval', reason } };
   }
 
   // executeBatch(:63-117):prefetch 复用 → 并行(全部 canRunInParallel)或顺序 →
@@ -360,9 +391,10 @@ export class AgentToolDispatcher {
     signal: AbortSignalLike | undefined = undefined,
   ): Promise<UIMessagePartTool | null> {
     if (signal !== undefined && signal.aborted) return null;
-    const decision: PermissionDecision = this.resolveDecision(
+    const decision: PermissionDecision = await this.resolveReviewedDecision(
       toolDef, tool, autoApproveTools, autoApproveHighRiskTools,
-      autoApprovedToolNames, invocationContext);
+      autoApprovedToolNames, invocationContext, signal);
+    if (signal?.aborted) return null;
     const tracedTool: UIMessagePartTool = withPermissionTrace(
       tool, permissionDecisionTraceToJson(decision.trace));
     if (tool.approvalState.type === 'denied') {
@@ -393,6 +425,7 @@ export class AgentToolDispatcher {
         }))],
       };
     }
+    if (decision.action === 'ask') return { ...tracedTool, approvalState: { type: 'pending' } };
     return this.executeWithHooks(tracedTool, toolDef, decision, invocationContext, retrySetting, signal);
   }
 

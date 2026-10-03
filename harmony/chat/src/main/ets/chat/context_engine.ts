@@ -1,3 +1,4 @@
+import type { JevPreparedToolResults } from './jev_context.ts';
 // context_engine.ts — 上下文压缩引擎(执行 + prepareContext 管线 + 存储 Port)
 //
 // Android 基准:
@@ -29,6 +30,7 @@ import { makeSystemMessage, makeUserMessage, isToolExecuted, toText } from './me
 import type { MessageNode, Conversation } from './conversation.ts';
 import { limitContext, nodeCurrentMessage, toMessageNode, currentMessages } from './conversation.ts';
 import type { ChatStreamProvider } from './chat_turn.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { JsonObject } from './json.ts';
 import type {
   CompactPlan, CompactPolicy, CompactResult, ConversationCompact,
@@ -228,6 +230,9 @@ const trimToolResult = (tool: UIMessagePartTool): UIMessagePartTool => {
   };
 };
 
+export const canClearPreparedToolResult = (tool: UIMessagePartTool): boolean =>
+  canEditPreparedResult(tool) && safeToClearPreparedResult(tool) && partsOutputChars(tool.output) > CLEAR_TOOL_RESULT_AFTER_CHARS;
+
 const clearToolResult = (tool: UIMessagePartTool): UIMessagePartTool => {
   if (!canEditPreparedResult(tool)) return tool;
   if (!safeToClearPreparedResult(tool)) return tool;
@@ -295,19 +300,21 @@ const applyEditorStage = (
 };
 
 export const editPreparedContext = (
-  messages: UIMessage[], keepRecentMessages: number,
+  messages: UIMessage[], keepRecentMessages: number, retainedToolCallIds: Set<string> = new Set(),
 ): PreparedContextEditResult => {
   const originalTokens: number = estimateTokens(messages);
   const trim: EditorStageResult = applyEditorStage(
     'trim', 'long historical tool results are trimmed before compaction planning',
     messages,
     (m: UIMessage, i: number): UIMessage =>
-      editMessageTools(m, i, messages.length, keepRecentMessages, trimToolResult));
+      editMessageTools(m, i, messages.length, keepRecentMessages,
+        (tool): UIMessagePartTool => retainedToolCallIds.has(tool.toolCallId) ? tool : trimToolResult(tool)));
   const clear: EditorStageResult = applyEditorStage(
     'clear', 'retriable historical tool results are replaced with placeholders',
     trim.messages,
     (m: UIMessage, i: number): UIMessage =>
-      editMessageTools(m, i, trim.messages.length, keepRecentMessages, clearToolResult));
+      editMessageTools(m, i, trim.messages.length, keepRecentMessages,
+        (tool): UIMessagePartTool => retainedToolCallIds.has(tool.toolCallId) ? tool : clearToolResult(tool)));
   return {
     messages: clear.messages,
     trace: {
@@ -408,6 +415,7 @@ export const copyValidCompactsToConversation = async (
 // ===== compactConversation(engine:346-605) =====
 
 export interface CompactEngineDeps {
+  abortSignal?: AbortSignalLike;
   provider: ChatStreamProvider;
   store: CompactStore;
   now?: () => number;
@@ -416,11 +424,19 @@ export interface CompactEngineDeps {
   locale?: string;
   compressPrompt?: string;
   onStream?: (text: string) => void;
+  prepareToolResults?: (messages: UIMessage[], keepRecentMessages: number) => Promise<JevPreparedToolResults>;
 }
 
 const streamCompactSummary = async (
   deps: CompactEngineDeps, prompt: string,
 ): Promise<string> => {
+  const checkAborted = (): void => {
+    if (!deps.abortSignal?.aborted) return;
+    const error: Error = new Error('Context compaction was cancelled');
+    error.name = 'AbortError';
+    throw error;
+  };
+  checkAborted();
   let accumulated: string = '';
   await deps.provider.streamText([makeUserMessage(prompt)], (chunk): void => {
     const choice = chunk.choices[0];
@@ -436,7 +452,8 @@ const streamCompactSummary = async (
       accumulated += deltaText;
       if (deps.onStream !== undefined) deps.onStream(accumulated);
     }
-  });
+  }, deps.abortSignal === undefined ? undefined : { signal: deps.abortSignal });
+  checkAborted();
   return accumulated.trim();
 };
 
@@ -470,8 +487,16 @@ export const compactConversation = async (
     }
     const nodes: MessageNode[] =
       conversation.messageNodes.slice(plan.sourceStartIndex, plan.sourceEndIndex + 1);
-    const contentToCompress: string =
-      buildCompressionInput(nodes.map(nodeCurrentMessage));
+    const fullMessages: UIMessage[] = currentMessages(conversation);
+    const preparedToolResults: JevPreparedToolResults | null = deps.prepareToolResults === undefined ? null
+      : await deps.prepareToolResults(fullMessages, Math.max(policy.keepRecentTurns * 2, 4));
+    const byId: Map<string, UIMessage> = new Map();
+    if (preparedToolResults !== null) {
+      // Compression has always consumed canonical source text. Only explicit Jev projection changes it.
+      for (const message of preparedToolResults.messages) byId.set(message.id, message);
+    }
+    const contentToCompress: string = buildCompressionInput(nodes.map((node): UIMessage =>
+      byId.get(nodeCurrentMessage(node).id) ?? nodeCurrentMessage(node)));
     const existingMessageIds: Set<string> = new Set<string>(
       conversation.messageNodes.map((n: MessageNode): string => nodeCurrentMessage(n).id));
     const previousCompacts: ConversationCompact[] =
@@ -629,13 +654,16 @@ export const prepareContext = async (
   contextMessageSize: number,
   deps: PrepareContextDeps,
 ): Promise<PreparedContext> => {
+  const keepRecentMessages: number = Math.max(policy.keepRecentTurns * 2, 4);
+  const preparedToolResults: JevPreparedToolResults = deps.prepareToolResults === undefined
+    ? { messages, retainedToolCallIds: new Set() } : await deps.prepareToolResults(messages, keepRecentMessages);
   const editResult: PreparedContextEditResult = policy.enabled
-    ? editPreparedContext(messages, Math.max(policy.keepRecentTurns * 2, 4))
+    ? editPreparedContext(preparedToolResults.messages, keepRecentMessages, preparedToolResults.retainedToolCallIds)
     : {
-      messages,
+      messages: preparedToolResults.messages,
       trace: {
         originalTokenEstimate: estimateTokens(messages),
-        finalTokenEstimate: estimateTokens(messages),
+        finalTokenEstimate: estimateTokens(preparedToolResults.messages),
         steps: [],
       },
     };
@@ -676,19 +704,21 @@ export const prepareContext = async (
     } else if (!precompactInFlight.has(conversation.id)) {
       precompactInFlight.add(conversation.id);
       const release = (): void => { precompactInFlight.delete(conversation.id); };
+      // Background precompaction has an independent lifetime from this generation.
+      const backgroundDeps: CompactEngineDeps = { ...deps, abortSignal: undefined };
       if (deps.launchPrecompact !== undefined) {
         try {
           deps.launchPrecompact((): Promise<CompactResult> =>
             compactConversation(
               conversation as Conversation, policy, modelContextWindowTokens,
-              'auto_precompact', '', false, deps).finally(release));
+              'auto_precompact', '', false, backgroundDeps).finally(release));
         } catch (e) {
           release(); // launcher 同步抛错/拒收回调时不泄漏门闩
           throw e instanceof Error ? e : new Error(String(e));
         }
       } else {
         const run: Promise<CompactResult> = compactConversation(
-          conversation, policy, modelContextWindowTokens, 'auto_precompact', '', false, deps)
+          conversation, policy, modelContextWindowTokens, 'auto_precompact', '', false, backgroundDeps)
           .finally(release);
         run.catch((e: Error): void => {
           if (deps.store.recordEvent !== undefined) {

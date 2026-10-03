@@ -5,7 +5,7 @@
 //
 // 评分模型是 MVP(简化版),但 reject 路径尽量贴合 Android:
 // - URL-based risk flags(照搬 Android urlRiskFlags)
-// - 尺寸 hard-reject 阈值照搬 Android(< 320 宽 或 < 160 高)
+// - 已知尺寸 hard-reject 阈值照搬 Android(< 320 宽 或 < 160 高);0 表示未知
 // - hard reject flag 集合照搬 Android hardRejectRisks
 // 这样 hero gate(P1-1)的 reject 决策与 Android 一致。
 
@@ -67,10 +67,12 @@ const qualityRiskFlags = (width: number, height: number, byteSize: number | unde
   const flags: string[] = [];
   const smaller = Math.min(width, height);
   const larger = Math.max(width, height);
-  if (width < 320 || height < 160) flags.push('too_small');
-  if (smaller <= 160 && larger <= 320) flags.push('tiny_asset');
-  if (smaller > 0 && larger / smaller > 4.5) flags.push('sprite_or_banner_strip');
-  if (Math.abs(width - height) <= 16 && width <= 640) flags.push('small_square_brand_asset');
+  if ((width > 0 && width < 320) || (height > 0 && height < 160)) flags.push('too_small');
+  if (width > 0 && height > 0) {
+    if (smaller <= 160 && larger <= 320) flags.push('tiny_asset');
+    if (larger / smaller > 4.5) flags.push('sprite_or_banner_strip');
+    if (Math.abs(width - height) <= 16 && width <= 640) flags.push('small_square_brand_asset');
+  }
   if (byteSize !== undefined && byteSize >= 1 && byteSize <= 4096) flags.push('tiny_file');
   return flags;
 };
@@ -117,10 +119,14 @@ export const scoreImageCandidate = (c: ImageCandidate, topicTitle: string): Scor
   }
 
   // 宽高比
-  const ratio = c.width / c.height;
+  const knownDimensions = c.width > 0 && c.height > 0;
+  const ratio = knownDimensions ? c.width / c.height : 0;
   const remainingRisks: string[] = [];
   let confidence: ImageConfidence = 'inline';
-  if (ratio >= 0.75 && ratio <= 2.0 && score >= 60) {
+  if (!knownDimensions) {
+    remainingRisks.push('unknown_dimensions');
+    reasons.push('unknown dimensions; inline only');
+  } else if (ratio >= 0.75 && ratio <= 2.0 && score >= 60) {
     confidence = 'hero';
     reasons.push('hero aspect ratio + high score');
   } else if (ratio > 3 || ratio < 0.3) {

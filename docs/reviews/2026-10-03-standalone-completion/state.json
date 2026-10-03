@@ -1,0 +1,181 @@
+{
+  "objective": "完成两个独立产品及当前实际生产能力差异，每阶段独立审查后修复再推进",
+  "branch": "harmony-preview",
+  "head": "5ea51f7a548198ee4676fc63ef0b3bbfa34ba290",
+  "phases": [
+    {
+      "id": "P1",
+      "name": "现状核对与独立应用入口闭环",
+      "status": "complete",
+      "review": "passed",
+      "findings": [
+        "5 entry/config/UI findings plus deepread start-failure persistence fixed and independently reviewed"
+      ],
+      "evidence": [
+        "/tmp/amber-p1-entry-tests.log:50/50",
+        "/tmp/amber-p1-entry-refresh-green.log:2/2",
+        "/tmp/amber-p1-start-failure-green.log:15/15",
+        "/tmp/amber-p1-lint.log:0 errors",
+        "/tmp/amber-p1-build.log:both build/sign verified",
+        "p1-entry-review.md:all5closed",
+        "device/p1"
+      ]
+    },
+    {
+      "id": "P2",
+      "name": "小说项目、结构化种子、历史与分支",
+      "status": "complete",
+      "review": "passed",
+      "findings": [
+        "停止保存失败在ordinary/tool continuation传播",
+        "删除前收口目标项目代笔润色",
+        "章节版本精确关联历史分叉",
+        "实机fork/rename按钮输入响应"
+      ],
+      "evidence": [
+        "p2-domain-review.md:R1/R2 closed",
+        "p2-exchange-review.md:delete closed",
+        "p2-ui-review.md:P2-UI01/A15 closed",
+        "/tmp/amber-p2-final-novel-tests.log:371/371",
+        "/tmp/amber-p2-final-entry-tests.log:15/15",
+        "/tmp/amber-p2-final-build.log:both build/sign",
+        "device/p2:setup/history/rename/Readerfork",
+        "Recovery:source and full domain verified, device corrupted fixture unavailable"
+      ]
+    },
+    {
+      "id": "P3",
+      "name": "小说资料、继承与实际注入链",
+      "status": "complete",
+      "review": "passed",
+      "findings": [
+        "提案公开交换保留字段presence与源digest",
+        "预览与实际三种发送模式固定指令统一",
+        "别名标签进入实际发送正文",
+        "ArkUI保留属性名冲突精准改名"
+      ],
+      "evidence": [
+        "p3-fields-review.md:70/70",
+        "p3-inheritance-review.md:39/39",
+        "p3-context-review.md:45/45",
+        "p3-ui-review.md:11 actual screenshots+AX passed",
+        "/tmp/amber-p3-novel-tests.log:394/394",
+        "/tmp/amber-p3-final-build.log:both build/sign verified",
+        "device/p3:editor/shared/override/preview/actual request receipts"
+      ]
+    },
+    {
+      "id": "P4",
+      "name": "小说 Agent 操作、结构化状态与专项改稿",
+      "status": "complete",
+      "review": "passed",
+      "findings": [
+        "真实generic/shared/branch资料投影修复",
+        "合同固定策划指令及代笔arc实际请求",
+        "原子救援与成对先文证据范围",
+        "Reader原子快照与同页状态/alias刷新",
+        "作者preview与三处candidate计数文案"
+      ],
+      "evidence": [
+        "p4-tools-review.md:passed",
+        "p4-contracts-review.md:actual raw HTTP passed; final device independently reviewed",
+        "p4-state-review.md:72/72 plus actual pair chain passed",
+        "p4-ui-review.md:final PASS",
+        "/tmp/amber-p4-final-novel.log:480/480",
+        "/tmp/amber-p4-final-chat.log:2617/2617",
+        "p4-ui-implementation.md:final57/57",
+        "/tmp/amber-p4-counter-label-final-build.log:both build/sign",
+        "device/p4:real independent package screenshots/AX/request receipts",
+        "device/p4/final-artifact-fingerprints.json:11 source pairs+HAP"
+      ]
+    },
+    {
+      "id": "P5",
+      "name": "小说润色、生成恢复与导入导出闭环",
+      "status": "complete",
+      "review": "passed",
+      "findings": [
+        "AskUser same-ID partial persistence and original frozen retry fixed",
+        "Native UIAbility background owner protected from Extension reports",
+        "System action menu colors paired to native theme",
+        "Polish by-value Builder froze actual UI: direct Prop/State update fixed"
+      ],
+      "evidence": [
+        "p5-polish-review.md:58/58",
+        "p5-ordinary-review.md:30+69+7 and real HTTP4/4",
+        "p5-exchange-review.md:22/22 plus10 native runtime records",
+        "p5-workspace-ui-independent-review.md:WUI06 device passed",
+        "p5-ui-review.md:independent final visual/native passed",
+        "/tmp/amber-p5-final-novel.log:501/501",
+        "/tmp/amber-p5-final-chat.log:2645/2645",
+        "/tmp/amber-p5-final-entry.log:190/190",
+        "/tmp/amber-p5-card-final-build.log:bothbuild/sign",
+        "device/p5/final-artifact-fingerprints.json:35 sources matchboth",
+        "device/p5/request-receipts.json:exact retry samejob successfulonce",
+        "device/p5/device-cases.md:systemsave/share and hot/cold realnotification"
+      ]
+    },
+    {
+      "id": "P6",
+      "name": "深读完整产品能力与运行闭环",
+      "status": "complete",
+      "review": "passed",
+      "findings": [
+        "11 deepread gaps implemented; four independent source/device reviews passed",
+        "Actual search page ArkUI class-call crash fixed via existing @Builder pattern",
+        "Full regression found existing same-millisecond novel receipt collision; unique ID minimal fix independently proven"
+      ],
+      "evidence": [
+        "p6-completion.md",
+        "p6-ui-device-review.md:final PASS",
+        "p6-runtime-search-review.md:PASS",
+        "p6-template-library-export-review.md:PASS",
+        "/tmp/amber-p6-full-deepread-final.log:1442/1442",
+        "/tmp/amber-p6-full-chat-final.log:2848/2848",
+        "/tmp/amber-p6-full-entry-final.log:224/224",
+        "/tmp/amber-p6-device-final-build.log:bothbuild/sign",
+        "device/p6/final-artifact-fingerprints.json:803matchboth",
+        "device/p6/device-cases.md",
+        "device/p6/request-receipts.json:twoactual5requestchains"
+      ]
+    },
+    {
+      "id": "P7",
+      "name": "独立包集成和 UI 细节验收",
+      "status": "complete",
+      "review": "passed",
+      "findings": [
+        "Actual frozen Ghostwrite/Verdict builders fixed via direct Prop/State; same-card progress and expanded labels proven",
+        "Find/replace+IME constrained footer fixed with existing Scroll/150vp pattern",
+        "Actual44vp touch targets fixed at three confirmed UI locations",
+        "Detailed activity progress preserves original boolean subscription contract"
+      ],
+      "evidence": [
+        "p7-novel-card-review.md:source/devicePASS",
+        "p7-deepread-ui-independent-review.md:Newsroom/randomPASS",
+        "p7-cross-product-ui-review.md:UI01/UI02/UI03closed",
+        "device/p7/request-receipts.json:actual planner+4 zero-tool requests and same-candidate retries",
+        "device/p8/final-artifact-fingerprints.json:804matchboth",
+        "/tmp/amber-p8-final-build.log:bothbuild/sign; exact final UI installed"
+      ]
+    },
+    {
+      "id": "P8",
+      "name": "最终回归、产物与逐项交付",
+      "status": "complete",
+      "review": "passed",
+      "findings": [
+        "Final whole DeepRead regression preserved exact boolean subscription contract",
+        "All confirmed UI/source findings closed; final installation, cold data, independent settings and distinct UID verified"
+      ],
+      "evidence": [
+        "p8-regression.md:4539/4539;dualtsc0",
+        "/tmp/amber-p8-final-build.log:bothbuild/sign/verify",
+        "device/p8/final-artifact-fingerprints.json:804matchboth+HAP/config hashes",
+        "p8-device-cases.md:finalinstall/cold/retaineddata+templates",
+        "p8-final-integration-review.md:source/build/artifact/devicePASS",
+        "final-parity.md:80novel/11deepread;allreferencesvalid"
+      ]
+    }
+  ]
+}

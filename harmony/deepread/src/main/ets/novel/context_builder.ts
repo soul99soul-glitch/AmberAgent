@@ -1,104 +1,108 @@
-// novel/context_builder — 生成上下文装配(移植自 Android NovelContextBuilder.kt)
-// 单一 systemPrompt:指令变体 + 活资料(20k 头截) + 章节正文(末3章,16k 尾截)
-//   + 最近对话(末16条,10k 尾截),整体 cap 48k。用户提示词即原始 userText。
-
-import { MATERIAL_KIND_LABELS } from './models.ts';
+import { confirmedChapterPlanText } from './chapter_contract.ts';
+// Novel 上下文只包含领域事实；canonical 对话由发送端单独裁剪。
+import { classifyNovelMaterials } from './material_injection.ts';
+import type { NovelInjectionOverrides } from './material_injection.ts';
 import { novelPromptTemplate } from './prompt_catalog.ts';
 import type { NovelRunKind } from './prompt_catalog.ts';
-import type {
-  NovelProject, NovelChatMode, NovelGenerationGranularity, NovelMaterial, NovelMessage, NovelChapter } from './models.ts';
+import type { NovelProject, NovelChatMode, NovelGenerationGranularity } from './models.ts';
+import type { NovelContextSection, NovelRequestContext } from './model_running.ts';
+import { chapterPlotSourceDigest } from './plot_projection.ts';
+import { emptyNovelStructuredState, pruneNovelStructuredState } from './structured_state.ts';
+import { effectiveNovelMaterials } from './material_inheritance.ts';
 
-// 预算常量(照搬 Android)
 export const MAX_USER_CHARS = 8_000;
 export const MAX_OUTPUT_CHARS = 256_000;
 export const MAX_SYSTEM_CHARS = 48_000;
-const MATERIAL_CHARS = 20_000;
-const CHAPTER_CHARS = 16_000;
-const MESSAGE_CHARS = 10_000;
 
 const CONTINUATION_INSTRUCTION =
   '紧接现有正文续写一个自然片段，保持人物、语气与情节连贯，不要重复已有内容，不要输出章节标题。';
 const WHOLE_CHAPTER_INSTRUCTION =
   '创作完整的新一章，包含场景、对话与情节推进，结构完整、节奏自然。';
 const DISCUSS_INSTRUCTION =
-  '你是小说策划伙伴，和我讨论设定、人物与情节。给出建议与选项，但不把建议冒充既定事实，不直接写正文。';
+  '你是小说策划伙伴，和我讨论设定、人物与情节。给出建议与选项，但不把建议冒充既定事实，不直接写正文。\n'
+  + '需要作者补充关键信息时用 ask_user；具体工作区变更用 novel_workspace_write 提交待确认提案，作者批准后才写入。';
 
-// 尾部保留截断(章节/对话用,保住最新内容)
-const tail = (s: string, max: number): string =>
-  s.length <= max ? s : s.slice(s.length - max);
+export const novelComposerRunKind = (
+  mode: NovelChatMode, granularity: NovelGenerationGranularity | null,
+): NovelRunKind => mode === 'discuss' ? 'discussion'
+  : granularity === 'continuation' ? 'prose_continuation' : 'prose_whole_chapter';
 
+export const novelStructuredStateContext = (project: NovelProject): string => {
+  const state = pruneNovelStructuredState(project.structuredState ?? emptyNovelStructuredState(),
+    project.chapters, effectiveNovelMaterials(project));
+  return [
+    ...state.events.map(event => `事件：${event.summary}\n来源章 ${event.chapterId} / ${event.sourceDigest}\n原文：${event.quote}\n人物ID：${event.entityRefs.join(', ')}`),
+    ...state.identityClarifications.map(item => `作者身份确认：${item.mention} / ${item.action} / ${item.materialId ?? '不作为人物身份'}`),
+  ].join('\n\n');
+};
+
+export const buildNovelContext = (
+  project: NovelProject, mode: NovelChatMode,
+  granularity: NovelGenerationGranularity | null = null, runKind: NovelRunKind | null = null,
+  userText: string = '', overrides?: NovelInjectionOverrides,
+): NovelRequestContext => {
+  const gran = granularity ?? project.lastGenerationGranularity;
+  const instruction = runKind !== null ? novelPromptTemplate(runKind).systemText
+    : mode === 'discuss' ? DISCUSS_INSTRUCTION
+      : gran === 'continuation' ? CONTINUATION_INSTRUCTION : WHOLE_CHAPTER_INSTRUCTION;
+  const sections: NovelContextSection[] = [{ key: 'instruction', text: instruction, required: true }];
+  const add = (key: string, title: string, text: string, required: boolean): void => {
+    if (text.trim().length > 0) sections.push({ key, text: `# ${title}\n${text}`, required });
+  };
+  const settings = project.branchSettings;
+  add('chapter_plan', '作者本章计划', confirmedChapterPlanText(settings), true);
+  add('preferences', '作者写作偏好', settings.preferences, true);
+  add('author_plot', '作者剧情资料', project.authorPlot ?? '', true);
+  add('structured_state', '已取证事件与作者身份确认', novelStructuredStateContext(project), true);
+  add('confirmed_decisions', '作者已确认决定', settings.confirmedDecisions
+    .map(decision => `${decision.title}：${decision.content}`).join('\n'), true);
+  add('foreshadows', '未解伏笔', settings.foreshadows.filter(item => item.status === 'open')
+    .map(item => `${item.title}：${item.content}`).join('\n'), true);
+  if (mode === 'write' && gran === 'whole_chapter') {
+    add('future_plan', '未来方向（不替代本章计划）', settings.futurePlan, true);
+  }
+  const archives = project.discussionArchives ?? [];
+  if (archives.length > 0) {
+    add('discussion_archive', '讨论归档',
+      '下文为讨论背景；未决想法不是正式设定，正式资料和作者已确认决定优先。\n' + archives[archives.length - 1].summary, true);
+  }
+  const materialDecisions = classifyNovelMaterials(project, userText, overrides);
+  materialDecisions.filter(material => material.included).forEach(material => {
+    sections.push({ key: `material:${material.materialId}`, text: material.text, required: material.protected });
+  });
+  const activeChapters = project.chapters.filter(chapter => !chapter.discarded);
+  activeChapters.slice(-3).reverse().forEach(chapter =>
+    add(`chapter:${chapter.id}`, '章节正文', `## ${chapter.title}\n${chapter.content}`, false));
+  (project.chapterPlots ?? []).slice().reverse().forEach(pointer => {
+    const chapter = activeChapters.find(item => item.id === pointer.chapterId);
+    if (chapter !== undefined && !pointer.stale && pointer.sourceDigest === chapterPlotSourceDigest(chapter.content)) {
+      add(`plot:${pointer.chapterId}`, '正文剧情指针', pointer.text, false);
+    }
+  });
+  const archivedIds = new Set<string>();
+  archives.forEach(archive => archive.sourceMessageIds.forEach(id => archivedIds.add(id)));
+  return {
+    sections,
+    materialDecisions,
+    excludedHistoryMessageIds: project.messages.filter(message => archivedIds.has(message.id))
+      .map(message => message.uiMessage.id),
+  };
+};
+
+// 兼容只消费字符串的调用方。作者约束完整保留，软性历史块只整块选择，绝不切断指令。
 export const systemPrompt = (
-  project: NovelProject,
-  mode: NovelChatMode,
-  granularity: NovelGenerationGranularity | null = null,
-  runKind: NovelRunKind | null = null,
+  project: NovelProject, mode: NovelChatMode,
+  granularity: NovelGenerationGranularity | null = null, runKind: NovelRunKind | null = null,
+  userText: string = '', overrides?: NovelInjectionOverrides,
 ): string => {
-  const gran: NovelGenerationGranularity = granularity ?? project.lastGenerationGranularity;
-  // N1:显式 runKind → 用目录模板(6 种 Run);否则保持旧指令变体行为
-  if (runKind !== null) {
-    const tpl: string = novelPromptTemplate(runKind).systemText;
-    const sectionsKinded: string[] = [tpl];
-    const matsK: NovelMaterial[] = project.materials
-      .filter(m => m.enabled)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
-    if (matsK.length > 0) {
-      const bodyK: string = matsK
-        .map(m => `[${MATERIAL_KIND_LABELS[m.kind]}] ${m.title}\n${m.content}`)
-        .join('\n\n');
-      if (bodyK.length > 0) sectionsKinded.push('# 活资料\n' + bodyK.slice(0, MATERIAL_CHARS));
+  const sections = buildNovelContext(project, mode, granularity, runKind, userText, overrides).sections;
+  const selected = sections.filter(section => section.required);
+  let size = selected.reduce((total, section) => total + section.text.length + 2, 0);
+  sections.filter(section => !section.required).forEach(section => {
+    if (size + section.text.length + 2 <= MAX_SYSTEM_CHARS) {
+      selected.push(section);
+      size += section.text.length + 2;
     }
-    const chaptersK: NovelChapter[] = project.chapters
-      .filter(c => !c.discarded)
-      .slice(-3);
-    if (chaptersK.length > 0) {
-      const bodyC: string = chaptersK
-        .map(c => `# ${c.title}\n${c.content}`)
-        .join('\n\n');
-      sectionsKinded.push('# 章节正文\n' + tail(bodyC, CHAPTER_CHARS));
-    }
-    const msgsK: NovelMessage[] = project.messages.slice(-16);
-    if (msgsK.length > 0) {
-      const bodyM: string = msgsK
-        .map(m => `${m.role === 'user' ? '作者' : '助手'}: ${m.content}`)
-        .join('\n\n');
-      sectionsKinded.push('# 最近对话\n' + tail(bodyM, MESSAGE_CHARS));
-    }
-    return sectionsKinded.join('\n\n').slice(0, MAX_SYSTEM_CHARS);
-  }
-  const granLegacy: NovelGenerationGranularity = granularity ?? project.lastGenerationGranularity;
-  let instruction: string;
-  if (mode === 'discuss') instruction = DISCUSS_INSTRUCTION;
-  else if (granLegacy === 'continuation') instruction = CONTINUATION_INSTRUCTION;
-  else instruction = WHOLE_CHAPTER_INSTRUCTION;
-
-  const sections: string[] = [instruction];
-
-  // 活资料:启用素材,按 updatedAt 倒序
-  const mats: NovelMaterial[] = project.materials
-    .filter(m => m.enabled)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
-  if (mats.length > 0) {
-    const body: string = mats
-      .map(m => `[${MATERIAL_KIND_LABELS[m.kind]}] ${m.title}\n${m.content}`)
-      .join('\n\n');
-    if (body.length > 0) sections.push('# 活资料\n' + body.slice(0, MATERIAL_CHARS));
-  }
-
-  // 章节正文:末 3 章,尾截
-  const lastChapters = project.chapters.slice(-3);
-  if (lastChapters.length > 0) {
-    const body: string = lastChapters.map(c => `## ${c.title}\n${c.content}`).join('\n\n');
-    if (body.length > 0) sections.push('# 章节正文\n' + tail(body, CHAPTER_CHARS));
-  }
-
-  // 最近对话:末 16 条,尾截
-  const lastMsgs: NovelMessage[] = project.messages.slice(-16);
-  if (lastMsgs.length > 0) {
-    const body: string = lastMsgs
-      .map(m => `${m.role === 'user' ? '用户' : '助手'}：${m.content}`)
-      .join('\n');
-    if (body.length > 0) sections.push('# 最近对话\n' + tail(body, MESSAGE_CHARS));
-  }
-
-  return sections.join('\n\n').slice(0, MAX_SYSTEM_CHARS);
+  });
+  return selected.map(section => section.text).join('\n\n');
 };

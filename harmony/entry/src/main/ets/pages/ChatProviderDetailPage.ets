@@ -2,7 +2,7 @@
 // 头部:// PROVIDERS eyebrow + slug 16 Bold + 在线点 + name·auth·N 个模型;
 // 配置 / 模型 双 tab(accent 2dp 下划线);配置 tab = 启用/名称/API Key/端点等;
 // 模型 tab = 模型列表 + 参数入口 + 逗号编辑;保存显式按钮;删除置底。
-// 新增流:列表页模板选择后经 PENDING_PROVIDER 暂存对象进入本页,保存时插入。
+// 新增流:列表页模板选择后经暂存函数交接对象进入本页,保存时插入。
 import { router, promptAction } from '@kit.ArkUI';
 import { picker, fileIo } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
@@ -15,7 +15,7 @@ import type {
 import {
   loadProviders, saveProviders, makeProviderSettingOpenAIVariant,
   makeProviderSettingGoogle, makeProviderSettingClaude, makeProviderModel,
-  openAIBrandAvailableAuthModes, openAIAuthModeFixedBaseUrl,
+  openAIBrandAvailableAuthModes, openAIAuthModeFixedBaseUrl, openAIAuthHeaders,
 } from '@amber/chat-domain';
 import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { loadGoogleModelCatalog } from '../platform_impl/GoogleAuthSupport.ets';
@@ -42,11 +42,18 @@ import { Icon } from '../components/ui/Icon.ets';
 import { BtnFill, BtnGhost, Chip, PaperSeparator, ToggleRow, SectionHeader, Seg } from '../components/PageTemplate.ets';
 import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 
-// 模板新增流:列表页 → 本页 的对象暂存(单线程 UI,模块级安全)
-export let PENDING_PROVIDER: ProviderSetting | null = null;
+// 模板新增流使用进程 AppStorage 单槽,避免路由页面间模块变量不共享。
+const PENDING_PROVIDER_KEY: string = 'chatPendingProviderDraft';
 
 export const setPendingProvider = (p: ProviderSetting | null): void => {
-  PENDING_PROVIDER = p;
+  if (p === null) AppStorage.delete(PENDING_PROVIDER_KEY);
+  else AppStorage.setOrCreate<ProviderSetting>(PENDING_PROVIDER_KEY, p);
+};
+
+export const takePendingProvider = (): ProviderSetting | null => {
+  const provider: ProviderSetting | null = AppStorage.get<ProviderSetting>(PENDING_PROVIDER_KEY) ?? null;
+  AppStorage.delete(PENDING_PROVIDER_KEY);
+  return provider;
 };
 
 // Provider 导出载荷(脱敏:不含 apiKey/OAuth 凭据;format 标记供导入方识别)
@@ -54,6 +61,14 @@ interface ProviderExportModel {
   modelId: string;
   displayName: string;
   type: string;
+}
+interface ProviderFieldOptions {
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (value: string) => void;
+  obscure: boolean;
+  mono: boolean;
 }
 interface ProviderExportPayload {
   format: string;
@@ -121,30 +136,31 @@ struct ChatProviderDetailPage {
   @State grokAccount: string = '';
   private grokAuth: GrokAuthorization | null = null;
   private isNew: boolean = false;
+  private pageAlive: boolean = false;
+  private loginSequence: number = 0;
   private googleCatalogController: EntryAbortController | null = null;
   private googleFetchedModels: GoogleCatalogModel[] = [];
 
   aboutToAppear(): void {
+    this.pageAlive = true;
     const params: Record<string, string> | undefined =
       router.getParams() as Record<string, string> | undefined;
     const id: string = params !== undefined && params['providerId'] !== undefined ? params['providerId'] : '';
     this.isNew = params !== undefined && params['isNew'] === '1';
+    const draft: ProviderSetting | null = this.isNew ? takePendingProvider() : null;
     loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): void => {
       let target: ProviderSetting | null = null;
       if (id.length > 0) {
         const hit = (list ?? []).find((p: ProviderSetting): boolean => p.id === id);
         if (hit !== undefined) target = hit;
       }
-      if (target === null && this.isNew && PENDING_PROVIDER !== null) {
-        target = PENDING_PROVIDER;
+      if (target === null && draft !== null) {
+        target = draft;
       }
       if (target !== null) {
         this.applyProvider(target);
       }
-      setPendingProvider(null);
-    }).catch((): void => {
-      setPendingProvider(null);
-    });
+    }).catch((): void => {});
   }
 
   // 返回自模型参数页等场景:仅刷新 provider 引用(携带最新 models 参数),
@@ -177,6 +193,9 @@ struct ChatProviderDetailPage {
   }
 
   aboutToDisappear(): void {
+    this.pageAlive = false;
+    this.cancelCodexLogin();
+    this.cancelGrokLogin();
     if (this.googleCatalogController !== null) this.googleCatalogController.abort();
     this.googleCatalogController = null;
   }
@@ -198,6 +217,21 @@ struct ChatProviderDetailPage {
     }).catch((): void => { this.savedMsg = '无法读取已保存的服务商配置。'; });
   }
 
+  private async openModelParameters(modelId: string): Promise<void> {
+    const raw: ProviderSetting | null = this.provider;
+    if (raw === null || this.ioBusy) return;
+    try {
+      const all: ProviderSetting[] | null = await loadProviders(getChatKvStore());
+      if (!(all ?? []).some((item: ProviderSetting): boolean => item.id === raw.id)) {
+        this.savedMsg = '请先点击保存，再编辑模型参数。';
+        return;
+      }
+      router.pushUrl({ url: 'pages/ChatModelParamsPage', params: { providerId: raw.id, modelId } });
+    } catch (error) {
+      this.savedMsg = `无法读取服务商配置：${(error as Error).message}`;
+    }
+  }
+
   private applyProvider(p: ProviderSetting): void {
     this.provider = p;
     this.providerEnabled = p.enabled;
@@ -211,9 +245,11 @@ struct ChatProviderDetailPage {
       this.chatPath = v.chatCompletionsPath;
       this.useResponseApi = v.useResponseApi;
       this.authMode = v.authMode;
+      const sequence: number = this.loginSequence;
       // 历史 OAuth:已支持 codex(设备码)与 grok(PKCE);token 失效时提示重新登录
       if (v.authMode === 'codex_oauth') {
         loadCodexTokens(v.id).then((tokens): void => {
+          if (!this.loginCurrent(v.id, 'codex_oauth', sequence)) return;
           this.codexAccount = tokens !== null && tokens.email.length > 0 ? tokens.email : '';
           if (tokens === null) {
             this.unsupportedAuthMsg = 'Codex 登录已失效,请重新登录。';
@@ -221,6 +257,7 @@ struct ChatProviderDetailPage {
         }).catch((): void => {});
       } else if (v.authMode === 'grok_oauth') {
         loadGrokTokens(v.id).then((tokens): void => {
+          if (!this.loginCurrent(v.id, 'grok_oauth', sequence)) return;
           this.grokAccount = tokens !== null && tokens.email.length > 0 ? tokens.email : '';
           if (tokens === null) {
             this.unsupportedAuthMsg = 'Grok 登录已失效,请重新登录。';
@@ -283,14 +320,14 @@ struct ChatProviderDetailPage {
       });
       return;
     }
-    const headers: Record<string, string> = {};
+    let headers: Record<string, string> = {};
     if (raw.type === 'claude') {
       headers['x-api-key'] = (raw as ProviderSettingClaude).apiKey;
       headers['anthropic-version'] = '2023-06-01';
     } else if (raw.type === 'google') {
       headers['x-goog-api-key'] = (raw as ProviderSettingGoogle).apiKey;
     } else {
-      headers['Authorization'] = `Bearer ${(raw as ProviderSettingOpenAIVariant).apiKey}`;
+      headers = openAIAuthHeaders(this.authMode as OpenAIAuthMode, this.baseUrl.trim(), this.apiKey.trim());
     }
     getAppContainer().httpClient.fetch({
       url: `${this.baseUrl.trim()}/models`,
@@ -371,7 +408,7 @@ struct ChatProviderDetailPage {
 
   private ioBusy: boolean = false;
 
-  private save(): void {
+  private async save(): Promise<void> {
     const raw: ProviderSetting | null = this.provider;
     if (raw === null || this.ioBusy) return;
     this.ioBusy = true;
@@ -389,6 +426,7 @@ struct ChatProviderDetailPage {
       this.ioBusy = false;
       return;
     }
+    const apiKeySnapshot: string = this.apiKey;
     const models: ProviderModel[] = this.parseModels(raw.models);
     const trimmedName: string = this.name.trim();
     let updated: ProviderSetting;
@@ -446,8 +484,16 @@ struct ChatProviderDetailPage {
         balanceOption: o.balanceOption,
       });
     }
-    loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): Promise<void> => {
+    await loadProviders(getChatKvStore()).then(async (list: ProviderSetting[] | null): Promise<void> => {
       const all: ProviderSetting[] = list ?? [];
+      if (updated.type === 'openai') {
+        const openAi: ProviderSettingOpenAIVariant = updated as ProviderSettingOpenAIVariant;
+        if (openAi.authMode === 'codex_oauth' || openAi.authMode === 'grok_oauth') {
+          const tokens = openAi.authMode === 'codex_oauth' ? await loadCodexTokens(updated.id) : await loadGrokTokens(updated.id);
+          const latest: ProviderSetting | undefined = all.find((item: ProviderSetting): boolean => item.id === updated.id);
+          updated.apiKey = tokens !== null ? tokens.accessToken : latest !== undefined ? latest.apiKey : apiKeySnapshot;
+        }
+      }
       const idx: number = all.findIndex((p: ProviderSetting): boolean => p.id === updated.id);
       if (idx >= 0) {
         all[idx] = updated;
@@ -519,6 +565,11 @@ struct ChatProviderDetailPage {
 
   private selectAuthMode(idx: number): void {
     const mode: OpenAIAuthMode = this.authModeAt(idx);
+    if (mode !== this.authMode) {
+      this.cancelCodexLogin();
+      this.cancelGrokLogin();
+      this.unsupportedAuthMsg = '';
+    }
     this.authMode = mode;
     const fixed: string | null = openAIAuthModeFixedBaseUrl(mode);
     if (fixed !== null) {
@@ -528,33 +579,43 @@ struct ChatProviderDetailPage {
   }
 
   // plan/codex/grok 模式的钉死地址('' = api_key 自由编辑);
-  //   TextInput 初始值语义,程序化改值不刷新 → 钉死态用只读行展示(Android 锁字段同语义)
+  //   固定地址用只读行展示,避免修改认证模式要求的官方端点(Android 锁字段同语义)
   private pinnedBaseUrl(): string {
     if (this.provider === null || this.provider.type !== 'openai') return '';
     const fixed: string | null = openAIAuthModeFixedBaseUrl(this.authMode as OpenAIAuthMode);
     return fixed !== null ? fixed : '';
   }
 
+  private loginCurrent(providerId: string, mode: OpenAIAuthMode, sequence: number): boolean {
+    return this.pageAlive && this.provider?.id === providerId && this.authMode === mode && sequence === this.loginSequence;
+  }
+
   private startCodexLogin(): void {
     const raw: ProviderSetting | null = this.provider;
-    if (raw === null || this.codexBusy) return;
+    if (raw === null || !this.pageAlive || this.authMode !== 'codex_oauth' || this.codexBusy) return;
+    const sequence: number = ++this.loginSequence;
     this.codexBusy = true;
     this.codexStatus = '正在获取设备码…';
     this.codexCancelled = false;
     const providerId: string = raw.id;
     requestCodexDeviceCode().then((auth: CodexDeviceAuthorization): void => {
+      if (!this.loginCurrent(providerId, 'codex_oauth', sequence)) return;
       this.codexAuth = auth;
       this.codexUserCode = auth.userCode;
       this.codexLoginOpen = true;
       this.codexStatus = '';
-      pollCodexDeviceCode(providerId, auth, (): boolean => this.codexCancelled)
+      pollCodexDeviceCode(providerId, auth, (): boolean => this.codexCancelled ||
+        !this.loginCurrent(providerId, 'codex_oauth', sequence))
         .then((tokens): void => {
+          if (!this.loginCurrent(providerId, 'codex_oauth', sequence)) return;
           this.codexBusy = false;
           this.codexLoginOpen = false;
           this.codexAccount = tokens.email.length > 0 ? tokens.email : '已登录';
+          this.apiKey = tokens.accessToken;
           this.useResponseApi = true;
           this.baseUrl = openAIAuthModeFixedBaseUrl('codex_oauth') ?? this.baseUrl;
           fetchCodexModels(providerId).then((models: CodexModelItem[]): void => {
+            if (!this.loginCurrent(providerId, 'codex_oauth', sequence)) return;
             if (models.length > 0) {
               this.modelsText = models.map((m: CodexModelItem): string => m.modelId).join(', ');
             }
@@ -562,17 +623,21 @@ struct ChatProviderDetailPage {
           });
         })
         .catch((e: Error): void => {
+          if (!this.loginCurrent(providerId, 'codex_oauth', sequence)) return;
           this.codexBusy = false;
           this.codexLoginOpen = false;
           this.codexStatus = e.message;
         });
     }).catch((e: Error): void => {
+      if (!this.loginCurrent(providerId, 'codex_oauth', sequence)) return;
       this.codexBusy = false;
       this.codexStatus = e.message;
     });
   }
 
   private cancelCodexLogin(): void {
+    this.loginSequence++;
+    this.codexAuth = null;
     this.codexCancelled = true;
     this.codexBusy = false;
     this.codexLoginOpen = false;
@@ -580,8 +645,16 @@ struct ChatProviderDetailPage {
 
   // ── Grok 登录(PKCE:浏览器授权 → 粘贴重定向 URL → 换 token) ──
 
+  private cancelGrokLogin(): void {
+    this.loginSequence++;
+    this.grokAuth = null;
+    this.grokBusy = false;
+    this.grokLoginOpen = false;
+  }
+
   private startGrokLogin(): void {
-    if (this.grokBusy) return;
+    if (!this.pageAlive || this.authMode !== 'grok_oauth' || this.grokBusy) return;
+    this.loginSequence++;
     const auth: GrokAuthorization = buildGrokAuthorization();
     this.grokAuth = auth;
     this.grokBusy = true;
@@ -606,7 +679,8 @@ struct ChatProviderDetailPage {
   private confirmGrokLogin(): void {
     const raw: ProviderSetting | null = this.provider;
     const auth: GrokAuthorization | null = this.grokAuth;
-    if (raw === null || auth === null || this.grokBusy) return;
+    if (raw === null || auth === null || !this.pageAlive || this.authMode !== 'grok_oauth' || this.grokBusy) return;
+    const sequence: number = this.loginSequence;
     const code: string = extractGrokCode(this.grokPasteUrl.trim());
     if (code.length === 0) {
       this.grokStatus = '未从链接中解析到 code 参数,请粘贴完整的重定向地址';
@@ -614,14 +688,18 @@ struct ChatProviderDetailPage {
     }
     this.grokBusy = true;
     this.grokStatus = '正在交换令牌…';
-    exchangeGrokCode(raw.id, code, auth.codeVerifier).then((tokens: GrokTokens): void => {
+    exchangeGrokCode(raw.id, code, auth.codeVerifier,
+      (): boolean => !this.loginCurrent(raw.id, 'grok_oauth', sequence)).then((tokens: GrokTokens): void => {
+      if (!this.loginCurrent(raw.id, 'grok_oauth', sequence)) return;
       this.grokBusy = false;
       this.grokLoginOpen = false;
       this.grokAccount = tokens.email.length > 0 ? tokens.email : '已登录';
+      this.apiKey = tokens.accessToken;
       this.baseUrl = openAIAuthModeFixedBaseUrl('grok_oauth') ?? this.baseUrl;
       this.modelsText = GROK_FALLBACK_MODELS.map((m: GrokModelItem): string => m.modelId).join(', ');
       this.save();
     }).catch((e: Error): void => {
+      if (!this.loginCurrent(raw.id, 'grok_oauth', sequence)) return;
       this.grokBusy = false;
       this.grokStatus = e.message;
     });
@@ -652,7 +730,7 @@ struct ChatProviderDetailPage {
             .fontSize(14).fontColor(INK3)
             .layoutWeight(1).textAlign(TextAlign.Center)
             .padding({ top: 8, bottom: 8 })
-            .onClick((): void => { this.grokLoginOpen = false; })
+            .onClick((): void => { this.cancelGrokLogin(); })
           Text(this.grokBusy ? '交换中…' : '完成登录')
             .fontSize(14).fontColor(this.grokBusy ? INK3 : this.accentColorStore)
             .layoutWeight(1).textAlign(TextAlign.Center)
@@ -864,10 +942,9 @@ struct ChatProviderDetailPage {
   }
 
   @Builder
-  field(label: string, placeholder: string, value: string, onChange: (v: string) => void,
-    obscure: boolean, mono: boolean = false) {
+  field(options: ProviderFieldOptions) {
     Column() {
-      Text(label)
+      Text(options.label)
         .fontSize(TEXT_STYLES.meta.size)
         .fontWeight(TEXT_STYLES.meta.weight)
         .lineHeight(TEXT_STYLES.meta.lineHeight)
@@ -875,11 +952,11 @@ struct ChatProviderDetailPage {
         .fontColor(INK3)
         .margin({ left: 2, bottom: 6 })
       FlatTextField({
-        value: value,
-        placeholder: placeholder,
-        mono: mono,
-        obscure: obscure,
-        onChange: onChange,
+        value: options.value,
+        placeholder: options.placeholder,
+        mono: options.mono,
+        obscure: options.obscure,
+        onChange: options.onChange,
       })
     }
     .width('100%')
@@ -1059,8 +1136,10 @@ struct ChatProviderDetailPage {
               .padding({ left: 16, right: 16, top: 12 })
             }
 
-            this.field('名称', 'Provider 名称', this.name,
-              (v: string): void => { this.name = v; }, false, false)
+            this.field({
+              label: '名称', placeholder: 'Provider 名称', value: this.name,
+              onChange: (v: string): void => { this.name = v; }, obscure: false, mono: false,
+            })
 
             if (this.unsupportedAuthMsg.length > 0) {
               Column() {
@@ -1076,14 +1155,17 @@ struct ChatProviderDetailPage {
             }
 
             if (this.provider === null || this.provider.type !== 'google' || this.isGoogleApiKey()) {
-              this.field('API Key',
-                this.provider !== null && this.provider.type === 'claude' ? 'sk-ant-…' : 'sk-…',
-                this.apiKey, (v: string): void => { this.apiKey = v; }, true, true)
+              this.field({
+                label: 'API Key',
+                placeholder: this.provider !== null && this.provider.type === 'claude' ? 'sk-ant-…' : 'sk-…',
+                value: this.apiKey, onChange: (v: string): void => { this.apiKey = v; },
+                obscure: true, mono: true,
+              })
             }
 
             if (this.provider !== null && this.provider.type === 'openai') {
               if (this.pinnedBaseUrl().length > 0) {
-                // 钉死地址只读行(TextInput 初始值语义下,程序化改值不刷新)
+                // 只读展示当前认证模式要求的固定官方地址
                 Column() {
                   Text('Base URL')
                     .fontSize(TEXT_STYLES.meta.size)
@@ -1107,11 +1189,15 @@ struct ChatProviderDetailPage {
                 .alignItems(HorizontalAlign.Start)
                 .margin({ bottom: 12 })
               } else {
-                this.field('Base URL', 'https://api.openai.com/v1', this.baseUrl,
-                  (v: string): void => { this.baseUrl = v; }, false, true)
+                this.field({
+                  label: 'Base URL', placeholder: 'https://api.openai.com/v1', value: this.baseUrl,
+                  onChange: (v: string): void => { this.baseUrl = v; }, obscure: false, mono: true,
+                })
               }
-              this.field('API Path', '/chat/completions', this.chatPath,
-                (v: string): void => { this.chatPath = v; }, false, true)
+              this.field({
+                label: 'API Path', placeholder: '/chat/completions', value: this.chatPath,
+                onChange: (v: string): void => { this.chatPath = v; }, obscure: false, mono: true,
+              })
             } else if (this.provider !== null && this.provider.type === 'google') {
               BtnGhost({ label: 'Google 认证与服务账号', onTap: (): void => { this.openGoogleAuth(); } })
                 .width('100%').margin({ bottom: 12 })
@@ -1121,13 +1207,18 @@ struct ChatProviderDetailPage {
                 onToggle: (): void => { this.vertexAI = !this.vertexAI; },
                 })
                 if (!this.vertexAI) {
-                  this.field('Base URL', 'https://generativelanguage.googleapis.com/v1beta',
-                    this.baseUrl, (v: string): void => { this.baseUrl = v; }, false, true)
+                  this.field({
+                    label: 'Base URL', placeholder: 'https://generativelanguage.googleapis.com/v1beta',
+                    value: this.baseUrl, onChange: (v: string): void => { this.baseUrl = v; },
+                    obscure: false, mono: true,
+                  })
                 }
               }
             } else if (this.provider !== null && this.provider.type === 'claude') {
-              this.field('Base URL', 'https://api.anthropic.com/v1', this.baseUrl,
-                (v: string): void => { this.baseUrl = v; }, false, true)
+              this.field({
+                label: 'Base URL', placeholder: 'https://api.anthropic.com/v1', value: this.baseUrl,
+                onChange: (v: string): void => { this.baseUrl = v; }, obscure: false, mono: true,
+              })
               ToggleRow({
                 label: 'Prompt Caching', checked: this.promptCaching, isLast: true,
                 onToggle: (): void => { this.promptCaching = !this.promptCaching; },
@@ -1186,10 +1277,7 @@ struct ChatProviderDetailPage {
                     .constraintSize({ minHeight: 64 })
                     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
                     .onClick((): void => {
-                      const params: Record<string, string> = {};
-                      params['providerId'] = this.provider !== null ? this.provider.id : '';
-                      params['modelId'] = m.id;
-                      router.pushUrl({ url: 'pages/ChatModelParamsPage', params: params });
+                      this.openModelParameters(m.id);
                     })
                     if (mIdx < (this.provider !== null ? this.provider.models.length : 0) - 1) {
                       PaperSeparator()

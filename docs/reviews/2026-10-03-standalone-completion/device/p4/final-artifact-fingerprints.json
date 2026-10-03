@@ -1,0 +1,100 @@
+[
+  {
+    "path": "entry/src/main/ets/pages/NovelWorkspacePage.ets",
+    "sourceSha256": "9ab7744e0787f2d67781e5fcddb114d80872c6f61c4708c4bfcbfa69cc5dcf49",
+    "copies": {
+      "novel": "9ab7744e0787f2d67781e5fcddb114d80872c6f61c4708c4bfcbfa69cc5dcf49",
+      "deepread": "9ab7744e0787f2d67781e5fcddb114d80872c6f61c4708c4bfcbfa69cc5dcf49"
+    }
+  },
+  {
+    "path": "entry/src/main/ets/pages/NovelChapterReaderPage.ets",
+    "sourceSha256": "9c1c28a393dcae7436d31859c7adb73161bacd68ff707ece46abd4aa53db7de8",
+    "copies": {
+      "novel": "9c1c28a393dcae7436d31859c7adb73161bacd68ff707ece46abd4aa53db7de8",
+      "deepread": "9c1c28a393dcae7436d31859c7adb73161bacd68ff707ece46abd4aa53db7de8"
+    }
+  },
+  {
+    "path": "entry/src/main/ets/pages/NovelStatePage.ets",
+    "sourceSha256": "221096211c630b60256a4f184775d1bc16a737393d3d8cf63a83506f44f1d008",
+    "copies": {
+      "novel": "221096211c630b60256a4f184775d1bc16a737393d3d8cf63a83506f44f1d008",
+      "deepread": "221096211c630b60256a4f184775d1bc16a737393d3d8cf63a83506f44f1d008"
+    }
+  },
+  {
+    "path": "entry/src/main/ets/pages/NovelOperationsPage.ets",
+    "sourceSha256": "bb62226b4faa4dbd667957042c42e81e0b6000e28d70034a96b83570874b4a3b",
+    "copies": {
+      "novel": "bb62226b4faa4dbd667957042c42e81e0b6000e28d70034a96b83570874b4a3b",
+      "deepread": "bb62226b4faa4dbd667957042c42e81e0b6000e28d70034a96b83570874b4a3b"
+    }
+  },
+  {
+    "path": "entry/src/main/ets/pages/NovelChapterContractPage.ets",
+    "sourceSha256": "7add6610417bdaea459237acca2eae5b61bde153f1d684822ac091f689ec06d4",
+    "copies": {
+      "novel": "7add6610417bdaea459237acca2eae5b61bde153f1d684822ac091f689ec06d4",
+      "deepread": "7add6610417bdaea459237acca2eae5b61bde153f1d684822ac091f689ec06d4"
+    }
+  },
+  {
+    "path": "entry/src/main/ets/components/NovelGhostwriteCard.ets",
+    "sourceSha256": "f2c0beb47406de554915440195b38a64457f6032c48f3a0517fe5a3715aacc0e",
+    "copies": {
+      "novel": "f2c0beb47406de554915440195b38a64457f6032c48f3a0517fe5a3715aacc0e",
+      "deepread": "f2c0beb47406de554915440195b38a64457f6032c48f3a0517fe5a3715aacc0e"
+    }
+  },
+  {
+    "path": "entry/src/main/ets/components/NovelChapterVerdictCard.ets",
+    "sourceSha256": "22477869f44c37c4f6a8c5d118e1c0daf1eaea1c43533c1f803c801b753b26d3",
+    "copies": {
+      "novel": "22477869f44c37c4f6a8c5d118e1c0daf1eaea1c43533c1f803c801b753b26d3",
+      "deepread": "22477869f44c37c4f6a8c5d118e1c0daf1eaea1c43533c1f803c801b753b26d3"
+    }
+  },
+  {
+    "path": "entry/src/main/ets/components/NovelPolishJobCard.ets",
+    "sourceSha256": "67d3081cec8c00a22cd4bc6b4d5a2f182f6749c2b0c9df47a35d80c126a5bccd",
+    "copies": {
+      "novel": "67d3081cec8c00a22cd4bc6b4d5a2f182f6749c2b0c9df47a35d80c126a5bccd",
+      "deepread": "67d3081cec8c00a22cd4bc6b4d5a2f182f6749c2b0c9df47a35d80c126a5bccd"
+    }
+  },
+  {
+    "path": "chat/src/main/ets/chat/novel_state_reasoning.ts",
+    "sourceSha256": "796bf4bc925223346f9f63313e5c3c2ed87203115da57712fbb550891e5aed88",
+    "copies": {
+      "novel": "796bf4bc925223346f9f63313e5c3c2ed87203115da57712fbb550891e5aed88",
+      "deepread": "796bf4bc925223346f9f63313e5c3c2ed87203115da57712fbb550891e5aed88"
+    }
+  },
+  {
+    "path": "deepread/src/main/ets/novel/creation.ts",
+    "sourceSha256": "50eac54248716f4232a1e40702599bf776905f9e9a1ecb652d750e8c0d98d803",
+    "copies": {
+      "novel": "50eac54248716f4232a1e40702599bf776905f9e9a1ecb652d750e8c0d98d803",
+      "deepread": "50eac54248716f4232a1e40702599bf776905f9e9a1ecb652d750e8c0d98d803"
+    }
+  },
+  {
+    "path": "deepread/src/main/ets/novel/continuity_repair.ts",
+    "sourceSha256": "21c93f9413adb6d71c3b2c6d6e07f9dff1fe7da6626664f532a2e37235991955",
+    "copies": {
+      "novel": "21c93f9413adb6d71c3b2c6d6e07f9dff1fe7da6626664f532a2e37235991955",
+      "deepread": "21c93f9413adb6d71c3b2c6d6e07f9dff1fe7da6626664f532a2e37235991955"
+    }
+  },
+  {
+    "product": "novel",
+    "hap": ".harmony-standalone/novel/entry/build/default/outputs/default/signed/entry-default-signed.hap",
+    "sha256": "e5b28d650e4e08de807ac2130e4f94b3f5d7a70a401bbef9e4345f59d2f4a567"
+  },
+  {
+    "product": "deepread",
+    "hap": ".harmony-standalone/deepread/entry/build/default/outputs/default/signed/entry-default-signed.hap",
+    "sha256": "70de0033fda2a6d1253d09f7485ae26c28b244429994a4b41c2bead88b2b6841"
+  }
+]

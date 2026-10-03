@@ -1,34 +1,26 @@
-// DeepReadArticlePage — 杂志风文章页(真实 run() 数据,非 mock)
-// 对照 Android:点击热点 → 文章页触发 run() → 渲染真实 DeepReadOutput
-//
-// G5-S1 增强(对照 Android DeepReadScreen.kt):
-//   - RunningStageNotice:生成中显示当前阶段 + 进度(314-318)
-//   - DeepReadPartialErrorNotice:部分 stage 失败但已有基础稿(318-323)
-//   - TemplateFallbackNotice:模板降级提示(329-333)
-//   - 确认对话框:重新生成前确认覆盖(DeepReadConfirmation 组件)
-//   - 字号缩放:标题栏 zoom in/out 按钮(对齐 Android deepReadFontScale)
-//
-// 保留原有 run() 逻辑,仅增强 UI 层。
-
+// DeepRead article controller. All layouts share recovery actions and the same content snapshot.
 import { router, promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Icon } from '../components/ui/Icon.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
-  CorePoint, DeepReadCacheEntry, DeepReadGenerationStage, DeepReadImageAsset, DeepReadOutput,
-  DeepReadRepository, DeepReadScheduler, Perspective, Quote, ReadingLink, RunResult, TimelineEvent,
+  DeepReadCacheEntry, DeepReadGenerationStage, DeepReadOutput,
+  DeepReadRepository, DeepReadScheduler, RunResult, DeepReadInputSource,
 } from '@amber/deepread-domain';
-import { displayHeroImageUrl, firstFailureMessage, firstFailedStage, isComplete, isCacheEntryExpired, deepReadProgressSnapshot, STAGE_ORDER } from '@amber/deepread-domain';
+import { makeEmptyDeepReadOutput, hasDisplayableDeepReadOutput, firstFailureMessage, firstFailedStage, isComplete, isCacheEntryExpired, deepReadProgressSnapshot, STAGE_ORDER } from '@amber/deepread-domain';
 import type { DeepReadProgressSnapshot } from '@amber/deepread-domain';
-import { MarkdownText } from '../components/MarkdownText.ets';
-import { FONT_SERIF, FONT_MONO_SEMIBOLD, FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import { DeepReadNativeArticleBody } from '../components/DeepReadNativeArticleBody.ets';
+import { FONT_SERIF } from '../design/fonts.ets';
 import { DeepReadConfirmationDialog } from '../components/DeepReadConfirmationDialog.ets';
-import { getDeepReadScheduler, getRepository, getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
-import { renderEditorialSlantHtml, DEEPREAD_TEMPLATE_EDITORIAL_SLANT } from '../platform_impl/DeepReadTemplate.ets';
-import { renderCustomTemplateHtml, loadCustomTemplates, CustomTemplateDef } from '../platform_impl/DeepReadTemplate.ets';
+import { DeepReadExportPanel } from '../components/DeepReadExportPanel.ets';
+import { DeepReadGoogleSearchHost } from '../components/DeepReadGoogleSearchHost.ets';
+import { getDeepReadScheduler, getRepository, getChatKvStore, getAppContainer, getDeepReadArtifactStore } from '../di/AppContainer.ets';
+import type { DeepReadArtifactStatus } from '../platform_impl/DeepReadArtifactStore.ets';
+import { DeepReadRenderOptions, resolveDeepReadArticleTemplate, renderCapturedDeepReadTemplateHtml,
+  captureDeepReadTemplate, DeepReadArticleTemplateResolution } from '../platform_impl/DeepReadTemplate.ets';
 import { webview } from '@kit.ArkWeb';
 import {
-  BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, LINE2, ACCENT, ACCENT_LIGHT,
+  BG, INK, INK2, INK3, SURFACE, SURFACE2, LINE, ACCENT,
   BODY, BODY2, META, LABEL, TITLE, ERROR,
 } from '../design/tokens.ets';
 
@@ -36,8 +28,8 @@ const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Article';
 
 // 字号缩放上下限 — 照搬 Android BoardSettings.kt:131-133
-const FONT_SCALE_MIN: number = 0.85;
-const FONT_SCALE_MAX: number = 1.25;
+const FONT_SCALE_MIN: number = 0.7;
+const FONT_SCALE_MAX: number = 1.8;
 const FONT_SCALE_STEP: number = 0.05;
 const FONT_SCALE_DEFAULT: number = 1.0;
 const GENERATION_STEP_COUNT: number = 6;
@@ -46,6 +38,8 @@ interface ArticleParams {
   topicId: string;
   title: string;
   sourceUrl?: string;
+  seedUrlsJson?: string;
+  inputSourcesJson?: string;
   force?: string;
   fromHistory?: string;
 }
@@ -59,6 +53,8 @@ struct DeepReadArticlePage {
   @State title: string = '';
   // 种子链接(热榜条目 url;run 的 seedUrl — 来源收集直接抓该页而非仅按标题搜索)
   private sourceUrl: string = '';
+  private seedUrls: string[] = [];
+  private discoveryInputs: DeepReadInputSource[] = [];
   @State output: DeepReadOutput | null = null;
   @State running: boolean = true;
   @State errorMsg: string = '';
@@ -71,19 +67,26 @@ struct DeepReadArticlePage {
   @State fromHistory: boolean = false;
   @State historyExpired: boolean = false;
   @State templateId: string = 'none';   // 模板选择(editorial_slant/custom_* → WebView 渲染)
-  @State customTemplates: CustomTemplateDef[] = [];
+  @State templateName: string = '默认排版';
+  @State templateMessage: string = '';
+  @State nativeReadingOverride: boolean = false;
   private webController: webview.WebviewController = new webview.WebviewController();
   // Web 组件是否已 attach:未 attach 时 loadData 会失败,zoom 刷新需门控
   private webAttached: boolean = false;
+  private webInitialized: boolean = false;
+  private webSession: number = 0;
+  @State webRenderError: string = '';
+  @State workspaceError: string = '';
+  @State workspaceSaving: boolean = false;
+  private workspaceRequest: number = 0;
+  private workspaceSaveOwner: number = 0;
 
-  private openTemplateInWeb(): void {
-    // 预留:外部打开
-  }
   // G5-S1:字号倍率(驱动 ArticleRenderer)
   @State fontScale: number = FONT_SCALE_DEFAULT;
   @State fontSerif: boolean = false;
   // G5-S1:重新生成确认对话框
   @State showRegenerateDialog: boolean = false;
+  @State showExport: boolean = false;
   private pageAlive: boolean = false;
   private pageToken: number = 0;
   private unsubscribeOutput: (() => void) | null = null;
@@ -92,6 +95,12 @@ struct DeepReadArticlePage {
 
   aboutToAppear(): void {
     this.pageAlive = true;
+    this.webSession++;
+    this.webAttached = false;
+    this.webInitialized = false;
+    this.showExport = false;
+    this.workspaceSaving = false;
+    this.workspaceSaveOwner = ++this.workspaceRequest;
     const token: number = ++this.pageToken;
     const rawParams: object = router.getParams() as object;
     if (rawParams === null || rawParams === undefined) {
@@ -104,6 +113,19 @@ struct DeepReadArticlePage {
     this.topicId = params.topicId ?? '';
     this.title = params.title ?? '';
     this.sourceUrl = params.sourceUrl ?? '';
+    try {
+      const seeds: string[] = JSON.parse(params.seedUrlsJson ?? '[]') as string[];
+      this.seedUrls = Array.isArray(seeds) ? seeds.filter((url: string): boolean =>
+        typeof url === 'string' && /^https?:\/\//i.test(url)) : [];
+    } catch (_) { this.seedUrls = []; }
+    try {
+      const inputs: DeepReadInputSource[] = JSON.parse(params.inputSourcesJson ?? '[]') as DeepReadInputSource[];
+      this.discoveryInputs = Array.isArray(inputs) ? inputs : [];
+    } catch (_) {
+      this.errorMsg = '阅读来源参数无法读取';
+      this.running = false;
+      return;
+    }
     const wantsForce: boolean = params.force === 'true';
     this.fromHistory = params.fromHistory === 'true';
     if (this.topicId.length === 0 || this.title.length === 0) {
@@ -122,6 +144,9 @@ struct DeepReadArticlePage {
 
   aboutToDisappear(): void {
     this.pageAlive = false;
+    this.showExport = false;
+    this.webAttached = false;
+    this.webInitialized = false;
     this.pageToken++;
     if (this.unsubscribeOutput !== null) {
       this.unsubscribeOutput();
@@ -134,6 +159,10 @@ struct DeepReadArticlePage {
   }
 
   onBackPress(): boolean {
+    if (this.showExport) {
+      this.showExport = false;
+      return true;
+    }
     if (!this.showRegenerateDialog) return false;
     this.showRegenerateDialog = false;
     return true;
@@ -143,21 +172,35 @@ struct DeepReadArticlePage {
     if (!this.onBackPress()) router.back();
   }
 
+  private openExport(): void {
+    if (!this.pageAlive || this.running || !this.hasReadableOutput()
+      || this.output === null) return;
+    this.showExport = true;
+  }
+
   private async loadArticle(token: number, force: boolean): Promise<void> {
     const repository = getRepository();
-    const cached: DeepReadCacheEntry | null = await repository.get(this.topicId);
+    let cached: DeepReadCacheEntry | null = await repository.get(this.topicId);
+    const hadCache: boolean = cached !== null;
     if (!this.pageAlive || token !== this.pageToken) return;
+    if (cached === null && this.discoveryInputs.length > 0) {
+      cached = await this.saveDiscoveryInputs(token);
+      if (!this.pageAlive || token !== this.pageToken) return;
+    }
     // UI-X01:显示偏好先于缓存早退读取(完整缓存也生效,不再只用默认字号/模板)
-    await this.loadDisplaySettings();
+    await this.loadDisplaySettings(token);
     if (!this.pageAlive || token !== this.pageToken) return;
     if (cached !== null) {
       this.historyExpired = isCacheEntryExpired(cached);
-      if (!force) {
-        this.applyOutput(cached.output, token);
-      }
+      if (this.sourceUrl.length === 0 && this.discoveryInputs.length === 0) this.sourceUrl = cached.sourceUrl ?? '';
+      if (this.seedUrls.length === 0 && this.discoveryInputs.length === 0) this.seedUrls = cached.output.inputSourceUrls ?? [];
+      this.applyOutput(cached.output, token);
+      await this.refreshWorkspaceStatus(token);
+      if (!this.pageAlive || token !== this.pageToken) return;
     }
     // 首用确认门(Android deepReadFirstUseConfirmed):未确认不自动跑
     const confirmedRaw: string | null = await getChatKvStore().get('deepread_first_use_confirmed');
+    if (!this.pageAlive || token !== this.pageToken) return;
     this.confirmed = confirmedRaw === 'true';
     if (!this.confirmed) {
       this.running = false;
@@ -168,6 +211,16 @@ struct DeepReadArticlePage {
     this.subscribeToUpdates(repository, token);
 
     const isRunning: boolean = this.scheduler.isRunning(this.topicId);
+    if (force && hadCache && this.discoveryInputs.length > 0 && cached !== null) {
+      if (isRunning) {
+        this.running = true;
+        this.errorMsg = '当前任务仍在运行，请先取消，再使用最新热点资料重新生成。';
+        return;
+      }
+      cached = await this.saveDiscoveryInputs(token, cached);
+      if (!this.pageAlive || token !== this.pageToken || cached === null) return;
+      this.applyOutput(cached.output, token);
+    }
     // 用户显式重新生成:直接跑(force 覆盖旧轮)
     if (force) {
       await this.runNow(token, true);
@@ -175,16 +228,16 @@ struct DeepReadArticlePage {
     }
     // UI-F30:完整缓存 → 仅展示;已有 run 或部分/取消缓存 → 仅订阅/显式继续,不自动 REPLACE
     const cachedOutput: DeepReadOutput | null = cached !== null ? cached.output : null;
-    if (cachedOutput !== null && (cachedOutput.generationPhase === 'COMPLETE' || isComplete(cachedOutput))) {
-      this.running = false;
-      this.awaitingContinue = false;
-      return;
-    }
     if (isRunning) {
       // 已有活动 run:只订阅,等它自己推进/收口
       this.awaitingContinue = false;
       this.running = true;
       this.currentStage = this.phaseLabel(cachedOutput);
+      return;
+    }
+    if (cachedOutput !== null && (isComplete(cachedOutput))) {
+      this.running = false;
+      this.awaitingContinue = false;
       return;
     }
     if (cachedOutput !== null) {
@@ -204,26 +257,45 @@ struct DeepReadArticlePage {
     await this.runNow(token, false);
   }
 
-  // UI-X01:显示偏好(字号/字体模式/模板)独立于生成与缓存命中
-  private async loadDisplaySettings(): Promise<void> {
-    const scaleRaw: string | null = await getChatKvStore().get('deepread_font_scale');
-    const scalePct: number = scaleRaw !== null ? parseFloat(scaleRaw) : 100;
-    this.fontScale = Math.max(0.8, Math.min(1.3, (Number.isNaN(scalePct) ? 100 : scalePct) / 100));
+  private async saveDiscoveryInputs(token: number, existing: DeepReadCacheEntry | null = null): Promise<DeepReadCacheEntry | null> {
+    const output: DeepReadOutput = existing === null ? makeEmptyDeepReadOutput()
+      : JSON.parse(JSON.stringify(existing.output)) as DeepReadOutput;
+    output.inputSources = this.discoveryInputs;
+    output.inputText = this.discoveryInputs.filter((source: DeepReadInputSource): boolean => source.kind === 'text')
+      .map((source: DeepReadInputSource): string => source.content).join('\n\n');
+    output.inputSourceUrls = this.seedUrls;
+    if (existing === null) {
+      const selected: string | null = await getChatKvStore().get('deepread_template_id');
+      output.templateSnapshot = await captureDeepReadTemplate(getAppContainer().storage, selected ?? 'none');
+      output.templateId = output.templateSnapshot.id;
+    }
+    if (!this.pageAlive || token !== this.pageToken) return null;
+    const now: number = Date.now();
+    const entry: DeepReadCacheEntry = existing === null ? { topicId: this.topicId, title: this.title,
+      sourceUrl: this.sourceUrl.length > 0 ? this.sourceUrl : null, output: output, phase: 'IDLE',
+      attemptCount: 0, lastError: null, createdAt: now, updatedAt: now, expiresAt: now + 86400000,
+      templateId: output.templateId } : JSON.parse(JSON.stringify(existing)) as DeepReadCacheEntry;
+    entry.output = output;
+    entry.title = this.title;
+    entry.sourceUrl = this.sourceUrl.length > 0 ? this.sourceUrl : null;
+    entry.updatedAt = now;
+    await getRepository().upsert(entry);
+    return entry;
+  }
+
+  // 字号与字体为阅读偏好，文章模板由持久快照决定。
+  private async loadDisplaySettings(token: number = this.pageToken): Promise<void> {
+    const scalePct: number = Number(await getAppContainer().storage.get<number>('deepread_font_scale', 100));
     const fontMode: string | null = await getChatKvStore().get('deepread_font_mode');
+    if (!this.pageAlive || token !== this.pageToken) return;
+    this.fontScale = Math.max(FONT_SCALE_MIN, Math.min(FONT_SCALE_MAX, (Number.isFinite(scalePct) ? scalePct : 100) / 100));
     this.fontSerif = fontMode === 'serif';
-    const tpl: string | null = await getChatKvStore().get('deepread_template_id');
-    this.templateId = tpl !== null ? tpl : 'none';
-    this.customTemplates = await loadCustomTemplates(getAppContainer().storage);
   }
 
   // D1-1:WebView 模板判定(editorial_slant 或存在的自定义模板;自定义被删回退 false)
   private isWebTemplate(): boolean {
-    if (this.templateId === 'editorial_slant') return true;
-    if (this.templateId.startsWith('custom_')) {
-      return this.customTemplates.findIndex(
-        (t: CustomTemplateDef): boolean => t.id === this.templateId) >= 0;
-    }
-    return false;
+    if (this.nativeReadingOverride) return false;
+    return resolveDeepReadArticleTemplate(this.output).template.kind !== 'native';
   }
 
   // 订阅 output/running(重复调用先退订,避免叠加)
@@ -240,6 +312,7 @@ struct DeepReadArticlePage {
       // 显式继续/已取消态下不因残留中断 phase 假装在跑(避免无限 spinner)
       this.running = (this.cancelled || this.awaitingContinue) ? false : running;
       if (running && this.currentStage.length === 0) this.currentStage = this.progressLabel('收集来源', 1);
+      if (!running) this.refreshWorkspaceStatus(token);
     });
   }
 
@@ -252,7 +325,8 @@ struct DeepReadArticlePage {
     this.errorMsg = '';
     this.currentStage = force ? this.progressLabel('收集来源', 1) : this.phaseLabel(this.output);
     const result: RunResult = await this.scheduler.run(this.topicId, this.title,
-      { force, seedUrl: this.sourceUrl.length > 0 ? this.sourceUrl : null });
+      { force, seedUrl: this.sourceUrl.length > 0 ? this.sourceUrl : null, seedUrls: this.seedUrls,
+        templateSnapshot: this.output?.templateSnapshot });
     if (!this.pageAlive || token !== this.pageToken) return;
     if (result.output !== null) this.applyOutput(result.output, token);
     if (!result.ok) {
@@ -268,8 +342,10 @@ struct DeepReadArticlePage {
 
   // UI-F30:显式继续(部分/取消缓存),不 REPLACE 已在执行的轮次
   private continueGeneration(): void {
-    this.runNow(this.pageToken, false).catch((e: Error): void => {
-      if (this.pageAlive) {
+    const token: number = ++this.pageToken;
+    this.subscribeToUpdates(getRepository(), token);
+    this.runNow(token, false).catch((e: Error): void => {
+      if (this.pageAlive && token === this.pageToken) {
         this.errorMsg = this.cancelled ? '生成已取消' : e.message;
         this.running = false;
       }
@@ -279,10 +355,15 @@ struct DeepReadArticlePage {
   private applyOutput(next: DeepReadOutput, token: number): void {
     if (!this.pageAlive || token !== this.pageToken) return;
     this.output = next;
+    const resolution: DeepReadArticleTemplateResolution = resolveDeepReadArticleTemplate(next);
+    this.templateId = resolution.template.id;
+    this.templateName = resolution.template.name;
+    this.templateMessage = resolution.message;
     this.currentStage = this.phaseLabel(next);
     const snap: DeepReadProgressSnapshot = deepReadProgressSnapshot(next, this.running);
     this.progress = snap;
-    if (next.generationPhase === 'COMPLETE' || isComplete(next)) this.errorMsg = '';
+    if (isComplete(next)) this.errorMsg = '';
+    this.refreshTemplateWeb();
   }
 
   private phaseLabel(output: DeepReadOutput | null): string {
@@ -298,7 +379,7 @@ struct DeepReadArticlePage {
       }
       return this.progressLabel('撰写文章', 3);
     }
-    if (output.generationPhase === 'COMPLETE' || isComplete(output)) return '完成';
+    if (isComplete(output)) return '完成';
     if (firstFailureMessage(output) !== null) return '生成失败';
     return '等待生成';
   }
@@ -314,46 +395,8 @@ struct DeepReadArticlePage {
     return '整理扩展阅读';
   }
 
-  private heroImageUrl(): string | null {
-    return this.output === null ? null : displayHeroImageUrl(this.output);
-  }
-
-  private inlineImageAssets(): DeepReadImageAsset[] {
-    if (this.output === null) return [];
-    const hero: string | null = this.heroImageUrl();
-    return this.output.imageAssets.filter((asset: DeepReadImageAsset): boolean => asset.url !== hero);
-  }
-
-  private diagramCode(): string {
-    if (this.output === null || this.output.diagram === null) return '';
-    return '```json\\n' + JSON.stringify(this.output.diagram, null, 2) + '\\n```';
-  }
-
-  // hero 右侧来源计数(Android deepReadSourceLabel)
-  private sourceCountLabel(o: DeepReadOutput): string {
-    const pool: ReadingLink[] = o.references.length > 0 ? o.references : o.extendedReading;
-    const seen: string[] = [];
-    for (const l of pool) {
-      const key: string = (l.source !== null && l.source.length > 0) ? l.source : l.url;
-      if (key.length > 0 && !seen.includes(key)) seen.push(key);
-    }
-    return seen.length > 0 ? `${seen.length} SOURCES` : 'DEEP READ';
-  }
-
-  // 核心要点标题随 topicType(Android CorePointsSection)
-  private corePointsTitle(o: DeepReadOutput): string {
-    if (o.topicType === 'product') return '功能亮点';
-    if (o.topicType === 'person') return '人物背景';
-    if (o.topicType === 'opinion') return '核心论点';
-    return '关键脉络';
-  }
-
-  private twoDigits(n: number): string {
-    return n < 10 ? '0' + n.toString() : n.toString();
-  }
-
   private openLink(url: string): void {
-    if (url.trim().length === 0) return;
+    if (!/^https?:\/\//i.test(url.trim())) return;
     try {
       const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
       ctx.startAbility({
@@ -378,7 +421,6 @@ struct DeepReadArticlePage {
 
   generateArticle(): void {
     const token: number = ++this.pageToken;
-    this.output = null;
     this.errorMsg = '';
     this.cancelled = false;
     this.awaitingContinue = false;
@@ -397,40 +439,86 @@ struct DeepReadArticlePage {
     const next: number = this.fontScale + FONT_SCALE_STEP;
     this.fontScale = next > FONT_SCALE_MAX ? FONT_SCALE_MAX : next;
     this.refreshTemplateWeb();
+    this.persistFontScale();
   }
   private zoomOut(): void {
     const next: number = this.fontScale - FONT_SCALE_STEP;
     this.fontScale = next < FONT_SCALE_MIN ? FONT_SCALE_MIN : next;
     this.refreshTemplateWeb();
+    this.persistFontScale();
   }
 
-  // F29:模板按当前字号/字体模式重渲染(editorial 纯 CSS,不开 JS;
-  //   自定义模板为静态壳,fontScale/serif 不生效 — 编辑器页脚已注明)
+  private persistFontScale(): void {
+    getAppContainer().storage.set<number>('deepread_font_scale', Math.round(this.fontScale * 100))
+      .catch((): void => { promptAction.showToast({ message: '字号设置保存失败', duration: 1400 }); });
+  }
+
+  private renderOptions(): DeepReadRenderOptions {
+    return { fontScale: this.fontScale, fontSerif: this.fontSerif,
+      background: BG, foreground: INK, muted: INK3, surface: SURFACE, border: LINE, accent: ACCENT };
+  }
+
   private editorialHtml(): string {
-    if (this.templateId.startsWith('custom_')) {
-      const tpl: CustomTemplateDef | undefined = this.customTemplates.find(
-        (t: CustomTemplateDef): boolean => t.id === this.templateId);
-      if (tpl !== undefined) {
-        return renderCustomTemplateHtml(tpl.html, this.title, this.output);
-      }
+    return renderCapturedDeepReadTemplateHtml(this.title, this.output, this.renderOptions());
+  }
+
+  private handleWebNavigation(request: WebResourceRequest): boolean {
+    const url: string = request.getRequestUrl();
+    if (url === 'about:blank' || url.startsWith('about:blank#') || url.startsWith('#')) return false;
+    if (this.pageAlive && request.isMainFrame() && request.isRequestGesture() && /^https?:\/\//i.test(url)) {
+      this.openLink(url);
     }
-    return renderEditorialSlantHtml(this.title, this.output, {
-      fontScale: this.fontScale,
-      fontSerif: this.fontSerif,
-    });
+    return true;
   }
 
   private loadTemplateHtml(): void {
-    if (!this.webAttached) return;
-    const html: string = this.editorialHtml();
-    this.webController.loadData(
-      encodeURIComponent(html).replace(/#/g, '%23'),
-      'text/html', 'UTF-8', ' ', ' ');
+    if (!this.pageAlive || !this.webAttached || !this.webInitialized) return;
+    try {
+      const html: string = this.editorialHtml();
+      this.webController.loadData(html, 'text/html', 'UTF-8', ' ', ' ');
+      this.webRenderError = '';
+    } catch (error) {
+      hilog.warn(DOMAIN, TAG, 'Template render failed: %{public}s', String(error));
+      this.webRenderError = '模板显示失败，文章内容仍已保留';
+    }
+  }
+
+  private attachTemplateWeb(session: number, epoch: number): void {
+    if (!this.pageAlive || session !== this.webSession || epoch !== this.themeEpoch) return;
+    this.webAttached = true;
+    this.webInitialized = false;
+  }
+
+  private onTemplatePageEnd(url: string, session: number, epoch: number): void {
+    if (!this.pageAlive || !this.webAttached || session !== this.webSession || epoch !== this.themeEpoch ||
+      this.webInitialized || url !== 'about:blank') return;
+    // Initial src loads after attached. Wait for it before submitting the article.
+    this.webInitialized = true;
+    this.loadTemplateHtml();
+  }
+
+  private detachTemplateWeb(session: number, epoch: number): void {
+    if (session !== this.webSession || epoch !== this.themeEpoch) return;
+    this.webAttached = false;
+    this.webInitialized = false;
+  }
+
+  private onTemplateError(mainFrame: boolean, session: number = this.webSession, epoch: number = this.themeEpoch): void {
+    if (!this.pageAlive || !this.webAttached || !this.isWebTemplate() || !mainFrame ||
+      session !== this.webSession || epoch !== this.themeEpoch) return;
+    this.webRenderError = '模板显示失败，文章内容仍已保留';
   }
 
   private refreshTemplateWeb(): void {
     if (!this.isWebTemplate()) return;
     this.loadTemplateHtml();
+  }
+
+  private switchToNativeReading(): void {
+    this.nativeReadingOverride = true;
+    this.webAttached = false;
+    this.webInitialized = false;
+    this.webRenderError = '';
   }
 
   // 基础稿判定:fallback 稿部分 READY 但未完成
@@ -455,19 +543,28 @@ struct DeepReadArticlePage {
     }
     this.running = true;
     this.errorMsg = '';
+    this.cancelled = false;
+    this.awaitingContinue = false;
+    const token: number = ++this.pageToken;
+    this.subscribeToUpdates(getRepository(), token);
     getDeepReadScheduler().then((sched: DeepReadScheduler): Promise<RunResult> => {
+      if (!this.pageAlive || token !== this.pageToken) {
+        const abortedResult: RunResult = { ok: false, output: this.output ?? makeEmptyDeepReadOutput(), error: 'aborted' };
+        return Promise.resolve(abortedResult);
+      }
       this.scheduler = sched;
       return sched.runSection(this.topicId, this.title, stage,
-        this.sourceUrl.length > 0 ? this.sourceUrl : null);
+        this.sourceUrl.length > 0 ? this.sourceUrl : null, this.seedUrls);
     }).then((result: RunResult): void => {
-      if (!this.pageAlive) return;
-      if (result.output !== null) this.applyOutput(result.output, ++this.pageToken);
-      if (!result.ok && result.error !== 'aborted') {
-        this.errorMsg = result.error ?? '该段重试失败';
+      if (!this.pageAlive || token !== this.pageToken) return;
+      if (result.output !== null) this.applyOutput(result.output, token);
+      if (!result.ok) {
+        this.cancelled = result.error === 'aborted';
+        this.errorMsg = this.cancelled ? '生成已取消' : result.error ?? '该段重试失败';
       }
       this.running = false;
     }).catch((e: Error): void => {
-      if (this.pageAlive) {
+      if (this.pageAlive && token === this.pageToken) {
         this.errorMsg = e.message;
         this.running = false;
       }
@@ -477,612 +574,277 @@ struct DeepReadArticlePage {
   // G5-S1:部分失败判定 — 有 output 但 firstFailureMessage 非空
   private partialError(): string {
     if (this.output === null) { return ''; }
-    if (this.currentStage === '完成') { return ''; }
-    const msg = firstFailureMessage(this.output);
-    if (msg === null) { return ''; }
-    return msg;
+    if (isComplete(this.output)) { return ''; }
+    const stage: DeepReadGenerationStage | null = firstFailedStage(this.output);
+    if (stage === null) return '';
+    return firstFailureMessage(this.output) || `${this.stageLabel(stage)}失败`;
   }
 
-  // G5-S1:模板降级判定 — 未完成且无部分失败但已有基础稿(走 fallback 模板)
-  private templateFallbackMessage(): string {
-    if (this.output === null) { return ''; }
-    if (this.currentStage === '完成') { return ''; }
-    if (this.partialError().length > 0) { return ''; }
-    const complete = isComplete(this.output);
-    if (complete) { return ''; }
-    if (this.output.summary.trim().length > 0) {
-      return '使用基础模板生成,内容可能不完整';
+  private hasReadableOutput(): boolean {
+    return this.output !== null && hasDisplayableDeepReadOutput(this.output);
+  }
+
+  private applyWorkspaceStatus(status: DeepReadArtifactStatus | null): void {
+    const messages: string[] = [];
+    if (status?.error !== null && status?.error !== undefined) {
+      messages.push('文章已保留，工作区保存未完成：' + status.error);
     }
-    return '';
+    if (status?.statusError !== null && status?.statusError !== undefined) {
+      messages.push('保存状态记录失败：' + status.statusError);
+    }
+    this.workspaceError = messages.join('；');
+  }
+
+  private async refreshWorkspaceStatus(token: number): Promise<void> {
+    const request: number = ++this.workspaceRequest;
+    try {
+      const status: DeepReadArtifactStatus | null = await getDeepReadArtifactStore().getStatus(this.topicId);
+      if (this.pageAlive && token === this.pageToken && request === this.workspaceRequest) {
+        this.applyWorkspaceStatus(status);
+      }
+    } catch (error) {
+      if (this.pageAlive && token === this.pageToken && request === this.workspaceRequest) {
+        this.workspaceError = '无法读取工作区保存状态：' + String(error);
+      }
+    }
+  }
+
+  private async retryWorkspaceSave(): Promise<void> {
+    if (this.workspaceSaving || this.running) return;
+    this.workspaceSaving = true;
+    const token: number = this.pageToken;
+    const request: number = ++this.workspaceRequest;
+    this.workspaceSaveOwner = request;
+    try {
+      const status: DeepReadArtifactStatus = await getDeepReadArtifactStore().save(this.topicId);
+      if (!this.pageAlive || token !== this.pageToken || request !== this.workspaceRequest) return;
+      this.applyWorkspaceStatus(status);
+      if (this.workspaceError.length === 0) promptAction.showToast({ message: '已保存到工作区', duration: 1400 });
+    } catch (error) {
+      if (this.pageAlive && token === this.pageToken && request === this.workspaceRequest) {
+        this.workspaceError = String(error);
+      }
+    } finally {
+      if (this.pageAlive && this.workspaceSaveOwner === request) this.workspaceSaving = false;
+    }
+  }
+
+  private retryGeneration(): void {
+    if (this.output !== null && firstFailedStage(this.output) !== null) {
+      this.retryFirstFailure();
+    } else if (this.output !== null && !isComplete(this.output)) {
+      this.continueGeneration();
+    } else {
+      this.generateArticle();
+    }
+  }
+
+  private visibleError(): string {
+    return this.errorMsg.length > 0 ? this.errorMsg : this.partialError();
+  }
+
+  private continuationNotice(): string {
+    if (!this.hasReadableOutput()) return this.cancelled ? '已取消，可重新开始' : '上次生成未完成，可重新开始';
+    return this.cancelled ? '生成已取消，已保存的进度仍可用' : '文章尚未完成，已保存的进度仍可用';
+  }
+
+  @Builder
+  RecoveryPanel(): void {
+    Column() {
+      if (this.workspaceError.length > 0 && !this.running) {
+        Row() {
+          Text(this.workspaceError)
+            .fontSize(META).fontColor(ERROR).layoutWeight(1)
+            .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.workspaceSaving ? '保存中' : '重试保存').fontSize(META).fontColor(INK)
+            .constraintSize({ minHeight: 44 }).padding({ left: 12, right: 12 })
+            .onClick((): void => { this.retryWorkspaceSave(); })
+        }.width('100%').alignItems(VerticalAlign.Center)
+      }
+      if (this.webRenderError.length > 0 && this.isWebTemplate()) {
+        Row() {
+          Text(this.webRenderError).fontSize(META).fontColor(ERROR).layoutWeight(1)
+            .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text('原生阅读').fontSize(META).fontColor(INK).constraintSize({ minHeight: 44 })
+            .padding({ left: 12, right: 12 }).onClick((): void => { this.switchToNativeReading(); })
+        }.width('100%').alignItems(VerticalAlign.Center)
+      }
+      if (this.running) {
+        Row() {
+          LoadingProgress().width(24).height(24).color(ACCENT).margin({ right: 10 })
+          Text(this.output !== null && isComplete(this.output)
+            ? '重新生成中，原文章已保留' : this.output?.generationPhase === 'IDLE'
+              ? '准备中' : `${this.progress.label} ${this.progress.percent}%`)
+            .fontSize(META).fontColor(INK2).layoutWeight(1)
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text('取消生成').fontSize(META).fontColor(ERROR).constraintSize({ minHeight: 44 })
+            .padding({ left: 12, right: 12 }).onClick((): void => { this.cancelGeneration(); })
+        }.width('100%').alignItems(VerticalAlign.Center)
+      } else {
+        if (this.awaitingContinue || (this.cancelled && this.output !== null && !isComplete(this.output))) {
+          Text(this.continuationNotice())
+            .fontSize(META).fontColor(INK3).width('100%').margin({ bottom: 4 })
+          Row() {
+            Text('继续生成').fontSize(BODY2).fontColor(INK).constraintSize({ minHeight: 44 })
+              .padding({ left: 12, right: 12 }).onClick((): void => { this.continueGeneration(); })
+            Blank()
+          }.width('100%')
+        }
+        if (this.visibleError().length > 0 && !this.cancelled) {
+          Row() {
+            Text(this.visibleError()).fontSize(META).fontColor(ERROR).layoutWeight(1)
+              .maxLines(4).textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(this.output !== null && firstFailedStage(this.output) !== null ? '重试此节' : '重试')
+              .fontSize(META).fontColor(INK).constraintSize({ minHeight: 44 })
+              .padding({ left: 12, right: 12 }).onClick((): void => { this.retryGeneration(); })
+          }.width('100%').alignItems(VerticalAlign.Center)
+        } else if (this.basicDraftNotice().length > 0) {
+          Row() {
+            Text(this.basicDraftNotice()).fontSize(META).fontColor(INK3).layoutWeight(1)
+            Text('继续生成').fontSize(META).fontColor(INK).constraintSize({ minHeight: 44 })
+              .padding({ left: 12, right: 12 }).onClick((): void => { this.continueGeneration(); })
+          }.width('100%')
+        }
+        if (this.output !== null) {
+          Row() {
+            if (this.historyExpired) {
+              Text('内容已过 24 小时').fontSize(META).fontColor(INK3).layoutWeight(1)
+            } else {
+              Text(this.currentStage).fontSize(META).fontColor(INK3).layoutWeight(1)
+            }
+            if (isComplete(this.output) && this.workspaceError.length === 0) {
+              Text(this.workspaceSaving ? '保存中' : '保存到工作区').fontSize(META).fontColor(INK)
+                .constraintSize({ minHeight: 44 }).padding({ left: 10, right: 10 })
+                .onClick((): void => { this.retryWorkspaceSave(); })
+            }
+            Text('重新生成').fontSize(META).fontColor(INK).constraintSize({ minHeight: 44 })
+              .padding({ left: 12, right: 12 }).onClick((): void => { this.showRegenerateDialog = true; })
+          }.width('100%').alignItems(VerticalAlign.Center)
+        }
+      }
+    }.width('100%').alignItems(HorizontalAlign.Start)
+      .padding({ left: 20, right: 12, top: 4, bottom: 4 }).backgroundColor(SURFACE2)
+  }
+
+  @Builder
+  TemplateWeb(session: number, epoch: number): void {
+    Web({ src: 'about:blank', controller: this.webController })
+      .width('100%').layoutWeight(1).backgroundColor(BG)
+      .javaScriptAccess(false).fileAccess(false).domStorageAccess(false).multiWindowAccess(false)
+      .onControllerAttached((): void => { this.attachTemplateWeb(session, epoch); })
+      .onPageEnd((event: OnPageEndEvent): void => { this.onTemplatePageEnd(event.url, session, epoch); })
+      .onErrorReceive((event: OnErrorReceiveEvent): void => {
+        this.onTemplateError(event.request.isMainFrame(), session, epoch);
+      })
+      .onDisAppear((): void => { this.detachTemplateWeb(session, epoch); })
+      .onOverrideUrlLoading((request: WebResourceRequest): boolean => this.handleWebNavigation(request))
   }
 
   build(): void {
     Stack() {
-      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
-      ForEach([this.themeEpoch], (_e: number): void => {
-      Column() {
-        // ── 顶栏:返回 + 标题(衬线) + 字号缩放按钮 ──
-        Row() {
-          Icon({ name: 'back', iconSize: 20, color: INK3 })
-            .onClick((): void => { this.handleBack(); })
-          Text('深度阅读').fontSize(18).fontWeight(FontWeight.Bold).fontColor(INK)
-            .fontFamily(FONT_SERIF).margin({ left: 12 }).layoutWeight(1)
-
-          // G5-S1:字号缩放按钮(zoom out / zoom in)
+      // Epoch remount ensures every child consumes the current theme tokens.
+      ForEach([this.themeEpoch], (_epoch: number): void => {
+        Column() {
           Row() {
-            Text('A-').fontSize(13).fontColor(INK3)
-              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-              .onClick((): void => { this.zoomOut(); })
-            Text('A+').fontSize(15).fontColor(INK3)
-              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-              .onClick((): void => { this.zoomIn(); })
-          }
-          .borderRadius(8)
-          .backgroundColor(SURFACE2)
-        }
-        .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
-        .backgroundColor(BG)
-
-        // ── 内容区 ──
-        if (!this.confirmed) {
-          // 首用确认页(Android DeepReadConfirmation)
-          Column() {
-            Blank()
-            Column() {
-              Text('深度阅读').fontSize(TITLE).fontWeight(FontWeight.Medium)
-                .fontFamily(FONT_SERIF).fontColor(INK)
-              Text('将围绕该话题收集资料并生成一篇深度文章')
-                .fontSize(BODY2).fontColor(INK2).margin({ top: 10 })
-                .textAlign(TextAlign.Center)
-              Text('深度阅读会消耗更多 tokens')
-                .fontSize(LABEL).fontColor(INK3).margin({ top: 6 })
-              Text('开始使用').fontSize(BODY).fontColor(ACCENT)
-                .padding({ left: 28, right: 28, top: 12, bottom: 12 })
-                .margin({ top: 24 })
-                .onClick((): void => {
-                  getChatKvStore().put('deepread_first_use_confirmed', 'true')
-                    .then((): void => {
-                      this.confirmed = true;
-                      this.loadArticle(++this.pageToken, false).catch((): void => {});
-                    });
-                })
-            }
-            .alignItems(HorizontalAlign.Center)
-            .width('86%')
-            .padding({ top: 32, bottom: 32 })
-            .backgroundColor(SURFACE)
-            .borderRadius(16)
-            Blank()
-          }.width('100%').layoutWeight(1)
-        } else if (this.running) {
-          // G5-S1:生成中 — RunningStageNotice(百分比胶囊 + 阶段)
-          Column() {
-            LoadingProgress().width(40).height(40).color(ACCENT)
             Row() {
-              Text(`${this.progress.label} ${this.progress.percent}%`)
-                .fontSize(META)
-                .fontColor(INK2)
+              Icon({ name: 'back', iconSize: 20, color: INK3 })
+            }.width(44).height(44).justifyContent(FlexAlign.Center)
+              .onClick((): void => { this.handleBack(); })
+            Text('深度阅读').fontSize(18).fontWeight(FontWeight.Bold).fontColor(INK)
+              .fontFamily(FONT_SERIF).margin({ left: 4 }).layoutWeight(1)
+            if ((this.output?.inputSources?.length ?? 0) > 0) {
+              Text('资料').fontSize(META).fontColor(INK).width(44).height(44).textAlign(TextAlign.Center)
+                .onClick((): void => { router.pushUrl({ url: 'pages/DeepReadSourcesPage', params: { topicId: this.topicId } }); })
             }
-            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-            .backgroundColor(SURFACE)
-            .borderRadius(50)
-            .margin({ top: 16 })
-            Text('取消生成')
-              .fontSize(BODY)
-              .fontColor(ERROR)
-              .height(40)
-              .padding({ left: 16, right: 16 })
-              .margin({ top: 12 })
-              .onClick((): void => { this.cancelGeneration(); })
-          }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-        } else if (this.awaitingContinue) {
-          // UI-F30:存在部分/取消缓存但无活动 run → 显式继续,不自动新建并 REPLACE
-          Column() {
-            Text('文章尚未完成').fontSize(TITLE).fontWeight(FontWeight.Medium).fontColor(INK).margin({ top: 12 })
-            Text('已保存的进度仍可用,是否继续生成?')
-              .fontSize(META).fontColor(INK3).margin({ top: 8 })
-            Text('继续生成').fontSize(BODY).fontColor(ACCENT)
-              .padding({ left: 28, right: 28, top: 12, bottom: 12 })
-              .margin({ top: 20 })
-              .onClick((): void => { this.continueGeneration(); })
-            Text('重新生成').fontSize(BODY2).fontColor(INK3)
-              .padding({ left: 20, right: 20, top: 8, bottom: 8 })
-              .margin({ top: 10 })
-              .onClick((): void => { this.showRegenerateDialog = true; })
-          }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-        } else if (this.errorMsg.length > 0 && this.output === null) {
-          // 首次生成失败或显式取消,保留明确重试入口
-          Column() {
-            Text(this.cancelled ? '生成已取消' : '生成失败')
-              .fontSize(TITLE).fontWeight(FontWeight.Medium).fontColor(INK2).margin({ top: 12 })
-            Text(this.errorMsg).fontSize(META).fontColor(INK3).margin({ top: 6 })
-            Text('重试').fontSize(BODY).fontColor(ACCENT).margin({ top: 16 })
-              .onClick((): void => { this.generateArticle(); })
-          }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-        } else if (this.output !== null && this.isWebTemplate()) {
-          // P8:模板渲染路径(editorial_slant/custom_* → WebView;Web 组件 full-size)
-          Column() {
-            Web({ src: 'about:blank', controller: this.webController })
-              .width('100%').layoutWeight(1)
-              .backgroundColor(BG)
-              .javaScriptAccess(false)
-              .onControllerAttached((): void => {
-                // data: URL 带 '#' 色值会白屏 → loadData + 官方空格兜底参数
-                this.webAttached = true;
-                this.loadTemplateHtml();
-              })
+            if (this.output !== null && this.hasReadableOutput() && !this.running) {
+              Text('导出').fontSize(META).fontColor(INK).width(44).height(44)
+                .textAlign(TextAlign.Center).onClick((): void => { this.openExport(); })
+            }
+            Row() {
+              Text('A-').fontSize(13).fontColor(this.fontScale <= FONT_SCALE_MIN ? INK3 : INK)
+                .width(44).height(44).textAlign(TextAlign.Center)
+                .onClick((): void => { this.zoomOut(); })
+              Text('A+').fontSize(15).fontColor(this.fontScale >= FONT_SCALE_MAX ? INK3 : INK)
+                .width(44).height(44).textAlign(TextAlign.Center)
+                .onClick((): void => { this.zoomIn(); })
+            }.borderRadius(8).backgroundColor(SURFACE2)
+          }.width('100%').padding({ left: 8, right: 12, top: this.statusBarHeight + 2, bottom: 8 })
+            .backgroundColor(BG)
+          if (this.output !== null) {
+            Text('本篇版式：' + this.templateName + (this.nativeReadingOverride ? ' · 当前使用原生阅读' : ''))
+              .fontSize(META).fontColor(INK3).width('100%').padding({ left: 20, right: 20, bottom: 8 })
+            if (this.templateMessage.length > 0) {
+              Text(this.templateMessage).fontSize(META).fontColor(INK3).width('100%')
+                .padding({ left: 20, right: 20, bottom: 8 })
+            }
           }
-          .width('100%').layoutWeight(1)
-        } else if (this.output !== null) {
-          // DeepReadOutput 统一组装为 Markdown,复用聊天侧原生 MarkdownText
-          // DeepReadOutput 结构化杂志帧(对齐 Android DeepReadArticle 版式)
-          Scroll() {
+          if (!this.confirmed) {
             Column() {
-              // ── Hero 图(有图先出图) ──
-              if (this.heroImageUrl() !== null) {
-                Image(this.heroImageUrl() as string)
-                  .width('100%').height(220)
-                  .objectFit(ImageFit.Cover)
-                  .borderRadius(14).clip(true)
-                  .margin({ top: 10 })
-              }
-              // eyebrow 行:DEEP READ + N SOURCES(Android TextOnlyHero)
-              Row() {
-                Text('DEEP READ')
-                  .fontSize(11).letterSpacing(3.2)
-                  .fontFamily(FONT_MONO_SEMIBOLD)
-                  .fontColor(ACCENT)
-                Blank()
-                Text(this.sourceCountLabel(this.output))
-                  .fontSize(11).letterSpacing(2.6)
-                  .fontFamily(FONT_MONO_SEMIBOLD)
-                  .fontColor(INK4)
-              }
-              .width('100%')
-              .margin({ top: this.heroImageUrl() !== null ? 20 : 12 })
-              Column().width(126).height(1).backgroundColor(LINE).margin({ top: 16 })
-              // 主题 kicker + 衬线大标题 + 阶段
-              Text(this.output.topicType.toUpperCase())
-                .fontSize(11).letterSpacing(3)
-                .fontFamily(FONT_SANS_MEDIUM)
-                .fontColor(INK3)
-                .margin({ top: 20 })
-              Text(this.title)
-                .fontSize(30 * this.fontScale).fontColor(INK)
-                .fontFamily(FONT_SERIF)
-                .lineHeight(42 * this.fontScale).maxLines(3)
-                .width('100%')
-                .margin({ top: 14 })
-              Row() {
-                Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-                Text(' ' + this.currentStage).fontSize(META).fontColor(INK3)
-              }
-              .width('100%').margin({ top: 10 })
-              if (this.fromHistory && this.historyExpired) {
-                Text('内容已过 24 小时，可能需要重新生成')
-                  .fontSize(META).fontColor(INK3)
-                  .width('100%').textAlign(TextAlign.Center)
-                  .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                  .backgroundColor(SURFACE2)
-                  .borderRadius(50)
-                  .margin({ top: 10 })
-              }
-              if (this.cancelled) {
-                Row() {
-                  Text(this.errorMsg.length > 0 ? this.errorMsg : '生成已取消')
-                    .fontSize(META)
-                    .fontColor(ERROR)
-                    .layoutWeight(1)
-                  Text('重试')
-                    .fontSize(META)
-                    .fontColor(ACCENT)
-                    .padding({ left: 12, right: 12, top: 4, bottom: 4 })
-                    .onClick((): void => { this.generateArticle(); })
-                }
-                .width('100%')
-                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                .backgroundColor(SURFACE2)
-                .borderRadius(8)
-                .margin({ top: 12 })
-              }
-              if (this.partialError().length > 0) {
-                this.PartialErrorNotice(this.partialError())
-              }
-              if (this.basicDraftNotice().length > 0) {
-                // 基础稿提示(Android "基础稿，可继续增强")
-                Text('基础稿，可继续增强')
-                  .fontSize(META).fontColor(INK3)
-                  .width('100%')
-                  .padding({ top: 8, bottom: 4 })
-              }
-              if (this.templateFallbackMessage().length > 0) {
-                this.TemplateFallbackNotice(this.templateFallbackMessage())
-              }
-              // ── 概览(lead 段落,17pt 衬线 1.8 倍行高) ──
-              if (this.output.summary.trim().length > 0) {
-                MarkdownText({
-                  content: this.output.summary,
-                  fontSize: 17 * this.fontScale,
-                  fontColor: INK,
-                  readingMode: true,
-                  lineHeightScale: 1.8,
-                })
-                  .margin({ top: 22 })
-              }
-              // ── 关键实体 pills ──
-              if (this.output.keyEntities.length > 0) {
-                Flex({ wrap: FlexWrap.Wrap }) {
-                  ForEach(this.output.keyEntities, (e: string): void => {
-                    Text(e)
-                      .fontSize(12).fontColor(ACCENT)
-                      .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                      .backgroundColor(ACCENT_LIGHT).borderRadius(999)
-                      .margin({ right: 8, bottom: 8 })
-                  }, (e: string): string => `ke-${e}`)
-                }
-                .margin({ top: 18 })
-              }
-              this.TimelineSection(this.output)
-              this.CorePointsSection(this.output)
-              this.AnalysisSection(this.output)
-              this.ReadingSection(this.output)
-              this.ReferencesSection(this.output)
-              if (this.inlineImageAssets().length > 0) {
-                ForEach(this.inlineImageAssets(), (asset: DeepReadImageAsset) => {
-                  Column() {
-                    Image(asset.url)
-                      .width('100%').height(180)
-                      .objectFit(ImageFit.Cover)
-                      .borderRadius(14).clip(true)
-                    if (asset.caption !== null && asset.caption.trim().length > 0) {
-                      Text(asset.caption).fontSize(META).fontColor(INK3).margin({ top: 4 })
-                    }
-                  }
-                  .width('100%').margin({ top: 14 })
-                }, (asset: DeepReadImageAsset): string => `img-${asset.url}`)
-              }
-              if (this.output.diagram !== null) {
-                Column() {
-                  Text('图解').fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK)
-                  MarkdownText({
-                    content: this.diagramCode(),
-                    fontSize: META,
-                    fontColor: INK3,
+              Blank()
+              Column() {
+                Text('深度阅读').fontSize(TITLE).fontFamily(FONT_SERIF).fontColor(INK)
+                Text('将围绕该话题收集资料并生成一篇深度文章')
+                  .fontSize(BODY2).fontColor(INK2).margin({ top: 10 }).textAlign(TextAlign.Center)
+                Text('深度阅读会消耗更多 tokens').fontSize(LABEL).fontColor(INK3).margin({ top: 6 })
+                Text('开始使用').fontSize(BODY).fontColor(ACCENT).constraintSize({ minHeight: 44 })
+                  .padding({ left: 28, right: 28 }).margin({ top: 24 })
+                  .onClick((): void => {
+                    getChatKvStore().put('deepread_first_use_confirmed', 'true').then((): void => {
+                      if (!this.pageAlive) return;
+                      this.confirmed = true;
+                      const token: number = ++this.pageToken;
+                      this.loadArticle(token, false).catch((error: Error): void => {
+                        if (!this.pageAlive || token !== this.pageToken) return;
+                        this.errorMsg = error.message;
+                        this.running = false;
+                      });
+                    }).catch((error: Error): void => {
+                      if (this.pageAlive) promptAction.showToast({ message: error.message });
+                    });
                   })
-                }
-                .width('100%').margin({ top: 14 })
-              }
-              Row() {
-                Text('重新生成').fontSize(BODY).fontColor(ACCENT)
-              }
-              .width('100%')
-              .height(48)
-              .justifyContent(FlexAlign.Center)
-              .margin({ top: 24, bottom: 40 })
-              .onClick((): void => { this.showRegenerateDialog = true; })
+              }.alignItems(HorizontalAlign.Center).width('86%')
+                .padding({ left: 20, right: 20, top: 32, bottom: 32 })
+                .backgroundColor(SURFACE).borderRadius(16)
+              Blank()
+            }.width('100%').layoutWeight(1)
+          } else if (this.hasReadableOutput() && this.output !== null) {
+            this.RecoveryPanel()
+            if (this.isWebTemplate()) {
+              this.TemplateWeb(this.webSession, _epoch)
+            } else {
+              Scroll() {
+                DeepReadNativeArticleBody({ title: this.title, output: this.output,
+                  fontScale: this.fontScale, fontSerif: this.fontSerif,
+                  onOpenLink: (url: string): void => { this.openLink(url); } })
+              }.align(Alignment.TopStart).width('100%').layoutWeight(1).backgroundColor(BG)
             }
-            .width('100%').alignItems(HorizontalAlign.Start)
-            .padding({ left: 28, right: 28, top: 2, bottom: 11 })
+          } else {
+            Column() {
+              Blank()
+              Text(this.running ? '正在生成文章' : this.awaitingContinue ? '文章尚未完成'
+                : this.cancelled ? '生成已取消' : '生成失败')
+                .fontSize(TITLE).fontColor(INK2).width('100%').textAlign(TextAlign.Center)
+                .margin({ bottom: 20 })
+              this.RecoveryPanel()
+              Blank()
+            }.width('100%').layoutWeight(1)
           }
-        .align(Alignment.TopStart)
-          .layoutWeight(1)
-          .backgroundColor(BG)
+        }.width('100%').height('100%').backgroundColor(BG)
+          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+        DeepReadGoogleSearchHost({ topicId: this.topicId })
+        DeepReadConfirmationDialog({ show: this.showRegenerateDialog, dialogTitle: '重新生成?',
+          message: '新文章完整生成并保存后将替换当前文章，失败或取消会保留原文章',
+          confirmText: '重新生成', dismissText: '取消',
+          onConfirm: (): void => { this.showRegenerateDialog = false; this.generateArticle(); },
+          onDismiss: (): void => { this.showRegenerateDialog = false; } })
+        if (this.showExport) {
+          DeepReadExportPanel({ topicId: this.topicId, title: this.title,
+            fontScale: this.fontScale, fontSerif: this.fontSerif,
+            customTemplateHtml: this.output?.templateSnapshot?.html ?? '',
+            isActive: (): boolean => this.pageAlive && this.showExport,
+            onClose: (): void => { this.showExport = false; } })
         }
-      }
-      .width('100%').height('100%').backgroundColor(BG)
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-
-      // G5-S1:重新生成确认对话框(覆盖层)
-      DeepReadConfirmationDialog({
-        show: this.showRegenerateDialog,
-        dialogTitle: '重新生成?',
-        message: '重新生成将覆盖当前文章',
-        confirmText: '重新生成',
-        dismissText: '取消',
-        onConfirm: (): void => {
-          this.showRegenerateDialog = false;
-          this.generateArticle();
-        },
-        onDismiss: (): void => {
-          this.showRegenerateDialog = false;
-        },
-      })
-    
-      }, (e: number): string => `theme-${e}`)
-}
-      .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%')
-  }
-
-  // G5-S1:部分错误提示(对齐 Android DeepReadPartialErrorNotice:515-548)
-
-  // ===== 杂志分节(Android DeepReadScreen.kt 对齐;SectionKicker/时间轴/要点/分析/阅读) =====
-
-  // SectionKicker:中文宽字距眉标(labelMedium + ls 3.5 + muted)
-  @Builder
-  SectionKicker(label: string): void {
-    Text(label)
-      .fontSize(11)
-      .letterSpacing(3.5)
-      .fontFamily(FONT_SANS_MEDIUM)
-      .fontColor(INK3)
-      .width('100%')
-  }
-
-  // 时间轴:竖线 + 圆点标记 + 日期/事件(Android TimelineSection/TimelineMarker)
-  @Builder
-  TimelineSection(o: DeepReadOutput): void {
-    if (o.timeline !== null && o.timeline.length > 0) {
-      Column() {
-        this.SectionKicker('时间轴')
-        ForEach(o.timeline, (ev: TimelineEvent): void => {
-          Row() {
-            Stack() {
-              Column().width(1).height(54).backgroundColor(LINE2)
-              Circle({ width: ev.isHighlight ? 10 : 6, height: ev.isHighlight ? 10 : 6 })
-                .fill(ev.isHighlight ? ACCENT : LINE2)
-                .margin({ top: 7 })
-            }
-            .width(18)
-            .height(54)
-            .alignContent(Alignment.Top)
-            Column() {
-              Text(ev.date)
-                .fontSize(META).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
-              MarkdownText({
-                content: ev.event,
-                fontSize: 16 * this.fontScale,
-                fontColor: INK,
-                readingMode: true,
-                lineHeightScale: 1.6,
-              })
-                .margin({ top: 5 })
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-            .margin({ left: 14 })
-          }
-          .width('100%')
-          .alignItems(VerticalAlign.Top)
-          .margin({ top: 20 })
-        }, (ev: TimelineEvent): string => `tl-${ev.date}-${ev.event.substring(0, 12)}`)
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
-      .margin({ top: 44 })
-    }
-  }
-
-  // 核心要点:01 序号 + 衬线要点 + 支撑句(Android CorePointsSection)
-  @Builder
-  CorePointsSection(o: DeepReadOutput): void {
-    if (o.corePoints !== null && o.corePoints.length > 0) {
-      Column() {
-        this.SectionKicker(this.corePointsTitle(o))
-        ForEach(o.corePoints, (cp: CorePoint, idx: number): void => {
-          Row() {
-            Text(this.twoDigits(idx + 1))
-              .fontSize(META).letterSpacing(2)
-              .fontFamily(FONT_MONO_SEMIBOLD)
-              .fontColor(ACCENT)
-            Column() {
-              MarkdownText({
-                content: cp.point,
-                fontSize: 17 * this.fontScale,
-                fontColor: INK,
-                readingMode: true,
-                lineHeightScale: 1.55,
-              })
-              if (cp.supporting !== null && cp.supporting.trim().length > 0) {
-                MarkdownText({
-                  content: cp.supporting,
-                  fontSize: 13.5 * this.fontScale,
-                  fontColor: INK3,
-                  readingMode: true,
-                  lineHeightScale: 1.75,
-                })
-                  .margin({ top: 6 })
-              }
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-            .margin({ left: 14 })
-          }
-          .width('100%')
-          .alignItems(VerticalAlign.Top)
-          .margin({ top: 18 })
-        }, (cp: CorePoint, idx: number): string => `cp-${idx}`)
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
-      .margin({ top: 44 })
-    }
-  }
-
-  // 深度分析:核心分歧大字衬线 + 引述大引号 + 各方立场 + 影响(Android AnalysisSection)
-  @Builder
-  AnalysisSection(o: DeepReadOutput): void {
-    if ((o.analysis.coreDispute !== null && o.analysis.coreDispute.trim().length > 0) ||
-      o.analysis.perspectives.length > 0 ||
-      (o.analysis.implications !== null && o.analysis.implications.trim().length > 0) ||
-      o.analysis.quotes.length > 0) {
-      Column() {
-        this.SectionKicker('深度分析')
-        if (o.analysis.coreDispute !== null && o.analysis.coreDispute.trim().length > 0) {
-          MarkdownText({
-            content: o.analysis.coreDispute,
-            fontSize: 20 * this.fontScale,
-            fontColor: INK,
-            readingMode: true,
-            lineHeightScale: 1.5,
-          })
-            .margin({ top: 16 })
-        }
-        ForEach(o.analysis.quotes.slice(0, 2), (q: Quote): void => {
-          Row() {
-            Text('\u201C')
-              .fontSize(40).fontColor(ACCENT)
-              .fontFamily(FONT_SERIF)
-              .lineHeight(44)
-              .width(30)
-            Column() {
-              Text(q.text)
-                .fontSize(16 * this.fontScale)
-                .fontColor(INK2)
-                .fontFamily(FONT_SERIF)
-                .fontStyle(FontStyle.Italic)
-                .lineHeight(28 * this.fontScale)
-              if (q.attribution !== null && q.attribution.trim().length > 0) {
-                Text('\u2014 ' + q.attribution)
-                  .fontSize(META)
-                  .fontColor(INK4)
-                  .margin({ top: 8 })
-              }
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-          }
-          .width('100%')
-          .alignItems(VerticalAlign.Top)
-          .margin({ top: 20 })
-        }, (q: Quote, idx: number): string => `q-${idx}`)
-        ForEach(o.analysis.perspectives, (ps: Perspective): void => {
-          Column() {
-            Text(ps.holder !== null ? ps.holder : '观点')
-              .fontSize(META).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
-            MarkdownText({
-              content: ps.viewpoint,
-              fontSize: 16 * this.fontScale,
-              fontColor: INK,
-              readingMode: true,
-              lineHeightScale: 1.65,
-            })
-              .margin({ top: 4 })
-          }
-          .width('100%')
-          .alignItems(HorizontalAlign.Start)
-          .margin({ top: 14 })
-        }, (ps: Perspective, idx: number): string => `ps-${idx}`)
-        if (o.analysis.implications !== null && o.analysis.implications.trim().length > 0) {
-          MarkdownText({
-            content: o.analysis.implications,
-            fontSize: 16 * this.fontScale,
-            fontColor: INK,
-            readingMode: true,
-            lineHeightScale: 1.65,
-          })
-            .margin({ top: 20 })
-        }
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
-      .margin({ top: 44 })
-    }
-  }
-
-  // 扩展阅读:01 序号 + 标题 + 来源,点击打开(Android ReadingSection)
-  @Builder
-  ReadingSection(o: DeepReadOutput): void {
-    if (o.extendedReading.length > 0) {
-      Column() {
-        this.SectionKicker('扩展阅读')
-        ForEach(o.extendedReading.slice(0, 8), (l: ReadingLink, idx: number): void => {
-          Row() {
-            Text(this.twoDigits(idx + 1))
-              .fontSize(11).letterSpacing(1.5)
-              .fontFamily(FONT_MONO_SEMIBOLD)
-              .fontColor(ACCENT)
-            Column() {
-              Text(l.title)
-                .fontSize(13.5).fontColor(INK)
-                .fontFamily(FONT_SERIF)
-                .lineHeight(20)
-              if (l.source !== null && l.source.length > 0) {
-                Text(l.source)
-                  .fontSize(11).fontColor(INK4)
-                  .margin({ top: 3 })
-              }
-            }
-            .layoutWeight(1)
-            .alignItems(HorizontalAlign.Start)
-            .margin({ left: 10 })
-          }
-          .width('100%')
-          .alignItems(VerticalAlign.Top)
-          .padding({ top: 10, bottom: 10 })
-          .onClick((): void => { this.openLink(l.url); })
-        }, (l: ReadingLink): string => `er-${l.url}`)
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
-      .margin({ top: 44 })
-    }
-  }
-
-  // 参考来源:小号编号列表
-  @Builder
-  ReferencesSection(o: DeepReadOutput): void {
-    if (o.references.length > 0) {
-      Column() {
-        this.SectionKicker('参考来源')
-        ForEach(o.references, (r: ReadingLink, idx: number): void => {
-          Row() {
-            Text(this.twoDigits(idx + 1))
-              .fontSize(11).letterSpacing(1.5)
-              .fontFamily(FONT_MONO_SEMIBOLD)
-              .fontColor(INK4)
-            Text(r.title)
-              .fontSize(META).fontColor(INK3)
-              .fontFamily(FONT_SERIF)
-              .lineHeight(18)
-              .layoutWeight(1)
-              .margin({ left: 10 })
-          }
-          .width('100%')
-          .alignItems(VerticalAlign.Top)
-          .margin({ top: 8 })
-          .onClick((): void => { this.openLink(r.url); })
-        }, (r: ReadingLink): string => `ref-${r.url}`)
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
-      .margin({ top: 44 })
-    }
-  }
-
-  @Builder
-  PartialErrorNotice(errText: string): void {
-    Row() {
-      Text(errText.length > 0 ? errText : '后续段落生成中断,已保留已写出的内容')
-        .fontSize(META)
-        .fontColor('#7A1F1A')
-        .layoutWeight(1)
-        .maxLines(2)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-      Text('重试')
-        .fontSize(META)
-        .fontColor(ACCENT)
-        .padding({ left: 12, right: 12, top: 4, bottom: 4 })
-        .onClick((): void => { this.generateArticle(); })
-    }
-    .width('100%')
-    .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-    .backgroundColor('#FBE9E7')
-    .borderRadius(22)
-    .margin({ top: 12, bottom: 8 })
-  }
-
-  // G5-S1:模板降级提示(对齐 Android TemplateFallbackNotice:551-564)
-  @Builder
-  TemplateFallbackNotice(msg: string): void {
-    Row() {
-      Text(msg)
-        .fontSize(META)
-        .fontColor('#7A1F1A')
-    }
-    .padding({ left: 12, right: 12, top: 7, bottom: 7 })
-    .backgroundColor('#FBE9E7')
-    .borderRadius(50)
-    .margin({ top: 12, bottom: 8 })
+      }, (epoch: number): string => `theme-${epoch}`)
+    }.width('100%').height('100%')
   }
 }

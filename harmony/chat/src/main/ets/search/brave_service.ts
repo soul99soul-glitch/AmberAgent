@@ -1,6 +1,7 @@
 // brave_service — Brave 搜索(D-068b)
 // Android 基准: search/.../BraveSearchService.kt(全文 142 行)
 // 偏差登记:okhttp response.message 无 Port 对应 → 尾空串;Log.i 不移植(宪章隐私)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -28,6 +29,7 @@ export const braveSearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: BraveOptions = asOptions(serviceOptions);
     const query: string = requireQuery(params);
@@ -40,7 +42,7 @@ export const braveSearchService: SearchService = {
         'Accept': 'application/json',
         'X-Subscription-Token': opts.apiKey,
       },
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`Brave search failed with code ${resp.status}: `);
     }

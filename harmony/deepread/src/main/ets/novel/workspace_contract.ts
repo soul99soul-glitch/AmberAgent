@@ -14,6 +14,8 @@ export interface NovelWorkspaceManifest {
   activeBranch: string;
   createdAt: number;
   updatedAt: number;
+  mainBranch?: string;
+  dialect?: 'harmony' | 'ios';
 }
 
 const yamlString = (value: string): string => JSON.stringify(value);
@@ -48,35 +50,68 @@ const finiteInt = (value: string, name: string): number => {
   return parsed;
 };
 
-export const parseNovelWorkspaceManifest = (raw: string): NovelWorkspaceManifest => {
+export const parseNovelWorkspaceMapping = (raw: string): Map<string, string> => {
   const values: Map<string, string> = new Map<string, string>();
-  const lines: string[] = raw.replace(/\r\n/g, '\n').split('\n');
-  for (let i: number = 0; i < lines.length; i++) {
-    const line: string = lines[i].trim();
+  let parent: string = '';
+  for (const original of raw.replace(/\r\n/g, '\n').split('\n')) {
+    const line: string = original.trim();
     if (line.length === 0 || line.startsWith('#')) continue;
+    if (line.startsWith('- ')) continue; // Markdown alias/extension lists remain verbatim in passthrough.
     const colon: number = line.indexOf(':');
-    if (colon <= 0) throw invalidInput('manifest YAML 格式无效');
-    const key: string = line.slice(0, colon).trim();
-    if (values.has(key)) throw invalidInput(`manifest 重复字段: ${key}`);
-    values.set(key, line.slice(colon + 1));
+    if (colon <= 0) throw invalidInput('工作区 YAML 格式无效');
+    const leaf: string = line.slice(0, colon).trim();
+    const source: string = line.slice(colon + 1).trim();
+    if (!original.startsWith(' ') && source.length === 0) { parent = leaf; continue; }
+    const key: string = original.startsWith(' ') && parent.length > 0 ? `${parent}.${leaf}` : leaf;
+    if (!original.startsWith(' ')) parent = '';
+    if (values.has(key)) throw invalidInput(`工作区重复字段: ${key}`);
+    values.set(key, scalar(source));
   }
+  return values;
+};
+
+export const parseNovelWorkspaceManifest = (raw: string, projectMarkdown: string = ''): NovelWorkspaceManifest => {
+  const values: Map<string, string> = parseNovelWorkspaceMapping(raw);
   const required = (key: string): string => {
     const value: string | undefined = values.get(key);
-    if (value === undefined || value.trim().length === 0) {
-      throw invalidInput(`manifest 缺少字段: ${key}`);
-    }
+    if (value === undefined || value.trim().length === 0) throw invalidInput(`manifest 缺少字段: ${key}`);
     return value;
   };
+  const ios: boolean = values.has('formatVersion');
+  if (ios && values.has('version') && required('formatVersion') !== required('version')) {
+    throw invalidInput('manifest 版本字段冲突');
+  }
+  const projectId: string = ios ? values.get('source.projectID') ?? required('projectID') : required('project_id');
+  if (values.has('project_id') && required('project_id') !== projectId) throw invalidInput('manifest 项目标识冲突');
+  if (values.has('projectID') && required('projectID') !== projectId) throw invalidInput('manifest 项目标识冲突');
+  let projectTitle: string = '';
+  if (projectMarkdown.startsWith('---\n')) {
+    const end: number = projectMarkdown.indexOf('\n---', 4);
+    if (end > 0) projectTitle = parseNovelWorkspaceMapping(projectMarkdown.slice(4, end)).get('title') ?? '';
+  }
+  const activeBranch: string = ios ? values.get('activeBranch') ?? required('mainBranch') : required('active_branch');
   const manifest: NovelWorkspaceManifest = {
-    format: scalar(required('format')),
-    version: finiteInt(required('version'), 'version'),
-    projectId: scalar(required('project_id')),
-    title: scalar(required('title')),
-    activeBranch: scalar(required('active_branch')),
+    format: required('format'),
+    version: finiteInt(required(ios ? 'formatVersion' : 'version'), 'version'),
+    projectId,
+    title: values.get('title') ?? (projectTitle || (ios ? projectId : required('title'))),
+    activeBranch,
     createdAt: values.has('created_at') ? finiteInt(required('created_at'), 'created_at') : 0,
     updatedAt: values.has('updated_at') ? finiteInt(required('updated_at'), 'updated_at') : 0,
   };
+  if (ios) { manifest.mainBranch = required('mainBranch'); manifest.dialect = 'ios'; }
   return validateManifest(manifest);
+};
+
+export const serializeNovelWorkspacePublicManifest = (manifest: NovelWorkspaceManifest): string => {
+  validateManifest(manifest);
+  return [
+    `format: ${yamlString(manifest.format)}`, 'formatVersion: 1',
+    `mainBranch: ${yamlString(manifest.mainBranch ?? manifest.activeBranch)}`,
+    `activeBranch: ${yamlString(manifest.activeBranch)}`,
+    `title: ${yamlString(manifest.title)}`, `created_at: ${manifest.createdAt}`, `updated_at: ${manifest.updatedAt}`,
+    'source:', `  projectID: ${yamlString(manifest.projectId)}`, '',
+  ].join('\n');
 };
 
 const validateManifest = (manifest: NovelWorkspaceManifest): NovelWorkspaceManifest => {
@@ -89,6 +124,7 @@ const validateManifest = (manifest: NovelWorkspaceManifest): NovelWorkspaceManif
   }
   validateNovelWorkspaceSegment(manifest.projectId, 'project_id');
   validateNovelWorkspaceSegment(manifest.activeBranch, 'active_branch');
+  if (manifest.mainBranch !== undefined) validateNovelWorkspaceSegment(manifest.mainBranch, 'mainBranch');
   return manifest;
 };
 

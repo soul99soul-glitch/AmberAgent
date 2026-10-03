@@ -11,6 +11,7 @@ export struct NovelSettingProposalCard {
   @Prop title: string = '';
   @Prop content: string = '';
   @Prop kindLabel: string = '设定提案';
+  @Prop status: string = 'pending';
   onResolve: (accepted: boolean) => void = (_accepted: boolean): void => {};
 
   @Builder
@@ -45,7 +46,10 @@ export struct NovelSettingProposalCard {
         iconName: 'ph_lightbulb',
         title: this.title.length > 0 ? this.title : '待确认设定',
         subtitle: this.kindLabel,
-        showActions: true,
+        statusLabel: this.status === 'accepted' ? '已采用' : this.status === 'rejected' ? '已忽略' : '待确认',
+        statusIcon: this.status === 'accepted' ? 'check' : this.status === 'rejected' ? 'ban' : 'info',
+        statusTone: this.status === 'accepted' ? 'success' : 'muted',
+        showActions: this.status === 'pending',
         content: (): void => { this.Body(); },
         actions: (): void => { this.Actions(); },
       })

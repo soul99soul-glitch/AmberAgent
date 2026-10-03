@@ -1,0 +1,386 @@
+{
+  "scope": "P5 frozen production source and supplemental native caller files; no production mutation/build performed by reviewer",
+  "selectionEvidence": {
+    "p4Baseline": "docs/reviews/2026-10-03-standalone-completion/device/p4/final-artifact-fingerprints.json",
+    "p4BaselineModifiedAtUnix": 1790972005.2263,
+    "changedProductionSourceCount": 31,
+    "supplementalNativeCallerCount": 4
+  },
+  "buildEvidence": {
+    "log": "/tmp/amber-p5-card-final-build.log",
+    "sha256": "4055a319d054920ce2c520785050f255ddddec8a82a8225c297e68be63c7320e",
+    "successfulBuildCount": 2,
+    "signedVerifySuccessCount": 2
+  },
+  "sourceCount": 35,
+  "allCopiesMatch": true,
+  "discrepancies": [],
+  "sources": [
+    {
+      "path": "chat/src/main/ets/chat/novel_interactive_adapter.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "52f5cb9e0ca464cc5d8625cf815f5d2a4b262fae47903c22be622ca8240148d1",
+      "copies": {
+        "novel": "52f5cb9e0ca464cc5d8625cf815f5d2a4b262fae47903c22be622ca8240148d1",
+        "deepread": "52f5cb9e0ca464cc5d8625cf815f5d2a4b262fae47903c22be622ca8240148d1"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "chat/src/main/ets/chat/novel_response_resume.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "9fd89d5d46ae2ce3e635acf217996746a9d7edd7ec30aa33a606668b6cd8ce0f",
+      "copies": {
+        "novel": "9fd89d5d46ae2ce3e635acf217996746a9d7edd7ec30aa33a606668b6cd8ce0f",
+        "deepread": "9fd89d5d46ae2ce3e635acf217996746a9d7edd7ec30aa33a606668b6cd8ce0f"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "chat/src/main/ets/chat/novel_runtime_snapshot.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "2c436a15d1d3548417e1a9d27adb5d6a4dbcde8b7648a28b4f150bd1ecb52b82",
+      "copies": {
+        "novel": "2c436a15d1d3548417e1a9d27adb5d6a4dbcde8b7648a28b4f150bd1ecb52b82",
+        "deepread": "2c436a15d1d3548417e1a9d27adb5d6a4dbcde8b7648a28b4f150bd1ecb52b82"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "chat/src/main/ets/chat/openai_chat_api.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "5fcd19a9601baba6caf839a0c8a8b1698e5d418a0b0c55c37e6619de6cd29917",
+      "copies": {
+        "novel": "5fcd19a9601baba6caf839a0c8a8b1698e5d418a0b0c55c37e6619de6cd29917",
+        "deepread": "5fcd19a9601baba6caf839a0c8a8b1698e5d418a0b0c55c37e6619de6cd29917"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "chat/src/main/ets/chat/openai_responses_api.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "641de9b6bef51759982f954a33d6598d9eb5e9e95d3d53c312e88066333a5009",
+      "copies": {
+        "novel": "641de9b6bef51759982f954a33d6598d9eb5e9e95d3d53c312e88066333a5009",
+        "deepread": "641de9b6bef51759982f954a33d6598d9eb5e9e95d3d53c312e88066333a5009"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "chat/src/main/ets/chat/openai_responses_request.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "c2a01545286cea1d7fb3c4301c752814e0d782f037f9c4cc4e2c9cb08d373ff3",
+      "copies": {
+        "novel": "c2a01545286cea1d7fb3c4301c752814e0d782f037f9c4cc4e2c9cb08d373ff3",
+        "deepread": "c2a01545286cea1d7fb3c4301c752814e0d782f037f9c4cc4e2c9cb08d373ff3"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "chat/src/main/ets/index.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "e35bb99ac7553bdce11f988fcc063ddecec9e206dae721643993829bc88136ba",
+      "copies": {
+        "novel": "e35bb99ac7553bdce11f988fcc063ddecec9e206dae721643993829bc88136ba",
+        "deepread": "e35bb99ac7553bdce11f988fcc063ddecec9e206dae721643993829bc88136ba"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/index.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "b2ea07c48cee161cd9e61cedf7c97644cc3a7bf4bb90763da078abad204837a7",
+      "copies": {
+        "novel": "b2ea07c48cee161cd9e61cedf7c97644cc3a7bf4bb90763da078abad204837a7",
+        "deepread": "b2ea07c48cee161cd9e61cedf7c97644cc3a7bf4bb90763da078abad204837a7"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/novel/collected_candidates.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "019f640f374492c103cc22ba518ccc68823819e20f261ffaa3faa1e99742c1dd",
+      "copies": {
+        "novel": "019f640f374492c103cc22ba518ccc68823819e20f261ffaa3faa1e99742c1dd",
+        "deepread": "019f640f374492c103cc22ba518ccc68823819e20f261ffaa3faa1e99742c1dd"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/novel/creation.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "ffadcc83fa8899e411834cfd264589f48539e95eb6faf23462c9ab0b8898b7c2",
+      "copies": {
+        "novel": "ffadcc83fa8899e411834cfd264589f48539e95eb6faf23462c9ab0b8898b7c2",
+        "deepread": "ffadcc83fa8899e411834cfd264589f48539e95eb6faf23462c9ab0b8898b7c2"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/novel/model_running.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "29887b41f8172307502a3ac74b9eaed597c3773922b58f4f8535a1bb3a64deb9",
+      "copies": {
+        "novel": "29887b41f8172307502a3ac74b9eaed597c3773922b58f4f8535a1bb3a64deb9",
+        "deepread": "29887b41f8172307502a3ac74b9eaed597c3773922b58f4f8535a1bb3a64deb9"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/novel/models.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "8d0ee93c60832de635936a265a0fd06d72c7189025721bd6e5274d556be73ac8",
+      "copies": {
+        "novel": "8d0ee93c60832de635936a265a0fd06d72c7189025721bd6e5274d556be73ac8",
+        "deepread": "8d0ee93c60832de635936a265a0fd06d72c7189025721bd6e5274d556be73ac8"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/novel/native_backup_copy.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "4c31b8f7ab6a08d1d615bcdedc5b356a21efba50be4368662607cb19101471d7",
+      "copies": {
+        "novel": "4c31b8f7ab6a08d1d615bcdedc5b356a21efba50be4368662607cb19101471d7",
+        "deepread": "4c31b8f7ab6a08d1d615bcdedc5b356a21efba50be4368662607cb19101471d7"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/novel/ordinary_run.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "73c5a5cc9fadbde29e3659d95941e23f1d51d24257a55fd81ea67bb6a3bfb1f6",
+      "copies": {
+        "novel": "73c5a5cc9fadbde29e3659d95941e23f1d51d24257a55fd81ea67bb6a3bfb1f6",
+        "deepread": "73c5a5cc9fadbde29e3659d95941e23f1d51d24257a55fd81ea67bb6a3bfb1f6"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/novel/polish.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "e8bf71719098e1b5d87e948264f20465cc0ca78dafef5d093e25bcc78d45d966",
+      "copies": {
+        "novel": "e8bf71719098e1b5d87e948264f20465cc0ca78dafef5d093e25bcc78d45d966",
+        "deepread": "e8bf71719098e1b5d87e948264f20465cc0ca78dafef5d093e25bcc78d45d966"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/novel/polish_context.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "49e6cc57765c85ac5596acf664572555cb6b77178f5e988656f8154e79909dd3",
+      "copies": {
+        "novel": "49e6cc57765c85ac5596acf664572555cb6b77178f5e988656f8154e79909dd3",
+        "deepread": "49e6cc57765c85ac5596acf664572555cb6b77178f5e988656f8154e79909dd3"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/novel/polish_outcomes.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "29f123cfa19295caadd90e62b5b8859280ddbe7e327868f351dca4b344025cbf",
+      "copies": {
+        "novel": "29f123cfa19295caadd90e62b5b8859280ddbe7e327868f351dca4b344025cbf",
+        "deepread": "29f123cfa19295caadd90e62b5b8859280ddbe7e327868f351dca4b344025cbf"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/novel/polish_runner.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "4d528e379e34cb2344f64ee0ff7899b02fce83636ee8680780b6493deea1275d",
+      "copies": {
+        "novel": "4d528e379e34cb2344f64ee0ff7899b02fce83636ee8680780b6493deea1275d",
+        "deepread": "4d528e379e34cb2344f64ee0ff7899b02fce83636ee8680780b6493deea1275d"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/novel/repository.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "8bfb735d648353a618049ecadd0cff011371e774d8849653c16aecfea4ceb486",
+      "copies": {
+        "novel": "8bfb735d648353a618049ecadd0cff011371e774d8849653c16aecfea4ceb486",
+        "deepread": "8bfb735d648353a618049ecadd0cff011371e774d8849653c16aecfea4ceb486"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "deepread/src/main/ets/novel/workspace_interop.ts",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "5e158b31ba591b04c1e176ec3baf131b7f31ccc5a35e629151454490e82c5cf9",
+      "copies": {
+        "novel": "5e158b31ba591b04c1e176ec3baf131b7f31ccc5a35e629151454490e82c5cf9",
+        "deepread": "5e158b31ba591b04c1e176ec3baf131b7f31ccc5a35e629151454490e82c5cf9"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/components/NovelArchivePresentation.ets",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "443289f3d1ee8294eebb7a1e054700782cd554c2269df2d7b4002c270f64f90e",
+      "copies": {
+        "novel": "443289f3d1ee8294eebb7a1e054700782cd554c2269df2d7b4002c270f64f90e",
+        "deepread": "443289f3d1ee8294eebb7a1e054700782cd554c2269df2d7b4002c270f64f90e"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/components/NovelDiscussionArchiveCard.ets",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "b0c97b21c2aede6cca5a0fdc2e96c046aad445a2f7c8b2b325878c38702226c7",
+      "copies": {
+        "novel": "b0c97b21c2aede6cca5a0fdc2e96c046aad445a2f7c8b2b325878c38702226c7",
+        "deepread": "b0c97b21c2aede6cca5a0fdc2e96c046aad445a2f7c8b2b325878c38702226c7"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/components/NovelPolishCreateSheet.ets",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "2cfe4a7bb89f2b2fc49ff985b5d06203b94610a0889f4f9c0a12fb0a8b5d4df5",
+      "copies": {
+        "novel": "2cfe4a7bb89f2b2fc49ff985b5d06203b94610a0889f4f9c0a12fb0a8b5d4df5",
+        "deepread": "2cfe4a7bb89f2b2fc49ff985b5d06203b94610a0889f4f9c0a12fb0a8b5d4df5"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/components/NovelPolishJobCard.ets",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "6abee97c069d4d649c3dbf7161438b9d128a4b1dfbdff7b8aa7e192c2c4a4ffa",
+      "copies": {
+        "novel": "6abee97c069d4d649c3dbf7161438b9d128a4b1dfbdff7b8aa7e192c2c4a4ffa",
+        "deepread": "6abee97c069d4d649c3dbf7161438b9d128a4b1dfbdff7b8aa7e192c2c4a4ffa"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/components/NovelRunRecoveryCard.ets",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "5d524afcbaadc97099eb1f32fa1a8ba8686177292070141d4cb34186621e1c6b",
+      "copies": {
+        "novel": "5d524afcbaadc97099eb1f32fa1a8ba8686177292070141d4cb34186621e1c6b",
+        "deepread": "5d524afcbaadc97099eb1f32fa1a8ba8686177292070141d4cb34186621e1c6b"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/di/AppContainer.ets",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "34f07a6a4a29ae8fd03229b2a33688e4892d62e5cf68a0e24a55d3b23484d237",
+      "copies": {
+        "novel": "34f07a6a4a29ae8fd03229b2a33688e4892d62e5cf68a0e24a55d3b23484d237",
+        "deepread": "34f07a6a4a29ae8fd03229b2a33688e4892d62e5cf68a0e24a55d3b23484d237"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/pages/NovelPolishPage.ets",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "987851be48c4c4025cb5a83fde4d44130d2224f320925aa6f78bf057b1cf3a1c",
+      "copies": {
+        "novel": "987851be48c4c4025cb5a83fde4d44130d2224f320925aa6f78bf057b1cf3a1c",
+        "deepread": "987851be48c4c4025cb5a83fde4d44130d2224f320925aa6f78bf057b1cf3a1c"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/pages/NovelStandaloneSettingsPage.ets",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "ef13fa3fdc450e2ad8a4c5ecb2029368c10f7b1586d32ce0a21eab5a7ab2b803",
+      "copies": {
+        "novel": "ef13fa3fdc450e2ad8a4c5ecb2029368c10f7b1586d32ce0a21eab5a7ab2b803",
+        "deepread": "ef13fa3fdc450e2ad8a4c5ecb2029368c10f7b1586d32ce0a21eab5a7ab2b803"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/pages/NovelWorkspacePage.ets",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "427772aa6661fa71ac274e0bae4ab389728af5fb9e1c283ff4e81d1ecf390019",
+      "copies": {
+        "novel": "427772aa6661fa71ac274e0bae4ab389728af5fb9e1c283ff4e81d1ecf390019",
+        "deepread": "427772aa6661fa71ac274e0bae4ab389728af5fb9e1c283ff4e81d1ecf390019"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/platform_impl/BackgroundGenerationKeepAlive.ets",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "0dbcfe79188f542c4e8ee21e572f5629d4b5e7357032c082231d36421c64fe29",
+      "copies": {
+        "novel": "0dbcfe79188f542c4e8ee21e572f5629d4b5e7357032c082231d36421c64fe29",
+        "deepread": "0dbcfe79188f542c4e8ee21e572f5629d4b5e7357032c082231d36421c64fe29"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/platform_impl/NotificationNotifier.ets",
+      "selection": "supplementalP5NativeCallChain",
+      "sourceSha256": "ac313ca470dd92a86d5f24fe2264eda1adbb4a7c4b9aee3c71205ae267a9aff9",
+      "copies": {
+        "novel": "ac313ca470dd92a86d5f24fe2264eda1adbb4a7c4b9aee3c71205ae267a9aff9",
+        "deepread": "ac313ca470dd92a86d5f24fe2264eda1adbb4a7c4b9aee3c71205ae267a9aff9"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/platform_impl/NovelChatRunAdapter.ets",
+      "selection": "changedProductionSourceAfterP4Fingerprint",
+      "sourceSha256": "cd7c51c829df8a5d774ca671d5522e9e741ab8210dbb5dc8df7711a67405e52f",
+      "copies": {
+        "novel": "cd7c51c829df8a5d774ca671d5522e9e741ab8210dbb5dc8df7711a67405e52f",
+        "deepread": "cd7c51c829df8a5d774ca671d5522e9e741ab8210dbb5dc8df7711a67405e52f"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/platform_impl/NovelShareSupport.ets",
+      "selection": "supplementalP5NativeCallChain",
+      "sourceSha256": "a627089cd40cac53390ab9510d573a1e628661ed2070121494ae1f0dfa971a2e",
+      "copies": {
+        "novel": "a627089cd40cac53390ab9510d573a1e628661ed2070121494ae1f0dfa971a2e",
+        "deepread": "a627089cd40cac53390ab9510d573a1e628661ed2070121494ae1f0dfa971a2e"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/platform_impl/NovelWorkspaceService.ets",
+      "selection": "supplementalP5NativeCallChain",
+      "sourceSha256": "733791981ba2bc08c814e52c4432590ad3b12ba8a29ed6d882987b8dc00969df",
+      "copies": {
+        "novel": "733791981ba2bc08c814e52c4432590ad3b12ba8a29ed6d882987b8dc00969df",
+        "deepread": "733791981ba2bc08c814e52c4432590ad3b12ba8a29ed6d882987b8dc00969df"
+      },
+      "matchesBothProducts": true
+    },
+    {
+      "path": "entry/src/main/ets/works/NovelPolishWorkAbility.ets",
+      "selection": "supplementalP5NativeCallChain",
+      "sourceSha256": "ea3af8f3102b7e033c407d6f5ff7d92f0773a366aaed5260556230328f42a330",
+      "copies": {
+        "novel": "ea3af8f3102b7e033c407d6f5ff7d92f0773a366aaed5260556230328f42a330",
+        "deepread": "ea3af8f3102b7e033c407d6f5ff7d92f0773a366aaed5260556230328f42a330"
+      },
+      "matchesBothProducts": true
+    }
+  ],
+  "signedHaps": [
+    {
+      "product": "novel",
+      "hap": ".harmony-standalone/novel/entry/build/default/outputs/default/signed/entry-default-signed.hap",
+      "sha256": "412a143dca5f89065033152b9d255eeb750638aaee417c22985eaf70e679c1f7",
+      "sizeBytes": 60740413,
+      "modifiedAtUnix": 1790974920.7112746
+    },
+    {
+      "product": "deepread",
+      "hap": ".harmony-standalone/deepread/entry/build/default/outputs/default/signed/entry-default-signed.hap",
+      "sha256": "d5a82a30190a33da5973eb43fdc8244135e275a04a36592626214b76ea05056f",
+      "sizeBytes": 60751769,
+      "modifiedAtUnix": 1790974934.0731246
+    }
+  ]
+}

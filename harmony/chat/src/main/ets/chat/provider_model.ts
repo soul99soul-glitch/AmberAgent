@@ -18,6 +18,17 @@ export type ModelAbility = 'tool' | 'reasoning';
 export type Modality = 'text' | 'image' | 'audio';  // Android Modality(TEXT/IMAGE/AUDIO)
 export type BuiltInTools = 'search' | 'url_context' | 'image_generation';
 
+// 聊天模型默认开启工具调用；显式配置（包括 []）由调用方优先保留。
+export const defaultModelAbilities = (modelId: string): ModelAbility[] => {
+  switch (modelId.toLowerCase()) {
+    case 'deepseek-flash':
+    case 'deepseek-v4-pro':
+      return ['tool', 'reasoning'];
+    default:
+      return ['tool'];
+  }
+};
+
 export interface ChatModel {
   modelId: string;
   displayName: string;
@@ -39,7 +50,7 @@ export interface ChatModelOpts {
 export const makeChatModel = (opts: ChatModelOpts = {}): ChatModel => ({
   modelId: opts.modelId ?? 'test-model',
   displayName: opts.displayName ?? (opts.modelId ?? 'test-model'),
-  abilities: opts.abilities ?? [],
+  abilities: opts.abilities ?? defaultModelAbilities(opts.modelId ?? 'test-model'),
   inputModalities: opts.inputModalities ?? ['text'],
   outputModalities: opts.outputModalities ?? ['text'],
   tools: opts.tools ?? [],
@@ -121,6 +132,9 @@ export interface ChatToolDefinition {
   name: string;
   description: string;
   parameters: JsonObject;
+  // Complete MCP root schemas use Google's JSON Schema field rather than its
+  // narrower OpenAPI Schema message. Other providers consume parameters.
+  parametersJsonSchema?: JsonObject;
 }
 
 // Request.kt CustomBody{key,value}

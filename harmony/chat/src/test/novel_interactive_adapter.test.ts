@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type {
   AbortControllerLike, AbortSignalLike, NovelModelEvent, NovelModelRequest,
+  NovelChatMode, NovelGenerationGranularity, NovelRunKind,
 } from '@amber/deepread-domain';
 import { latestAssistantText } from '@amber/deepread-domain';
 import { createNovelInteractiveAdapter } from '../main/ets/chat/novel_interactive_adapter.ts';
@@ -15,8 +16,13 @@ import { makeAssistantMessage, makeUserMessage } from '../main/ets/chat/message.
 import { makeAgentTool, makeInputSchemaObj } from '../main/ets/chat/tool.ts';
 import type { AgentTool } from '../main/ets/chat/tool.ts';
 import { createAskUserTool } from '../main/ets/chat/builtin_ask_user_tool.ts';
+import { createNovelProjectOperationTools } from '../main/ets/chat/novel_project_operations.ts';
 import type { ChatToolDefinition } from '../main/ets/chat/provider_model.ts';
 import type { JsonValue } from '../main/ets/chat/json.ts';
+import { estimateTokens } from '../main/ets/chat/context_compact.ts';
+import {
+  createNovelCreation, createFileNovelRepository, createMemoryFileStore, makeNovelProject, makeNovelMaterial,
+} from '@amber/deepread-domain';
 
 const chunkOf = (text: string): MessageChunk => ({
   id: 'chunk', model: 'model',
@@ -96,6 +102,111 @@ const collectToTerminal = (
       resolve(events);
     }
   });
+});
+
+test('novel context preview uses the actual configured model/output budget and identical send selection', async () => {
+  let sent: UIMessage[] = [];
+  let providerCalls: number = 0;
+  const provider: ChatStreamProvider = { async streamText(messages, onChunk): Promise<void> {
+    providerCalls++; sent = messages; onChunk(chunkOf('完成'));
+  } };
+  const adapter = createNovelInteractiveAdapter({
+    resolveRuntime: async () => ({ assistant: makeAssistant({}), provider, contextWindowTokens: 1200, maxOutputTokens: 200 }),
+    createAbortController: (): AbortControllerLike => new TestAbortController(),
+  });
+  const history = [makeUserMessage('旧问题'.repeat(300)), makeAssistantMessage('旧回答'.repeat(300))];
+  const modelRequest: NovelModelRequest = { ...request(undefined, history), context: {
+    excludedHistoryMessageIds: [], sections: [
+      { key: 'instruction', text: '必要作者约束', required: true },
+      { key: 'material:a', text: '智能资料 A'.repeat(100), required: false },
+      { key: 'material:b', text: '智能资料 B'.repeat(1000), required: false },
+    ], materialDecisions: ['a', 'b'].map(id => ({ materialId: id, title: id, text: `智能资料 ${id}`,
+      protected: false, included: true, reason: 'smartMatch', relevanceScore: 100 })),
+  } };
+  const preview = await adapter.previewContext!(modelRequest);
+  assert.equal(providerCalls, 0, 'preview resolves configuration without invoking the model');
+  assert.equal(preview.maxOutputTokens, 200);
+  assert.equal(preview.tokenBudget, 1000);
+  assert.equal(preview.materialDecisions.find(item => item.materialId === 'a')?.included, true);
+  assert.equal(preview.materialDecisions.find(item => item.materialId === 'b')?.reason, 'budgetTrimmed');
+  const events = await collectToTerminal(callback => adapter.start(modelRequest).subscribe(callback));
+  assert.equal(events.at(-1)?.kind, 'completed');
+  const text = (messages: UIMessage[]) => messages.map(message => ({ role: message.role,
+    parts: message.parts.filter(part => part.type === 'text').map(part => part.text) }));
+  assert.deepEqual(text(sent), text(preview.preparedMessages));
+  assert.equal(estimateTokens(sent), preview.estimatedInputTokens);
+  assert.equal(history.length, 2, 'canonical history stays intact');
+});
+
+test('novel context preview preserves protected material above 48k characters or reports real window failure', async () => {
+  let windowTokens: number = 50_000;
+  let sent: UIMessage[] = [];
+  const provider: ChatStreamProvider = { async streamText(messages, onChunk): Promise<void> {
+    sent = messages; onChunk(chunkOf('完成'));
+  } };
+  const adapter = createNovelInteractiveAdapter({
+    resolveRuntime: async () => ({ assistant: makeAssistant({}), provider, contextWindowTokens: windowTokens, maxOutputTokens: 100 }),
+    createAbortController: (): AbortControllerLike => new TestAbortController(),
+  });
+  const fullMaterial: string = 'abcdefghij'.repeat(6000);
+  const modelRequest: NovelModelRequest = { ...request(), context: { excludedHistoryMessageIds: [],
+    sections: [{ key: 'material:forced', text: fullMaterial, required: true }] } };
+  const preview = await adapter.previewContext!(modelRequest);
+  assert.ok(preview.preparedMessages.some(message => message.parts.some(part => part.type === 'text' && part.text === fullMaterial)));
+  windowTokens = 500;
+  await assert.rejects(adapter.previewContext!(modelRequest), /上下文.*超出/);
+  const events = await collectToTerminal(callback => adapter.start(modelRequest).subscribe(callback));
+  assert.equal(events.at(-1)?.kind, 'failed');
+  assert.equal(sent.length, 0, 'send re-resolves changed model budget instead of using an old preview');
+});
+
+test('novel creation preview and actual Workspace send kinds share exact system/input/material selection in all three modes', async t => {
+  const modes: Array<{ mode: NovelChatMode; granularity: NovelGenerationGranularity | null; runKind: NovelRunKind }> = [
+    { mode: 'discuss', granularity: null, runKind: 'discussion' },
+    { mode: 'write', granularity: 'continuation', runKind: 'prose_continuation' },
+    { mode: 'write', granularity: 'whole_chapter', runKind: 'prose_whole_chapter' },
+  ];
+  for (const mode of modes) {
+  await t.test(mode.runKind, async () => {
+  let sent: UIMessage[] = [];
+  const provider: ChatStreamProvider = { async streamText(messages, onChunk): Promise<void> {
+    sent = messages; onChunk(chunkOf('完成正文'));
+  } };
+  const adapter = createNovelInteractiveAdapter({
+    resolveRuntime: async () => ({ assistant: makeAssistant({}), provider, contextWindowTokens: 4000, maxOutputTokens: 300,
+      runtimeSnapshot: { providerId: 'test-provider', modelId: 'test-model', configurationJson: '{}' },
+      responsesResumeSupported: false }),
+    createAbortController: (): AbortControllerLike => new TestAbortController(),
+  });
+  const repository = createFileNovelRepository(createMemoryFileStore());
+  const smart = { ...makeNovelMaterial({ kind: 'character', title: 'harbor', content: '港口人物', injectionMode: 'smart', now: 1 }), id: 'smart' };
+  const off = { ...makeNovelMaterial({ kind: 'character', title: 'off-setting', content: '临时包含禁用世界', injectionMode: 'off',
+    aliases: ['temporary-alias'], tags: ['z-tag', 'a-tag'], now: 1 }), id: 'off' };
+  const initial = await repository.createProject({ ...makeNovelProject({ name: '预览', now: 1 }),
+    materials: [smart, off], baseMaterials: [smart, off], materialOverrides: [], hiddenMaterialIds: [] });
+  const creation = createNovelCreation({ repository, modelRunning: adapter });
+  const before = await repository.readWorkspaceSnapshot(initial.id);
+  const overrides = { branchId: before.status.activeBranchId, forceIncludeMaterialIds: ['off'], forceExcludeMaterialIds: ['smart'] };
+  const preview = await creation.previewContext(initial.id, ' harbor ', mode.mode, mode.granularity, overrides);
+  assert.equal(preview.branchId, before.status.activeBranchId);
+  assert.equal(preview.receipt.materialDecisions.find(item => item.materialId === 'off')?.reason, 'forceIncluded');
+  assert.equal(preview.receipt.materialDecisions.find(item => item.materialId === 'smart')?.reason, 'forceExcluded');
+  assert.deepEqual((await repository.readWorkspaceSnapshot(initial.id)).status.cas, before.status.cas, 'preview is read-only');
+  await new Promise<void>((resolve, reject) => {
+    creation.generate(initial.id, ' harbor ', mode.mode, mode.granularity, mode.runKind, null, overrides).subscribe(event => {
+      if (event.kind === 'completed') resolve();
+      if (event.kind === 'failed') reject(new Error(event.message));
+    });
+  });
+  const text = (messages: UIMessage[]) => messages.flatMap(message => message.parts.filter(part => part.type === 'text').map(part => part.text));
+  assert.deepEqual(text(sent), text(preview.receipt.preparedMessages));
+  assert.match(text(sent).join('\n'), /临时包含禁用世界/);
+  assert.match(text(sent).join('\n'), /Aliases: temporary-alias/);
+  assert.match(text(sent).join('\n'), /Tags: a-tag, z-tag/);
+  assert.equal(text(sent).join('\n').includes('港口人物'), false);
+  await assert.rejects(creation.previewContext(initial.id, '继续', 'write', null, { ...overrides, branchId: 'another-branch' }), /分支已切换/);
+  });
+  }
 });
 
 test('novel adapter: validate 把 fixed provider/model target 原样交给 runtime resolver', async () => {
@@ -376,6 +487,10 @@ test('novel adapter: C6 read_only profile 复用同一 tool loop 但排除 works
   const tools: AgentTool[] = [
     makeAgentTool({ name: 'novel_workspace_read', description: 'read', execute }),
     makeAgentTool({ name: 'novel_workspace_status', description: 'status', execute }),
+    makeAgentTool({ name: 'novel_list_chapters', description: 'chapters', execute }),
+    makeAgentTool({ name: 'novel_read_chapter', description: 'chapter', execute }),
+    makeAgentTool({ name: 'novel_list_setting_proposals', description: 'settings', execute }),
+    makeAgentTool({ name: 'novel_revise_chapter', description: 'revise', execute }),
     makeAgentTool({ name: 'ask_user', description: 'ask', execute }),
     makeAgentTool({
       name: 'novel_workspace_write', description: 'write', needsApproval: true, execute,
@@ -398,7 +513,40 @@ test('novel adapter: C6 read_only profile 复用同一 tool loop 但排除 works
   const events = await collectToTerminal(
     callback => adapter.start(readOnlyRequest).subscribe(callback));
   assert.equal(events.at(-1)?.kind, 'completed');
-  assert.deepEqual(stepToolNames, ['novel_workspace_read', 'novel_workspace_status']);
+  assert.deepEqual(stepToolNames, ['novel_workspace_read', 'novel_workspace_status',
+    'novel_list_chapters', 'novel_read_chapter', 'novel_list_setting_proposals']);
+});
+
+test('novel project staging executes in the real tool loop and returns the author proposal without dispatcher approval', async () => {
+  let calls = 0;
+  let staged = 0;
+  let continuation: UIMessage[] = [];
+  const provider: ChatStreamProvider = {
+    async streamText(messages, onChunk): Promise<void> {
+      calls++;
+      if (calls === 1) onChunk(toolChunkOf('project-proposal', 'novel_rename_project', '{"title":"New name"}'));
+      else { continuation = messages; onChunk(chunkOf('已生成待作者批准的改名提案。')); }
+    },
+  };
+  const tools = createNovelProjectOperationTools(async (name, input) => {
+    assert.equal(name, 'novel_rename_project');
+    assert.equal(input.title, 'New name');
+    staged++;
+    return { requires_author_approval: true, proposal_id: 'proposal-a' };
+  });
+  const adapter = createNovelInteractiveAdapter({
+    resolveRuntime: async () => ({ assistant: makeAssistant({}), provider, tools,
+      makeProviderForStep: () => provider }),
+    createAbortController: () => new TestAbortController(),
+  });
+  const events = await collectToTerminal(callback => adapter.start(request()).subscribe(callback));
+  assert.equal(events.at(-1)?.kind, 'completed');
+  assert.equal(staged, 1);
+  assert.equal(calls, 2);
+  const tool = findToolPart(continuation, 'project-proposal');
+  assert.equal(tool.output[0].type, 'text');
+  if (tool.output[0].type === 'text') assert.deepEqual(JSON.parse(tool.output[0].text),
+    { requires_author_approval: true, proposal_id: 'proposal-a' });
 });
 
 test('novel adapter: ask_user pending→checkpoint→同 toolCallId answer continuation→工具输出→终态', async () => {
@@ -534,4 +682,260 @@ test('novel adapter: write denied 不执行工具，复用 dispatcher 写入 den
   const payload = JSON.parse((output[0] as { text: string }).text);
   assert.equal(payload.status, 'denied');
   assert.ok(String(payload.message).includes('不要改正文'));
+});
+
+test('novel context: 模型窗口只裁发送历史的完整轮次，checkpoint 与 snapshot 保留全历史', async () => {
+  const history: UIMessage[] = [];
+  for (let index = 0; index < 10; index += 1) {
+    history.push(makeUserMessage(`question-${index}: ${'u'.repeat(800)}`));
+    history.push(makeAssistantMessage(`answer-${index}: ${'a'.repeat(800)}`));
+  }
+  const originalIds: string[] = history.map(message => message.id);
+  const checkpoints: UIMessage[][] = [];
+  let sent: UIMessage[] = [];
+  const provider: ChatStreamProvider = {
+    async streamText(messages, onChunk): Promise<void> {
+      sent = messages;
+      onChunk(chunkOf('完成'));
+    },
+  };
+  const adapter = createNovelInteractiveAdapter({
+    resolveRuntime: async () => ({ assistant: makeAssistant({}), provider, contextWindowTokens: 1000 }),
+    createAbortController: (): AbortControllerLike => new TestAbortController(),
+  });
+  const modelRequest: NovelModelRequest = {
+    ...request(async messages => { checkpoints.push(messages); }, history), maxOutputTokens: 100,
+  };
+  const events = await collectToTerminal(callback => adapter.start(modelRequest).subscribe(callback));
+  assert.equal(events.at(-1)?.kind, 'completed');
+  const sentHistory = sent.filter(message => originalIds.includes(message.id));
+  assert.ok(sentHistory.length > 0 && sentHistory.length < history.length);
+  assert.equal(sentHistory[0].role, 'user');
+  assert.equal(sentHistory.length % 2, 0);
+  assert.deepEqual(sentHistory.map(message => message.id), originalIds.slice(-sentHistory.length));
+  assert.ok(estimateTokens(sent) <= 900);
+  assert.deepEqual(checkpoints.at(-1)?.slice(0, history.length).map(message => message.id), originalIds);
+  const snapshot = events.filter(event => event.kind === 'snapshot').at(-1);
+  assert.ok(snapshot?.kind === 'snapshot');
+  assert.equal(snapshot.messages.length, history.length + 2);
+  assert.deepEqual(history.map(message => message.id), originalIds);
+});
+
+test('novel context: 归档仅排除发送副本，有context时不重复原systemPrompt', async () => {
+  const history = [makeUserMessage('旧讨论'), makeAssistantMessage('旧回答')];
+  let sent: UIMessage[] = [];
+  let saved: UIMessage[] = [];
+  const provider: ChatStreamProvider = {
+    async streamText(messages, onChunk): Promise<void> { sent = messages; onChunk(chunkOf('完成')); },
+  };
+  const adapter = createNovelInteractiveAdapter({
+    resolveRuntime: async () => ({ assistant: makeAssistant({}), provider, contextWindowTokens: 1000 }),
+    createAbortController: (): AbortControllerLike => new TestAbortController(),
+  });
+  const modelRequest: NovelModelRequest = {
+    ...request(async messages => { saved = messages; }, history),
+    systemPrompt: '旧system不要重复', maxOutputTokens: 100,
+    context: {
+      sections: [
+        { key: 'instruction', text: '按作者决定创作', required: true },
+        { key: 'archive', text: '累计摘要：主角抵达北城。', required: true },
+      ],
+      excludedHistoryMessageIds: history.map(message => message.id),
+    },
+  };
+  const events = await collectToTerminal(callback => adapter.start(modelRequest).subscribe(callback));
+  assert.equal(events.at(-1)?.kind, 'completed');
+  assert.equal(sent.some(message => history.some(old => old.id === message.id)), false);
+  assert.deepEqual(saved.slice(0, 2).map(message => message.id), history.map(message => message.id));
+  const systemText = sent.filter(message => message.role === 'system')
+    .flatMap(message => message.parts.filter(part => part.type === 'text').map(part => part.text)).join('\n');
+  assert.match(systemText, /按作者决定创作/);
+  assert.match(systemText, /累计摘要：主角抵达北城/);
+  assert.equal(systemText.includes('旧system不要重复'), false);
+});
+
+test('novel context: 作者必需sections或完整来源输入超窗，明确失败且不调用provider', async () => {
+  for (const oversizedSection of [true, false]) {
+    let called: boolean = false;
+    const provider: ChatStreamProvider = {
+      async streamText(_messages, onChunk): Promise<void> { called = true; onChunk(chunkOf('意外')); },
+    };
+    const adapter = createNovelInteractiveAdapter({
+      resolveRuntime: async () => ({ assistant: makeAssistant({}), provider, contextWindowTokens: 500 }),
+      createAbortController: (): AbortControllerLike => new TestAbortController(),
+    });
+    const modelRequest: NovelModelRequest = {
+      ...request(), maxOutputTokens: 100,
+      operation: { kind: 'turn', userPrompt: oversizedSection ? '开始' : '完整原章'.repeat(1000) },
+      context: {
+        sections: [{
+          key: 'instruction', text: oversizedSection ? '作者必需决定'.repeat(1000) : '保留原章事实',
+          required: true,
+        }],
+        excludedHistoryMessageIds: [],
+      },
+    };
+    const events = await collectToTerminal(callback => adapter.start(modelRequest).subscribe(callback));
+    const terminal = events.at(-1);
+    assert.equal(terminal?.kind, 'failed');
+    assert.match(terminal?.kind === 'failed' ? terminal.message : '', /上下文.*超出/);
+    assert.equal(called, false);
+  }
+});
+
+test('novel context: 无sections的helper也检查完整systemPrompt预算，未知窗口使用既有默认', async () => {
+  for (const configuredWindow of [500, null]) {
+    let called: boolean = false;
+    const provider: ChatStreamProvider = {
+      async streamText(_messages, onChunk): Promise<void> { called = true; onChunk(chunkOf('完成')); },
+    };
+    const adapter = createNovelInteractiveAdapter({
+      resolveRuntime: async () => ({
+        assistant: makeAssistant({}), provider, contextWindowTokens: configuredWindow,
+      }),
+      createAbortController: (): AbortControllerLike => new TestAbortController(),
+    });
+    const modelRequest: NovelModelRequest = {
+      ...request(), maxOutputTokens: 100, systemPrompt: '完整系统指令'.repeat(1000),
+    };
+    const events = await collectToTerminal(callback => adapter.start(modelRequest).subscribe(callback));
+    assert.equal(events.at(-1)?.kind, configuredWindow === null ? 'completed' : 'failed');
+    assert.equal(called, configuredWindow === null);
+  }
+});
+
+test('novel context: 工具续接保留待答所在完整轮次及本轮工具输出，旧历史仍完整checkpoint', async () => {
+  const oldHistory: UIMessage[] = [];
+  for (let index = 0; index < 8; index += 1) {
+    oldHistory.push(makeUserMessage(`old-${index} ${'u'.repeat(1200)}`));
+    oldHistory.push(makeAssistantMessage(`answer-${index} ${'a'.repeat(1200)}`));
+  }
+  const sends: UIMessage[][] = [];
+  let saved: UIMessage[] = [];
+  const provider: ChatStreamProvider = {
+    async streamText(messages, onChunk): Promise<void> {
+      sends.push(messages);
+      onChunk(sends.length === 1 ? toolChunkOf('context-ask', 'ask_user', JSON.stringify({
+        questions: [{ id: 'tone', question: '语气？' }],
+      })) : chunkOf('按回答继续。'));
+    },
+  };
+  const adapter = createNovelInteractiveAdapter({
+    resolveRuntime: async () => ({
+      assistant: makeAssistant({}), provider, contextWindowTokens: 1800,
+      tools: [createAskUserTool()], makeProviderForStep: () => provider,
+    }),
+    createAbortController: (): AbortControllerLike => new TestAbortController(),
+  });
+  const save = async (messages: UIMessage[]): Promise<void> => { saved = messages; };
+  const first = await collectToTerminal(callback => adapter.start({
+    ...request(save, oldHistory), maxOutputTokens: 100,
+  }).subscribe(callback));
+  assert.equal(first.at(-1)?.kind, 'waiting_user');
+  const pendingHistory = saved;
+  const pendingUser = pendingHistory.at(-2);
+  assert.equal(pendingUser?.role, 'user');
+  const second = await collectToTerminal(callback => adapter.start({
+    ...request(save, pendingHistory), runId: 'context-continue', maxOutputTokens: 100,
+    context: {
+      sections: [{ key: 'instruction', text: '按作者回答继续', required: true }],
+      // 即使范围包含待答轮次，未决工具的来源和结果也不能被归档过滤误删。
+      excludedHistoryMessageIds: pendingHistory.map(message => message.id),
+    },
+    operation: { kind: 'tool_continuation', toolCallId: 'context-ask',
+      verdict: { kind: 'answered', answer: '{"tone":"温暖"}' } },
+  }).subscribe(callback));
+  assert.equal(second.at(-1)?.kind, 'completed');
+  assert.equal(sends.length, 2);
+  assert.ok(sends[1].some(message => message.id === pendingUser?.id));
+  assert.equal(findToolPart(sends[1], 'context-ask').output.length, 1);
+  assert.deepEqual(saved.slice(0, oldHistory.length).map(message => message.id),
+    oldHistory.map(message => message.id));
+  assert.equal(latestAssistantText(saved), '按回答继续。');
+});
+
+test('novel context: 本轮工具输出超窗时停止后续发送，完整结果仍保存在checkpoint', async () => {
+  let calls: number = 0;
+  let saved: UIMessage[] = [];
+  const fullResult = '完整工具读取结果'.repeat(1000);
+  const provider: ChatStreamProvider = {
+    async streamText(_messages, onChunk): Promise<void> {
+      calls += 1;
+      onChunk(toolChunkOf('context-read', 'novel_workspace_read', '{}'));
+    },
+  };
+  const adapter = createNovelInteractiveAdapter({
+    resolveRuntime: async () => ({
+      assistant: makeAssistant({}), provider, contextWindowTokens: 1600,
+      tools: [makeAgentTool({
+        name: 'novel_workspace_read', description: 'read',
+        execute: async (): Promise<UIMessagePart[]> => [
+          { type: 'text', text: fullResult, metadata: null },
+        ],
+      })],
+      makeProviderForStep: () => provider,
+    }),
+    createAbortController: (): AbortControllerLike => new TestAbortController(),
+  });
+  const events = await collectToTerminal(callback => adapter.start({
+    ...request(async messages => { saved = messages; }), maxOutputTokens: 100,
+  }).subscribe(callback));
+  const terminal = events.at(-1);
+  assert.equal(terminal?.kind, 'failed');
+  assert.match(terminal?.kind === 'failed' ? terminal.message : '', /上下文.*超出/);
+  assert.equal(calls, 1);
+  const tool = findToolPart(saved, 'context-read');
+  assert.equal(tool.output[0].type === 'text' ? tool.output[0].text : '', fullResult);
+});
+
+test('novel request: 单次输出上限送到实际main和tool factory，null继承runtime实际上限', async () => {
+  for (const withTools of [false, true]) {
+    const mainCaps: Array<number | null> = [];
+    const stepCaps: Array<number | null | undefined> = [];
+    const provider: ChatStreamProvider = {
+      async streamText(_messages, onChunk): Promise<void> { onChunk(chunkOf('完成')); },
+    };
+    const adapter = createNovelInteractiveAdapter({
+      resolveRuntime: async () => ({
+        assistant: makeAssistant({ maxTokens: 777 }), provider, contextWindowTokens: 1000,
+        maxOutputTokens: 200,
+        makeProviderForOutputTokens: (cap: number | null): ChatStreamProvider => {
+          mainCaps.push(cap);
+          return provider;
+        },
+        tools: withTools ? [createAskUserTool()] : [],
+        makeProviderForStep: (_definitions, cap): ChatStreamProvider => {
+          stepCaps.push(cap);
+          return provider;
+        },
+      }),
+      createAbortController: (): AbortControllerLike => new TestAbortController(),
+    });
+    const modelRequest: NovelModelRequest = { ...request(), maxOutputTokens: withTools ? null : 100 };
+    const events = await collectToTerminal(callback => adapter.start(modelRequest).subscribe(callback));
+    assert.equal(events.at(-1)?.kind, 'completed');
+    assert.deepEqual(mainCaps, [withTools ? 200 : 100]);
+    assert.deepEqual(stepCaps, withTools ? [200] : []);
+    assert.equal(modelRequest.maxOutputTokens, withTools ? null : 100);
+  }
+});
+
+test('novel audit budget metadata reuses the production window, output cap and message estimator', async () => {
+  const { novelInputTokenBudget, estimateNovelInputTokens } = await import('../main/ets/chat/novel_context_policy.ts');
+  const seen: Array<{target: NovelModelRequest['modelTarget'];projectId:string}> = [];
+  const provider: ChatStreamProvider = {streamText:async()=>{}};
+  const adapter = createNovelInteractiveAdapter({
+    resolveRuntime:async(target,projectId)=>{
+      seen.push({target,projectId});
+      return {assistant:makeAssistant({}),provider,contextWindowTokens:16000,maxOutputTokens:1234};
+    },
+    createAbortController:()=>new TestAbortController(),
+  });
+  const target: NovelModelRequest['modelTarget']={kind:'fixed',providerId:'p',modelId:'m'};
+  assert.equal(await adapter.inputBudgetTokens!(target,'audit-book',8192),novelInputTokenBudget(8192,16000));
+  assert.deepEqual(seen,[{target,projectId:'audit-book'}]);
+  assert.equal(adapter.estimateInputTokens!('作者约束','本块正文'),estimateNovelInputTokens('作者约束','本块正文'));
+  assert.equal(adapter.estimateInputTokens!('作者约束','本块正文'),estimateTokens([
+    { ...makeUserMessage('作者约束'),role:'system' },makeUserMessage('本块正文'),
+  ]));
 });

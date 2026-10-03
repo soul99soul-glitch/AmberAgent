@@ -1,0 +1,18 @@
+{
+  "novel": {
+    "bundle": "app.amber.novel",
+    "sourceCount": 1373,
+    "sourceDifferences": [],
+    "hap": "/Users/arquiel/Downloads/AI/amber-harmony-preview/.harmony-standalone/novel/entry/build/default/outputs/default/signed/entry-default-signed.hap",
+    "sha256": "bc16f8c328ac8783be8cca430ab51a3ea32149e49d7d964065c564c5f06de939",
+    "certificateSha256": "de6ad215552a489059e5cace8729f12e8db843a1e84802cf137630ae1658d663"
+  },
+  "deepread": {
+    "bundle": "app.amber.deepread.reader",
+    "sourceCount": 1373,
+    "sourceDifferences": [],
+    "hap": "/Users/arquiel/Downloads/AI/amber-harmony-preview/.harmony-standalone/deepread/entry/build/default/outputs/default/signed/entry-default-signed.hap",
+    "sha256": "b38c5779b4ab1be0ab12f0283117f3957d811237be3193c54f9173c4b5ce183f",
+    "certificateSha256": "59f67e152e7ee54159e609801379f00a039cd72ec9b10c9eac19930d53740274"
+  }
+}

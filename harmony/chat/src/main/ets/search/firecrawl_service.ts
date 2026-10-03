@@ -2,6 +2,7 @@
 // Android 基准: search/.../FirecrawlSearchService.kt(全文 244 行)
 // **bug 钉住**: search 失败文案 Android 为字面量 'response failed #{response.code}'
 //   (Kotlin "response failed #${'$'}{response.code}" — ${'$'} 渲染 $,其余字面量)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -67,6 +68,7 @@ export const firecrawlSearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: FirecrawlOptions = asOptions(serviceOptions);
     const query: string = requireQuery(params);
@@ -88,7 +90,7 @@ export const firecrawlSearchService: SearchService = {
         'Authorization': `Bearer ${opts.apiKey}`,
       },
       body: JSON.stringify(body),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       // Android bug 逐字保留(见文件头注)
       throw new Error('response failed #{response.code}');
@@ -126,6 +128,7 @@ export const firecrawlSearchService: SearchService = {
 
   scrape: async (
     params: JsonObject, _commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<ScrapedResult> => {
     const opts: FirecrawlOptions = asOptions(serviceOptions);
     const url: string | null = primitiveContentOrNull(params, 'url');
@@ -150,7 +153,7 @@ export const firecrawlSearchService: SearchService = {
         parsers: [],
         formats: ['markdown'],
       }),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`response failed #${resp.status}`);
     }

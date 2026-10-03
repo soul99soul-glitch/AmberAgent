@@ -2,15 +2,14 @@
 //
 // 自定义 HTML 版式模板:列表管理 + 编辑器(全屏/从文件导入)+ 示例预览(ArkWeb)+
 //   AI 生成(自然语言 → LLM 产 HTML → 严格安检 → 填入编辑器人工确认)。
-// 安检/渲染收口在 platform_impl/DeepReadTemplate.ets(sanitizeTemplateHtml/
-//   renderCustomTemplateHtml);占位符 {{title}}/{{kicker}}/{{summary}}/{{timeline}}/
-//   {{analysis}}/{{reading}}。
-// 偏差登记:自定义模板为静态壳,deepread 字号倍率/衬线偏好不生效(页脚注明)。
-import { getAppContainer } from '../di/AppContainer.ets';
+// 安检/渲染收口在 DeepReadTemplate;旧模板缺少的章节会补在文章末尾。
+import { getAppContainer, getChatKvStore, getDeepReadTextRuntime } from '../di/AppContainer.ets';
+import type { DeepReadTextRuntime } from '../di/AppContainer.ets';
 import {
   CustomTemplateDef, loadCustomTemplates, saveCustomTemplates,
-  sanitizeTemplateHtml, hasTemplatePlaceholders, renderCustomTemplateHtml,
-  buildSampleTemplateOutput,
+  validateTemplateHtml, renderCustomTemplateHtml, MAX_TEMPLATE_BYTES,
+  buildSampleTemplateOutput, DeepReadRenderOptions,
+  starterTemplateHtml,
 } from '../platform_impl/DeepReadTemplate.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, FooterNote, PageSpacer,
@@ -18,22 +17,28 @@ import {
 } from '../components/PageTemplate.ets';
 import { AmberTextArea } from '../components/ui/AmberTextArea.ets';
 import {
-  INK, INK3, ACCENT, BG, ERROR, GUTTER, LINE,
+  INK, INK3, INK4, ACCENT, BG, SURFACE, ERROR, GUTTER, LINE,
 } from '../design/tokens.ets';
 import { webview } from '@kit.ArkWeb';
 import { picker, fileIo } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
-import { makeUserMessage, UIMessage, UIMessagePart, UIMessagePartText } from '@amber/chat-domain';
-import { Storage } from '@amber/deepread-domain';
+import { makeUserMessage, UIMessage, UIMessagePartText } from '@amber/chat-domain';
+import { Storage, AbortControllerLike } from '@amber/deepread-domain';
+import { createEntryAbortController } from '../platform_impl/EntryAbortController.ets';
+import { router } from '@kit.ArkUI';
+
+interface TemplateEditorParams { templateId?: string; }
 
 const SAMPLE_TITLE: string = '示例文章标题:自定义模板预览';
 
 const AI_TEMPLATE_PROMPT: string =
   '你是前端版式设计师。根据用户描述输出一个深度阅读文章的 HTML 模板,只输出 HTML 本体,不要解释。' +
-  '硬性规则:①可用占位符 {{title}} {{kicker}} {{summary}} {{timeline}} {{analysis}} {{reading}},' +
-  '正文至少包含 {{summary}} 和一个其他内容占位符;②只允许内联 <style> CSS,' +
-  '禁止 script/iframe/form/外部资源(url()/import);③排版杂志风,雅致、留白充分;' +
-  '④所有章节占位符放在合适的容器里。用户描述:';
+  '硬性规则:①可用占位符 {{title}} {{kicker}} {{topic}} {{hero}} {{summary}} {{timeline}} {{core_points}} ' +
+  '{{analysis}} {{diagram}} {{images}} {{reading}} {{references}};或使用 {{content}} 一次展示全部内容;' +
+  '②只允许内联 <style> CSS,禁止 script/iframe/form/事件属性/外部 CSS(url()/import);' +
+  '③字号使用 calc(15.5px * var(--ds)),字体使用 var(--dr-font),' +
+  '背景和文字使用 var(--dr-bg) 和 var(--dr-ink),辅助色可用 var(--dr-muted)/var(--dr-surface)/var(--dr-border)/var(--dr-accent);' +
+  '④排版雅致、留白充分,所有章节占位符放在合适容器。用户描述:';
 
 @Entry
 @Component
@@ -49,83 +54,189 @@ struct DeepReadTemplateWorkbenchPage {
   @State generating: boolean = false;
   @State genError: string = '';
   @State previewOpen: boolean = false;
+  @State saving: boolean = false;
+  @State loaded: boolean = false;
   private storage: Storage | null = null;
   private webController: webview.WebviewController = new webview.WebviewController();
   private webAttached: boolean = false;
+  private webInitialized: boolean = false;
+  private previewId: number = 0;
+  private alive: boolean = false;
+  private generationController: AbortControllerLike | null = null;
+  private fontScale: number = 1;
+  private fontSerif: boolean = false;
+  private lifecycleId: number = 0;
+  private editorId: number = 0;
+  private requestedTemplateId: string = '';
 
   aboutToAppear(): void {
+    this.alive = true;
+    this.lifecycleId++;
     this.storage = getAppContainer().storage;
+    const params: TemplateEditorParams = router.getParams() as TemplateEditorParams;
+    this.requestedTemplateId = params.templateId ?? '';
+    this.loaded = false;
+    this.saving = false;
+    this.startNew();
     this.reload();
+  }
+
+  aboutToDisappear(): void {
+    this.alive = false;
+    this.lifecycleId++;
+    this.webAttached = false;
+    this.webInitialized = false;
+    this.generationController?.abort();
   }
 
   private reload(): void {
     if (this.storage === null) return;
+    const lifecycle: number = this.lifecycleId;
+    const editor: number = this.editorId;
     loadCustomTemplates(this.storage).then((list: CustomTemplateDef[]): void => {
+      if (!this.alive || lifecycle !== this.lifecycleId) return;
       this.templates = list;
-    }).catch((): void => {});
+      this.loaded = true;
+      if (editor === this.editorId && this.requestedTemplateId.length > 0) {
+        const selected: CustomTemplateDef | undefined = list.find((t: CustomTemplateDef): boolean => t.id === this.requestedTemplateId);
+        if (selected !== undefined) this.startEdit(selected);
+        else this.note = '该模板已不存在，可新建模板。';
+      }
+    }).catch((e: Error): void => {
+      if (this.alive && lifecycle === this.lifecycleId) this.note = `加载模板失败:${e.message}`;
+    });
+    getChatKvStore().get('deepread_font_scale').then((raw: string | null): void => {
+      if (!this.alive || lifecycle !== this.lifecycleId) return;
+      const percent: number = raw !== null ? parseFloat(raw) : 100;
+      this.fontScale = Math.max(0.7, Math.min(1.8, (Number.isNaN(percent) ? 100 : percent) / 100));
+    }).catch((e: Error): void => {
+      if (this.alive && lifecycle === this.lifecycleId) this.note = `加载阅读偏好失败:${e.message}`;
+    });
+    getChatKvStore().get('deepread_font_mode').then((raw: string | null): void => {
+      if (!this.alive || lifecycle !== this.lifecycleId) return;
+      this.fontSerif = raw === 'serif';
+    }).catch((e: Error): void => {
+      if (this.alive && lifecycle === this.lifecycleId) this.note = `加载阅读偏好失败:${e.message}`;
+    });
   }
 
   private startEdit(t: CustomTemplateDef): void {
+    if (this.saving) return;
+    this.generationController?.abort();
+    this.generationController = null;
+    this.generating = false;
+    this.editorId++;
     this.editingId = t.id;
     this.editName = t.name;
     this.editHtml = t.html;
     this.note = '';
+    this.genError = '';
   }
 
   private startNew(): void {
+    if (this.saving) return;
+    this.generationController?.abort();
+    this.generationController = null;
+    this.generating = false;
+    this.editorId++;
     this.editingId = '';
-    this.editName = '';
-    this.editHtml = '';
+    this.editName = '自定义模板';
+    this.editHtml = starterTemplateHtml();
     this.note = '';
+    this.genError = '';
   }
 
   private async save(): Promise<void> {
-    if (this.storage === null) return;
+    if (this.storage === null || this.saving || this.generating) return;
+    if (!this.loaded) { this.note = '模板尚未加载完成，暂不能保存'; return; }
+    const lifecycle: number = this.lifecycleId;
     const name: string = this.editName.trim();
     if (name.length === 0) {
       this.note = '请填写模板名称';
       return;
     }
-    if (!hasTemplatePlaceholders(this.editHtml)) {
-      this.note = '模板至少需要一个 {{占位符}}(如 {{summary}})';
-      return;
-    }
-    if (sanitizeTemplateHtml(this.editHtml).length === 0) {
-      this.note = '模板内容在安检后为空,请移除被禁元素';
+    const error: string = validateTemplateHtml(this.editHtml);
+    if (error.length > 0) {
+      this.note = error;
       return;
     }
     const now: number = Date.now();
+    const existing: CustomTemplateDef | undefined = this.templates.find((t: CustomTemplateDef): boolean => t.id === this.editingId);
     const item: CustomTemplateDef = {
       id: this.editingId.length > 0 ? this.editingId : `custom_${now}`,
       name: name,
       html: this.editHtml,
-      createdAt: now,
+      createdAt: existing !== undefined ? existing.createdAt : now,
+      updatedAt: now,
     };
     const next: CustomTemplateDef[] = [
       ...this.templates.filter((t: CustomTemplateDef): boolean => t.id !== item.id),
       item,
     ];
-    await saveCustomTemplates(this.storage, next);
-    this.templates = next;
-    this.editingId = item.id;
-    this.note = '已保存 ✓(到 深度阅读设置 选用)';
+    this.saving = true;
+    let saved: boolean = false;
+    try {
+      await saveCustomTemplates(this.storage, next);
+      saved = true;
+      if (this.alive && lifecycle === this.lifecycleId) {
+        this.templates = next;
+        this.editingId = item.id;
+      }
+      await this.storage.set<string>('deepread_template_id', item.id);
+      if (this.alive && lifecycle === this.lifecycleId) this.note = '已保存并用于新文章 ✓';
+    } catch (e) {
+      if (this.alive && lifecycle === this.lifecycleId) {
+        this.note = `${saved ? '模板已保存，但选用失败' : '保存失败'}:${e instanceof Error ? e.message : String(e)}`;
+      }
+    } finally {
+      if (this.alive && lifecycle === this.lifecycleId) this.saving = false;
+    }
+  }
+
+  private confirmRemove(id: string): void {
+    if (this.saving) return;
+    const item: CustomTemplateDef | undefined = this.templates.find((t: CustomTemplateDef): boolean => t.id === id);
+    if (item === undefined) return;
+    AlertDialog.show({
+      title: '删除模板？', message: `删除「${item.name}」？若已选用，后续新文章将使用默认排版。`,
+      primaryButton: { value: '删除', action: (): void => { this.remove(id); } },
+      secondaryButton: { value: '取消', action: (): void => {} },
+    });
   }
 
   private async remove(id: string): Promise<void> {
-    if (this.storage === null) return;
+    if (this.storage === null || this.saving) return;
+    const lifecycle: number = this.lifecycleId;
     const next: CustomTemplateDef[] = this.templates.filter(
       (t: CustomTemplateDef): boolean => t.id !== id);
-    await saveCustomTemplates(this.storage, next);
-    this.templates = next;
-    if (this.editingId === id) this.startNew();
-    // 删除的是当前选中模板 → 清选中键,否则设置页选中态与存储不一致
-    const selected: string = await this.storage.get<string>('deepread_template_id', 'none');
-    if (selected === id) {
-      await this.storage.set<string>('deepread_template_id', 'none');
+    this.saving = true;
+    let removed: boolean = false;
+    try {
+      await saveCustomTemplates(this.storage, next);
+      removed = true;
+      if (this.alive && lifecycle === this.lifecycleId) this.templates = next;
+      // Only clear selection after the template was actually removed.
+      const selected: string = await this.storage.get<string>('deepread_template_id', 'none');
+      if (selected === id) await this.storage.set<string>('deepread_template_id', 'none');
+      if (this.alive && lifecycle === this.lifecycleId) {
+        this.saving = false;
+        if (this.editingId === id) this.startNew();
+        this.note = '已删除模板 ✓';
+      }
+    } catch (e) {
+      const reason: string = e instanceof Error ? e.message : String(e);
+      if (this.alive && lifecycle === this.lifecycleId) {
+        this.note = removed ? `模板已删除,但选用状态更新失败:${reason}。请到阅读模板重新选用。` : `删除失败:${reason}`;
+      }
+    } finally {
+      if (this.alive && lifecycle === this.lifecycleId) this.saving = false;
     }
   }
 
   private async importHtmlFile(): Promise<void> {
+    if (this.saving || this.generating) return;
+    const lifecycle: number = this.lifecycleId;
+    const editor: number = this.editorId;
     try {
       const ctx: common.UIAbilityContext =
         AppStorage.get<common.UIAbilityContext>('abilityContext') as common.UIAbilityContext;
@@ -134,44 +245,85 @@ struct DeepReadTemplateWorkbenchPage {
       options.fileSuffixFilters = ['.html', '.htm'];
       const docPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(ctx);
       const uris: string[] = await docPicker.select(options);
+      if (!this.alive || lifecycle !== this.lifecycleId || editor !== this.editorId) return;
       if (uris.length === 0) return;
+      if (fileIo.statSync(uris[0]).size > MAX_TEMPLATE_BYTES) throw new Error('模板超过 96 KiB UTF-8 大小限制');
       const text: string = fileIo.readTextSync(uris[0]);
+      const error: string = validateTemplateHtml(text);
+      if (error.length > 0) throw new Error(error);
       this.editHtml = text;
-      this.note = '已从文件导入,保存前请确认安检通过';
+      this.note = '已从文件导入，请预览后保存 ✓';
     } catch (e) {
       const msg: string = e instanceof Error ? e.message : String(e);
-      this.note = `导入失败:${msg}`;
+      if (this.alive && lifecycle === this.lifecycleId && editor === this.editorId) this.note = `导入失败:${msg}`;
     }
   }
 
   private loadPreview(): void {
-    if (!this.webAttached) return;
+    if (!this.alive || !this.previewOpen || !this.webAttached || !this.webInitialized) return;
+    const options: DeepReadRenderOptions = {
+      fontScale: this.fontScale, fontSerif: this.fontSerif,
+      background: BG, foreground: INK, muted: INK3, surface: SURFACE,
+      border: LINE, accent: this.accentColorStore,
+    };
     const html: string = renderCustomTemplateHtml(
-      this.editHtml, SAMPLE_TITLE, buildSampleTemplateOutput());
-    this.webController.loadData(
-      encodeURIComponent(html).replace(/#/g, '%23'),
-      'text/html', 'UTF-8', ' ', ' ');
+      this.editHtml, SAMPLE_TITLE, buildSampleTemplateOutput(), options);
+    try {
+      this.webController.loadData(html, 'text/html', 'UTF-8', ' ', ' ');
+    } catch (e) {
+      this.previewOpen = false;
+      this.note = `预览失败:${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  private attachPreviewWeb(id: number, epoch: number): void {
+    if (!this.alive || !this.previewOpen || id !== this.previewId || epoch !== this.themeEpoch) return;
+    this.webAttached = true;
+    this.webInitialized = false;
+  }
+
+  private onPreviewPageEnd(url: string, id: number, epoch: number): void {
+    if (!this.alive || !this.previewOpen || !this.webAttached || id !== this.previewId ||
+      epoch !== this.themeEpoch || this.webInitialized || url !== 'about:blank') return;
+    this.webInitialized = true;
+    this.loadPreview();
+  }
+
+  private onPreviewError(mainFrame: boolean, id: number = this.previewId, epoch: number = this.themeEpoch): void {
+    if (!this.alive || !this.webAttached || !this.previewOpen || !mainFrame ||
+      id !== this.previewId || epoch !== this.themeEpoch) return;
+    this.previewOpen = false;
+    this.note = '预览失败:正文加载错误，请重试。';
   }
 
   private openPreview(): void {
+    const error: string = validateTemplateHtml(this.editHtml);
+    if (error.length > 0) { this.note = error; return; }
+    if (this.previewOpen) { this.loadPreview(); return; }
+    this.previewId++;
+    this.webAttached = false;
+    this.webInitialized = false;
     this.previewOpen = true;
-    // controller 已附着时直接重载;未附着由 onControllerAttached 触发
-    this.loadPreview();
   }
 
   private async generate(): Promise<void> {
     const prompt: string = this.aiPrompt.trim();
-    if (prompt.length === 0 || this.generating) return;
+    if (prompt.length === 0 || this.generating || this.saving) return;
     this.generating = true;
     this.genError = '';
+    const controller: AbortControllerLike = createEntryAbortController();
+    this.generationController = controller;
     try {
       if (this.storage === null) throw new Error('存储未就绪');
-      const model: string = await this.storage.get<string>('ai_model', 'deepseek-chat');
+      const runtime: DeepReadTextRuntime = await getDeepReadTextRuntime();
+      if (!this.alive || controller.signal.aborted) return;
       const messages: UIMessage[] = [makeUserMessage(prompt.length > 0 ? AI_TEMPLATE_PROMPT + prompt : prompt)];
-      const out: UIMessage[] = await getAppContainer().aiClient.generateText({ model: model, messages: messages });
+      const out: UIMessage[] = await runtime.aiClient.generateText({ model: runtime.model, messages: messages, signal: controller.signal });
       let text: string = '';
-      for (const m of out) {
-        if (m.role !== 'assistant') continue;
+      const assistants: UIMessage[] = out.filter((m: UIMessage): boolean => m.role === 'assistant');
+      const last: UIMessage | undefined = assistants.length > 0 ? assistants[assistants.length - 1] : undefined;
+      if (last !== undefined) {
+        const m: UIMessage = last;
         for (const p of m.parts) {
           if (p.type === 'text') {
             const tp: UIMessagePartText = p as UIMessagePartText;
@@ -185,22 +337,32 @@ struct DeepReadTemplateWorkbenchPage {
       const end: number = text.lastIndexOf('>');
       if (start < 0 || end <= start) throw new Error('模型未返回 HTML');
       const html: string = text.substring(start, end + 1);
-      if (sanitizeTemplateHtml(html).length === 0) throw new Error('生成内容未通过安检');
+      const error: string = validateTemplateHtml(html);
+      if (error.length > 0) throw new Error(error);
+      if (!this.alive || controller.signal.aborted) return;
       this.editHtml = html;
       if (this.editName.trim().length === 0) this.editName = prompt.substring(0, 12);
       this.note = 'AI 生成已填入编辑器,请预览确认后保存';
     } catch (e) {
       const msg: string = e instanceof Error ? e.message : String(e);
-      this.genError = `生成失败:${msg}`;
+      if (this.alive && !controller.signal.aborted) this.genError = `生成失败:${msg}`;
     } finally {
-      this.generating = false;
+      if (this.alive && this.generationController === controller) {
+        this.generating = false;
+        this.generationController = null;
+      }
     }
   }
 
   private templateDate(t: CustomTemplateDef): string {
-    if (t.createdAt <= 0) return '';
-    const d: Date = new Date(t.createdAt);
+    const time: number = t.updatedAt ?? t.createdAt;
+    if (time <= 0) return '';
+    const d: Date = new Date(time);
     return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+  }
+
+  private templateRowKey(t: CustomTemplateDef): string {
+    return `${t.id}-${t.name}-${t.updatedAt ?? t.createdAt}`;
   }
 
   build(): void {
@@ -224,8 +386,10 @@ struct DeepReadTemplateWorkbenchPage {
 
           FooterNote({
             text: '占位符:{{title}} 标题 · {{kicker}} 刊头 · {{summary}} 导语与实体 · ' +
-              '{{timeline}} 时间线 · {{analysis}} 深度分析 · {{reading}} 扩展阅读。' +
-              '模板经严格安检(禁脚本/表单/外部资源);自定义模板不随字号倍率与衬线偏好缩放。',
+              '{{timeline}} 时间线 · {{core_points}} 核心要点 · {{analysis}} 分析 · {{diagram}} 图解 · ' +
+              '{{hero}} 主图 · {{images}} 其他图片 · {{reading}} 扩展阅读 · {{references}} 来源 · {{content}} 全部章节。' +
+              '缺少的章节补在末尾。字号、字体与主题通过 CSS 变量生效;模板自行写死或强制覆盖的样式需手动修改。' +
+              '大小限制 96 KiB,禁止脚本、表单、事件与外部 CSS。',
           })
           PageSpacer()
         }
@@ -238,14 +402,16 @@ struct DeepReadTemplateWorkbenchPage {
 }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(BG)
-    .bindSheet(this.previewOpen, this.PreviewSheet(), {
+    .bindSheet(this.previewOpen, this.PreviewSheet(this.previewId), {
       height: SheetSize.LARGE, showClose: false,
-      onDisappear: (): void => { this.previewOpen = false; },
+      onDisappear: (): void => { this.previewOpen = false; this.webAttached = false; this.webInitialized = false; },
     })
   }
 
   @Builder
   ListCard(): void {
+    CardRow({ label: '阅读模板与选用', desc: '查看内置版式和当前选用状态',
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/DeepReadTemplateSettingsPage' }); } })
     if (this.templates.length === 0) {
       Column() {
         Text('还没有自定义模板。用下方编辑器手写,或用 AI 生成。')
@@ -264,14 +430,14 @@ struct DeepReadTemplateWorkbenchPage {
         isLast: idx === this.templates.length - 1 && this.editingId.length === 0,
         onRowClick: (): void => { this.startEdit(t); },
       })
-    }, (t: CustomTemplateDef): string => t.id)
+    }, (t: CustomTemplateDef): string => this.templateRowKey(t))
     if (this.templates.length > 0 && this.editingId.length > 0) {
       Column() {
         Row().width('100%').height(0.5).backgroundColor(LINE)
         Text(`删除「${this.editName}」`)
           .fontSize(13).fontColor(ERROR)
-          .constraintSize({ minHeight: 40 })
-          .onClick((): void => { this.remove(this.editingId); })
+          .constraintSize({ minHeight: 44 })
+          .onClick((): void => { this.confirmRemove(this.editingId); })
       }
       .width('100%')
       .padding({ left: 14, right: 14 })
@@ -282,7 +448,9 @@ struct DeepReadTemplateWorkbenchPage {
   EditorCard(): void {
     Column() {
       TextInput({ text: this.editName, placeholder: '模板名称(如:暗夜极简)' })
+        .enabled(!this.saving && !this.generating)
         .fontSize(15).fontColor(INK)
+        .placeholderColor(INK4)
         .backgroundColor(Color.Transparent)
         .constraintSize({ minHeight: 44 })
         .onChange((v: string): void => { this.editName = v; })
@@ -293,6 +461,8 @@ struct DeepReadTemplateWorkbenchPage {
         placeholder: '<style>…</style>\n<h1>{{title}}</h1>\n{{summary}}\n{{analysis}}',
         minLines: 8,
         maxLines: 14,
+        inputEnabled: !this.saving && !this.generating,
+        enableFullscreen: !this.saving && !this.generating,
         onChange: (v: string): void => { this.editHtml = v; },
         onImportFile: (): void => { this.importHtmlFile(); },
       })
@@ -306,7 +476,7 @@ struct DeepReadTemplateWorkbenchPage {
         BtnGhost({ label: '新建', onTap: (): void => { this.startNew(); } })
         Blank().layoutWeight(1)
         BtnGhost({ label: '预览', onTap: (): void => { this.openPreview(); } })
-        BtnFill({ label: '保存', onTap: (): void => { this.save().catch((): void => {}); } })
+        BtnFill({ label: this.saving ? '保存中…' : '保存并选用', onTap: (): void => { this.save(); } })
           .margin({ left: 8 })
       }
       .width('100%')
@@ -321,6 +491,7 @@ struct DeepReadTemplateWorkbenchPage {
     Column() {
       TextInput({ text: this.aiPrompt, placeholder: '描述想要的版式,如:深夜极简、大标题衬线' })
         .fontSize(15).fontColor(INK)
+        .placeholderColor(INK4)
         .backgroundColor(Color.Transparent)
         .constraintSize({ minHeight: 44 })
         .onChange((v: string): void => { this.aiPrompt = v; })
@@ -334,7 +505,7 @@ struct DeepReadTemplateWorkbenchPage {
         Blank().layoutWeight(1)
         BtnFill({
           label: this.generating ? '生成中…' : '生成模板',
-          onTap: (): void => { this.generate().catch((): void => {}); },
+          onTap: (): void => { this.generate(); },
         })
       }
       .width('100%')
@@ -345,23 +516,39 @@ struct DeepReadTemplateWorkbenchPage {
   }
 
   @Builder
-  PreviewSheet(): void {
+  PreviewSheet(id: number): void {
     Column() {
       Row() {
         Text('预览(示例数据)').fontSize(18).fontColor(INK).layoutWeight(1)
-        Text('关闭').fontSize(14).fontColor(this.accentColorStore).padding(12)
+        Row() {
+          Text('关闭').fontSize(14).fontColor(INK)
+        }
+          .constraintSize({ minWidth: 64, minHeight: 44 })
+          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
           .onClick((): void => { this.previewOpen = false; })
       }
       .width('100%')
       .padding({ left: 4, right: 4, bottom: 8 })
-      Web({ src: 'about:blank', controller: this.webController })
+      ForEach([this.themeEpoch], (epoch: number): void => {
+        Web({ src: 'about:blank', controller: this.webController })
         .width('100%').layoutWeight(1)
         .backgroundColor(BG)
         .javaScriptAccess(false)
-        .onControllerAttached((): void => {
-          this.webAttached = true;
-          this.loadPreview();
+        .fileAccess(false).domStorageAccess(false).multiWindowAccess(false)
+        .onOverrideUrlLoading((request: WebResourceRequest): boolean => {
+          const url: string = request.getRequestUrl();
+          return url !== 'about:blank' && !url.startsWith('data:') && !url.startsWith('#');
         })
+        .onControllerAttached((): void => {
+          this.attachPreviewWeb(id, epoch);
+        })
+        .onPageEnd((event: OnPageEndEvent): void => {
+          this.onPreviewPageEnd(event.url, id, epoch);
+        })
+        .onErrorReceive((event: OnErrorReceiveEvent): void => {
+          this.onPreviewError(event.request.isMainFrame(), id, epoch);
+        })
+      }, (epoch: number): string => `preview-${epoch}`)
     }
     .width('100%').height('100%')
     .padding({ left: 16, right: 16, top: 12 })

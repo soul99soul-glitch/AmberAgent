@@ -48,6 +48,7 @@ export struct DeepReadConfirmationDialog {
               .layoutWeight(1)
               .textAlign(TextAlign.Center)
               .padding({ top: 12, bottom: 12 })
+              .constraintSize({ minHeight: 44 })
               .onClick((): void => { this.onDismiss(); })
 
             // 分隔竖线
@@ -63,6 +64,7 @@ export struct DeepReadConfirmationDialog {
               .layoutWeight(1)
               .textAlign(TextAlign.Center)
               .padding({ top: 12, bottom: 12 })
+              .constraintSize({ minHeight: 44 })
               .onClick((): void => { this.onConfirm(); })
           }
           .width('100%')

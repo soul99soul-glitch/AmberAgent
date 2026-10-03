@@ -1,5 +1,5 @@
 // SettingBackupPage — 本地加密备份导出 / 恢复
-// 域层 sync_snapshot + entry SyncCryptoPort；无云上传（下一圈）。
+// 域层 sync_snapshot + entry SyncCryptoPort / WebDavTransport。
 // 2026-09-27 二级页 iOS 对齐:仅换视觉骨架(CenteredTitleBar/PlainSection/
 //   CardGroup r18+描边/CardRow/CardToggleRow/FooterNote),导出/导入/加密/恢复逻辑零改动。
 
@@ -15,12 +15,14 @@ import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, CardToggleRow, FooterNote, PageSpacer,
 } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { getChatRepository, getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
+import { getChatRepository, getChatKvStore } from '../di/AppContainer.ets';
+import { createWebDavTransport } from '../platform_impl/WebDavTransport.ets';
 import { createEntrySyncCryptoPort } from '../platform_impl/SyncCryptoPort.ets';
 import {
   hasActiveConversationRuns, beginConversationRestore, markConversationsRestored,
 } from '../platform_impl/ConversationRunGuard.ets';
 import { clearConversationDeletedMarker } from '../platform_impl/EntryCompactStore.ets';
+import { getConversationRecapService } from '../platform_impl/ConversationRecapSupport.ets';
 import type { Conversation, ConversationSummary, JsonObject } from '@amber/chat-domain';
 import {
   createSyncBackup, restoreSyncBackup, inspectSyncArchive,
@@ -95,6 +97,10 @@ struct SettingBackupPage {
         const c: Conversation | null = await repo.getById(s.id);
         if (c !== null) conversations.push(c);
       }
+      // list/getById 首次初始化也可能进入内存降级，读取完成后再检查。
+      if (AppStorage.get<boolean>('chatStorageDegraded') === true) {
+        throw new Error('会话存储不可用，无法创建完整备份');
+      }
     }
     const kv = getChatKvStore();
     const settingsBlob: JsonObject = await buildSyncSettingsBlob(kv, this.exportAssistants, this.exportProviders);
@@ -108,6 +114,33 @@ struct SettingBackupPage {
       deviceLabel: 'HarmonyOS',
       passphrase: pass,
     }, Date.now());
+  }
+
+  private writeBackupFile(path: string, bytes: Uint8Array): void {
+    const file = fileIo.openSync(
+      path, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+    try {
+      const buffer: ArrayBuffer = bytes.slice().buffer as ArrayBuffer;
+      if (fileIo.writeSync(file.fd, buffer) !== bytes.byteLength) {
+        throw new Error('备份文件写入不完整');
+      }
+    } finally {
+      fileIo.closeSync(file.fd);
+    }
+  }
+
+  private readBackupFile(path: string): Uint8Array {
+    const file = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+    try {
+      const stat = fileIo.statSync(file.fd);
+      const buffer: ArrayBuffer = new ArrayBuffer(stat.size);
+      if (fileIo.readSync(file.fd, buffer) !== stat.size) {
+        throw new Error('备份文件读取不完整');
+      }
+      return new Uint8Array(buffer);
+    } finally {
+      fileIo.closeSync(file.fd);
+    }
   }
 
   async doExport(): Promise<void> {
@@ -132,10 +165,7 @@ struct SettingBackupPage {
         return;
       }
       const target: string = uris[0];
-      const file = fileIo.openSync(
-        target, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
-      fileIo.writeSync(file.fd, bytes.buffer as ArrayBuffer);
-      fileIo.closeSync(file.fd);
+      this.writeBackupFile(target, bytes);
       this.statusMsg = `已导出 → ${fileName}`;
       this.toast('备份已导出');
     } catch (e) {
@@ -167,8 +197,9 @@ struct SettingBackupPage {
         password: this.davPass,
         path: this.davPath.trim().length > 0 ? this.davPath.trim() : 'amber_agent_backups',
       };
-      const client = createWebDavClient(getAppContainer().httpClient, config);
+      const client = createWebDavClient(createWebDavTransport(), config);
       const name = webDavBackupFileName();
+      await client.mkcol('');
       await client.put(name, bytes);
       this.statusMsg = `已上传 ${name}`;
       this.toast('上传成功');
@@ -190,7 +221,7 @@ struct SettingBackupPage {
       password: this.davPass,
       path: this.davPath.trim().length > 0 ? this.davPath.trim() : 'amber_agent_backups',
     };
-    return createWebDavClient(getAppContainer().httpClient, config);
+    return createWebDavClient(createWebDavTransport(), config);
   }
 
   private formatSize(bytes: number): string {
@@ -230,10 +261,7 @@ struct SettingBackupPage {
     try {
       const bytes: Uint8Array = await client.get(item.name);
       const path: string = `${this.ctx().cacheDir}/webdav-restore.abin`;
-      const file = fileIo.openSync(
-        path, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
-      fileIo.writeSync(file.fd, bytes.buffer as ArrayBuffer);
-      fileIo.closeSync(file.fd);
+      this.writeBackupFile(path, bytes);
       const preview = await inspectSyncArchive(bytes, path);
       this.setPreview(preview);
       this.pendingArchivePath = path;
@@ -258,12 +286,8 @@ struct SettingBackupPage {
         fileSuffixFilters: ['abin', 'json'],
       });
       if (uris.length === 0) return;
-      const file = fileIo.openSync(uris[0], fileIo.OpenMode.READ_ONLY);
-      const stat = fileIo.statSync(file.fd);
-      const buf = new ArrayBuffer(stat.size);
-      fileIo.readSync(file.fd, buf);
-      fileIo.closeSync(file.fd);
-      const preview = await inspectSyncArchive(new Uint8Array(buf), uris[0]);
+      const bytes: Uint8Array = this.readBackupFile(uris[0]);
+      const preview = await inspectSyncArchive(bytes, uris[0]);
       this.setPreview(preview);
       this.pendingArchivePath = uris[0];
       this.statusMsg =
@@ -291,15 +315,11 @@ struct SettingBackupPage {
     this.statusMsg = '恢复中…';
     let release: (() => void) | null = null;
     try {
-      const file = fileIo.openSync(this.pendingArchivePath, fileIo.OpenMode.READ_ONLY);
-      const stat = fileIo.statSync(file.fd);
-      const buf = new ArrayBuffer(stat.size);
-      fileIo.readSync(file.fd, buf);
-      fileIo.closeSync(file.fd);
+      const bytes: Uint8Array = this.readBackupFile(this.pendingArchivePath);
       const crypto = createEntrySyncCryptoPort();
       // restoreSyncBackup 内部已用真实序列化器整体校验结构/ID/时间/selectIndex(R03)；
       // 校验失败在此抛出，尚未写任何会话。
-      const result: SyncRestoreResult = await restoreSyncBackup(crypto, new Uint8Array(buf), pass);
+      const result: SyncRestoreResult = await restoreSyncBackup(crypto, bytes, pass);
       const settings: SyncRestoreSettings = settingsFromSyncPayload(result.payload);
       const kv = getChatKvStore();
       // D4-1:会话类别(勾选才恢复;未勾选跳过活跃检查/事务/标记清理)
@@ -325,13 +345,19 @@ struct SettingBackupPage {
         // R09:恢复成功 → 清除 compact 删除标记(仅压缩状态标记；绝不触碰
         // memory/managedfiles 的损坏隔离保护——恢复不携带这些 store 的数据)。
         // 会话已落库，故此处失败不得泛报「恢复失败」隐去已写。
-        try {
-          for (const id of ids) {
-            await clearConversationDeletedMarker(kv, id);
+        for (const id of ids) {
+          try {
+            await getConversationRecapService().invalidate(id);
+          } catch (e) {
+            compactFailed = true;
+            compactErr = e instanceof Error ? e.message : String(e);
           }
-        } catch (e) {
-          compactFailed = true;
-          compactErr = e instanceof Error ? e.message : String(e);
+          try {
+            await clearConversationDeletedMarker(kv, id);
+          } catch (e) {
+            compactFailed = true;
+            compactErr = e instanceof Error ? e.message : String(e);
+          }
         }
         convNote = `已恢复 ${convs.length} 个会话`;
       }
@@ -346,8 +372,8 @@ struct SettingBackupPage {
         settingsNote = note !== null ? note : '（备份不含所选 settings 类别）';
       }
       if (compactFailed) {
-        this.statusMsg = `${convNote}，但压缩状态恢复失败：${compactErr}${settingsNote}`;
-        this.toast('会话已恢复，压缩状态恢复失败');
+        this.statusMsg = `${convNote}，但回顾或压缩状态清理失败：${compactErr}${settingsNote}`;
+        this.toast('会话已恢复，回顾或压缩状态清理失败');
       } else if (settingsNote.indexOf('失败') >= 0) {
         this.statusMsg = `${convNote}${settingsNote}`;
         this.toast('settings 覆盖失败');

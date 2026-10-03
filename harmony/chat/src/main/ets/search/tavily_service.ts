@@ -1,5 +1,6 @@
 // tavily_service — Tavily 搜索/抓取(D-068c)
 // Android 基准: search/.../TavilySearchService.kt(全文 203 行;含 scrape)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -36,6 +37,7 @@ export const tavilySearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: TavilyOptions = asOptions(serviceOptions);
     const query: string = requireQuery(params);
@@ -58,7 +60,7 @@ export const tavilySearchService: SearchService = {
         topic,
         include_answer: 'advanced',
       }),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`response failed #${resp.status}`);
     }
@@ -92,6 +94,7 @@ export const tavilySearchService: SearchService = {
 
   scrape: async (
     params: JsonObject, _commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<ScrapedResult> => {
     const opts: TavilyOptions = asOptions(serviceOptions);
     const url: string | null = primitiveContentOrNull(params, 'url');
@@ -105,7 +108,7 @@ export const tavilySearchService: SearchService = {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ urls: [url] }),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`response failed #${resp.status}`);
     }

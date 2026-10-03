@@ -1,13 +1,18 @@
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
+import { markWantRoutingReady } from '../entryability/EntryAbility.ets';
+import { novelStorySeedText } from '@amber/deepread-domain';
+import type { NovelStorySeed } from '@amber/deepread-domain';
 // NovelProjectsPage — 小说项目库(iOS NovelProjectListView 结构:右上导入 +
 // 底部悬浮新建胶囊 + 创建 sheet(空白/快速开始)+ 空态双按钮)
 // 行操作收进长按菜单(对齐会话首页交互);恢复删除项目为列表尾注链接。
 import { ACCENT, ACCENT_INK, ACCENT_LIGHT, BG, INK, INK2, INK3, INK4, ERROR, MOTION_ENTER, MOTION_OVERLAY, MOTION_STAGGER, OVERLAY, SHADOW_OVERLAY, SURFACE, SURFACE2, TITLE, TEXT_STYLES } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
-import { CenteredTitleBar, PlainSection, CardGroup, BtnFill, BtnGhost, Seg, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PageTitleBar, PlainSection, CardGroup, BtnFill, BtnGhost, Seg, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router, promptAction, KeyboardAvoidMode } from '@kit.ArkUI';
 import { getNovelCreation, getNovelWorkspaceService } from '../di/AppContainer.ets';
-import type { NovelProject } from '@amber/deepread-domain';
+import type { NovelProject, NovelProjectFailure, NovelProjectRecoveryPreview } from '@amber/deepread-domain';
+import type { NovelWorkspaceImportPreview } from '../platform_impl/NovelWorkspaceService.ets';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 
@@ -31,6 +36,9 @@ struct NovelProjectsPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State projects: NovelProject[] = [];
+  @State projectFailures: NovelProjectFailure[] = [];
+  @State importPreview: NovelWorkspaceImportPreview | null = null;
+  @State recoveryPreview: NovelProjectRecoveryPreview | null = null;
   @State loading: boolean = true;
   @State renameDialogOpen: boolean = false;
   @State renameId: string = '';
@@ -46,6 +54,9 @@ struct NovelProjectsPage {
   @State createName: string = '';
   @State quickGenre: string = '';
   @State quickIdea: string = '';
+  @State quickWorld: string = '';
+  @State quickCharacters: string = '';
+  @State quickDirection: string = '';
   @State creating: boolean = false;
   private pageAlive: boolean = false;
   private loadToken: number = 0;
@@ -64,6 +75,7 @@ struct NovelProjectsPage {
   }
 
   onPageShow(): void {
+    if (getProductKind() === 'novel') markWantRoutingReady(this.getUIContext().getRouter());
     if (this.firstShowDone) {
       this.loadProjects().catch((e: Error): void => {
         if (this.pageAlive) this.errorMsg = String(e);
@@ -82,6 +94,10 @@ struct NovelProjectsPage {
   }
 
   onBackPress(): boolean {
+    if (this.importPreview !== null || this.recoveryPreview !== null) {
+      if (!this.importing && !this.restoring) this.dismissRestorePreview();
+      return true;
+    }
     if (this.createSheetOpen) {
       if (!this.creating) this.dismissCreateSheet();
       return true;
@@ -118,7 +134,8 @@ struct NovelProjectsPage {
     const firstLoad: boolean = !this.loadedOnce;
     if (this.pageAlive && firstLoad) this.loading = true;
     try {
-      const projects: NovelProject[] = await getNovelCreation().listProjects();
+      const inventory = await getNovelCreation().listProjectInventory();
+      const projects: NovelProject[] = inventory.projects;
       if (this.pageAlive && token === this.loadToken) {
         // 首次填充走 animateTo,让行交错入场 transition 生效
         if (firstLoad && projects.length > 0) {
@@ -128,6 +145,7 @@ struct NovelProjectsPage {
         } else {
           this.projects = projects;
         }
+        this.projectFailures = inventory.failures;
         this.loadedOnce = true;
         this.errorMsg = '';
       }
@@ -137,10 +155,14 @@ struct NovelProjectsPage {
   }
 
   openCreateSheet(): void {
+    if (this.importing || this.restoring || this.importPreview !== null || this.recoveryPreview !== null) return;
     this.createMode = 0;
     this.createName = '';
     this.quickGenre = '';
     this.quickIdea = '';
+    this.quickWorld = '';
+    this.quickCharacters = '';
+    this.quickDirection = '';
     this.errorMsg = '';
     this.enableKeyboardAvoidance();
     this.createSheetOpen = true;
@@ -153,6 +175,7 @@ struct NovelProjectsPage {
   }
 
   openRename(p: NovelProject): void {
+    if (this.importing || this.restoring || this.importPreview !== null || this.recoveryPreview !== null) return;
     this.renameId = p.id;
     this.nameInput = p.name;
     this.errorMsg = '';
@@ -170,10 +193,13 @@ struct NovelProjectsPage {
     if (this.creating) return;
     this.creating = true;
     try {
-      const created: NovelProject = await getNovelCreation().create(name);
-      // 快速开始:题材+核心想法拼成种子,进工作区自动发起 quick_start
-      const seed: string = this.createMode === 1
-        ? `题材：${this.quickGenre.trim()}\n核心想法：${this.quickIdea.trim()}` : '';
+      const story: NovelStorySeed = {
+        genre: this.quickGenre, coreIdea: this.quickIdea, world: this.quickWorld,
+        characters: this.quickCharacters, direction: this.quickDirection,
+      };
+      const seed: string = this.createMode === 1 ? novelStorySeedText(story) : '';
+      if (this.createMode === 1 && seed.length === 0) throw new Error('请至少填写一项故事种子');
+      const created: NovelProject = await getNovelCreation().create(name, this.createMode === 1 ? story : undefined);
       this.dismissCreateSheet();
       this.openWorkspace(created.id, seed);
     } catch (e) {
@@ -209,7 +235,7 @@ struct NovelProjectsPage {
 
   // N3:恢复最近删除的项目(repository 软删恢复)
   async restoreDeleted(): Promise<void> {
-    if (this.restoring) return;
+    if (this.restoring || this.importing || this.importPreview !== null || this.recoveryPreview !== null) return;
     this.restoring = true;
     try {
       const restored: NovelProject | null = await getNovelCreation().restorePreviousProject();
@@ -241,26 +267,101 @@ struct NovelProjectsPage {
   }
 
   async importWorkspace(): Promise<void> {
-    if (this.importing) return;
-    const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
-    options.maxSelectNumber = 1;
-    options.fileSuffixFilters = ['小说工作区 ZIP|.zip'];
-    const context: common.UIAbilityContext =
-      this.getUIContext().getHostContext() as common.UIAbilityContext;
-    const documentPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(context);
+    if (this.importing || this.restoring || this.importPreview !== null || this.recoveryPreview !== null ||
+      this.createSheetOpen || this.renameDialogOpen || this.confirmDeleteId.length > 0) return;
+    this.errorMsg = '';
+    this.importing = true;
     try {
+      const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+      options.maxSelectNumber = 1;
+      options.fileSuffixFilters = ['小说工作区或完整备份 ZIP|.zip'];
+      const context: common.UIAbilityContext =
+        this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const documentPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(context);
       const uris: string[] = await documentPicker.select(options);
       if (uris.length === 0) return;
-      this.importing = true;
-      const project: NovelProject = await getNovelWorkspaceService().importZip(
+      const preview: NovelWorkspaceImportPreview = await getNovelWorkspaceService().inspectImport(
         this.readSelectedBytes(uris[0]));
-      await this.loadProjects();
-      this.openWorkspace(project.id, '');
+      if (!this.pageAlive) return;
+      this.errorMsg = '';
+      this.importPreview = preview;
     } catch (e) {
-      this.errorMsg = `导入失败：${String(e)}`;
+      if (this.pageAlive) this.errorMsg = `导入失败：${String(e)}`;
     } finally {
-      this.importing = false;
+      if (this.pageAlive) this.importing = false;
     }
+  }
+
+  private dismissRestorePreview(): void {
+    this.importPreview = null;
+    this.recoveryPreview = null;
+    this.errorMsg = '';
+  }
+
+  private async inspectRecovery(failure: NovelProjectFailure): Promise<void> {
+    if (this.restoring || this.importing || this.recoveryPreview !== null || this.importPreview !== null) return;
+    this.restoring = true;
+    try {
+      const preview: NovelProjectRecoveryPreview | null =
+        await getNovelCreation().inspectProjectRecovery(failure.id);
+      if (!this.pageAlive) return;
+      if (preview === null) this.errorMsg = `「${failure.name}」没有可用的恢复快照，请导入完整备份。`;
+      else {
+        this.errorMsg = '';
+        this.recoveryPreview = preview;
+      }
+    } catch (e) {
+      if (this.pageAlive) this.errorMsg = `检查恢复来源失败：${String(e)}`;
+    } finally {
+      if (this.pageAlive) this.restoring = false;
+    }
+  }
+
+  private async confirmRestorePreview(resolution: 'reject' | 'replace' | 'keepBoth' = 'reject'): Promise<void> {
+    if (this.importing || this.restoring) return;
+    const imported: NovelWorkspaceImportPreview | null = this.importPreview;
+    const recovered: NovelProjectRecoveryPreview | null = this.recoveryPreview;
+    if (imported === null && recovered === null) return;
+    this.restoring = true;
+    try {
+      const project: NovelProject = imported !== null
+        ? await getNovelWorkspaceService().confirmImport(imported, resolution)
+        : await getNovelCreation().restoreProjectRecovery(recovered as NovelProjectRecoveryPreview);
+      if (!this.pageAlive) return;
+      this.dismissRestorePreview();
+      await this.loadProjects();
+      if (this.pageAlive) this.openWorkspace(project.id, '');
+    } catch (e) {
+      if (this.pageAlive) this.errorMsg = `恢复失败：${String(e)}`;
+    } finally {
+      if (this.pageAlive) this.restoring = false;
+    }
+  }
+
+  private importHasCollision(): boolean {
+    return this.importPreview !== null && this.importPreview.collision;
+  }
+
+  private openRecoveryText(): void {
+    if (this.recoveryPreview === null || this.restoring || this.importing) return;
+    const preview: NovelProjectRecoveryPreview = this.recoveryPreview;
+    router.pushUrl({ url: 'pages/NovelRecoveryPreviewPage', params: {
+      projectId: preview.projectId, title: preview.title, source: preview.source, sourceToken: preview.sourceToken,
+    } });
+  }
+
+  private restorePreviewTitle(): string {
+    if (this.importPreview !== null) return this.importPreview.kind === 'native' ? '恢复完整备份' : '导入公开工作区';
+    return '恢复损坏的项目';
+  }
+
+  private restorePreviewDetails(): string {
+    if (this.importPreview !== null) return this.importPreview.description;
+    if (this.recoveryPreview !== null) {
+      const source: string = this.recoveryPreview.source === 'trash' ? '删除前的完整项目' : '当前分支的提交快照';
+      return `项目：${this.recoveryPreview.title}\n恢复来源：${source}\n损坏的原目录会保留，确认后才替换。`;
+    }
+    return '';
   }
 
   openWorkspace(projectId: string, quickStartSeed: string): void {
@@ -271,6 +372,7 @@ struct NovelProjectsPage {
 
   // 行操作收进长按菜单(对齐会话首页交互),列表不再常驻两个盒按钮
   private showRowMenu(p: NovelProject): void {
+    if (this.importing || this.restoring || this.importPreview !== null || this.recoveryPreview !== null) return;
     promptAction.showActionMenu({
       buttons: [
         { text: '重命名', color: INK },
@@ -323,6 +425,7 @@ struct NovelProjectsPage {
         if (e.type === TouchType.Down) this.pressedId = project.id;
         else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressedId = '';
       })
+      .enabled(!this.importing && !this.restoring)
       .onClick((): void => { this.openWorkspace(project.id, ''); })
       .gesture(
         LongPressGesture()
@@ -345,6 +448,69 @@ struct NovelProjectsPage {
     ForEach(this.projects, (p: NovelProject, idx: number): void => {
       this.projectRow(p, idx === this.projects.length - 1, idx)
     }, (p: NovelProject): string => p.id)
+  }
+
+  @Builder
+  FailedProjectRows(): void {
+    ForEach(this.projectFailures, (failure: NovelProjectFailure): void => {
+      Column({ space: 8 }) {
+        Text(failure.name).fontSize(15).fontWeight(FontWeight.Medium).fontColor(INK).width('100%')
+        Text(`读取失败：${failure.error}`).fontSize(13).fontColor(ERROR).width('100%')
+        Row({ space: 12 }) {
+          Text('重试读取').fontSize(14).fontColor(ACCENT).constraintSize({ minHeight: 44 })
+            .enabled(!this.restoring && !this.importing)
+            .onClick((): void => { this.loadProjects().catch((e: Error): void => { this.errorMsg = String(e); }); })
+          Text(this.restoring ? '检查中…' : '检查恢复来源').fontSize(14).fontColor(ACCENT)
+            .constraintSize({ minHeight: 44 }).enabled(!this.restoring && !this.importing)
+            .onClick((): void => { this.inspectRecovery(failure); })
+        }.width('100%')
+      }.width('100%').alignItems(HorizontalAlign.Start).padding(16)
+    }, (failure: NovelProjectFailure): string => failure.id)
+  }
+
+  @Builder
+  RestorePreviewSheet(): void {
+    Column() {
+      Blank().onClick((): void => { if (!this.restoring && !this.importing) this.dismissRestorePreview(); })
+      Column({ space: 12 }) {
+        Text(this.restorePreviewTitle()).fontSize(18).fontWeight(FontWeight.Bold).fontColor(INK).width('100%')
+        Scroll() {
+          Column({ space: 12 }) {
+            Text(this.restorePreviewDetails()).fontSize(14).lineHeight(22).fontColor(INK2).width('100%')
+            if (this.errorMsg.length > 0) {
+              Text(this.errorMsg).fontSize(13).fontColor(ERROR).width('100%')
+            }
+          }.width('100%').alignItems(HorizontalAlign.Start)
+        }.width('100%').constraintSize({ maxHeight: '50%' }).scrollBar(BarState.Off)
+        if (this.recoveryPreview !== null) {
+          Text('只读查看旧稿').fontSize(14).fontColor(ACCENT).constraintSize({ minHeight: 44 })
+            .enabled(!this.restoring && !this.importing).onClick((): void => { this.openRecoveryText(); })
+        }
+        if (this.importHasCollision()) {
+          Text('已存在同一项目。选择保留两份，或明确替换现有项目。').fontSize(13).fontColor(INK3).width('100%')
+          Row({ space: 12 }) {
+            Text('保留两份').fontSize(14).fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center)
+              .constraintSize({ minHeight: 44 }).enabled(!this.restoring && !this.importing)
+              .onClick((): void => { this.confirmRestorePreview('keepBoth'); })
+            Text('替换现有项目').fontSize(14).fontColor(ERROR).layoutWeight(1).textAlign(TextAlign.Center)
+              .constraintSize({ minHeight: 44 }).enabled(!this.restoring && !this.importing)
+              .onClick((): void => { this.confirmRestorePreview('replace'); })
+          }.width('100%')
+        }
+        Row({ space: 12 }) {
+          Text('取消').fontSize(14).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
+            .constraintSize({ minHeight: 44 }).enabled(!this.restoring && !this.importing)
+            .onClick((): void => { this.dismissRestorePreview(); })
+          if (!this.importHasCollision()) {
+            Text(this.restoring ? '恢复中…' : '确认').fontSize(14).fontColor(ACCENT).layoutWeight(1)
+              .textAlign(TextAlign.Center).constraintSize({ minHeight: 44 }).enabled(!this.restoring && !this.importing)
+              .onClick((): void => { this.confirmRestorePreview(); })
+          }
+        }.width('100%')
+      }.width('100%').padding({ left: 20, right: 20, top: 20, bottom: 20 + this.navBarHeight })
+        .backgroundColor(SURFACE).borderRadius({ topLeft: 20, topRight: 20 })
+        .alignItems(HorizontalAlign.Start).onClick((): void => {})
+    }.width('100%').height('100%').backgroundColor(OVERLAY).justifyContent(FlexAlign.End)
   }
 
   // 列表尾注:恢复删除的项目(鸿蒙独有救命入口,iOS 无对等行)
@@ -378,6 +544,7 @@ struct NovelProjectsPage {
       .borderRadius(25)
       .shadow({ radius: 16, color: SHADOW_OVERLAY, offsetY: 6 })
       .margin({ bottom: 24 + Math.max(this.navBarHeight, 24) })
+      .enabled(!this.importing && !this.restoring && this.importPreview === null && this.recoveryPreview === null)
       .onClick((): void => { this.openCreateSheet(); })
       .accessibilityText('新建小说项目')
       .transition(TransitionEffect.OPACITY
@@ -423,7 +590,19 @@ struct NovelProjectsPage {
                   .height(120).fontSize(14).fontColor(INK).placeholderColor(INK4)
                   .backgroundColor(SURFACE2).borderRadius(10).padding(12)
                   .onChange((v: string) => { this.quickIdea = v; })
-                Text('AI 只会生成建议，确认后才写入项目设定。')
+                TextArea({ text: this.quickWorld, placeholder: '世界背景：故事发生的时代、地点和规则' })
+                  .height(88).fontSize(14).fontColor(INK).placeholderColor(INK4)
+                  .backgroundColor(SURFACE2).borderRadius(10).padding(12)
+                  .onChange((value: string): void => { this.quickWorld = value; })
+                TextArea({ text: this.quickCharacters, placeholder: '主要人物：身份、目标和人物关系' })
+                  .height(88).fontSize(14).fontColor(INK).placeholderColor(INK4)
+                  .backgroundColor(SURFACE2).borderRadius(10).padding(12)
+                  .onChange((value: string): void => { this.quickCharacters = value; })
+                TextArea({ text: this.quickDirection, placeholder: '故事方向：冲突、走向与期望结局' })
+                  .height(88).fontSize(14).fontColor(INK).placeholderColor(INK4)
+                  .backgroundColor(SURFACE2).borderRadius(10).padding(12)
+                  .onChange((value: string): void => { this.quickDirection = value; })
+                Text('你填写的种子会保存为项目资料。AI 生成的建议仍须确认后写入设定。')
                   .fontSize(12).fontColor(INK3).width('100%')
               }
               .width('100%').alignItems(HorizontalAlign.Start)
@@ -467,10 +646,20 @@ struct NovelProjectsPage {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
-        CenteredTitleBar({ title: '小说创作', actionIcon: 'arrow_down_to_line',
-          onAction: (): void => { this.importWorkspace(); } })
+        if (getProductKind() === 'novel') {
+          PageTitleBar({ title: '小说创作', showBack: false, actionText: '设置',
+            onAction: (): void => { router.pushUrl({ url: 'pages/NovelStandaloneSettingsPage' }); } })
+          Row() {
+            Blank()
+            Text('导入项目').fontSize(14).fontColor(ACCENT).constraintSize({ minHeight: 44 })
+              .onClick((): void => { this.importWorkspace(); })
+          }.width('100%').padding({ left: 20, right: 20 })
+        } else {
+          CenteredTitleBar({ title: '小说创作', actionIcon: 'arrow_down_to_line',
+            onAction: (): void => { this.importWorkspace(); } })
+        }
 
-        if (this.errorMsg.length > 0 && !this.renameDialogOpen && !this.createSheetOpen) {
+        if (this.errorMsg.length > 0 && !this.renameDialogOpen && !this.createSheetOpen && this.importPreview === null && this.recoveryPreview === null) {
           Text(this.errorMsg)
             .fontSize(TEXT_STYLES.meta.size)
             .fontWeight(TEXT_STYLES.meta.weight)
@@ -494,7 +683,7 @@ struct NovelProjectsPage {
           }
           .width('100%').padding({ top: 64, left: 18, right: 18 })
           .alignItems(HorizontalAlign.Start)
-        } else if (this.projects.length === 0) {
+        } else if (this.projects.length === 0 && this.projectFailures.length === 0) {
           // 空态(iOS ContentUnavailableView):大图标座 + 标题 + 说明 + 新建/导入
           Column() {
             Row() {
@@ -533,9 +722,16 @@ struct NovelProjectsPage {
         } else {
           Scroll() {
             Column() {
+              if (this.projects.length > 0) {
               PlainSection({ label: '项目' })
               CardGroup({ radius: 18, stroke: true, content: (): void => { this.ProjectRows(); } })
                 .margin({ left: 16, right: 16 })
+              }
+              if (this.projectFailures.length > 0) {
+                PlainSection({ label: '需要恢复的项目' })
+                CardGroup({ radius: 18, stroke: true, content: (): void => { this.FailedProjectRows(); } })
+                  .margin({ left: 16, right: 16 })
+              }
               Row() {
                 Blank()
                 this.RestoreFooter()
@@ -554,8 +750,12 @@ struct NovelProjectsPage {
       .width('100%').height('100%').backgroundColor(BG)
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
-      if (!this.loading && !this.createSheetOpen && this.projects.length > 0) {
+      if (!this.loading && !this.createSheetOpen && (this.projects.length > 0 || this.projectFailures.length > 0) && this.importPreview === null && this.recoveryPreview === null) {
         this.Fab()
+      }
+
+      if (this.importPreview !== null || this.recoveryPreview !== null) {
+        this.RestorePreviewSheet()
       }
 
       // 创建 sheet(空白/快速开始)

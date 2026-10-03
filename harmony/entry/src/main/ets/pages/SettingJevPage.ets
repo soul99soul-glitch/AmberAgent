@@ -7,7 +7,7 @@
 import {
   loadJevSettings, saveJevSettings, makeJevSettings, decodeJevResponse, buildJevRequest,
   JEV_TYPESAFE_ENDPOINT,
-  resolveJevPurposeMode,
+  resolveJevPurposeMode, jevPurposeSettings,
 } from '@amber/chat-domain';
 import type { JevSettings, JevEvaluation, JevQuestion, JevMode, JevNewPurpose, JevNewPurposeSettings } from '@amber/chat-domain';
 import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
@@ -107,6 +107,10 @@ struct SettingJevPage {
       model: this.settings.model,
       approvalTriage: this.settings.approvalTriage,
       webAutomation: this.settings.webAutomation,
+      toolContextSelection: this.settings.toolContextSelection,
+      contextRetention: this.settings.contextRetention,
+      autoApproval: this.settings.autoApproval,
+      completionCheck: this.settings.completionCheck,
     });
     this.persist();
   }
@@ -121,6 +125,10 @@ struct SettingJevPage {
         model: this.settings.model,
         approvalTriage: this.settings.approvalTriage,
         webAutomation: this.settings.webAutomation,
+        toolContextSelection: this.settings.toolContextSelection,
+        contextRetention: this.settings.contextRetention,
+        autoApproval: this.settings.autoApproval,
+        completionCheck: this.settings.completionCheck,
       });
     });
     this.persist();
@@ -135,12 +143,16 @@ struct SettingJevPage {
       model: patch.model ?? this.settings.model,
       approvalTriage: this.settings.approvalTriage,
       webAutomation: this.settings.webAutomation,
+      toolContextSelection: this.settings.toolContextSelection,
+      contextRetention: this.settings.contextRetention,
+      autoApproval: this.settings.autoApproval,
+      completionCheck: this.settings.completionCheck,
     });
     this.persist();
   }
 
   private purposeSettings(purpose: JevNewPurpose): JevNewPurposeSettings {
-    return purpose === 'approval_triage' ? this.settings.approvalTriage : this.settings.webAutomation;
+    return jevPurposeSettings(this.settings, purpose) ?? this.settings.approvalTriage;
   }
   private patchPurpose(purpose: JevNewPurpose, patch: Partial<JevNewPurposeSettings>): void {
     const current: JevNewPurposeSettings = this.purposeSettings(purpose);
@@ -149,11 +161,16 @@ struct SettingJevPage {
       allowToolMetadata: patch.allowToolMetadata ?? current.allowToolMetadata,
       allowTaskText: patch.allowTaskText ?? current.allowTaskText,
       allowPageContent: patch.allowPageContent ?? current.allowPageContent,
+      allowToolOutput: patch.allowToolOutput ?? current.allowToolOutput,
     };
     this.settings = makeJevSettings({ mode: this.settings.mode, apiMode: this.settings.apiMode,
       apiKey: this.settings.apiKey, baseUrl: this.settings.baseUrl, model: this.settings.model,
       approvalTriage: purpose === 'approval_triage' ? next : this.settings.approvalTriage,
-      webAutomation: purpose === 'web_automation' ? next : this.settings.webAutomation });
+      webAutomation: purpose === 'web_automation' ? next : this.settings.webAutomation,
+      toolContextSelection: purpose === 'tool_context_selection' ? next : this.settings.toolContextSelection,
+      contextRetention: purpose === 'context_retention' ? next : this.settings.contextRetention,
+      autoApproval: purpose === 'auto_approval' ? next : this.settings.autoApproval,
+      completionCheck: purpose === 'completion_check' ? next : this.settings.completionCheck });
     this.persist();
   }
   private purposeModeIndex(purpose: JevNewPurpose): number {
@@ -196,12 +213,25 @@ struct SettingJevPage {
         }.width('100%')
         Text(this.effectivePurpose(purpose)).fontSize(LABEL).fontColor(this.colors.muted).width('100%')
       }.width('100%').padding({ left: 14, right: 14, top: 12, bottom: 12 })
-      this.AllowanceRow('允许工具元数据', '发送有限工具摘要；不发送原始脚本、凭据或完整参数。',
+      this.AllowanceRow('允许工具元数据', purpose === 'auto_approval'
+        ? '发送工具名称、有限参数或命令以及权限信息，用于复核自动批准。'
+        : purpose === 'completion_check' ? '发送有限修改文件路径与检查状态，不发送工具输出正文。'
+        : purpose === 'context_retention' || purpose === 'tool_context_selection'
+          ? '发送有限工具名称与参数，帮助判断输出内容。'
+          : '发送有限工具摘要；不发送原始脚本、凭据或完整参数。',
         this.purposeSettings(purpose).allowToolMetadata,
         (): void => { this.patchPurpose(purpose, { allowToolMetadata: !this.purposeSettings(purpose).allowToolMetadata }); })
-      this.AllowanceRow('允许任务意图摘要', '只发送有限意图分类，不包含任务原句。',
+      this.AllowanceRow(purpose === 'approval_triage' || purpose === 'web_automation' ? '允许任务意图摘要' : '允许任务文本',
+        purpose === 'completion_check' ? '发送有限用户任务文本和助手最终回复，用于判断是否宣称完成或验证。'
+          : purpose === 'approval_triage' || purpose === 'web_automation' ? '只发送有限意图分类，不包含任务原句。'
+          : '发送有限近期用户任务文本，可能包含原句。',
         this.purposeSettings(purpose).allowTaskText,
         (): void => { this.patchPurpose(purpose, { allowTaskText: !this.purposeSettings(purpose).allowTaskText }); })
+      if (purpose === 'tool_context_selection' || purpose === 'context_retention') {
+        this.AllowanceRow('允许工具输出摘录', '发送有限工具输出内容摘录，用于判断哪些内容与任务相关。',
+          this.purposeSettings(purpose).allowToolOutput,
+          (): void => { this.patchPurpose(purpose, { allowToolOutput: !this.purposeSettings(purpose).allowToolOutput }); })
+      }
       if (purpose === 'web_automation') {
         this.AllowanceRow('允许页面内容', '发送有限页面摘要；仅在真实浏览器目标循环接通后使用。',
           this.purposeSettings(purpose).allowPageContent,
@@ -387,6 +417,18 @@ struct SettingJevPage {
               .margin({ left: GUTTER, right: GUTTER })
             FooterNote({ text: '主动模式只补充“只读、可逆、与任务相关”三个中性事实，仍由你批准、拒绝或回答；未知事实不会变成批准建议。' })
 
+            PlainSection({ label: '工具结果筛选' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.PurposeCard('tool_context_selection'); } })
+              .margin({ left: GUTTER, right: GUTTER })
+            PlainSection({ label: '工具结果保留' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.PurposeCard('context_retention'); } })
+              .margin({ left: GUTTER, right: GUTTER })
+            PlainSection({ label: '自动批准复核' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.PurposeCard('auto_approval'); } })
+              .margin({ left: GUTTER, right: GUTTER })
+            PlainSection({ label: '完成校验' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.PurposeCard('completion_check'); } })
+              .margin({ left: GUTTER, right: GUTTER })
             PlainSection({ label: 'Web 自动化' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.PurposeCard('web_automation'); } })
               .margin({ left: GUTTER, right: GUTTER })
@@ -399,7 +441,7 @@ struct SettingJevPage {
             PlainSection({ label: '状态' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.StatusCard(); } })
               .margin({ left: GUTTER, right: GUTTER })
-            FooterNote({ text: '预算：每日 200 次评估；连续错误进入 5 分钟冷却。已接用途：工具发现、记忆召回、上下文选择、模型路由、审批分诊；Web 自动化消费者待下一阶段接入。' })
+            FooterNote({ text: '预算：每日 200 次评估；连续错误进入 5 分钟冷却。已接用途：工具发现、记忆召回、会话标题选择、模型路由、审批分诊、工具结果筛选与保留、自动批准复核、完成校验；Web 自动化消费者待下一阶段接入。' })
             PageSpacer()
           }
           .width('100%')

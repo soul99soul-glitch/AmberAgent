@@ -281,9 +281,10 @@ test('buildDeepReadQueries: includes title + variants', () => {
   assert.ok(qs.every(q => q.length > 0));
 });
 
-test('buildDeepReadQueries: includes seedUrl first when provided', () => {
+test('buildDeepReadQueries: seed is fetched directly instead of submitted as a query', () => {
   const qs = buildDeepReadQueries('Title', 'https://seed.example.com/x');
-  assert.equal(qs[0], 'https://seed.example.com/x');
+  assert.equal(qs[0], 'Title');
+  assert.ok(!qs.includes('https://seed.example.com/x'));
 });
 
 // ===== DeepReadSource shape =====
@@ -311,7 +312,7 @@ test('fetched source has correct shape', async () => {
 
 test('deadline exceeded: slow fetch rejected, others may still complete', async () => {
   // 一个超慢的 seed URL(模拟 100ms)+ 极短 budget
-  // 由于 budget 在 createSourcePrefetcher 内固定 36s,我们用 fake timers 不可行;
+  // 本测试只验证单个来源失败的隔离;真实 15s/10s deadline 在 product_p2_research.test 用 fake timers 验证。
   // 改为:验证 fetchSource 对非 200 返回 null,以及整体容错。
   // (真正 deadline 测试需要注入 clock,本测试验证容错性即可)
   const { http } = mockHttp((req) => {

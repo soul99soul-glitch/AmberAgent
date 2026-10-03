@@ -181,14 +181,14 @@ export const decodeNovelWorkspaceUtf8 = (bytes: Uint8Array): string => {
 
 const parseManifestFromFiles = (files: NovelWorkspaceArchiveFile[]): NovelWorkspaceManifest => {
   let manifestBytes: Uint8Array | undefined;
-  let hasProjectDocument: boolean = false;
+  let projectDocument: string | null = null;
   for (let i: number = 0; i < files.length; i++) {
     if (files[i].path === NOVEL_WORKSPACE_MANIFEST_PATH) manifestBytes = files[i].bytes;
-    if (files[i].path === 'project.md') hasProjectDocument = true;
+    if (files[i].path === 'project.md') projectDocument = decodeNovelWorkspaceUtf8(files[i].bytes);
   }
   if (manifestBytes === undefined) throw invalidInput('ZIP 缺少 manifest.yaml');
-  if (!hasProjectDocument) throw invalidInput('ZIP 缺少 project.md');
-  return parseNovelWorkspaceManifest(decodeNovelWorkspaceUtf8(manifestBytes));
+  if (projectDocument === null) throw invalidInput('ZIP 缺少 project.md');
+  return parseNovelWorkspaceManifest(decodeNovelWorkspaceUtf8(manifestBytes), projectDocument);
 };
 
 const validateExportFiles = (files: NovelWorkspaceArchiveFile[],

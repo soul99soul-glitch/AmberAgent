@@ -65,7 +65,7 @@ export {
 export type { TemplateVars } from './chat/transformers.ts';
 export {
   applyTemplate, createTemplateTransformer,
-  thinkTagTransformer, regexOutputTransformer, replaceRegexes,
+  thinkTagTransformer, createThinkTagTransformer, regexOutputTransformer, replaceRegexes,
 } from './chat/transformers.ts';
 
 export type {
@@ -79,10 +79,11 @@ export type {
 export { runInteractiveTurn } from './chat/interactive_turn_runtime.ts';
 export type {
   NovelInteractiveRuntimeConfig, NovelInteractiveAdapterDeps,
+  NovelResponsesStreamOptions,
 } from './chat/novel_interactive_adapter.ts';
 export { createNovelInteractiveAdapter } from './chat/novel_interactive_adapter.ts';
 export type { NovelWorkspaceToolPort } from './chat/novel_workspace_tools.ts';
-export { createNovelWorkspaceTools } from './chat/novel_workspace_tools.ts';
+export { createNovelWorkspaceTools, novelAuditToolResult } from './chat/novel_workspace_tools.ts';
 export { selectMessageBranch, runRegenerateAt } from './chat/regenerate.ts';
 export { deleteMessage } from './chat/delete_message.ts';
 export { editMessage } from './chat/edit_message.ts';
@@ -138,6 +139,8 @@ export {
   reasoningDurationMs, formatThoughtSeconds, reasoningBudgetLabel,
   extractThinkingTitle, resolveOnStreamStart, resolveOnStreamEnd,
 } from './chat/reasoning_display.ts';
+
+export { createReasoningLevelMetadataTransformer } from './chat/reasoning_level_metadata.ts';
 
 // ===== 上下文压缩纯逻辑(D-054,Planner/Estimator/Payload/Models 全文) =====
 export type {
@@ -205,7 +208,7 @@ export {
 } from './chat/tool_permission.ts';
 export type {
   ToolInvocationRequest, ToolInvocationResult, ToolInvocationHook,
-  AgentToolDispatcherDeps,
+  AgentToolDispatcherDeps, AutoApprovalReview,
 } from './chat/tool_dispatcher.ts';
 export {
   AgentToolDispatcher, ToolInvocationBarrierError, defaultToolInvocationHooks,
@@ -337,6 +340,12 @@ export type {
 } from './chat/openai_request.ts';
 
 export { createOpenAIChatApi, asChatStreamProvider, openAIAuthHeaders } from './chat/openai_chat_api.ts';
+export { createChatDeepReadAiClient } from './chat/deepread_ai_client.ts';
+export type { ChatDeepReadAiClientOptions } from './chat/deepread_ai_client.ts';
+export { prepareProviderRuntime, prepareProviderAuth } from './chat/provider_runtime.ts';
+export type {
+  ProviderRuntimeSnapshot, ProviderRuntimeOptions, ProviderOAuthSnapshot, ProviderAuthOptions, ProviderAuthSnapshot,
+} from './chat/provider_runtime.ts';
 export type { OpenAIChatApiDeps, OpenAIChatApi, CallOpts } from './chat/openai_chat_api.ts';
 
 // OpenAI Responses API + Grok + Google OAuth 契约 (harmony-agent-core-spiral Phase 1)
@@ -383,10 +392,12 @@ export type {
 // 会话导出 + Cron 执行器 (completion spiral Phase 2-3)
 export {
   exportConversationMarkdown, exportConversationJson, exportConversationJsonString,
-  messageImageExportText,
-  exportFileNameFor, maskSensitiveJsonObject,
+  messageImageExportText, messageArchiveMarkdown, messageArchiveSource,
+  exportFileNameFor, maskSensitiveJsonObject, maskSensitiveJsonText,
 } from './chat/conversation_export.ts';
-export type { ConversationExportOptions, ConversationExportJson } from './chat/conversation_export.ts';
+export type { ConversationExportOptions, ConversationExportJson, ChatMessageArchiveSource } from './chat/conversation_export.ts';
+export { parseGenerativeWidgets, widgetDocument, widgetActionPrompt, sanitizeWidgetHtml } from './chat/generative_widget.ts';
+export type { GenerativeWidget, GenerativeWidgetAction, GenerativeWidgetSegment } from './chat/generative_widget.ts';
 export {
   runCronTaskOnce, fireDueCronTasks, isCronTaskDue,
 } from './chat/agent_cron_run_executor.ts';
@@ -408,7 +419,7 @@ export type {
 export {
   createWebDavClient, webDavBuildUrl, webDavBackupFileName,
 } from './chat/sync_webdav.ts';
-export type { WebDavConfig, WebDavClient, WebDavRemoteFile } from './chat/sync_webdav.ts';
+export type { WebDavConfig, WebDavClient, WebDavRemoteFile, WebDavRequest, WebDavResponse, WebDavTransport } from './chat/sync_webdav.ts';
 export {
   createWebMountPkce, buildFeishuAuthorizationUrl, buildFeishuTokenBody,
   parseFeishuTokenResponse, webMountTokenUsable, defaultFeishuRedirectUri,
@@ -799,6 +810,8 @@ export {
 export {
   SEARCH_PREFS_KEYS, defaultSearchPrefs, loadSearchPrefs, saveSearchPrefs, updateSearchPrefs,
 } from './search/search_prefs.ts';
+export { createDeepReadSearchProviders } from './search/deepread_search_registry.ts';
+export type { DeepReadSearchGoogle, DeepReadSearchProviderDependencies } from './search/deepread_search_registry.ts';
 export { createSearchTools } from './search/search_tools.ts';
 
 // ===== D-071a:视觉兜底(分类器/缓存/OcrTransformer/生成接线) =====
@@ -1162,6 +1175,8 @@ export type {
 export {
   appendSubAgentTranscriptEvent, readSubAgentDisplayTextFromTranscript,
 } from './chat/subagent_transcript.ts';
+export { subAgentNameFromTools, subAgentObjectiveFromTools, subAgentWorkSummary, subAgentStatusFromTools, subAgentStatusLabel,
+  subAgentFinalTextFromTools, readSubAgentHistoricalText } from './chat/subagent_display.ts';
 
 // ===== D-132b Task 6:isolated child runner =====
 export type {
@@ -1260,7 +1275,7 @@ export {
   JEV_TYPESAFE_ENDPOINT, JEV_VERCEL_DEFAULT_BASE,
 } from './chat/jev_models.ts';
 export type {
-  JevMode, JevApiMode, JevSettings, JevNewPurpose, JevNewPurposeSettings, JevEvaluateResult,
+  JevMode, JevApiMode, JevSettings, JevSettingsInit, JevPurpose, JevNewPurpose, JevNewPurposeSettings, JevEvaluateResult,
   JevNoulQuestion, JevChoiceQuestion, JevQuestion,
   JevNoulAnswer, JevChoiceAnswer, JevAnswer,
   JevUsage, JevEvaluation, JevCallOutcome, JevCallOk, JevCallSkipped, JevCallFailed,
@@ -1458,8 +1473,48 @@ export * from './chat/google_auth.ts';
 
 export type { JevFact, JevApprovalLocator, JevApprovalTriage, JevApprovalSubject, JevApprovalPolicy,
   JevPendingApproval, JevApprovalBatch } from './chat/jev_approval.ts';
-export { resolveJevPurposeMode, jevFactFromProbability, buildJevApprovalSubject, readJevApprovalTriage,
+export { resolveJevPurposeMode, jevPurposeSettings, jevPurposeConsentUnchanged,
+  jevFactFromProbability, buildJevApprovalSubject, readJevApprovalTriage,
   listJevPendingApprovals, jevTaskIntent, buildJevApprovalBatch, completeJevApprovalFacts } from './chat/jev_approval.ts';
 
 export type { JevWebCandidate, JevWebObservation, JevWebDecision } from './chat/jev_web.ts';
 export { buildJevWebChoice } from './chat/jev_web.ts';
+
+export type { JevAutoApprovalReviewDeps } from './chat/jev_auto_approval.ts';
+export { buildJevAutoApprovalBatch, jevAutoApprovalRiskReasons, jevAutoApprovalReason,
+  createJevAutoApprovalReview } from './chat/jev_auto_approval.ts';
+export type { JevContextPolicy, JevContextPurpose, JevContextEvaluation, JevContextRuntimeDeps,
+  JevPreparedToolResults, JevContextBlock } from './chat/jev_context.ts';
+export { JevContextRuntime, JevContextRun, splitJevContextBlocks } from './chat/jev_context.ts';
+export type { JevCompletionFacts, JevCompletionNotice, JevCompletionBatch,
+  JevVerificationComposerAction } from './chat/jev_completion.ts';
+export { JEV_VERIFICATION_PROMPT, jevUnverifiedChanges, jevCompletionBindingMatches,
+  jevCompletionNeedsVerification, buildJevCompletionBatch,
+  jevVerificationComposerAction } from './chat/jev_completion.ts';
+export { ConversationRecapService, recapMessages, recapEligible, recapBranchId, recapIsStale,
+  projectRecap, makeRecapInput, parseRecap, decodeStoredRecap } from './chat/conversation_recap.ts';
+export type { ConversationRecap, ConversationRecapNode, RecapNodeKind, RecapInput,
+  RecapState, RecapServiceDeps } from './chat/conversation_recap.ts';
+export { recapCustomBody } from './chat/recap_request.ts';
+
+export { applyUserInputRegexes } from './chat/user_input.ts';
+
+export { createCouncilTools } from './chat/council_tools.ts';
+export type { CouncilToolsDeps } from './chat/council_tools.ts';
+export { councilRunFromTools } from './chat/council_display.ts';
+
+export * from './chat/native_timeline_motion';
+export { makeNovelTextGenerationParams, resolveNovelMaxOutputTokens } from './chat/novel_request_config.ts';
+export { applyNovelStateReasoning } from './chat/novel_state_reasoning.ts';
+export { freezeNovelRuntimeConfiguration, readNovelRuntimeConfiguration } from './chat/novel_runtime_snapshot.ts';
+export type { NovelFrozenRuntimeConfiguration } from './chat/novel_runtime_snapshot.ts';
+export { createProviderManagementTools } from './chat/provider_tools.ts';
+export type { ProviderManagementToolsDeps } from './chat/provider_tools.ts';
+export { collectConversationArtifacts, artifactSourceNodeIndex, widgetArtifactExport } from './chat/conversation_artifacts.ts';
+export type {
+  ConversationArtifactIndex, ConversationArtifactSource, ConversationImageArtifact,
+  ConversationDocumentArtifact, ConversationMiniAppArtifact, ConversationWidgetArtifact, WidgetArtifactExport,
+} from './chat/conversation_artifacts.ts';
+
+export { createNovelProjectOperationTools, executeNovelProjectOperation } from './chat/novel_project_operations.ts';
+export type { NovelProjectOperationPort } from './chat/novel_project_operations.ts';

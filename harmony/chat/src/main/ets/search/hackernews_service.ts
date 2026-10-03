@@ -1,7 +1,7 @@
 // hackernews_service — Hacker News(Algolia)内置源(D-066)
 // Android 基准: search/.../HackerNewsSearchService.kt(全文 65 行;普通 object 非 SearchService)
 import type { JsonObject, JsonValue } from '../chat/json.ts';
-import type { SearchCommonOptions, SearchResult, SearchResultItem } from './search_service.ts';
+import type { SearchCommonOptions, SearchRequestContext, SearchResult, SearchResultItem } from './search_service.ts';
 import { searchSdkRuntime } from './search_service.ts';
 import { buildQuery } from './url_codec.ts';
 
@@ -18,6 +18,7 @@ const numOrNull = (v: JsonValue | undefined): number | null =>
 
 export const hackerNewsSearch = async (
   query: string, commonOptions: SearchCommonOptions,
+  context?: SearchRequestContext,
 ): Promise<SearchResult> => {
   const limit: number = Math.min(20, Math.max(1, commonOptions.resultSize)); // coerceIn(1,20)
   const url: string = 'https://hn.algolia.com/api/v1/search?' + buildQuery([
@@ -25,7 +26,7 @@ export const hackerNewsSearch = async (
     ['tags', 'story'],
     ['hitsPerPage', String(limit)],
   ]);
-  const resp = await searchSdkRuntime().http.fetch({ url, method: 'GET', headers: {} });
+  const resp = await searchSdkRuntime().http.fetch({ url, method: 'GET', headers: {} }, context);
   if (resp.status < 200 || resp.status >= 300) {
     throw new Error(`Hacker News request failed #${resp.status}`);
   }

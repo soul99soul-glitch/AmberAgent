@@ -1,3 +1,4 @@
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
 // ChatProviderSettingsPage — Provider 设置(D-047:三变体列表 + 编辑)
 // Android 基准:SettingProviderConfigPage.kt
 //   OpenAIEndpointFields(:531-561) / GoogleAuthConsole(:436-487)
@@ -19,12 +20,14 @@ import { router, promptAction } from '@kit.ArkUI';
 import type { ProviderSetting } from '@amber/chat-domain';
 import { setPendingProvider } from './ChatProviderDetailPage.ets';
 import {
-  loadProviders, saveProviders, providerFromImportJson,
+  loadProviders, saveProviders, providerFromImportJson, makeProviderSettingOpenAIVariant,
+  newId, openAIAuthModeFixedBaseUrl,
 } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { loadGoogleAuthStatus } from '../platform_impl/GoogleAuthSupport.ets';
 import { DEFAULT_PROVIDERS, toProviderMonogram, providerSlug, providerAuthLabel } from '../di/ProviderDefaults.ets';
 import { ProviderTemplatePickerSheet } from '../components/ProviderTemplatePickerSheet.ets';
+import type { OAuthTemplateKind } from '../components/ProviderTemplatePickerSheet.ets';
 import { ProviderBalanceText } from '../components/ui/ProviderBalanceText.ets';
 import { picker, fileIo } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
@@ -60,6 +63,22 @@ struct ChatProviderSettingsPage {
     if (!this.sheetShow) return false;
     this.sheetShow = false;
     return true;
+  }
+
+  private addOAuthProvider(kind: OAuthTemplateKind): void {
+    this.sheetShow = false;
+    if (kind === 'gemini') {
+      promptAction.showToast({ message: '鸿蒙版暂不支持 Gemini OAuth 登录，请使用 API Key 预置', duration: 2200 });
+      return;
+    }
+    const provider: ProviderSetting = makeProviderSettingOpenAIVariant({
+      id: newId(), name: 'OpenAI Codex OAuth', brand: 'openai', authMode: 'codex_oauth',
+      baseUrl: openAIAuthModeFixedBaseUrl('codex_oauth') as string, useResponseApi: true,
+    });
+    setPendingProvider(provider);
+    const params: Record<string, string> = {};
+    params['isNew'] = '1';
+    router.pushUrl({ url: 'pages/ChatProviderDetailPage', params: params });
   }
 
   // 子页(模型参数页)保存返回后重读,避免陈旧 models 合并覆盖新参数
@@ -291,6 +310,13 @@ struct ChatProviderSettingsPage {
 
   @Builder
   ConfigurationLinks(): void {
+    if (getProductKind() === 'novel') {
+      CardRow({ label: '小说模型设置', desc: '写作、审稿和剧情同步的默认模型', isLast: true,
+        onRowClick: (): void => { router.pushUrl({ url: 'pages/NovelStandaloneSettingsPage' }); } })
+    } else if (getProductKind() === 'deepread') {
+      CardRow({ label: '阅读模型设置', desc: '选择深度阅读和模板生成使用的模型', isLast: true,
+        onRowClick: (): void => { router.pushUrl({ url: 'pages/SettingDeepReadPage' }); } })
+    } else {
     CardRow({
       label: '模型与提示词',
       desc: '聊天模型与标题、建议、压缩等任务模型可单独选择服务商与模型',
@@ -302,6 +328,7 @@ struct ChatProviderSettingsPage {
       isLast: true,
       onRowClick: (): void => { router.pushUrl({ url: 'pages/SettingDeepReadPage' }); },
     })
+      }
   }
 
   @Builder
@@ -342,7 +369,11 @@ struct ChatProviderSettingsPage {
         Scroll() {
           Column() {
             FooterNote({
-              text: '聊天和小说共用这里的服务商与模型。小说默认跟随聊天，也可在项目设置中指定。任务模型可单独选择服务商；深度阅读可跟随聊天或从模型库单独选择。',
+              text: getProductKind() === 'deepread'
+                ? '这里配置本应用的服务商与模型。到阅读模型设置选择文章和模板生成使用的模型。'
+                : getProductKind() === 'novel'
+                  ? '这里配置本应用的服务商与模型。项目设置可以指定创作模型，代笔和润色任务可单独选择模型。'
+                  : '聊天和小说共用这里的服务商与模型。小说默认跟随聊天，也可在项目设置中指定。任务模型可单独选择服务商；深度阅读可跟随聊天或从模型库单独选择。',
             })
             Column() {
               CardGroup({ radius: 18, stroke: true, content: (): void => { this.ConfigurationLinks(); } })
@@ -448,9 +479,8 @@ struct ChatProviderSettingsPage {
               params['isNew'] = '1';
               router.pushUrl({ url: 'pages/ChatProviderDetailPage', params: params });
             },
-            onOauthPick: (): void => {
-              this.sheetShow = false;
-              promptAction.showToast({ message: '鸿蒙版暂不支持 OAuth 登录，请使用 API Key 预置', duration: 2200 });
+            onOauthPick: (kind: OAuthTemplateKind): void => {
+              this.addOAuthProvider(kind);
             },
             onDismiss: (): void => { this.sheetShow = false; },
           })

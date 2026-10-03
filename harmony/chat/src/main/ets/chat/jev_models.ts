@@ -7,18 +7,22 @@
 
 export type JevMode = 'off' | 'shadow' | 'active';
 export type JevApiMode = 'typesafe' | 'vercel';
-export type JevNewPurpose = 'approval_triage' | 'web_automation';
+export type JevNewPurpose = 'approval_triage' | 'web_automation' | 'tool_context_selection'
+  | 'context_retention' | 'auto_approval' | 'completion_check';
+export type JevPurpose = JevNewPurpose | 'tool_discovery' | 'memory_recall' | 'context_selection' | 'model_routing';
 export interface JevNewPurposeSettings {
   mode: JevMode;
   allowToolMetadata: boolean;
   allowTaskText: boolean;
   allowPageContent: boolean;
+  allowToolOutput: boolean;
 }
 export const makeJevNewPurposeSettings = (opts: Partial<JevNewPurposeSettings> = {}): JevNewPurposeSettings => ({
   mode: opts.mode === 'active' || opts.mode === 'shadow' ? opts.mode : 'off',
   allowToolMetadata: opts.allowToolMetadata === true,
   allowTaskText: opts.allowTaskText === true,
   allowPageContent: opts.allowPageContent === true,
+  allowToolOutput: opts.allowToolOutput === true,
 });
 
 export const JEV_TYPESAFE_ENDPOINT: string = 'https://api.typesafe.ai/v1/systemone';
@@ -32,9 +36,20 @@ export interface JevSettings {
   model: string;
   approvalTriage: JevNewPurposeSettings;
   webAutomation: JevNewPurposeSettings;
+  toolContextSelection: JevNewPurposeSettings;
+  contextRetention: JevNewPurposeSettings;
+  autoApproval: JevNewPurposeSettings;
+  completionCheck: JevNewPurposeSettings;
 }
 
-export const makeJevSettings = (opts: Partial<JevSettings> = {}): JevSettings => ({
+export interface JevSettingsInit {
+  mode?: JevMode; apiMode?: JevApiMode; apiKey?: string; baseUrl?: string; model?: string;
+  approvalTriage?: Partial<JevNewPurposeSettings>; webAutomation?: Partial<JevNewPurposeSettings>;
+  toolContextSelection?: Partial<JevNewPurposeSettings>; contextRetention?: Partial<JevNewPurposeSettings>;
+  autoApproval?: Partial<JevNewPurposeSettings>; completionCheck?: Partial<JevNewPurposeSettings>;
+}
+
+export const makeJevSettings = (opts: JevSettingsInit = {}): JevSettings => ({
   mode: opts.mode ?? 'off',
   apiMode: opts.apiMode ?? 'typesafe',
   apiKey: opts.apiKey ?? '',
@@ -42,6 +57,10 @@ export const makeJevSettings = (opts: Partial<JevSettings> = {}): JevSettings =>
   model: opts.model ?? '',
   approvalTriage: makeJevNewPurposeSettings(opts.approvalTriage),
   webAutomation: makeJevNewPurposeSettings(opts.webAutomation),
+  toolContextSelection: makeJevNewPurposeSettings(opts.toolContextSelection),
+  contextRetention: makeJevNewPurposeSettings(opts.contextRetention),
+  autoApproval: makeJevNewPurposeSettings(opts.autoApproval),
+  completionCheck: makeJevNewPurposeSettings(opts.completionCheck),
 });
 
 // ===== 题 =====
@@ -132,6 +151,15 @@ export const loadJevSettings = async (kv: KeyValueStore): Promise<JevSettings> =
         ? parsed.approvalTriage : undefined,
       webAutomation: parsed.webAutomation !== null && typeof parsed.webAutomation === 'object'
         ? parsed.webAutomation : undefined,
+      toolContextSelection: parsed.toolContextSelection !== null && typeof parsed.toolContextSelection === 'object'
+        ? parsed.toolContextSelection : undefined,
+      contextRetention: parsed.contextRetention !== null && typeof parsed.contextRetention === 'object'
+        ? parsed.contextRetention : undefined,
+      autoApproval: parsed.autoApproval !== null && typeof parsed.autoApproval === 'object'
+        ? parsed.autoApproval : undefined,
+      completionCheck: parsed.completionCheck !== null && typeof parsed.completionCheck === 'object'
+        ? parsed.completionCheck : undefined,
+
     });
   } catch (_e) {
     return makeJevSettings();

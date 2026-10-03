@@ -116,7 +116,7 @@ test('job freezes a closed contiguous chapter range, context provenance and warn
   assert.deepEqual(created.warnings.map(warning => warning.kind), ['plot_stale', 'unresolved']);
 });
 
-test('range validation rejects duplicate ids, duplicate or non-contiguous ordinals and empty source', () => {
+test('target validation rejects duplicate ids, duplicate or descending ordinals and empty source', () => {
   const base = targets();
   assert.throws(() => makePolishJob({
     jobId: 'duplicate-id', projectId: 'project-1', branchId: 'main', expectedCas: CAS, now: NOW,
@@ -126,9 +126,9 @@ test('range validation rejects duplicate ids, duplicate or non-contiguous ordina
     contextOptions: OPTIONS, contextSnapshot: contextSnapshot(), warnings: [], modelPolicyAtStart: POLICY,
   }));
   assert.throws(() => makePolishJob({
-    jobId: 'gap', projectId: 'project-1', branchId: 'main', expectedCas: CAS, now: NOW,
+    jobId: 'descending', projectId: 'project-1', branchId: 'main', expectedCas: CAS, now: NOW,
     targets: [base[0], makePolishChapterTarget({
-      id: 'chapter-5', ordinal: 5, title: '远航', sourceContent: '正文',
+      id: 'chapter-2', ordinal: 2, title: '远航', sourceContent: '正文',
     })],
     contextOptions: OPTIONS, contextSnapshot: contextSnapshot(), warnings: [], modelPolicyAtStart: POLICY,
   }));
@@ -280,7 +280,7 @@ test('pause and system yield clear ownership, resume exact stage, and failed ret
   const failed = failPolishJob(claimedThird, { token: 'owner-c', epoch: 3 }, 'provider failed', NOW + 9);
   assert.equal(failed.stage, 'failed');
   assert.equal(failed.resumeStage, 'writing');
-  assert.equal(retryPolishJob(failed, NOW + 10).stage, 'writing');
+  assert.equal(retryPolishJob(failed, NOW + 10).stage, 'queued');
 });
 
 test('reviewed commit records a bound receipt and advances the cursor chapter by chapter', () => {
@@ -354,4 +354,33 @@ test('validation rejects malformed context bindings and receipts, while cancel i
   assert.equal(cancelled.stage, 'cancelled');
   assert.equal(cancelled.claim, null);
   assert.throws(() => transitionPolishJob(cancelled, 'writing', NOW + 2));
+});
+
+
+test('non-contiguous chapter targets survive durable serialization and cursor advancement', () => {
+  const original = targets();
+  const selected = makePolishJob({
+    jobId: 'subset', projectId: 'project-1', branchId: 'main', expectedCas: CAS, now: NOW,
+    targets: [original[0], makePolishChapterTarget({
+      id: 'chapter-8', ordinal: 8, title: '远航', sourceContent: '第八章正文。',
+    })],
+    contextOptions: OPTIONS, contextSnapshot: contextSnapshot(), warnings: [], modelPolicyAtStart: POLICY,
+  });
+  const restored = validateDurablePolishJob(JSON.parse(JSON.stringify(selected)));
+  assert.deepEqual(restored.targets.map(target => target.ordinal), [3, 8]);
+  assert.equal(restored.startOrdinal, 3);
+  assert.equal(restored.endOrdinal, 8);
+  let current = claimPolishJob(restored, 'subset-owner', NOW + 1, 60_000);
+  current = transitionPolishJob(current, 'writing', NOW + 2);
+  const candidate = candidateFor(current);
+  current = withPolishCandidate(current, candidate, NOW + 3);
+  current = applyPolishReview(current, reviewFor(candidate), NOW + 4);
+  current = commitPolishChapter(current, { token: 'subset-owner', epoch: 1 }, {
+    branchId: 'main', commitId: 'subset-commit',
+    receipt: polishReceipt(current.jobId, candidate.chapterId, candidate.chapterOrdinal,
+      candidate.sourceDigest, candidate.candidateId, candidate.digest),
+    nextCas: { branchId: 'main', head: 'subset-commit', treeDigest: 'tree-2' },
+  }, NOW + 5);
+  assert.equal(current.cursor, 1);
+  assert.equal(current.targets[current.cursor].ordinal, 8);
 });

@@ -6,6 +6,7 @@ import {
   LINE, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2,
 } from '../design/tokens.ets';
 import type { PolishContextOptions } from '@amber/deepread-domain';
+import { loadNovelPolishContext } from '../platform_impl/NovelStandaloneDefaults.ets';
 
 export interface NovelPolishCreateSheetChapter {
   id: string;
@@ -18,28 +19,50 @@ export interface NovelPolishCreateSheetChapter {
 export struct NovelPolishCreateSheet {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop visible: boolean = false;
+  @Prop singleChapter: boolean = false;
   @Prop chapters: NovelPolishCreateSheetChapter[] = [];
   @Prop modelReady: boolean = false;
   @Prop modelDisabledReason: string = '请先配置可用的写作与审稿模型。';
   @Prop conflictReason: string = '';
+  @Prop errorMessage: string = '';
   @Prop busy: boolean = false;
   // 父页面传入底部避让高度；sheet 不假设设备安全区尺寸。
   @Prop bottomPadding: number = 0;
 
-  onStart: (startOrdinal: number, endOrdinal: number, context: PolishContextOptions) => void = (
-    _startOrdinal: number, _endOrdinal: number, _context: PolishContextOptions,
+  onStart: (startOrdinal: number, endOrdinal: number, context: PolishContextOptions, ordinals: number[]) => void = (
+    _startOrdinal: number, _endOrdinal: number, _context: PolishContextOptions, _ordinals: number[],
   ): void => {};
   onClose: () => void = (): void => {};
 
-  @State private startOrdinal: number = 0;
-  @State private endOrdinal: number = 0;
+  @State private selectedOrdinals: number[] = [];
+  @State private preferencesError: string = '';
+  @State private preferencesLoaded: boolean = false;
+  private mounted: boolean = false;
   @State private includePlot: boolean = true;
   @State private includeForeshadows: boolean = true;
   @State private includeCharacters: boolean = true;
   @State private includeDecisions: boolean = true;
 
   aboutToAppear(): void {
-    this.resetRange();
+    this.mounted = true;
+    this.selectedOrdinals = this.activeChapters().map((chapter: NovelPolishCreateSheetChapter): number => chapter.ordinal);
+    this.loadContextDefaults();
+  }
+
+  aboutToDisappear(): void { this.mounted = false; }
+
+  private async loadContextDefaults(): Promise<void> {
+    try {
+      const options: PolishContextOptions = await loadNovelPolishContext();
+      if (!this.mounted) return;
+      this.includePlot = options.includePlot;
+      this.includeForeshadows = options.includeForeshadows;
+      this.includeCharacters = options.includeCharacters;
+      this.includeDecisions = options.includeDecisions;
+      this.preferencesLoaded = true;
+    } catch (error) {
+      if (this.mounted) this.preferencesError = `润色偏好无法读取：${String(error)}`;
+    }
   }
 
   build(): void {
@@ -56,10 +79,18 @@ export struct NovelPolishCreateSheet {
               this.contextSection()
               this.safetySection()
               this.gateSection()
+              if (this.preferencesError.length > 0) {
+                Text(this.preferencesError).fontSize(12).fontColor(ERROR).lineHeight(18).width('100%')
+                  .margin({ top: 8, bottom: 8 })
+              }
+              if (this.errorMessage.length > 0) {
+                Text(this.errorMessage).fontSize(12).fontColor(ERROR).lineHeight(18).width('100%')
+                  .margin({ top: 8, bottom: 8 })
+              }
             }
             .width('100%').alignItems(HorizontalAlign.Start)
           }
-          .width('100%').layoutWeight(1)
+          .width('100%').layoutWeight(1).align(Alignment.TopStart)
           this.actionRow()
         }
         .width('100%').constraintSize({ maxHeight: '90%' })
@@ -78,9 +109,9 @@ export struct NovelPolishCreateSheet {
   private header(): void {
     Row() {
       Column() {
-        Text('创建批量润色')
+        Text(this.singleChapter ? '整章润色' : '创建批量润色')
           .fontSize(18).fontWeight(FontWeight.Bold).fontColor(INK)
-        Text('选择一个连续章节区间，任务会持久化到当前工作区。')
+        Text(this.singleChapter ? '为本章创建可暂停、可恢复的润色任务。' : '勾选要润色的章节，可跳过任意章节，任务会保存到当前工作区。')
           .fontSize(12).fontColor(INK3).lineHeight(18).margin({ top: 4 })
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
@@ -95,17 +126,25 @@ export struct NovelPolishCreateSheet {
   @Builder
   private rangeSection(): void {
     Column() {
-      Text('章节范围').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK)
-      Text('仅显示未废弃章节；起止范围内的章节序号必须连续。')
+      Text(this.singleChapter ? '本次章节' : '章节范围').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK)
+      Text(this.singleChapter ? '确认本章及上下文后开始；审稿通过才收录正文。' : '仅处理勾选的未废弃章节；未勾选的正文保持原样。')
         .fontSize(11).fontColor(INK3).lineHeight(16).margin({ top: 3, bottom: 8 })
       if (this.activeChapters().length === 0) {
         Text('当前没有可润色的章节。').fontSize(13).fontColor(INK3)
           .width('100%').padding({ top: 12, bottom: 12 })
       } else {
-        Text('起始章节').fontSize(11).fontColor(INK3).margin({ bottom: 5 })
-        this.chapterPicker(this.activeChapters(), this.startOrdinal, true)
-        Text('结束章节').fontSize(11).fontColor(INK3).margin({ top: 10, bottom: 5 })
-        this.chapterPicker(this.endCandidates(), this.endOrdinal, false)
+        if (this.singleChapter) {
+          Text(`第 ${this.selectedOrdinals[0]} 章 · ${this.chapterTitle(this.activeChapters()[0])}`)
+            .fontSize(14).fontColor(INK).lineHeight(21).width('100%')
+        } else {
+          Row() {
+            Text('全选').fontSize(12).fontColor(ACCENT).height(44).layoutWeight(1)
+              .onClick((): void => { if (!this.busy) this.selectAll(); })
+            Text('清空').fontSize(12).fontColor(INK3).height(44).constraintSize({ minWidth: 44 })
+              .onClick((): void => { if (!this.busy) this.selectedOrdinals = []; })
+          }.width('100%')
+          this.chapterPicker(this.activeChapters())
+        }
         Text(this.rangeSummary()).fontSize(11).fontColor(INK3).lineHeight(16)
           .width('100%').margin({ top: 8 })
       }
@@ -115,31 +154,31 @@ export struct NovelPolishCreateSheet {
 
   @Builder
   private chapterPicker(
-    chapters: NovelPolishCreateSheetChapter[], selectedOrdinal: number, selectingStart: boolean,
+    chapters: NovelPolishCreateSheetChapter[],
   ): void {
     Scroll() {
       Column() {
         ForEach(chapters, (chapter: NovelPolishCreateSheetChapter): void => {
           Row() {
             Text(`第 ${chapter.ordinal} 章`).fontSize(12)
-              .fontColor(chapter.ordinal === selectedOrdinal ? ACCENT : INK3).width(58)
+              .fontColor(this.selectedOrdinals.includes(chapter.ordinal) ? ACCENT : INK3).width(58)
             Text(this.chapterTitle(chapter)).fontSize(13)
-              .fontColor(chapter.ordinal === selectedOrdinal ? ACCENT : INK)
-              .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            if (chapter.ordinal === selectedOrdinal) {
+              .fontColor(this.selectedOrdinals.includes(chapter.ordinal) ? ACCENT : INK)
+              .layoutWeight(1).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+            if (this.selectedOrdinals.includes(chapter.ordinal)) {
               Text('已选').fontSize(11).fontColor(ACCENT).margin({ left: 8 })
             }
           }
-          .width('100%').height(44).padding({ left: 12, right: 12 })
-          .backgroundColor(chapter.ordinal === selectedOrdinal ? ACCENT_LIGHT : SURFACE2)
-          .border({ width: 1, color: chapter.ordinal === selectedOrdinal ? ACCENT : LINE }).borderRadius(10)
-          .margin({ bottom: 6 }).onClick((): void => { this.selectOrdinal(chapter.ordinal, selectingStart); })
-          .accessibilityText(`${selectingStart ? '起始' : '结束'}章节，第 ${chapter.ordinal} 章${this.chapterTitle(chapter)}`)
-        }, (chapter: NovelPolishCreateSheetChapter): string => chapter.id)
+          .width('100%').constraintSize({ minHeight: 44 }).padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .backgroundColor(this.selectedOrdinals.includes(chapter.ordinal) ? ACCENT_LIGHT : SURFACE2)
+          .border({ width: 1, color: this.selectedOrdinals.includes(chapter.ordinal) ? ACCENT : LINE }).borderRadius(10)
+          .margin({ bottom: 6 }).onClick((): void => { this.toggleChapter(chapter.ordinal); })
+          .accessibilityText(`第 ${chapter.ordinal} 章${this.chapterTitle(chapter)}，${this.selectedOrdinals.includes(chapter.ordinal) ? '已选' : '未选'}`)
+        }, (chapter: NovelPolishCreateSheetChapter): string => `${chapter.id}:${chapter.ordinal}:${chapter.title}:${this.selectedOrdinals.includes(chapter.ordinal)}`)
       }
       .width('100%')
     }
-    .width('100%').constraintSize({ maxHeight: '24%' })
+    .width('100%').constraintSize({ maxHeight: '24%' }).align(Alignment.TopStart)
   }
 
   @Builder
@@ -162,7 +201,8 @@ export struct NovelPolishCreateSheet {
     Row() {
       Text(title).fontSize(13).fontColor(INK).layoutWeight(1)
       Toggle({ type: ToggleType.Switch, isOn: checked })
-        .selectedColor(ACCENT).onChange((next: boolean): void => { this.setContextOption(key, next); })
+        .selectedColor(ACCENT).enabled(!this.busy && this.preferencesLoaded)
+        .onChange((next: boolean): void => { this.setContextOption(key, next); })
         .accessibilityText(`${title}上下文${checked ? '已启用' : '未启用'}`)
     }
     .width('100%').height(44).padding({ left: 2, right: 2 })
@@ -174,7 +214,7 @@ export struct NovelPolishCreateSheet {
       Text('安全收录').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK)
       Text('原稿会以内容摘要冻结；候选、审稿与最多两次定向重写都不会直接改正文。')
         .fontSize(12).fontColor(INK2).lineHeight(18).margin({ top: 5 })
-      Text('只有审稿通过后，版本、正文、receipt 与进度才会原子收录；可在工作区版本记录中恢复。')
+      Text('审稿通过后会一起保存版本、正文与进度；可在版本记录中恢复原稿。')
         .fontSize(12).fontColor(INK2).lineHeight(18).margin({ top: 5 })
     }
     .width('100%').padding({ top: 12, bottom: 12 })
@@ -225,44 +265,19 @@ export struct NovelPolishCreateSheet {
     return this.chapters.filter((chapter: NovelPolishCreateSheetChapter): boolean => !chapter.discarded);
   }
 
-  private endCandidates(): NovelPolishCreateSheetChapter[] {
-    const active: NovelPolishCreateSheetChapter[] = this.activeChapters();
-    const startIndex: number = this.chapterIndex(active, this.startOrdinal);
-    if (startIndex < 0) return [];
-    const candidates: NovelPolishCreateSheetChapter[] = [];
-    for (let index: number = startIndex; index < active.length; index++) {
-      if (index > startIndex && active[index].ordinal !== active[index - 1].ordinal + 1) break;
-      candidates.push(active[index]);
-    }
-    return candidates;
+  private selectAll(): void {
+    this.selectedOrdinals = this.activeChapters().map((chapter: NovelPolishCreateSheetChapter): number => chapter.ordinal);
   }
 
-  private chapterIndex(chapters: NovelPolishCreateSheetChapter[], ordinal: number): number {
-    for (let index: number = 0; index < chapters.length; index++) {
-      if (chapters[index].ordinal === ordinal) return index;
-    }
-    return -1;
+  private toggleChapter(ordinal: number): void {
+    if (this.busy) return;
+    this.selectedOrdinals = this.selectedOrdinals.includes(ordinal)
+      ? this.selectedOrdinals.filter((value: number): boolean => value !== ordinal)
+      : this.selectedOrdinals.concat([ordinal]);
   }
 
-  private resetRange(): void {
-    const active: NovelPolishCreateSheetChapter[] = this.activeChapters();
-    if (active.length === 0) {
-      this.startOrdinal = 0;
-      this.endOrdinal = 0;
-      return;
-    }
-    this.startOrdinal = active[0].ordinal;
-    this.endOrdinal = active[0].ordinal;
-  }
-
-  private selectOrdinal(ordinal: number, selectingStart: boolean): void {
-    if (selectingStart) {
-      this.startOrdinal = ordinal;
-      const candidates: NovelPolishCreateSheetChapter[] = this.endCandidates();
-      this.endOrdinal = candidates.length > 0 ? candidates[0].ordinal : ordinal;
-    } else {
-      this.endOrdinal = ordinal;
-    }
+  private orderedSelection(): number[] {
+    return this.selectedOrdinals.slice().sort((left: number, right: number): number => left - right);
   }
 
   private setContextOption(key: string, value: boolean): void {
@@ -282,14 +297,14 @@ export struct NovelPolishCreateSheet {
   }
 
   private canStart(): boolean {
-    return !this.busy && this.modelReady && this.conflictReason.trim().length === 0 &&
-      this.endCandidates().some((chapter: NovelPolishCreateSheetChapter): boolean =>
-        chapter.ordinal === this.endOrdinal);
+    return !this.busy && this.modelReady && this.preferencesLoaded && this.preferencesError.length === 0 && this.conflictReason.trim().length === 0 &&
+      this.selectedOrdinals.length > 0;
   }
 
   private start(): void {
     if (!this.canStart()) return;
-    this.onStart(this.startOrdinal, this.endOrdinal, this.contextOptions());
+    const ordinals: number[] = this.orderedSelection();
+    this.onStart(ordinals[0], ordinals[ordinals.length - 1], this.contextOptions(), ordinals);
   }
 
   private chapterTitle(chapter: NovelPolishCreateSheetChapter): string {
@@ -297,8 +312,8 @@ export struct NovelPolishCreateSheet {
   }
 
   private rangeSummary(): string {
-    if (this.startOrdinal <= 0 || this.endOrdinal <= 0) return '请选择可用章节。';
-    const count: number = this.endOrdinal - this.startOrdinal + 1;
-    return `将冻结第 ${this.startOrdinal}–${this.endOrdinal} 章，共 ${count} 章。`;
+    const ordinals: number[] = this.orderedSelection();
+    if (ordinals.length === 0) return '请至少勾选一章。';
+    return `将冻结第 ${ordinals.join('、')} 章，共 ${ordinals.length} 章。`;
   }
 }

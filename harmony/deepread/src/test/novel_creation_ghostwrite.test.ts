@@ -118,7 +118,12 @@ test('NovelCreation 代笔门面完成写作→审稿→原子收录并清空末
   assert.equal(reopened.branchSettings.thisChapterPlan, '');
   const plotFile = (await repository.workspaceFiles(project.id))
     .find(file => file.path.endsWith('/plan/plot.md'));
-  assert.equal(new TextDecoder().decode(plotFile?.bytes).includes('主角踏上旅途'), true);
+  assert.equal(new TextDecoder().decode(plotFile?.bytes).includes('主角踏上旅途'), false,
+    '模型审稿摘要不能覆盖作者维护的剧情资料');
+  assert.equal(reopened.chapterPlots.length, 1);
+  assert.equal(reopened.chapterPlots[0].chapterId, reopened.chapters[0].id);
+  assert.ok(reopened.chapterPlots[0].text.includes('山雨欲来。'));
+  assert.equal(reopened.chapterPlots[0].stale, false);
   assert.equal(requests.length, 2);
   assert.equal(requests.every(request => request.toolProfile === 'read_only'), true);
 });

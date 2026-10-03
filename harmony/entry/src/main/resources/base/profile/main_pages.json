@@ -35,7 +35,6 @@
     "pages/SearchPage",
     "pages/SettingAboutPage",
     "pages/SettingAgentExecutionPageFull",
-    "pages/SettingAgentExtensionsPageFull",
     "pages/SettingAgentMemoryPageFull",
     "pages/SettingAgentPermissionsPageFull",
     "pages/SettingAppearancePage",
@@ -66,6 +65,20 @@
     "pages/PythonPage",
     "pages/RecipesPage",
     "pages/PluginsPage",
-    "pages/GoogleProviderAuthPage"
+    "pages/GoogleProviderAuthPage",
+    "pages/StandaloneSettingsPage",
+    "pages/DeepReadComposePage",
+    "pages/NovelStandaloneSettingsPage",
+    "pages/DeepReadSourcesPage",
+    "pages/NovelProjectSetupPage",
+    "pages/NovelBranchHistoryPage",
+    "pages/NovelRecoveryPreviewPage",
+    "pages/NovelContextPreviewPage",
+    "pages/NovelOperationsPage",
+    "pages/NovelStatePage",
+    "pages/NovelChapterContractPage",
+    "pages/NovelPolishPage",
+    "pages/DeepReadSearchSettingsPage",
+    "pages/DeepReadDiscoverySettingsPage"
   ]
 }

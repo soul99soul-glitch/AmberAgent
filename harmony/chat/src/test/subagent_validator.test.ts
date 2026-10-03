@@ -314,11 +314,11 @@ test('smart mode replaces generic English and Chinese names instead of failing',
   assert.equal(chinese.definition.dynamic, true);
 });
 
-test('smart mode keeps a specific Chinese display name and uses unsigned hash fallback id', () => {
+test('smart mode assigns an English display name and preserves the unsigned hash role id', () => {
   const result = subAgentResolveDefinition(
     inputWithCustomSubagent({ name: '情书子代理', toolProfile: 'none' }),
     makeSetting({ mode: 'smart_dynamic' }), new Set<string>());
-  assert.equal(result.definition.name, '情书子代理');
+  assert.match(result.definition.name, /^[A-Z][a-z]+$/);
   assert.equal(result.definition.id, 'dynamic-1hdixql');
   assert.equal(result.definition.dynamic, true);
 });
@@ -400,10 +400,10 @@ test('dynamic role defaults to available read-only tools only', () => {
   assert.equal(result.definition.dynamic, true);
 });
 
-test('roster mode dynamic role allows a non-Latin display name', () => {
+test('roster mode assigns an English display name while preserving non-Latin role identity', () => {
   const result = subAgentResolveDefinition(
     inputWithCustomSubagent({ name: '新闻员' }), makeSetting(), new Set(['file_read']));
-  assert.equal(result.definition.name, '新闻员');
+  assert.match(result.definition.name, /^[A-Z][a-z]+$/);
   assert.equal(result.definition.id.startsWith('dynamic-'), true);
   assert.equal(result.definition.dynamic, true);
 });
@@ -837,4 +837,15 @@ test('dynamic role resolution enforces normalized id, invocation, boundary, and 
   assert.equal(normalized.definition.systemPrompt.length >= 80, true);
   assert.equal(normalized.definition.systemPrompt.includes('Boundaries:'), true);
   assert.equal(normalized.definition.systemPrompt.includes('Report output as:'), true);
+});
+
+// Harmony 动态显示名统一为英文人名，内部角色 id 保持兼容。
+test('dynamic roles show normal English names without numeric suffixes', () => {
+  for (const requested of ['Grace_5', 'grace-5', 'GRACE', 'Micro Essay Writer', 'General Helper', '新闻员']) {
+    const resolved = subAgentResolveDefinition(
+      inputWithCustomSubagent({ name: requested, toolProfile: 'none' }),
+      makeSetting(), new Set<string>());
+    assert.match(resolved.definition.name, /^[A-Z][a-z]+$/);
+    if (requested.toLowerCase().startsWith('grace')) assert.equal(resolved.definition.name, 'Grace');
+  }
 });

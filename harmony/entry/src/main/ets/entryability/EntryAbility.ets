@@ -1,10 +1,11 @@
+import { getProductKind, productKindForBundle, productRootPage } from '../platform_impl/ProductIdentity.ets';
 // EntryAbility — Phase 7 切后台暂停/回前台续跑
 // onBackground → AppStorage 写 appBackgrounded=true(Index 检查后暂停新 stage)
 // onForeground → AppStorage 写 appBackgrounded false(恢复)
 // 对照设计 §6.5
 
 import { UIAbility, AbilityConstant, Want, Configuration, ConfigurationConstant } from '@kit.AbilityKit';
-import { window, display, router } from '@kit.ArkUI';
+import { window, display, Router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -59,13 +60,14 @@ const validatedWantParameter = (value: object | undefined): string => {
 // ===== R23:统一 Want 深链派发 =====
 // 根因:onNewWant 只写 AppStorage,唯一消费者是根页 ChatListPage;栈顶为
 // ChatPage/设置页时前台 Want 不被消费,未消费参数还会被后续 Want 覆盖。
-// 机制:EntryAbility 把校验后的目标写入待处理槽并自增序列号;onNewWant 与窗口
-// loadContent 成功(markWantRoutingReady)都触发 routePendingWant,经全局 router
+// 机制:EntryAbility 把校验后的目标写入待处理槽并自增序列号;onNewWant 与
+// 根页 onPageShow(markWantRoutingReady)都触发 routePendingWant,经该页 UIContext Router
 // 从任意栈顶 push 目标页;仅 pushUrl 成功且序列号未被新 Want 顶替时才清参数,
-// 旧跳的迟到回调不得清掉新参数;冷启动在 loadContent 前只挂起、不发跳。
+// 旧跳的迟到回调不得清掉新参数;冷启动在根页首次渲染完成前只挂起、不发跳。
 const WANT_ROUTE_SEQ_KEY: string = 'wantRouteSeq';
 const WANT_ROUTE_READY_KEY: string = 'wantRouteReady';
 let wantRouteInFlight: boolean = false;
+let wantRouteRouter: Router | null = null;
 
 const clearPendingWantRoute = (): void => {
   AppStorage.setOrCreate<string>('wantTopicId', '');
@@ -73,12 +75,15 @@ const clearPendingWantRoute = (): void => {
   AppStorage.setOrCreate<string>('wantNovelProjectId', '');
   AppStorage.setOrCreate<string>('wantNovelBranchId', '');
   AppStorage.setOrCreate<string>('wantNovelJobId', '');
+  AppStorage.setOrCreate<string>('wantConversationId', '');
+  AppStorage.setOrCreate<string>('wantNovelWorkspaceProjectId', '');
   AppStorage.setOrCreate<number>(WANT_ROUTE_SEQ_KEY, 0);
 };
 
 // 消费 AppStorage 里的待处理深链。ready 前 / 无 pending / 跳转在途 → 空操作。
 export const routePendingWant = (): void => {
-  if (!(AppStorage.get<boolean>(WANT_ROUTE_READY_KEY) ?? false)) return;
+  const routeRouter: Router | null = wantRouteRouter;
+  if (routeRouter === null || !(AppStorage.get<boolean>(WANT_ROUTE_READY_KEY) ?? false)) return;
   if (wantRouteInFlight) return;
   const seq: number = AppStorage.get<number>(WANT_ROUTE_SEQ_KEY) ?? 0;
   if (seq <= 0) return;
@@ -87,6 +92,8 @@ export const routePendingWant = (): void => {
   const novelJobId: string = AppStorage.get<string>('wantNovelJobId') ?? '';
   const topicId: string = AppStorage.get<string>('wantTopicId') ?? '';
   const title: string = AppStorage.get<string>('wantTitle') ?? '';
+  const conversationId: string = AppStorage.get<string>('wantConversationId') ?? '';
+  const novelWorkspaceProjectId: string = AppStorage.get<string>('wantNovelWorkspaceProjectId') ?? '';
   let targetUrl: string = '';
   const targetParams: Record<string, string> = {};
   if (novelProjectId.length > 0 && novelBranchId.length > 0 && novelJobId.length > 0) {
@@ -99,13 +106,19 @@ export const routePendingWant = (): void => {
     targetUrl = 'pages/DeepReadArticlePage';
     targetParams['topicId'] = topicId;
     targetParams['title'] = title;
+  } else if (conversationId.length > 0) {
+    targetUrl = 'pages/ChatPage';
+    targetParams['conversationId'] = conversationId;
+  } else if (novelWorkspaceProjectId.length > 0) {
+    targetUrl = 'pages/NovelWorkspacePage';
+    targetParams['projectId'] = novelWorkspaceProjectId;
   } else {
     clearPendingWantRoute();
     return;
   }
   wantRouteInFlight = true;
   try {
-    router.pushUrl({ url: targetUrl, params: targetParams }).then((): void => {
+    routeRouter.pushUrl({ url: targetUrl, params: targetParams }).then((): void => {
       wantRouteInFlight = false;
       // sequence 守卫:跳转期间到达的新 Want 参数不得被旧跳清除
       if ((AppStorage.get<number>(WANT_ROUTE_SEQ_KEY) ?? 0) === seq) {
@@ -117,6 +130,8 @@ export const routePendingWant = (): void => {
       wantRouteInFlight = false;
       // nav success 才清:pending 保留,下次 onNewWant/onPageShow 重试
       hilog.warn(DOMAIN, TAG, 'want route failed: %{public}s', String(e));
+      // 旧跳失败仅释放已到达的新 Want；相同 seq 不在这里重试。
+      if ((AppStorage.get<number>(WANT_ROUTE_SEQ_KEY) ?? 0) !== seq) routePendingWant();
     });
   } catch (e) {
     wantRouteInFlight = false;
@@ -124,14 +139,15 @@ export const routePendingWant = (): void => {
   }
 };
 
-// 路由就绪(窗口 loadContent 成功)后才允许消费;并补跳冷启动挂起的 Want。
-export const markWantRoutingReady = (): void => {
+// 根页 onPageShow 已完成首次渲染,绑定其 Router 后消费冷启动挂起的 Want。
+export const markWantRoutingReady = (pageRouter: Router): void => {
+  wantRouteRouter = pageRouter;
   AppStorage.setOrCreate<boolean>(WANT_ROUTE_READY_KEY, true);
   routePendingWant();
 };
 
 // 校验后的目标写入待处理槽 + 自增序列号。三类语义:
-//   1) 完整目标(topic 或 novel 三键齐全)→ 落参 + seq++ + 派发。
+//   1) 完整目标(topic、novel 三键、conversation 或 workspace project)→ 落参 + seq++ + 派发。
 //   2) 含 topic/novel 路由字段但**不完整**(如只有 novelProjectId)→ 这是一个新的
 //      畸形意图,作废旧 pending(wantRouteSeq=0),避免用户被误路由到上一条合法目标;
 //      既有 seq 守卫保证旧的在途 push 迟到回调不会再清/跳。
@@ -140,30 +156,28 @@ export const markWantRoutingReady = (): void => {
 export const publishWantRoute = (
   topicId: string, title: string,
   novelProjectId: string, novelBranchId: string, novelJobId: string,
+  conversationId: string = '', novelWorkspaceProjectId: string = '',
 ): void => {
   const hasNovel: boolean =
     novelProjectId.length > 0 && novelBranchId.length > 0 && novelJobId.length > 0;
-  const hasTopic: boolean = topicId.length > 0;
-  if (!hasNovel && !hasTopic) {
+  const hasTopic: boolean = !hasNovel && topicId.length > 0;
+  const hasConversation: boolean = !hasNovel && !hasTopic && conversationId.length > 0;
+  const hasWorkspace: boolean = !hasNovel && !hasTopic && !hasConversation && novelWorkspaceProjectId.length > 0;
+  if (!hasNovel && !hasTopic && !hasConversation && !hasWorkspace) {
     const declaredRoute: boolean = topicId.length > 0 || title.length > 0
-      || novelProjectId.length > 0 || novelBranchId.length > 0 || novelJobId.length > 0;
+      || novelProjectId.length > 0 || novelBranchId.length > 0 || novelJobId.length > 0
+      || conversationId.length > 0 || novelWorkspaceProjectId.length > 0;
     if (declaredRoute) clearPendingWantRoute();
     return;
   }
-  if (hasNovel) {
-    AppStorage.setOrCreate<string>('wantNovelProjectId', novelProjectId);
-    AppStorage.setOrCreate<string>('wantNovelBranchId', novelBranchId);
-    AppStorage.setOrCreate<string>('wantNovelJobId', novelJobId);
-    AppStorage.setOrCreate<string>('wantTopicId', '');
-    AppStorage.setOrCreate<string>('wantTitle', '');
-  } else {
-    AppStorage.setOrCreate<string>('wantTopicId', topicId);
-    // title 无条件覆写(含空):仅在有值时写入会残留上一条通知的旧标题
-    AppStorage.setOrCreate<string>('wantTitle', title);
-    AppStorage.setOrCreate<string>('wantNovelProjectId', '');
-    AppStorage.setOrCreate<string>('wantNovelBranchId', '');
-    AppStorage.setOrCreate<string>('wantNovelJobId', '');
-  }
+  // 所有字段每次一起覆写，切换目标不会残留旧 id 或标题。
+  AppStorage.setOrCreate<string>('wantNovelProjectId', hasNovel ? novelProjectId : '');
+  AppStorage.setOrCreate<string>('wantNovelBranchId', hasNovel ? novelBranchId : '');
+  AppStorage.setOrCreate<string>('wantNovelJobId', hasNovel ? novelJobId : '');
+  AppStorage.setOrCreate<string>('wantTopicId', hasTopic ? topicId : '');
+  AppStorage.setOrCreate<string>('wantTitle', hasTopic ? title : '');
+  AppStorage.setOrCreate<string>('wantConversationId', hasConversation ? conversationId : '');
+  AppStorage.setOrCreate<string>('wantNovelWorkspaceProjectId', hasWorkspace ? novelWorkspaceProjectId : '');
   AppStorage.setOrCreate<number>(WANT_ROUTE_SEQ_KEY,
     (AppStorage.get<number>(WANT_ROUTE_SEQ_KEY) ?? 0) + 1);
   routePendingWant();
@@ -194,28 +208,31 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<boolean>('systemDarkMode', this.systemDarkMode);
     AppStorage.setOrCreate<string>('accentColor', ACCENT);
     AppStorage.setOrCreate<Context>('abilityContext', this.context);
+    AppStorage.setOrCreate('productKind', productKindForBundle(this.context.applicationInfo.name));
     // Want 契约(§7.2):分享/deep-link 收 URL/title → 写 AppStorage 供 Index 跳转
     this.routeFromWant(want);
-    if (BuildProfile.DEBUG) {
+    if (BuildProfile.DEBUG && getProductKind() === 'agent') {
       runNativeTokenCounterFixture(want);
       runSSHRuntimeFixture(want).catch((): void => hilog.error(DOMAIN, 'SSH.Fixture', 'fixture failed'));
       runRuntimeE3Fixture(want).catch((): void => hilog.error(DOMAIN, 'Runtime.E3.Fixture', 'fixture failed'));
     }
     // D-126:AmberAgentApp.kt:205-213 — 启动 fire-and-forget 装内置技能
     //   (Dispatchers.IO 异步 → promise 丢弃;失败仅 Log.e,不阻塞启动)
-    getSkillManager().installBuiltinSkillsIfMissing()
-      .catch((e: Error): void => {
-        hilog.error(DOMAIN, TAG, 'installBuiltinSkills failed: %{public}s', String(e));
-      });
-    // D-130:AmberAgentApp.kt:216-224 — 启动 fire-and-forget 重排 cron 任务
-    //   (内部已 catch + hilog;应用存活期定时器重新武装)
-    rescheduleCronTasksOnStartup();
+    if (getProductKind() === 'agent') {
+      getSkillManager().installBuiltinSkillsIfMissing()
+        .catch((e: Error): void => {
+          hilog.error(DOMAIN, TAG, 'installBuiltinSkills failed: %{public}s', String(e));
+        });
+      // D-130:AmberAgentApp.kt:216-224 — 启动 fire-and-forget 重排 cron 任务
+      //   (内部已 catch + hilog;应用存活期定时器重新武装)
+      rescheduleCronTasksOnStartup();
+    }
   }
 
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'onNewWant');
     this.routeFromWant(want);
-    if (BuildProfile.DEBUG) {
+    if (BuildProfile.DEBUG && getProductKind() === 'agent') {
       runNativeTokenCounterFixture(want);
       runSSHRuntimeFixture(want).catch((): void => hilog.error(DOMAIN, 'SSH.Fixture', 'fixture failed'));
       runRuntimeE3Fixture(want).catch((): void => hilog.error(DOMAIN, 'Runtime.E3.Fixture', 'fixture failed'));
@@ -223,19 +240,19 @@ export default class EntryAbility extends UIAbility {
   }
 
   private routeFromWant(want: Want): void {
-    // 从 want.parameters 提取 DeepRead 或 Novel 的稳定 id；无效/超长参数忽略。
+    // 从 want.parameters 提取内容目标的稳定 id；无效/超长参数忽略。
     const params: Record<string, object> | undefined = want.parameters as Record<string, object>;
-    if (params === undefined || params === null) {
-      return;
-    }
+    if (params === undefined || params === null) return;
     // R23:校验后在统一待处理槽落参并触发派发(ready 前只挂起,冷启动由
-    // loadContent 成功回调补跳;前台任意栈顶由 onNewWant 立即派发)。
+    // 根页 onPageShow 补跳;前台任意栈顶由 onNewWant 立即派发)。
     publishWantRoute(
       validatedWantParameter(params['topicId']),
-      validatedWantParameter(params['title']),
+      typeof params['title'] === 'string' ? (params['title'] as string).trim() : '',
       validatedWantParameter(params['novelProjectId']),
       validatedWantParameter(params['novelBranchId']),
       validatedWantParameter(params['novelJobId']),
+      validatedWantParameter(params['conversationId']),
+      validatedWantParameter(params['novelWorkspaceProjectId']),
     );
   }
 
@@ -286,11 +303,13 @@ export default class EntryAbility extends UIAbility {
     //   否则首帧静态组件读浅色、异步组件读深色 → 混色)
     const start: () => void = (): void => {
       // 首页=对话列表(用户心智: 列表是首页, 点 session 进聊天界面)
-      windowStage.loadContent('pages/ChatListPage', (err: BusinessError) => {
+      windowStage.loadContent(productRootPage(), (err: BusinessError) => {
         if (err.code !== 0) {
           hilog.error(DOMAIN, TAG, 'loadContent failed: %{public}s', JSON.stringify(err));
         } else {
           hilog.info(DOMAIN, TAG, 'loadContent success');
+          // 窗口背景需要 UIContent 就绪；先设置背景，再应用系统栏内容颜色。
+          applyWindowTheme(AppStorage.get<boolean>('darkMode') ?? this.systemDarkMode);
           // 竞态兜底:内容加载后 UIContext 必然就绪,再注册一次字体(幂等)
           try {
             registerAmberFontsFor(windowStage.getMainWindowSync().getUIContext().getFont());
@@ -301,10 +320,7 @@ export default class EntryAbility extends UIAbility {
           notificationManager.requestEnableNotification(this.context).catch((): void => {
             hilog.warn(DOMAIN, TAG, 'requestEnableNotification rejected');
           });
-          syncMacGatewayPushTokenOnLaunch();
-          // R23:窗口内容就绪 = 全局 router 可用;此时补跳冷启动挂起的 Want
-          //   (onCreate 已写待处理槽,但那时 router 尚未就绪,不能发跳)。
-          markWantRoutingReady();
+          if (getProductKind() === 'agent') syncMacGatewayPushTokenOnLaunch();
         }
       });
     };
@@ -323,14 +339,11 @@ export default class EntryAbility extends UIAbility {
         applyCurrentTheme(resolvedDark);
         AppStorage.setOrCreate<string>('themePackId', themePackStore.current().id);
         AppStorage.setOrCreate<boolean>('homeDotGrid', themePackStore.current().dotGrid);
-        // 包可能换 BG:窗口底色按包再落一次(同步那次仍是默认纸色)
-        applyWindowTheme(resolvedDark);
       }).catch((): void => {
         applyTheme(resolvedDark);
       });
       AppStorage.setOrCreate<string>('uiColorMode', mode === 'dark' || mode === 'light' || mode === 'system' ? mode : 'system');
       AppStorage.setOrCreate<boolean>('darkMode', resolvedDark);
-      applyWindowTheme(resolvedDark);
       // accent 恢复排在包 hydrate 之后:accent 即当前包 accent 时沿用包 accentInk 覆写
       // (否则裸 setAccentColor 会清掉导入包的上墨色,重启后按钮字色退化)
       return loadDisplaySetting(getChatKvStore())
@@ -357,6 +370,8 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageDestroy(): void {
+    wantRouteRouter = null;
+    AppStorage.setOrCreate<boolean>(WANT_ROUTE_READY_KEY, false);
     if (this.avoidAreaWindow !== null) {
       try { this.avoidAreaWindow.off('avoidAreaChange'); } catch (_e) {}
       this.avoidAreaWindow = null;
@@ -367,7 +382,7 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     hilog.info(DOMAIN, TAG, 'onForeground — 回前台续跑');
     AppStorage.setOrCreate<boolean>('appBackgrounded', false);
-    getMemoryTopicCoordinator().foreground();
+    if (getProductKind() === 'agent') getMemoryTopicCoordinator().foreground();
     // 后台生成保活对称释放(回到前台即不需要长时任务;desired 先行再串行停止)
     setGenerationKeepAliveBackground(this.context, false).catch((): void => {});
   }
@@ -375,13 +390,15 @@ export default class EntryAbility extends UIAbility {
   onBackground(): void {
     hilog.info(DOMAIN, TAG, 'onBackground — 切后台暂停');
     AppStorage.setOrCreate<boolean>('appBackgrounded', true);
-    getMemoryTopicCoordinator().background();
-    cancelNativePluginJsSessions();
-    // E12:后台不保留 OAuth 等待 — 关闭 loopback 并使等待中的兑换失效
-    getWebMountOAuthRuntime().cancelAll();
-    interruptTerminalForBackground().catch((e: Error): void => {
-      hilog.warn(DOMAIN, TAG, 'terminal background disconnect failed: %{public}s', e.message);
-    });
+    if (getProductKind() === 'agent') {
+      getMemoryTopicCoordinator().background();
+      cancelNativePluginJsSessions();
+      // E12:后台不保留 OAuth 等待 — 关闭 loopback 并使等待中的兑换失效
+      getWebMountOAuthRuntime().cancelAll();
+      interruptTerminalForBackground().catch((e: Error): void => {
+        hilog.warn(DOMAIN, TAG, 'terminal background disconnect failed: %{public}s', e.message);
+      });
+    }
     // 生成中切后台:声明 desired,由活动集驱动 DATA_TRANSFER 申请(E13;
     //   无活动 run 时不会凭空申请;申请失败经 generationKeepAliveLastError 可观测)
     setGenerationKeepAliveBackground(this.context, true).catch((): void => {});

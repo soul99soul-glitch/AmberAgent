@@ -1,6 +1,7 @@
 // ollama_service — Ollama 搜索(D-068a)
 // Android 基准: search/.../OllamaSearchService.kt(全文 110 行)
 // 偏差登记:okhttp response.message 无对应字段(HttpClient Port 无状态文本)→ 尾空串
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -27,6 +28,7 @@ export const ollamaSearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: OllamaOptions = asOptions(serviceOptions);
     const query: string = requireQuery(params);
@@ -39,7 +41,7 @@ export const ollamaSearchService: SearchService = {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ query, max_results: maxResults }),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`Ollama search failed with code ${resp.status}: `);
     }

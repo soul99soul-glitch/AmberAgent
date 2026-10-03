@@ -1,6 +1,7 @@
 // amberagent_service — AmberAgent 搜索(D-068a)
 // Android 基准: search/.../AmberAgentSearchService.kt(全文 110 行)
 // 偏差登记:Log.i(TAG,"search: $query") 不移植(宪章:日志不落用户查询等隐私数据)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -27,6 +28,7 @@ export const amberAgentSearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: AmberAgentSearchOptions = asOptions(serviceOptions);
     const query: string = requireQuery(params);
@@ -45,7 +47,7 @@ export const amberAgentSearchService: SearchService = {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`response failed #${resp.status}: ${resp.body}`);
     }

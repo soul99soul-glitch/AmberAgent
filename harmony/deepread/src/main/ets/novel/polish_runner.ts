@@ -1,3 +1,5 @@
+import type { NovelModelPolicy, NovelModelTarget } from './models.ts';
+import type { NovelModelRole } from './standalone_defaults.ts';
 // polish_runner — C7 durable batch-polish executor.
 // Repository owns checkpoints and atomic chapter replacement. This thin runner only drives models.
 
@@ -19,11 +21,13 @@ import type { NovelProjectRepository } from './repository.ts';
 export type PolishRunnerRepository = Pick<NovelProjectRepository,
   'loadPolishJob' | 'claimPolishJob' | 'checkpointPolishStage' |
   'checkpointPolishCandidate' | 'checkpointPolishReview' | 'failPolishJob' |
-  'yieldPolishJob' | 'commitPolishChapter'>;
+  'yieldPolishJob' | 'commitPolishChapter' | 'recordPolishChapterResult'>;
 
 export interface PolishRunnerDeps {
   repository: PolishRunnerRepository;
   modelRunning: NovelModelRunning;
+  loadPolishPreference?: () => Promise<string>;
+  resolveModelTarget?: (policy: NovelModelPolicy, role: NovelModelRole) => Promise<NovelModelTarget>;
   nowMs?: () => number;
   makeId?: (prefix: string) => string;
 }
@@ -164,6 +168,7 @@ const frozenInput = (job: DurablePolishJob): string => {
       sourceDigest: target.sourceDigest,
       sourceContent: target.sourceContent,
     },
+    polishPreferenceAtStart: job.polishPreferenceAtStart ?? '',
     contextSnapshot: job.contextSnapshot.map((item) => ({
       kind: item.kind,
       sourcePath: item.sourcePath,
@@ -253,23 +258,34 @@ class DefaultPolishRunner implements PolishRunner {
           this.assertJobBinding(checkpointed, projectId, jobId);
           continue;
         }
-        if (job.stage === 'writing' || job.stage === 'rewriting_1' || job.stage === 'rewriting_2') {
-          const generated: ModelCallResult = await this.callModel(
-            job, 'writer', writerSystemPrompt(), writerUserPrompt(job));
-          if (generated.kind === 'waiting_user') throw invalidInput('润色模型请求用户输入，batch polish 不支持等待用户');
-          const candidateId: string = job.candidate?.candidateId ?? this.makeId('polish-candidate');
-          const checkpointed: DurablePolishJob = await this.deps.repository.checkpointPolishCandidate(
-            projectId, jobId, claim, parseCandidate(generated.text, job, candidateId), this.nowMs());
-          this.assertJobBinding(checkpointed, projectId, jobId);
-          continue;
-        }
-        if (job.stage === 'reviewing') {
-          const reviewed: ModelCallResult = await this.callModel(
-            job, 'reviewer', reviewSystemPrompt(), reviewUserPrompt(job));
-          if (reviewed.kind === 'waiting_user') throw invalidInput('审核模型请求用户输入，batch polish 不支持等待用户');
-          const checkpointed: DurablePolishJob = await this.deps.repository.checkpointPolishReview(
-            projectId, jobId, claim, parseReview(reviewed.text, job), this.nowMs());
-          this.assertJobBinding(checkpointed, projectId, jobId);
+        if (job.stage === 'writing' || job.stage === 'rewriting_1' || job.stage === 'rewriting_2' || job.stage === 'reviewing') {
+          try {
+            let checkpointed: DurablePolishJob;
+            if (job.stage === 'reviewing') {
+              const reviewed = await this.callModel(job, 'reviewer', reviewSystemPrompt(), reviewUserPrompt(job));
+              if (reviewed.kind === 'waiting_user') throw invalidInput('审核模型请求用户输入，batch polish 不支持等待用户');
+              checkpointed = await this.deps.repository.checkpointPolishReview(
+                projectId, jobId, claim, parseReview(reviewed.text, job), this.nowMs());
+            } else {
+              const generated = await this.callModel(job, 'writer', writerSystemPrompt(), writerUserPrompt(job));
+              if (generated.kind === 'waiting_user') throw invalidInput('润色模型请求用户输入，batch polish 不支持等待用户');
+              const candidateId: string = job.candidate?.candidateId ?? this.makeId('polish-candidate');
+              checkpointed = await this.deps.repository.checkpointPolishCandidate(
+                projectId, jobId, claim, parseCandidate(generated.text, job, candidateId), this.nowMs());
+            }
+            this.assertJobBinding(checkpointed, projectId, jobId);
+            if (checkpointed.stage === 'queued' || checkpointed.stage === 'completed') committedThisRun += 1;
+          } catch (error) {
+            // Recording a chapter failure still requires the current CAS and owner.
+            // A pause/cancel, stale workspace or lease loss cannot advance this cursor.
+            const durable = await this.deps.repository.loadPolishJob(projectId, jobId);
+            this.assertJobBinding(durable, projectId, jobId);
+            if (STOPPED_STAGES.includes(durable.stage)) return durable;
+            const recorded = await this.deps.repository.recordPolishChapterResult(
+              projectId, jobId, claim, 'failed', errorText(error), this.nowMs());
+            this.assertJobBinding(recorded, projectId, jobId);
+            committedThisRun += 1;
+          }
           continue;
         }
         if (job.stage === 'committing') {
@@ -277,8 +293,16 @@ class DefaultPolishRunner implements PolishRunner {
           const commandId: string = polishReceipt(
             job.jobId, job.candidate.chapterId, job.candidate.chapterOrdinal,
             job.candidate.sourceDigest, job.candidate.candidateId, job.candidate.digest);
-          const committed: DurablePolishJob = await this.deps.repository.commitPolishChapter(
-            projectId, jobId, claim, commandId, this.nowMs());
+          let committed: DurablePolishJob;
+          try {
+            committed = await this.deps.repository.commitPolishChapter(projectId, jobId, claim, commandId, this.nowMs());
+          } catch (error) {
+            const durable = await this.deps.repository.loadPolishJob(projectId, jobId);
+            this.assertJobBinding(durable, projectId, jobId);
+            if (STOPPED_STAGES.includes(durable.stage)) return durable;
+            committed = currentPolishTarget(durable)?.id !== job.candidate.chapterId ? durable
+              : await this.deps.repository.recordPolishChapterResult(projectId, jobId, claim, 'failed', errorText(error), this.nowMs());
+          }
           this.assertJobBinding(committed, projectId, jobId);
           committedThisRun += 1;
           if (STOPPED_STAGES.includes(committed.stage)) return committed;
@@ -332,11 +356,15 @@ class DefaultPolishRunner implements PolishRunner {
   private async callModel(
     job: DurablePolishJob, role: 'writer' | 'reviewer', systemPrompt: string, userPrompt: string,
   ): Promise<ModelCallResult> {
-    const modelTarget = role === 'writer'
+    const modelTarget = this.deps.resolveModelTarget !== undefined
+      ? await this.deps.resolveModelTarget(job.modelPolicyAtStart, role === 'writer' ? 'writing' : role === 'reviewer' ? 'review' : 'stateSync')
+      : role === 'writer'
       ? job.modelPolicyAtStart.writing
       : (job.modelPolicyAtStart.review ?? job.modelPolicyAtStart.writing);
     await this.deps.modelRunning.validate(modelTarget, job.projectId);
     const runId: string = this.makeId(`polish-${role}`);
+    const preference: string = role === 'writer' ? (job.polishPreferenceAtStart ?? '').trim() : '';
+    const prompt: string = preference.length > 0 ? `${userPrompt}\n\n作者润色偏好：\n${preference}` : userPrompt;
     const request: NovelModelRequest = {
       runId,
       projectId: job.projectId,
@@ -345,7 +373,7 @@ class DefaultPolishRunner implements PolishRunner {
       modelTarget,
       toolProfile: 'read_only',
       history: [],
-      operation: { kind: 'turn', userPrompt },
+      operation: { kind: 'turn', userPrompt: prompt },
       checkpoint: async (_messages: UIMessage[]): Promise<void> => {},
     };
     const key: string = this.jobKey(job.projectId, job.jobId);

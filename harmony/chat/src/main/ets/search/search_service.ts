@@ -19,7 +19,7 @@
 //   - getService(options) when 分派:随 provider 批次落地(D-066/D-067),
 //     本切片仅接口 + 运行时装
 
-import type { HttpClient } from '@amber/deepread-domain';
+import type { AbortSignalLike, HttpClient } from '@amber/deepread-domain';
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import type { InputSchemaObj } from '../chat/tool.ts';
 import { newId } from '../chat/ids.ts';
@@ -338,15 +338,22 @@ export const searchServiceOptionsFromJson = (j: JsonObject): SearchServiceOption
 
 // ===== SearchService 接口(:22-43) =====
 
+export interface SearchRequestContext {
+  // 每次请求独立传递,不改动共享 SDK 运行时。
+  signal?: AbortSignalLike;
+}
+
 export interface SearchService {
   readonly name: string;
   readonly parameters: InputSchemaObj | null;
   readonly scrapingParameters: InputSchemaObj | null;
   search(
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult>;
   scrape(
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<ScrapedResult>;
 }
 

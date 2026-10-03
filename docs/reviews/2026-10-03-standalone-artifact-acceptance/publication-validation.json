@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-03",
+  "baseline_head": "5ea51f7a548198ee4676fc63ef0b3bbfa34ba290",
+  "validation_scope": "HEAD plus explicit standalone delivery paths in isolated checkout",
+  "selected_paths_before_publication_receipts": 2206,
+  "preserved_unselected_paths": 783,
+  "tests": {
+    "chat": {
+      "exit": 0,
+      "tests": 2449,
+      "pass": 2449,
+      "fail": 0
+    },
+    "deepread": {
+      "exit": 0,
+      "tests": 1222,
+      "pass": 1222,
+      "fail": 0
+    },
+    "entry": {
+      "exit": 0,
+      "tests": 168,
+      "pass": 168,
+      "fail": 0
+    },
+    "prepare": {
+      "exit": 0,
+      "tests": 6,
+      "pass": 6,
+      "fail": 0
+    },
+    "chat-tsc": {
+      "exit": 0
+    },
+    "deepread-tsc": {
+      "exit": 0
+    }
+  },
+  "total_tests": 3845,
+  "standalone_build": {
+    "command": "node scripts/harmony-standalone/build.mjs --product all",
+    "exit": 0,
+    "build_successful_count": 2,
+    "unsigned_haps": {
+      "novel": {
+        "file": "entry-default-unsigned.hap",
+        "bytes": 58781810,
+        "sha256": "93a427ddd6f3ce4b2fc2a88c9528d3ed32c39fe065f30dde7324002606779da7"
+      },
+      "deepread": {
+        "file": "entry-default-unsigned.hap",
+        "bytes": 58794572,
+        "sha256": "f3bda1ac801e083a6dbee0efe32babbeaedb889b84ef2970af0a855fd930bcb5"
+      }
+    }
+  },
+  "review": {
+    "agent": "commit_scope_review",
+    "result": "PASS",
+    "missing_relative_imports": 0,
+    "candidate_source_byte_mismatches": 0,
+    "production_ts_ets_paths": 249,
+    "selected_text_files_checked_for_common_credentials": 1569,
+    "credential_matches": 0
+  }
+}

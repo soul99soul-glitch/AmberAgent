@@ -1,3 +1,5 @@
+import { loadNovelModelDefaults, loadNovelPolishPreference } from '../platform_impl/NovelStandaloneDefaults.ets';
+import { createEntryJevAutoApprovalReview } from '../platform_impl/JevAutoApprovalSupport.ets';
 // AppContainer — 依赖注入容器(ArkTS 兼容版)
 // 组装 deepread 逻辑层与平台实现。
 // 平台实现均已真实接线(RcpHttpClient/RdbRepository/PreferencesStorage/
@@ -7,16 +9,21 @@
 import type {
   RunManagerDeps, AiClient, UIMessage, Tool, ToolDefinition,
   DeepReadOutput, DeepReadScheduler, DeepReadCacheEntry, Observable, HttpClient, Storage,
+  SchedulerRunOptions, DeepReadTemplateSnapshot, SearchHit,
   DeepReadRepository, SearchProviderRegistry, Notifier,
   SourcePrefetcher, FileStore, ModelRegistry, AbortSignalLike,
   ModelCouncilTextRunner, ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelConfig,
   NovelProjectRepository, NovelModelTarget, NovelPolishEffects, DurablePolishJob,
+  NovelStructuredTaskOptions,
+  NovelRuntimeSnapshot,
+  PolishChapterResult,
 } from '@amber/deepread-domain';
 import {
   isInterruptedPhase, createScheduler, createSourcePrefetcher,
   createStorageModelRegistry, createModelCouncilManager, ModelCouncilManager,
-  createNovelCreation, NovelCreation, createFileNovelRepository,
+  createNovelCreation, NovelCreation, createFileNovelRepository, NovelAuditController,
   DeepReadPlaybookRepository,
+  projectPolishOutcomes,
 } from '@amber/deepread-domain';
 // 真实平台实现 import
 import { createRcpHttpClient } from '../platform_impl/RcpHttpClient.ets';
@@ -25,7 +32,14 @@ import { initializeJevTriageHost } from '../platform_impl/JevTriageHost.ets';
 import { createPreferencesStorage } from '../platform_impl/PreferencesStorage.ets';
 import { createRdbRepository } from '../platform_impl/RdbRepository.ets';
 import { createOpenAiCompatibleAiClient } from '../platform_impl/OpenAiCompatibleAiClient.ets';
+import { DeepReadRunRepositoryAdapter } from '../platform_impl/DeepReadRunRepository.ets';
+import { DeepReadArtifactStore } from '../platform_impl/DeepReadArtifactStore.ets';
+import {
+  setDeepReadGenerationActivity, beginDeepReadGenerationStep, observeDeepReadGenerationSnapshot,
+} from '../platform_impl/DeepReadGenerationActivity.ets';
 import { createTavilyAndFallbackRegistry } from '../platform_impl/SearchRegistry.ets';
+import { captureDeepReadTemplate } from '../platform_impl/DeepReadTemplate.ets';
+import { searchDeepReadGoogle } from '../platform_impl/DeepReadGoogleSearch.ets';
 import { createNotificationNotifier, notifyCronRunning, notifyCronCompleted, notifyCronFailed } from '../platform_impl/NotificationNotifier.ets';
 import { createFileStore } from '../platform_impl/FileStore.ets';
 import { getChatKeyRoulette } from '../platform_impl/KeyRouletteSupport.ets';
@@ -52,9 +66,12 @@ import type {
   ProviderModel, CompactStore, ModelAbility, SkillMetadata, SkillWorkspacePort,
   ModelType, TaskModelPair, TaskModelReference,
   AgentTool, ChatStreamProvider, ChatToolDefinition, CustomHeader,
-  SubAgentRuntimeSetting, SubAgentOverride, SubAgentManagerDeps, SubAgentRunner,
+  SubAgentRuntimeSetting, SubAgentOverride, SubAgentManagerDeps, SubAgentRunner, SubAgentGenerationRequest,
   SubAgentAssistantResolution, SubAgentGenerationPort,
   AgentPromptSettingsPort, NovelInteractiveRuntimeConfig, Conversation, JevSettings, JevQuestion, JevEvaluateResult,
+  ProviderRuntimeSnapshot, ProviderAuthSnapshot,
+  NovelFrozenRuntimeConfiguration,
+  NovelResponsesStreamOptions,
 } from '@amber/chat-domain';
 import type { NovelWorkspaceToolPort } from '@amber/chat-domain';
 import {
@@ -62,7 +79,10 @@ import {
   makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi,
   hasUsableAuth, openAIAuthHeaders, copyProviderSettingWithModels,
   taskModelReferenceId, taskModelReferenceFromId, findTaskProviderModel,
-  makeTextGenerationParams, toChatModel, defaultReasoningLevelForModel,
+  makeTextGenerationParams, makeNovelTextGenerationParams, resolveNovelMaxOutputTokens, applyNovelStateReasoning,
+  freezeNovelRuntimeConfiguration, readNovelRuntimeConfiguration, supportsResponsesResume,
+  createChatDeepReadAiClient, prepareProviderRuntime, prepareProviderAuth,
+  toChatModel, defaultReasoningLevelForModel,
   resolveSessionDefaults, mergeCustomParams,
   SessionAccessGrantStore, DEFAULT_AUTO_MODEL_ID,
   DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT,
@@ -74,10 +94,10 @@ import {
   makeChatModel,
   SubAgentManager, GenerationSubAgentRunner, ChatStreamSubAgentGenerationPort,
   SubAgentTools,
-  createAskUserTool, createNovelWorkspaceTools,
+  createAskUserTool, createNovelWorkspaceTools, novelAuditToolResult, executeNovelProjectOperation,
   createKvResponseResumeStore,
   AgentCronTools,
-  runChatTurnWithTools, conversationHasPendingOrUnexecutedTools,
+  runChatTurnWithTools, conversationHasPendingOrUnexecutedTools, AgentToolDispatcher,
   createTimeTool, createWorkspaceTools, createSearchTools, loadSearchPrefs,
   createToolRegistry, filterToolProfile, createMcpServerTools,
   createRegistryIntrospectionTools, createToolSearchTool, newId,
@@ -140,6 +160,7 @@ import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.et
 import { beginConversationRun } from '../platform_impl/ConversationRunGuard.ets';
 import { ConversationRunService } from '../platform_impl/ConversationRunService.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
+import { loadNovelResearchTools } from '../platform_impl/NovelResearchSupport.ets';
 import { util } from '@kit.ArkTS';
 
 const DOMAIN: number = 0x0001;
@@ -178,7 +199,7 @@ const buildContainer = (): Container => {
   const searchRegistry: SearchProviderRegistry = createTavilyAndFallbackRegistry(
     httpClient, storage, (): Promise<SearchSettings> => loadSearchPrefs(getChatKvStore()), ensureSearchSdk,
   );
-  const prefetcher: SourcePrefetcher = createSourcePrefetcher(httpClient, searchRegistry);
+  const prefetcher: SourcePrefetcher = createSourcePrefetcher(httpClient, searchRegistry, createEntryAbortController);
   const aiClient: AiClient = createOpenAiCompatibleAiClient(httpClient, storage);
   const notifier: Notifier = createNotificationNotifier();
   const fileStore: FileStore = createFileStore();
@@ -200,76 +221,32 @@ export const getNotifier = (): Notifier => getAppContainer().notifier;
 export const getPrefetcher = (): SourcePrefetcher => getAppContainer().prefetcher;
 export const getAiClient = (): AiClient => getAppContainer().aiClient;
 export const getRepository = (): DeepReadRepository => getAppContainer().repository;
+let deepReadArtifactStore: DeepReadArtifactStore | null = null;
+export const getDeepReadArtifactStore = (): DeepReadArtifactStore => {
+  if (deepReadArtifactStore === null) {
+    deepReadArtifactStore = new DeepReadArtifactStore(getRepository(), getChatKvStore());
+  }
+  return deepReadArtifactStore;
+};
 export const getFileStore = (): FileStore => getAppContainer().fileStore;
 export const getModelRegistry = (): ModelRegistry => getAppContainer().modelRegistry;
 
-interface DeepReadRunRepository {
-  get: (topicId: string, title: string) => DeepReadOutput | null;
-  save: (topicId: string, title: string, output: DeepReadOutput) => void;
-  clear: (topicId: string) => void;
+export interface DeepReadTextRuntime {
+  aiClient: AiClient;
+  model: string;
 }
 
-class DeepReadRunRepositoryAdapter implements DeepReadRunRepository {
-  private readonly repository: DeepReadRepository;
-  private readonly cache: Map<string, DeepReadCacheEntry> = new Map<string, DeepReadCacheEntry>();
-
-  constructor(repository: DeepReadRepository) {
-    this.repository = repository;
-  }
-
-  async hydrate(): Promise<void> {
-    const rows: DeepReadCacheEntry[] = await this.repository.listHistory(100);
-    for (const row of rows) this.cache.set(row.topicId, row);
-  }
-
-  get(topicId: string, _title: string): DeepReadOutput | null {
-    const entry: DeepReadCacheEntry | undefined = this.cache.get(topicId);
-    if (entry === undefined || entry.expiresAt <= Date.now()) return null;
-    return entry.output;
-  }
-
-  save(topicId: string, title: string, output: DeepReadOutput): void {
-    const now: number = Date.now();
-    const previous: DeepReadCacheEntry | undefined = this.cache.get(topicId);
-    const entry: DeepReadCacheEntry = {
-      topicId,
-      title,
-      sourceUrl: previous?.sourceUrl ?? null,
-      output,
-      phase: output.generationPhase,
-      attemptCount: previous?.attemptCount ?? 0,
-      lastError: firstOutputError(output),
-      createdAt: previous?.createdAt ?? now,
-      updatedAt: now,
-      expiresAt: now + 24 * 60 * 60 * 1000,
-    };
-    this.cache.set(topicId, entry);
-    this.repository.upsert(entry).catch((e: Error): void => {
-      hilog.warn(DOMAIN, TAG, 'DeepRead save failed: %{public}s', e.message);
-    });
-  }
-
-  clear(topicId: string): void {
-    this.cache.delete(topicId);
-    this.repository.delete(topicId).catch((e: Error): void => {
-      hilog.warn(DOMAIN, TAG, 'DeepRead clear failed: %{public}s', e.message);
-    });
-  }
-}
-
-const firstOutputError = (output: DeepReadOutput): string | null => {
-  const states: string[] = ['OVERVIEW', 'NARRATIVE', 'ANALYSIS', 'EXTENDED_READING'];
-  for (const stage of states) {
-    const error: string | null | undefined = output.sectionStates[stage]?.errorMessage;
-    if (error !== undefined && error !== null && error.length > 0) return error;
-  }
-  return null;
+export const getDeepReadTextRuntime = async (): Promise<DeepReadTextRuntime> => {
+  const runtime: ProviderRuntimeSnapshot = await resolveDeepReadRuntimeCore();
+  return { model: runtime.model.modelId, aiClient: createChatDeepReadAiClient({ api: runtime.api, params: runtime.params }) };
 };
 
 const toolToModelTool = (tool: ToolDefinition): Tool => ({
   name: tool.name,
   description: tool.description,
   schema: tool.schema ?? {},
+  allowsAutoApproval: tool.allowsAutoApproval,
+  isHighRisk: tool.isHighRisk,
   execute: tool.execute,
 });
 
@@ -282,63 +259,96 @@ export const getDeepReadScheduler = (): Promise<DeepReadScheduler> => {
   deepReadSchedulerInit = (async (): Promise<DeepReadScheduler> => {
     const container: Container = getAppContainer();
     const runRepository: DeepReadRunRepositoryAdapter =
-      new DeepReadRunRepositoryAdapter(container.repository);
-    try {
-      await runRepository.hydrate();
-    } catch (e) {
-      hilog.warn(DOMAIN, TAG, 'DeepRead cache hydrate failed; continuing with empty cache: %{public}s', String(e));
-    }
-    // P5:看板模型独立(deepread_model_id → 空 = 跟随聊天模型 ai_model)
-    const boardModelId: string = await container.storage.get<string>('deepread_model_id', '');
-    const model: string = boardModelId.length > 0
-      ? boardModelId
-      : await container.storage.get<string>('ai_model', 'deepseek-chat');
-    const playbook: string = (await getDeepReadPlaybookRepository().read()).markdown;
-    const collectRun = (
-      messages: UIMessage[],
-      _label: string,
-      signal?: import('@amber/deepread-domain').AbortSignalLike,
-      tools?: ToolDefinition[],
-    ): Promise<UIMessage[]> => {
-      hilog.info(DOMAIN, TAG, 'collectRun call: msgs=%{public}d tools=%{public}d', messages.length, tools?.length ?? 0);
-      return container.aiClient.generateText({
-      model,
-      messages,
-      tools: tools?.map(toolToModelTool),
-      maxSteps: 32,
-      autoApproveTools: true,
-      autoApproveHighRiskTools: true,
-      autoApprovedToolNames: tools?.map((tool: ToolDefinition): string => tool.name),
-      signal,
-    }).then((out: UIMessage[]): UIMessage[] => {
-      // 诊断:模型响应形态(文本/工具调用占比)— "未按约定调用分段写入工具"排查
-      let kinds: string = '';
-      for (const m of out) {
-        for (const p of m.parts) {
-          kinds += p.type + ',';
-        }
+      new DeepReadRunRepositoryAdapter(container.repository,
+        (entry: DeepReadCacheEntry): Promise<void> => getDeepReadArtifactStore().save(entry.topicId).then((): void => {}));
+    await runRepository.hydrate();
+    const createRunManager = async (
+      topicId?: string, title?: string, runToken?: number, options?: SchedulerRunOptions,
+    ): Promise<RunManagerDeps> => {
+      if (topicId !== undefined) await runRepository.load(topicId);
+      const runtime: ProviderRuntimeSnapshot = await resolveDeepReadRuntimeCore();
+      const cachedOutput: DeepReadOutput | null = topicId === undefined ? null : runRepository.get(topicId, title ?? '');
+      let templateSnapshot: DeepReadTemplateSnapshot | undefined = options?.templateSnapshot
+        ?? (options?.force ? undefined : cachedOutput?.templateSnapshot);
+      if (templateSnapshot === undefined) {
+        const templateId: string = await container.storage.get<string>('deepread_template_id', 'none');
+        templateSnapshot = await captureDeepReadTemplate(container.storage, templateId);
       }
-      hilog.info(DOMAIN, TAG, 'collectRun done: msgs=%{public}d parts=[%{public}s]', out.length, kinds);
-      return out;
-    });
+      const searchRegistry: SearchProviderRegistry = createTavilyAndFallbackRegistry(
+        container.httpClient, container.storage, (): Promise<SearchSettings> => loadSearchPrefs(getChatKvStore()), ensureSearchSdk,
+        { searchGoogle: (query: string, resultSize: number, signal?: AbortSignalLike): Promise<SearchHit[]> =>
+          searchDeepReadGoogle(topicId ?? '', query, resultSize, signal) },
+      );
+      const prefetcher: SourcePrefetcher = createSourcePrefetcher(container.httpClient, searchRegistry, createEntryAbortController);
+      const playbookMarkdown: string = (await getDeepReadPlaybookRepository().read()).markdown;
+      const model: string = runtime.model.modelId;
+      const aiClient: AiClient = createChatDeepReadAiClient({
+        api: runtime.api, params: runtime.params,
+        onRequestStart: (history: UIMessage[]): void => {
+          if (topicId !== undefined && runToken !== undefined) beginDeepReadGenerationStep(topicId, runToken, history);
+        },
+        onRawSnapshot: (messages: UIMessage[]): void => {
+          if (topicId !== undefined && runToken !== undefined) observeDeepReadGenerationSnapshot(topicId, runToken, messages);
+        },
+      });
+      const collectRun = (
+        messages: UIMessage[],
+        _label: string,
+        signal?: import('@amber/deepread-domain').AbortSignalLike,
+        tools?: ToolDefinition[],
+      ): Promise<UIMessage[]> => {
+        hilog.info(DOMAIN, TAG, 'collectRun call: msgs=%{public}d tools=%{public}d', messages.length, tools?.length ?? 0);
+        return aiClient.generateText({
+          model,
+          messages,
+          tools: tools?.map(toolToModelTool),
+          maxSteps: 32,
+          autoApproveTools: true,
+          autoApproveHighRiskTools: true,
+          autoApprovedToolNames: tools?.map((tool: ToolDefinition): string => tool.name),
+          signal,
+        }).then((out: UIMessage[]): UIMessage[] => {
+          // 诊断:模型响应形态(文本/工具调用占比)— "未按约定调用分段写入工具"排查
+          let kinds: string = '';
+          for (const m of out) {
+            for (const p of m.parts) kinds += p.type + ',';
+          }
+          hilog.info(DOMAIN, TAG, 'collectRun done: msgs=%{public}d parts=[%{public}s]', out.length, kinds);
+          return out;
+        });
+      };
+      const runManager: RunManagerDeps = {
+        onProgress: options?.onProgress,
+        prefetcher,
+        aiClient,
+        model,
+        writerMode: runtime.model.abilities.includes('tool') ? 'tools' : 'structured',
+        templateSnapshot,
+        playbookMarkdown,
+        collectRun,
+        repository: runRepository,
+        nowIso: (): string => new Date().toISOString().slice(0, 10),
+      };
+      return runManager;
     };
+    // Reading history and active jobs does not require a configured model.
+    // The actual job always captures its provider through createRunManager.
     const runManager: RunManagerDeps = {
-      prefetcher: container.prefetcher,
-      aiClient: container.aiClient,
-      model,
-      playbookMarkdown: playbook,
-      collectRun,
+      prefetcher: container.prefetcher, aiClient: container.aiClient, model: '',
+      playbookMarkdown: '', nowIso: (): string => new Date().toISOString().slice(0, 10),
+      collectRun: (): Promise<UIMessage[]> => Promise.reject(new Error('深读运行配置尚未捕获')),
       repository: runRepository,
-      nowIso: (): string => new Date().toISOString().slice(0, 10),
     };
     const scheduler: DeepReadScheduler = createScheduler({
       runManager,
+      createRunManager,
       observeOutput: (topicId: string): Observable<DeepReadOutput> =>
         mapCacheEntryObservable(container.repository.observe(topicId)),
       isInterruptedPhase,
       createAbortController: (): import('@amber/deepread-domain').AbortControllerLike =>
         createEntryAbortController(),
       notifier: container.notifier,
+      onRunActivity: setDeepReadGenerationActivity,
     });
     deepReadScheduler = scheduler;
     return scheduler;
@@ -758,9 +768,9 @@ const buildSubAgentGenerationPort = (
   parentRuntime: ChatRuntime | null = null, parentAgentRuntime: AgentRuntimeSnapshot | null = null,
   parentConversationId: string | null = null,
 ): SubAgentGenerationPort => {
-  // model.id → 已解析 provider(resolveModel 异步解析后缓存;makeProvider 同步取)
+  // model.id → 已刷新的 provider/accountId(resolveModel 异步解析后缓存;makeProvider 同步取)
   //   并行子代理按各自 model.id 取 provider,不互相干扰;同 model → 同 provider(正确)
-  const providerByModelId: Map<string, ProviderSetting> = new Map<string, ProviderSetting>();
+  const providerByModelId: Map<string, ProviderAuthSnapshot> = new Map<string, ProviderAuthSnapshot>();
   // D5-1:Jev 模型路由(无 override 且有任务上下文时):候选 = 当前聊天模型 +
   //   各启用服务商首个 chat 模型(≤6);ACTIVE 用选中,SHADOW/失败/无路由空间 → null
   const jevRouteModel = async (taskHint: string): Promise<ChatProviderChoice | null> => {
@@ -801,7 +811,9 @@ const buildSubAgentGenerationPort = (
     if (choice === null) choice = parentRuntime === null
       ? await resolveChatProviderChoice() : parentRuntime.resolvedChoice;
     if (choice === null) return null;
-    providerByModelId.set(choice.model.id, choice.provider);
+    providerByModelId.set(choice.model.id, await prepareProviderAuth({
+      provider: choice.provider, refreshCodex: getValidCodexToken, refreshGrok: getValidGrokToken,
+    }));
     return choice.model;
   };
   const resolveAssistant = async (): Promise<SubAgentAssistantResolution | null> => {
@@ -825,7 +837,7 @@ const buildSubAgentGenerationPort = (
   ): ChatStreamProvider => {
     // resolveModel 在 makeProvider 之前 await 完成并按 model.id 缓存 provider;
     //   缺失 = resolveModel 未被调用(契约违反),显式抛错(fail-closed,不伪成功)
-    const cached: ProviderSetting | undefined = providerByModelId.get(model.id);
+    const cached: ProviderAuthSnapshot | undefined = providerByModelId.get(model.id);
     if (cached === undefined) {
       throw new Error(`Subagent provider not resolved for model ${model.id}`);
     }
@@ -835,11 +847,13 @@ const buildSubAgentGenerationPort = (
       if (name.length === 0) return;
       customHeaderRecord[name] = h.value.trim();
     });
-    const api: OpenAIChatApi = buildProviderApi(cached, customHeaderRecord);
+    const api: OpenAIChatApi = buildProviderApi(cached.provider, customHeaderRecord, cached.accountId);
     return asChatStreamProvider(api, (): TextGenerationParams => params);
   };
   return new ChatStreamSubAgentGenerationPort({ resolveModel, resolveAssistant, makeProvider,
-    configureRecipeLoop: async (loop: ToolLoopOptions): Promise<void> => {
+    configureRecipeLoop: async (loop: ToolLoopOptions, request: SubAgentGenerationRequest): Promise<void> => {
+      const review = createEntryJevAutoApprovalReview(request.messages);
+      loop.dispatcher = new AgentToolDispatcher({ autoApprovalReview: review });
       if (!loop.tools.some((tool: AgentTool): boolean =>
         tool.name.startsWith('recipe_') || tool.name === 'recipes_list'
           || tool.name.startsWith('plugin_') || tool.name === 'plugins_list')) return;
@@ -851,7 +865,7 @@ const buildSubAgentGenerationPort = (
         store: pluginStore,
         createAdapter: (installed: InstalledPlugin[], primitives: AgentTool[]): PluginLoopAdapter =>
           createEntryPluginAdapter(pluginStore, installed, primitives, parentConversationId),
-      });
+      }, review);
     },
   });
 };
@@ -945,6 +959,7 @@ export const getCouncilRunner = (): ModelCouncilTextRunner => {
 export const prepareCouncilManager = async (
   setting: ModelCouncilRuntimeSetting,
 ): Promise<ModelCouncilManager> => {
+  if (councilManager !== null && councilManager.listActive().length > 0) return councilManager;
   const pool = await getModelRegistry().list();
   const runner: ModelCouncilTextRunner = setting.toolMode === 'search' || setting.toolMode === 'full'
     ? await prepareCouncilToolRunner({
@@ -967,6 +982,7 @@ export const prepareCouncilManager = async (
       getRecipeStore, getPluginStore, getAgentTaskTools, getAgentCronTools,
       getPermissionsStatusTool, getAgentPromptConfigTool, playbookRepository: getDeepReadPlaybookRepository(),
     }) : getCouncilRunner();
+  if (councilManager !== null && councilManager.listActive().length > 0) return councilManager;
   councilManager = createModelCouncilManager({
     runner: runner,
     fileStore: getFileStore(),
@@ -992,7 +1008,7 @@ export const getNovelProjectRepository = (): NovelProjectRepository => {
 
 export const getNovelWorkspaceService = (): NovelWorkspaceService => {
   if (novelWorkspaceService === null) {
-    novelWorkspaceService = createNovelWorkspaceService(getNovelProjectRepository());
+    novelWorkspaceService = createNovelWorkspaceService(getNovelProjectRepository(), getNovelCreation());
   }
   return novelWorkspaceService;
 };
@@ -1012,13 +1028,19 @@ export const getNovelCreation = (): NovelCreation => {
         });
       },
       async notify(job: DurablePolishJob): Promise<void> {
+        const outcomes: PolishChapterResult[] = projectPolishOutcomes(job);
+        const succeeded: number = outcomes.filter((item: PolishChapterResult): boolean => item.status === 'success').length;
+        const failed: number = outcomes.filter((item: PolishChapterResult): boolean => item.status === 'failed').length;
+        const skipped: number = outcomes.filter((item: PolishChapterResult): boolean => item.status === 'driftSkipped').length;
+        const remaining: number = outcomes.filter((item: PolishChapterResult): boolean => item.status === 'unprocessed').length;
+        const summary: string = `成功 ${succeeded}/${job.targets.length} · 失败 ${failed} · 跳过 ${skipped} · 未处理 ${remaining}`;
         let title: string = '批量润色';
-        let text: string = `已完成 ${job.cursor}/${job.targets.length}`;
+        let text: string = summary;
         if (job.stage === 'completed') {
-          title = '批量润色完成';
+          title = failed + skipped + remaining === 0 ? '批量润色完成' : '批量润色处理结束';
         } else if (job.stage === 'failed') {
           title = '批量润色失败';
-          text = job.failure ?? text;
+          text = `${summary}；${job.failure ?? ''}`;
         } else if (job.stage === 'cancelled') {
           title = '批量润色已取消';
         } else if (job.stage === 'paused') {
@@ -1027,13 +1049,15 @@ export const getNovelCreation = (): NovelCreation => {
           title = '批量润色等待后台调度';
         } else if (job.cursor < job.targets.length) {
           const target = job.targets[job.cursor];
-          text = `正在处理第 ${target.ordinal} 章 · ${job.cursor}/${job.targets.length}`;
+          text = `正在处理第 ${target.ordinal} 章；${summary}`;
         }
         await publishNovelJobNotification(
           job.projectId, job.branchId, job.jobId, title, text.slice(0, 120));
       },
     };
     novelCreation = createNovelCreation({
+      loadModelDefaults: loadNovelModelDefaults,
+      loadPolishPreference: loadNovelPolishPreference,
       repository: getNovelProjectRepository(),
       modelRunning: createEntryNovelChatRunAdapter(resolveNovelInteractiveRuntime),
       polishEffects,
@@ -1420,6 +1444,7 @@ export const TASK_SUGGESTION_MODEL_KEY: string = 'suggestion_model';
 export const TASK_COMPRESS_MODEL_KEY: string = 'compress_model';
 // 生图模型槽(Android imageGenerationModel 语义;AUTO/空 = 未配置,工具不装配)
 export const TASK_IMAGE_MODEL_KEY: string = 'image_generation_model';
+export const TASK_DEEPREAD_MODEL_KEY: string = 'deepread_task_model';
 
 export interface TaskModelIds {
   titleModelId: string;
@@ -1561,6 +1586,31 @@ export interface NovelModelOption {
   available: boolean;
 }
 
+export interface DeepReadModelOption {
+  providerId: string;
+  modelId: string;
+  label: string;
+  providerLabel: string;
+  available: boolean;
+}
+
+export const loadDeepReadModelOptions = async (): Promise<DeepReadModelOption[]> => {
+  const providers: ProviderSetting[] = (await loadProviders(getChatKvStore())) ?? [];
+  const options: DeepReadModelOption[] = [];
+  for (const provider of providers) {
+    for (const model of provider.models) {
+      if (model.type !== 'chat') continue;
+      options.push({
+        providerId: provider.id, modelId: model.id,
+        label: model.displayName.trim().length > 0 ? model.displayName : model.modelId,
+        providerLabel: provider.name,
+        available: makeProviderChoice(provider, model) !== null,
+      });
+    }
+  }
+  return options;
+};
+
 // C5 项目策略 picker 的唯一 provider/model 事实源。不可用模型仍返回，
 // 以便固定选择失效后 UI 能原位呈现并引导用户修复，而不是静默替换。
 export const loadNovelModelOptions = async (): Promise<NovelModelOption[]> => {
@@ -1568,7 +1618,6 @@ export const loadNovelModelOptions = async (): Promise<NovelModelOption[]> => {
   if (providers === null) return [];
   const options: NovelModelOption[] = [];
   for (const provider of providers) {
-    const available: boolean = hasUsableAuth(provider);
     for (const model of provider.models) {
       if (model.type !== 'chat') continue;
       options.push({
@@ -1576,7 +1625,7 @@ export const loadNovelModelOptions = async (): Promise<NovelModelOption[]> => {
         modelId: model.id,
         label: model.displayName.trim().length > 0 ? model.displayName : model.modelId,
         providerLabel: provider.name,
-        available,
+        available: hasUsableAuth(provider) && makeProviderChoice(provider, model) !== null,
       });
     }
   }
@@ -1654,7 +1703,7 @@ export const describeChatModel = async (): Promise<string> => {
 //   分发/auth/header 语义与 D-046/D-078 逐字一致,未落地传输显式抛错)
 export const buildProviderApi = (
   chosen: ProviderSetting, customHeaderRecord: Record<string, string>,
-  oauthAccountId: string = '',
+  oauthAccountId: string = '', responses?: NovelResponsesStreamOptions,
 ): OpenAIChatApi => {
   // useResponseApi=true 走 createOpenAIChatApi 内部分流(Responses);不再在此 throw
   if (!hasUsableAuth(chosen)) {
@@ -1718,11 +1767,50 @@ export const buildProviderApi = (
     // D-038:图片编码(data:/http(s): 直通,file:// 读文件编码;失败即抛)
     encodeImage: encodeImageForChat,
     // P6-01:官方 OpenAI + api_key 时注入 resume cursor KV Port
-    resumeStore: openaiSetting.useResponseApi === true
+    resumeStore: responses === undefined && openaiSetting.useResponseApi === true
       ? createKvResponseResumeStore(getChatKvStore())
       : undefined,
     enableResponsesResume: openaiSetting.useResponseApi === true,
+    runId: responses?.runId,
+    resumeFrom: responses?.resumeFrom,
+    resumeMessages: responses?.partialMessages,
+    onResumeCheckpoint: responses?.onCheckpoint,
   });
+};
+
+// Auxiliary tasks keep their existing model/parameter/header policy and share OAuth refresh.
+export const prepareProviderApi = async (
+  provider: ProviderSetting, customHeaderRecord: Record<string, string>,
+): Promise<OpenAIChatApi> => {
+  const headers: Record<string, string> = {};
+  for (const key of Object.keys(customHeaderRecord)) headers[key] = customHeaderRecord[key];
+  const auth: ProviderAuthSnapshot = await prepareProviderAuth({
+    provider, refreshCodex: getValidCodexToken, refreshGrok: getValidGrokToken,
+  });
+  return buildProviderApi(auth.provider, headers, auth.accountId);
+};
+
+const resolveProviderRuntimeCore = (
+  choice: ChatProviderChoice, assistant: Assistant,
+): Promise<ProviderRuntimeSnapshot> => prepareProviderRuntime({
+  provider: choice.provider, model: choice.model, assistant,
+  refreshCodex: getValidCodexToken,
+  refreshGrok: getValidGrokToken,
+  buildApi: buildProviderApi,
+});
+
+const resolveDeepReadRuntimeCore = async (): Promise<ProviderRuntimeSnapshot> => {
+  const reference: TaskModelReference = await readTaskModelReference(TASK_DEEPREAD_MODEL_KEY);
+  const choice: ChatProviderChoice | null = reference.kind === 'auto'
+    ? await resolveChatProviderChoice()
+    : await resolveConfiguredTaskModel(reference, 'chat');
+  if (choice === null) {
+    throw new Error(reference.kind === 'auto'
+      ? '请先在提供商设置中配置可用的聊天模型。'
+      : '指定的深读模型已不可用，请检查提供商认证或重新选择模型。');
+  }
+  const assistants: Assistant[] = await getChatAssistants();
+  return resolveProviderRuntimeCore(choice, assistants[0]);
 };
 
 export const resolveChatRuntime = async (
@@ -1747,49 +1835,10 @@ export const resolveChatRuntime = async (
       ? await resolveConfiguredTaskChatModel(exactModelId)
     : await resolveChatProviderChoice(assistant);
   if (choice === null) return null;
-  const chosen: ProviderSetting = choice.provider;
-  const model = choice.model;
-  const sessionDefaults = resolveSessionDefaults(
-    assistant,
-    null,
-    defaultReasoningLevelForModel(model),
-  );
-  const merged = mergeCustomParams(assistant, model);
-  // D-049:customBodies 进 params(三 provider 请求构建层均 mergeCustomBody);
-  //   customHeaders(assistant+model 拼接,GenerationHandler.kt:453-468 忠实)
-  //   注入各 provider 请求头,blank name 跳过,重名后值覆盖(toHeaders 语义),
-  //   且覆盖 auth 头(与各 api 层 extra-headers 覆盖语义一致)
-  const params = makeTextGenerationParams({
-    model: toChatModel(model),
-    temperature: merged.temperature,
-    topP: merged.topP,
-    maxTokens: sessionDefaults.maxTokens,
-    reasoningLevel: sessionDefaults.reasoningLevel,
-    customBody: merged.customBodies,
-  });
-  const customHeaderRecord: Record<string, string> = {};
-  for (const h of merged.customHeaders) {
-    const name: string = h.name.trim();
-    if (name.length === 0) continue;
-    customHeaderRecord[name] = h.value.trim();
-  }
-  // D-046:按变体类型分发到对应 api 组装层(均返回结构 OpenAIChatApi)。
-  // auth header 归属:openai 由 adapter(openAIAuthHeaders);claude/google 由各自
-  // api 层从 setting.apiKey 注入(x-api-key / x-goog-api-key)。
-  // 未落地传输模式(OAuth/Vertex service account)在 api 层显式抛错(非静默)。
-  // codex/grok:resolve 为 async 天然刷新点(刷新流程内部同步写回 provider.apiKey);
-  //   codex 另需 ChatGPT-Account-Id 头(iOS modelsRequest 同款);子代理路径(681)
-  //   走同步调用,accountId 传空(v1 登记)
-  let codexAccountId: string = '';
-  const chosenVariant: ProviderSettingOpenAIVariant | null = chosen.type === 'openai'
-    ? chosen as ProviderSettingOpenAIVariant : null;
-  if (chosenVariant !== null && chosenVariant.authMode === 'codex_oauth') {
-    const codexTokens = await getValidCodexToken(chosenVariant.id).catch((): null => null);
-    if (codexTokens !== null) codexAccountId = codexTokens.accountId;
-  } else if (chosenVariant !== null && chosenVariant.authMode === 'grok_oauth') {
-    await getValidGrokToken(chosenVariant.id).catch((): null => null);
-  }
-  const api: OpenAIChatApi = buildProviderApi(chosen, customHeaderRecord, codexAccountId);
+  const runtime: ProviderRuntimeSnapshot = await resolveProviderRuntimeCore(choice, assistant);
+  const model: ProviderModel = runtime.model;
+  const params: TextGenerationParams = runtime.params;
+  const api: OpenAIChatApi = runtime.api;
   // Await real dependencies before exposing terminal tools to the provider.
   const terminalEnabled: boolean = assistant.localTools.includes('terminal');
   const terminalRuntime: TerminalRuntime | null = terminalEnabled ? await getTerminalRuntime() : null;
@@ -1798,7 +1847,7 @@ export const resolveChatRuntime = async (
   const sshProfiles: SSHProfileStore | null = terminalEnabled ? await getSSHProfileStore() : null;
   return {
     api, resolvedChoice: choice, assistant, params,
-    contextMessageSize: sessionDefaults.contextMessageSize,
+    contextMessageSize: runtime.defaults.contextMessageSize,
     modelContextWindowTokens: model.contextWindowTokens,
     modelSupportsImageInput: model.inputModalities.includes('image'),
     modelAbilities: model.abilities,
@@ -1809,6 +1858,7 @@ export const resolveChatRuntime = async (
 };
 
 const novelWorkspaceToolPort = (projectId: string): NovelWorkspaceToolPort => ({
+  projectOperation: (name, input) => executeNovelProjectOperation(getNovelCreation(), projectId, name, input),
   list: async (input) => {
     const result = await getNovelCreation().workspaceList(projectId, input.path ?? '');
     return { root: result.root, entries: result.entries };
@@ -1850,15 +1900,19 @@ const novelWorkspaceToolPort = (projectId: string): NovelWorkspaceToolPort => ({
       patch_count: proposal.patches.length,
     };
   },
-  audit: async () => {
-    const report = await getNovelCreation().runContinuityAudit(projectId);
-    return {
-      ok: report.ok,
-      issue_count: report.issues.length,
-      issues: report.issues.map((issue): string =>
-        `[${issue.severity}] ${issue.chapterRef}: ${issue.summary}` +
-        (issue.suggestion.length > 0 ? ` → ${issue.suggestion}` : '')),
-    };
+  audit: async (signal?: AbortSignalLike) => {
+    const controller: NovelAuditController = new NovelAuditController();
+    const cancel: () => void = (): void => { controller.cancel(); };
+    if (signal !== undefined) {
+      if (signal.aborted) controller.cancel();
+      else signal.addEventListener?.('abort', cancel);
+    }
+    try {
+      const report = await getNovelCreation().runContinuityAudit(projectId, controller);
+      return novelAuditToolResult(report);
+    } finally {
+      if (signal !== undefined) signal.removeEventListener?.('abort', cancel);
+    }
   },
   ingestSettingProposals: async (sourceMessageId: string, text: string) => {
     const proposals = await getNovelCreation().ingestSettingProposals(
@@ -1870,35 +1924,66 @@ const novelWorkspaceToolPort = (projectId: string): NovelWorkspaceToolPort => ({
   },
 });
 
-const novelRuntimeConfig = (
-  runtime: ChatRuntime, projectId: string,
-): NovelInteractiveRuntimeConfig => ({
-  assistant: runtime.assistant,
-  provider: asChatStreamProvider(runtime.api, (): TextGenerationParams => runtime.params),
-  tools: [...createNovelWorkspaceTools(novelWorkspaceToolPort(projectId)), createAskUserTool()],
-  // 工具循环每一步都带实际暴露工具集，其他 Chat 参数保持同一 selected model 快照。
-  makeProviderForStep: (definitions: ChatToolDefinition[]): ChatStreamProvider =>
-    asChatStreamProvider(runtime.api, (): TextGenerationParams => makeTextGenerationParams({
-      model: runtime.params.model,
-      temperature: runtime.params.temperature,
-      topP: runtime.params.topP,
-      maxTokens: runtime.params.maxTokens,
-      tools: definitions,
-      reasoningLevel: runtime.params.reasoningLevel,
-      customBody: runtime.params.customBody,
-    })),
-  toolPromptModel: runtime.params.model,
-  retrySetting: makeGenerationRetrySetting({}),
-});
+const novelRuntimeConfig = async (
+  runtime: ChatRuntime, projectId: string, snapshot?: NovelRuntimeSnapshot,
+): Promise<NovelInteractiveRuntimeConfig> => {
+  const frozen: NovelFrozenRuntimeConfiguration | null = snapshot === undefined ? null :
+    readNovelRuntimeConfiguration(snapshot.configurationJson, runtime.resolvedChoice.provider,
+      runtime.resolvedChoice.model, runtime.assistant);
+  const params: TextGenerationParams = frozen === null ? runtime.params : frozen.params;
+  const assistant: Assistant = frozen === null ? runtime.assistant : frozen.assistant;
+  const contextWindowTokens: number | null = frozen === null ? runtime.modelContextWindowTokens : frozen.contextWindowTokens;
+  const defaultCap: number = resolveNovelMaxOutputTokens(
+    null, params.maxTokens, contextWindowTokens);
+  const customHeaders: Record<string, string> = {};
+  for (const header of mergeCustomParams(runtime.assistant, runtime.resolvedChoice.model).customHeaders) {
+    if (header.name.trim().length > 0) customHeaders[header.name.trim()] = header.value.trim();
+  }
+  const makeProvider = (definitions: ChatToolDefinition[], cap: number, taskOptions?: NovelStructuredTaskOptions,
+    responses?: NovelResponsesStreamOptions): ChatStreamProvider => {
+    const api: OpenAIChatApi = responses === undefined ? runtime.api :
+      buildProviderApi(runtime.resolvedChoice.provider, customHeaders, '', responses);
+    return asChatStreamProvider(api, (): TextGenerationParams =>
+      applyNovelStateReasoning(makeNovelTextGenerationParams(params, definitions, cap, taskOptions),
+        runtime.resolvedChoice.provider, taskOptions));
+  };
+  return {
+    assistant,
+    runtimeSnapshot: snapshot ?? {
+      providerId: runtime.resolvedChoice.providerContainerId, modelId: runtime.resolvedChoice.model.id,
+      configurationJson: freezeNovelRuntimeConfiguration(runtime.resolvedChoice.provider,
+        runtime.resolvedChoice.model, assistant, params, contextWindowTokens),
+      responsesProviderId: runtime.resolvedChoice.provider.id,
+    },
+    responsesProviderId: runtime.resolvedChoice.provider.id,
+    responsesResumeSupported: runtime.resolvedChoice.provider.type === 'openai' &&
+      supportsResponsesResume(runtime.resolvedChoice.provider),
+    provider: makeProvider([], defaultCap),
+    makeProviderForOutputTokens: (cap: number | null, taskOptions?: NovelStructuredTaskOptions,
+      responses?: NovelResponsesStreamOptions): ChatStreamProvider =>
+      makeProvider([], cap ?? defaultCap, taskOptions, responses),
+    tools: [...createNovelWorkspaceTools(novelWorkspaceToolPort(projectId)), createAskUserTool(),
+      ...await loadNovelResearchTools(getChatKvStore())],
+    makeProviderForStep: (definitions: ChatToolDefinition[], cap?: number | null,
+      responses?: NovelResponsesStreamOptions): ChatStreamProvider =>
+      makeProvider(definitions, cap ?? defaultCap, undefined, responses),
+    toolPromptModel: params.model,
+    contextWindowTokens,
+    maxOutputTokens: params.maxTokens,
+    retrySetting: makeGenerationRetrySetting({}),
+  };
+};
 
 // C5:Novel 与 Chat 共用生成深模块。global 复用现有 Chat 选择；fixed 只接受
 // 指定 provider/model UUID 的精确命中。两种固定失败都返回 null，调用端原位 fail closed。
 // 旧 ModelRegistry 不再参与 Novel 的模型解析，防止固定选择被 legacy/global 静默替换。
 const resolveNovelInteractiveRuntime = async (
-  modelTarget: NovelModelTarget, projectId: string,
+  modelTarget: NovelModelTarget, projectId: string, snapshot?: NovelRuntimeSnapshot,
 ): Promise<NovelInteractiveRuntimeConfig | null> => {
-  const runtime: ChatRuntime | null = modelTarget.kind === 'global'
+  const runtime: ChatRuntime | null = snapshot !== undefined
+    ? await resolveChatRuntime(undefined, snapshot.modelId, snapshot.providerId)
+    : modelTarget.kind === 'global'
     ? await resolveChatRuntime()
     : await resolveChatRuntime(undefined, modelTarget.modelId, modelTarget.providerId);
-  return runtime === null ? null : novelRuntimeConfig(runtime, projectId);
+  return runtime === null ? null : novelRuntimeConfig(runtime, projectId, snapshot);
 };

@@ -31,6 +31,7 @@ const utf8Bytes = (text: string): number => {
 export class GenerationProgressTracker {
   private countedChars: Map<string, number> = new Map();
   private countedBytes: Map<string, number> = new Map();
+  private measuredMessages: Map<string, UIMessage> = new Map();
   private receivedChars: number = 0;
   private receivedBytes: number = 0;
 
@@ -44,6 +45,7 @@ export class GenerationProgressTracker {
     for (const msg of messages) {
       if (msg.role !== 'assistant') continue;
       const current: GenerationProgressTotals = this.measure(msg);
+      this.measuredMessages.set(msg.id, msg);
       this.countedChars.set(msg.id, current.chars);
       this.countedBytes.set(msg.id, current.bytes);
     }
@@ -55,7 +57,9 @@ export class GenerationProgressTracker {
     let addBytes: number = 0;
     for (const msg of messages) {
       if (msg.role !== 'assistant') continue;
+      if (this.measuredMessages.get(msg.id) === msg) continue;
       const current: GenerationProgressTotals = this.measure(msg);
+      this.measuredMessages.set(msg.id, msg);
       const prevChars: number = this.countedChars.get(msg.id) ?? 0;
       const prevBytes: number = this.countedBytes.get(msg.id) ?? 0;
       if (current.chars > prevChars) {

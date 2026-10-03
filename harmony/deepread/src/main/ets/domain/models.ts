@@ -1,6 +1,7 @@
 // Deep Read output data model — HarmonyOS port of Android DeepReadModels.kt
 // ArkTS: interface + factory functions, no runtime mutation
 
+import type { DeepReadInputSource } from './input_sources.ts';
 import type { DeepReadSectionStatus, DeepReadGenerationPhase } from './enums.ts';
 
 export interface TimelineEvent {
@@ -108,7 +109,24 @@ export interface DeepReadSectionState {
   errorMessage: string | null;
 }
 
+/** The article owns this capture; changing or deleting a template cannot restyle it. */
+export interface DeepReadTemplateSnapshot {
+  id: string;
+  name: string;
+  kind: 'native' | 'editorial' | 'custom';
+  html: string | null;
+  capturedAt: number;
+}
+
 export interface DeepReadOutput {
+  templateId?: string;
+  templateSnapshot?: DeepReadTemplateSnapshot;
+  /** Original topic sources, stored with the draft so history can retry every source. */
+  inputSourceUrls?: string[];
+  inputSources?: DeepReadInputSource[];
+  /** Unabridged user paste and URL input, retained separately from extraction limits. */
+  inputText?: string;
+  inputUrlsText?: string;
   topicType: string;
   generationComplete: boolean;
   generationPhase: DeepReadGenerationPhase;

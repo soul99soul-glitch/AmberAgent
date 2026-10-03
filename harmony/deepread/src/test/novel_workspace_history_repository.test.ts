@@ -96,10 +96,20 @@ test('middle edit marks unresolved and plot stale; sync and resolve are explicit
   await repository.syncPlot('consistency', changed.cas, 'sync-plot');
   const synced = await repository.workspaceStatus('consistency');
   assert.equal(synced.plotStale, false);
-  assert.equal(synced.unresolvedFromOrdinal, 2);
-  await repository.resolveUnresolved('consistency', synced.cas, 'resolve-unresolved');
+  assert.equal(synced.unresolvedFromOrdinal, null);
+  assert.deepEqual((await repository.loadProject('consistency')).chapterPlots.map(pointer => pointer.stale),
+    [false, false, false]);
+  await repository.commitProject('consistency', synced.cas, 'edit-again', 'manual_edit', project => ({
+    ...project, chapters: project.chapters.map(chapter => chapter.id === 'c1'
+      ? { ...chapter, content: '再次修改', updatedAt: NOW + 2 } : chapter),
+  }));
+  const changedAgain = await repository.workspaceStatus('consistency');
+  await repository.resolveUnresolved('consistency', changedAgain.cas, 'resolve-unresolved');
   const resolved = await repository.workspaceStatus('consistency');
   assert.equal(resolved.unresolvedFromOrdinal, null);
+  assert.equal(resolved.plotStale, false);
+  assert.deepEqual((await repository.loadProject('consistency')).chapterPlots.map(pointer => pointer.stale),
+    [false, false, false]);
 });
 
 test('one-level undo restores branch tree by appending a new commit', async () => {

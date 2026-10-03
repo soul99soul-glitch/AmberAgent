@@ -1,5 +1,6 @@
 // serper_service — Serper 搜索(D-068a)
 // Android 基准: search/.../SerperSearchService.kt(全文 110 行)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -29,6 +30,7 @@ export const serperSearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: SerperOptions = asOptions(serviceOptions);
     if (opts.apiKey.trim().length === 0) throw new Error('Serper API key is required');
@@ -44,7 +46,7 @@ export const serperSearchService: SearchService = {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ q: query, num }),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`Serper request failed #${resp.status}`);
     }

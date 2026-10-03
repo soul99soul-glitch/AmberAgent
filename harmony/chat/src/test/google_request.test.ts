@@ -172,6 +172,7 @@ test('tools:functionDeclarations + parameters 六键递归裁剪;无 tool 能力
   const noAbility = buildGoogleCompletionRequestBody({
     messages: [makeUserMessage('x')],
     params: baseParams({
+      model: makeChatModel({ abilities: [] }),
       tools: [{ name: 't', description: 'd', parameters: {} }],
     }),
   });

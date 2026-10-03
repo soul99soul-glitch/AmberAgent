@@ -9,6 +9,8 @@ export interface Tool {
   name: string;
   description: string;
   schema: object;  // JSON schema
+  allowsAutoApproval?: boolean;
+  isHighRisk?: boolean;
   // DeepRead writer tools provide the local execution bridge. Platform clients
   // may omit this field for ordinary model tools.
   execute?: (input: string) => Promise<UIMessagePartText[]>;

@@ -12,20 +12,22 @@ import { createSectionWriterTools } from './section_writer_tools.ts';
 import { runStageSupervisorLoop } from './supervisor_loop.ts';
 import type { CollectRunFn } from './supervisor_loop.ts';
 import { tryFallbackAfterStageFailure } from './try_fallback.ts';
-import type { SourcePrefetcher, DeepReadSource, SourceCredibility, SourceFreshness } from '../research/source_prefetcher.ts';
+import type { SourcePrefetcher, DeepReadSource } from '../research/source_prefetcher.ts';
 import { buildEvidencePack } from '../research/evidence_pack.ts';
 import type { DeepReadEvidencePack, DeepReadArticlePlan } from '../research/evidence_pack.ts';
 import { generateArticlePlan } from '../research/article_plan.ts';
 import type { ScoredImageCandidate } from '../research/image_scorer.ts';
 import type { AiClient } from '../platform/ai_client.ts';
 import type { AbortSignalLike } from '../platform/runtime_api.ts';
-import type { DeepReadOutput } from '../domain/models.ts';
+import type { DeepReadTemplateSnapshot, DeepReadOutput } from '../domain/models.ts';
+import { sourceInputs, mergeCollectedSources, generationSources } from '../domain/input_sources.ts';
+import type { DeepReadCollectionIssue } from '../domain/input_sources.ts';
 import { makeEmptyDeepReadOutput } from '../domain/models.ts';
 import {
-  statusOf, sectionsReady, isComplete, withInferredSectionStates,
+  statusOf, sectionsReady, isComplete, withInferredSectionStates, hasReadableArticle, hasDisplayableDeepReadOutput, withSectionStatus,
 } from '../domain/helpers.ts';
 import type { DeepReadGenerationStage, DeepReadGenerationPhase } from '../domain/enums.ts';
-import { STAGE_ORDER } from '../domain/enums.ts';
+import { STAGE_ORDER, STAGE_LABELS } from '../domain/enums.ts';
 
 export interface RunResult {
   ok: boolean;
@@ -35,6 +37,7 @@ export interface RunResult {
 
 // createRunContext 产物 — 对应 Android DeepReadRunContext
 export interface RunContext {
+  writerMode: 'tools' | 'structured';
   writer: SectionWriterTools;
   evidencePack: DeepReadEvidencePack;
   articlePlan: DeepReadArticlePlan;
@@ -48,6 +51,9 @@ export interface RunContext {
 
 // 依赖注入(测试 mock)
 export interface RunManagerDeps {
+  onProgress?: (stage: DeepReadGenerationPhase, label: string) => void;
+  writerMode?: 'tools' | 'structured';
+  templateSnapshot?: DeepReadTemplateSnapshot;
   prefetcher: SourcePrefetcher;
   collectRun: CollectRunFn;              // 真实由 AiClient.generateText 装配
   aiClient: AiClient;                    // 用于 generateArticlePlan
@@ -56,7 +62,7 @@ export interface RunManagerDeps {
   /** 可选:持久化 save/get(真实由 Repository;测试可注入内存) */
   repository?: {
     get: (topicId: string, title: string) => DeepReadOutput | null;
-    save: (topicId: string, title: string, output: DeepReadOutput) => void;
+    save: (topicId: string, title: string, output: DeepReadOutput) => Promise<void> | void;
     clear: (topicId: string) => void;
   };
   /** 注入 clock 避免测试不稳定 */
@@ -97,6 +103,10 @@ const finishIfPossible = (writer: SectionWriterTools): DeepReadOutput => {
 // 注意:简化 — 不解析 model abilities / 不持久化 COLLECTING 中间态(测试不依赖;
 // 真实 Repository 持久化由 scheduler 层做)。空 prefetch → Result.failure(P1-9)。
 
+const sourceUrlsForRun = (seedUrl: string | null, seedUrls: string[] | undefined, cachedOutput: DeepReadOutput | null): string[] =>
+  Array.from(new Set([seedUrl ?? '', ...(seedUrls ?? cachedOutput?.inputSourceUrls ?? [])]
+    .map(url => url.trim()).filter(url => url.length > 0)));
+
 export const createRunContext = async (
   deps: RunManagerDeps,
   topicId: string,
@@ -104,31 +114,60 @@ export const createRunContext = async (
   seedUrl: string | null,
   force: boolean,
   signal?: AbortSignalLike,
+  seedUrls?: string[],
+  templateSnapshot?: DeepReadTemplateSnapshot,
 ): Promise<{ ok: true; context: RunContext } | { ok: false; error: string }> => {
   // 0. 取消一旦发生,不再进入任何抓取/规划(避免取消后仍工作)
   if (isAborted(signal)) return { ok: false, error: 'aborted' };
-  // 1. prefetch(空/异常 → 用 topicTitle 构造降级 evidence,而非 hard fail)
+  const cachedOutput = deps.repository?.get(topicId, topicTitle) ?? null;
+  const inputSourceUrls = sourceUrlsForRun(seedUrl, seedUrls, cachedOutput);
+  const primarySeedUrl = inputSourceUrls[0] ?? null;
+  // 1. prefetch:没有正文资料时停止,不能把话题标题当作研究来源。
   // signal 贯穿:provider search / HTTP fetch 真实取消;prefetch 内部也会提前返回
   let prefetchedSources: DeepReadSource[] = [];
+  let allCollected: DeepReadSource[] = [];
+  let collectionIssues: DeepReadCollectionIssue[] = [];
+  // Standalone composer inputs are explicit. Legacy forced replacement still
+  // requires fresh research; automatic cached collection must not make an empty
+  // replacement succeed when an old owner commits during admission.
+  const hasUserInputs = cachedOutput?.inputText !== undefined || cachedOutput?.inputUrlsText !== undefined;
+  const savedInputs = (!force || hasUserInputs ? cachedOutput?.inputSources : undefined)
+    ?? sourceInputs('', inputSourceUrls.join('\n'));
+  const pendingUrls = force ? inputSourceUrls : inputSourceUrls.filter(url => !savedInputs.some(source => source.url === url
+    && source.status === 'ready' && (source.kind === 'web' || source.kind === 'search')));
+  const canSaveInputCollection = cachedOutput !== null && cachedOutput.inputSources !== undefined
+    && !hasDisplayableDeepReadOutput(cachedOutput) && !hasAnyReady(cachedOutput);
+  // Composer inputs already exist on disk. Mark collection before network work so
+  // a cold launch offers explicit continuation instead of silently creating a new run.
+  if (deps.repository !== undefined && canSaveInputCollection && cachedOutput !== null) {
+    await deps.repository.save(topicId, topicTitle, { ...cachedOutput,
+      generationPhase: 'COLLECTING', generationComplete: false });
+    if (isAborted(signal)) return { ok: false, error: 'aborted' };
+  }
   try {
-    prefetchedSources = await deps.prefetcher.collect(topicId, topicTitle, seedUrl, force, signal);
+    // Successful original text is reused even when a website is temporarily unavailable.
+    // An empty search registry still allows user text/files to generate.
+    deps.onProgress?.('COLLECTING', '收集来源');
+    prefetchedSources = await deps.prefetcher.collect(topicId, topicTitle, pendingUrls[0] ?? null,
+      force, signal, pendingUrls, (sources, issues): void => { allCollected = sources; collectionIssues = issues; });
   } catch (_e) {
-    // prefetch 超时或异常 → 降级(取消由下方 signal 复查兜住)
+    // 抓取失败与空资料使用同一个失败出口;取消由下方 signal 复查。
   }
   if (isAborted(signal)) return { ok: false, error: 'aborted' };
+  const inputSources = mergeCollectedSources(savedInputs,
+    allCollected.length > 0 ? allCollected : prefetchedSources, collectionIssues, force);
+  const capturedTemplate = !force && cachedOutput?.templateSnapshot !== undefined
+    ? cachedOutput.templateSnapshot : templateSnapshot ?? deps.templateSnapshot ?? cachedOutput?.templateSnapshot;
+  const inputFields = { templateSnapshot: capturedTemplate, templateId: capturedTemplate?.id ?? cachedOutput?.templateId,
+    inputSourceUrls, inputSources,
+    inputText: cachedOutput?.inputText, inputUrlsText: cachedOutput?.inputUrlsText };
+  // Persist the collection outcome before planning: failed runs retain their inputs too.
+  if (deps.repository !== undefined && canSaveInputCollection) {
+    await deps.repository.save(topicId, topicTitle, { ...(cachedOutput ?? makeEmptyDeepReadOutput()), ...inputFields });
+  }
+  prefetchedSources = generationSources(inputSources);
   if (prefetchedSources.length === 0) {
-    // 降级:搜索源全部失败时,用标题构造一个最小来源,让流程能走 fallbackPlan
-    prefetchedSources = [{
-      sourceId: 'fallback-title',
-      url: seedUrl ?? `topic://${topicId}`,
-      title: topicTitle,
-      source: 'fallback',
-      evidenceText: topicTitle,
-      credibility: 'medium' as SourceCredibility,
-      freshness: 'unknown' as SourceFreshness,
-      publishedAt: null,
-      imageCandidates: [],
-    }];
+    return { ok: false, error: '未获取到可用于深度阅读的资料，请检查来源或搜索配置后重试。' };
   }
 
   // 2. evidence pack
@@ -138,24 +177,29 @@ export const createRunContext = async (
   const imageCandidates: ScoredImageCandidate[] = prefetchedSources.flatMap(s => s.imageCandidates);
 
   // 4. writer(初始 output 从 repository 取或空)
-  const initialOutput = deps.repository?.get(topicId, topicTitle) ?? makeEmptyDeepReadOutput();
+  const initialOutput: DeepReadOutput = {
+    ...(force ? makeEmptyDeepReadOutput() : withInferredSectionStates(cachedOutput ?? makeEmptyDeepReadOutput())), ...inputFields,
+  };
   const writer = createSectionWriterTools({
     topicId, topicTitle, imageCandidates, initialOutput,
   });
   if (deps.onWriterCreated) deps.onWriterCreated(writer);
 
   // 5. article plan(1 次 LLM;失败 → fallbackPlan;signal 贯穿真实取消)
+  if (isAborted(signal)) return { ok: false, error: 'aborted' };
+  deps.onProgress?.('PLANNING', '规划结构');
   const articlePlan = await generateArticlePlan(deps.aiClient, deps.model, topicTitle, evidencePack, deps.playbookMarkdown, signal);
   if (isAborted(signal)) return { ok: false, error: 'aborted' };
 
   return {
     ok: true,
     context: {
+      writerMode: deps.writerMode ?? 'tools',
       writer,
       evidencePack,
       articlePlan,
       topicTitle,
-      seedUrl,
+      seedUrl: primarySeedUrl,
       playbookMarkdown: deps.playbookMarkdown,
       scrapeWebAvailable: deps.scrapeWebAvailable ?? false,
       collectRun: deps.collectRun,
@@ -176,7 +220,12 @@ export const generateStages = async (
   planningPhase: DeepReadGenerationPhase = 'PLANNING',
   markCollecting: boolean = true,
   signal?: AbortSignalLike,
+  seedUrls?: string[],
+  templateSnapshot?: DeepReadTemplateSnapshot,
 ): Promise<RunResult> => {
+  // 重生成只在完整新稿保存成功时替换旧稿;阶段缓存仍用于首次生成和续跑。
+  const cachedOutput = force ? deps.repository?.get(topicId, topicTitle) ?? null : null;
+  const previousOutput = cachedOutput !== null && hasAnyReady(withInferredSectionStates(cachedOutput)) ? cachedOutput : null;
   // 统一 aborted 结果(返回取消前已持久化的当前态,不写新状态)
   const abortedResult = (): RunResult => ({
     ok: false,
@@ -186,19 +235,45 @@ export const generateStages = async (
   if (isAborted(signal)) return abortedResult();
 
   // createRunContext(空 prefetch → failure)
-  const ctxResult = await createRunContext(deps, topicId, topicTitle, seedUrl, force, signal);
+  const ctxResult = await createRunContext(deps, topicId, topicTitle, seedUrl, force, signal, seedUrls, templateSnapshot);
   if (ctxResult.ok === false) {
     // ArkTS 对 discriminated union 的 narrow 较弱,显式提取 error
     const failMsg: string = (ctxResult as { ok: false; error: string }).error;
-    if (failMsg === 'aborted') return abortedResult();
-    return { ok: false, output: makeEmptyDeepReadOutput(), error: failMsg };
+    if (failMsg === 'aborted' || isAborted(signal)) return abortedResult();
+    const oldOutput = previousOutput ?? deps.repository?.get(topicId, topicTitle) ?? null;
+    // 已有可读内容或 READY 分段时保持原稿;首次无资料失败需要留真实历史入口。
+    if (oldOutput !== null && (hasReadableArticle(oldOutput) || hasAnyReady(withInferredSectionStates(oldOutput)))) {
+      return { ok: false, output: oldOutput, error: failMsg };
+    }
+    const failedTemplate = !force && oldOutput?.templateSnapshot !== undefined ? oldOutput.templateSnapshot
+      : templateSnapshot ?? deps.templateSnapshot ?? oldOutput?.templateSnapshot;
+    const failedOutput = withSectionStatus({ ...makeEmptyDeepReadOutput(),
+      templateSnapshot: failedTemplate,
+      templateId: failedTemplate?.id ?? oldOutput?.templateId,
+      inputSources: oldOutput?.inputSources, inputText: oldOutput?.inputText, inputUrlsText: oldOutput?.inputUrlsText,
+      inputSourceUrls: sourceUrlsForRun(seedUrl, seedUrls, oldOutput),
+    }, 'OVERVIEW', 'FAILED', failMsg);
+    if (isAborted(signal)) return abortedResult();
+    // 位于生成 catch 外:首次失败记录写入被拒绝时也必须真实上抛。
+    await persist(deps, topicId, topicTitle, failedOutput);
+    if (isAborted(signal)) return abortedResult();
+    return { ok: false, output: failedOutput, error: failMsg };
   }
   const context = (ctxResult as { ok: true; context: RunContext }).context;
 
   // 持久化守卫:signal 已取消时绝不落盘(避免取消后仍写 RUNNING/COLLECTING)
-  const saveGuarded = (out: DeepReadOutput): void => {
+  let persistenceFailed = false;
+  const saveGuarded = async (out: DeepReadOutput): Promise<void> => {
     if (isAborted(signal)) throw makeAbortedError();
-    persist(deps, topicId, topicTitle, out);
+    if (previousOutput !== null && !isComplete(out)) return;
+    try {
+      await persist(deps, topicId, topicTitle, out);
+    } catch (error) {
+      persistenceFailed = true;
+      throw error;
+    }
+    // 完整稿已经成功提交即算完成;该提交期间的取消不能把真实成功降为中断。
+    if (!isComplete(out) && isAborted(signal)) throw makeAbortedError();
   };
 
   try {
@@ -206,7 +281,7 @@ export const generateStages = async (
     // 放在 try 内:取消恰好发生在此窗口时由 catch 归一为 abortedResult(P3-1),
     // 直调 run_manager.run 也不以 rejection 出栈。
     if (markCollecting && deps.repository) {
-      saveGuarded({ ...context.writer.current(), generationPhase: 'COLLECTING', generationComplete: false });
+      await saveGuarded({ ...context.writer.current(), generationPhase: 'COLLECTING', generationComplete: false });
     }
     // 顺序 if(OVERVIEW → NARRATIVE → ANALYSIS → EXTENDED_READING)
     if (stages.includes('OVERVIEW')) {
@@ -226,27 +301,42 @@ export const generateStages = async (
     const allTargetedReady = stages.every(s => statusOf(context.writer.current(), s) === 'READY');
     const allSectionsReady = sectionsReady(context.writer.current());
     if (allTargetedReady && allSectionsReady) {
+      if (isAborted(signal)) return abortedResult();
+      deps.onProgress?.('VERIFYING', '校验并保存');
       const finished = finishIfPossible(context.writer);
-      saveGuarded(finished);
+      await saveGuarded(finished);
+      if (isComplete(finished)) deps.onProgress?.('COMPLETE', '已完成');
       return { ok: true, output: finished, error: null };
     }
     if (allTargetedReady) {
       const out = context.writer.markPhase('IDLE');
-      saveGuarded(out);
+      if (previousOutput !== null) {
+        return { ok: false, output: previousOutput, error: '新文章未完整生成，已保留原文章，请重试。' };
+      }
+      await saveGuarded(out);
       return { ok: true, output: out, error: null };
     }
     // 未达 READY 的 stage → markFailed
     const missing = stages.filter(s => statusOf(context.writer.current(), s) !== 'READY');
     for (const stage of missing) {
-      context.writer.markFailed(stage, 'Agent 未按约定调用分段写入工具，该段未写入。');
+      if (statusOf(context.writer.current(), stage) !== 'FAILED') {
+        context.writer.markFailed(stage, context.writerMode === 'structured'
+          ? '模型未返回合法且完整的段落 JSON，该段未写入。' : 'Agent 未按约定调用分段写入工具，该段未写入。');
+      }
     }
     const out = context.writer.markPhase('IDLE');
-    saveGuarded(out);
+    if (previousOutput !== null) {
+      return { ok: false, output: previousOutput, error: '新文章未完整生成，已保留原文章，请重试。' };
+    }
+    await saveGuarded(out);
     return { ok: out.extendedReading.length > 0 || hasAnyReady(out), output: out, error: hasAnyReady(out) ? null : '深度阅读生成失败' };
   } catch (error) {
+    // 写入失败必须由调用者呈现,不能当作生成失败再保存一次并宣称成功。
+    if (persistenceFailed) throw error;
     // 取消 → 统一 aborted 结果(以 signal 状态判定,不宽判 error.message)
     if (isAborted(signal) || isAbortErrorName(error)) return abortedResult();
     const msg = error instanceof Error ? error.message : String(error);
+    if (previousOutput !== null) return { ok: false, output: previousOutput, error: msg };
     for (const stage of stages) {
       if (statusOf(context.writer.current(), stage) !== 'READY') {
         context.writer.markFailed(stage, msg);
@@ -254,10 +344,11 @@ export const generateStages = async (
     }
     try {
       const out = context.writer.markPhase('IDLE');
-      saveGuarded(out);
+      await saveGuarded(out);
       return { ok: hasAnyReady(out), output: out, error: hasAnyReady(out) ? null : msg };
     } catch (persistError) {
       // 落盘守卫因取消抛出 → 统一 aborted;其余落盘错误按原样上抛(不误报取消)
+      if (persistenceFailed) throw persistError;
       if (isAborted(signal) || isAbortErrorName(persistError)) return abortedResult();
       throw persistError;
     }
@@ -271,14 +362,15 @@ const runStage = async (
   topicTitle: string,
   stage: DeepReadGenerationStage,
   signal?: AbortSignalLike,
-  saveGuarded?: (out: DeepReadOutput) => void,
+  saveGuarded?: (out: DeepReadOutput) => Promise<void>,
 ): Promise<void> => {
   if (isAborted(signal)) throw makeAbortedError();
+  deps.onProgress?.('WRITING', STAGE_LABELS[stage]);
   const running: DeepReadOutput = context.writer.markRunning([stage]);
   if (saveGuarded !== undefined) {
-    saveGuarded({ ...running, generationPhase: 'WRITING', generationComplete: false });
+    await saveGuarded({ ...running, generationPhase: 'WRITING', generationComplete: false });
   } else {
-    persist(deps, topicId, topicTitle, { ...running, generationPhase: 'WRITING', generationComplete: false });
+    await persist(deps, topicId, topicTitle, { ...running, generationPhase: 'WRITING', generationComplete: false });
   }
   await runSupervisor(deps, context, stage, signal);
 };
@@ -291,6 +383,7 @@ const runSupervisor = async (
   signal?: AbortSignalLike,
 ): Promise<void> => {
   await runStageSupervisorLoop({
+    writerMode: context.writerMode,
     writer: context.writer,
     evidencePack: context.evidencePack,
     articlePlan: context.articlePlan,
@@ -313,28 +406,25 @@ const runSupervisor = async (
 const hasAnyReady = (output: DeepReadOutput): boolean =>
   STAGE_ORDER.some(s => statusOf(output, s) === 'READY');
 
-const persist = (deps: RunManagerDeps, topicId: string, title: string, output: DeepReadOutput): void => {
-  if (deps.repository) deps.repository.save(topicId, title, output);
+const persist = async (deps: RunManagerDeps, topicId: string, title: string, output: DeepReadOutput): Promise<void> => {
+  if (deps.repository) await deps.repository.save(topicId, title, output);
 };
 
 // ===== run / runSection(照搬 Android :88-149) =====
 // 简化:不做 missingStages 后台调度(那是 scheduler 职责),不做 deferMissing。
-// run = force ? clear : 取 cache → 若 isComplete → 返回;否则 generateStages(全 4 stages)。
+// run = 非 force 取 cache → 若 isComplete → 返回;force 用全新 writer,不清旧稿。
 
 export const run = async (
   deps: RunManagerDeps,
   topicId: string,
   topicTitle: string,
-  opts: { force?: boolean; seedUrl?: string | null; signal?: AbortSignalLike } = {},
+  opts: { force?: boolean; seedUrl?: string | null; seedUrls?: string[]; templateSnapshot?: DeepReadTemplateSnapshot; signal?: AbortSignalLike } = {},
 ): Promise<RunResult> => {
   const force = opts.force ?? false;
   const seedUrl = opts.seedUrl ?? null;
   // 取消已发生 → 不 clear、不读缓存直接返回 aborted
   if (isAborted(opts.signal)) {
     return { ok: false, output: deps.repository?.get(topicId, topicTitle) ?? makeEmptyDeepReadOutput(), error: 'aborted' };
-  }
-  if (force && deps.repository) {
-    deps.repository.clear(topicId);
   }
   // 续跑只补非 READY 段(P2-2):部分/取消缓存「继续」不重跑、不改写已 READY 段。
   // force/首次(无缓存或全未完成)仍为全 4 段。
@@ -352,14 +442,14 @@ export const run = async (
           return { ok: false, output: inferred, error: 'aborted' };
         }
         const completed = { ...inferred, generationPhase: 'COMPLETE' as const, generationComplete: true };
-        if (deps.repository) deps.repository.save(topicId, topicTitle, completed);
+        if (deps.repository) await deps.repository.save(topicId, topicTitle, completed);
         return { ok: true, output: completed, error: null };
       }
       const missing = STAGE_ORDER.filter(s => statusOf(inferred, s) !== 'READY');
       if (missing.length > 0) stagesToRun = missing;
     }
   }
-  return generateStages(deps, topicId, topicTitle, stagesToRun, seedUrl, force, 'PLANNING', true, opts.signal);
+  return generateStages(deps, topicId, topicTitle, stagesToRun, seedUrl, force, 'PLANNING', true, opts.signal, opts.seedUrls, opts.templateSnapshot);
 };
 
 export const runSection = async (
@@ -369,27 +459,18 @@ export const runSection = async (
   stage: DeepReadGenerationStage,
   seedUrl: string | null = null,
   signal?: AbortSignalLike,
+  seedUrls?: string[],
 ): Promise<RunResult> => {
   if (isAborted(signal)) {
     return { ok: false, output: deps.repository?.get(topicId, topicTitle) ?? makeEmptyDeepReadOutput(), error: 'aborted' };
   }
-  // markSectionRunning(真实持久化;取消后不落 RUNNING)
-  if (deps.repository) {
-    const current = deps.repository.get(topicId, topicTitle) ?? makeEmptyDeepReadOutput();
-    const inferred = withInferredSectionStates(current);
-    if (statusOf(inferred, stage) !== 'READY') {
-      if (isAborted(signal)) {
-        return { ok: false, output: inferred, error: 'aborted' };
-      }
-      const next = { ...inferred, sectionStates: { ...inferred.sectionStates, [stage]: { status: 'RUNNING' as const, errorMessage: null } } };
-      deps.repository.save(topicId, topicTitle, next);
-    }
-  }
+  // 有有效资料后由 runStage 标记 RUNNING;预抓失败不留下假的运行状态。
   return generateStages(
     deps, topicId, topicTitle, [stage], seedUrl, false,
     'WRITING',   // planningPhase
     false,       // markCollecting
     signal,
+    seedUrls,
   );
 };
 

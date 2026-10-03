@@ -4,6 +4,15 @@
 
 import type { UIMessage } from '../agent/message.ts';
 import { makeUIMessage } from '../agent/message.ts';
+import type { NovelChapterContract, NovelUpcomingArc } from './chapter_contract.ts';
+import type { NovelDiscussionArchive } from './discussion_archive.ts';
+import type { NovelChapterPlotPointer } from './plot_projection.ts';
+import type { NovelStructuredState } from './structured_state.ts';
+import type { NovelStateOperation } from './state_rebuild.ts';
+import type { NovelOrdinaryRun } from './ordinary_run.ts';
+import type { NovelRunKind } from './prompt_catalog.ts';
+import { invalidInput } from './error.ts';
+import { normalizeNovelMaterialFields, optionalNovelMaterialFields } from './material_fields.ts';
 
 export const NOVEL_SCHEMA_VERSION = 4;
 
@@ -17,7 +26,7 @@ export const MAX_MATERIAL_CHARS = 200_000;
 export type NovelMessageRole = 'user' | 'assistant';
 export type NovelChatMode = 'write' | 'discuss';
 export type NovelGenerationGranularity = 'continuation' | 'whole_chapter';
-export type NovelMaterialKind = 'world' | 'character' | 'outline' | 'requirement' | 'other';
+export type NovelMaterialKind = 'world' | 'character' | 'relationship' | 'outline' | 'requirement' | 'other';
 export type NovelSuggestionStatus = 'pending' | 'accepted' | 'rejected';
 export type NovelSettingProposalStatus = 'pending' | 'accepted' | 'rejected';
 
@@ -57,6 +66,9 @@ export interface NovelConfirmedDecision {
 }
 
 export interface NovelBranchSettings {
+  chapterContract?: NovelChapterContract;
+  upcomingArc?: NovelUpcomingArc;
+  suggestedChapterCount?: number;
   thisChapterPlan: string;
   futurePlan: string;
   preferences: string;
@@ -71,6 +83,17 @@ export type NovelCollectionTarget =
   | { kind: 'new_chapter'; title: string };
 
 // ===== 实体 =====
+export interface NovelCandidateProvenance {
+  kind: 'write' | 'regenerate' | 'polish';
+  branchId: string;
+  baseManuscriptDigest: string;
+  basePlanDigest: string;
+  sourceChapterId: string | null;
+  sourceDigest: string | null;
+  // 润色只有收到完整结束标记后才可采用；普通写作中断的片段仍可手动收录。
+  complete: boolean;
+}
+
 export interface NovelMessage {
   id: string;
   role: NovelMessageRole;
@@ -83,17 +106,45 @@ export interface NovelMessage {
   createdAt: number;
   granularity: NovelGenerationGranularity | null;
   interrupted: boolean;
+  // 旧消息无来源元数据；新写作候选的基线不包含对话 checkpoint/revision。
+  candidate?: NovelCandidateProvenance;
+  // Actual assistant run origin; presentation can hide incomplete protocol output without guessing JSON.
+  runKind?: NovelRunKind | null;
+  clonedFromMessageId?: string;
+  rootMessageId?: string;
 }
 
 export interface NovelChapter {
   id: string;
+  // 公开工作区可携带独立章号；旧项目继续从 chapter-XXX id 或所在顺序解析。
+  ordinal?: number;
   title: string;
   content: string;
   createdAt: number;
   updatedAt: number;
   // N1:章节废弃标记(Android setChapterDiscarded);false = 正常
   discarded: boolean;
+  suggestionWarning?: string | null;
 }
+
+export const novelChapterOrdinal = (chapter: NovelChapter, fallback: number): number => {
+  if (chapter.ordinal !== undefined) return chapter.ordinal;
+  const match: RegExpMatchArray | null = chapter.id.match(/^chapter-(\d{3})(?:-|$)/);
+  if (match === null) return fallback;
+  const parsed: number = Number.parseInt(match[1], 10);
+  return parsed >= 1 && parsed <= 999 ? parsed : fallback;
+};
+
+// Allocate after the highest existing chapter, including discarded chapters. Deleted highest
+// ordinals may be reused by a new UUID; this is not a permanent ordinal reservation ledger.
+export const nextNovelChapterOrdinal = (chapters: NovelChapter[]): number => {
+  let highest: number = 0;
+  chapters.forEach((chapter: NovelChapter, index: number): void => {
+    highest = Math.max(highest, novelChapterOrdinal(chapter, index + 1));
+  });
+  if (highest >= 999) throw invalidInput('章节序号已达到 999，无法新建下一章');
+  return highest + 1;
+};
 
 // 章节版本历史(Android NovelChapterVersionKind:manual/polish/regenerate/collection)
 export type NovelChapterVersionKind = 'manual' | 'polish' | 'regenerate' | 'collection';
@@ -118,7 +169,15 @@ export interface NovelBranch {
   createdAt: number;
 }
 
-export interface NovelMaterial {
+export type NovelMaterialInjectionMode = 'always' | 'smart' | 'off';
+export interface NovelMaterialFields {
+  aliases?: string[];
+  tags?: string[];
+  customKind?: string;
+  injectionMode?: NovelMaterialInjectionMode;
+}
+
+export interface NovelMaterial extends NovelMaterialFields {
   id: string;
   kind: NovelMaterialKind;
   title: string;
@@ -128,7 +187,7 @@ export interface NovelMaterial {
   updatedAt: number;
 }
 
-export interface NovelMaterialSuggestion {
+export interface NovelMaterialSuggestion extends NovelMaterialFields {
   id: string;
   sourceChapterId: string;
   kind: NovelMaterialKind;
@@ -137,9 +196,10 @@ export interface NovelMaterialSuggestion {
   status: NovelSuggestionStatus;
   createdAt: number;
   resolvedAt: number | null;
+  sourceDigest?: string;
 }
 
-export interface NovelSettingProposal {
+export interface NovelSettingProposal extends NovelMaterialFields {
   id: string;
   sourceMessageId: string;
   kind: NovelMaterialKind;
@@ -150,18 +210,42 @@ export interface NovelSettingProposal {
   resolvedAt: number | null;
 }
 
+export type NovelProjectCreationMode = 'blank' | 'quickStart';
+export interface NovelStorySeed {
+  genre: string;
+  coreIdea: string;
+  world: string;
+  characters: string;
+  direction: string;
+}
+
 export interface NovelProject {
   schemaVersion: number;
   id: string;
   name: string;
+  // Creation metadata is immutable; omitted fields keep pre-standalone projects compatible.
+  creationMode?: NovelProjectCreationMode;
+  quickStartSeed?: NovelStorySeed | null;
+  polishPreference?: string;
+  structuredState?: NovelStructuredState;
+  stateOperation?: NovelStateOperation | null;
+  ordinaryRun?: NovelOrdinaryRun | null;
+  stateSyncReasoningEnabled?: boolean;
   messages: NovelMessage[];
   chapters: NovelChapter[];
   materials: NovelMaterial[];
+  // Project-wide base plus the current checkout's explicit overrides and hidden IDs.
+  // Absent baseMaterials identifies legacy whole-branch material snapshots.
+  baseMaterials?: NovelMaterial[];
+  materialOverrides?: NovelMaterial[];
+  hiddenMaterialIds?: string[];
   createdAt: number;
   updatedAt: number;
   modelPolicy: NovelModelPolicy;
   // 兼容旧调用方的派生值；仅 fixed writing 返回 modelId，永不持久化。
   readonly modelId: string | null;
+  // 当前分支 plan/plot.md 的只读投影；branch snapshot 仍是唯一存储来源。
+  readonly authorPlot?: string;
   lastGenerationGranularity: NovelGenerationGranularity;
   materialSuggestions: NovelMaterialSuggestion[];
   settingProposals: NovelSettingProposal[];
@@ -171,6 +255,8 @@ export interface NovelProject {
   // 当前 checkout 分支的设定目录；切换分支时从目标快照恢复。
   branchSettings: NovelBranchSettings;
   revision: number;
+  chapterPlots: NovelChapterPlotPointer[];
+  discussionArchives: NovelDiscussionArchive[];
 }
 
 // ===== id 生成 =====
@@ -242,6 +328,8 @@ export const makeNovelProject = (init: NovelProjectInit): NovelProject => {
     chapterVersions: [],
     branchSettings: emptyNovelBranchSettings(),
     revision: 0,
+    chapterPlots: [],
+    discussionArchives: [],
   };
   return withNovelProjectCompatibility(p);
 };
@@ -257,6 +345,11 @@ export interface NovelMessageInit {
   granularity?: NovelGenerationGranularity | null;
   collectedChapterId?: string | null;
   interrupted?: boolean;
+  candidate?: NovelCandidateProvenance;
+  // Actual assistant run origin; presentation can hide incomplete protocol output without guessing JSON.
+  runKind?: NovelRunKind | null;
+  clonedFromMessageId?: string;
+  rootMessageId?: string;
 }
 
 export const makeNovelMessage = (init: NovelMessageInit): NovelMessage => {
@@ -275,6 +368,10 @@ export const makeNovelMessage = (init: NovelMessageInit): NovelMessage => {
     createdAt: init.createdAt,
     granularity: init.granularity !== undefined ? init.granularity : null,
     interrupted: init.interrupted ?? false,
+    candidate: init.candidate,
+    runKind: init.runKind,
+    clonedFromMessageId: init.clonedFromMessageId,
+    rootMessageId: init.rootMessageId,
   };
   Object.defineProperty(m, 'content', {
     configurable: true,
@@ -286,6 +383,7 @@ export const makeNovelMessage = (init: NovelMessageInit): NovelMessage => {
 
 export interface NovelChapterInit {
   id?: string;
+  ordinal?: number;
   title: string;
   content: string;
   now: number;
@@ -294,6 +392,7 @@ export interface NovelChapterInit {
 export const makeNovelChapter = (init: NovelChapterInit): NovelChapter => {
   const c: NovelChapter = {
     id: init.id !== undefined && init.id.length > 0 ? init.id : novelId(),
+    ordinal: init.ordinal,
     title: init.title,
     content: init.content,
     createdAt: init.now,
@@ -327,7 +426,7 @@ export const makeNovelBranch = (
   createdAt: now,
 });
 
-export interface NovelMaterialInit {
+export interface NovelMaterialInit extends NovelMaterialFields {
   id?: string;
   kind: NovelMaterialKind;
   title: string;
@@ -337,25 +436,28 @@ export interface NovelMaterialInit {
 }
 
 export const makeNovelMaterial = (init: NovelMaterialInit): NovelMaterial => {
+  const fields = normalizeNovelMaterialFields(init, init.enabled ?? true);
   const m: NovelMaterial = {
     id: init.id !== undefined && init.id.length > 0 ? init.id : novelId(),
     kind: init.kind,
     title: init.title,
     content: init.content,
-    enabled: init.enabled ?? true,
+    ...fields,
+    enabled: fields.injectionMode !== 'off',
     createdAt: init.now,
     updatedAt: init.now,
   };
   return m;
 };
 
-export interface NovelSuggestionInit {
+export interface NovelSuggestionInit extends NovelMaterialFields {
   id?: string;
   sourceChapterId: string;
   kind: NovelMaterialKind;
   title: string;
   content: string;
   now: number;
+  sourceDigest?: string;
 }
 
 export const makeNovelSuggestion = (init: NovelSuggestionInit): NovelMaterialSuggestion => {
@@ -368,11 +470,13 @@ export const makeNovelSuggestion = (init: NovelSuggestionInit): NovelMaterialSug
     status: 'pending',
     createdAt: init.now,
     resolvedAt: null,
+    sourceDigest: init.sourceDigest,
+    ...optionalNovelMaterialFields(init),
   };
   return s;
 };
 
-export interface NovelSettingProposalInit {
+export interface NovelSettingProposalInit extends NovelMaterialFields {
   id?: string;
   sourceMessageId: string;
   kind: NovelMaterialKind;
@@ -382,6 +486,7 @@ export interface NovelSettingProposalInit {
 }
 
 export const makeNovelSettingProposal = (init: NovelSettingProposalInit): NovelSettingProposal => ({
+  ...optionalNovelMaterialFields(init),
   id: init.id !== undefined && init.id.length > 0 ? init.id : novelId(),
   sourceMessageId: init.sourceMessageId,
   kind: init.kind,
@@ -396,6 +501,7 @@ export const makeNovelSettingProposal = (init: NovelSettingProposalInit): NovelS
 export const MATERIAL_KIND_LABELS: Record<NovelMaterialKind, string> = {
   world: '世界',
   character: '人物',
+  relationship: '关系',
   outline: '大纲',
   requirement: '写作要求',
   other: '其他',

@@ -12,7 +12,7 @@ import type {
 import {
   applyPolishReview, assertPolishClaim, claimPolishJob, commitPolishChapter,
   makePolishCandidate, makePolishChapterTarget, makePolishContextSnapshotItem, makePolishJob,
-  transitionPolishJob, withPolishCandidate, yieldPolishJobToSystem,
+  transitionPolishJob, withPolishCandidate, yieldPolishJobToSystem, recordPolishChapterResult,
 } from '../main/ets/novel/polish.ts';
 import { createPolishRunner } from '../main/ets/novel/polish_runner.ts';
 import type { PolishRunner, PolishRunnerRepository } from '../main/ets/novel/polish_runner.ts';
@@ -86,6 +86,12 @@ class FakeRepository implements PolishRunnerRepository {
   ): Promise<DurablePolishJob> {
     assertPolishClaim(this.job, claim, now);
     this.job = applyPolishReview(this.job, review, now);
+    return Promise.resolve(this.job);
+  }
+
+  recordPolishChapterResult(_projectId: string, _jobId: string, claim: GhostwriteClaimRef,
+    status: 'failed' | 'driftSkipped', reason: string, now: number): Promise<DurablePolishJob> {
+    this.job = recordPolishChapterResult(this.job, claim, status, reason, now);
     return Promise.resolve(this.job);
   }
 
@@ -330,8 +336,9 @@ test('polish runner cancellation reaches active model and persists failure', asy
   runner.cancel('project-1', 'polish-1');
   const result = await running;
   assert.equal(model.cancelled.length, 1);
-  assert.equal(result.stage, 'failed');
-  assert.equal(repository.failCount, 1);
+  assert.equal(result.stage, 'completed');
+  assert.equal(result.outcomes![0].status, 'failed');
+  assert.equal(repository.failCount, 0);
 });
 
 test('polish runner old owner does not overwrite a newer durable state', async () => {
@@ -348,14 +355,16 @@ test('polish runner invalid candidate and waiting_user persist durable failure',
   const invalidRepository = new FakeRepository(makeJob());
   const invalidResult = await makeRunner(invalidRepository, new FakeModel((): string => 'not json')).run(
     'project-1', 'polish-1', 'owner-1');
-  assert.equal(invalidResult.stage, 'failed');
-  assert.equal(invalidRepository.failCount, 1);
+  assert.equal(invalidResult.stage, 'completed');
+  assert.equal(invalidResult.outcomes![0].status, 'failed');
+  assert.equal(invalidRepository.failCount, 0);
 
   const waitingRepository = new FakeRepository(makeJob());
   const waitingResult = await makeRunner(waitingRepository, new FakeModel((): 'waiting_user' => 'waiting_user')).run(
     'project-1', 'polish-1', 'owner-1');
-  assert.equal(waitingResult.stage, 'failed');
-  assert.match(waitingResult.failure ?? '', /不支持等待用户/);
+  assert.equal(waitingResult.stage, 'completed');
+  assert.equal(waitingResult.outcomes![0].status, 'failed');
+  assert.match(waitingResult.outcomes![0].message ?? '', /不支持等待用户/);
 });
 
 test('polish runner rejects candidate and review transplanted from another job', async () => {
@@ -363,8 +372,9 @@ test('polish runner rejects candidate and review transplanted from another job',
   const candidateResult = await makeRunner(
     candidateRepository, new FakeModel((): string => candidateJson(1, 0, 'polish-other')),
   ).run('project-1', 'polish-1', 'owner-1');
-  assert.equal(candidateResult.stage, 'failed');
-  assert.match(candidateResult.failure ?? '', /candidate .* job/);
+  assert.equal(candidateResult.stage, 'completed');
+  assert.equal(candidateResult.outcomes![0].status, 'failed');
+  assert.match(candidateResult.outcomes![0].message ?? '', /candidate .* job/);
 
   const reviewRepository = new FakeRepository(makeJob());
   const reviewModel = new FakeModel((request: NovelModelRequest): string => {
@@ -375,6 +385,7 @@ test('polish runner rejects candidate and review transplanted from another job',
   });
   const reviewResult = await makeRunner(reviewRepository, reviewModel).run(
     'project-1', 'polish-1', 'owner-1');
-  assert.equal(reviewResult.stage, 'failed');
-  assert.match(reviewResult.failure ?? '', /review .*绑定/);
+  assert.equal(reviewResult.stage, 'completed');
+  assert.equal(reviewResult.outcomes![0].status, 'failed');
+  assert.match(reviewResult.outcomes![0].message ?? '', /review .*绑定/);
 });

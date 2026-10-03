@@ -1,0 +1,29 @@
+P4-Renamed-Verification
+
+001 第 1 章
+
+Alpha test, with clear wording. Alpha chapter content.
+
+002 第 2 章
+
+Rhea checks every sign on the storm map. She preserves the route markers and records the findings. She preserves the route markers and records the findings. She preserves the route markers and records the findings. She preserves the route markers and records the findings. She preserves the route markers and records the findings. She preserves the route markers and records the findings. She preserves the route markers and records the findings. She preserves the route markers and records the findings. P4-REPLACEMENT-TAIL.
+
+CaptainRhea closes the eastern gate.
+
+003 第 3 章
+
+Rhea brings the map safely home.
+
+The storm clears before sunrise. The returning rider brings a sealed letter. Courier waits outside.
+
+004 第 4 章
+
+本地验证模型已收到当前小说上下文。角色资料与本轮选择已经进入请求；这是设备调用链的验证文本。
+
+005 Local draft chapter
+
+Rhea follows the author direction and returns the storm map.
+
+006 Local draft chapter
+
+Rhea follows the author direction and returns the storm map.

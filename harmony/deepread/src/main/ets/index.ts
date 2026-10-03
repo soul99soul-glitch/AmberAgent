@@ -11,14 +11,20 @@ export { createTopicIdWithRuntime, normalizeTitle, normalizeUrlArkTs } from './d
 export type { TopicIdRuntime } from './domain/topic_id.ts';
 export type { DeepReadOutput, TimelineEvent, CorePoint, ReadingLink, Perspective, Quote, DeepAnalysis, DeepReadImageAsset, DiagramNode, DiagramEdge, DeepReadDiagram, DeepReadSectionState } from './domain/models.ts';
 export { makeEmptyDeepReadOutput } from './domain/models.ts';
+export type { DeepReadTemplateSnapshot } from './domain/models.ts';
+export * from './domain/discovery.ts';
+export * from './domain/discovery_input.ts';
+export { observeDeepReadLibrary, queryDeepReadLibraryRows } from './domain/library.ts';
+export type { DeepReadLibrarySnapshot, DeepReadLibraryRow } from './domain/library.ts';
 export type { DeepReadGenerationStage, DeepReadGenerationPhase, DeepReadSectionStatus } from './domain/enums.ts';
 export { STAGE_ORDER, STAGE_LABELS, IMAGE_CONFIDENCE, WRITER_TOOL_NAMES } from './domain/enums.ts';
-export { statusOf, sectionsReady, isComplete, firstFailureMessage, firstFailedStage, displayHeroImageUrl, displayHeroCaption, hasReadableArticle } from './domain/helpers.ts';
+export { statusOf, sectionsReady, isComplete, firstFailureMessage, firstFailedStage, displayHeroImageUrl, displayHeroCaption, hasReadableArticle, hasDisplayableDeepReadOutput } from './domain/helpers.ts';
 export type { ModelConfig, ModelRegistry, ModelConfigInit, ModelRegistryOptions } from './domain/model_config.ts';
 export { makeModelConfig, newModelId, createStorageModelRegistry, MODEL_CONFIGS_STORAGE_KEY } from './domain/model_config.ts';
 
 // ===== Platform 契约(供 entry 注入真实实现) =====
 export type { HttpClient, HttpRequest, HttpResponse } from './platform/http.ts';
+export { httpResponseStatusFromHeaders, isEventStreamResponse } from './platform/http_response_status.ts';
 export type { AbortSignalLike, AbortControllerLike } from './platform/runtime_api.ts';
 export type { Database } from './platform/database.ts';
 export type { Storage } from './platform/storage.ts';
@@ -72,7 +78,7 @@ export type {
 } from './agent/legacy_message.ts';
 export { migrateLegacyUIMessage } from './agent/legacy_message.ts';
 export { createScheduler, isInterruptedPhase } from './agent/scheduler.ts';
-export type { DeepReadScheduler, SchedulerRunOptions } from './agent/scheduler.ts';
+export type { DeepReadScheduler, SchedulerRunOptions, DeepReadActiveRun } from './agent/scheduler.ts';
 export { createSourcePrefetcher } from './research/source_prefetcher.ts';
 export type { SourcePrefetcher, DeepReadSource } from './research/source_prefetcher.ts';
 export { buildEvidencePack, cardsFor } from './research/evidence_pack.ts';
@@ -105,6 +111,7 @@ export type { CouncilTaskInput, CouncilDynamicSeatSelection } from './council/va
 export { parseTask, validateSeats, resolveSynthesisModelId, buildDefaultSeats, resolveCouncilDynamicSeats } from './council/validator.ts';
 export type { ModelCouncilDeps } from './council/manager.ts';
 export { ModelCouncilManager, createModelCouncilManager } from './council/manager.ts';
+export { readCouncilArchive } from './council/archive.ts';
 
 // ===== Novel Creation(小说创作) =====
 export type {
@@ -114,7 +121,7 @@ export type {
   NovelMaterialInit, NovelSuggestionInit, NovelSettingProposal, NovelSettingProposalInit,
   NovelChapterVersion, NovelChapterVersionKind, NovelBranch, NovelModelTarget, NovelModelPolicy,
   NovelSettingFilePath, NovelForeshadowStatus, NovelForeshadow, NovelConfirmedDecision,
-  NovelBranchSettings } from './novel/models.ts';
+  NovelBranchSettings, NovelCandidateProvenance } from './novel/models.ts';
 export {
   NOVEL_SCHEMA_VERSION, MAX_PROJECT_NAME_CHARS, MAX_TITLE_CHARS, MAX_CHAPTER_CHARS,
   MAX_MATERIAL_CHARS, MATERIAL_KIND_LABELS, novelId, makeNovelProject, makeNovelMessage,
@@ -124,8 +131,13 @@ export {
 export type { NovelErrorCode } from './novel/error.ts';
 export {
   NovelError, isNovelError, invalidInput, notFound, projectBusy, alreadyCollected,
-  providerError, outputTooLarge,
+  providerError, outputTooLarge, invalidModelOutput,
 } from './novel/error.ts';
+export type { NovelMaterialAdoption, NovelMaterialAdoptionResult } from './novel/material_adoption.ts';
+export {
+  buildSuggestionAdoption, buildSettingProposalAdoption, materialAdoptionTargetDigest,
+  materialSuggestionChapterDigest, applyMaterialAdoption,
+} from './novel/material_adoption.ts';
 export {
   createProject, renameProject, setProjectModelPolicy, setProjectBranchSettings,
   appendMessage, saveChapter, deleteChapter,
@@ -134,28 +146,54 @@ export {
 } from './novel/mutations.ts';
 export type { NovelMutation } from './novel/mutations.ts';
 export { novelMessageUi, novelMessageText } from './novel/transcript.ts';
-export { systemPrompt, MAX_USER_CHARS, MAX_OUTPUT_CHARS, MAX_SYSTEM_CHARS } from './novel/context_builder.ts';
+export type {
+  NovelDiscussionArchive, NovelDiscussionArchiveDraft, NovelDiscussionArchiveConfirmation,
+} from './novel/discussion_archive.ts';
+export { eligibleNovelDiscussion } from './novel/discussion_archive.ts';
+export type { NovelGhostwriteStartPreview } from './novel/ghostwrite_start_preview.ts';
+export type { NovelGhostwriteReport, NovelGhostwriteReportChapter } from './novel/job_report.ts';
+export { formatNovelQuickStartOverview } from './novel/quick_start_proposals.ts';
+export { systemPrompt, novelComposerRunKind, MAX_USER_CHARS, MAX_OUTPUT_CHARS, MAX_SYSTEM_CHARS } from './novel/context_builder.ts';
 export type {
   NovelToolContinuationVerdict, NovelModelOperation, NovelModelRequest,
+  NovelContextSection, NovelRequestContext,
   NovelModelEvent, NovelModelStream, NovelModelRunning,
+  NovelRuntimeSnapshot, NovelResponsesResumeCursor, NovelPreparedRuntime,
 } from './novel/model_running.ts';
 export {
   SUGGESTION_SYSTEM_PROMPT, buildSuggestionUserPrompt, mapSuggestionKind, parseSuggestions,
   collectModelText, analyzeChapterSuggestions, MAX_SUGGESTIONS,
 } from './novel/suggestion_engine.ts';
 export {
-  parseAuditReport, buildAuditUserPrompt, runContinuityAudit,
-  CONTINUITY_AUDIT_SYSTEM_PROMPT, AUDIT_MAX_ISSUES,
+  parseAuditReport, buildAuditUserPrompt, runContinuityAudit, verifyAuditCanonicalReferences,
+  CONTINUITY_AUDIT_SYSTEM_PROMPT, AUDIT_MAX_ISSUES, NovelAuditController,
 } from './novel/continuity_audit.ts';
-export type { NovelAuditIssue, NovelAuditReport, NovelAuditSeverity } from './novel/continuity_audit.ts';
+export type {
+  NovelAuditIssue, NovelAuditReport, NovelAuditSeverity, NovelAuditProgress, NovelAuditBlock,
+  NovelAuditParsedReference, NovelAuditReference,
+} from './novel/continuity_audit.ts';
 export {
   parseSettingProposals, isSettingProposalEnvelope, SETTING_PROPOSAL_MARKER, MAX_PROPOSALS,
 } from './novel/setting_proposal_parser.ts';
 export type {
-  NovelProjectRepository, NovelWorkspaceMutationKind, NovelWorkspaceCas, NovelWorkspaceStatus,
+  NovelProjectRepository, NovelWorkspaceMutationKind, NovelWorkspaceCas, NovelWorkspaceStatus, NovelWorkspaceSnapshot,
 } from './novel/repository.ts';
 export { createFileNovelRepository, migrateNovelProject } from './novel/repository.ts';
 export type { NovelWorkspaceManifest } from './novel/workspace_contract.ts';
+export { novelChapterOrdinal, nextNovelChapterOrdinal } from './novel/models.ts';
+export type {
+  NovelProjectFailure, NovelProjectInventory, NovelProjectRecoveryPreview,
+  NovelNativeRestorePreview, NovelNativeBackupSnapshot,
+} from './novel/workspace_storage.ts';
+export type {
+  NovelNativeBackupMetadata, NovelNativeBackupManifest, NovelNativeBackupEntry, NovelNativeBackupImport,
+} from './novel/native_backup.ts';
+export {
+  NOVEL_NATIVE_BACKUP_MANIFEST_PATH, NOVEL_NATIVE_BACKUP_FORMAT, NOVEL_NATIVE_BACKUP_VERSION,
+  exportNovelNativeBackup, importNovelNativeBackup,
+} from './novel/native_backup.ts';
+export type { NovelWorkspaceBranchImport, NovelWorkspaceImportPlan } from './novel/workspace_interop.ts';
+export { buildNovelWorkspaceImportPlan, buildNovelWorkspacePublicFiles } from './novel/workspace_interop.ts';
 export {
   NOVEL_WORKSPACE_FORMAT, NOVEL_WORKSPACE_VERSION, parseNovelWorkspaceManifest,
   serializeNovelWorkspaceManifest, validateNovelWorkspacePath, chapterFileName,
@@ -236,3 +274,75 @@ export { DeepReadPlaybookRepository } from './agent/playbook.ts';
 export type {
   DeepReadPlaybookSnapshot, DeepReadPlaybookResult, DeepReadPlaybookDeps,
 } from './agent/playbook.ts';
+
+export { deepReadToMarkdown, deepReadToText } from './domain/export.ts';
+export {
+  CLAUDE_REDACTED_THINKING_METADATA_KEY, CLAUDE_THINKING_BLOCK_INDEX_METADATA_KEY,
+  hasProtocolReasoningContent, reasoningBlocksCanMerge, mergeReasoningMetadata,
+} from './agent/reasoning_metadata.ts';
+
+export type { DeepReadInputSource, DeepReadInputKind, DeepReadInputStatus, DeepReadCollectionIssue } from './domain/input_sources.ts';
+export { makeInputSource, sourceInputs, mergeCollectedSources, generationSources, inputSourceLabel, extractDocxSourceText, decodeInputSourceText, MAX_INPUT_SOURCE_CHARS, MAX_GENERATION_SOURCES } from './domain/input_sources.ts';
+
+export { deepReadLibraryStatus, queryDeepReadLibrary } from './domain/library.ts';
+export type { DeepReadLibraryStatus, DeepReadLibraryFilter } from './domain/library.ts';
+
+export { defaultNovelModelDefaults, resolveNovelDefaultTarget, novelStorySeedText, projectWithNovelStorySeed } from './novel/standalone_defaults.ts';
+export type { NovelModelDefaults, NovelModelRole, NovelStorySeed } from './novel/standalone_defaults.ts';
+
+export { findNovelChapterMatches, replaceNovelChapterMatch } from './novel/chapter_find_replace.ts';
+
+export { copyNovelWorkspaceImportPlan } from './novel/import_conflicts.ts';
+export type { NovelImportResolution } from './novel/import_conflicts.ts';
+export type { NovelProjectCreationMode } from './novel/models.ts';
+
+export type { NovelMaterialFields, NovelMaterialInjectionMode } from './novel/models.ts';
+export { normalizeNovelMaterialFields, novelMaterialAdoptionFields } from './novel/material_fields.ts';
+export type { NormalizedNovelMaterialFields } from './novel/material_fields.ts';
+export { classifyNovelMaterials, novelMaterialRelevanceScore } from './novel/material_injection.ts';
+export type { NovelInjectionOverrides, NovelMaterialInjectionDecision, NovelMaterialInjectionReason } from './novel/material_injection.ts';
+export type { NovelContextPreviewReceipt, NovelContextPreviewSection } from './novel/model_running.ts';
+export type { NovelContextPreviewResult } from './novel/creation.ts';
+export { canCloneCollectedMessage } from './novel/collected_candidates.ts';
+export type { NovelOrdinaryRun, NovelOrdinaryRunView, NovelOrdinaryRunStatus, NovelOrdinaryRequest } from './novel/ordinary_run.ts';
+export { ordinaryRunHistoryCount, ordinaryRunMessages } from './novel/ordinary_run.ts';
+export { effectiveNovelMaterials, materialOrigin } from './novel/material_inheritance.ts';
+export type { NovelMaterialOrigin } from './novel/material_inheritance.ts';
+
+export type {
+  NovelChapterContractStatus, NovelChapterContractInput, NovelChapterContract, NovelUpcomingArc,
+} from './novel/chapter_contract.ts';
+export {
+  makeNovelChapterContract, chapterContractMarkdown, confirmedChapterPlanText,
+  withNovelChapterContract, withNovelUpcomingArc, parseChapterContractProposal, collectChapterContractProposal,
+} from './novel/chapter_contract.ts';
+
+export type {
+  NovelStateEvent, NovelStateDelta, NovelIdentityAction, NovelIdentityClarification,
+  NovelStateChapterSource, NovelStructuredState, NovelCharacterExperience,
+} from './novel/structured_state.ts';
+export {
+  NOVEL_STATE_PROTOCOL_VERSION, emptyNovelStructuredState, parseNovelStateDelta,
+  mergeNovelStateDelta, appendNovelStateDelta, pruneNovelStructuredState, invalidateNovelStructuredState,
+  projectNovelCharacterExperiences, applyNovelIdentityClarification,
+} from './novel/structured_state.ts';
+
+export type {
+  NovelProjectOperationKind, NovelProjectToolInput, NovelSpecializedOperation,
+  NovelChapterParagraph, NovelProjectToolResult,
+} from './novel/specialized_operations.ts';
+export {
+  novelProjectOperationKind, novelChapterParagraphs, novelOperationSourceDigest,
+  readNovelProjectOperation, applyNovelSpecializedOperation, makeNovelSpecializedReview,
+  validateNovelSpecializedOperation, makeNovelProjectOperation,
+} from './novel/specialized_operations.ts';
+export type { WorkspaceProposalPreview, WorkspaceProposalReview } from './novel/workspace_history.ts';
+
+export type { NovelStateSource, NovelStateTarget, NovelStateOperation } from './novel/state_rebuild.ts';
+export { STATE_MAX_OUTPUT_TOKENS, STATE_SYSTEM_PROMPT, NovelStateService } from './novel/state_rebuild.ts';
+export type { NovelStructuredTaskOptions } from './novel/model_running.ts';
+export type { NovelStructuredStateView } from './novel/creation.ts';
+
+export type { PolishChapterOutcome, PolishChapterResult } from './novel/polish.ts';
+export { projectPolishOutcomes, recordPolishChapterResult } from './novel/polish.ts';
+export type { NovelPolishStartPreview } from './novel/polish_context.ts';

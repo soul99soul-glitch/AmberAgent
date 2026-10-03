@@ -5,7 +5,7 @@
 //   - 360 / 夸克:国内兜底;解析思路参照 searxng(AGPL,仅参考思路,未搬代码)
 //   - 遇到验证页/限流的引擎短期熔断,避免深度阅读多角度查询连续撞墙
 import type { JsonObject, JsonValue } from '../chat/json.ts';
-import type { SearchCommonOptions, SearchResult, SearchResultItem } from './search_service.ts';
+import type { SearchCommonOptions, SearchRequestContext, SearchResult, SearchResultItem } from './search_service.ts';
 import { searchSdkRuntime, makeSearchServiceOptions } from './search_service.ts';
 import { javaUrlEncodeForm } from './url_codec.ts';
 import { asRecord, strOrNull } from './json_pick.ts';
@@ -89,8 +89,9 @@ const distinctTake = (items: SearchResultItem[], limit: number): SearchResultIte
 
 const fetchHtml = async (
   engine: string, url: string, headers: Record<string, string>,
+  context?: SearchRequestContext,
 ): Promise<string> => {
-  const resp = await searchSdkRuntime().http.fetch({ url, method: 'GET', headers });
+  const resp = await searchSdkRuntime().http.fetch({ url, method: 'GET', headers }, context);
   if (resp.status < 200 || resp.status >= 300) {
     throw new Error(`${engine} request failed with HTTP ${resp.status}`);
   }
@@ -146,6 +147,7 @@ export const parseBraveHtml = (html: string, limit: number): SearchResultItem[] 
 
 export const braveWebSearch = async (
   query: string, commonOptions: SearchCommonOptions,
+  context?: SearchRequestContext,
 ): Promise<SearchResult> => {
   const html: string = await fetchHtml(
     'Brave',
@@ -156,6 +158,7 @@ export const braveWebSearch = async (
       'Accept-Language': searchSdkRuntime().acceptLanguage(),
       'Cookie': 'safesearch=off; useLocation=0; summarizer=0',
     },
+    context,
   );
   const items: SearchResultItem[] = parseBraveHtml(html, commonOptions.resultSize);
   if (items.length > 0) return { answer: null, items };
@@ -196,11 +199,13 @@ export const parseSo360Html = (html: string, limit: number): SearchResultItem[] 
 
 export const so360Search = async (
   query: string, commonOptions: SearchCommonOptions,
+  context?: SearchRequestContext,
 ): Promise<SearchResult> => {
   const html: string = await fetchHtml(
     '360',
     `https://www.so.com/s?q=${javaUrlEncodeForm(query)}`,
     { 'User-Agent': DESKTOP_UA, 'Accept': HTML_ACCEPT, 'Accept-Language': 'zh-CN,zh;q=0.9' },
+    context,
   );
   const items: SearchResultItem[] = parseSo360Html(html, commonOptions.resultSize);
   if (items.length > 0) return { answer: null, items };
@@ -258,11 +263,13 @@ export const parseQuarkHtml = (html: string, limit: number): SearchResultItem[] 
 
 export const quarkSearch = async (
   query: string, commonOptions: SearchCommonOptions,
+  context?: SearchRequestContext,
 ): Promise<SearchResult> => {
   const html: string = await fetchHtml(
     '夸克',
     `https://quark.sm.cn/s?q=${javaUrlEncodeForm(query)}&safe=1`,
     { 'User-Agent': MOBILE_UA, 'Accept': HTML_ACCEPT, 'Accept-Language': 'zh-CN,zh;q=0.9' },
+    context,
   );
   const items: SearchResultItem[] = parseQuarkHtml(html, commonOptions.resultSize);
   if (items.length > 0) return { answer: null, items };
@@ -274,30 +281,38 @@ export const quarkSearch = async (
 
 const dispatch = (
   id: FreeEngineId, query: string, commonOptions: SearchCommonOptions,
+  context?: SearchRequestContext,
 ): Promise<SearchResult> => {
   switch (id) {
-    case 'duckduckgo': return duckDuckGoSearch(query, commonOptions);
-    case 'brave': return braveWebSearch(query, commonOptions);
+    case 'duckduckgo': return duckDuckGoSearch(query, commonOptions, context);
+    case 'brave': return braveWebSearch(query, commonOptions, context);
     case 'bing':
-      return bingSearchService.search({ query }, commonOptions, makeSearchServiceOptions('bing_local'));
-    case 'so360': return so360Search(query, commonOptions);
-    case 'quark': return quarkSearch(query, commonOptions);
-    case 'wikipedia': return wikipediaSearch(query, commonOptions);
-    case 'hackernews': return hackerNewsSearch(query, commonOptions);
+      return bingSearchService.search({ query }, commonOptions, makeSearchServiceOptions('bing_local'), context);
+    case 'so360': return so360Search(query, commonOptions, context);
+    case 'quark': return quarkSearch(query, commonOptions, context);
+    case 'wikipedia': return wikipediaSearch(query, commonOptions, context);
+    case 'hackernews': return hackerNewsSearch(query, commonOptions, context);
   }
 };
 
 // 熔断中的引擎直接跳过(抛错,由聚合层记为失败源);遇验证页/限流则熔断
 export const runFreeEngine = async (
   id: FreeEngineId, query: string, commonOptions: SearchCommonOptions,
+  context?: SearchRequestContext,
 ): Promise<SearchResult> => {
+  if (context?.signal?.aborted) {
+    const error = new Error('search aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
   if (freeEngineCoolingDown(id)) {
     throw new Error(`${FREE_ENGINE_NAMES[id]} skipped: cooling down after verification page`);
   }
   try {
-    return await dispatch(id, query, commonOptions);
+    return await dispatch(id, query, commonOptions, context);
   } catch (e) {
     const err: Error = e instanceof Error ? e : new Error(String(e));
+    if (context?.signal?.aborted || err.name === 'AbortError') throw err;
     if (isBlockedError(err)) breakerUntil.set(id, Date.now() + BREAKER_COOLDOWN_MS);
     throw err;
   }

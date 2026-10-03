@@ -1,3 +1,4 @@
+import { getAppBundleName } from './ProductIdentity.ets';
 // NotificationNotifier — Notifier 契约的真实实现(对照设计 §6.7 / §8.8)
 // 3 类通知:running/completed/failed;同 topic 同 id 覆盖更新,cancel 撤销。
 // 进度:notifyProgress 带 label+N% 文本(节流由调用方按快照变化驱动)。
@@ -36,7 +37,7 @@ const buildArticleWantAgent = (
   topicId: string, title: string, sourceUrl: string,
 ): Promise<object | null> => {
   const want: Want = {
-    bundleName: 'app.amber.deepread',
+    bundleName: getAppBundleName(),
     abilityName: 'EntryAbility',
     parameters: {
       topicId,
@@ -65,7 +66,7 @@ export const buildNovelJobWantAgent = (
   projectId: string, branchId: string, jobId: string,
 ): Promise<object | null> => {
   const want: Want = {
-    bundleName: 'app.amber.deepread',
+    bundleName: getAppBundleName(),
     abilityName: 'EntryAbility',
     parameters: {
       novelProjectId: projectId,
@@ -167,44 +168,78 @@ export const notifyCronFailed = (taskId: string, title: string, errorText: strin
 };
 
 class NotificationNotifierImpl implements Notifier {
-  // R22:每 topic 通知归属的 run token。notifyRunning/notifyCompleted 记录持有者,
+  // 每 topic 通知归属的 run token。notifyRunning 在 await 前记录持有者,
   // cancelRunning 仅在 token 匹配(或调用方未传 token)时撤销 → 旧 run 的迟到
   // cancel 不能撤掉新 run 已发布的同 id 通知。
   private ownerToken: Map<string, number> = new Map<string, number>();
+  // Platform cancellation is asynchronous: a new publish must wait for an
+  // already-started cancellation of this same notification ID to finish.
+  private operationTails: Map<string, Promise<void>> = new Map<string, Promise<void>>();
+
+  private enqueue(topicId: string, operation: () => Promise<void>): Promise<void> {
+    const previous: Promise<void> = this.operationTails.get(topicId) ?? Promise.resolve();
+    const run: Promise<void> = previous.then(operation);
+    const settled: Promise<void> = run.then((): void => {}, (): void => {});
+    this.operationTails.set(topicId, settled);
+    settled.then((): void => {
+      if (this.operationTails.get(topicId) === settled) this.operationTails.delete(topicId);
+    });
+    return run;
+  }
 
   private claim(topicId: string, runToken?: number): void {
     if (runToken !== undefined) this.ownerToken.set(topicId, runToken);
   }
 
+  private owns(topicId: string, runToken?: number): boolean {
+    return runToken === undefined || this.ownerToken.get(topicId) === runToken;
+  }
+
   async notifyRunning(topicId: string, title: string, runToken?: number): Promise<void> {
-    const wa: object | null = await buildArticleWantAgent(topicId, title, '');
     this.claim(topicId, runToken);
+    const wa: object | null = await buildArticleWantAgent(topicId, title, '');
+    if (!this.owns(topicId, runToken)) return;
     // await 真实 publish:调用方 await 返回即平台已落地(R22)
-    await publishBasicNotification(notificationIdFor(topicId), '正在深度阅读', title, wa);
+    await this.enqueue(topicId, async (): Promise<void> => {
+      if (!this.owns(topicId, runToken)) return;
+      await publishBasicNotification(notificationIdFor(topicId), '正在深度阅读', title, wa);
+    });
   }
 
   async notifyCompleted(topicId: string, title: string, complete: boolean, runToken?: number): Promise<void> {
+    if (!this.owns(topicId, runToken)) return;
     const wa: object | null = await buildArticleWantAgent(topicId, title, '');
-    this.claim(topicId, runToken);
+    if (!this.owns(topicId, runToken)) return;
     // 严格 await:发布失败必须上抛(P2-3),不能对调度层谎报「已发布」,
     // 否则 finally 不撤同一 id,「正在深度阅读」永久残留。
-    await publishBasicNotificationStrict(notificationIdFor(topicId),
-      complete ? '深度阅读完成' : '深度阅读部分完成', title, wa);
+    await this.enqueue(topicId, async (): Promise<void> => {
+      if (!this.owns(topicId, runToken)) return;
+      await publishBasicNotificationStrict(notificationIdFor(topicId),
+        complete ? '深度阅读完成' : '深度阅读部分完成', title, wa);
+    });
   }
 
   async notifyFailed(topicId: string, title: string, errorMessage: string, runToken?: number): Promise<void> {
+    if (!this.owns(topicId, runToken)) return;
     const wa: object | null = await buildArticleWantAgent(topicId, title, '');
-    this.claim(topicId, runToken);
-    await publishBasicNotification(notificationIdFor(topicId), '深度阅读失败',
-      `${title} — ${errorMessage}`.slice(0, 120), wa);
+    if (!this.owns(topicId, runToken)) return;
+    await this.enqueue(topicId, async (): Promise<void> => {
+      if (!this.owns(topicId, runToken)) return;
+      await publishBasicNotificationStrict(notificationIdFor(topicId), '深度阅读失败',
+        `${title} — ${errorMessage}`.slice(0, 120), wa);
+    });
   }
 
   async cancelRunning(topicId: string, runToken?: number): Promise<void> {
-    const owner: number | undefined = this.ownerToken.get(topicId);
-    // 旧 run token 不可取消新通知:owner 已换且调用方仍带旧 token → no-op
-    if (runToken !== undefined && owner !== undefined && owner !== runToken) return;
-    this.ownerToken.delete(topicId);
-    await cancelNotification(notificationIdFor(topicId));
+    await this.enqueue(topicId, async (): Promise<void> => {
+      const owner: number | undefined = this.ownerToken.get(topicId);
+      // Recheck at execution, since a new owner can register while queued.
+      if (runToken !== undefined && owner !== undefined && owner !== runToken) return;
+      await cancelNotification(notificationIdFor(topicId));
+      // The new owner's publication is queued after this cancellation; keep
+      // its claim if it arrived while the platform operation was in flight.
+      if (this.ownerToken.get(topicId) === owner) this.ownerToken.delete(topicId);
+    });
   }
 }
 

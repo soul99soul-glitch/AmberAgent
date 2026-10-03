@@ -7,7 +7,8 @@
 // 方便测试(mock AiClient)。timeout 用 Promise.race + setTimeout 模拟 withTimeout。
 
 import type { UIMessage } from './message.ts';
-import { makeUserMessage } from './message.ts';
+import { makeUserMessage, latestAssistantText } from './message.ts';
+import { structuredStageSchema, structuredArticleBody, writeStructuredStage } from './structured_stage.ts';
 import type { AbortControllerLike, AbortSignalLike } from '../platform/runtime_api.ts';
 import type { SectionWriterTools } from './section_writer_tools.ts';
 import type { ToolDefinition } from './tool_execution.ts';
@@ -35,6 +36,7 @@ export type CollectRunFn = (
 // ===== buildPrompt(照搬 Android :661-739) =====
 
 export interface BuildPromptParams {
+  writerMode?: 'tools' | 'structured';
   topicTitle: string;
   stage: DeepReadGenerationStage;
   existingOutput: DeepReadOutput;
@@ -59,7 +61,7 @@ export const buildPrompt = (p: BuildPromptParams): string => {
   lines.push(p.playbookMarkdown.slice(0, PLAYBOOK_PROMPT_LIMIT));
   if (p.seedUrl !== null && p.seedUrl.trim().length > 0) {
     lines.push(`用户指定来源 URL：${p.seedUrl}`);
-    lines.push('该 URL 已在预抓阶段尝试读取，优先使用预抓正文；如下面预抓正文为空再 search_web/scrape_web 补充。');
+    lines.push('该 URL 已在预抓阶段尝试读取，只使用下面实际提供的正文；未读取的内容不得补写。');
   }
   lines.push('');
   appendArticlePlan(lines, p.articlePlan);
@@ -68,32 +70,36 @@ export const buildPrompt = (p: BuildPromptParams): string => {
   lines.push('');
   appendArticleContext(lines, p.existingOutput);
   lines.push('');
-  appendDeadlineGuidance(lines, p.stage, p.stageTimeoutMs);
+  appendDeadlineGuidance(lines, p.stage, p.stageTimeoutMs, p.writerMode);
   lines.push('');
   lines.push('## 研究顺序');
   lines.push('1. 本地 harness 已经完成来源扩展、去重、分桶和结构规划。你只处理当前小目标。');
-  lines.push('2. 仅在以下情况补充 search_web：');
-  lines.push('   - 关键事实（发布时间、价格、官方表态、版本号等）在预抓来源中找不到或互相矛盾');
-  lines.push('   - 用户指定 URL 的预抓正文为空，需要别的 query 命中该话题');
-  lines.push('   - 你需要反面证据时（例如「辟谣」「不实」「未确认」）');
-  if (p.scrapeWebAvailable) {
-    lines.push('3. 仅在确认某个 URL 比预抓正文更详细时再 scrape_web；不要把预抓已有正文重抓一次。');
-  } else {
-    lines.push('3. 当前未暴露 scrape_web；只能基于预抓正文 + 必要时的 search_web 摘要写入。');
-  }
+  lines.push('2. 研究资料以本段证据包为准，不补充外部搜索或抓取。');
+  lines.push('3. 关键事实缺失、来源互相矛盾或缺少反方证据时，明确标注不确定；不得把未读取内容写成事实。');
   lines.push('4. 本轮只生成目标段落，不要改写或重写未列入目标的段落。');
-  lines.push('5. 完成研究后立即调用对应 writer tool：');
-  lines.push(`   - ${WRITER_TOOL_NAMES[p.stage]}：${STAGE_LABELS[p.stage]}`);
-  lines.push('6. 本轮只暴露目标段 writer tool；如果你输出自由文本但没调工具，系统会尝试把自由文本转换成基础稿。');
-  lines.push('7. 图片只能从 image_candidates 中选择；本轮如果没有视觉 writer，就在目标段 references/links 中保留可用来源。');
-  lines.push('8. 全部 writer 完成后，直接调用 deep_read_finish。');
+  if (p.writerMode === 'structured') {
+    lines.push('5. 只返回当前段落 JSON，不调用工具，不输出解释、Markdown 长文或其他段落。');
+    lines.push(`本段 JSON 格式：${structuredStageSchema(p.stage)}`);
+    if (p.stage === 'EXTENDED_READING') lines.push('没有真实外部链接时不要编造。可提供来源支撑的 diagram：3-6个节点，type/title/nodes[{id,label}]/edges[{from,to}]；没有候选图时 hero_image_url 留空。');
+  } else {
+    lines.push('5. 完成研究后立即调用对应 writer tool：');
+    lines.push(`   - ${WRITER_TOOL_NAMES[p.stage]}：${STAGE_LABELS[p.stage]}`);
+    lines.push('6. 本轮只暴露目标段 writer tool；如果你输出自由文本但没调工具，系统会尝试把自由文本转换成基础稿。');
+    lines.push('7. 图片只能从 image_candidates 中选择；本轮如果没有视觉 writer，就在目标段 references/links 中保留可用来源。');
+    lines.push('8. 全部 writer 完成后，直接调用 deep_read_finish。');
+  }
+  if (p.writerMode === 'structured') {
+    lines.push('## 已完成段落（只读，不重新输出）');
+    lines.push(JSON.stringify(structuredArticleBody(p.existingOutput)));
+  }
   lines.push('');
   lines.push('## 段落要求');
   appendStageRequirement(lines, p.stage);
   lines.push('- 视觉：头图必须来自候选池且 confidence=hero；inline 候选只能作为正文图。不得提交任意 URL、站点 logo、favicon、媒体图标或头像。');
-  lines.push('- 图解：只提交 3-6 个短节点的 diagram spec，节点 label 控制在约 30 字内；流程/因果可保留少量关键跨节点关系，但避免网状交叉。禁止 raw SVG/HTML/JS/外链资源。图解不参与段落完成状态，不需要就隐藏。');
+  lines.push('- 图解：只提交 3-6 个短节点的 diagram spec，节点 label 控制在约 30 字内；流程/因果可保留少量关键跨节点关系，但避免网状交叉。禁止 raw SVG/HTML/JS/外链资源。不需要就隐藏。');
   lines.push('');
-  lines.push('正文输出不会被 UI 消费。不要输出完整 JSON，不要写 Markdown 长文作为最终答案。');
+  lines.push(p.writerMode === 'structured' ? '只输出本段的 JSON 对象，系统会核验并合并当前段落。'
+    : '正文输出不会被 UI 消费。不要输出完整 JSON，不要写 Markdown 长文作为最终答案。');
   return lines.join('\n');
 };
 
@@ -114,15 +120,17 @@ const appendStageRequirement = (lines: string[], stage: DeepReadGenerationStage)
   }
 };
 
-const appendDeadlineGuidance = (lines: string[], stage: DeepReadGenerationStage, stageTimeoutMs: number): void => {
+const appendDeadlineGuidance = (lines: string[], stage: DeepReadGenerationStage, stageTimeoutMs: number, writerMode?: 'tools' | 'structured'): void => {
   const stageSeconds = Math.max(1, Math.floor(stageTimeoutMs / 1000));
   lines.push('## 时间预算（硬约束）');
   lines.push(`- 本段运行预算约 ${stageSeconds} 秒。`);
-  lines.push(`- 你必须把第一优先级放在调用 ${WRITER_TOOL_NAMES[stage]}；不要先输出长文、完整 JSON 或 Markdown 草稿。`);
-  lines.push('- 预抓证据包是主材料。除非关键事实缺失或互相矛盾，不要连续 search_web / scrape_web。');
+  lines.push(writerMode === 'structured' ? '- 第一优先级是返回合法的本段 JSON，不输出长文或 Markdown 草稿。'
+    : `- 你必须把第一优先级放在调用 ${WRITER_TOOL_NAMES[stage]}；不要先输出长文、完整 JSON 或 Markdown 草稿。`);
+  lines.push('- 预抓证据包是本轮材料。关键事实缺失或互相矛盾时保留不确定性，不补写未读取内容。');
   lines.push('- 如果证据不够完整，先基于现有证据写保守版本；不要为了补全而耗尽本段预算。');
   if (stage === 'EXTENDED_READING') {
-    lines.push('- 扩展阅读不是长文写作：从本段证据包挑选 4-8 条真实来源链接，必要时带 image_assets，然后立即调用 writer tool。');
+    lines.push(writerMode === 'structured' ? '- 从证据包挑选真实来源链接与允许的视觉资料，返回扩展阅读 JSON。'
+      : '- 扩展阅读不是长文写作：从本段证据包挑选 4-8 条真实来源链接，必要时带 image_assets，然后立即调用 writer tool。');
   }
 };
 
@@ -207,6 +215,7 @@ export const buildWriterReminder = (stage: DeepReadGenerationStage, pass: number
 // ===== runStageSupervisorLoop(照搬 Android :412-527, 0.1 无 coverageReport) =====
 
 export interface SupervisorContext {
+  writerMode?: 'tools' | 'structured';
   writer: SectionWriterTools;
   evidencePack: DeepReadEvidencePack;
   articlePlan: DeepReadArticlePlan;
@@ -239,6 +248,7 @@ export const runStageSupervisorLoop = async (
   const stageSources = stageEvidence;
 
   let messages: UIMessage[] = [makeUserMessage(buildPrompt({
+    writerMode: ctx.writerMode,
     topicTitle: ctx.topicTitle,
     stage,
     existingOutput: writer.current(),
@@ -261,16 +271,26 @@ export const runStageSupervisorLoop = async (
         throw new Error('aborted');
       }
       const beforeWrites = writer.requiredWriteCount;
-      messages = await withTimeout(
-        stageTimeoutMs,
-        (stageSignal: AbortSignalLike): Promise<UIMessage[]> => ctx.collectRun(
-          messages,
-          `深度阅读 ${STAGE_LABELS[stage]}`,
-          stageSignal,
-          writer.tools(new Set<DeepReadGenerationStage>([stage])),
-        ),
-        ctx.signal,
-      );
+      try {
+        messages = await withTimeout(
+          stageTimeoutMs,
+          (stageSignal: AbortSignalLike): Promise<UIMessage[]> => ctx.collectRun(
+            messages,
+            `深度阅读 ${STAGE_LABELS[stage]}`,
+            stageSignal,
+            ctx.writerMode === 'structured' ? [] : writer.tools(new Set<DeepReadGenerationStage>([stage])),
+          ),
+          ctx.signal,
+        );
+      } catch (error) {
+        if (ctx.writerMode !== 'structured' || pass + 1 >= MAX_SUPERVISOR_PASSES || ctx.signal?.aborted || isAbortError(error)) throw error;
+        messages = [...messages, makeUserMessage(`上次调用失败：${String(error).slice(0, 160)}。请重新只输出本段 JSON：${structuredStageSchema(stage)}`)];
+        continue;
+      }
+      if (ctx.writerMode === 'structured') {
+        if (ctx.signal?.aborted) { const error = new Error('aborted'); error.name = 'AbortError'; throw error; }
+        await writeStructuredStage(writer, stage, latestAssistantText(messages));
+      }
       const stageReady = statusOf(writer.current(), stage) === 'READY';
       // 0.1: 无 coverageReport,supplementWritten 永远 true
       const supplementWritten = writer.requiredWriteCount > initialRequiredWrites;
@@ -279,14 +299,15 @@ export const runStageSupervisorLoop = async (
       }
       // 该 pass 没新写入 → 加 reminder
       if (writer.requiredWriteCount === beforeWrites) {
-        messages = [...messages, makeUserMessage(buildWriterReminder(stage, pass))];
+        messages = [...messages, makeUserMessage(ctx.writerMode === 'structured'
+          ? `上一次没有合法且完整的本段 JSON。请只返回此 JSON 对象，不要解释：${structuredStageSchema(stage)}` : buildWriterReminder(stage, pass))];
       }
     }
     // 2 pass 都没成功
     if (statusOf(writer.current(), stage) !== 'READY') {
-      const recovered = await ctx.tryFallback(stage, messages, stageSources, 'missing writer tool');
+      const recovered = ctx.writerMode !== 'structured' && await ctx.tryFallback(stage, messages, stageSources, 'missing writer tool');
       if (recovered) return { stage, ready: true, outcome: 'fallback_recovered', finalOutput: writer.current() };
-      const failMsg = stageFailureMessage(stage, new Error('missing writer tool'), stageTimeoutMs);
+      const failMsg = stageFailureMessage(stage, new Error(ctx.writerMode === 'structured' ? '未返回合法且完整的段落 JSON' : 'missing writer tool'), stageTimeoutMs);
       writer.markFailed(stage, failMsg);
       return { stage, ready: false, outcome: 'failed', finalOutput: writer.current() };
     }
@@ -295,7 +316,7 @@ export const runStageSupervisorLoop = async (
     if (isAbortError(error)) throw error;
     const isTimeout = isTimeoutError(error);
     const reason = isTimeout ? 'timeout' : isErrorLike(error) && isDeepReadTimeoutLike(error) ? 'provider timeout' : 'failure';
-    const recovered = await ctx.tryFallback(stage, messages, stageSources, reason);
+    const recovered = ctx.writerMode !== 'structured' && await ctx.tryFallback(stage, messages, stageSources, reason);
     if (!recovered && statusOf(writer.current(), stage) !== 'READY') {
       const failMsg = isTimeout
         ? timeoutFailureMessage(stage, stageTimeoutMs)

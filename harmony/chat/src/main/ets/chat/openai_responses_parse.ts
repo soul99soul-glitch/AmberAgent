@@ -17,6 +17,8 @@ import type {
 import { nowIso } from './ids.ts';
 import type { TokenUsage } from './usage.ts';
 import { withStreamArgsReplace, isStreamArgsReplace } from './tool_merge.ts';
+import { parseOpenAiErrorDetail } from './openai_parse.ts';
+import { ProviderResponseError } from './provider_response_error.ts';
 
 export const OPENAI_TOOL_CALL_ID_METADATA_KEY = 'openai_call_id';
 export const OPENAI_IMAGE_CALL_ID_METADATA_KEY = 'openai_image_call_id';
@@ -105,7 +107,7 @@ const parseDoneMessageItem = (item: JsonObject, id: string): MessageChunk | null
 };
 
 // parseResponseOutput — final response object → MessageChunk (message=full, delta=null)
-export const parseResponsesOutput = (jsonObject: JsonObject): MessageChunk => {
+export const parseResponsesOutput = (jsonObject: JsonObject, terminalStatus?: string): MessageChunk => {
   const outputsRaw = jsonObject['output'];
   const outputs: JsonValue[] = Array.isArray(outputsRaw) ? outputsRaw : [];
   const parts: UIMessagePart[] = [];
@@ -117,18 +119,23 @@ export const parseResponsesOutput = (jsonObject: JsonObject): MessageChunk => {
     const id = strOrNull(outputItem['id']);
     if (type === 'reasoning') {
       const encrypted = strOrNull(outputItem['encrypted_content']);
+      const metadata: JsonObject = {};
+      if (encrypted !== null) metadata[ENCRYPTED_CONTENT_METADATA_KEY] = encrypted;
+      if (id !== null) metadata[REASONING_ID_METADATA_KEY] = id;
       const summary = outputItem['summary'];
+      let hasSummary = false;
       if (Array.isArray(summary)) {
         for (const part of summary) {
           if (!isObj(part)) continue;
           if (strOrNull(part['type']) !== 'summary_text') continue;
           const text = strOrNull(part['text']) ?? '';
-          const metadata: JsonObject = {};
-          if (encrypted !== null) metadata[ENCRYPTED_CONTENT_METADATA_KEY] = encrypted;
-          if (id !== null) metadata[REASONING_ID_METADATA_KEY] = id;
+          hasSummary = true;
           parts.push(makeReasoningPart(text, nowIso(),
             Object.keys(metadata).length > 0 ? metadata : undefined));
         }
+      }
+      if (!hasSummary && Object.keys(metadata).length > 0) {
+        parts.push(makeReasoningPart('', nowIso(), metadata));
       }
     } else if (type === 'function_call') {
       const callId = strOrNull(outputItem['call_id']);
@@ -166,7 +173,8 @@ export const parseResponsesOutput = (jsonObject: JsonObject): MessageChunk => {
   const usage = parseResponsesTokenUsage(
     isObj(jsonObject['usage']) ? jsonObject['usage'] as JsonObject : null,
   );
-  const incomplete = strOrNull(jsonObject['status']) === 'incomplete';
+  const status = terminalStatus ?? strOrNull(jsonObject['status']);
+  const incomplete = status === 'incomplete';
   const incompleteDetails = isObj(jsonObject['incomplete_details'])
     ? jsonObject['incomplete_details'] as JsonObject : null;
   const finishReason = incomplete
@@ -178,7 +186,7 @@ export const parseResponsesOutput = (jsonObject: JsonObject): MessageChunk => {
     finishedAt: nowIso(),
   });
 
-  return {
+  const chunk: MessageChunk = {
     id: strOrNull(jsonObject['id']) ?? '',
     model: strOrNull(jsonObject['model']) ?? '',
     choices: [{
@@ -189,6 +197,19 @@ export const parseResponsesOutput = (jsonObject: JsonObject): MessageChunk => {
     }],
     usage,
   };
+  if (status === 'failed' || (incomplete && finishReason !== 'max_output_tokens')) {
+    const error = jsonObject['error'];
+    const detail = status === 'failed'
+      ? (error !== undefined && error !== null ? parseOpenAiErrorDetail(error).message : 'unknown error')
+      : finishReason ?? 'unknown reason';
+    const displayParts = parts.filter((part: UIMessagePart): boolean => part.type !== 'tool');
+    const partialChunk: MessageChunk | null = displayParts.length > 0 ? {
+      ...chunk,
+      choices: [{ ...chunk.choices[0], message: { ...message, parts: displayParts } }],
+    } : null;
+    throw new ProviderResponseError(`OpenAI Responses ${status}: ${detail}`, partialChunk);
+  }
+  return chunk;
 };
 
 // parseResponseDelta — SSE event → MessageChunk | null
@@ -251,13 +272,15 @@ export const parseResponsesStreamEvent = (jsonObject: JsonObject): MessageChunk 
   }
 
   if (chunkType === 'response.reasoning_summary_text.delta' || chunkType === 'response.reasoning_text.delta') {
+    const itemId = strOrNull(jsonObject['item_id']);
     return {
       id: strOrNull(jsonObject['item_id']) ?? '',
       model: '',
       choices: [{
         index: 0,
         delta: makeUIMessage('assistant', [makeReasoningPart(
-          strOrNull(jsonObject['delta']) ?? '', null)]),
+          strOrNull(jsonObject['delta']) ?? '', null,
+          itemId !== null ? { [REASONING_ID_METADATA_KEY]: itemId } : undefined)]),
         message: null,
         finishReason: null,
       }],
@@ -409,16 +432,15 @@ export const parseResponsesStreamEvent = (jsonObject: JsonObject): MessageChunk 
 
   if (chunkType === 'response.failed') {
     const response = jsonObject['response'];
-    const error = isObj(response) ? response['error'] : jsonObject['error'];
-    const detail = strOrNull(error);
-    throw new Error(detail !== null ? detail : 'Response stream failed');
+    return parseResponsesOutput(isObj(response) ? response : jsonObject, 'failed');
   }
 
   if (chunkType === 'response.completed' || chunkType === 'response.incomplete') {
     const response = jsonObject['response'];
     if (isObj(response)) {
-      return parseResponsesOutput(response);
+      return parseResponsesOutput(response, chunkType === 'response.incomplete' ? 'incomplete' : undefined);
     }
+    if (chunkType === 'response.incomplete') return parseResponsesOutput(jsonObject, 'incomplete');
     return {
       id: strOrNull(jsonObject['item_id']) ?? '',
       model: '',
@@ -446,6 +468,7 @@ export class ResponseStreamReconciler {
   private readonly itemTexts = new Map<string, string>();
   private readonly streamedTools = new Map<string, StreamedTool>();
   private hasStreamedReasoning = false;
+  private readonly streamedReasoningIds = new Set<string>();
 
   reconcile(chunk: MessageChunk): MessageChunk {
     const choices: UIMessageChoice[] = [];
@@ -480,7 +503,9 @@ export class ResponseStreamReconciler {
       } else if (part.type === 'tool') {
         this.trackTool(part as UIMessagePartTool);
       } else if (part.type === 'reasoning' && part.reasoning.length > 0) {
-        this.hasStreamedReasoning = true;
+        const reasoningId = part.metadata !== null ? strOrNull(part.metadata[REASONING_ID_METADATA_KEY]) : null;
+        if (reasoningId !== null) this.streamedReasoningIds.add(reasoningId);
+        else this.hasStreamedReasoning = true;
       }
     }
   }
@@ -561,9 +586,11 @@ export class ResponseStreamReconciler {
       }
       const argsDiffer = finalTool.input.length > 0 && finalTool.input !== state.args;
       const nameMissing = state.name.length === 0 && finalTool.toolName.length > 0;
-      if (argsDiffer || nameMissing) {
+      const callIdMissing = state.callId !== finalTool.toolCallId;
+      if (argsDiffer || nameMissing || callIdMissing) {
         parts.push(withStreamArgsReplace(makeToolPart(
           state.id, finalTool.toolName, finalTool.input,
+          { [OPENAI_TOOL_CALL_ID_METADATA_KEY]: finalTool.toolCallId },
         )));
       }
     }
@@ -580,11 +607,16 @@ export class ResponseStreamReconciler {
       this.itemTexts.set(chunkId, prev + suffix);
     }
 
-    if (!this.hasStreamedReasoning) {
-      for (const p of message.parts) {
-        if (p.type === 'reasoning' && p.reasoning.length > 0) {
-          parts.push(p);
-        }
+    for (const p of message.parts) {
+      if (p.type !== 'reasoning') continue;
+      const reasoningId = p.metadata !== null ? strOrNull(p.metadata[REASONING_ID_METADATA_KEY]) : null;
+      const streamed = this.hasStreamedReasoning || (reasoningId !== null && this.streamedReasoningIds.has(reasoningId));
+      if (!streamed) {
+        if (p.reasoning.length > 0 || p.metadata !== null) parts.push(p);
+      } else if (p.metadata !== null) {
+        // The summary has already streamed; retain terminal opaque data without
+        // appending the full summary a second time.
+        parts.push({ ...p, reasoning: '' });
       }
     }
 

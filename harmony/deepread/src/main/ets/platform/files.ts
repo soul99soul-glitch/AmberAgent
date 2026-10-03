@@ -63,7 +63,10 @@ class MemoryFileStore implements FileStore {
 
   async readText(path: string): Promise<string | null> {
     const key: string = this.norm(path);
-    return this.files.has(key) ? (this.files.get(key) as string) : null;
+    const text: string | undefined = this.files.get(key);
+    if (text !== undefined) return text;
+    const bytes: Uint8Array | undefined = this.byteFiles.get(key);
+    return bytes === undefined ? null : decodeFileUtf8(bytes);
   }
 
   async writeText(path: string, content: string): Promise<void> {
@@ -221,6 +224,50 @@ class MemoryFileStore implements FileStore {
     return v === undefined ? null : v;
   }
 }
+
+const decodeFileUtf8 = (bytes: Uint8Array): string => {
+  let result: string = '';
+  for (let i: number = 0; i < bytes.length;) {
+    const first: number = bytes[i];
+    if (first < 0x80) {
+      result += String.fromCharCode(first);
+      i++;
+      continue;
+    }
+    let needed: number = 0;
+    let codePoint: number = 0;
+    if (first >= 0xC2 && first <= 0xDF) {
+      needed = 1;
+      codePoint = first & 0x1F;
+    } else if (first >= 0xE0 && first <= 0xEF) {
+      needed = 2;
+      codePoint = first & 0x0F;
+    } else if (first >= 0xF0 && first <= 0xF4) {
+      needed = 3;
+      codePoint = first & 0x07;
+    } else {
+      throw new Error('文件不是 UTF-8 文本');
+    }
+    if (i + needed >= bytes.length) throw new Error('文件不是 UTF-8 文本');
+    for (let j: number = 1; j <= needed; j++) {
+      const next: number = bytes[i + j];
+      if ((next & 0xC0) !== 0x80) throw new Error('文件不是 UTF-8 文本');
+      codePoint = (codePoint << 6) | (next & 0x3F);
+    }
+    const minimum: number = needed === 1 ? 0x80 : needed === 2 ? 0x800 : 0x10000;
+    if (codePoint < minimum || codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
+      throw new Error('文件不是 UTF-8 文本');
+    }
+    if (codePoint <= 0xFFFF) {
+      result += String.fromCharCode(codePoint);
+    } else {
+      const scalar: number = codePoint - 0x10000;
+      result += String.fromCharCode(0xD800 + (scalar >> 10), 0xDC00 + (scalar & 0x3FF));
+    }
+    i += needed + 1;
+  }
+  return result;
+};
 
 const utf8Encode = (text: string): Uint8Array => {
   const out: number[] = [];

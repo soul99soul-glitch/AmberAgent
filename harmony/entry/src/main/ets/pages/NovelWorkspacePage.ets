@@ -13,7 +13,15 @@ import {
 } from '../components/AgentMessageRow.ets';
 import type { AgentMessageRowHostCapabilities } from '../components/AgentMessageRow.ets';
 import { InteractiveMessageTimeline } from '../components/InteractiveMessageTimeline.ets';
+import { NovelDiscussionArchiveSheet } from '../components/NovelDiscussionArchiveSheet.ets';
+import { NovelDiscussionArchiveCard } from '../components/NovelDiscussionArchiveCard.ets';
+import { NovelRunRecoveryCard } from '../components/NovelRunRecoveryCard.ets';
+import { discussionArchiveAtMessage, discussionMessageVisible } from '../components/NovelArchivePresentation.ets';
+import { NovelMaterialAdoptionSheet, NovelMaterialAdoptionSheetTarget } from '../components/NovelMaterialAdoptionSheet.ets';
+import { NovelMaterialEditorSheet, NovelMaterialEditorDraft, NovelMaterialEditScope, emptyMaterialEditorDraft, materialEditorDraftFor } from '../components/NovelMaterialEditorSheet.ets';
+import { NovelMaterialCard, NovelHiddenSharedMaterials } from '../components/NovelMaterialCard.ets';
 import { NovelSettingProposalCard } from '../components/NovelSettingProposalCard.ets';
+import { orphanSettingProposals, settingProposalsForMessage } from '../platform_impl/NovelSettingProposalProjection.ets';
 import {
   NovelPolishCreateSheet, NovelPolishCreateSheetChapter,
 } from '../components/NovelPolishCreateSheet.ets';
@@ -22,33 +30,49 @@ import { NovelBranchSheet } from '../components/NovelBranchSheet.ets';
 import {
   NovelSettingsPane, NovelModelOptionView,
 } from '../components/NovelSettingsPane.ets';
+import { NovelAuditReportView } from '../components/NovelAuditReportView.ets';
+import { NovelGhostwriteReportCard } from '../components/NovelGhostwriteReportCard.ets';
+import { NovelRevisionBriefSheet } from '../components/NovelRevisionBriefSheet.ets';
+import { NovelGhostwriteStartSheet } from '../components/NovelGhostwriteStartSheet.ets';
 import { NovelGhostwriteCard } from '../components/NovelGhostwriteCard.ets';
 import { KeyboardAvoidMode, router, promptAction } from '@kit.ArkUI';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
+import { pasteboard } from '@kit.BasicServicesKit';
 import {
   getNovelCreation, getNovelWorkspaceService, loadNovelModelOptions,
 } from '../di/AppContainer.ets';
 import type { NovelModelOption } from '../di/AppContainer.ets';
 import type { NovelBookExportBundle } from '../platform_impl/NovelWorkspaceService.ets';
+import { shareNovelFile, NovelShareFormat } from '../platform_impl/NovelShareSupport.ets';
 import { MATERIAL_KIND_LABELS } from '@amber/deepread-domain';
 import {
-  NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
+  NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion, NovelBranch,
+  NovelMaterialFields, NovelWorkspaceCas, NovelWorkspaceSnapshot, makeNovelMaterial, materialOrigin, NovelInjectionOverrides, novelComposerRunKind,
   NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget,
-  NovelRunKind, NovelRun, NovelActiveRun, NovelRunEvent,
-  NovelSettingProposal, NovelForeshadow, NovelConfirmedDecision,
-  NovelWorkspaceStatus, StreamTransportState, UIMessage, makeUIMessage,
+  NovelRunKind, NovelRun, NovelActiveRun, NovelRunEvent, NovelOrdinaryRun, NovelOrdinaryRunView, latestAssistantText, ordinaryRunMessages, ordinaryRunHistoryCount,
+  NovelSettingProposal, NovelForeshadow, NovelConfirmedDecision, NovelDiscussionArchive, NovelSuggestionRefreshResult, canCloneCollectedMessage,
+  NovelWorkspaceStatus, StreamTransportState, UIMessage, makeUIMessage, toText,
   UIMessagePart, novelMessageUi, novelMessageText, NovelToolContinuationVerdict,
   NovelModelPolicy, NovelModelTarget, NovelBranchSettings, NovelConsistencyReport,
-  emptyNovelBranchSettings,
-  NovelAuditIssue, NovelAuditReport,
+  emptyNovelBranchSettings, eligibleNovelDiscussion, NovelDiscussionArchiveDraft,
+  NovelMaterialAdoption, buildSuggestionAdoption, buildSettingProposalAdoption, materialAdoptionTargetDigest,
+  NovelAuditIssue, NovelAuditReference, verifyAuditCanonicalReferences, NovelAuditReport, NovelAuditController, NovelAuditProgress, NovelAuditBlock, defaultGhostwriteDigest, DEFAULT_GHOSTWRITE_CHAPTER_COUNT,
   DurableGhostwriteJob, GhostwriteStage, DurablePolishJob, PolishContextOptions, PolishStage,
+  NovelGhostwriteStartPreview, NovelGhostwriteReport, NovelChapterContract, confirmedChapterPlanText, chapterContractMarkdown, formatNovelQuickStartOverview, novelChapterOrdinal, nextNovelChapterOrdinal,
 } from '@amber/deepread-domain';
 import {
   shouldScrollOnStreamUpdate, transitionOnGenerateEnd, transitionOnJumpToBottom,
   transitionOnStreamUpdate, transitionOnUserScroll,
 } from '@amber/chat-domain';
 import type { FollowMode, ToolApprovalPartLocator } from '@amber/chat-domain';
+import {
+  selectedParagraphDraft, draftAfterSelection, canCollectSelection,
+  defaultCollectionLocation, composerOwner, canRestoreFailedInput,
+  NovelComposerDraftStore,
+} from '../novel/NovelComposerState';
+import type { NovelComposeMode, NovelComposerDraft, CollectionLocation } from '../novel/NovelComposerState';
+import { getNovelComposerDraftStore } from '../novel/NovelComposerDraftStore.ets';
 
 
 const NOVEL_AGENT_MESSAGE_CAPABILITIES: AgentMessageRowHostCapabilities = {
@@ -70,7 +94,6 @@ const NOVEL_AGENT_MESSAGE_CAPABILITIES: AgentMessageRowHostCapabilities = {
   openDocument: false,
 };
 
-type ComposeMode = 'discuss' | 'continue' | 'whole_chapter';
 type MaterialFilter = 'all' | NovelMaterialKind;
 
 const KIND_FILTERS: MaterialFilter[] = ['all', 'world', 'character', 'outline', 'requirement', 'other'];
@@ -85,6 +108,14 @@ interface KindFilterLabels {
 }
 interface ExportMenuResult {
   index: number;
+}
+interface WorkspaceReturnParams { novelContextOverrides?: string; }
+interface NovelContextOverrideReturn {
+  projectId: string;
+  branchId: string;
+  forceIncludeMaterialIds: string[];
+  forceExcludeMaterialIds: string[];
+  receiptToken: string;
 }
 const KIND_FILTER_LABELS: KindFilterLabels = {
   all: '全部', world: '世界', character: '人物', outline: '大纲', requirement: '写作要求', other: '其他',
@@ -116,6 +147,8 @@ struct NovelWorkspacePage {
   @State planFuture: string = '';
   @State planPreferences: string = '';
   @State controlNotice: string = '';
+  @State contextOverrides: NovelInjectionOverrides | null = null;
+  private lastContextReceiptToken: string = '';
   @State tab: number = 0;
   // 设定 tab 分类(iOS Compendium segmented):0 角色 / 1 世界观 / 2 剧情 / 3 更多
   @State settingTab: number = 0;
@@ -127,11 +160,18 @@ struct NovelWorkspacePage {
   @State consistencyMessage: string = '';
   @State auditRunning: boolean = false;
   @State auditMessage: string = '';
-  @State auditIssues: NovelAuditIssue[] = [];
+  @State auditReport: NovelAuditReport | null = null;
+  private auditController: NovelAuditController | null = null;
+  private auditBranchId: string = '';
   @State modelOptions: NovelModelOptionView[] = [];
   @State busy: boolean = false;
   @State draft: string = '';  // 聊天
-  @State composeMode: ComposeMode = 'whole_chapter';
+  @State composeMode: NovelComposeMode = 'whole_chapter';
+  @State sendStarting: boolean = false;
+  @State composerRestoring: boolean = false;
+  @State failedInput: string = '';
+  @State failedMessages: UIMessage[] = [];
+  @State ordinaryRecovery: NovelOrdinaryRunView | null = null;
   @State activeMessages: UIMessage[] = [];
   @State activeTextDeltasLive: boolean = false;
   @State activeTransport: StreamTransportState = 'unavailable';
@@ -143,26 +183,83 @@ struct NovelWorkspacePage {
   @State activeRunId: string = '';
   @State activeRunCreatedAt: number = 0;
   @State activeHistoryCount: number = 0;
-  // N3:讨论归档蒸馏(取当前讨论模式中未收录的 assistant 消息)
+  @State archiveOpen: boolean = false;
+  @State archiveSummary: string = '';
+  @State archiveDecisions: string[] = [];
+  @State archiveSourceCount: number = 0;
+  @State archiveSourceRange: string = '';
+  @State archiveDraftKey: string = '';
+  @State archiveError: string = '';
+  @State expandedArchiveIds: string[] = [];
+  @State collectionFeedback: string = '';
+  private collectionFeedbackToken: number = 0;
+  @State adoptionOpen: boolean = false;
+  @State adoptionKind: NovelMaterialKind = 'world';
+  @State adoptionTitle: string = '';
+  @State adoptionBody: string = '';
+  @State adoptionFields: NovelMaterialFields = {};
+  @State adoptionTargets: NovelMaterialAdoptionSheetTarget[] = [];
+  @State adoptionDraftKey: string = '';
+  @State adoptionError: string = '';
+  private archiveDraft: NovelDiscussionArchiveDraft | null = null;
+  private adoptionBaseline: NovelMaterialAdoption | null = null;
+  private adoptionTargetDigests: Map<string, string> = new Map();
+  private adoptionSourceId: string = '';
+  private adoptionIsSetting: boolean = false;
+
   async archiveDiscussion(): Promise<void> {
-    if (this.project === null || this.activeRunId.length > 0) return;
-    const discussMsgs: NovelMessage[] = this.project.messages.filter(
-      (m: NovelMessage): boolean => m.mode === 'discuss' && m.collectedChapterId === null);
-    if (discussMsgs.length === 0) {
-      promptAction.showToast({ message: '没有可归档的讨论内容', duration: 1400 });
+    const project: NovelProject | null = this.project;
+    if (project === null || this.busy || this.hasBlockingNovelRun()) return;
+    const messages: NovelMessage[] = eligibleNovelDiscussion(project);
+    if (messages.length === 0) {
+      promptAction.showToast({ message: '没有可归档的新增讨论内容', duration: 1800 });
       return;
     }
     this.busy = true;
+    this.errorMsg = '';
+    const branchId: string = this.workspaceStatus?.activeBranchId ?? '';
     try {
-      const ids: string[] = discussMsgs.map((m: NovelMessage): string => m.id);
-      const r = await getNovelCreation().archiveDiscussion(this.projectId, ids);
-      promptAction.showToast({ message: `归档完成,产出 ${r.count} 条资料建议`, duration: 1800 });
-      await this.reload();
+      const draft: NovelDiscussionArchiveDraft = await getNovelCreation().prepareDiscussionArchive(
+        this.projectId, messages.map((message: NovelMessage): string => message.id));
+      if (!this.pageAlive || (this.workspaceStatus?.activeBranchId ?? '') !== branchId) return;
+      this.archiveDraft = draft;
+      this.archiveSummary = draft.summary;
+      this.archiveDecisions = draft.decisions.slice();
+      this.archiveSourceCount = draft.sourceMessageIds.length;
+      const archivedMessages: NovelMessage[] = messages.filter((message: NovelMessage): boolean =>
+        draft.sourceMessageIds.includes(message.id));
+      this.archiveSourceRange = `从「${archivedMessages[0].content.substring(0, 24)}」至「${archivedMessages[archivedMessages.length - 1].content.substring(0, 24)}」`;
+      this.archiveDraftKey = `${draft.sourceDigest}-${Date.now()}`;
+      this.archiveError = '';
+      this.archiveOpen = true;
     } catch (e) {
-      this.errorMsg = String(e);
+      if (this.pageAlive) this.errorMsg = e instanceof Error ? e.message : String(e);
     } finally {
       this.busy = false;
     }
+  }
+
+  private async confirmArchive(summary: string, selectedIndexes: number[]): Promise<void> {
+    if (this.busy || this.archiveDraft === null) return;
+    this.busy = true;
+    this.archiveError = '';
+    try {
+      await getNovelCreation().confirmDiscussionArchive(this.projectId, this.archiveDraft, summary, selectedIndexes);
+      this.archiveOpen = false;
+      this.archiveDraft = null;
+      await this.reload();
+      if (this.pageAlive) promptAction.showToast({ message: '讨论已归档，原文保留在创作记录中', duration: 1800 });
+    } catch (e) {
+      if (this.pageAlive) this.archiveError = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private cancelArchive(): void {
+    if (this.busy) return;
+    this.archiveOpen = false;
+    this.archiveDraft = null;
   }
 
   // N2:章节版本历史 sheet
@@ -174,6 +271,7 @@ struct NovelWorkspacePage {
   @State collectParas: string[] = [];
   @State collectSelected: boolean[] = [];
   @State collectDraft: string = '';
+  @State collectManuallyEdited: boolean = false;
   @State collectMode: number = 0;  // 0 新开 / 1 并入 / 2 替换
   @State collectChapterId: string = '';
   // 章节
@@ -185,15 +283,36 @@ struct NovelWorkspacePage {
   @State expandedMaterialId: string = '';
   @State materialEditorOpen: boolean = false;
   @State editingMaterialId: string = '';
-  @State materialKind: NovelMaterialKind = 'world';
-  @State materialTitle: string = '';
-  @State materialContent: string = '';
-  @State materialEnabled: boolean = true;
+  @State materialEditorDraft: NovelMaterialEditorDraft = emptyMaterialEditorDraft();
+  @State materialEditorKey: string = '';
+  @State materialCloseRequest: number = 0;
+  private materialEditorCas: NovelWorkspaceCas | null = null;
+  private materialOpenToken: number = 0;
+  private materialCreatedAt: number = 0;
   @State polishCreateOpen: boolean = false;
   @State polishJob: DurablePolishJob | null = null;
   @State polishBusy: boolean = false;
   @State ghostwriteJob: DurableGhostwriteJob | null = null;
+  @State ghostwriteBriefOpen: boolean = false;
+  @State ghostwriteBriefKey: string = '';
+  @State ghostwriteBriefCloseRequest: number = 0;
+  @State ghostwriteBriefError: string = '';
+  @State ghostwriteBriefDetail: string = '';
+  private ghostwriteBriefOpenToken: number = 0;
+  private ghostwriteBriefCas: NovelWorkspaceCas | null = null;
+  private ghostwriteBriefJobId: string = '';
+  private ghostwriteBriefCandidateDigest: string = '';
+  @State auditRepairBusy: boolean = false;
+  private auditRepairToken: number = 0;
+
   @State ghostwriteBusy: boolean = false;
+  @State ghostwritePreview: NovelGhostwriteStartPreview | null = null;
+  @State ghostwritePreviewError: string = '';
+  @State ghostwriteReport: NovelGhostwriteReport | null = null;
+  @State singlePolishChapterId: string = '';
+  @State polishStartError: string = '';
+  @State activeQuickStart: boolean = false;
+  @State failedQuickStart: boolean = false;
   @State ghostwriteModelAvailable: boolean = false;
   @State ghostwriteModelIssue: string = '正在检查模型配置…';
 
@@ -210,13 +329,23 @@ struct NovelWorkspacePage {
   private polishPollToken: number = 0;
   private requestedBranchId: string = '';
   private requestedPolishJobId: string = '';
+  private composerDraftStore: NovelComposerDraftStore = getNovelComposerDraftStore();
+  private composerDraftOwner: string = '';
+  private composerRevision: number = 0;
+  private composerSaveToken: number = 0;
+  private failedInputMode: NovelComposeMode = 'whole_chapter';
+  @State failedInputRunKind: NovelRunKind | null = null;
+  private collectOriginalTitle: string = '';
+  private collectOriginalDraft: string = '';
+  private collectOriginalMode: number = 0;
+  private collectOriginalChapterId: string = '';
+  private collectDraftController: TextAreaController = new TextAreaController();
+  private collectTitleController: TextInputController = new TextInputController();
+  private chapterTitleController: TextInputController = new TextInputController();
+  private chapterContentController: TextAreaController = new TextAreaController();
   // F38:编辑器脏检查基线(打开时快照;返回时对比,脏则确认放弃)
   private chapterOriginalTitle: string = '';
   private chapterOriginalContent: string = '';
-  private materialOriginalKind: NovelMaterialKind = 'world';
-  private materialOriginalTitle: string = '';
-  private materialOriginalContent: string = '';
-  private materialOriginalEnabled: boolean = true;
   private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
   private keyboardAvoidanceActive: boolean = false;
 
@@ -244,7 +373,7 @@ struct NovelWorkspacePage {
     }
     const seed: string = this.pendingQuickStartSeed;
     this.pendingQuickStartSeed = '';
-    this.draft = seed;
+    this.setComposerDraft(seed);
     this.send('quick_start');
   }
 
@@ -252,7 +381,13 @@ struct NovelWorkspacePage {
   private pageHiddenOnce: boolean = false;
 
   onPageHide(): void {
+    this.ghostwriteBriefOpenToken++;
+    this.auditRepairToken++;
+    if (this.auditRepairBusy) this.cancelAuditRepair();
+    this.materialOpenToken++;
+    this.flushComposerDraft();
     this.pageHiddenOnce = true;
+    this.auditController?.cancel();
     this.restoreKeyboardAvoidance();
   }
 
@@ -260,13 +395,20 @@ struct NovelWorkspacePage {
     this.enableKeyboardAvoidance();
     if (this.pageHiddenOnce) {
       this.pageHiddenOnce = false;
-      this.reload();
+      this.reload().then((): void => { if (this.pageAlive) this.consumeContextOverrides(); });
     }
   }
 
   aboutToDisappear(): void {
+    this.ghostwriteBriefOpenToken++;
+    this.auditRepairToken++;
+    if (this.auditRepairBusy) this.cancelAuditRepair();
+    this.materialOpenToken++;
+    this.flushComposerDraft();
     this.restoreKeyboardAvoidance();
     this.pageAlive = false;
+    this.auditController?.cancel();
+    this.auditController = null;
     this.reloadToken++;
     this.novelScrollToken++;
     this.ghostwritePollToken++;
@@ -305,8 +447,24 @@ struct NovelWorkspacePage {
   // 关闭最上层自绘 overlay;有关闭动作返回 true(已消费返回),无 overlay 返回 false。
   private closeTopOverlay(): boolean {
     // 渲染顺序:后面的 child 更靠上,故按逆序检查
+    if (this.adoptionOpen) {
+      this.cancelAdoption();
+      return true;
+    }
+    if (this.archiveOpen) {
+      this.cancelArchive();
+      return true;
+    }
+    if (this.ghostwriteBriefOpen) {
+      this.ghostwriteBriefCloseRequest++;
+      return true;
+    }
     if (this.controlSheetOpen) {
       this.controlSheetOpen = false;
+      return true;
+    }
+    if (this.ghostwritePreview !== null) {
+      if (!this.ghostwriteBusy) this.ghostwritePreview = null;
       return true;
     }
     if (this.polishCreateOpen) {
@@ -314,7 +472,7 @@ struct NovelWorkspacePage {
       return true;
     }
     if (this.branchSheetOpen) {
-      this.branchSheetOpen = false;
+      if (!this.busy) this.branchSheetOpen = false;
       return true;
     }
     if (this.materialEditorOpen) {
@@ -326,7 +484,7 @@ struct NovelWorkspacePage {
       return true;
     }
     if (this.collectMessageId.length > 0) {
-      this.collectMessageId = '';
+      this.confirmDiscardCollect();
       return true;
     }
     return false;
@@ -337,14 +495,15 @@ struct NovelWorkspacePage {
       || this.chapterContent !== this.chapterOriginalContent;
   }
 
-  private materialDirty(): boolean {
-    return this.materialKind !== this.materialOriginalKind
-      || this.materialTitle !== this.materialOriginalTitle
-      || this.materialContent !== this.materialOriginalContent
-      || this.materialEnabled !== this.materialOriginalEnabled;
+  private confirmDiscardChapter(): void {
+    if (this.busy) return;
+    this.chapterTitleController.stopEditing();
+    this.chapterContentController.stopEditing();
+    setTimeout((): void => { this.confirmDiscardCommittedChapter(); }, 0);
   }
 
-  private confirmDiscardChapter(): void {
+  private confirmDiscardCommittedChapter(): void {
+    if (!this.pageAlive || !this.chapterEditorOpen || this.busy) return;
     if (!this.chapterDirty()) {
       this.chapterEditorOpen = false;
       return;
@@ -356,26 +515,13 @@ struct NovelWorkspacePage {
       secondaryButton: {
         value: '放弃',
         fontColor: ERROR,
-        action: (): void => { this.chapterEditorOpen = false; },
+        action: (): void => { if (!this.busy) this.chapterEditorOpen = false; },
       },
     });
   }
 
   private confirmDiscardMaterial(): void {
-    if (!this.materialDirty()) {
-      this.materialEditorOpen = false;
-      return;
-    }
-    AlertDialog.show({
-      title: '放弃编辑？',
-      message: '未保存的资料内容将丢失。',
-      primaryButton: { value: '继续编辑', action: (): void => {} },
-      secondaryButton: {
-        value: '放弃',
-        fontColor: ERROR,
-        action: (): void => { this.materialEditorOpen = false; },
-      },
-    });
+    if (!this.busy) this.materialCloseRequest++;
   }
 
   async reload(): Promise<void> {
@@ -394,7 +540,9 @@ struct NovelWorkspacePage {
         activeRun = creation.activeRun(projectId);
         status = await creation.workspaceStatus(projectId);
       }
+      const recovery: NovelOrdinaryRunView = await creation.readOrdinaryRun(projectId);
       const ghostwrite: DurableGhostwriteJob | null = await creation.ghostwriteJob(projectId);
+      const ghostwriteReport: NovelGhostwriteReport | null = await creation.latestGhostwriteReport(projectId);
       let polish: DurablePolishJob | null = await creation.polishJob(
         projectId, this.requestedPolishJobId);
       let polishNotice: string = '';
@@ -419,9 +567,20 @@ struct NovelWorkspacePage {
         modelIssue = error instanceof Error ? error.message : String(error);
       }
       if (this.pageAlive && token === this.reloadToken) {
+        await this.restoreComposerDraft(composerOwner(projectId, status.activeBranchId));
+        if (!this.pageAlive || token !== this.reloadToken) return;
+        if (this.workspaceStatus?.activeBranchId !== status.activeBranchId) {
+          this.expandedArchiveIds = [];
+          this.collectionFeedback = '';
+          this.collectionFeedbackToken++;
+        }
         this.project = project;
         this.workspaceStatus = status;
+        this.ordinaryRecovery = recovery.record?.branchId === status.activeBranchId ? recovery : null;
+        if (this.contextOverrides !== null && this.contextOverrides.branchId !== status.activeBranchId) this.contextOverrides = null;
+        this.requestedBranchId = '';
         this.ghostwriteJob = ghostwrite;
+        this.ghostwriteReport = ghostwriteReport;
         this.polishJob = polish;
         if (ghostwrite !== null) this.settingTab = 3;
         this.ghostwriteModelAvailable = modelAvailable;
@@ -433,7 +592,7 @@ struct NovelWorkspacePage {
           (this.activeRunId !== activeRun.run.id || this.currentUnsub === null)) {
           this.attachNovelRun(
             activeRun.run, activeRun.historyCount, activeRun.userText,
-            activeRun.startedAt, '正在继续离页前的生成…');
+            activeRun.startedAt, '正在继续离页前的生成…', activeRun.runKind === 'quick_start');
         } else if (activeRun === null && this.currentUnsub === null && this.activeRunId.length > 0) {
           this.clearNovelRunUi();
         }
@@ -473,6 +632,9 @@ struct NovelWorkspacePage {
       const next: DurableGhostwriteJob | null = await getNovelCreation().ghostwriteJob(this.projectId);
       if (!this.pageAlive || token !== this.ghostwritePollToken) return;
       this.ghostwriteJob = next;
+      if (next === null && previous !== null) {
+        this.ghostwriteReport = await getNovelCreation().latestGhostwriteReport(this.projectId);
+      }
       if (next !== null) this.settingTab = 3;
       const previousProgress: number = previous?.progress.length ?? 0;
       const nextProgress: number = next?.progress.length ?? 0;
@@ -602,18 +764,80 @@ struct NovelWorkspacePage {
   }
 
   private async startGhostwrite(targetChapterCount: number): Promise<void> {
-    if (this.ghostwriteBusy || this.novelJobLocksWorkspace()) return;
+    if (this.ghostwriteBusy || this.busy || this.hasBlockingNovelRun()) return;
+    this.ghostwriteBusy = true;
+    this.ghostwritePreviewError = '';
+    try {
+      const preview: NovelGhostwriteStartPreview = await getNovelCreation().prepareGhostwriteStart(this.projectId, targetChapterCount);
+      if (this.pageAlive) {
+        this.controlSheetOpen = false;
+        this.ghostwritePreview = preview;
+      }
+    } catch (error) { this.showWorkspaceOperationError('准备代笔计划失败', error); }
+    finally { this.ghostwriteBusy = false; }
+  }
+
+  private ghostwriteAuthorPlanPreview(): string {
+    const content: string = this.ghostwritePreview?.planContent ?? '';
+    const settings: NovelBranchSettings | undefined = this.project?.branchSettings;
+    const contract: NovelChapterContract | undefined = settings?.chapterContract;
+    if (settings !== undefined && contract !== undefined && contract.status === 'confirmed' && content === confirmedChapterPlanText(settings)) {
+      return `本章计划已确认\n\n${chapterContractMarkdown(contract)}`;
+    }
+    return content;
+  }
+
+  private async confirmGhostwriteStart(): Promise<void> {
+    const preview: NovelGhostwriteStartPreview | null = this.ghostwritePreview;
+    if (preview === null || this.ghostwriteBusy) return;
+    const targetChapterCount: number = preview.targetChapterCount;
+    if (this.busy || this.hasBlockingNovelRun()) return;
     this.ghostwriteBusy = true;
     try {
-      this.ghostwriteJob = await getNovelCreation().startGhostwrite(this.projectId, targetChapterCount);
+      this.ghostwriteJob = await getNovelCreation().startGhostwrite(this.projectId, targetChapterCount, preview);
+      this.ghostwritePreview = null;
       this.settingTab = 3;
       this.errorMsg = '';
       this.scheduleGhostwritePoll();
     } catch (error) {
-      this.showWorkspaceOperationError('启动代笔失败', error);
+      this.ghostwritePreviewError = String(error);
     } finally {
       this.ghostwriteBusy = false;
     }
+  }
+
+  private async openGhostwriteBrief(): Promise<void> {
+    const job: DurableGhostwriteJob | null = this.ghostwriteJob;
+    if (job === null || this.ghostwriteBusy || (job.stage !== 'paused' && job.stage !== 'failed')) return;
+    const token: number = ++this.ghostwriteBriefOpenToken;
+    try {
+      const snapshot: NovelWorkspaceSnapshot = await getNovelCreation().readWorkspaceSnapshot(this.projectId);
+      if (!this.pageAlive || token !== this.ghostwriteBriefOpenToken || this.ghostwriteJob?.jobId !== job.jobId) return;
+      if (snapshot.status.activeBranchId !== job.branchId) throw new Error('分支已变化，请重新打开代笔任务');
+      this.ghostwriteBriefDetail = `分支“${snapshot.status.activeBranchName}” · 第 ${job.currentChapterOrdinal} 章。保留当前候选作为来源，按本次要求生成下一稿；确认收录前正文保持原样。`;
+      this.ghostwriteBriefCas = snapshot.status.cas;
+      this.ghostwriteBriefJobId = job.jobId;
+      this.ghostwriteBriefCandidateDigest = job.candidate?.digest ?? '';
+      this.ghostwriteBriefKey = `${job.jobId}:${Date.now()}`;
+      this.ghostwriteBriefError = '';
+      this.controlSheetOpen = false;
+      this.ghostwriteBriefOpen = true;
+    } catch (error) { this.showWorkspaceOperationError('无法打开修改要求', error); }
+  }
+
+  private async submitGhostwriteBrief(brief: string): Promise<void> {
+    if (this.ghostwriteBusy || this.ghostwriteBriefCas === null) return;
+    this.ghostwriteBusy = true; this.ghostwriteBriefError = '';
+    try {
+      this.ghostwriteJob = await getNovelCreation().reviseGhostwriteWithBrief(this.projectId,
+        this.ghostwriteBriefJobId, brief, this.ghostwriteBriefCas, this.ghostwriteBriefCandidateDigest);
+      if (!this.pageAlive) return;
+      this.ghostwriteBriefOpen = false;
+      this.ghostwritePollToken++;
+      await this.reload();
+      this.scheduleGhostwritePoll();
+    } catch (error) { if (this.pageAlive) this.ghostwriteBriefError = String(error); }
+    finally { if (this.pageAlive) this.ghostwriteBusy = false; }
   }
 
   private async pauseGhostwrite(): Promise<void> {
@@ -671,6 +895,7 @@ struct NovelWorkspacePage {
       this.ghostwritePollToken++;
       await getNovelCreation().cancelGhostwrite(this.projectId, job.jobId);
       this.ghostwriteJob = null;
+      this.ghostwriteReport = await getNovelCreation().latestGhostwriteReport(this.projectId);
       this.errorMsg = '';
       await this.reload();
     } catch (error) {
@@ -724,44 +949,214 @@ struct NovelWorkspacePage {
     }
   }
 
-  // LLM 全文连续性审计(iOS NovelContinuityAudit);需已配置 stateSync 职责模型
   private async runLlmContinuityAudit(): Promise<void> {
     if (this.auditRunning || this.busy) return;
-    const p: NovelProject | null = this.project;
-    if (p !== null && p.modelPolicy.stateSync === null) {
-      this.auditMessage = '请先在工作区设定中配置「内部职责」模型';
-      this.auditIssues = [];
-      return;
-    }
+    this.auditBranchId = this.workspaceStatus?.activeBranchId ?? '';
     this.auditRunning = true;
-    this.auditMessage = '审计中…（检查情节、人名与时间线）';
-    this.auditIssues = [];
+    this.auditMessage = '正在准备全文审校…';
+    this.auditReport = null;
+    const control: NovelAuditController = new NovelAuditController((progress: NovelAuditProgress): void => {
+      if (this.pageAlive && this.auditController === control) {
+        this.auditMessage = `已检查 ${progress.completedBlocks}/${progress.totalBlocks} 块 · ${progress.checkedChars}/${progress.totalChars} 字符`;
+      }
+    });
+    this.auditController = control;
     try {
-      const report: NovelAuditReport = await getNovelCreation().runContinuityAudit(this.projectId);
-      this.auditIssues = report.issues;
-      this.auditMessage = report.ok
-        ? '未发现连续性问题。'
-        : `发现 ${report.issues.length} 条问题（不自动改稿）。`;
+      const report: NovelAuditReport = await getNovelCreation().runContinuityAudit(this.projectId, control);
+      if (!this.pageAlive || this.auditController !== control) return;
+      this.auditReport = report;
+      this.auditMessage = '';
       this.errorMsg = '';
     } catch (error) {
-      this.auditMessage = '';
-      this.showWorkspaceOperationError('连续性审计失败', error);
+      if (this.pageAlive) {
+        this.auditMessage = '';
+        this.showWorkspaceOperationError('连续性审校失败', error);
+      }
     } finally {
-      this.auditRunning = false;
+      if (this.auditController === control) {
+        this.auditRunning = false;
+        this.auditController = null;
+      }
     }
   }
 
-  private auditSeverityColor(severity: string): string {
-    if (severity === 'blocker') return ERROR;
-    if (severity === 'major') return ACCENT;
-    return INK3;
+  private auditReportStale(): boolean {
+    const report: NovelAuditReport | null = this.auditReport;
+    const project: NovelProject | null = this.project;
+    if (report === null || project === null) return false;
+    if (this.workspaceStatus?.activeBranchId !== this.auditBranchId) return true;
+    return report.blocks.some((block: NovelAuditBlock): boolean => {
+      const chapter: NovelChapter | undefined = project.chapters.find((item: NovelChapter): boolean => item.id === block.chapterId);
+      return chapter === undefined || chapter.discarded || defaultGhostwriteDigest(chapter.content) !== block.sourceDigest;
+    });
+  }
+
+  private async openAuditEvidence(issue: NovelAuditIssue | NovelAuditReference, targetChapterId: string = ''): Promise<void> {
+    const chapterId: string = issue.chapterId;
+    if (chapterId.length === 0) return;
+    const token: number = this.auditRepairToken;
+    try {
+      const snapshot: NovelWorkspaceSnapshot = await getNovelCreation().readWorkspaceSnapshot(this.projectId);
+      if (!this.pageAlive || this.pageHiddenOnce || token !== this.auditRepairToken) return;
+      const status: NovelWorkspaceStatus = snapshot.status;
+      const project: NovelProject = snapshot.project;
+      if (targetChapterId.length > 0) verifyAuditCanonicalReferences(project.chapters, targetChapterId, [issue]);
+      const chapter: NovelChapter | undefined = project.chapters.find((item: NovelChapter): boolean => item.id === chapterId);
+      if (status.activeBranchId !== this.auditBranchId || status.cas.branchId !== this.auditBranchId || chapter === undefined || chapter.discarded ||
+        defaultGhostwriteDigest(chapter.content) !== issue.sourceDigest || !Number.isInteger(issue.start) || !Number.isInteger(issue.end) ||
+        issue.start < 0 || issue.end <= issue.start || issue.end > chapter.content.length || issue.quote.length === 0 ||
+        chapter.content.slice(issue.start, issue.end) !== issue.quote) {
+        this.errorMsg = '分支或正文已变化，这条证据来自旧稿。请重新审校后查看原文。';
+        return;
+      }
+      await router.pushUrl({ url: 'pages/NovelChapterReaderPage', params: { projectId: this.projectId, chapterId,
+        evidenceQuote: issue.quote, evidenceStart: issue.start, evidenceEnd: issue.end, evidenceDigest: issue.sourceDigest,
+        evidenceBranchId: this.auditBranchId } });
+    } catch (error) {
+      if (this.pageAlive && !this.pageHiddenOnce && token === this.auditRepairToken) this.showWorkspaceOperationError('无法查看审校原文', error);
+    }
+  }
+
+  private async repairAuditIssue(issue: NovelAuditIssue): Promise<void> {
+    await this.repairAuditIssues([issue]);
+  }
+
+  private async repairAuditIssues(issues: NovelAuditIssue[]): Promise<void> {
+    if (issues.length === 0 || this.auditRunning || this.auditRepairBusy || this.busy || this.hasBlockingNovelRun() || this.auditReportStale()) return;
+    this.auditRepairBusy = true;
+    const token: number = ++this.auditRepairToken;
+    try {
+      const proposal = await getNovelCreation().repairContinuityIssues(this.projectId, issues);
+      if (!this.pageAlive || this.pageHiddenOnce || token !== this.auditRepairToken) return;
+      await router.pushUrl({ url: 'pages/NovelOperationsPage', params: { projectId: this.projectId, proposalId: proposal.proposalId } });
+    } catch (error) {
+      if (this.pageAlive && !this.pageHiddenOnce && token === this.auditRepairToken) this.showWorkspaceOperationError('无法生成审校修复建议', error);
+    } finally { if (this.pageAlive && token === this.auditRepairToken) this.auditRepairBusy = false; }
+  }
+
+  private async cancelAuditRepair(): Promise<void> {
+    if (!this.auditRepairBusy) return;
+    const token: number = ++this.auditRepairToken;
+    try { await getNovelCreation().cancelContinuityRepair(this.projectId); }
+    catch (error) {
+      if (this.pageAlive && !this.pageHiddenOnce && token === this.auditRepairToken) this.showWorkspaceOperationError('无法取消修复建议', error);
+    } finally { if (this.pageAlive && token === this.auditRepairToken) this.auditRepairBusy = false; }
+  }
+
+  private openProjectPage(url: string): void {
+    if (this.busy || this.hasBlockingNovelRun()) return;
+    this.controlSheetOpen = false;
+    router.pushUrl({ url, params: { projectId: this.projectId } })
+      .catch((error: Error): void => { if (this.pageAlive) this.errorMsg = String(error); });
+  }
+
+  private openPolishPage(): void {
+    if (this.busy) return;
+    this.controlSheetOpen = false;
+    router.pushUrl({ url: 'pages/NovelPolishPage', params: { projectId: this.projectId } })
+      .catch((error: Error): void => { if (this.pageAlive) this.errorMsg = String(error); });
+  }
+
+  private toggleDiscussionArchive(archiveId: string): void {
+    if (!this.project?.discussionArchives.some((archive: NovelDiscussionArchive): boolean => archive.id === archiveId)) return;
+    this.expandedArchiveIds = this.expandedArchiveIds.includes(archiveId)
+      ? this.expandedArchiveIds.filter((id: string): boolean => id !== archiveId)
+      : this.expandedArchiveIds.concat(archiveId);
+  }
+
+  private ordinaryRecoveryRecord(): NovelOrdinaryRun | null {
+    const record: NovelOrdinaryRun | null = this.ordinaryRecovery?.record ?? null;
+    return record !== null && record.status !== 'completed' && record.status !== 'waiting_user' &&
+      record.branchId === this.workspaceStatus?.activeBranchId && !this.ordinaryRecovery?.active ? record : null;
+  }
+
+  private ordinaryPartialText(record: NovelOrdinaryRun): string {
+    if (record.originalRequest.operation.kind === 'tool_continuation') {
+      const current: UIMessage | undefined = ordinaryRunMessages(record).slice(ordinaryRunHistoryCount(record))
+        .reverse().find((message: UIMessage): boolean => message.role === 'assistant');
+      if (current === undefined) return '';
+      const before: UIMessage | undefined = record.originalRequest.history.find((message: UIMessage): boolean => message.id === current.id);
+      const text: string = latestAssistantText([current]);
+      const oldText: string = before === undefined ? '' : latestAssistantText([before]);
+      return text.startsWith(oldText) ? text.slice(oldText.length) : text;
+    }
+    const originalIds: string[] = record.originalRequest.history.map((message: UIMessage): string => message.id);
+    return latestAssistantText(record.checkpointMessages.filter((message: UIMessage): boolean => !originalIds.includes(message.id)));
+  }
+
+  private ordinaryRecoveryDetail(record: NovelOrdinaryRun): string {
+    if (record.originalRequest.operation.kind === 'tool_continuation') {
+      return `${this.workspaceStatus?.activeBranchName ?? '当前分支'} · 工具续接\n继续已保存的回答与工具结果，不重新发起原讨论。重试会替换本次工具续接的部分内容；需要保留可先复制。`;
+    }
+    const mode: string = record.runKind === 'regenerate' ? '章节重生成'
+      : record.runKind === 'polish' ? '章节润色' : record.runKind === 'quick_start' ? '快速开始'
+        : record.mode === 'discuss' ? '讨论' : record.granularity === 'whole_chapter' ? '整章创作' : '片段创作';
+    const source: NovelChapter | undefined = this.project?.chapters.find((chapter: NovelChapter): boolean => chapter.id === record.candidate?.sourceChapterId);
+    return `${this.workspaceStatus?.activeBranchName ?? '当前分支'} · ${mode}${source === undefined ? '' : ` · ${source.title}`}\n使用保存的原请求、模型与上下文。重试不会将此前失败的部分内容作为新的写作输入。`;
+  }
+
+  private recoverOrdinaryRun(recordId: string, kind: 'retry' | 'resume'): void {
+    const record: NovelOrdinaryRun | null = this.ordinaryRecoveryRecord();
+    if (record === null || record.id !== recordId || this.busy || this.hasBlockingNovelRun()) return;
+    if (kind === 'retry' ? !this.ordinaryRecovery?.retryAllowed : !this.ordinaryRecovery?.resumeAllowed) return;
+    const run: NovelRun = kind === 'retry'
+      ? getNovelCreation().retryOrdinaryRun(this.projectId, recordId)
+      : getNovelCreation().resumeOrdinaryRun(this.projectId, recordId);
+    const historyCount: number = kind === 'resume' || record.originalRequest.operation.kind === 'tool_continuation'
+      ? ordinaryRunHistoryCount(record) : this.project?.messages.length ?? 0;
+    this.attachNovelRun(run, historyCount, '', Date.now(),
+      kind === 'retry' ? '正在按原请求重试…' : '正在继续原任务…', record.runKind === 'quick_start');
+  }
+
+  private copyOrdinaryPartial(recordId: string, text: string): void {
+    if (this.ordinaryRecoveryRecord()?.id !== recordId || text.length === 0) return;
+    try {
+      pasteboard.getSystemPasteboard().setDataSync(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));
+      promptAction.showToast({ message: '已复制保存的部分内容', duration: 1400 });
+    } catch (error) { this.showWorkspaceOperationError('复制失败', error); }
+  }
+
+  private confirmCloneCollected(message: NovelMessage): void {
+    const project: NovelProject | null = this.project;
+    const cas: NovelWorkspaceCas | undefined = this.workspaceStatus?.cas;
+    if (project === null || cas === undefined || this.busy || this.hasBlockingNovelRun() ||
+      !canCloneCollectedMessage(project, message, cas.branchId)) return;
+    const projectId: string = this.projectId;
+    AlertDialog.show({ title: '再次收录这份回复？',
+      message: '根据当前书稿再次收录这份原回复。将创建一份带来源标记的新候选，再由你选择段落与收录位置；原收录记录保留。',
+      primaryButton: { value: '取消', action: (): void => {} },
+      secondaryButton: { value: '创建收录候选', action: (): void => {
+        if (this.pageAlive && !this.pageHiddenOnce && this.projectId === projectId && this.workspaceStatus?.activeBranchId === cas.branchId) {
+          this.cloneCollectedForCollection(message.id, cas);
+        }
+      } } });
+  }
+
+  private async cloneCollectedForCollection(messageId: string, cas: NovelWorkspaceCas): Promise<void> {
+    if (this.busy || this.hasBlockingNovelRun() || this.workspaceStatus?.activeBranchId !== cas.branchId) return;
+    const projectId: string = this.projectId;
+    this.busy = true;
+    this.errorMsg = '';
+    try {
+      const cloned: NovelMessage = await getNovelCreation().cloneCollectedMessage(projectId, messageId, cas);
+      if (!this.pageAlive || this.pageHiddenOnce || this.projectId !== projectId) return;
+      await this.reload();
+      if (this.pageAlive && !this.pageHiddenOnce && this.projectId === projectId && this.workspaceStatus?.activeBranchId === cas.branchId) {
+        if (this.project?.messages.some((message: NovelMessage): boolean => message.id === cloned.id)) this.openCollect(cloned.id);
+        else if (this.errorMsg.length === 0) this.errorMsg = '收录候选已保存，但页面尚未读取到。请重新打开项目后再收录。';
+      }
+    } catch (error) {
+      if (this.pageAlive && this.projectId === projectId) this.errorMsg = String(error);
+    } finally { if (this.pageAlive && this.projectId === projectId) this.busy = false; }
   }
 
   private async createWorkspaceBranch(name: string): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || this.hasBlockingNovelRun()) return;
     this.busy = true;
     try {
       await getNovelCreation().createBranch(this.projectId, name);
+      this.requestedBranchId = '';
+      this.requestedPolishJobId = '';
       this.branchSheetOpen = false;
       await this.reload();
     } catch (e) {
@@ -772,10 +1167,43 @@ struct NovelWorkspacePage {
   }
 
   private async selectWorkspaceBranch(branchId: string): Promise<void> {
-    if (this.busy || branchId === this.workspaceStatus?.activeBranchId) return;
+    if (this.busy || this.ghostwriteBusy || this.polishBusy || this.sendStarting || this.composerRestoring ||
+      branchId === this.workspaceStatus?.activeBranchId) return;
+    if (this.hasBlockingNovelRun()) {
+      const branch: NovelBranch | undefined = this.workspaceStatus?.branches.find((item: NovelBranch): boolean => item.id === branchId);
+      if (branch === undefined) return;
+      AlertDialog.show({
+        title: '停止任务并切换分支？',
+        message: `停止当前生成、代笔或润色任务，再切换到“${branch.name}”。已保存的内容保留，尚未完成的任务将取消。`,
+        primaryButton: { value: '继续当前任务', action: (): void => {} },
+        secondaryButton: { value: '停止并切换', action: (): void => { this.stopAndSwitchWorkspaceBranch(branchId); } },
+      });
+      return;
+    }
+    await this.stopAndSwitchWorkspaceBranch(branchId);
+  }
+
+  private async stopAndSwitchWorkspaceBranch(branchId: string): Promise<void> {
+    if (this.busy || this.ghostwriteBusy || this.polishBusy || this.sendStarting || this.composerRestoring) return;
     this.busy = true;
     try {
-      await getNovelCreation().switchBranch(this.projectId, branchId);
+      const creation = getNovelCreation();
+      await creation.stopActiveRun(this.projectId);
+      const ghostwrite: DurableGhostwriteJob | null = this.ghostwriteJob;
+      if (ghostwrite !== null) {
+        await creation.cancelGhostwrite(this.projectId, ghostwrite.jobId);
+        this.ghostwritePollToken++;
+        this.ghostwriteJob = null;
+      }
+      const polish: DurablePolishJob | null = this.polishJob;
+      if (polish !== null && this.polishLocksWorkspace()) {
+        this.polishJob = await creation.cancelPolish(this.projectId, polish.jobId);
+        this.polishPollToken++;
+      }
+      // switchBranch 重新读取停止任务之后的工作区 CAS，再进入既有事务。
+      await creation.switchBranch(this.projectId, branchId);
+      this.requestedBranchId = '';
+      this.requestedPolishJobId = '';
       this.branchSheetOpen = false;
       await this.reload();
     } catch (e) {
@@ -786,7 +1214,7 @@ struct NovelWorkspacePage {
   }
 
   private async undoWorkspace(): Promise<void> {
-    if (this.busy || this.novelJobLocksWorkspace()) return;
+    if (this.busy || this.hasBlockingNovelRun()) return;
     this.busy = true;
     try {
       await getNovelCreation().undoLast(this.projectId);
@@ -799,7 +1227,7 @@ struct NovelWorkspacePage {
   }
 
   private async syncWorkspacePlot(): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || this.hasBlockingNovelRun()) return;
     this.busy = true;
     try {
       await getNovelCreation().syncPlot(this.projectId);
@@ -812,7 +1240,7 @@ struct NovelWorkspacePage {
   }
 
   private async resolveWorkspaceUnresolved(): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || this.hasBlockingNovelRun()) return;
     this.busy = true;
     try {
       await getNovelCreation().resolveUnresolved(this.projectId);
@@ -873,27 +1301,40 @@ struct NovelWorkspacePage {
     const uris: string[] = await documentPicker.save(options);
     if (uris.length === 0) return;
     this.writeExportBytes(uris[0], bytes);
-    promptAction.showToast({ message: `已导出 ${fileName}`, duration: 1600 });
+    promptAction.showToast({ message: '文件已导出', duration: 1600 });
   }
 
-  private async exportArtifact(index: number): Promise<void> {
+  private async deliverExportFile(
+    fileName: string, bytes: Uint8Array, share: boolean, format: NovelShareFormat,
+  ): Promise<void> {
+    if (!share) { await this.saveExportFile(fileName, bytes); return; }
+    const context: common.UIAbilityContext =
+      this.getUIContext().getHostContext() as common.UIAbilityContext;
+    await shareNovelFile(context, fileName, bytes, format,
+      (): boolean => this.pageAlive && !this.pageHiddenOnce);
+  }
+
+  private async exportArtifact(index: number, share: boolean = false): Promise<void> {
     if (this.project === null || this.busy) return;
     this.busy = true;
     try {
       const safeName: string = this.project.name.replace(/[\\/:*?"<>|]/g, '-');
       if (index === 0) {
         const zip: Uint8Array = await getNovelWorkspaceService().exportWorkspaceZip(this.projectId);
-        await this.saveExportFile(`${safeName}.amber-novel.zip`, zip);
+        await this.deliverExportFile(`${safeName}.amber-novel.zip`, zip, share, 'zip');
+      } else if (index === 1) {
+        const zip: Uint8Array = await getNovelWorkspaceService().exportNativeBackupZip(this.projectId);
+        await this.deliverExportFile(`${safeName}.amber-native-backup.zip`, zip, share, 'zip');
       } else {
         const book: NovelBookExportBundle = await getNovelWorkspaceService().exportBook(this.projectId);
-        if (index === 1) await this.saveExportFile(`${safeName}.txt`, this.encodeExportText(book.text));
-        else if (index === 2) {
-          await this.saveExportFile(`${safeName}.md`, this.encodeExportText(book.markdown));
-        } else if (index === 3) await this.saveExportFile(`${safeName}.epub`, book.epub);
+        if (index === 2) await this.deliverExportFile(`${safeName}.txt`, this.encodeExportText(book.text), share, 'txt');
+        else if (index === 3) {
+          await this.deliverExportFile(`${safeName}.md`, this.encodeExportText(book.markdown), share, 'markdown');
+        } else if (index === 4) await this.deliverExportFile(`${safeName}.epub`, book.epub, share, 'epub');
       }
       this.errorMsg = '';
     } catch (e) {
-      this.errorMsg = `导出失败：${String(e)}`;
+      this.errorMsg = `${share ? '分享' : '导出'}失败：${String(e)}`;
       promptAction.showToast({ message: this.errorMsg, duration: 2400 });
     } finally {
       this.busy = false;
@@ -904,33 +1345,57 @@ struct NovelWorkspacePage {
     if (this.project === null || this.busy) return;
     promptAction.showActionMenu({
       buttons: [
-        { text: '工作区 ZIP', color: INK },
-        { text: '正文 TXT', color: INK },
-        { text: '正文 Markdown', color: INK },
-        { text: '正文 EPUB', color: INK },
+        { text: '公开工作区 ZIP（跨端交流）', color: $r('sys.color.ohos_id_color_text_primary') },
+        { text: '完整备份 ZIP（含创作记录）', color: $r('sys.color.ohos_id_color_text_primary') },
+        { text: '正文 TXT', color: $r('sys.color.ohos_id_color_text_primary') },
+        { text: '正文 Markdown', color: $r('sys.color.ohos_id_color_text_primary') },
+        { text: '正文 EPUB', color: $r('sys.color.ohos_id_color_text_primary') },
+        { text: '分享作品…', color: $r('sys.color.ohos_id_color_text_primary') },
       ],
     }).then((result: ExportMenuResult): void => {
-      this.exportArtifact(result.index);
+      if (!this.pageAlive || this.pageHiddenOnce || this.busy) return;
+      if (result.index === 5) this.showShareMenu();
+      else this.exportArtifact(result.index);
+    }).catch((): void => {});
+  }
+
+  private showShareMenu(): void {
+    if (this.project === null || this.busy) return;
+    promptAction.showActionMenu({
+      buttons: [
+        { text: '分享公开工作区 ZIP', color: $r('sys.color.ohos_id_color_text_primary') },
+        { text: '分享完整备份 ZIP', color: $r('sys.color.ohos_id_color_text_primary') },
+        { text: '分享正文 TXT', color: $r('sys.color.ohos_id_color_text_primary') },
+        { text: '分享正文 Markdown', color: $r('sys.color.ohos_id_color_text_primary') },
+        { text: '分享正文 EPUB', color: $r('sys.color.ohos_id_color_text_primary') },
+      ],
+    }).then((result: ExportMenuResult): void => {
+      if (!this.pageAlive || this.pageHiddenOnce || this.busy) return;
+      this.exportArtifact(result.index, true);
     }).catch((): void => {});
   }
 
   // 章节目录次要操作(一致性/深度审计/撤销/批量润色);既有守卫逻辑不变
   private showChapterToolsMenu(): void {
+    if (this.busy || this.project === null) return;
     promptAction.showActionMenu({
       buttons: [
-        { text: '一致性检查', color: INK },
+        { text: '一致性检查', color: $r('sys.color.ohos_id_color_text_primary') },
         { text: this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace() ? '撤销上次工作区操作' : '撤销（当前不可用）',
-          color: this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace() ? INK : INK4 },
+          color: this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace() ? $r('sys.color.ohos_id_color_text_primary') : $r('sys.color.ohos_id_color_text_tertiary') },
         { text: this.polishConflictReason().length > 0 ? `批量润色（${this.polishConflictReason()}）` : '批量润色',
-          color: this.polishConflictReason().length > 0 ? INK4 : INK },
+          color: this.polishConflictReason().length > 0 ? $r('sys.color.ohos_id_color_text_tertiary') : $r('sys.color.ohos_id_color_text_primary') },
       ],
     }).then((result: ExportMenuResult): void => {
+      if (!this.pageAlive || this.busy) return;
       if (result.index === 0) this.runConsistencyCheck();
       else if (result.index === 1) {
         if (this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace()) this.undoWorkspace();
       } else if (result.index === 2) {
         if (this.polishConflictReason().length === 0) {
           this.requestedPolishJobId = '';
+          this.singlePolishChapterId = '';
+          this.polishStartError = '';
           this.polishCreateOpen = true;
         }
       }
@@ -949,7 +1414,19 @@ struct NovelWorkspacePage {
   }
 
   private projectMessageUi(message: NovelMessage): UIMessage {
-    return novelMessageUi(message);
+    const overview: string | null = this.project === null ? null : formatNovelQuickStartOverview(this.project, message);
+    if (overview === null) return novelMessageUi(message);
+    const original: UIMessage = novelMessageUi(message);
+    return makeUIMessage(original.role, [{ type: 'text', text: overview, metadata: null }], {
+      id: original.id, createdAt: original.createdAt, finishedAt: original.finishedAt, modelId: original.modelId,
+    });
+  }
+
+  private unsavedDisplayMessage(message: UIMessage): UIMessage {
+    if (!this.failedQuickStart || message.role !== 'assistant') return message;
+    return makeUIMessage('assistant', [{ type: 'text', text: '快速开始未能保存。可复制原始内容后重试。', metadata: null }], {
+      id: message.id, createdAt: message.createdAt, finishedAt: message.finishedAt, modelId: message.modelId,
+    });
   }
 
   private pendingUserUi(): UIMessage {
@@ -1025,31 +1502,146 @@ struct NovelWorkspacePage {
     this.scheduleNovelScrollToBottom();
   }
 
-  async send(runKindOverride: NovelRunKind | null = null): Promise<void> {
-    const text: string = this.draft.trim();
-    if (text.length === 0 || this.hasBlockingNovelRun() || this.project === null) return;
+  private setComposerDraft(text: string): void {
+    if (text === this.draft) return;
+    this.draft = text;
+    this.composerRevision++;
+    this.scheduleComposerSave();
+  }
+
+  private scheduleComposerSave(): void {
+    const token: number = ++this.composerSaveToken;
+    setTimeout((): void => {
+      if (token === this.composerSaveToken) this.flushComposerDraft();
+    }, 400);
+  }
+
+  private flushComposerDraft(): void {
+    this.composerSaveToken++;
+    if (this.composerDraftOwner.length === 0 || this.composerRestoring) return;
+    const owner: string = this.composerDraftOwner;
+    const snapshot: NovelComposerDraft = { text: this.draft, mode: this.composeMode };
+    this.composerDraftStore.save(owner, snapshot).catch((error: Object): void => {
+      const message: string = `创作草稿保存失败：${String(error)}`;
+      if (this.pageAlive && this.composerDraftOwner === owner) this.errorMsg = message;
+      promptAction.showToast({ message, duration: 2400 });
+    });
+  }
+
+  private async restoreComposerDraft(owner: string): Promise<void> {
+    if (this.composerDraftOwner === owner) return;
+    this.flushComposerDraft();
+    this.composerDraftOwner = owner;
+    this.composerRevision++;
+    const revision: number = this.composerRevision;
+    this.composerRestoring = true;
+    this.draft = '';
+    this.failedInput = '';
+    this.failedInputRunKind = null;
+    this.failedMessages = [];
     try {
-      await getNovelCreation().validateWritingModel(this.projectId);
+      const snapshot: NovelComposerDraft = await this.composerDraftStore.load(owner);
+      if (this.pageAlive && this.composerDraftOwner === owner && this.composerRevision === revision) {
+        this.draft = snapshot.text;
+        this.composeMode = snapshot.mode;
+      }
     } catch (error) {
-      this.errorMsg = `模型不可用：${String(error)}`;
+      if (this.pageAlive && this.composerDraftOwner === owner) {
+        this.errorMsg = `创作草稿恢复失败：${String(error)}`;
+      }
+    } finally {
+      if (this.composerDraftOwner === owner) this.composerRestoring = false;
+    }
+  }
+
+  private restoreFailedInput(): void {
+    if (this.failedInputRunKind === 'quick_start') {
+      this.retryQuickStartSeed(this.failedInput);
       return;
     }
-    if (this.hasBlockingNovelRun() || this.project === null || this.draft.trim() !== text) return;
-    const mode: NovelChatMode = this.composeMode === 'discuss' ? 'discuss' : 'write';
-    let gran: NovelGenerationGranularity | null = null;
-    if (this.composeMode === 'continue') gran = 'continuation';
-    else if (this.composeMode === 'whole_chapter') gran = 'whole_chapter';
-    let runKind: NovelRunKind = 'discussion';
-    if (this.composeMode === 'continue') runKind = 'prose_continuation';
-    else if (this.composeMode === 'whole_chapter') runKind = 'prose_whole_chapter';
-    if (runKindOverride !== null) runKind = runKindOverride;
+    if (this.failedInput.length === 0 || this.hasBlockingNovelRun()) return;
+    if (this.draft.length > 0) {
+      promptAction.showToast({ message: '请先保留或清空当前输入，再恢复失败的输入。', duration: 1800 });
+      return;
+    }
+    this.composeMode = this.failedInputMode;
+    this.setComposerDraft(this.failedInput);
+    this.failedInput = '';
+    this.flushComposerDraft();
+  }
 
-    this.draft = '';
-    const run: NovelRun = runKind === 'quick_start'
-      ? await getNovelCreation().quickStart(this.projectId, text)
-      : getNovelCreation().generate(this.projectId, text, mode, gran, runKind);
-    this.attachNovelRun(
-      run, this.project.messages.length, text, Date.now(), '正在连接模型并组织正文…');
+  private quickStartSeedFor(message: NovelMessage): string {
+    const messages: NovelMessage[] = this.project?.messages ?? [];
+    const index: number = messages.findIndex((item: NovelMessage): boolean => item.id === message.id);
+    for (let cursor: number = index - 1; cursor >= 0; cursor--) {
+      if (messages[cursor].role === 'user') return novelMessageText(messages[cursor]);
+    }
+    return '';
+  }
+
+  private canRetryQuickStart(message: NovelMessage): boolean {
+    return message.role === 'assistant' && message.runKind === 'quick_start' &&
+      !this.project?.settingProposals.some((proposal: NovelSettingProposal): boolean => proposal.sourceMessageId === message.id) &&
+      this.quickStartSeedFor(message).trim().length > 0;
+  }
+
+  private async retryQuickStartSeed(seed: string): Promise<void> {
+    if (seed.trim().length === 0 || this.busy || this.hasBlockingNovelRun()) return;
+    if (this.draft.length > 0 && this.draft !== seed) {
+      promptAction.showToast({ message: '请先保留或清空当前输入，再重试快速开始。', duration: 1800 });
+      return;
+    }
+    this.composeMode = 'discuss';
+    this.setComposerDraft(seed);
+    this.flushComposerDraft();
+    await this.send('quick_start');
+  }
+
+  async send(runKindOverride: NovelRunKind | null = null): Promise<void> {
+    const originalInput: string = this.draft;
+    const text: string = originalInput.trim();
+    if (text.length === 0 || this.busy || this.hasBlockingNovelRun() || this.project === null) return;
+    const owner: string = this.composerDraftOwner;
+    const composeMode: NovelComposeMode = this.composeMode;
+    this.sendStarting = true;
+    let clearedRevision: number = -1;
+    try {
+      await getNovelCreation().validateWritingModel(this.projectId);
+      if (!this.pageAlive || this.busy || this.activeRunId.length > 0 || this.novelJobLocksWorkspace() ||
+        this.project === null || this.composerDraftOwner !== owner || this.draft !== originalInput) return;
+      const mode: NovelChatMode = composeMode === 'discuss' ? 'discuss' : 'write';
+      let gran: NovelGenerationGranularity | null = null;
+      if (composeMode === 'continue') gran = 'continuation';
+      else if (composeMode === 'whole_chapter') gran = 'whole_chapter';
+      let runKind: NovelRunKind = novelComposerRunKind(mode, gran);
+      if (runKindOverride !== null) runKind = runKindOverride;
+      this.setComposerDraft('');
+      clearedRevision = this.composerRevision;
+      this.flushComposerDraft();
+      const run: NovelRun = runKind === 'quick_start'
+        ? await getNovelCreation().quickStart(this.projectId, text)
+        : getNovelCreation().generate(this.projectId, text, mode, gran, runKind, null, this.contextOverrides ?? undefined);
+      if (runKind !== 'quick_start') this.contextOverrides = null;
+      if (!this.pageAlive || this.composerDraftOwner !== owner) return;
+      this.failedInput = '';
+      this.attachNovelRun(
+        run, this.project.messages.length, text, Date.now(), '正在连接模型并组织正文…', runKind === 'quick_start');
+    } catch (error) {
+      if (this.pageAlive && this.composerDraftOwner === owner) {
+        if (clearedRevision >= 0 && canRestoreFailedInput(
+          owner, this.composerDraftOwner, clearedRevision, this.composerRevision, this.draft)) {
+          this.setComposerDraft(originalInput);
+          this.flushComposerDraft();
+        }
+        if (runKindOverride === 'quick_start') {
+          this.failedInput = text;
+          this.failedInputRunKind = 'quick_start';
+        }
+        this.errorMsg = `生成未能启动：${String(error)}`;
+      }
+    } finally {
+      this.sendStarting = false;
+    }
   }
 
   interrupt(): void {
@@ -1057,30 +1649,54 @@ struct NovelWorkspacePage {
   }
 
   private hasBlockingNovelRun(): boolean {
-    return this.activeRunId.length > 0 || this.novelJobLocksWorkspace();
+    return this.sendStarting || this.composerRestoring ||
+      this.activeRunId.length > 0 || this.novelJobLocksWorkspace();
   }
 
   // 打开收录表单(iOS 四段式):拆段落、全选、初稿=全选拼接
   openCollect(messageId: string): void {
-    this.collectMessageId = messageId;
     const p: NovelProject | null = this.project;
-    this.collectTitle = p !== null ? `第 ${p.chapters.length + 1} 章` : '第 1 章';
     const msg: NovelMessage | null = p === null ? null
       : p.messages.find((m: NovelMessage): boolean => m.id === messageId) ?? null;
+    const location: CollectionLocation = defaultCollectionLocation(
+      msg?.candidate?.kind ?? 'write', msg?.candidate?.sourceChapterId ?? null,
+      msg?.granularity ?? null, p?.chapters ?? []);
+    try {
+      this.collectTitle = p !== null ? `第 ${nextNovelChapterOrdinal(p.chapters)} 章` : '第 1 章';
+    } catch (error) {
+      this.collectTitle = '';
+      this.errorMsg = error instanceof Error ? error.message : String(error);
+    }
+    this.collectMessageId = messageId;
     const text: string = msg === null ? '' : novelMessageText(msg);
     this.collectParas = text.split(/\n\s*\n/).map((s: string): string => s.trim())
       .filter((s: string): boolean => s.length > 0);
     this.collectSelected = this.collectParas.map((): boolean => true);
     this.collectDraft = this.collectParas.join('\n\n');
-    this.collectMode = 0;
-    this.collectChapterId = p !== null && p.chapters.length > 0
-      ? p.chapters[p.chapters.length - 1].id : '';
+    this.collectManuallyEdited = false;
+    this.collectMode = location.mode;
+    this.collectChapterId = location.chapterId;
+    this.collectOriginalTitle = this.collectTitle;
+    this.collectOriginalDraft = this.collectDraft;
+    this.collectOriginalMode = this.collectMode;
+    this.collectOriginalChapterId = this.collectChapterId;
   }
 
   private togglePara(idx: number): void {
     const next: boolean[] = this.collectSelected.slice();
     next[idx] = !next[idx];
     this.collectSelected = next;
+    this.refreshCollectDraft();
+  }
+
+  private selectCollectParagraphs(selected: boolean): void {
+    this.collectSelected = this.collectParas.map((): boolean => selected);
+    this.refreshCollectDraft();
+  }
+
+  private refreshCollectDraft(): void {
+    this.collectDraft = draftAfterSelection(
+      this.collectParas, this.collectSelected, this.collectDraft, this.collectManuallyEdited);
   }
 
   private collectSelectedCount(): number {
@@ -1089,38 +1705,77 @@ struct NovelWorkspacePage {
 
   // 「按当前选择重置」:编辑稿回到勾选段落拼接(iOS 同名)
   private resetDraftFromSelection(): void {
-    const parts: string[] = [];
-    for (let i: number = 0; i < this.collectParas.length; i++) {
-      if (this.collectSelected[i]) parts.push(this.collectParas[i]);
-    }
-    this.collectDraft = parts.join('\n\n');
+    this.collectManuallyEdited = false;
+    this.collectDraft = selectedParagraphDraft(this.collectParas, this.collectSelected);
+  }
+
+  private confirmDiscardCollect(): void {
+    if (this.busy) return;
+    const messageId: string = this.collectMessageId;
+    this.collectDraftController.stopEditing();
+    this.collectTitleController.stopEditing();
+    // 退出编辑先接收输入法最终 onChange，再判断脏稿。
+    setTimeout((): void => {
+      if (!this.pageAlive || this.collectMessageId !== messageId || this.busy) return;
+      const dirty: boolean = this.collectDraft !== this.collectOriginalDraft ||
+        this.collectTitle !== this.collectOriginalTitle || this.collectMode !== this.collectOriginalMode ||
+        this.collectChapterId !== this.collectOriginalChapterId ||
+        this.collectSelected.some((selected: boolean): boolean => !selected);
+      if (!dirty) {
+        this.collectMessageId = '';
+        return;
+      }
+      AlertDialog.show({
+        title: '放弃收录编辑？',
+        message: '尚未收录的正文修改和段落选择将丢失。',
+        primaryButton: { value: '继续编辑', action: (): void => {} },
+        secondaryButton: { value: '放弃', fontColor: ERROR,
+          action: (): void => { this.collectMessageId = ''; } },
+      });
+    }, 0);
   }
 
   private collectDisabled(): boolean {
-    if (this.busy || this.collectDraft.trim().length === 0) return true;
+    if (this.busy || !canCollectSelection(this.collectSelected, this.collectDraft)) return true;
     return this.collectMode !== 0 && this.collectChapterId.length === 0;
   }
 
   private async submitCollect(): Promise<void> {
     if (this.collectMessageId.length === 0 || this.collectDisabled()) return;
+    const messageId: string = this.collectMessageId;
+    this.collectDraftController.stopEditing();
+    this.collectTitleController.stopEditing();
+    await new Promise<void>((resolve: () => void): void => { setTimeout(resolve, 0); });
+    if (this.collectMessageId !== messageId || this.collectDisabled()) return;
     let target: NovelCollectionTarget;
     if (this.collectMode === 0) target = { kind: 'new_chapter', title: this.collectTitle };
     else if (this.collectMode === 1) target = { kind: 'append', chapterId: this.collectChapterId };
     else target = { kind: 'replace', chapterId: this.collectChapterId };
     this.busy = true;
     try {
-      await getNovelCreation().collectMessage(this.projectId, this.collectMessageId, target,
+      const projectId: string = this.projectId;
+      const branchId: string = this.workspaceStatus?.activeBranchId ?? '';
+      const source: NovelMessage | undefined = this.project?.messages.find((message: NovelMessage): boolean => message.id === messageId);
+      const offerArchive: boolean = this.collectMode === 0 && source?.granularity === 'whole_chapter';
+      const collected = await getNovelCreation().collectMessage(projectId, this.collectMessageId, target,
         this.collectDraft.trim());
-      const mode: number = this.collectMode;
+      if (!this.pageAlive || this.pageHiddenOnce || this.projectId !== projectId ||
+        this.workspaceStatus?.activeBranchId !== branchId) return;
+      const feedbackToken: number = ++this.collectionFeedbackToken;
+      this.collectionFeedback = '正文已收录，剧情同步点已保存。正在分析本章资料建议…';
+      void collected.analysisFinished.then(
+        (result: NovelSuggestionRefreshResult): Promise<void> => this.refreshCollectedAnalysis(projectId, branchId, feedbackToken, result),
+        (error: Error): Promise<void> => this.refreshCollectedAnalysis(projectId, branchId, feedbackToken, null, String(error)),
+      ).catch((): void => {});
       this.collectMessageId = '';
       this.errorMsg = '';
       await this.reload();
       this.tab = 1;
-      // iOS:整章收录(新开/替换)完成后自动 offer 讨论归档;并入片段不弹
-      if (mode !== 1) {
+      // 新开整章后 offer 讨论归档；替换与并入不改变此作者流程。
+      if (offerArchive && this.pageAlive && this.workspaceStatus?.activeBranchId === branchId) {
         AlertDialog.show({
           title: '正文已收进章节',
-          message: '要把这次讨论整理成长期记忆吗？Amber 会把讨论蒸馏成资料建议，确认后才写入设定。',
+          message: '要整理尚未归档的讨论吗？你可以编辑摘要并逐项确认创作决定，确认后才用于下一轮创作。',
           primaryButton: { value: '不了', action: (): void => {} },
           secondaryButton: { value: '整理讨论', action: (): void => { this.archiveDiscussion(); } },
         });
@@ -1132,9 +1787,19 @@ struct NovelWorkspacePage {
     }
   }
 
+  private async refreshCollectedAnalysis(projectId: string, branchId: string, token: number,
+    result: NovelSuggestionRefreshResult | null, error: string = ''): Promise<void> {
+    if (!this.pageAlive || this.projectId !== projectId ||
+      this.workspaceStatus?.activeBranchId !== branchId || token !== this.collectionFeedbackToken) return;
+    this.collectionFeedback = result !== null
+      ? `正文已收录，剧情同步点已保存。${result.warning ?? `资料分析完成，新增 ${result.count} 条建议。`}`
+      : `正文已收录，剧情同步点已保存。资料分析未完成：${error}`;
+    await this.reload();
+  }
+
   private continueNovelTool(toolCallId: string, verdict: NovelToolContinuationVerdict,
     locator?: ToolApprovalPartLocator): void {
-    if (this.hasBlockingNovelRun()) return;
+    if (this.busy || this.hasBlockingNovelRun()) return;
     // R08:NovelService.continueTool 目前按 id 定位(findTool 取首个匹配),
     //   空 id 会错误命中同 blank 的其它工具、重复 id 也无法区分。UI 侧先用 locator
     //   精确解析出真实 id;无法唯一确定时安全拒绝,绝不按 blank 等价批准/续跑。
@@ -1144,8 +1809,10 @@ struct NovelWorkspacePage {
       return;
     }
     const run: NovelRun = getNovelCreation().continueTool(this.projectId, resolvedId, verdict);
+    const historyCount: number = (this.project?.messages ?? []).findIndex((message: NovelMessage): boolean =>
+      novelMessageUi(message).parts.some((part: UIMessagePart): boolean => part.type === 'tool' && part.toolCallId === resolvedId));
     this.attachNovelRun(
-      run, this.project?.messages.length ?? 0, '', Date.now(), '正在继续同一轮任务…');
+      run, historyCount, '', Date.now(), '正在继续同一轮任务…');
   }
 
   // R08:locator(messageId+partIndex)优先精确定位到目标工具 part 的 toolCallId;
@@ -1182,6 +1849,7 @@ struct NovelWorkspacePage {
 
   private clearNovelRunUi(): void {
     this.activeRunId = '';
+    this.activeQuickStart = false;
     this.activeRunCreatedAt = 0;
     this.pendingUserText = '';
     this.activeMessages = [];
@@ -1194,7 +1862,7 @@ struct NovelWorkspacePage {
 
   private attachNovelRun(
     run: NovelRun, historyCount: number, pendingUserText: string,
-    startedAt: number, statusText: string,
+    startedAt: number, statusText: string, quickStart: boolean = false,
   ): void {
     if (this.currentUnsub !== null) {
       const previous: () => void = this.currentUnsub;
@@ -1202,6 +1870,7 @@ struct NovelWorkspacePage {
       previous();
     }
     this.activeRunId = run.id;
+    this.activeQuickStart = quickStart;
     this.activeRunCreatedAt = startedAt;
     this.pendingUserText = pendingUserText;
     this.activeMessages = [];
@@ -1211,6 +1880,10 @@ struct NovelWorkspacePage {
     this.activeFrameSeen = false;
     this.generationStatus = statusText;
     this.errorMsg = '';
+    this.failedMessages = [];
+    this.failedQuickStart = false;
+    const owner: string = this.composerDraftOwner;
+    const inputMode: NovelComposeMode = this.composeMode;
     this.beginNovelGenerationFollow();
     const unsub: () => void = run.subscribe((event: NovelRunEvent): void => {
       if (this.activeRunId !== run.id) return;
@@ -1224,6 +1897,15 @@ struct NovelWorkspacePage {
         this.followNovelStreamingUpdate();
       } else if (event.kind === 'completed' || event.kind === 'waiting_user' ||
         event.kind === 'interrupted' || event.kind === 'failed') {
+        if (event.kind === 'failed' && event.unsavedMessages !== undefined) {
+          this.failedMessages = event.unsavedMessages.slice();
+          this.failedQuickStart = this.activeQuickStart;
+        }
+        if (event.kind === 'failed' && this.composerDraftOwner === owner && this.pendingUserText.length > 0) {
+          this.failedInput = this.pendingUserText;
+          this.failedInputMode = inputMode;
+          this.failedInputRunKind = this.activeQuickStart ? 'quick_start' : null;
+        }
         this.finishNovelGenerationFollow();
         this.clearNovelRunUi();
         if (event.kind === 'failed') this.errorMsg = event.message;
@@ -1236,9 +1918,14 @@ struct NovelWorkspacePage {
   }
 
   private async resolveSettingProposal(proposal: NovelSettingProposal, accept: boolean): Promise<void> {
+    if (this.busy || this.hasBlockingNovelRun()) return;
+    if (accept) {
+      this.openMaterialAdoption(proposal.id, true);
+      return;
+    }
     this.busy = true;
     try {
-      await getNovelCreation().resolveSettingProposal(this.projectId, proposal.id, accept);
+      await getNovelCreation().resolveSettingProposal(this.projectId, proposal.id, false);
       this.errorMsg = '';
       await this.reload();
     } catch (e) {
@@ -1250,11 +1937,16 @@ struct NovelWorkspacePage {
 
   // ===== 章节 =====
   openNewChapter(): void {
-    if (this.novelJobLocksWorkspace()) return;
+    if (this.busy || this.novelJobLocksWorkspace()) return;
     this.errorMsg = '';
     this.editingChapterId = '';
     const p: NovelProject | null = this.project;
-    this.chapterTitle = p !== null ? `第 ${p.chapters.length + 1} 章` : '第 1 章';
+    try {
+      this.chapterTitle = p !== null ? `第 ${nextNovelChapterOrdinal(p.chapters)} 章` : '第 1 章';
+    } catch (error) {
+      this.errorMsg = error instanceof Error ? error.message : String(error);
+      return;
+    }
     this.chapterContent = '';
     this.chapterOriginalTitle = this.chapterTitle;
     this.chapterOriginalContent = this.chapterContent;
@@ -1277,24 +1969,21 @@ struct NovelWorkspacePage {
     }
   }
 
-  // N2:单章润色(polish 哨兵协议)
+  // 单章与批量共用持久化润色及上下文确认面板。
   async polishChapter(chapterId: string): Promise<void> {
-    if (this.hasBlockingNovelRun()) return;
-    try {
-      const creation = getNovelCreation();
-      const run: NovelRun = await creation.polishChapter(this.projectId, chapterId);
-      this.attachChapterRun(run, '润色中…');
-    } catch (e) {
-      this.errorMsg = String(e);
-    }
+    if (this.busy || this.hasBlockingNovelRun()) return;
+    this.singlePolishChapterId = chapterId;
+    this.polishStartError = '';
+    this.polishCreateOpen = true;
   }
 
   private polishSheetChapters(): NovelPolishCreateSheetChapter[] {
     const p: NovelProject | null = this.project;
     if (p === null) return [];
-    return p.chapters.map((chapter: NovelChapter, index: number): NovelPolishCreateSheetChapter => ({
+    return p.chapters.filter((chapter: NovelChapter): boolean =>
+      this.singlePolishChapterId.length === 0 || chapter.id === this.singlePolishChapterId).map((chapter: NovelChapter): NovelPolishCreateSheetChapter => ({
       id: chapter.id,
-      ordinal: index + 1,
+      ordinal: novelChapterOrdinal(chapter, p.chapters.indexOf(chapter) + 1),
       title: chapter.title,
       discarded: chapter.discarded,
     }));
@@ -1308,19 +1997,21 @@ struct NovelWorkspacePage {
   }
 
   private async startPolish(
-    startOrdinal: number, endOrdinal: number, contextOptions: PolishContextOptions,
+    startOrdinal: number, endOrdinal: number, contextOptions: PolishContextOptions, ordinals: number[],
   ): Promise<void> {
-    if (this.polishBusy || this.polishConflictReason().length > 0) return;
+    if (this.busy || this.polishBusy || this.polishConflictReason().length > 0) return;
     this.polishBusy = true;
+    this.polishStartError = '';
     try {
       this.requestedPolishJobId = '';
-      this.polishJob = await getNovelCreation().startPolish(
-        this.projectId, startOrdinal, endOrdinal, contextOptions);
+      this.polishJob = this.singlePolishChapterId.length > 0
+        ? await getNovelCreation().startChapterPolish(this.projectId, this.singlePolishChapterId, contextOptions)
+        : await getNovelCreation().startSelectedPolish(this.projectId, ordinals, contextOptions);
       this.polishCreateOpen = false;
       this.errorMsg = '';
       this.schedulePolishPoll();
     } catch (error) {
-      this.showWorkspaceOperationError('启动批量润色失败', error);
+      this.polishStartError = String(error);
     } finally {
       this.polishBusy = false;
     }
@@ -1390,7 +2081,11 @@ struct NovelWorkspacePage {
 
   // N2:章节版本历史
   async saveChapter(): Promise<void> {
-    if (this.novelJobLocksWorkspace()) return;
+    if (this.busy || !this.chapterEditorOpen || this.novelJobLocksWorkspace()) return;
+    this.chapterTitleController.stopEditing();
+    this.chapterContentController.stopEditing();
+    await new Promise<void>((resolve: () => void): void => { setTimeout(resolve, 0); });
+    if (!this.pageAlive || !this.chapterEditorOpen || this.busy || this.novelJobLocksWorkspace()) return;
     this.busy = true;
     try {
       const saved: NovelChapter = await getNovelCreation().saveChapter(
@@ -1518,55 +2213,112 @@ struct NovelWorkspacePage {
     return p.branchSettings.foreshadows.filter((f: NovelForeshadow): boolean => f.status === 'resolved');
   }
 
-  openNewMaterial(kind: NovelMaterialKind = 'world'): void {
-    this.errorMsg = '';
-    this.editingMaterialId = '';
-    this.materialKind = kind;
-    this.materialTitle = '';
-    this.materialContent = '';
-    this.materialEnabled = true;
-    this.materialOriginalKind = this.materialKind;
-    this.materialOriginalTitle = this.materialTitle;
-    this.materialOriginalContent = this.materialContent;
-    this.materialOriginalEnabled = this.materialEnabled;
-    this.materialEditorOpen = true;
+  async openNewMaterial(kind: NovelMaterialKind = 'world'): Promise<void> {
+    if (this.busy || this.hasBlockingNovelRun()) return;
+    const token: number = ++this.materialOpenToken;
+    try {
+      const snapshot: NovelWorkspaceSnapshot = await getNovelCreation().readWorkspaceSnapshot(this.projectId);
+      if (!this.pageAlive || token !== this.materialOpenToken || this.busy || this.hasBlockingNovelRun()) return;
+      const draft: NovelMaterialEditorDraft = emptyMaterialEditorDraft();
+      draft.kind = kind;
+      this.materialEditorDraft = draft;
+      this.materialEditorCas = snapshot.status.cas;
+      this.materialCreatedAt = Date.now();
+      this.editingMaterialId = '';
+      this.materialEditorKey = `new-${token}`;
+      this.errorMsg = '';
+      this.materialEditorOpen = true;
+    } catch (error) { if (this.pageAlive && token === this.materialOpenToken) this.showWorkspaceOperationError('无法新建资料', error); }
   }
 
-  openEditMaterial(m: NovelMaterial): void {
-    this.errorMsg = '';
-    this.editingMaterialId = m.id;
-    this.materialKind = m.kind;
-    this.materialTitle = m.title;
-    this.materialContent = m.content;
-    this.materialEnabled = m.enabled;
-    this.materialOriginalKind = m.kind;
-    this.materialOriginalTitle = m.title;
-    this.materialOriginalContent = m.content;
-    this.materialOriginalEnabled = m.enabled;
-    this.materialEditorOpen = true;
+  async openEditMaterial(material: NovelMaterial, scope: NovelMaterialEditScope = 'branch'): Promise<void> {
+    if (this.busy || this.hasBlockingNovelRun()) return;
+    const token: number = ++this.materialOpenToken;
+    try {
+      const snapshot: NovelWorkspaceSnapshot = await getNovelCreation().readWorkspaceSnapshot(this.projectId);
+      if (!this.pageAlive || token !== this.materialOpenToken || this.busy || this.hasBlockingNovelRun()) return;
+      const effective: NovelMaterial | undefined = snapshot.project.materials.find((item: NovelMaterial): boolean => item.id === material.id);
+      if (effective === undefined) throw new Error('此资料已不在当前分支，请刷新后再编辑');
+      const base: NovelMaterial | undefined = snapshot.project.baseMaterials?.find((item: NovelMaterial): boolean => item.id === material.id);
+      const source: NovelMaterial = scope === 'shared' && base !== undefined ? base : effective;
+      this.materialEditorDraft = materialEditorDraftFor(source, scope);
+      this.materialEditorCas = snapshot.status.cas;
+      this.materialCreatedAt = source.createdAt;
+      this.editingMaterialId = source.id;
+      this.materialEditorKey = `${source.id}-${scope}-${token}`;
+      this.errorMsg = '';
+      this.materialEditorOpen = true;
+    } catch (error) { if (this.pageAlive && token === this.materialOpenToken) this.showWorkspaceOperationError('无法编辑资料', error); }
   }
 
-  async saveMaterial(): Promise<void> {
+  async saveMaterial(draft: NovelMaterialEditorDraft): Promise<void> {
+    if (this.busy || !this.materialEditorOpen || !this.pageAlive || this.hasBlockingNovelRun()) return;
+    const cas: NovelWorkspaceCas | null = this.materialEditorCas;
+    if (cas === null) { this.errorMsg = '资料编辑缺少工作区快照，请重新打开'; return; }
     this.busy = true;
     try {
-      const saved: NovelMaterial = await getNovelCreation().upsertMaterial(
-        this.projectId, this.editingMaterialId.length > 0 ? this.editingMaterialId : null,
-        this.materialKind, this.materialTitle, this.materialContent, this.materialEnabled);
+      let savedId: string = this.editingMaterialId;
+      const fields: NovelMaterialFields = { aliases: draft.aliases, tags: draft.tags,
+        customKind: draft.customKind, injectionMode: draft.injectionMode };
+      if (draft.scope === 'shared') {
+        const material: NovelMaterial = makeNovelMaterial({ id: this.editingMaterialId,
+          kind: draft.kind, title: draft.title, content: draft.content, enabled: draft.enabled,
+          aliases: fields.aliases, tags: fields.tags, customKind: fields.customKind, injectionMode: fields.injectionMode, now: Date.now() });
+        material.createdAt = this.materialCreatedAt;
+        await getNovelCreation().saveSharedMaterial(this.projectId, material, cas);
+        savedId = material.id;
+      } else {
+        const saved: NovelMaterial = await getNovelCreation().upsertMaterial(
+          this.projectId, this.editingMaterialId.length > 0 ? this.editingMaterialId : null,
+          draft.kind, draft.title, draft.content, draft.enabled, fields, cas);
+        savedId = saved.id;
+      }
+      if (!this.pageAlive) return;
       this.materialEditorOpen = false;
-      this.expandedMaterialId = saved.id;
+      this.expandedMaterialId = savedId;
       this.errorMsg = '';
       await this.reload();
-    } catch (e) {
-      this.errorMsg = e instanceof Error ? e.message : String(e);
-    } finally {
-      this.busy = false;
-    }
+    } catch (error) { if (this.pageAlive) this.errorMsg = error instanceof Error ? error.message : String(error); }
+    finally { if (this.pageAlive) this.busy = false; }
   }
 
-  async deleteMaterial(id: string): Promise<void> {
+  private confirmRestoreMaterialInheritance(material: NovelMaterial): void {
+    if (this.busy || this.hasBlockingNovelRun()) return;
+    const cas: NovelWorkspaceCas | null = this.workspaceStatus?.cas ?? null;
+    if (cas === null) return;
+    AlertDialog.show({ title: '恢复资料继承？',
+      message: `当前分支重新使用“${material.title}”的最新共享底稿；此分支的覆盖或隐藏设置会移除，其他分支保持原样。`,
+      primaryButton: { value: '取消', action: (): void => {} },
+      secondaryButton: { value: '恢复继承', action: (): void => { this.restoreMaterialInheritance(material.id, cas); } } });
+  }
+
+  private async restoreMaterialInheritance(materialId: string, cas: NovelWorkspaceCas): Promise<void> {
+    if (this.busy || this.hasBlockingNovelRun()) return;
     this.busy = true;
     try {
-      await getNovelCreation().deleteMaterial(this.projectId, id);
+      await getNovelCreation().restoreMaterialInheritance(this.projectId, materialId, cas);
+      await this.reload();
+    } catch (error) { if (this.pageAlive) this.showWorkspaceOperationError('恢复资料继承失败', error); }
+    finally { if (this.pageAlive) this.busy = false; }
+  }
+
+  private confirmDeleteMaterial(material: NovelMaterial): void {
+    if (this.busy || this.hasBlockingNovelRun()) return;
+    const cas: NovelWorkspaceCas | null = this.workspaceStatus?.cas ?? null;
+    if (cas === null) return;
+    const shared: boolean = this.project?.baseMaterials?.some((base: NovelMaterial): boolean => base.id === material.id) ?? false;
+    AlertDialog.show({ title: shared ? '在当前分支移除此资料？' : '删除当前分支资料？',
+      message: shared ? `当前分支将隐藏“${material.title}”。共享底稿和其他分支保留，可通过恢复继承重新显示。`
+        : `删除当前分支的“${material.title}”，其他分支保持原样。`,
+      primaryButton: { value: '取消', action: (): void => {} },
+      secondaryButton: { value: '确认移除', fontColor: ERROR, action: (): void => { this.deleteMaterial(material.id, cas); } } });
+  }
+
+  async deleteMaterial(id: string, cas: NovelWorkspaceCas): Promise<void> {
+    if (this.busy || this.hasBlockingNovelRun()) return;
+    this.busy = true;
+    try {
+      await getNovelCreation().deleteMaterial(this.projectId, id, cas);
       await this.reload();
     } catch (e) {
       this.errorMsg = String(e);
@@ -1576,9 +2328,14 @@ struct NovelWorkspacePage {
   }
 
   async resolveSuggestion(id: string, accept: boolean): Promise<void> {
+    if (this.busy || this.hasBlockingNovelRun()) return;
+    if (accept) {
+      this.openMaterialAdoption(id, false);
+      return;
+    }
     this.busy = true;
     try {
-      await getNovelCreation().resolveMaterialSuggestion(this.projectId, id, accept);
+      await getNovelCreation().resolveMaterialSuggestion(this.projectId, id, false);
       await this.reload();
     } catch (e) {
       this.errorMsg = String(e);
@@ -1587,19 +2344,104 @@ struct NovelWorkspacePage {
     }
   }
 
-  async reanalyze(): Promise<void> {
+  async reanalyze(chapterId: string = ''): Promise<void> {
     const p: NovelProject | null = this.project;
-    if (p === null || p.chapters.length === 0) return;
+    if (this.busy || this.hasBlockingNovelRun() || p === null || p.chapters.length === 0) return;
     this.busy = true;
     try {
-      const last: NovelChapter = p.chapters[p.chapters.length - 1];
-      await getNovelCreation().refreshMaterialSuggestions(this.projectId, last.id);
+      const chapter: NovelChapter | undefined = chapterId.length > 0
+        ? p.chapters.find((item: NovelChapter): boolean => item.id === chapterId) : p.chapters[p.chapters.length - 1];
+      if (chapter === undefined) return;
+      await getNovelCreation().refreshMaterialSuggestions(this.projectId, chapter.id);
       await this.reload();
     } catch (e) {
-      this.errorMsg = String(e);
+      // 失败信息已由 domain 持久化到章上，重读后保留本次错误。
+      await this.reload();
+      if (this.pageAlive) this.errorMsg = String(e);
     } finally {
       this.busy = false;
     }
+  }
+
+  private openMaterialAdoption(sourceId: string, isSetting: boolean): void {
+    const project: NovelProject | null = this.project;
+    if (project === null || this.busy || this.hasBlockingNovelRun()) return;
+    try {
+      let baseline: NovelMaterialAdoption;
+      let sourceFields: NovelMaterialFields;
+      if (isSetting) {
+        const source: NovelSettingProposal | undefined = project.settingProposals.find(
+          (proposal: NovelSettingProposal): boolean => proposal.id === sourceId);
+        if (source === undefined) return;
+        baseline = buildSettingProposalAdoption(project, source, null, this.workspaceStatus?.activeBranchId ?? null);
+        sourceFields = { aliases: source.aliases, tags: source.tags, customKind: source.customKind, injectionMode: source.injectionMode };
+      } else {
+        const source: NovelMaterialSuggestion | undefined = project.materialSuggestions.find(
+          (suggestion: NovelMaterialSuggestion): boolean => suggestion.id === sourceId);
+        if (source === undefined) return;
+        baseline = buildSuggestionAdoption(project, source, null, this.workspaceStatus?.activeBranchId ?? null);
+        sourceFields = { aliases: source.aliases, tags: source.tags, customKind: source.customKind, injectionMode: source.injectionMode };
+      }
+      this.adoptionBaseline = baseline;
+      this.adoptionSourceId = sourceId;
+      this.adoptionIsSetting = isSetting;
+      this.adoptionKind = baseline.kind;
+      this.adoptionTitle = baseline.title;
+      this.adoptionBody = baseline.content;
+      this.adoptionFields = sourceFields;
+      this.adoptionTargets = project.materials.map((material: NovelMaterial): NovelMaterialAdoptionSheetTarget => {
+        return { id: material.id, kind: material.kind, title: material.title, body: material.content, enabled: material.enabled,
+          aliases: material.aliases, tags: material.tags, customKind: material.customKind, injectionMode: material.injectionMode };
+      });
+      this.adoptionTargetDigests = new Map();
+      project.materials.forEach((material: NovelMaterial): void => {
+        this.adoptionTargetDigests.set(material.id, materialAdoptionTargetDigest(material));
+      });
+      this.adoptionDraftKey = `${sourceId}-${Date.now()}`;
+      this.adoptionError = '';
+      this.adoptionOpen = true;
+    } catch (e) {
+      this.errorMsg = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  private async confirmMaterialAdoption(
+    kind: NovelMaterialKind, title: string, body: string, targetId: string | null, fields: NovelMaterialFields,
+  ): Promise<void> {
+    if (this.busy || this.adoptionBaseline === null) return;
+    const digest: string | null = targetId === null ? null : this.adoptionTargetDigests.get(targetId) ?? null;
+    if (targetId !== null && digest === null) {
+      this.adoptionError = '目标不在本次预览中，请重新打开后选择';
+      return;
+    }
+    const edit: NovelMaterialAdoption = {
+      kind, title, content: body, targetMaterialId: targetId, targetDigest: digest,
+      sourceDigest: this.adoptionBaseline.sourceDigest, branchId: this.adoptionBaseline.branchId,
+      aliases: fields.aliases, tags: fields.tags, customKind: fields.customKind, injectionMode: fields.injectionMode,
+    };
+    this.busy = true;
+    this.adoptionError = '';
+    try {
+      if (this.adoptionIsSetting) {
+        await getNovelCreation().resolveSettingProposal(this.projectId, this.adoptionSourceId, true, edit);
+      } else {
+        await getNovelCreation().resolveMaterialSuggestion(this.projectId, this.adoptionSourceId, true, edit);
+      }
+      this.adoptionOpen = false;
+      this.adoptionBaseline = null;
+      this.errorMsg = '';
+      await this.reload();
+    } catch (e) {
+      if (this.pageAlive) this.adoptionError = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private cancelAdoption(): void {
+    if (this.busy) return;
+    this.adoptionOpen = false;
+    this.adoptionBaseline = null;
   }
 
   // ===== 页签内容 =====
@@ -1611,11 +2453,20 @@ struct NovelWorkspacePage {
         .fontColor(INK3)
         .margin({ bottom: 4 })
     }
+    if (message.clonedFromMessageId !== undefined) {
+      Text('再次收录候选 · 来自已收录回复').fontSize(12).fontColor(INK3).lineHeight(18).width('100%')
+    }
   }
 
   @Builder
   novelMessageFooter(message: NovelMessage): void {
-    if (message.mode === 'write' && message.collectedChapterId === null &&
+    if (this.canRetryQuickStart(message)) {
+      Text('重试快速开始').fontSize(13).fontColor(ACCENT).constraintSize({ minHeight: 44 })
+        .enabled(!this.busy && !this.hasBlockingNovelRun())
+        .onClick((): void => { this.retryQuickStartSeed(this.quickStartSeedFor(message)); })
+    }
+    if (message.role === 'assistant' && message.mode === 'write' && message.collectedChapterId === null &&
+      (message.candidate === undefined || message.candidate.kind !== 'polish' || message.candidate.complete) &&
       novelMessageText(message).trim().length > 0) {
       Row() {
         Icon({ name: 'ph_bookOpen', iconSize: 14, color: ACCENT_INK })
@@ -1638,6 +2489,11 @@ struct NovelWorkspacePage {
           .margin({ left: 5 })
       }
       .alignItems(VerticalAlign.Center).margin({ top: 10 })
+      if (this.project !== null && canCloneCollectedMessage(this.project, message, this.workspaceStatus?.activeBranchId ?? '')) {
+        Text('再次收录').fontSize(13).fontColor(ACCENT).constraintSize({ minHeight: 44 })
+          .enabled(!this.busy && !this.hasBlockingNovelRun())
+          .onClick((): void => { this.confirmCloneCollected(message); })
+      }
     }
   }
 
@@ -1664,6 +2520,45 @@ struct NovelWorkspacePage {
   @Builder
   novelTimelineRows(): void {
     if (this.project !== null) {
+      if (this.ordinaryRecoveryRecord() !== null && this.activeRunId.length === 0) {
+        ListItem() {
+          NovelRunRecoveryCard({
+            recordKey: this.ordinaryRecoveryRecord()!.id,
+            heading: this.ordinaryRecoveryRecord()!.status === 'failed' ? '上次生成失败' : '上次生成已中断',
+            detail: this.ordinaryRecoveryDetail(this.ordinaryRecoveryRecord()!),
+            userText: this.ordinaryRecoveryRecord()!.userText,
+            partialText: this.ordinaryPartialText(this.ordinaryRecoveryRecord()!),
+            busy: this.busy || this.hasBlockingNovelRun(),
+            retryAllowed: this.ordinaryRecovery?.retryAllowed ?? false,
+            resumeAllowed: this.ordinaryRecovery?.resumeAllowed ?? false,
+            blockedReason: this.ordinaryRecovery?.blockedReason ?? '',
+            errorMessage: this.ordinaryRecoveryRecord()!.error ?? '',
+            retryLabel: this.ordinaryRecoveryRecord()!.originalRequest.operation.kind === 'tool_continuation' ? '重试工具续接' : '重试原请求',
+            onRetry: (recordId: string): void => { this.recoverOrdinaryRun(recordId, 'retry'); },
+            onResume: (recordId: string): void => { this.recoverOrdinaryRun(recordId, 'resume'); },
+            onCopyPartial: (recordId: string, text: string): void => { this.copyOrdinaryPartial(recordId, text); },
+          }).margin({ bottom: 10 })
+        }
+      }
+      if (this.ghostwriteJob !== null) {
+        ListItem() {
+          NovelGhostwriteCard({
+            job: this.ghostwriteJob,
+            suggestedChapterCount: this.project?.branchSettings.suggestedChapterCount ?? DEFAULT_GHOSTWRITE_CHAPTER_COUNT,
+            planReady: this.ghostwritePlanReady(),
+            modelReady: this.ghostwriteModelsReady(),
+            planDisabledReason: '请先在项目控制中保存本章计划。',
+            modelDisabledReason: this.ghostwriteModelReason(),
+            busy: this.ghostwriteBusy,
+            onStart: (targetChapterCount: number): void => { this.startGhostwrite(targetChapterCount); },
+            onPause: (): void => { this.pauseGhostwrite(); },
+            onResume: (): void => { this.resumeGhostwrite(); },
+            onRetry: (): void => { this.retryGhostwrite(); },
+            onCancel: (): void => { this.cancelGhostwrite(); },
+          })
+          .margin({ bottom: 8 }).borderRadius(14).clip(true)
+        }
+      }
       if (this.project.messages.length === 0 && this.activeRunId.length === 0) {
         // 空态(iOS 纯文字):快速开始已前置到列表页创建 sheet
         ListItem() {
@@ -1676,41 +2571,51 @@ struct NovelWorkspacePage {
           .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
         }
       }
+      if (this.ghostwriteJob === null && this.ghostwriteReport !== null) {
+        ListItem() { NovelGhostwriteReportCard({ report: this.ghostwriteReport }) }
+      }
       ForEach(this.activeRunId.length > 0
         ? this.project.messages.slice(0, this.activeHistoryCount)
         : this.project.messages, (message: NovelMessage): void => {
-        ListItem() {
-          AgentMessageRow({
-            message: this.projectMessageUi(message),
-            capabilities: NOVEL_AGENT_MESSAGE_CAPABILITIES,
-            hostHeader: (): void => { this.novelMessageHeader(message); },
-            hostFooter: (): void => { this.novelMessageFooter(message); },
-            streaming: false,
-            onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void => {
-              this.continueNovelTool(toolCallId, { kind: 'approved' }, locator);
-            },
-            onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void => {
-              this.continueNovelTool(toolCallId, { kind: 'denied', reason: '用户拒绝了这次操作' }, locator);
-            },
-            onAnswerTool: (toolCallId: string, answer: string,
-              locator?: ToolApprovalPartLocator): void => {
-              this.continueNovelTool(toolCallId, { kind: 'answered', answer }, locator);
-            },
-          })
+        if (discussionArchiveAtMessage(this.project?.discussionArchives ?? [], message) !== null) {
+          ListItem() {
+            NovelDiscussionArchiveCard({
+              archive: discussionArchiveAtMessage(this.project?.discussionArchives ?? [], message)!,
+              expanded: this.expandedArchiveIds.includes(discussionArchiveAtMessage(this.project?.discussionArchives ?? [], message)!.id),
+              onToggle: (archiveId: string): void => { this.toggleDiscussionArchive(archiveId); },
+            }).margin({ bottom: 8 })
+          }
         }
-      }, (message: NovelMessage): string => message.id)
-      ForEach(this.project.settingProposals.filter(
-        (proposal: NovelSettingProposal): boolean => proposal.status === 'pending'),
-      (proposal: NovelSettingProposal): void => {
-        ListItem() {
-          NovelSettingProposalCard({
-            title: proposal.title,
-            content: proposal.content,
-            kindLabel: MATERIAL_KIND_LABELS[proposal.kind],
-            onResolve: (accept: boolean): void => { this.resolveSettingProposal(proposal, accept); },
-          })
+        if (discussionMessageVisible(this.project?.discussionArchives ?? [], this.expandedArchiveIds, message)) {
+          ListItem() {
+            AgentMessageRow({
+              message: this.projectMessageUi(message),
+              capabilities: NOVEL_AGENT_MESSAGE_CAPABILITIES,
+              hostHeader: (): void => { this.novelMessageHeader(message); },
+              hostFooter: (): void => { this.novelMessageFooter(message); },
+              streaming: false,
+              onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void => {
+                this.continueNovelTool(toolCallId, { kind: 'approved' }, locator);
+              },
+              onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void => {
+                this.continueNovelTool(toolCallId, { kind: 'denied', reason: '用户拒绝了这次操作' }, locator);
+              },
+              onAnswerTool: (toolCallId: string, answer: string,
+                locator?: ToolApprovalPartLocator): void => {
+                this.continueNovelTool(toolCallId, { kind: 'answered', answer }, locator);
+              },
+            })
+          }
         }
-      }, (proposal: NovelSettingProposal): string => proposal.id)
+        ForEach(this.settingProposalsAt(message),
+          (proposal: NovelSettingProposal): void => {
+            this.novelSettingProposalRow(proposal)
+          }, (proposal: NovelSettingProposal): string => proposal.id)
+      }, (message: NovelMessage): string => `${message.id}:${message.collectedChapterId ?? ''}:${discussionMessageVisible(this.project?.discussionArchives ?? [], this.expandedArchiveIds, message)}`)
+      ForEach(orphanSettingProposals(this.project.settingProposals, this.project.messages),
+        (proposal: NovelSettingProposal): void => {
+          this.novelSettingProposalRow(proposal)
+        }, (proposal: NovelSettingProposal): string => proposal.id)
     }
     if (this.pendingUserText.length > 0 && this.activeMessages.length === 0) {
       ListItem() {
@@ -1726,9 +2631,42 @@ struct NovelWorkspacePage {
   }
 
   @Builder
+  private novelSettingProposalRow(proposal: NovelSettingProposal): void {
+    ListItem() {
+      NovelSettingProposalCard({
+        title: proposal.title,
+        content: proposal.content,
+        kindLabel: MATERIAL_KIND_LABELS[proposal.kind],
+        status: proposal.status,
+        onResolve: (accept: boolean): void => { this.resolveSettingProposal(proposal, accept); },
+      })
+    }
+  }
+
+  private settingProposalsAt(message: NovelMessage): NovelSettingProposal[] {
+    return this.project === null ? [] : settingProposalsForMessage(this.project.settingProposals, message);
+  }
+
+  @Builder
   novelTimelineActiveTail(): void {
+    ForEach(this.failedMessages, (message: UIMessage): void => {
+      ListItem() {
+        AgentMessageRow({
+          message: this.unsavedDisplayMessage(message),
+          capabilities: NO_AGENT_MESSAGE_ROW_CAPABILITIES,
+          hostHeader: (): void => { this.unsavedMessageHeader(); },
+          hostFooter: (): void => { this.unsavedMessageFooter(message); },
+          streaming: false,
+        })
+      }
+    }, (message: UIMessage): string => `unsaved-${message.id}`)
     if (this.activeRunId.length > 0) {
-      if (this.activeMessages.length > 0) {
+      if (this.activeQuickStart) {
+        ListItem() {
+          Text('正在整理角色、设定与开篇方向；完成后可逐项确认。')
+            .fontSize(14).fontColor(INK3).lineHeight(21).width('100%').padding(16)
+        }
+      } else if (this.activeMessages.length > 0) {
         ForEach(this.activeMessages, (message: UIMessage, index: number): void => {
           ListItem() {
             AgentMessageRow({
@@ -1770,6 +2708,30 @@ struct NovelWorkspacePage {
     }
   }
 
+  @Builder
+  private unsavedMessageHeader(): void {
+    Text('未保存的生成内容').fontSize(12).fontColor(ERROR).margin({ bottom: 4 })
+  }
+
+  @Builder
+  private unsavedMessageFooter(message: UIMessage): void {
+    if (toText(message).trim().length > 0) {
+      Text('复制未保存内容').fontSize(12).fontColor(ACCENT).fontFamily(FONT_SANS_MEDIUM)
+        .constraintSize({ minHeight: 44 }).padding({ left: 8, right: 8 })
+        .onClick((): void => { this.copyUnsavedMessage(message); })
+    }
+  }
+
+  private copyUnsavedMessage(message: UIMessage): void {
+    try {
+      const board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
+      board.setDataSync(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, toText(message)));
+      promptAction.showToast({ message: '已复制未保存内容', duration: 1400 });
+    } catch (error) {
+      this.showWorkspaceOperationError('复制失败', error);
+    }
+  }
+
   // ===== 项目控制 sheet(iOS writingContext:模式与偏好) =====
 
   private composeModeLabel(): string {
@@ -1796,26 +2758,27 @@ struct NovelWorkspacePage {
 
   // 创作方式 menu(讨论/写一段/写整章 + 归档当前讨论;iOS 意图 menu 同款)
   private showComposeModeMenu(): void {
-    if (this.hasBlockingNovelRun()) return;
+    if (this.busy || this.hasBlockingNovelRun()) return;
     promptAction.showActionMenu({
       title: '创作方式',
       buttons: [
-        { text: '讨论', color: INK },
-        { text: '写一段', color: INK },
-        { text: '写整章', color: INK },
-        { text: '归档当前讨论', color: INK },
+        { text: '讨论', color: $r('sys.color.ohos_id_color_text_primary') },
+        { text: '写一段', color: $r('sys.color.ohos_id_color_text_primary') },
+        { text: '写整章', color: $r('sys.color.ohos_id_color_text_primary') },
+        { text: '归档当前讨论', color: $r('sys.color.ohos_id_color_text_primary') },
       ],
     }).then((result: ExportMenuResult): void => {
       if (result.index === 0) this.composeMode = 'discuss';
       else if (result.index === 1) this.composeMode = 'continue';
       else if (result.index === 2) this.composeMode = 'whole_chapter';
       else if (result.index === 3) this.archiveDiscussion();
+      if (result.index >= 0 && result.index <= 2) this.flushComposerDraft();
     }).catch((): void => {});
   }
 
   private openControlSheet(): void {
     const p: NovelProject | null = this.project;
-    if (p === null) return;
+    if (p === null || this.busy) return;
     this.planThisChapter = p.branchSettings.thisChapterPlan;
     this.planFuture = p.branchSettings.futurePlan;
     this.planPreferences = p.branchSettings.preferences;
@@ -1897,15 +2860,74 @@ struct NovelWorkspacePage {
     }, (option: NovelModelOptionView): string => `${option.providerId}-${option.modelId}`)
   }
 
+  private consumeContextOverrides(): void {
+    const params: WorkspaceReturnParams = router.getParams() as WorkspaceReturnParams;
+    const raw: string | undefined = params?.novelContextOverrides;
+    if (raw === undefined) return;
+    try {
+      const result: NovelContextOverrideReturn = JSON.parse(raw) as NovelContextOverrideReturn;
+      if (result.receiptToken === this.lastContextReceiptToken) return;
+      this.lastContextReceiptToken = result.receiptToken;
+      if (result.projectId !== this.projectId || result.branchId !== this.workspaceStatus?.activeBranchId) {
+        this.contextOverrides = null;
+        this.errorMsg = '上下文选择来自其他项目或分支，请重新预览';
+        return;
+      }
+      this.contextOverrides = { branchId: result.branchId, forceIncludeMaterialIds: result.forceIncludeMaterialIds,
+        forceExcludeMaterialIds: result.forceExcludeMaterialIds };
+    } catch (error) { this.errorMsg = `无法读取本次上下文选择：${String(error)}`; }
+  }
+
+  private openContextPreview(): void {
+    if (this.busy || this.hasBlockingNovelRun() || this.project === null) return;
+    this.controlSheetOpen = false;
+    router.pushUrl({ url: 'pages/NovelContextPreviewPage', params: {
+      projectId: this.projectId, userText: this.draft, mode: this.composeMode === 'discuss' ? 'discuss' : 'write',
+      granularity: this.composeMode === 'continue' ? 'continuation' : this.composeMode === 'whole_chapter' ? 'whole_chapter' : '',
+      forceIncludeMaterialIds: JSON.stringify(this.contextOverrides?.forceIncludeMaterialIds ?? []),
+      forceExcludeMaterialIds: JSON.stringify(this.contextOverrides?.forceExcludeMaterialIds ?? []),
+    } }).catch((error: Error): void => { if (this.pageAlive) this.errorMsg = String(error); });
+  }
+
   @Builder
   private ControlOps(): void {
+    CardRow({ label: '预览本次上下文', desc: '查看资料选择与预算，只调整下一次普通创作',
+      onRowClick: (): void => { this.openContextPreview(); } })
+      .enabled(!this.busy && !this.hasBlockingNovelRun())
+      .opacity(this.busy || this.hasBlockingNovelRun() ? 0.5 : 1)
+    CardRow({ label: '正文操作与修改建议', desc: '按段改写、回退最近章节、删除多章与确认预览',
+      onRowClick: (): void => { this.openProjectPage('pages/NovelOperationsPage'); } })
+      .enabled(!this.busy && !this.hasBlockingNovelRun()).opacity(this.busy || this.hasBlockingNovelRun() ? 0.5 : 1)
+    CardRow({ label: '润色与结果', desc: '任意选章、项目润色偏好、逐章结果与失败重试',
+      onRowClick: (): void => { this.openPolishPage(); } }).enabled(!this.busy)
+    CardRow({ label: '本章计划与走向', desc: '本章合同、确认计划与后续最多八个走向',
+      onRowClick: (): void => { this.openProjectPage('pages/NovelChapterContractPage'); } })
+      .enabled(!this.busy && !this.hasBlockingNovelRun()).opacity(this.busy || this.hasBlockingNovelRun() ? 0.5 : 1)
+    CardRow({ label: '剧情状态与人物经历', desc: '原文证据、身份确认、救援进度与重试',
+      onRowClick: (): void => { this.openProjectPage('pages/NovelStatePage'); } })
+      .enabled(!this.busy && !this.hasBlockingNovelRun()).opacity(this.busy || this.hasBlockingNovelRun() ? 0.5 : 1)
+    if (this.ghostwriteJob?.stage === 'paused' || this.ghostwriteJob?.stage === 'failed') {
+      CardRow({ label: '按要求返修代笔', desc: '保留当前候选作为来源，只对下一稿生效',
+        onRowClick: (): void => { this.openGhostwriteBrief(); } }).enabled(!this.ghostwriteBusy)
+    }
+    CardRow({ label: '项目创建设置', desc: '创作方式、原始种子与项目润色偏好',
+      onRowClick: (): void => {
+        if (this.busy || this.hasBlockingNovelRun()) return;
+        this.controlSheetOpen = false;
+        router.pushUrl({ url: 'pages/NovelProjectSetupPage', params: { projectId: this.projectId } })
+          .catch((error: Error): void => { if (this.pageAlive) this.errorMsg = String(error); });
+      } })
+      .enabled(!this.busy && !this.hasBlockingNovelRun())
+      .opacity(this.busy || this.hasBlockingNovelRun() ? 0.5 : 1)
     CardRow({ label: '分支管理', desc: '创建、切换与撤销分支',
       onRowClick: (): void => {
-        if (this.busy || this.novelJobLocksWorkspace()) return;
+        if (this.busy) return;
         this.controlSheetOpen = false;
         this.branchSheetOpen = true;
       } })
-    CardRow({ label: '导出作品', desc: '工作区 ZIP / 正文 TXT / Markdown / EPUB', isLast: true,
+      .enabled(!this.busy)
+      .opacity(this.busy ? 0.5 : 1)
+    CardRow({ label: '导出作品', desc: '公开工作区 / 完整备份 / TXT / Markdown / EPUB', isLast: true,
       onRowClick: (): void => {
         this.controlSheetOpen = false;
         this.showExportMenu();
@@ -1948,6 +2970,7 @@ struct NovelWorkspacePage {
                 Column() {
                   NovelGhostwriteCard({
                     job: this.ghostwriteJob,
+            suggestedChapterCount: this.project?.branchSettings.suggestedChapterCount ?? DEFAULT_GHOSTWRITE_CHAPTER_COUNT,
                     planReady: this.ghostwritePlanReady(),
                     modelReady: this.ghostwriteModelsReady(),
                     planDisabledReason: '请先保存本章计划。',
@@ -1999,7 +3022,7 @@ struct NovelWorkspacePage {
               Text(this.controlNotice).fontSize(12).fontColor(INK3).layoutWeight(1)
               Text(this.busy ? '保存中…' : '保存').fontSize(14).fontWeight(FontWeight.Medium)
                 .fontFamily(FONT_SANS_MEDIUM).fontColor(this.busy ? INK4 : ACCENT)
-                .constraintSize({ minHeight: 44 })
+                .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.End)
                 .enabled(!this.busy)
                 .onClick((): void => { this.savePlanPrefs(); })
             }.width('100%').margin({ top: 6 })
@@ -2031,30 +3054,6 @@ struct NovelWorkspacePage {
   @Builder
   chatPane(): void {
     Column() {
-    Column() {
-      // 代笔任务进行中时卡片常显于聊天顶(控制入口在顶栏「项目控制」)
-      if (this.project !== null && this.ghostwriteJob !== null) {
-        NovelGhostwriteCard({
-          job: this.ghostwriteJob,
-          planReady: this.ghostwritePlanReady(),
-          modelReady: this.ghostwriteModelsReady(),
-          planDisabledReason: '请先在设定中保存本章计划。',
-          modelDisabledReason: this.ghostwriteModelReason(),
-          busy: this.ghostwriteBusy,
-          onStart: (targetChapterCount: number): void => { this.startGhostwrite(targetChapterCount); },
-          onPause: (): void => { this.pauseGhostwrite(); },
-          onResume: (): void => { this.resumeGhostwrite(); },
-          onRetry: (): void => { this.retryGhostwrite(); },
-          onCancel: (): void => { this.cancelGhostwrite(); },
-        })
-        .margin({ left: 16, right: 16, bottom: 8 })
-        .borderRadius(14)
-        .clip(true)
-        .transition(TransitionEffect.OPACITY
-          .combine(TransitionEffect.translate({ y: -8 }))
-          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
-      }
-    }.width('100%').clip(true)
     Column() {
       // Chat 与 Novel 共享同一 Timeline/AgentMessageRow；Timeline 独占 16vp 水平 gutter。
       InteractiveMessageTimeline({
@@ -2111,7 +3110,7 @@ struct NovelWorkspacePage {
             .constraintSize({ minHeight: 44, maxWidth: '50%' })
             .padding({ left: 10, right: 10 })
             .backgroundColor(SURFACE2).borderRadius(12)
-            .enabled(this.project !== null)
+            .enabled(this.project !== null && !this.busy)
             .onClick((): void => { this.openControlSheet(); })
             .accessibilityText('写作模型，打开项目控制')
           Blank()
@@ -2127,21 +3126,32 @@ struct NovelWorkspacePage {
         }
         .width('100%').margin({ bottom: 6 }).alignItems(VerticalAlign.Center)
 
+        if (this.failedInput.length > 0) {
+          Row({ space: 8 }) {
+            Text('可恢复本次输入，重新发送时会读取当前书稿。')
+              .fontSize(11).fontColor(INK3).layoutWeight(1).lineHeight(16)
+            Text(this.failedInputRunKind === 'quick_start' ? '重试快速开始' : '恢复输入').fontSize(12).fontColor(ACCENT).fontFamily(FONT_SANS_MEDIUM)
+              .constraintSize({ minHeight: 44 }).padding({ left: 8, right: 8 })
+              .enabled(!this.hasBlockingNovelRun())
+              .onClick((): void => { this.restoreFailedInput(); })
+          }.width('100%').alignItems(VerticalAlign.Center)
+        }
         ChatInput({
           text: this.draft,
           placeholder: this.composerPlaceholder(),
           showAttachments: false,
           showCoreSlashCommands: false,
           sending: this.activeRunId.length > 0 || this.polishRuns() || this.ghostwriteRuns(),
-          disabled: this.novelJobLocksWorkspace() && !this.ghostwriteRuns() && !this.polishRuns(),
-          onTextChange: (v: string): void => { this.draft = v; },
+          disabled: this.busy || this.sendStarting || this.composerRestoring ||
+            (this.novelJobLocksWorkspace() && !this.ghostwriteRuns() && !this.polishRuns()),
+          onTextChange: (v: string): void => { this.setComposerDraft(v); },
           onSend: (): void => { this.send(); },
           onStop: (): void => {
             if (this.polishRuns()) this.pausePolish();
             else if (this.ghostwriteRuns()) this.pauseGhostwrite();
             else this.interrupt();
           },
-          onClearInput: (): void => { this.draft = ''; },
+          onClearInput: (): void => { this.setComposerDraft(''); },
         })
       }
       // 全屏布局下手势条悬浮(bottomRect=0 → navBarHeight=0),须自留 ≥24vp 安全区
@@ -2186,6 +3196,10 @@ struct NovelWorkspacePage {
   @Builder
   chapterPane(): void {
     Column() {
+      if (this.collectionFeedback.length > 0) {
+        Text(this.collectionFeedback).fontSize(12).fontColor(INK3).lineHeight(18).width('100%')
+          .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+      }
       // 目录(iOS NovelChapterManagementView):标题 + 共 N 章;次要操作收「更多」
       Row() {
         Text('目录').fontSize(15).fontWeight(FontWeight.Bold).fontColor(INK2)
@@ -2233,12 +3247,15 @@ struct NovelWorkspacePage {
             ForEach(this.project.chapters, (c: NovelChapter, idx: number) => {
               ListItem() {
                 Row() {
-                  Text((idx + 1) < 10 ? '0' + (idx + 1) : '' + (idx + 1))
+                  Text(novelChapterOrdinal(c, idx + 1).toString().padStart(2, '0'))
                     .fontSize(13).fontColor(INK4).width(30)
                   Column() {
                     Text((c.discarded ? '[已废弃] ' : '') + (c.title.length > 0 ? c.title : '未命名章节'))
                       .fontSize(15).fontColor(c.discarded ? INK4 : INK).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                     Text(`${this.charCount(c.content)} 字`).fontSize(11).fontColor(INK3).margin({ top: 4 })
+                    if (c.suggestionWarning !== undefined && c.suggestionWarning !== null && c.suggestionWarning.length > 0) {
+                      Text('正文已保存 · 资料分析失败').fontSize(11).fontColor(ERROR).lineHeight(16).margin({ top: 4 })
+                    }
                   }
                   .alignItems(HorizontalAlign.Start).layoutWeight(1)
                   Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
@@ -2268,48 +3285,30 @@ struct NovelWorkspacePage {
     return s.replace(/\s/g, '').length;
   }
 
-  // 资料卡(各分区共用):展开读全文,展开态露编辑/删除
+  private hiddenSharedMaterialsIn(kinds: NovelMaterialKind[]): NovelMaterial[] {
+    const project: NovelProject | null = this.project;
+    if (project === null) return [];
+    return (project.baseMaterials ?? []).filter((material: NovelMaterial): boolean =>
+      kinds.includes(material.kind) && (project.hiddenMaterialIds ?? []).includes(material.id));
+  }
+
   @Builder
-  private MaterialCard(m: NovelMaterial): void {
-    Column() {
-      Row() {
-        Text(MATERIAL_KIND_LABELS[m.kind]).fontSize(11).fontColor(ACCENT)
-          .padding({ left: 8, right: 8, top: 3, bottom: 3 }).borderRadius(8).backgroundColor(SURFACE2)
-        Text(m.title).fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
-          .margin({ left: 8 }).layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        if (!m.enabled) {
-          Text('· 不参与写作').fontSize(11).fontColor(ERROR)
-        }
-        Text(this.expandedMaterialId === m.id ? '收起' : '展开').fontSize(12).fontColor(INK3)
-          .margin({ left: 8 })
-      }
-      .width('100%').constraintSize({ minHeight: 44 })
-      .onClick(() => {
-        animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => {
-          this.expandedMaterialId = this.expandedMaterialId === m.id ? '' : m.id;
-        });
-      })
-      if (this.expandedMaterialId === m.id) {
-        Column() {
-          Text(m.content).fontSize(13).fontColor(INK2).lineHeight(20).width('100%')
-          Row() {
-            Blank()
-            Text('删除').fontSize(12).fontColor(ERROR)
-              .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.Center).margin({ right: 8 })
-              .onClick(() => { this.deleteMaterial(m.id); })
-            Text('编辑').fontSize(12).fontColor(ACCENT)
-              .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.Center)
-              .onClick(() => { this.openEditMaterial(m); })
-          }.width('100%').margin({ top: 10 })
-        }
-        .width('100%')
-        .transition(TransitionEffect.OPACITY
-          .combine(TransitionEffect.translate({ y: -8 }))
-          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
-      }
-    }
-    .width('100%').padding(14).backgroundColor(SURFACE).borderRadius(12)
-    .border({ width: 1, color: LINE }).margin({ bottom: 10 })
+  private MaterialCard(material: NovelMaterial): void {
+    NovelMaterialCard({ material, origin: this.project === null ? 'branch' : materialOrigin(this.project, material.id),
+      sharedExists: this.project?.baseMaterials?.some((base: NovelMaterial): boolean => base.id === material.id) ?? false,
+      expanded: this.expandedMaterialId === material.id, busy: this.busy || this.hasBlockingNovelRun(),
+      onExpand: (): void => { this.expandedMaterialId = this.expandedMaterialId === material.id ? '' : material.id; },
+      onEditBranch: (): void => { this.openEditMaterial(material, 'branch'); },
+      onEditShared: (): void => { this.openEditMaterial(material, 'shared'); },
+      onDelete: (): void => { this.confirmDeleteMaterial(material); },
+      onRestore: (): void => { this.confirmRestoreMaterialInheritance(material); },
+    })
+  }
+
+  @Builder
+  private HiddenMaterials(kinds: NovelMaterialKind[]): void {
+    NovelHiddenSharedMaterials({ materials: this.hiddenSharedMaterialsIn(kinds), busy: this.busy || this.hasBlockingNovelRun(),
+      onRestore: (material: NovelMaterial): void => { this.confirmRestoreMaterialInheritance(material); } })
   }
 
   // 资料分区页(iOS Compendium 角色/世界观):待确认建议 + 资料列表 + 新增
@@ -2329,8 +3328,23 @@ struct NovelWorkspacePage {
             .constraintSize({ minHeight: 44 }).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
             .onClick(() => { this.openNewMaterial(addKind); })
         }
-        .width('100%').padding({ left: 20, right: 20, top: 4, bottom: 10 })
+        .width('100%').padding({ top: 4, bottom: 10 })
 
+        if (this.project !== null) {
+          ForEach(this.project.chapters.filter((chapter: NovelChapter): boolean =>
+            chapter.suggestionWarning !== undefined && chapter.suggestionWarning !== null && chapter.suggestionWarning.length > 0),
+          (chapter: NovelChapter): void => {
+            Column({ space: 6 }) {
+              Text(`「${chapter.title}」正文已保存，资料分析失败`).fontSize(12).fontColor(ERROR).lineHeight(18)
+              Text(chapter.suggestionWarning ?? '').fontSize(11).fontColor(INK3).lineHeight(16)
+              Text('重新分析此章').fontSize(12).fontColor(ACCENT).height(44).textAlign(TextAlign.Center)
+                .enabled(!this.busy && !this.hasBlockingNovelRun())
+                .onClick((): void => { this.reanalyze(chapter.id); })
+            }
+            .width('100%').alignItems(HorizontalAlign.Start).padding(12)
+            .backgroundColor(SURFACE2).borderRadius(10).margin({ bottom: 10 })
+          }, (chapter: NovelChapter): string => chapter.id)
+        }
         if (this.pendingSuggestionsIn(kinds).length > 0) {
           Text('待确认').fontSize(13).fontFamily(FONT_SANS_MEDIUM).fontColor(INK2).margin({ bottom: 8 })
           Text('Amber 从正文中发现了资料变化，采用后才会写入资料库。')
@@ -2352,6 +3366,7 @@ struct NovelWorkspacePage {
         ForEach(this.materialsIn(kinds), (m: NovelMaterial): void => {
           this.MaterialCard(m)
         }, (m: NovelMaterial): string => m.id)
+        this.HiddenMaterials(kinds)
       }
       .width('100%').padding({ left: 20, right: 20, bottom: 24 })
       .alignItems(HorizontalAlign.Start)
@@ -2396,6 +3411,7 @@ struct NovelWorkspacePage {
         ForEach(this.materialsIn(['outline']), (m: NovelMaterial): void => {
           this.MaterialCard(m)
         }, (m: NovelMaterial): string => m.id)
+        this.HiddenMaterials(['outline'])
         if (this.materialsIn(['outline']).length === 0) {
           Text('暂无总纲资料。').fontSize(12).fontColor(INK3).width('100%').margin({ bottom: 8 })
         }
@@ -2474,39 +3490,39 @@ struct NovelWorkspacePage {
         Column() {}.height(12)
         // 连续性审计(自正文 tab「更多」迁入;iOS 剧情 Section)
         this.SheetLabel('连续性审计')
-        Text('通读全部章节，检查情节、人名与时间线矛盾；需要已配置「内部职责」模型。')
-          .fontSize(11).fontColor(INK3).margin({ bottom: 8 })
+        Text('逐块覆盖全部有效章节，核查有原文依据的连续性问题。内部职责模型未单独配置时使用写作模型。')
+          .fontSize(11).fontColor(INK3).lineHeight(17).margin({ bottom: 8 })
         Row() {
-          Blank()
-          Text(this.auditRunning ? '审计中…' : '开始连续性审计')
-            .fontSize(13).fontFamily(FONT_SANS_MEDIUM)
-            .fontColor(this.auditRunning || this.busy ? INK4 : ACCENT)
-            .constraintSize({ minHeight: 44 })
-            .enabled(!this.auditRunning && !this.busy)
+          Text(this.auditRunning ? '正在审校' : '开始全文审校').fontSize(13).fontColor(this.auditRunning || this.busy ? INK4 : ACCENT)
+            .constraintSize({ minHeight: 44 }).enabled(!this.auditRunning && !this.busy)
             .onClick((): void => { this.runLlmContinuityAudit(); })
+          Blank()
+          if (this.auditRunning) {
+            Text('取消').fontSize(13).fontColor(ACCENT).constraintSize({ minWidth: 44, minHeight: 44 })
+              .onClick((): void => { this.auditController?.cancel(); })
+          }
         }.width('100%')
         if (this.auditMessage.length > 0) {
           Text(this.auditMessage).fontSize(12).fontColor(INK3).lineHeight(18).width('100%')
         }
-        ForEach(this.auditIssues, (issue: NovelAuditIssue): void => {
-          Column() {
-            Row() {
-              Text(issue.severity).fontSize(11).fontColor(this.auditSeverityColor(issue.severity))
-                .padding({ left: 6, right: 6, top: 2, bottom: 2 }).borderRadius(6)
-                .backgroundColor(SURFACE2)
-              Text(issue.chapterRef).fontSize(12).fontColor(INK3).margin({ left: 6 })
+        if ((this.auditReport?.issues.length ?? 0) > 0) {
+          Flex({ wrap: FlexWrap.Wrap }) {
+            Text(this.auditRepairBusy ? '正在生成修复建议…' : '全部生成修复建议').fontSize(13).fontColor(ACCENT)
+              .constraintSize({ minHeight: 44 }).padding({ right: 20 })
+              .enabled(!this.auditRepairBusy && !this.auditRunning && !this.busy && !this.hasBlockingNovelRun() && !this.auditReportStale())
+              .opacity(this.auditRepairBusy || this.auditReportStale() ? 0.45 : 1)
+              .onClick((): void => { this.repairAuditIssues(this.auditReport?.issues ?? []); })
+            if (this.auditRepairBusy) {
+              Text('取消修复').fontSize(13).fontColor(ACCENT).constraintSize({ minHeight: 44 })
+                .onClick((): void => { this.cancelAuditRepair(); })
             }
-            Text(issue.summary).fontSize(13).fontColor(INK).lineHeight(18).margin({ top: 4 })
-            if (issue.suggestion.length > 0) {
-              Text(`建议：${issue.suggestion}`).fontSize(12).fontColor(INK3).lineHeight(17).margin({ top: 2 })
-            }
-          }
-          .width('100%').alignItems(HorizontalAlign.Start)
-          .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-          .backgroundColor(SURFACE).borderRadius(10)
-          .margin({ top: 8 })
-        }, (issue: NovelAuditIssue): string =>
-          `${issue.severity}|${issue.chapterRef}|${issue.summary}`)
+          }.width('100%')
+        }
+        NovelAuditReportView({ report: this.auditReport, chapters: this.project?.chapters ?? [], stale: this.auditReportStale(),
+          repairBusy: this.auditRepairBusy || this.auditRunning || this.busy || this.hasBlockingNovelRun(),
+          onRepair: (issue: NovelAuditIssue): void => { this.repairAuditIssue(issue); },
+          onCanonicalEvidence: (issue: NovelAuditIssue, reference: NovelAuditReference): void => { this.openAuditEvidence(reference, issue.chapterId); },
+          onEvidence: (issue: NovelAuditIssue): void => { this.openAuditEvidence(issue); } })
       }
       .width('100%').padding({ left: 20, right: 20, bottom: 24 })
       .alignItems(HorizontalAlign.Start)
@@ -2553,7 +3569,7 @@ struct NovelWorkspacePage {
         Column() {}.layoutWeight(1)
       } else if (this.settingTab === 0) {
         Column() {
-          this.MaterialKindPane(['character'], '新增角色', 'character', false)
+          this.MaterialKindPane(['character', 'relationship'], '新增角色', 'character', false)
         }
         .width('100%').layoutWeight(1)
         .transition(TransitionEffect.OPACITY
@@ -2630,7 +3646,7 @@ struct NovelWorkspacePage {
             .alignItems(HorizontalAlign.Center)
             .constraintSize({ minHeight: 44, maxWidth: '62%' })
             .padding({ left: 12, right: 12 })
-            .enabled(this.project !== null)
+            .enabled(this.project !== null && !this.busy)
             .onClick((): void => { this.openControlSheet(); })
             .accessibilityText('项目控制')
           }
@@ -2648,6 +3664,15 @@ struct NovelWorkspacePage {
           if (this.errorMsg.length > 0 && !this.chapterEditorOpen && !this.materialEditorOpen) {
             Text(this.errorMsg).fontSize(12).fontColor(ERROR).lineHeight(18)
               .width('100%').padding({ left: 20, right: 20, bottom: 8 })
+          }
+
+          if (this.contextOverrides !== null) {
+            Row() {
+              Text(`本次上下文：包含 ${this.contextOverrides.forceIncludeMaterialIds.length} 项，排除 ${this.contextOverrides.forceExcludeMaterialIds.length} 项。仅下一次普通创作有效。`)
+                .fontSize(12).fontColor(INK3).lineHeight(18).layoutWeight(1)
+              Text('清除').fontSize(13).fontColor(ACCENT).height(44).padding({ left: 12, right: 12 })
+                .onClick((): void => { this.contextOverrides = null; })
+            }.width('100%').padding({ left: 20, right: 20, bottom: 8 })
           }
 
           if (this.project === null) {
@@ -2693,43 +3718,97 @@ struct NovelWorkspacePage {
         }
         // 素材编辑器
         if (this.materialEditorOpen) {
-          this.materialEditor()
+          NovelMaterialEditorSheet({ draftKey: this.materialEditorKey, closeRequest: this.materialCloseRequest,
+            initialDraft: this.materialEditorDraft, newMaterial: this.editingMaterialId.length === 0,
+            busy: this.busy, errorMessage: this.errorMsg, bottomPadding: Math.max(this.navBarHeight, 12),
+            onConfirm: (draft: NovelMaterialEditorDraft): void => { this.saveMaterial(draft); },
+            onCancel: (): void => { if (!this.busy) { this.materialEditorOpen = false; this.materialOpenToken++; } },
+          })
         }
         if (this.branchSheetOpen && this.workspaceStatus !== null) {
           NovelBranchSheet({
             visible: this.branchSheetOpen,
             activeBranchId: this.workspaceStatus.activeBranchId,
             branches: this.workspaceStatus.branches,
-            busy: this.busy || this.novelJobLocksWorkspace(),
+            busy: this.busy || this.hasBlockingNovelRun(),
+            switchBusy: this.busy || this.ghostwriteBusy || this.polishBusy || this.sendStarting || this.composerRestoring,
+            switchNeedsStop: this.hasBlockingNovelRun(),
             canUndo: this.workspaceStatus.canUndo,
             unresolvedFromOrdinal: this.workspaceStatus.unresolvedFromOrdinal,
             plotStale: this.workspaceStatus.plotStale,
-            onClose: (): void => { this.branchSheetOpen = false; },
+            onClose: (): void => { if (!this.busy) this.branchSheetOpen = false; },
             onCreate: (name: string): void => { this.createWorkspaceBranch(name); },
             onSelect: (branchId: string): void => { this.selectWorkspaceBranch(branchId); },
             onUndo: (): void => { this.undoWorkspace(); },
             onSyncPlot: (): void => { this.syncWorkspacePlot(); },
             onResolveUnresolved: (): void => { this.resolveWorkspaceUnresolved(); },
+            onOpenHistory: (): void => {
+              if (this.busy || this.hasBlockingNovelRun()) return;
+              this.branchSheetOpen = false;
+              router.pushUrl({ url: 'pages/NovelBranchHistoryPage', params: { projectId: this.projectId } })
+                .catch((error: Error): void => { if (this.pageAlive) this.errorMsg = String(error); });
+            },
           })
         }
         if (this.polishCreateOpen) {
           NovelPolishCreateSheet({
             visible: this.polishCreateOpen,
+            singleChapter: this.singlePolishChapterId.length > 0,
             chapters: this.polishSheetChapters(),
             modelReady: this.ghostwriteModelsReady(),
             modelDisabledReason: this.ghostwriteModelReason(),
             conflictReason: this.polishConflictReason(),
+            errorMessage: this.polishStartError,
             busy: this.polishBusy,
             bottomPadding: Math.max(this.navBarHeight, 12),
             onStart: (
-              startOrdinal: number, endOrdinal: number, contextOptions: PolishContextOptions,
-            ): void => { this.startPolish(startOrdinal, endOrdinal, contextOptions); },
+              startOrdinal: number, endOrdinal: number, contextOptions: PolishContextOptions, ordinals: number[],
+            ): void => { this.startPolish(startOrdinal, endOrdinal, contextOptions, ordinals); },
             onClose: (): void => { if (!this.polishBusy) this.polishCreateOpen = false; },
           })
+        }
+        if (this.ghostwritePreview !== null) {
+          NovelGhostwriteStartSheet({
+            planContent: this.ghostwriteAuthorPlanPreview(), branchName: this.ghostwritePreview.branchName,
+            chapterCount: this.ghostwritePreview.targetChapterCount, busy: this.ghostwriteBusy,
+            errorMessage: this.ghostwritePreviewError, bottomPadding: Math.max(this.navBarHeight, 12),
+            onConfirm: (): void => { this.confirmGhostwriteStart(); },
+            onClose: (): void => { if (!this.ghostwriteBusy) this.ghostwritePreview = null; },
+          })
+        }
+        if (this.ghostwriteBriefOpen) {
+          NovelRevisionBriefSheet({ draftKey: this.ghostwriteBriefKey, closeRequest: this.ghostwriteBriefCloseRequest,
+            sheetTitle: '按要求返修代笔', detail: this.ghostwriteBriefDetail,
+            placeholder: '输入本次返修要求（最多 2400 字）', confirmLabel: '开始定向返修', busy: this.ghostwriteBusy,
+            errorMessage: this.ghostwriteBriefError, bottomPadding: Math.max(this.navBarHeight, 12),
+            onConfirm: (brief: string): void => { this.submitGhostwriteBrief(brief); },
+            onCancel: (): void => { if (!this.ghostwriteBusy) this.ghostwriteBriefOpen = false; } })
         }
         // 项目控制 sheet(顶栏 principal 触发,渲染最上层)
         if (this.controlSheetOpen) {
           this.ControlSheet()
+        }
+        if (this.archiveOpen) {
+          NovelDiscussionArchiveSheet({
+            visible: this.archiveOpen, draftKey: this.archiveDraftKey,
+            sourceMessageCount: this.archiveSourceCount, sourceRangeLabel: this.archiveSourceRange,
+            initialSummary: this.archiveSummary, decisions: this.archiveDecisions,
+            busy: this.busy, errorMessage: this.archiveError, bottomPadding: Math.max(this.navBarHeight, 12),
+            onConfirm: (summary: string, indexes: number[]): void => { this.confirmArchive(summary, indexes); },
+            onCancel: (): void => { this.cancelArchive(); },
+          })
+        }
+        if (this.adoptionOpen) {
+          NovelMaterialAdoptionSheet({
+            visible: this.adoptionOpen, draftKey: this.adoptionDraftKey,
+            initialKind: this.adoptionKind, initialTitle: this.adoptionTitle, initialBody: this.adoptionBody, initialFields: this.adoptionFields,
+            existingTargets: this.adoptionTargets, busy: this.busy, errorMessage: this.adoptionError,
+            bottomPadding: Math.max(this.navBarHeight, 12),
+            onConfirm: (kind: NovelMaterialKind, title: string, body: string, targetId: string | null, fields: NovelMaterialFields): void => {
+              this.confirmMaterialAdoption(kind, title, body, targetId, fields);
+            },
+            onCancel: (): void => { this.cancelAdoption(); },
+          })
         }
       }, (e: number): string => `theme-${e}`)
     }
@@ -2741,7 +3820,7 @@ struct NovelWorkspacePage {
   @Builder
   private collectSheet(): void {
     Column() {
-      Blank().onClick((): void => { this.collectMessageId = ''; })
+      Blank().onClick((): void => { this.confirmDiscardCollect(); })
       Column() {
         Row() {
           Text('收录正文').fontSize(17).fontWeight(FontWeight.Bold).fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
@@ -2752,19 +3831,17 @@ struct NovelWorkspacePage {
         Scroll() {
           Column() {
             Row() {
-              this.SheetLabel('选择段落')
-              Blank()
+              Text('选择段落').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+                .layoutWeight(1)
               Text('全选').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
                 .constraintSize({ minHeight: 36 }).padding({ left: 10 })
                 .onClick((): void => {
-                  this.collectSelected = this.collectParas.map((): boolean => true);
-                  this.resetDraftFromSelection();
+                  this.selectCollectParagraphs(true);
                 })
               Text('清空').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
                 .constraintSize({ minHeight: 36 }).padding({ left: 10 })
                 .onClick((): void => {
-                  this.collectSelected = this.collectParas.map((): boolean => false);
-                  this.collectDraft = '';
+                  this.selectCollectParagraphs(false);
                 })
             }.width('100%').alignItems(VerticalAlign.Center)
             ForEach(this.collectParas, (para: string, idx: number): void => {
@@ -2788,23 +3865,34 @@ struct NovelWorkspacePage {
 
             Column() {}.height(14)
             Row() {
-              this.SheetLabel('收录前编辑')
-              Blank()
+              Text('收录前编辑').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+                .layoutWeight(1)
               Text('按当前选择重置').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
                 .constraintSize({ minHeight: 36 })
                 .onClick((): void => { this.resetDraftFromSelection(); })
             }.width('100%').alignItems(VerticalAlign.Center)
-            TextArea({ text: this.collectDraft, placeholder: '收录进章节的正文…' })
+            TextArea({ text: this.collectDraft, placeholder: '收录进章节的正文…',
+              controller: this.collectDraftController })
               .width('100%').height(150).fontSize(13).fontColor(INK).placeholderColor(INK4)
               .backgroundColor(SURFACE2).borderRadius(12).padding(12)
-              .onChange((v: string): void => { this.collectDraft = v; })
+              .onChange((v: string): void => {
+                if (v !== this.collectDraft) {
+                  this.collectManuallyEdited = true;
+                  this.collectDraft = v;
+                }
+              })
+            if (this.collectManuallyEdited) {
+              Text('已保留你的编辑；段落调整后可用“按当前选择重置”重建正文。')
+                .fontSize(11).fontColor(INK3).lineHeight(16).margin({ top: 6 }).width('100%')
+            }
 
             Column() {}.height(14)
             this.SheetLabel('章节位置')
             Seg({ options: ['新开章节', '并入', '替换'], selected: this.collectMode,
               onSelect: (idx: number): void => { this.collectMode = idx; } })
             if (this.collectMode === 0) {
-              TextInput({ text: this.collectTitle, placeholder: '章节标题' })
+              TextInput({ text: this.collectTitle, placeholder: '章节标题',
+                controller: this.collectTitleController })
                 .height(44).fontSize(14).fontColor(INK).placeholderColor(INK4)
                 .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
                 .margin({ top: 10 })
@@ -2825,7 +3913,7 @@ struct NovelWorkspacePage {
           Text('取消').fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
             .layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
             .enabled(!this.busy)
-            .onClick((): void => { this.collectMessageId = ''; })
+            .onClick((): void => { this.confirmDiscardCollect(); })
           Text(this.busy ? '收录中…' : '收录').fontSize(14).fontWeight(FontWeight.Medium)
             .fontFamily(FONT_SANS_MEDIUM).fontColor(this.collectDisabled() ? INK4 : ACCENT)
             .layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
@@ -2834,7 +3922,7 @@ struct NovelWorkspacePage {
         }.width('100%').margin({ top: 8 })
       }
       .width('100%').height('85%')
-      .padding({ left: 18, right: 18, top: 16, bottom: 14 + this.navBarHeight })
+      .padding({ left: 18, right: 18, top: 16, bottom: 14 + Math.max(this.navBarHeight, 24) })
       .backgroundColor(SURFACE).borderRadius({ topLeft: 20, topRight: 20 })
       .onClick((): void => {})
       .transition(TransitionEffect.translate({ y: 160 })
@@ -2853,7 +3941,7 @@ struct NovelWorkspacePage {
         (c: NovelChapter, idx: number): void => {
           Row() {
             Column({ space: 2 }) {
-              Text(`第 ${idx + 1} 章${c.title.length > 0 ? ' · ' + c.title : ''}`)
+              Text(`第 ${novelChapterOrdinal(c, idx + 1)} 章${c.title.length > 0 ? ' · ' + c.title : ''}`)
                 .fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
                 .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               Text(`${this.charCount(c.content)} 字`).fontSize(11).fontColor(INK3)
@@ -2880,13 +3968,15 @@ struct NovelWorkspacePage {
       Column() {
         Text(this.editingChapterId.length > 0 ? '编辑本章' : '新建章节')
           .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).margin({ bottom: 16 })
-        TextInput({ text: this.chapterTitle, placeholder: '章节标题' })
+        TextInput({ text: this.chapterTitle, placeholder: '章节标题', controller: this.chapterTitleController })
           .height(44).fontSize(14).fontColor(INK).placeholderColor(INK4)
           .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
+          .enabled(!this.busy)
           .onChange((v: string) => { this.chapterTitle = v; })
-        TextArea({ text: this.chapterContent, placeholder: '章节正文' })
+        TextArea({ text: this.chapterContent, placeholder: '章节正文', controller: this.chapterContentController })
           .height(180).fontSize(14).fontColor(INK).placeholderColor(INK4)
           .backgroundColor(SURFACE2).borderRadius(10).padding(12).margin({ top: 12 })
+          .enabled(!this.busy)
           .onChange((v: string) => { this.chapterContent = v; })
         Text(`${this.charCount(this.chapterContent)} 字`).fontSize(11).fontColor(INK3).margin({ top: 6 })
         if (this.errorMsg.length > 0) {
@@ -2897,10 +3987,10 @@ struct NovelWorkspacePage {
         }
         Row() {
           Text('取消').fontSize(14).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
-            .height(44)
+            .height(44).enabled(!this.busy)
             .onClick(() => { this.confirmDiscardChapter(); })
-          Text('保存').fontSize(14).fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center)
-            .height(44)
+          Text(this.busy ? '保存中…' : '保存').fontSize(14).fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center)
+            .height(44).enabled(!this.busy)
             .onClick(() => { this.saveChapter(); })
         }
         .width('100%').margin({ top: 16 })
@@ -2914,63 +4004,4 @@ struct NovelWorkspacePage {
     .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
-  @Builder
-  materialEditor(): void {
-    Column() {
-      Column() {
-        Text(this.editingMaterialId.length > 0 ? '编辑资料' : '新建资料')
-          .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).margin({ bottom: 16 })
-        // kind chips
-        Row() {
-          ForEach(KIND_FILTERS.filter(f => f !== 'all'), (f: MaterialFilter) => {
-            Text(filterLabel(f))
-              .fontSize(12).height(44).padding({ left: 10, right: 10 }).borderRadius(22)
-              .textAlign(TextAlign.Center)
-              .fontColor(this.materialKind === f ? ACCENT_INK : INK2)
-              .backgroundColor(this.materialKind === f ? ACCENT : SURFACE2)
-              .margin({ right: 6 })
-              .onClick(() => { this.materialKind = f as NovelMaterialKind; })
-          }, (f: MaterialFilter) => f)
-        }
-        .width('100%').margin({ bottom: 12 })
-
-        TextInput({ text: this.materialTitle, placeholder: this.materialKind === 'character' ? '人物姓名' : '名称' })
-          .height(44).fontSize(14).fontColor(INK).placeholderColor(INK4)
-          .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
-          .onChange((v: string) => { this.materialTitle = v; })
-        TextArea({ text: this.materialContent, placeholder: '资料内容' })
-          .height(140).fontSize(14).fontColor(INK).placeholderColor(INK4)
-          .backgroundColor(SURFACE2).borderRadius(10).padding(12).margin({ top: 12 })
-          .onChange((v: string) => { this.materialContent = v; })
-        Row() {
-          Text('参与写作上下文').fontSize(13).fontColor(INK2).layoutWeight(1)
-          Toggle({ type: ToggleType.Switch, isOn: this.materialEnabled })
-            .selectedColor(ACCENT)
-            .onChange((v: boolean) => { this.materialEnabled = v; })
-        }
-        .width('100%').margin({ top: 12 })
-        if (this.errorMsg.length > 0) {
-          Scroll() {
-            Text(this.errorMsg).fontSize(12).fontColor(ERROR).width('100%').wordBreak(WordBreak.BREAK_ALL)
-          }
-          .width('100%').constraintSize({ maxHeight: 54 }).align(Alignment.TopStart).margin({ top: 8 })
-        }
-        Row() {
-          Text('取消').fontSize(14).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
-            .height(44)
-            .onClick(() => { this.confirmDiscardMaterial(); })
-          Text('保存').fontSize(14).fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center)
-            .height(44)
-            .onClick(() => { this.saveMaterial(); })
-        }
-        .width('100%').margin({ top: 16 })
-      }
-      .width('88%').padding(22).backgroundColor(SURFACE).borderRadius(16)
-      .transition(TransitionEffect.translate({ y: 24 })
-        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
-    }
-    .width('100%').height('100%').backgroundColor(OVERLAY)
-    .justifyContent(FlexAlign.Center)
-    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
-  }
 }

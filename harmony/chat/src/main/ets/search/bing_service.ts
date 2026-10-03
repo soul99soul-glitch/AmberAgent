@@ -2,6 +2,7 @@
 // Android 基准: search/.../BingSearchService.kt(全文 133 行;SearchService<BingLocalOptions>)
 // 偏差登记:Jsoup → mini-DOM(html_dom.ts,树形/选择器子集);Jsoup timeout 10s →
 //   HttpClient Port 默认超时;Locale.getDefault() → runtime.acceptLanguage 注入
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -91,6 +92,7 @@ export const bingSearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     asBingOptions(serviceOptions);
     const qv: JsonValue | undefined = params['query'];
@@ -112,7 +114,7 @@ export const bingSearchService: SearchService = {
         'Referer': 'https://www.bing.com/',
         'Cookie': 'SRCHHPGUSR=ULSR=1',
       },
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       // 429/403/5xx 的挑战页/错误页不得当结果页解析(会被误报成无结果或返回错误页链接)
       throw new Error(`Bing request failed with HTTP ${resp.status}`);

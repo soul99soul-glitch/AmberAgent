@@ -59,7 +59,7 @@ export interface ChatStreamSubAgentGenerationPortDeps {
   makeProvider: (
     model: ProviderModel, params: TextGenerationParams, headers: CustomHeader[],
   ) => ChatStreamProvider;
-  configureRecipeLoop?: (loop: ToolLoopOptions) => Promise<void>;
+  configureRecipeLoop?: (loop: ToolLoopOptions, request: SubAgentGenerationRequest) => Promise<void>;
 }
 
 const unreachableSubAgentProvider: ChatStreamProvider = {
@@ -130,7 +130,7 @@ export class ChatStreamSubAgentGenerationPort implements SubAgentGenerationPort 
       makeProviderForStep: (definitions: ChatToolDefinition[]): ChatStreamProvider =>
         providerFor(definitions),
     };
-    if (this.deps.configureRecipeLoop !== undefined) await this.deps.configureRecipeLoop(loop);
+    if (this.deps.configureRecipeLoop !== undefined) await this.deps.configureRecipeLoop(loop, request);
     const result = await runAgenticToolLoop(seed, deps, loop);
     return currentMessages(result);
   }
@@ -290,6 +290,15 @@ const pendingToolName = (messages: UIMessage[]): string | null => {
   return null;
 };
 
+const approvalRequiredResult = (toolName: string): SubAgentResult => makeSubAgentResult({
+  status: 'approval_required',
+  summary: `Subagent requested approval for ${toolName}.`,
+  risks: ['Subagent cannot self-approve sensitive tools.'],
+  recommendedNextSteps: [
+    'Main agent should decide whether to ask the user for approval in the parent conversation.',
+  ],
+});
+
 export class GenerationSubAgentRunner implements SubAgentRunner {
   private readonly generation: SubAgentGenerationPort;
 
@@ -376,14 +385,7 @@ export class GenerationSubAgentRunner implements SubAgentRunner {
 
     const pending: string | null = pendingToolName(latest);
     if (pending !== null) {
-      return makeSubAgentResult({
-        status: 'approval_required',
-        summary: `Subagent requested approval for ${pending}.`,
-        risks: ['Subagent cannot self-approve sensitive tools.'],
-        recommendedNextSteps: [
-          'Main agent should decide whether to ask the user for approval in the parent conversation.',
-        ],
-      });
+      return approvalRequiredResult(pending);
     }
 
     let reportRetryError: unknown = null;
@@ -424,6 +426,8 @@ export class GenerationSubAgentRunner implements SubAgentRunner {
       displayForOutput = renderTranscriptForDisplay(latest).slice(0, definition.outputBudgetChars);
     }
     if (displayForOutput.length > 0) liveText(displayForOutput);
+    const retryPending: string | null = pendingToolName(latest);
+    if (retryPending !== null) return approvalRequiredResult(retryPending);
     const result: SubAgentResult = reportCapture.resultOrFallback(displayForOutput);
     const reportError: unknown = firstGenerationError ?? reportRetryError;
     if (!reportCapture.hasReport && reportError !== null && displayForOutput.length > 0) {

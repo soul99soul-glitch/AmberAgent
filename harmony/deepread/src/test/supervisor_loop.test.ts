@@ -91,15 +91,16 @@ test('buildPrompt: omits seedUrl section when null', () => {
   assert.ok(!prompt.includes('用户指定来源 URL'));
 });
 
-test('buildPrompt: scrape_web available vs not (different research order line 3)', () => {
+test('buildPrompt: legacy scrape flag cannot advertise tools absent from the writer set', () => {
   const base = (scrape: boolean) => buildPrompt({
     topicTitle: 't', stage: 'OVERVIEW', existingOutput: makeEmptyDeepReadOutput(),
     seedUrl: null, scrapeWebAvailable: scrape, evidencePack: makePack(),
     articlePlan: emptyPlan(), stageEvidence: [makeCard('s1')],
     stageTimeoutMs: 90_000, playbookMarkdown: '', todayIso: '2026-06-23',
   });
-  assert.ok(base(true).includes('再 scrape_web'));
-  assert.ok(base(false).includes('当前未暴露 scrape_web'));
+  assert.ok(!base(true).includes('scrape_web'));
+  assert.ok(!base(false).includes('scrape_web'));
+  assert.ok(base(true).includes('不确定'));
 });
 
 test('buildPrompt: includes stage-specific requirement', () => {

@@ -1,0 +1,277 @@
+{
+  "provider": "local synthetic fixture; fake key; actual device HTTP request log, no cloud-quality claim",
+  "sanitization": "Only selected request structure, hashes, synthetic job/entity IDs, frozen preference and public synthetic markers retained; no headers, authentication, API keys, response bodies or complete source prose exported.",
+  "hashAlgorithm": "sha256 over UTF-8 sorted-key compact JSON with ensure_ascii=false; original raw-body semantic equality separately compared",
+  "sourceLog": "/tmp/amber-standalone-provider-fixture.jsonl",
+  "sourceLogSha256": "ba2498c246dde86613b04471d1ea68a0e53ef6d151a61094b1efbd65b145519b",
+  "sourceLogLineCount": 53,
+  "summary": {
+    "polish": {
+      "jobId": "nv_murfyfqk_1_bay2hzc2",
+      "requestCount": 5,
+      "counts": {
+        "reviewer_ordinal_1": 1,
+        "reviewer_ordinal_3": 1,
+        "writer_ordinal_1": 2,
+        "writer_ordinal_3": 1
+      },
+      "frozenPreferenceSameAcrossAllRequests": true,
+      "frozenContextSameAcrossAllRequests": true,
+      "ordinal1InitialAndRetryWriterBodyEqual": true,
+      "ordinal3WriterAndReviewerExactlyOnce": true,
+      "initialFailureDeviceEvidence": "p5-polish-latest-result-page.json contains ordinal 1 failure strict-JSON error and ordinal 3 adopted success; HTTP request log alone does not encode response outcomes",
+      "retryDeviceEvidence": "p5-polish-retry-real-outcomes.json shows the same frozen project preference and ordinal 1 running; final outcome gate recorded by root separately"
+    },
+    "ordinaryLong": {
+      "matchingRequestCount": 2,
+      "twoBodiesExactlyEqual": true,
+      "failedPartialExcluded": true,
+      "olderHistoryPresentAndUnchanged": true,
+      "historyBoundary": "All system and original older history remain exactly as in initial request; newly generated failed partial is absent from both request inputs."
+    },
+    "freshCollect": {
+      "matchingRequestCount": 1,
+      "latestLocalLogLine": 48
+    }
+  },
+  "records": [
+    {
+      "localLogLine": 38,
+      "time": 1790974047.0594492,
+      "path": "/v1/chat/completions",
+      "category": "ordinary_original_or_explicit_retry",
+      "model": "fixture-context-16k",
+      "messageCount": 18,
+      "messageRoles": {
+        "system": 1,
+        "user": 7,
+        "assistant": 8,
+        "tool": 2
+      },
+      "maxOutputTokens": 4096,
+      "toolNames": [],
+      "canonicalRequestBodySha256": "a724d8cb64a3a44aa4e1edf853b169f5bdf665213f2ba2eb55bf9363c95da31c",
+      "userMarker": "P5_LONG",
+      "historyMessageCount": 16,
+      "failedPartialPhraseOccurrences": 0,
+      "generatedOutputTailMarkerOccurrences": 0,
+      "olderHistorySha256": "f45d8db34ef7aeff144a3f87997a5c585b4d3aad028d5c68716520cdf049344b",
+      "originalRequestBodyEqualsFirst": true
+    },
+    {
+      "localLogLine": 39,
+      "time": 1790974183.0658848,
+      "path": "/v1/chat/completions",
+      "category": "ordinary_original_or_explicit_retry",
+      "model": "fixture-context-16k",
+      "messageCount": 18,
+      "messageRoles": {
+        "system": 1,
+        "user": 7,
+        "assistant": 8,
+        "tool": 2
+      },
+      "maxOutputTokens": 4096,
+      "toolNames": [],
+      "canonicalRequestBodySha256": "a724d8cb64a3a44aa4e1edf853b169f5bdf665213f2ba2eb55bf9363c95da31c",
+      "userMarker": "P5_LONG",
+      "historyMessageCount": 16,
+      "failedPartialPhraseOccurrences": 0,
+      "generatedOutputTailMarkerOccurrences": 0,
+      "olderHistorySha256": "f45d8db34ef7aeff144a3f87997a5c585b4d3aad028d5c68716520cdf049344b",
+      "originalRequestBodyEqualsFirst": true
+    },
+    {
+      "localLogLine": 40,
+      "time": 1790974468.272515,
+      "path": "/v1/chat/completions",
+      "category": "polish_writer",
+      "model": "fixture-context-16k",
+      "messageCount": 2,
+      "messageRoles": {
+        "system": 1,
+        "user": 1
+      },
+      "maxOutputTokens": 4096,
+      "toolNames": [
+        "novel_workspace_list",
+        "novel_workspace_read",
+        "novel_workspace_grep",
+        "novel_workspace_status",
+        "novel_list_chapters",
+        "novel_read_chapter",
+        "novel_list_setting_proposals"
+      ],
+      "canonicalRequestBodySha256": "219922c92cc662666cfb4aaf7ba5775688a1e52d6e687baa4bf3ef34df72c8cd",
+      "jobId": "nv_murfyfqk_1_bay2hzc2",
+      "chapterOrdinal": 1,
+      "chapterId": "nv_mur9j7y7_2_bxj224ex",
+      "sourceDigest": "34b4b375",
+      "sourceDigestMatchesContent": true,
+      "polishPreferenceAtStart": "P2 project polish preference",
+      "polishPreferenceSha256": "812a0d93c6fd78e91b8f6c44ed518e6b1d83fadf5ab089a8c047ef4ef2759e32",
+      "contextSnapshotSha256": "e388ddda815c5836afe2fb2055a605d54beb95023b44723c76536c8230d8b000",
+      "frozenInputSha256": "376bc930a0c7386080f162ceb6512121880e8d2c4dafc968303da4bb157c8bd1",
+      "ordinalStageAttempt": 1
+    },
+    {
+      "localLogLine": 41,
+      "time": 1790974503.5917828,
+      "path": "/v1/chat/completions",
+      "category": "polish_writer",
+      "model": "fixture-context-16k",
+      "messageCount": 2,
+      "messageRoles": {
+        "system": 1,
+        "user": 1
+      },
+      "maxOutputTokens": 4096,
+      "toolNames": [
+        "novel_workspace_list",
+        "novel_workspace_read",
+        "novel_workspace_grep",
+        "novel_workspace_status",
+        "novel_list_chapters",
+        "novel_read_chapter",
+        "novel_list_setting_proposals"
+      ],
+      "canonicalRequestBodySha256": "57a67924b017a7db43f509ae5b891313f724640e465fba36856e505c3f3d0ed8",
+      "jobId": "nv_murfyfqk_1_bay2hzc2",
+      "chapterOrdinal": 3,
+      "chapterId": "nv_murcapcr_12_yec9kjs1",
+      "sourceDigest": "f0f80b55",
+      "sourceDigestMatchesContent": true,
+      "polishPreferenceAtStart": "P2 project polish preference",
+      "polishPreferenceSha256": "812a0d93c6fd78e91b8f6c44ed518e6b1d83fadf5ab089a8c047ef4ef2759e32",
+      "contextSnapshotSha256": "e388ddda815c5836afe2fb2055a605d54beb95023b44723c76536c8230d8b000",
+      "frozenInputSha256": "6f59f9808ca3916d8b8c77a0896594c09638db58a56cfacbfe15059f223ca28f",
+      "ordinalStageAttempt": 1
+    },
+    {
+      "localLogLine": 42,
+      "time": 1790974538.803539,
+      "path": "/v1/chat/completions",
+      "category": "polish_reviewer",
+      "model": "fixture-context-16k",
+      "messageCount": 2,
+      "messageRoles": {
+        "system": 1,
+        "user": 1
+      },
+      "maxOutputTokens": 4096,
+      "toolNames": [
+        "novel_workspace_list",
+        "novel_workspace_read",
+        "novel_workspace_grep",
+        "novel_workspace_status",
+        "novel_list_chapters",
+        "novel_read_chapter",
+        "novel_list_setting_proposals"
+      ],
+      "canonicalRequestBodySha256": "5b11e251e04453b0a41eeebc5f43a56b27fb386f6bd8698138c21213b79016b9",
+      "jobId": "nv_murfyfqk_1_bay2hzc2",
+      "chapterOrdinal": 3,
+      "chapterId": "nv_murcapcr_12_yec9kjs1",
+      "sourceDigest": "f0f80b55",
+      "sourceDigestMatchesContent": true,
+      "polishPreferenceAtStart": "P2 project polish preference",
+      "polishPreferenceSha256": "812a0d93c6fd78e91b8f6c44ed518e6b1d83fadf5ab089a8c047ef4ef2759e32",
+      "contextSnapshotSha256": "e388ddda815c5836afe2fb2055a605d54beb95023b44723c76536c8230d8b000",
+      "frozenInputSha256": "6f59f9808ca3916d8b8c77a0896594c09638db58a56cfacbfe15059f223ca28f",
+      "ordinalStageAttempt": 1,
+      "candidateId": "polish-candidate:nv_murfzybj_6_nw2ch4zc",
+      "candidateDigest": "59805f3d",
+      "candidateDigestMatchesContent": true,
+      "candidateContentSha256": "ba359ebcfc345282d5c736b22c66a18f1f0ae3afa3dd81dc7295a3ebb2455be8"
+    },
+    {
+      "localLogLine": 43,
+      "time": 1790974652.478428,
+      "path": "/v1/chat/completions",
+      "category": "polish_writer",
+      "model": "fixture-context-16k",
+      "messageCount": 2,
+      "messageRoles": {
+        "system": 1,
+        "user": 1
+      },
+      "maxOutputTokens": 4096,
+      "toolNames": [
+        "novel_workspace_list",
+        "novel_workspace_read",
+        "novel_workspace_grep",
+        "novel_workspace_status",
+        "novel_list_chapters",
+        "novel_read_chapter",
+        "novel_list_setting_proposals"
+      ],
+      "canonicalRequestBodySha256": "219922c92cc662666cfb4aaf7ba5775688a1e52d6e687baa4bf3ef34df72c8cd",
+      "jobId": "nv_murfyfqk_1_bay2hzc2",
+      "chapterOrdinal": 1,
+      "chapterId": "nv_mur9j7y7_2_bxj224ex",
+      "sourceDigest": "34b4b375",
+      "sourceDigestMatchesContent": true,
+      "polishPreferenceAtStart": "P2 project polish preference",
+      "polishPreferenceSha256": "812a0d93c6fd78e91b8f6c44ed518e6b1d83fadf5ab089a8c047ef4ef2759e32",
+      "contextSnapshotSha256": "e388ddda815c5836afe2fb2055a605d54beb95023b44723c76536c8230d8b000",
+      "frozenInputSha256": "376bc930a0c7386080f162ceb6512121880e8d2c4dafc968303da4bb157c8bd1",
+      "ordinalStageAttempt": 2
+    },
+    {
+      "localLogLine": 44,
+      "time": 1790974687.7624161,
+      "path": "/v1/chat/completions",
+      "category": "polish_reviewer",
+      "model": "fixture-context-16k",
+      "messageCount": 2,
+      "messageRoles": {
+        "system": 1,
+        "user": 1
+      },
+      "maxOutputTokens": 4096,
+      "toolNames": [
+        "novel_workspace_list",
+        "novel_workspace_read",
+        "novel_workspace_grep",
+        "novel_workspace_status",
+        "novel_list_chapters",
+        "novel_read_chapter",
+        "novel_list_setting_proposals"
+      ],
+      "canonicalRequestBodySha256": "61a5568d82b6bc6dd696ed0d533f43f70594ccacc6543e1981b58eec6e797cbb",
+      "jobId": "nv_murfyfqk_1_bay2hzc2",
+      "chapterOrdinal": 1,
+      "chapterId": "nv_mur9j7y7_2_bxj224ex",
+      "sourceDigest": "34b4b375",
+      "sourceDigestMatchesContent": true,
+      "polishPreferenceAtStart": "P2 project polish preference",
+      "polishPreferenceSha256": "812a0d93c6fd78e91b8f6c44ed518e6b1d83fadf5ab089a8c047ef4ef2759e32",
+      "contextSnapshotSha256": "e388ddda815c5836afe2fb2055a605d54beb95023b44723c76536c8230d8b000",
+      "frozenInputSha256": "376bc930a0c7386080f162ceb6512121880e8d2c4dafc968303da4bb157c8bd1",
+      "ordinalStageAttempt": 1,
+      "candidateId": "polish-candidate:nv_murg3578_3_00gg5fkx",
+      "candidateDigest": "a22d812c",
+      "candidateDigestMatchesContent": true,
+      "candidateContentSha256": "9400e320ff9515b13b70813c26ed5517792c71d5f0b19bb7f1d1b9f34f1c69bb"
+    },
+    {
+      "localLogLine": 48,
+      "time": 1790975091.142387,
+      "path": "/v1/chat/completions",
+      "category": "fresh_collection_generation",
+      "model": "fixture-context-16k",
+      "messageCount": 22,
+      "messageRoles": {
+        "system": 1,
+        "user": 9,
+        "assistant": 10,
+        "tool": 2
+      },
+      "maxOutputTokens": 4096,
+      "toolNames": [],
+      "canonicalRequestBodySha256": "3d345a2a55e18b68aea718f411a38a6bb28b0795c63d4c16bd667a6cba2a4f69",
+      "userMarker": "P5_COLLECT",
+      "latestMatchingRequest": true
+    }
+  ]
+}

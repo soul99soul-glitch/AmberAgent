@@ -1,0 +1,50 @@
+[
+  {
+    "product": "novel",
+    "bundleName": "app.amber.novel",
+    "appId": "app.amber.novel_",
+    "versionName": "0.0.2",
+    "versionCode": 2,
+    "provisionType": "debug",
+    "mainAbilities": [
+      {
+        "name": "entry",
+        "mainAbility": "EntryAbility",
+        "hapPath": "/data/app/el1/bundle/public/app.amber.novel/entry.hap"
+      }
+    ],
+    "uid": 20020074
+  },
+  {
+    "product": "deepread",
+    "bundleName": "app.amber.deepread.reader",
+    "appId": "app.amber.deepread.reader_",
+    "versionName": "0.0.2",
+    "versionCode": 2,
+    "provisionType": "debug",
+    "mainAbilities": [
+      {
+        "name": "entry",
+        "mainAbility": "EntryAbility",
+        "hapPath": "/data/app/el1/bundle/public/app.amber.deepread.reader/entry.hap"
+      }
+    ],
+    "uid": 20020075
+  },
+  {
+    "product": "host",
+    "bundleName": "app.amber.deepread",
+    "appId": "app.amber.deepread_BJvEmT6S0WGGLQlB5lHMzHAQMehq8xj8ASwXIueC0sIAZzFm/+8mvjWJUWBudfjhiL31ASsTArj6aAGRmCLLKfA=",
+    "versionName": "0.0.2",
+    "versionCode": 2,
+    "provisionType": "debug",
+    "mainAbilities": [
+      {
+        "name": "entry",
+        "mainAbility": "EntryAbility",
+        "hapPath": "/data/app/el1/bundle/public/app.amber.deepread/entry.hap"
+      }
+    ],
+    "uid": 20020073
+  }
+]

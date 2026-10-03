@@ -6,14 +6,17 @@ import { MOTION_OVERLAY,
 } from '../design/tokens.ets';
 import type {
   DurablePolishJob, GhostwriteFinding, PolishChapterTarget, PolishProgress, PolishStage,
-  PolishWarning,
+  PolishWarning, PolishChapterResult,
 } from '@amber/deepread-domain';
+import { projectPolishOutcomes } from '@amber/deepread-domain';
 
 @Component
 export struct NovelPolishJobCard {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop job: DurablePolishJob | null = null;
   @Prop busy: boolean = false;
+  @Prop fullHeight: boolean = false;
+  @Prop retryReady: boolean = true;
 
   onPause: () => void = (): void => {};
   onResume: () => void = (): void => {};
@@ -26,100 +29,99 @@ export struct NovelPolishJobCard {
 
   build(): void {
     if (this.themeEpoch >= 0 && this.job !== null) {
-      Scroll() {
-        this.jobBody(this.job)
+      if (this.fullHeight) {
+        this.jobBody()
+      } else {
+        Scroll() {
+          this.jobBody()
+        }
+        .width('100%').constraintSize({ maxHeight: 380 }).scrollBar(BarState.Auto).align(Alignment.TopStart)
       }
-      .width('100%').constraintSize({ maxHeight: 380 }).scrollBar(BarState.Auto)
     }
   }
 
   @Builder
-  private jobBody(job: DurablePolishJob): void {
+  private jobBody(): void {
     Column() {
-      this.header(job)
-      this.progressSection(job)
-      this.stageSection(job)
-      this.warningSection(job)
-      this.candidateSection(job)
-      this.reviewSection(job)
-      this.failureSection(job)
-      this.resultSection(job)
-      this.actionRow(job)
+      this.header()
+      this.progressSection()
+      this.stageSection()
+      this.warningSection()
+      this.candidateSection()
+      this.reviewSection()
+      this.failureSection()
+      this.resultSection()
+      this.actionRow()
     }
     .width('100%').padding(14).backgroundColor(SURFACE2).borderRadius(14)
-    .border({ width: 1, color: this.stageColor(job.stage) }).alignItems(HorizontalAlign.Start)
+    .border({ width: 1, color: this.stageColor(this.job!.stage) }).alignItems(HorizontalAlign.Start)
   }
 
   @Builder
-  private header(job: DurablePolishJob): void {
+  private header(): void {
     Column() {
-      Text('批量润色').fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK)
-      Text(this.stageDescription(job.stage)).fontSize(12).fontColor(INK3).lineHeight(18)
+      Text(this.job!.targets.length === 1 ? '整章润色' : '批量润色').fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK)
+      Text(this.stageDescription(this.job!.stage)).fontSize(12).fontColor(INK3).lineHeight(18)
         .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%').margin({ top: 4 })
     }
     .width('100%').alignItems(HorizontalAlign.Start)
   }
 
   @Builder
-  private progressSection(job: DurablePolishJob): void {
+  private progressSection(): void {
     Row() {
       Column() {
-        Text(`${job.progress.length}/${job.targets.length}`).fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
-        Text('已原子收录 / 目标').fontSize(11).fontColor(INK3).margin({ top: 2 })
+        Text(`${this.processedCount(this.job!)}/${this.job!.targets.length}`).fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+        Text('已处理 / 目标').fontSize(11).fontColor(INK3).margin({ top: 2 })
       }
       .alignItems(HorizontalAlign.Start)
       Blank()
       Column() {
-        Text(this.currentChapterLabel(job)).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
-        Text(this.stageLabel(job.stage)).fontSize(12).fontColor(this.stageColor(job.stage)).margin({ top: 3 })
+        Text(this.currentChapterLabel(this.job!)).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
+        Text(this.stageLabel(this.job!.stage)).fontSize(12).fontColor(this.stageColor(this.job!.stage)).margin({ top: 3 })
       }
       .alignItems(HorizontalAlign.End)
     }
     .width('100%').margin({ top: 12, bottom: 10 })
-    this.progressBar(job.progress.length, job.targets.length)
+    this.progressBar()
   }
 
   @Builder
-  private stageSection(job: DurablePolishJob): void {
+  private stageSection(): void {
     Column() {
       Text('执行阶段').fontSize(11).fontColor(INK3)
-      Text(this.stageFlow(job.stage)).fontSize(12).fontColor(INK2).lineHeight(18)
+      Text(this.stageFlow(this.job!.stage)).fontSize(12).fontColor(INK2).lineHeight(18)
         .width('100%').margin({ top: 4 })
     }
-    .width('100%').padding({ top: 11, bottom: 3 })
+    .width('100%').alignItems(HorizontalAlign.Start).padding({ top: 11, bottom: 3 })
     .border({ width: { top: 0.5 }, color: { top: LINE } }).margin({ top: 12 })
   }
 
   @Builder
-  private warningSection(job: DurablePolishJob): void {
-    if (job.warnings.length > 0) {
+  private warningSection(): void {
+    if (this.job!.warnings.length > 0) {
       Column() {
         Text('注意事项').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK)
-        ForEach(job.warnings, (warning: PolishWarning): void => {
+        ForEach(this.job!.warnings, (warning: PolishWarning): void => {
           Text(`${this.warningLabel(warning.kind)}：${warning.message}`).fontSize(12).fontColor(INK2)
             .lineHeight(18).maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%').margin({ top: 7 })
         }, (warning: PolishWarning): string => warning.kind)
       }
-      .width('100%').padding({ top: 11, bottom: 3 })
+      .width('100%').alignItems(HorizontalAlign.Start).padding({ top: 11, bottom: 3 })
       .border({ width: { top: 0.5 }, color: { top: LINE } }).margin({ top: 12 })
     }
   }
 
   @Builder
-  private candidateSection(job: DurablePolishJob): void {
-    if (job.candidate !== null) {
+  private candidateSection(): void {
+    if (this.job!.candidate !== null) {
       Column() {
-        this.detailToggle('候选正文', `第 ${job.candidate.chapterOrdinal} 章 · 第 ${job.candidate.attempt + 1} 稿`,
-          this.candidateExpanded, (): void => {
-            this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
-              this.candidateExpanded = !this.candidateExpanded;
-            });
-          })
+        this.detailToggle('candidate')
         if (this.candidateExpanded) {
           Column() {
             Text('候选未原子收录前不会改变正文。').fontSize(11).fontColor(INK3).margin({ top: 8 })
-            Text(job.candidate.content).fontSize(12).fontColor(INK2).lineHeight(18)
+            Text(this.job!.candidate.content).fontSize(12).fontColor(INK2).lineHeight(18)
               .width('100%').margin({ top: 7 })
           }
           .width('100%')
@@ -133,22 +135,17 @@ export struct NovelPolishJobCard {
   }
 
   @Builder
-  private reviewSection(job: DurablePolishJob): void {
-    if (job.review !== null) {
+  private reviewSection(): void {
+    if (this.job!.review !== null) {
       Column() {
-        this.detailToggle('独立审稿', this.reviewSummary(job), this.reviewExpanded,
-          (): void => {
-            this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
-              this.reviewExpanded = !this.reviewExpanded;
-            });
-          })
+        this.detailToggle('review')
         if (this.reviewExpanded) {
           Column() {
-            if (job.review.rewriteInstructions.trim().length > 0) {
-              Text(`重写说明：${job.review.rewriteInstructions}`).fontSize(12).fontColor(INK2).lineHeight(18)
+            if (this.job!.review.rewriteInstructions.trim().length > 0) {
+              Text(`重写说明：${this.job!.review.rewriteInstructions}`).fontSize(12).fontColor(INK2).lineHeight(18)
                 .width('100%').margin({ top: 8 })
             }
-            ForEach(job.review.findings, (finding: GhostwriteFinding): void => {
+            ForEach(this.job!.review.findings, (finding: GhostwriteFinding): void => {
               Text(`${this.findingLabel(finding)}：${finding.message}`).fontSize(12).fontColor(INK2)
                 .lineHeight(18)
                 .width('100%').margin({ top: 7 })
@@ -165,28 +162,23 @@ export struct NovelPolishJobCard {
   }
 
   @Builder
-  private failureSection(job: DurablePolishJob): void {
-    if (job.failure !== null && job.failure.trim().length > 0) {
-      Text(job.failure).fontSize(12).fontColor(ERROR).lineHeight(18)
+  private failureSection(): void {
+    if (this.job!.failure !== null && this.job!.failure.trim().length > 0) {
+      Text(this.job!.failure).fontSize(12).fontColor(ERROR).lineHeight(18)
         .width('100%').margin({ top: 12 })
     }
   }
 
   @Builder
-  private resultSection(job: DurablePolishJob): void {
-    if (this.showResults(job.stage)) {
+  private resultSection(): void {
+    if (this.showResults(this.job!.stage)) {
       Column() {
-        this.detailToggle('本次结果', `${job.progress.length} 已完成，${this.incompleteCount(job)} 未完成`,
-          this.resultsExpanded, (): void => {
-            this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
-              this.resultsExpanded = !this.resultsExpanded;
-            });
-          })
+        this.detailToggle('results')
         if (this.resultsExpanded) {
           Column() {
-            ForEach(job.targets, (target: PolishChapterTarget): void => {
-              this.resultRow(target, this.progressFor(job, target.id))
-            }, (target: PolishChapterTarget): string => target.id)
+            ForEach(projectPolishOutcomes(this.job!), (result: PolishChapterResult): void => {
+              this.outcomeRow(result)
+            }, (result: PolishChapterResult): string => `${result.chapterId}:${result.status}:${result.message ?? ''}:${result.updatedAt}`)
           }
           .width('100%')
           .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
@@ -199,15 +191,15 @@ export struct NovelPolishJobCard {
   }
 
   @Builder
-  private resultRow(target: PolishChapterTarget, progress: PolishProgress | null): void {
+  private outcomeRow(result: PolishChapterResult): void {
     Row() {
       Column() {
-        Text(`第 ${target.ordinal} 章 · ${target.title}`).fontSize(12).fontColor(INK).maxLines(1)
+        Text(`第 ${result.chapterOrdinal} 章 · ${this.targetTitle(this.job!, result.chapterId)}`).fontSize(12).fontColor(INK).maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-        if (progress !== null) {
-          Text(`已完成 · ${this.shortReceipt(progress.receipt)}`).fontSize(11).fontColor(ACCENT).margin({ top: 2 })
-        } else {
-          Text('未完成').fontSize(11).fontColor(INK3).margin({ top: 2 })
+        Text(this.outcomeLabel(result)).fontSize(11).fontColor(result.status === 'failed' ? ERROR : result.status === 'success' ? ACCENT : INK3)
+          .lineHeight(18).width('100%').margin({ top: 2 })
+        if (result.message !== null && result.message.length > 0) {
+          Text(result.message).fontSize(12).fontColor(INK2).lineHeight(18).width('100%').margin({ top: 4 })
         }
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
@@ -217,51 +209,63 @@ export struct NovelPolishJobCard {
   }
 
   @Builder
-  private detailToggle(title: string, detail: string, expanded: boolean, action: () => void): void {
+  private detailToggle(section: string): void {
     Row() {
       Column() {
-        Text(title).fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK)
-        Text(detail).fontSize(11).fontColor(INK3).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(section === 'candidate' ? '候选正文' : section === 'review' ? '独立审稿' : '本次结果')
+          .fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK)
+        Text(section === 'candidate'
+          ? `第 ${this.job!.candidate!.chapterOrdinal} 章 · ${this.job!.candidate!.attempt === 0 ? '本轮候选' : `自动返修 ${this.job!.candidate!.attempt} 次`}`
+          : section === 'review' ? this.reviewSummary(this.job!) : this.resultSummary(this.job!))
+          .fontSize(11).fontColor(INK3).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%').margin({ top: 2 })
       }
       .layoutWeight(1).alignItems(HorizontalAlign.Start)
-      Text(expanded ? '收起' : '查看').fontSize(12).fontColor(ACCENT).width(52).height(44)
+      Text((section === 'candidate' ? this.candidateExpanded : section === 'review' ? this.reviewExpanded : this.resultsExpanded) ? '收起' : '查看')
+        .fontSize(12).fontColor(ACCENT).width(52).height(44)
         .textAlign(TextAlign.Center).padding({ top: 13, bottom: 13 })
-        .accessibilityText(`${expanded ? '收起' : '查看'}${title}`).onClick(action)
+        .accessibilityText(`${(section === 'candidate' ? this.candidateExpanded : section === 'review' ? this.reviewExpanded : this.resultsExpanded) ? '收起' : '查看'}${section === 'candidate' ? '候选正文' : section === 'review' ? '独立审稿' : '本次结果'}`)
+        .onClick((): void => { this.toggleDetail(section); })
     }
     .width('100%').constraintSize({ minHeight: 44 }).alignItems(VerticalAlign.Center)
   }
 
   @Builder
-  private actionRow(job: DurablePolishJob): void {
+  private actionRow(): void {
     Row() {
-      if (job.stage === 'paused' || job.stage === 'waiting_system') {
-        this.smallButton('继续', !this.busy, ACCENT, ACCENT_INK, (): void => { this.onResume(); })
-        this.smallButton('取消', !this.busy, SURFACE, ERROR, (): void => { this.onCancel(); })
-      } else if (job.stage === 'failed') {
-        this.smallButton('重试', !this.busy, ACCENT, ACCENT_INK, (): void => { this.onRetry(); })
-        this.smallButton('取消', !this.busy, SURFACE, ERROR, (): void => { this.onCancel(); })
-      } else if (job.stage !== 'cancelled' && job.stage !== 'completed') {
-        this.smallButton('暂停', !this.busy, SURFACE, ACCENT, (): void => { this.onPause(); })
-        this.smallButton('取消', !this.busy, SURFACE, ERROR, (): void => { this.onCancel(); })
+      if (this.job!.stage === 'paused' || this.job!.stage === 'waiting_system') {
+        this.smallButton('resume')
+        this.smallButton('cancel')
+      } else if (this.job!.stage === 'failed') {
+        this.smallButton('retry')
+        this.smallButton('cancel')
+      } else if (this.job!.stage !== 'cancelled' && this.job!.stage !== 'completed') {
+        this.smallButton('pause')
+        this.smallButton('cancel')
       }
     }
     .width('100%').margin({ top: 14 }).justifyContent(FlexAlign.End)
   }
 
   @Builder
-  private smallButton(label: string, enabled: boolean, background: string, color: string, action: () => void): void {
-    Text(label).fontSize(13).fontWeight(FontWeight.Medium).fontColor(enabled ? color : INK4)
+  private smallButton(actionKind: string): void {
+    Text(actionKind === 'resume' ? '继续' : actionKind === 'retry' ? '重试' : actionKind === 'pause' ? '暂停' : '取消')
+      .fontSize(13).fontWeight(FontWeight.Medium)
+      .fontColor(this.busy || (actionKind === 'retry' && !this.retryReady) ? INK4
+        : actionKind === 'cancel' ? ERROR : actionKind === 'pause' ? ACCENT : ACCENT_INK)
       .constraintSize({ minWidth: 72, minHeight: 44 }).height(44).textAlign(TextAlign.Center)
-      .padding({ left: 12, right: 12, top: 12, bottom: 12 }).backgroundColor(background).borderRadius(12)
-      .border({ width: 1, color: color === ERROR ? ERROR : LINE }).margin({ left: 8 })
-      .opacity(enabled ? 1 : 0.5).onClick((): void => { if (enabled) action(); })
+      .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+      .backgroundColor(actionKind === 'resume' || actionKind === 'retry' ? ACCENT : SURFACE).borderRadius(12)
+      .border({ width: 1, color: actionKind === 'cancel' ? ERROR : LINE }).margin({ left: 8 })
+      .opacity(this.busy || (actionKind === 'retry' && !this.retryReady) ? 0.5 : 1)
+      .enabled(!this.busy && (actionKind !== 'retry' || this.retryReady))
+      .onClick((): void => { if (!this.busy && (actionKind !== 'retry' || this.retryReady)) this.performAction(actionKind); })
   }
 
   @Builder
-  private progressBar(done: number, total: number): void {
+  private progressBar(): void {
     Row() {
-      Row() {}.width(`${this.progressPercent(done, total)}%`).height(6).backgroundColor(ACCENT).borderRadius(3)
+      Row() {}.width(`${this.progressPercent(this.processedCount(this.job!), this.job!.targets.length)}%`).height(6).backgroundColor(ACCENT).borderRadius(3)
     }
     .width('100%').height(6).backgroundColor(RAISED).borderRadius(3)
   }
@@ -270,6 +274,21 @@ export struct NovelPolishJobCard {
     if (job.targets.length === 0) return '未选择章节';
     const index: number = Math.max(0, Math.min(job.cursor, job.targets.length - 1));
     return `第 ${job.targets[index].ordinal} 章`;
+  }
+
+  private toggleDetail(section: string): void {
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      if (section === 'candidate') this.candidateExpanded = !this.candidateExpanded;
+      else if (section === 'review') this.reviewExpanded = !this.reviewExpanded;
+      else this.resultsExpanded = !this.resultsExpanded;
+    });
+  }
+
+  private performAction(actionKind: string): void {
+    if (actionKind === 'resume') this.onResume();
+    else if (actionKind === 'retry') this.onRetry();
+    else if (actionKind === 'pause') this.onPause();
+    else this.onCancel();
   }
 
   private stageFlow(stage: PolishStage): string {
@@ -301,7 +320,7 @@ export struct NovelPolishJobCard {
     if (stage === 'paused') return '暂停会在安全检查点生效，正文不会被半途写入。';
     if (stage === 'failed') return '已保留冻结输入与进度，可重试同一任务。';
     if (stage === 'cancelled') return '任务已取消；已收录章节保留在工作区版本记录中。';
-    if (stage === 'completed') return '本批次已完成，可从工作区版本记录恢复。';
+    if (stage === 'completed') return '本批次已结束，逐章结果见下方；已收录章节可从工作区版本记录恢复。';
     return '候选与审稿结果在原子收录前均不改变正文。';
   }
 
@@ -334,8 +353,12 @@ export struct NovelPolishJobCard {
     return stage === 'failed' || stage === 'cancelled' || stage === 'completed';
   }
 
+  private processedCount(job: DurablePolishJob): number {
+    return projectPolishOutcomes(job).filter((result: PolishChapterResult): boolean => result.status !== 'unprocessed').length;
+  }
+
   private incompleteCount(job: DurablePolishJob): number {
-    return job.targets.length - job.progress.length;
+    return projectPolishOutcomes(job).filter((result: PolishChapterResult): boolean => result.status === 'unprocessed').length;
   }
 
   private progressFor(job: DurablePolishJob, chapterId: string): PolishProgress | null {
@@ -343,6 +366,25 @@ export struct NovelPolishJobCard {
       if (job.progress[index].chapterId === chapterId) return job.progress[index];
     }
     return null;
+  }
+
+  private targetTitle(job: DurablePolishJob, chapterId: string): string {
+    return job.targets.find((target: PolishChapterTarget): boolean => target.id === chapterId)?.title ?? '未命名章节';
+  }
+
+  private outcomeLabel(result: PolishChapterResult): string {
+    if (result.status === 'success') return '已润色并收录';
+    if (result.status === 'driftSkipped') return '剧情漂移，跳过并保留原稿';
+    if (result.status === 'failed') return '失败，可定向重试';
+    return '尚未处理';
+  }
+
+  private resultSummary(job: DurablePolishJob): string {
+    const results: PolishChapterResult[] = projectPolishOutcomes(job);
+    return `${results.filter(result => result.status === 'success').length} 已收录 · `
+      + `${results.filter(result => result.status === 'driftSkipped').length} 漂移跳过 · `
+      + `${results.filter(result => result.status === 'failed').length} 失败 · `
+      + `${results.filter(result => result.status === 'unprocessed').length} 未处理`;
   }
 
   private shortReceipt(receipt: string): string {

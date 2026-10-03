@@ -4,7 +4,7 @@
 //   OrchestratorSource sealed class → 判别联合(source 字段)
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import { newId } from '../chat/ids.ts';
-import type { SearchCommonOptions, SearchResult, SearchServiceOptions } from './search_service.ts';
+import type { SearchCommonOptions, SearchRequestContext, SearchResult, SearchServiceOptions } from './search_service.ts';
 import { SEARCH_SERVICE_TYPES } from './search_service.ts';
 import { getSearchService } from './service_registry.ts';
 import type { FreeEngineId } from './free_web_engines.ts';
@@ -241,6 +241,7 @@ export interface SourceSearchResult {
 export type OrchestratorSearchExecutor = (
   request: SourceSearchRequest,
   commonOptions: SearchCommonOptions,
+  context?: SearchRequestContext,
 ) => Promise<SearchResult>;
 
 // :285-328
@@ -599,15 +600,16 @@ const requestServiceParams = (request: SourceSearchRequest, deps: OrchestratorDe
 };
 
 const defaultExecutor = (deps: OrchestratorDeps): OrchestratorSearchExecutor =>
-  async (request: SourceSearchRequest, commonOptions: SearchCommonOptions): Promise<SearchResult> => {
+  async (request: SourceSearchRequest, commonOptions: SearchCommonOptions,
+    context?: SearchRequestContext): Promise<SearchResult> => {
     if (request.source.source === 'configured') {
       const options: SearchServiceOptions = request.source.options as SearchServiceOptions;
       return getSearchService(options).search(
-        requestServiceParams(request, deps), commonOptions, options,
+        requestServiceParams(request, deps), commonOptions, options, context,
       );
     }
     // 内置源统一走带验证码熔断的免费引擎分派
-    return runFreeEngine(BUILTIN_ENGINE[request.source.source], request.query, commonOptions);
+    return runFreeEngine(BUILTIN_ENGINE[request.source.source], request.query, commonOptions, context);
   };
 
 export const FREE_TIER_SETUP_HINT: string =
@@ -623,7 +625,15 @@ export const searchOrchestratorSearch = async (
   params: JsonObject,
   executor?: OrchestratorSearchExecutor,
   deps: OrchestratorDeps = {},
+  context: SearchRequestContext = {},
 ): Promise<JsonObject> => {
+  const throwIfCancelled = (): void => {
+    if (!context.signal?.aborted) return;
+    const error = new Error('search aborted');
+    error.name = 'AbortError';
+    throw error;
+  };
+  throwIfCancelled();
   const exec: OrchestratorSearchExecutor = executor ?? defaultExecutor(deps);
   const queryMaybe: string | null = stringContentOrNull(params, 'query') ?? stringContentOrNull(params, 'q');
   if (queryMaybe === null) throw new Error('query is required');
@@ -673,9 +683,13 @@ export const searchOrchestratorSearch = async (
     calls.map(async (request: SourceSearchRequest): Promise<SourceSearchResult> => {
       let outcome: SourceOutcome;
       try {
-        const result: SearchResult = await exec(request, { resultSize: request.maxResults });
+        throwIfCancelled();
+        const result: SearchResult = await exec(request, { resultSize: request.maxResults }, context);
+        throwIfCancelled();
         outcome = { ok: true, result };
       } catch (e) {
+        throwIfCancelled();
+        if (e instanceof Error && e.name === 'AbortError') throw e;
         outcome = { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
       }
       return { request, outcome };

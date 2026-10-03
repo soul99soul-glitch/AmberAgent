@@ -28,7 +28,7 @@ import { scopedSubAgentTools } from './subagent_tool_scope.ts';
 import type { SubAgentTranscriptPort } from './subagent_transcript.ts';
 import { appendSubAgentTranscriptEvent } from './subagent_transcript.ts';
 import {
-  DEFAULT_DYNAMIC_READ_ONLY_TOOLS, subAgentParseTask,
+  DEFAULT_DYNAMIC_READ_ONLY_TOOLS, subAgentDynamicName, subAgentParseTask,
   subAgentResolveDefinition, subAgentValidateToolAllowlist,
 } from './subagent_validator.ts';
 import type { AgentTool } from './tool.ts';
@@ -372,6 +372,20 @@ export class SubAgentManager {
             message: 'Dynamic subagent per-turn limit reached.',
           });
         }
+        if (effectiveDefinition.dynamic) {
+          const usedNames: Set<string> = new Set<string>();
+          this.runs.forEach((candidate: RuntimeRun): void => {
+            if (subAgentRunStatusRunning(candidate.snapshot.status)) {
+              usedNames.add(candidate.snapshot.definition.name);
+            }
+          });
+          // 分配与入库在同一 admission 锁内，初始化的 await 不会让并发重名。
+          const namedDefinition: SubAgentDefinition = copyDefinition(
+            effectiveDefinition, effectiveDefinition.toolAllowlist, true);
+          namedDefinition.name = subAgentDynamicName(
+            effectiveDefinition.name, `${effectiveTask.objective}|${runId}`, usedNames);
+          run.definition = namedDefinition;
+        }
         this.runs.set(runId, runtimeRun);
         return Promise.resolve(null);
       },
@@ -439,18 +453,35 @@ export class SubAgentManager {
     return this.runToPayload(runtimeRun.snapshot);
   }
 
-  async wait(runId: string, waitTimeoutMs: number): Promise<JsonObject> {
+  async wait(runId: string, waitTimeoutMs: number, signal?: AbortSignalLike): Promise<JsonObject> {
+    const cancelled = (): Error => {
+      const error = new Error('subagent wait aborted');
+      error.name = 'AbortError';
+      return error;
+    };
+    if (signal?.aborted) throw cancelled();
     const timeout: number = Math.min(Math.max(waitTimeoutMs, 0), 60000);
     const deadline: number = this.deps.now() + timeout;
-    while (this.deps.now() < deadline) {
-      const runtimeRun: RuntimeRun | undefined = this.runs.get(runId);
-      if (runtimeRun === undefined) return this.readMissingRun(runId);
-      if (!subAgentRunStatusRunning(runtimeRun.snapshot.status)) {
-        return this.runToPayload(runtimeRun.snapshot);
+    let onAbort: (() => void) | null = null;
+    const aborted: Promise<void> = new Promise<void>((_resolve, reject): void => {
+      onAbort = (): void => { reject(cancelled()); };
+      signal?.addEventListener?.('abort', onAbort);
+    });
+    try {
+      while (this.deps.now() < deadline) {
+        if (signal?.aborted) throw cancelled();
+        const runtimeRun: RuntimeRun | undefined = this.runs.get(runId);
+        if (runtimeRun === undefined) return this.readMissingRun(runId);
+        if (!subAgentRunStatusRunning(runtimeRun.snapshot.status)) {
+          return this.runToPayload(runtimeRun.snapshot);
+        }
+        await Promise.race([this.deps.sleep(200), aborted]);
       }
-      await this.deps.sleep(200);
+      if (signal?.aborted) throw cancelled();
+      return this.read(runId);
+    } finally {
+      if (onAbort !== null) signal?.removeEventListener?.('abort', onAbort);
     }
-    return this.read(runId);
   }
 
   async cancel(runId: string): Promise<JsonObject> {

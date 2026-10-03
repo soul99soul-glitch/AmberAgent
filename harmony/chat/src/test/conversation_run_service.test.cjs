@@ -15,6 +15,22 @@ const deferred = () => {
 };
 const turn = () => new Promise(resolve => setImmediate(resolve));
 
+test('failed generation commits the latest tail below checkpoint growth threshold', { timeout: 5000 }, async () => {
+  const { domain, memory, service, providerFor } = await serviceFixture(['A']);
+  const off = service.subscribe('A', () => {});
+  const run = service.send('A', domain.makeUserMessage('failure question').parts);
+  const rejected = assert.rejects(run.done, /provider terminal failure/);
+  const request = await providerFor('A').next(0);
+  request.emit('first'); await turn();
+  assert.match(domain.toText(domain.currentMessages(await memory.getById('A')).at(-1)), /first/);
+  request.emit(' latest'); request.fail(new Error('provider terminal failure'));
+  await rejected;
+  assert.equal(domain.toText(domain.currentMessages(await memory.getById('A')).at(-1)), 'first latest');
+  assert.equal(service.snapshot('A').phase, 'failed');
+  assert.match(service.snapshot('A').errorMsg, /provider terminal failure/);
+  off();
+});
+
 function loadEntry(filename, imports, storage, cache = new Map()) {
   const full = path.resolve(entry, filename);
   if (cache.has(full)) return cache.get(full);
@@ -24,7 +40,7 @@ function loadEntry(filename, imports, storage, cache = new Map()) {
   }).outputText;
   const requireEntry = name => {
     if (Object.prototype.hasOwnProperty.call(imports, name)) return imports[name];
-    if (name === './EntryAbortController.ets' || name === './ConversationRunGuard.ets') {
+    if (name === './EntryAbortController.ets' || name === './ConversationRunGuard.ets' || name === './GenerationProgressTracker.ets') {
       return loadEntry(name, imports, storage, cache);
     }
     throw new Error('Unexpected Entry dependency: ' + name);
@@ -34,7 +50,7 @@ function loadEntry(filename, imports, storage, cache = new Map()) {
   return exports;
 }
 
-async function serviceFixture(initialIds = ['A', 'B']) {
+async function serviceFixture(initialIds = ['A', 'B'], options = {}) {
   const domain = await import('../main/ets/index.ts');
   const memory = domain.createMemoryConversationRepository();
   const kv = domain.createMemoryKeyValueStore();
@@ -74,6 +90,8 @@ async function serviceFixture(initialIds = ['A', 'B']) {
         const request = { messages: clone(messages), signal: opts.signal, done: completed.promise,
           emit: text => onChunk({ id: id + '-chunk-' + index, model: id + '-model', usage: null,
             choices: [{ index: 0, delta: domain.makeAssistantMessage(text), message: null, finishReason: null }] }),
+          emitParts: parts => onChunk({ id: id + '-chunk-' + index, model: id + '-model', usage: null,
+            choices: [{ index: 0, delta: domain.makeUIMessage('assistant', parts), message: null, finishReason: null }] }),
           finish: () => { opts.onDataEnd?.(); completed.resolve(); },
           fail: error => completed.reject(error) };
         requests.push(request); waiters.get(index)?.resolve(request);
@@ -84,16 +102,32 @@ async function serviceFixture(initialIds = ['A', 'B']) {
     };
     providers.set(id, provider); return provider;
   };
+  const liveRuns = new Set();
+  const assistantFor = id => domain.makeAssistant({ id, name: id + ' assistant', localTools: [], regexes: options.regexes ?? [] });
+  const compactPort = { compactConversationNow: options.compact ?? (async () => ({
+    status: 'completed', message: '已压缩', summary: '摘要', compacts: [], contextWindowTokens: 16000,
+  })) };
+  const documentPort = { materializeDocumentParts: options.documents ?? (async parts => parts),
+    materializeConversationDocuments: async conversation => conversation };
   const imports = {
     '@amber/chat-domain': domain,
+    '@kit.ArkTS': { util: { TextEncoder: { create: () => ({ encodeInto: text => new TextEncoder().encode(text) }) } } },
     '../di/AppContainer.ets': { getChatRepository: () => repository, getChatKvStore: () => kv,
+      getChatAssistants: async () => [assistantFor('default')],
       getCompactStore: () => ({ getCompacts: async () => [], deleteByConversation: async () => {} }) },
-    './BackgroundGenerationKeepAlive.ets': { stopGenerationKeepAlive: async context => { stoppedKeepAlive.push(context); } },
+    './BackgroundGenerationKeepAlive.ets': { reportGenerationProgress: (context, progress) => {
+      if (progress.generationActive) liveRuns.add(progress.runId);
+      else { liveRuns.delete(progress.runId); if (liveRuns.size === 0) stoppedKeepAlive.push(context); }
+    } },
+    './JevCompletionSupport.ets': { evaluateJevCompletion: options.completion ?? (async () => null) },
+    './JevApprovalTriage.ets': { cancelJevApprovalTriage: () => {}, scheduleJevApprovalTriage: () => {} },
+    './ContextCompactionSupport.ets': compactPort,
+    './DocumentAttachmentSupport.ets': documentPort,
     './ConversationBrowserGuard.ets': { releaseConversationBrowserRun: () => {} },
     './NativePluginJsTransport.ets': { cancelNativePluginJsConversation: () => {} },
     './ConversationRunDependencies.ets': {
       prepareConversationSeed: async conversation => ({ runtime: {
-        assistant: domain.makeAssistant({ name: conversation.id + ' assistant', localTools: [] }),
+        assistant: assistantFor(conversation.id),
         params: { model: { modelId: conversation.id + '-model' } }, modelContextWindowTokens: 16000 } }),
       buildConversationTurnDeps: context => {
         const previous = contexts.get(context.conversationId) ?? []; previous.push(context); contexts.set(context.conversationId, previous);
@@ -104,6 +138,8 @@ async function serviceFixture(initialIds = ['A', 'B']) {
       },
     },
     './ConversationRunTools.ets': { buildConversationToolLoop: async context => ({ tools: toolsByConversation.get(context.conversationId) ?? [],
+      dispatcher: options.autoReviewFactory ? new domain.AgentToolDispatcher({ autoApprovalReview: options.autoReviewFactory(context, domain, kv) }) : undefined,
+      autoApproveTools: options.autoReviewFactory !== undefined, autoApproveHighRiskTools: options.autoReviewFactory !== undefined,
       makeProviderForStep: () => providerFor(context.conversationId) }) },
     './ConversationRunAuxiliary.ets': { completeConversationAuxiliary: () => {} },
   };
@@ -111,9 +147,86 @@ async function serviceFixture(initialIds = ['A', 'B']) {
   const { ConversationRunService } = loadEntry('ConversationRunService.ets', imports, storage, entryCache);
   const guard = loadEntry('ConversationRunGuard.ets', imports, storage, entryCache);
   const service = new ConversationRunService();
-  return { domain, memory, service, guard, values, generating, stoppedKeepAlive, providerFor, contexts, textOf, userCount, maximum, writeEvents, toolsByConversation,
+  return { domain, memory, kv, service, guard, values, generating, stoppedKeepAlive, providerFor, contexts, textOf, userCount, maximum, writeEvents, toolsByConversation,
     setSaveGate: value => { saveGate = value; }, setSaveFault: value => { saveFault = value; } };
 }
+
+test('manual compact excludes runs/restores and pending restore atomically takes only an undispatched item', { timeout: 5000 }, async () => {
+  const gate = deferred();
+  const { service, guard, domain, providerFor } = await serviceFixture(['A'], { compact: () => gate.promise });
+  const off = service.subscribe('A', () => {});
+  const compact = service.compact('A');
+  assert.equal(service.isBusy('A'), true);
+  assert.equal(guard.isConversationCompacting('A'), true);
+  assert.throws(() => service.send('A', domain.makeUserMessage('blocked').parts), /仍在运行/);
+  assert.throws(() => guard.beginConversationRestore(['A']), /仍在生成或恢复/);
+  await assert.rejects(service.compact('A'), /生成或压缩/);
+  await service.enqueue('A', domain.makeUserMessage('restore me').parts, true);
+  const queued = service.pending('A')[0];
+  const taken = await service.takePending('A', queued.id);
+  assert.equal(taken.id, queued.id);
+  assert.equal(await service.takePending('A', queued.id), null);
+  assert.equal(service.pending('A').length, 0);
+  gate.resolve({ status: 'completed', message: '已压缩', summary: 'visible summary', compacts: [], contextWindowTokens: 16000 });
+  assert.equal((await compact).summary, 'visible summary');
+  assert.equal(service.isBusy('A'), false);
+  assert.equal(guard.isConversationCompacting('A'), false);
+  assert.equal(service.snapshot('A').compactActiveCount, 0);
+  assert.equal(providerFor('A').requests.length, 0);
+  const releaseAuto = guard.beginConversationCompaction('A');
+  await assert.rejects(service.compact('A'), /生成或压缩/);
+  releaseAuto();
+  off();
+});
+
+test('history admission processes user regex once and materializes documents for send, edit, append and STEER', { timeout: 5000 }, async () => {
+  const domain = await import('../main/ets/index.ts');
+  let imports = 0;
+  const fixture = await serviceFixture(['A'], {
+    regexes: [domain.makeAssistantRegex({ findRegex: 'foo', replaceString: 'foo!', affectingScope: ['user'] })],
+    documents: async parts => parts.map(part => part.type === 'document' && part.url.startsWith('data:')
+      ? { ...part, url: `file:///upload/${++imports}.txt` } : part),
+  });
+  const { service, memory, providerFor, contexts } = fixture;
+  const off = service.subscribe('A', () => {});
+  const raw = [...domain.makeUserMessage('foo').parts,
+    { type: 'document', url: 'data:text/plain;base64,YQ==', fileName: 'a.txt', mime: 'text/plain', metadata: null }];
+  const send = service.send('A', raw);
+  const first = await providerFor('A').next(0);
+  let saved = await memory.getById('A');
+  assert.equal(domain.toText(domain.currentMessages(saved)[0]).trim(), 'foo!');
+  assert.equal(domain.currentMessages(saved)[0].parts[1].url, 'file:///upload/1.txt');
+  assert.equal(raw[0].text, 'foo'); assert.match(raw[1].url, /^data:/);
+  first.emit('answer'); first.finish(); await send.done;
+  const userNode = saved.messageNodes[0];
+  const edited = service.edit('A', userNode.id, userNode.messages[0].id, 'foo');
+  const second = await providerFor('A').next(1);
+  saved = await memory.getById('A');
+  const variant = saved.messageNodes[0].messages.at(-1);
+  assert.equal(domain.toText(variant).trim(), 'foo!');
+  assert.equal(variant.parts[1].url, 'file:///upload/1.txt');
+  assert.equal(imports, 1);
+  second.emit('edited answer'); second.finish(); await edited.done;
+  await service.append('A', raw);
+  const appended = domain.currentMessages(await memory.getById('A')).at(-1);
+  assert.equal(domain.toText(appended).trim(), 'foo!'); assert.equal(appended.parts[1].url, 'file:///upload/2.txt');
+  const active = service.send('A', domain.makeUserMessage('continue').parts);
+  const third = await providerFor('A').next(2);
+  await service.enqueue('A', raw, true, 'STEER');
+  assert.equal(service.pending('A')[0].parts[0].text, 'foo');
+  const steering = await contexts.get('A').at(-1).consumeSteer();
+  assert.equal(domain.toText(steering[0]).trim(), 'foo!'); assert.equal(steering[0].parts[1].url, 'file:///upload/3.txt');
+  assert.equal(service.pending('A').length, 0);
+  await service.enqueue('A', raw, true);
+  const followupId = service.pending('A')[0].id;
+  third.emit('continued'); third.finish(); await active.done;
+  const fourth = await providerFor('A').next(3);
+  assert.equal(await service.takePending('A', followupId), null);
+  const followed = domain.currentMessages(await memory.getById('A')).at(-1);
+  assert.equal(domain.toText(followed).trim(), 'foo!'); assert.equal(followed.parts[1].url, 'file:///upload/4.txt');
+  fourth.emit('final'); fourth.finish(); await turn();
+  off();
+});
 
 test('actual service isolates A/B runs and admission, awaits durable checkpoints, and never requeues committed input', { timeout: 5000 }, async () => {
   const { domain, memory, service, guard, values, generating, stoppedKeepAlive, providerFor, contexts, textOf, userCount, maximum, writeEvents, setSaveGate, setSaveFault } = await serviceFixture();
@@ -222,4 +335,126 @@ test('focused active projection shows regenerated user output once across real e
   assert.ok(evidence.length >= 2, 'Observe more than one actual checkpoint publication');
   assert.match(textOf(await memory.getById('projection-user')), /user-live/);
   assert.deepEqual([...new Set(violations)], [], JSON.stringify(evidence));
+});
+
+const completedWrite = () => ({ type: 'tool', toolCallId: 'completed-write', toolName: 'file_write',
+  input: '{"path":"code/app.ts","content":"changed"}', output: [{ type: 'text', text: '{"path":"code/app.ts"}', metadata: null }],
+  approvalState: { type: 'approved' }, metadata: null });
+
+test('completion notice is volatile, bound to the completed run/tail, and late old checks cannot overwrite a new run', { timeout: 5000 }, async () => {
+  const pending = [];
+  const f = await serviceFixture(['A'], { completion: async (conversation, signal) => {
+    const gate = deferred(); pending.push({ conversation, signal, gate }); return gate.promise;
+  } });
+  const off = f.service.subscribe('A', () => {});
+  const run = f.service.send('A', f.domain.makeUserMessage('modify').parts);
+  const request = await f.providerFor('A').next(0);
+  request.emitParts([completedWrite(), { type: 'text', text: '已完成', metadata: null }]); request.finish(); await run.done;
+  assert.equal(pending.length, 1);
+  const facts = f.domain.jevUnverifiedChanges(f.domain.currentMessages(pending[0].conversation));
+  const savesBefore = f.writeEvents.length;
+  pending[0].gate.resolve(facts); await turn();
+  assert.equal(f.service.snapshot('A').completionNotice.runId, run.runId);
+  assert.equal(f.writeEvents.length, savesBefore, 'notice must not save a captured conversation after run release');
+  const next = f.service.send('A', f.domain.makeUserMessage('next').parts);
+  assert.equal(f.service.snapshot('A').completionNotice, null);
+  const nextRequest = await f.providerFor('A').next(1); nextRequest.emit('next final'); nextRequest.finish(); await next.done;
+  const old = pending[1];
+  if (old) { old.gate.resolve(facts); await turn(); }
+  assert.equal(f.service.snapshot('A').completionNotice, null);
+  off();
+});
+
+test('cancelled/failed provider run never schedules completion evaluation', { timeout: 5000 }, async () => {
+  const calls = [];
+  const f = await serviceFixture(['A'], { completion: async (...args) => { calls.push(args); return null; } });
+  const off = f.service.subscribe('A', () => {});
+  const run = f.service.send('A', f.domain.makeUserMessage('modify').parts);
+  const rejected = assert.rejects(run.done, /failure/);
+  const request = await f.providerFor('A').next(0); request.emitParts([completedWrite()]); request.fail(new Error('failure')); await rejected;
+  assert.equal(calls.length, 0); assert.equal(f.service.snapshot('A').completionNotice, null);
+  off();
+});
+
+for (const scenario of ['send', 'assistant regenerate']) {
+  test(`actual service ${scenario} review sees saved current user/prefix through Entry provider, excludes future user`, { timeout: 5000 }, async () => {
+    const states = [], initialSnapshots = []; let effects = 0;
+    const f = await serviceFixture(['A'], { autoReviewFactory: (context, domain, kv) => {
+      const support = loadEntry('JevAutoApprovalSupport.ets', { '@amber/chat-domain': domain,
+        '../di/AppContainer.ets': { getChatKvStore: () => kv }, './JevSupport.ets': { jevEvaluatePurpose: async (_purpose, state) => {
+          states.push(state);
+          return { ok: true, shadow: false, reason: '', evaluation: { answers: {
+            destructive: { kind: 'noul', probability: .9 }, exfiltration: { kind: 'noul', probability: 0 },
+            offTask: { kind: 'noul', probability: 0 }, authorized: { kind: 'noul', probability: .9 } }, usage: null, model: 'judge' } };
+        } } }, {});
+      initialSnapshots.push(domain.currentMessages(context.conversation));
+      return support.createEntryJevAutoApprovalReview(domain.currentMessages(context.conversation), () => domain.currentMessages(context.conversation));
+    } });
+    const d = f.domain;
+    await d.saveJevSettings(f.kv, d.makeJevSettings({ mode: 'active', autoApproval: { mode: 'active', allowTaskText: true, allowToolMetadata: true } }));
+    f.toolsByConversation.set('A', [d.makeAgentTool({ name: 'file_write', description: 'write', needsApproval: true,
+      execute: async () => { effects++; return [{ type: 'text', text: 'done', metadata: null }]; } })]);
+    const originalUser = d.toMessageNode(d.makeUserMessage('CURRENT_AUTHORIZED_REQUEST'));
+    const regenerated = d.toMessageNode(d.makeUIMessage('assistant', [{ type: 'text', text: 'original answer', metadata: null }]));
+    if (scenario !== 'send') await f.memory.save(d.makeConversation('A', [originalUser, regenerated,
+      d.toMessageNode(d.makeUserMessage('FUTURE_UNRELATED_REQUEST')), d.toMessageNode(d.makeUIMessage('assistant', []))]));
+    const off = f.service.subscribe('A', () => {});
+    const run = scenario === 'send' ? f.service.send('A', d.makeUserMessage('CURRENT_AUTHORIZED_REQUEST').parts)
+      : f.service.regenerate('A', regenerated.id);
+    const request = await f.providerFor('A').next(0);
+    request.emitParts([{ type: 'tool', toolCallId: 'write', toolName: 'file_write', input: '{"path":"allowed"}',
+      output: [], metadata: null, approvalState: { type: 'auto' } }]); request.finish();
+    const final = await f.providerFor('A').next(1); final.emit('complete'); final.finish(); await run.done;
+    assert.equal(effects, 1); assert.equal(states.length, 1);
+    assert.match(JSON.stringify(states[0].user_requests), /CURRENT_AUTHORIZED_REQUEST/);
+    assert.doesNotMatch(JSON.stringify(states[0].user_requests), /FUTURE_UNRELATED_REQUEST/);
+    if (scenario === 'send') assert.doesNotMatch(JSON.stringify(initialSnapshots[0]), /CURRENT_AUTHORIZED_REQUEST/);
+    else assert.match(JSON.stringify(initialSnapshots[0]), /FUTURE_UNRELATED_REQUEST/);
+    off();
+  });
+}
+
+test('changing the selected user branch invalidates both pending and visible completion notices with the same final tail', { timeout: 5000 }, async () => {
+  for (const resolveBeforeBranch of [false, true]) {
+    const pending = [];
+    const f = await serviceFixture(['A'], { completion: async (conversation, signal) => {
+      const gate = deferred(); pending.push({ conversation, signal, gate }); return gate.promise;
+    } });
+    const off = f.service.subscribe('A', () => {});
+    const run = f.service.send('A', f.domain.makeUserMessage('first task').parts);
+    const request = await f.providerFor('A').next(0);
+    request.emitParts([completedWrite(), { type: 'text', text: 'done', metadata: null }]); request.finish(); await run.done;
+    const candidate = f.domain.jevUnverifiedChanges(f.domain.currentMessages(pending[0].conversation));
+    if (resolveBeforeBranch) { pending[0].gate.resolve(candidate); await turn(); assert.ok(f.service.snapshot('A').completionNotice); }
+    await f.service.mutateStoredConversation('A', latest => ({ ...latest, messageNodes: latest.messageNodes.map((node, index) => index === 0
+      ? { ...node, messages: [...node.messages, f.domain.makeUserMessage('different task')] } : node) }));
+    const stored = await f.memory.getById('A');
+    await f.service.mutateStoredConversation('A', latest => f.domain.selectMessageBranch(latest, stored.messageNodes[0].id, 1));
+    if (!resolveBeforeBranch) {
+      assert.equal(pending[0].signal.aborted, true, 'branch change aborts the pending assessment');
+      pending[0].gate.resolve(candidate); await turn();
+    }
+    assert.equal(f.service.snapshot('A').completionNotice, null);
+    assert.equal(f.domain.currentMessages(await f.memory.getById('A')).at(-1).id, candidate.finalMessageId);
+    off();
+  }
+});
+
+test('a truly pending completion result from the previous run is aborted and cannot apply during the new run', { timeout: 5000 }, async () => {
+  const pending = [];
+  const f = await serviceFixture(['A'], { completion: async (conversation, signal) => {
+    const gate = deferred(); pending.push({ conversation, signal, gate }); return gate.promise;
+  } });
+  const off = f.service.subscribe('A', () => {});
+  const first = f.service.send('A', f.domain.makeUserMessage('first').parts);
+  const request = await f.providerFor('A').next(0);
+  request.emitParts([completedWrite(), { type: 'text', text: 'done', metadata: null }]); request.finish(); await first.done;
+  const old = pending[0]; const candidate = f.domain.jevUnverifiedChanges(f.domain.currentMessages(old.conversation));
+  const second = f.service.send('A', f.domain.makeUserMessage('second').parts);
+  assert.equal(old.signal.aborted, true);
+  old.gate.resolve(candidate); await turn();
+  assert.equal(f.service.snapshot('A').runId, second.runId); assert.equal(f.service.snapshot('A').completionNotice, null);
+  const next = await f.providerFor('A').next(1); next.emit('second response'); next.finish(); await second.done;
+  assert.equal(f.service.snapshot('A').completionNotice, null);
+  off();
 });

@@ -6,14 +6,14 @@
 //   - Markdown: # title + ## role · time + 正文(text parts);reasoning 折叠为
 //     <!-- thinking -->;tool 卡为 fenced json;跳过空消息
 //   - JSON: { conversation meta, messages: UIMessage[] } kotlinx 风格 camelCase
-//   - 密钥脱敏: tool input/output 中疑似 key/token 字段值替换为 ***
+//   - 密钥脱敏: tool input/output 中凭据字段值替换为 ***
 // 裁剪:
 //   - 图片/FileProvider 导出、Bitmap 合成、Highlighter 预览 = UI 层,域层只产字符串
 
 import type { Conversation, MessageNode } from './conversation.ts';
 import { currentMessages } from './conversation.ts';
 import type { UIMessage, UIMessagePart, UIMessagePartText } from './message.ts';
-import type { JsonObject } from './json.ts';
+import type { JsonObject, JsonValue } from './json.ts';
 
 export interface ConversationExportOptions {
   /** 空 = 全量;否则仅导出这些 node id(保持树序) */
@@ -32,21 +32,40 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 const SENSITIVE_KEY_RE: RegExp =
-  /(api[_-]?key|authorization|token|secret|password|passwd|cookie|session)/i;
+  /^(api[_-]?key|x-api-key|x-goog-api-key|authorization|(?:access|refresh|auth|api|session)[_-]?token|token|(?:client[_-]?)?secret|secret[_-]?key|password|passwd|(?:set[_-]?)?cookie|session)$/i;
+
+const maskSensitiveJsonValue = (value: JsonValue): JsonValue => {
+  if (Array.isArray(value)) return value.map(maskSensitiveJsonValue);
+  if (typeof value === 'object' && value !== null) return maskSensitiveJsonObject(value);
+  return value;
+};
 
 export const maskSensitiveJsonObject = (value: JsonObject): JsonObject => {
   const out: JsonObject = {};
+  // Custom headers/bodies are stored as {name/key, value} pairs rather than a map.
+  const pairKey = value['name'] ?? value['key'];
+  const sensitivePair = typeof pairKey === 'string' && SENSITIVE_KEY_RE.test(pairKey);
   for (const key of Object.keys(value)) {
     const v = value[key];
-    if (SENSITIVE_KEY_RE.test(key) && typeof v === 'string' && v.length > 0) {
+    if ((SENSITIVE_KEY_RE.test(key) || (key === 'value' && sensitivePair))
+      && typeof v === 'string' && v.length > 0) {
       out[key] = '***';
-    } else if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
-      out[key] = maskSensitiveJsonObject(v as JsonObject);
     } else {
-      out[key] = v;
+      out[key] = maskSensitiveJsonValue(v);
     }
   }
   return out;
+};
+
+/** 工具参数/结果的 JSON 文本走同一脱敏规则；普通文本不改写。 */
+export const maskSensitiveJsonText = (text: string): string => {
+  try {
+    const value: JsonValue = JSON.parse(text);
+    if (typeof value === 'object' && value !== null) {
+      return JSON.stringify(maskSensitiveJsonValue(value), null, 2);
+    }
+  } catch { /* 普通文本和未完成 JSON 原样显示。 */ }
+  return text;
 };
 
 const messagePlainText = (message: UIMessage, includeReasoning: boolean): string => {
@@ -57,9 +76,9 @@ const messagePlainText = (message: UIMessage, includeReasoning: boolean): string
     } else if (part.type === 'reasoning' && includeReasoning) {
       chunks.push(`<!-- thinking\n${part.reasoning}\n-->`);
     } else if (part.type === 'tool') {
-      chunks.push(`[tool ${part.toolName}] ${part.input}`);
+      chunks.push(`[tool ${part.toolName}] ${maskSensitiveJsonText(part.input)}`);
       for (const outPart of part.output) {
-        if (outPart.type === 'text') chunks.push(outPart.text);
+        if (outPart.type === 'text') chunks.push(maskSensitiveJsonText(outPart.text));
       }
     } else if (part.type === 'image') {
       chunks.push('[图片]');
@@ -149,7 +168,15 @@ export const exportConversationJson = (
   for (const node of nodes) {
     const message: UIMessage | undefined = node.messages[node.selectIndex >= 0 ? node.selectIndex : 0];
     if (message === undefined) continue;
-    messages.push(message);
+    messages.push({
+      ...message,
+      parts: message.parts.map((part: UIMessagePart): UIMessagePart => part.type === 'tool' ? {
+        ...part,
+        input: maskSensitiveJsonText(part.input),
+        output: part.output.map((output: UIMessagePart): UIMessagePart => output.type === 'text'
+          ? { ...output, text: maskSensitiveJsonText(output.text) } : output),
+      } : part),
+    });
   }
   return {
     id: conversation.id,
@@ -165,6 +192,38 @@ export const exportConversationJsonString = (
   conversation: Conversation,
   opts: ConversationExportOptions = {},
 ): string => JSON.stringify(exportConversationJson(conversation, opts), null, 2);
+
+export interface ChatMessageArchiveSource {
+  conversationId: string;
+  messageId: string;
+  nodeId: string;
+}
+
+const CHAT_ARCHIVE_SOURCE_PREFIX = '<!-- amber-chat-source ';
+
+/** 来源随 Markdown 文件持久保存，不增加独立登记库。 */
+export const messageArchiveMarkdown = (conversation: Conversation, messageId: string): string => {
+  const node = conversation.messageNodes.find((item: MessageNode): boolean =>
+    item.messages[item.selectIndex >= 0 ? item.selectIndex : 0]?.id === messageId);
+  if (node === undefined) throw new Error('原消息已不在当前对话分支中');
+  const source: ChatMessageArchiveSource = { conversationId: conversation.id, messageId, nodeId: node.id };
+  return `${CHAT_ARCHIVE_SOURCE_PREFIX}${JSON.stringify(source)} -->\n\n${exportConversationMarkdown(
+    conversation, { selectedNodeIds: [node.id], includeReasoning: false })}`;
+};
+
+export const messageArchiveSource = (markdown: string): ChatMessageArchiveSource | null => {
+  const header = markdown.split('\n', 1)[0];
+  if (!header.startsWith(CHAT_ARCHIVE_SOURCE_PREFIX) || !header.endsWith(' -->')) return null;
+  try {
+    const value = JSON.parse(header.slice(CHAT_ARCHIVE_SOURCE_PREFIX.length, -4)) as JsonObject;
+    if (value !== null && typeof value === 'object' &&
+      typeof value['conversationId'] === 'string' && typeof value['messageId'] === 'string' &&
+      typeof value['nodeId'] === 'string') {
+      return { conversationId: value['conversationId'], messageId: value['messageId'], nodeId: value['nodeId'] };
+    }
+  } catch { /* 普通 Workspace Markdown 没有聊天来源。 */ }
+  return null;
+};
 
 /** 建议文件名: title-slug + 时间戳 + 扩展名 */
 export const exportFileNameFor = (

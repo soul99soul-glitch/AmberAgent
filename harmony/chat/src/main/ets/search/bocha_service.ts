@@ -1,5 +1,6 @@
 // bocha_service — 博查搜索(D-068c)
 // Android 基准: search/.../BochaSearchService.kt(全文 182 行)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -26,6 +27,7 @@ export const bochaSearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: BochaOptions = asOptions(serviceOptions);
     const query: string = requireQuery(params);
@@ -41,7 +43,7 @@ export const bochaSearchService: SearchService = {
         summary: opts.summary,
         count: commonOptions.resultSize,
       }),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`Bocha response failed #${resp.status}`);
     }

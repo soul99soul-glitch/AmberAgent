@@ -202,3 +202,22 @@ export const hasReadableArticle = (o: DeepReadOutput): boolean => {
     o.analysis.perspectives.filter(p => p.viewpoint.trim().length >= 30).length >= 2;
   return hasTimeline && hasCorePoints && hasAnalysis;
 };
+
+/** Presentation gate only: partial content stays visible without claiming completion or research quality. */
+export const hasDisplayableDeepReadOutput = (o: DeepReadOutput): boolean => {
+  return o.summary.trim().length > 0 || o.keyEntities.some(entity => entity.trim().length > 0)
+    || (o.timeline?.some(event => event.event.trim().length > 0 || isHttpUrl(event.imageUrl ?? '')) ?? false)
+    || (o.corePoints?.some(point => point.point.trim().length > 0 || !!point.supporting?.trim()
+      || isHttpUrl(point.imageUrl ?? '')) ?? false)
+    || (o.analysis.coreDispute?.trim().length ?? 0) > 0
+    || (o.analysis.implications?.trim().length ?? 0) > 0
+    || o.analysis.perspectives.some(perspective => perspective.viewpoint.trim().length > 0)
+    || o.analysis.quotes.some(quote => quote.text.trim().length > 0)
+    || o.extendedReading.some(link => link.title.trim().length > 0 || link.url.trim().length > 0)
+    || o.references.some(link => link.title.trim().length > 0 || link.url.trim().length > 0)
+    || displayHeroImageUrl(o) !== null
+    || (o.diagram !== null && (o.diagram.title.trim().length > 0
+      || (o.diagram.reason?.trim().length ?? 0) > 0
+      || o.diagram.nodes.some(node => node.label.trim().length > 0 || !!node.note?.trim())
+      || (o.diagram.caption?.trim().length ?? 0) > 0));
+};

@@ -23,6 +23,8 @@ export struct NovelBranchSheet {
   @Prop activeBranchId: string = '';
   @Prop branches: NovelBranchSheetBranch[] = [];
   @Prop busy: boolean = false;
+  @Prop switchBusy: boolean = false;
+  @Prop switchNeedsStop: boolean = false;
   @Prop canUndo: boolean = false;
   @Prop unresolvedFromOrdinal: number | null = null;
   @Prop plotStale: boolean = false;
@@ -34,13 +36,14 @@ export struct NovelBranchSheet {
   onUndo: () => void = (): void => {};
   onSyncPlot: () => void = (): void => {};
   onResolveUnresolved: () => void = (): void => {};
+  onOpenHistory: () => void = (): void => {};
 
   build(): void {
     if (this.themeEpoch >= 0 && this.visible) {
       Stack() {
         Row() {}
           .width('100%').height('100%').backgroundColor(OVERLAY)
-          .onClick((): void => { if (!this.busy) this.onClose(); })
+          .onClick((): void => { if (!this.switchBusy) this.onClose(); })
 
         Scroll() {
           Column() {
@@ -73,7 +76,7 @@ export struct NovelBranchSheet {
           .fontSize(TEXT_STYLES.sessionTitle.size).fontWeight(TEXT_STYLES.sessionTitle.weight)
           .lineHeight(TEXT_STYLES.sessionTitle.lineHeight).fontFamily(TEXT_STYLES.sessionTitle.family)
           .fontColor(INK)
-        Text(this.busy ? '正在处理工作区变更…' : '切换分支不会修改其他分支。')
+        Text(this.switchBusy ? '正在处理工作区变更…' : this.switchNeedsStop ? '切换前会确认停止当前任务。' : '切换分支不会修改其他分支。')
           .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
           .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(TEXT_STYLES.meta.family)
           .fontColor(INK3).margin({ top: 4 })
@@ -84,9 +87,9 @@ export struct NovelBranchSheet {
       Text('关闭')
         .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
         .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-        .fontColor(this.busy ? INK4 : INK3)
+        .fontColor(this.switchBusy ? INK4 : INK3)
         .width(44).height(44).textAlign(TextAlign.Center)
-        .onClick((): void => { if (!this.busy) this.onClose(); })
+        .onClick((): void => { if (!this.switchBusy) this.onClose(); })
         .accessibilityText('关闭故事分支面板')
     }
     .width('100%').margin({ bottom: 12 }).alignItems(VerticalAlign.Center)
@@ -127,7 +130,7 @@ export struct NovelBranchSheet {
           Text(branch.name.length > 0 ? branch.name : '未命名分支')
             .fontSize(BODY).fontWeight(FontWeight.Medium)
             .fontColor(this.isActiveBranch(branch.id) ? ACCENT : INK)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
           if (this.isActiveBranch(branch.id)) {
             Text('✓').fontSize(18).fontWeight(FontWeight.Bold).fontColor(ACCENT).margin({ left: 12 })
           }
@@ -141,12 +144,12 @@ export struct NovelBranchSheet {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
     }
-    .width('100%').height(52).padding({ left: 14, right: 14 })
+    .width('100%').constraintSize({ minHeight: 64 }).padding({ left: 14, right: 14, top: 8, bottom: 8 })
     .backgroundColor(this.isActiveBranch(branch.id) ? ACCENT_LIGHT : SURFACE2)
     .border({ width: 1, color: this.isActiveBranch(branch.id) ? ACCENT : LINE }).borderRadius(12)
-    .opacity(this.busy ? 0.5 : 1).margin({ bottom: 8 })
+    .opacity(this.switchBusy ? 0.5 : 1).margin({ bottom: 8 })
     .onClick((): void => {
-      if (!this.busy && !this.isActiveBranch(branch.id)) this.onSelect(branch.id);
+      if (!this.switchBusy && !this.isActiveBranch(branch.id)) this.onSelect(branch.id);
     })
     .accessibilityText(`${branch.name}，${this.isActiveBranch(branch.id) ? '当前分支' : '切换到此分支'}`)
   }
@@ -181,6 +184,9 @@ export struct NovelBranchSheet {
   @Builder
   private historyControls(): void {
     Column() {
+      this.controlRow('历史与分支管理', '查看检查点、分支改名、调整主线。', '打开', false, (): void => {
+        this.onOpenHistory();
+      })
       if (this.canUndo) {
         this.controlRow('撤销最近变更', '恢复到上一个工作区快照。', '撤销', false, (): void => {
           this.onUndo();
@@ -205,9 +211,9 @@ export struct NovelBranchSheet {
     Row() {
       Column() {
         Text(title).fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
-          .fontColor(warning ? ERROR : INK).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .fontColor(warning ? ERROR : INK).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         Text(detail).fontSize(TEXT_STYLES.meta.size).fontColor(INK3)
-          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 2 })
+          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 2 })
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
       Text(actionLabel)
@@ -235,7 +241,7 @@ export struct NovelBranchSheet {
 
   private branchListHeight(): number {
     const branchCount: number = this.activeBranches().length;
-    return Math.min(156, Math.max(60, branchCount * 60));
+    return Math.min(216, Math.max(72, branchCount * 80));
   }
 
   private canCreate(): boolean {

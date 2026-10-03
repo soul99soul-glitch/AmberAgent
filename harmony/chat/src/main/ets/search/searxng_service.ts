@@ -1,6 +1,7 @@
 // searxng_service — SearXNG 搜索(D-068c)
 // Android 基准: search/.../SearXNGService.kt(全文 183 行)
 // 偏差: Log.i(query) 省略(隐私:用户查询不入日志,章程禁止)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -42,6 +43,7 @@ export const searXNGService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: SearXNGOptions = asOptions(serviceOptions);
     if (opts.url.trim().length === 0) throw new Error('SearXNG URL cannot be empty');
@@ -61,7 +63,7 @@ export const searXNGService: SearchService = {
     if (opts.username.trim().length > 0 && opts.password.trim().length > 0) {
       headers['Authorization'] = basicAuthHeader(opts.username, opts.password);
     }
-    const resp = await searchSdkRuntime().http.fetch({ url, method: 'GET', headers });
+    const resp = await searchSdkRuntime().http.fetch({ url, method: 'GET', headers }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`SearXNG request failed with status ${resp.status}`);
     }

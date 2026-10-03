@@ -1,0 +1,86 @@
+# Independent standalone integration rereview — 2026-10-03
+
+Reviewer scope: product preparation/build/sign identity, UI routing and return stack, ability lifecycle, background lease ownership, notifications, model/settings consumers and bundle-local data context. The initial review was read-only; after INT-01 was reproduced, the parent authorized the focused four-file repair and regression tests recorded below. No build, signing, installation, reset, stash or cleanup was performed by this reviewer. Repository HEAD was `5ea51f7a548198ee4676fc63ef0b3bbfa34ba290` with extensive existing tracked/untracked changes. `AGENTS.md` and `.agents/skills/harmony-arkts/SKILL.md` were read before ArkTS review. Production and tests were frozen after repair for the parent's build/verification.
+
+## Finding
+
+### INT-01 · P2 · Single DeepRead background activity notification opens a parameter-error article
+
+Status: reproduced, repaired and focused source/domain checks passed. Device click acceptance remains a separate gate.
+
+Trigger: start one DeepRead run in `app.amber.deepread.reader`, move the UIAbility to background, then tap the DATA_TRANSFER activity notification while that run is the only activity. The same shared path also applies in the host when a DeepRead run is the only activity.
+
+Actual chain:
+
+1. `harmony/entry/src/main/ets/platform_impl/DeepReadGenerationActivity.ets:20` reports the stable `topicId` and run token, with no title.
+2. `harmony/entry/src/main/ets/platform_impl/BackgroundGenerationKeepAlive.ets:84` builds the activity Want; its topic branch at line 89 carries only `parameters.topicId`. Even supplying a snapshot title does not currently add it to the Want.
+3. `harmony/entry/src/main/ets/entryability/EntryAbility.ets:105` routes that Want to `DeepReadArticlePage` and writes `params.title` from the empty pending title.
+4. `harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:131` rejects an empty title before `loadArticle()` reads the persisted article. Result: `文章参数缺失`, despite the stable topic ID and stored article.
+
+Evidence: an in-memory Node/TypeScript VM executed the actual `buildActivityWantAgent`, actual `EntryAbility.routeFromWant`/`markWantRoutingReady`, and actual article `aboutToAppear` body. It produced:
+
+```json
+{"want":{"bundleName":"app.amber.deepread.reader","abilityName":"EntryAbility","parameters":{"topicId":"topic-A"}},"route":{"url":"pages/DeepReadArticlePage","params":{"topicId":"topic-A","title":""}},"articleError":"文章参数缺失","articleLoads":0}
+```
+
+This is an integration reproduction with platform stubs, not a new device-notification acceptance claim. Ordinary running/completed/failed article notifications already carry both `topicId` and title (`NotificationNotifier.ets:36`), so their path does not reproduce this failure. Multiple activity aggregation intentionally opens the root page and also does not reproduce it.
+
+Existing independent KeepAlive and Want-routing tests passed while this seam failed; the repair therefore adds a regression connecting the activity Want to the real article entry guard.
+
+Implemented repair: scheduler passes its admitted `job.title` with both activity start and terminal cleanup; the DeepRead bridge stores that title beside the tracker under the existing topic/token run key, so raw snapshot progress retains it; the activity Want carries `parameters.title`. EntryAbility parses display title as a trimmed string without imposing the stable-ID 512-character limit. Stable IDs retain their original validation. Article code was unchanged: its actual renderer/export/section retry sees the original full title, with no title fallback or truncation.
+
+### INT-02 · P2 · Coalesced replacement keeps an old full-title Want when display prefixes match
+
+Status: independently reproduced by UI reviewer, focused regression reproduced RED, then repaired and independently rechecked GREEN.
+
+Trigger: an old DeepRead token remains registered when a replacement for the same topic starts with the same first 60 title characters but a different suffix; the old token's late cleanup removes only its own key. Scheduler replacement admits a successor after its 5-second abort-wait deadline, so late predecessor cleanup is an existing supported ownership case. The 1-second notification timer can merge the intermediate two-activity state.
+
+At `BackgroundGenerationKeepAlive.ets:110`, the pre-repair signature covered bytes/count/the truncated display title and content IDs, omitting the full title now sent in the Want. The activity set remains nonempty, bytes/count/display title remain unchanged, and the lease is never stopped, so the final signature equals the earlier one and the prior full-title Want is retained. The independent reviewer executed actual activity bridge plus actual KeepAlive to observe one publish and the old suffix; this was not a same-run in-place title mutation probe.
+
+The focused actual KeepAlive regression starts `topic:1`, publishes its full title, adds `topic:2`, removes old `topic:1` before the throttled publish, and checks the final full-title Want. It failed with publishCount `1 != 2`; adding only full `activity.title` to the existing signature made it pass. Throttle, task scheduling and token ownership were unchanged. Independent post-repair UI review observed two publishes/new full title, no publication from the old token's late raw snapshot and exactly one stop after the remaining token ended.
+
+Verification: new real activity → Want → Entry → actual article entry tests first failed with `articleLoads=0`/`文章参数缺失`, then passed for 4- and 600-character titles. Nonstring title is still rejected and oversized stable topic IDs still do not route. The new scheduler activity-title test first failed and then passed; all scheduler start-failure/signal/progress tests passed (18/18). Existing Want/KeepAlive plus new navigation tests passed (25/25 before the signature regression was added); the final signature regression (1/1) and navigation/activity group (5/5) also passed. DeepRead domain `tsc --noEmit` passed. Scoped ArkTS lint of all four production files exited 0 with 0 errors and 73 warnings, all reported in scheduler.ts; the final single-file KeepAlive lint rerun after the signature field change exited 0 with no defects. `git diff --check` passed for all owned production/test files.
+
+## Integration coverage
+
+| Concern | Actual caller → implementation → observed result |
+| --- | --- |
+| Product build boundary | `scripts/harmony-standalone/build.mjs` calls `prepareProduct(product)`, sets `AMBER_HARMONY_DIR`, and `scripts/harmony-inventory/build-harmony-app.mjs:73` uses that directory as hvigor cwd. Each optional signing invocation runs the copy under its generated product root. No build was run in this review. |
+| Product packaging | `prepare.mjs` patches bundle/application/ability labels and `product_kind`, removes host signing configuration, whitelists four product permissions, retains `NovelPolishWorkAbility` only for Novel, and excludes dependency caches/signing materials/local data/symlinks. Existing product source manifests govern only previously generated source removal. Focused prepare tests validate current dirty/untracked source snapshotting and preservation of unrelated generated-root files. |
+| Installed identity | `EntryAbility.ets:210` writes its context and derives `productKind` from `context.applicationInfo.name`. `ProductIdentity.ets:21` selects NovelProjects or Board roots. `getAppBundleName()` reads installed context rather than defaulting notification/work targets to the host. The only production hardcoded product bundles found in the audited ETS/TS trees were the identity classification pair. |
+| Novel UI routes | NovelProjects `onPageShow` registers the root UIContext router, settings opens `NovelStandaloneSettingsPage`, workspace/detail actions stay within Novel pages, and normal return uses `router.back()`. A polish notification routes project/branch/job plus chapters tab; workspace `reload()` consumes the requested branch/job, rejects mismatched job branch and can show a newer current task with an explicit notice. |
+| DeepRead UI routes | Board root registers the router and opens composer/history/product settings. Composer saves all inputs and template snapshot to the repository before replacing itself with article; article returns to the root/history stack. Article output/running subscriptions are removed on disappearance; disappearance does not abort the scheduler-owned job. Explicit cancellation calls `scheduler.abort(topicId)`. |
+| Cold/hot Want ownership | Ability `onCreate` and `onNewWant` use one validated pending route slot. Root `markWantRoutingReady` defers cold navigation until page show. Current sequence checks prevent a late push from erasing a newer Want; failed pushes retain the pending target. Window destruction clears the router binding. Focused actual-entry tests cover cold, hot, overlapping, failed and destroyed-window routes. |
+| Lease owner/cancellation | `EntryAbility.onBackground/onForeground` alone supplies lease context. `BackgroundGenerationKeepAlive.reportGenerationProgress` ignores work-extension context for ownership and removes precise source/run keys. DeepRead activity keys contain topic and run token; late snapshots cannot recreate removed trackers. Novel adapter removes exact run on terminal/waiting/cancel. Serialized start/stop/publish uses late-start rechecks. Focused tests prove original UIAbility context survives WorkScheduler progress and cold extension progress does not request a UIAbility lease. |
+| Ordinary notification owner | `NotificationNotifier` claims topic/run token before asynchronous Want creation, rechecks before publish, serializes same-topic platform operations and rechecks cancellation ownership at execution. Scheduler finalization only clears its activity and its own registration; terminal publication failures leave cleanup responsible for the running notification. |
+| WorkScheduler product/data context | `NovelPolishWorkScheduler` constructs work with installed bundle and project/branch/job key. WorkAbility writes its context before obtaining creation/repository/runtime and validates callback parameters. Repository/file/Preferences stores lazily obtain bundle-local context; same preference filename does not point the standalone at the host sandbox. DeepRead HAP contains no work extension. |
+| DeepRead model setting | Product settings → `SettingDeepReadPage` → `DeepReadModelSelection` writes the new task slot with provider ID/model UUID. Scheduler captures `resolveDeepReadRuntimeCore` at run creation, uses exact fixed selection without legacy/global fallback, and template AI uses `getDeepReadTextRuntime`. History observation does not require a model. Provider picker returns to the product-specific setting page; legacy independent model-library UI is gated to agent mode. |
+| Novel role models | `NovelStandaloneSettingsPage` persists writing/review/stateSync defaults; `AppContainer.getNovelCreation` supplies `loadModelDefaults`, and ordinary/state-sync/ghostwrite/polish resolvers consume them. Exact project models use provider/model UUID lookup. Existing fixed picker availability test executes the actual resolver with provider overrides. |
+| Novel context/research settings | Four polish context defaults load in `NovelPolishPage.reload` and are passed into task creation. The standalone settings UI writes no unconsumed global preference text. Research toggle writes the same search-enabled key read by `loadNovelResearchTools`; `novelRuntimeConfig` actually adds the returned tools. Novel tools are composed from workspace tools, ask-user and configured research, not the entire host chat tool registry. |
+| DeepRead display/discovery settings | Font mode/scale are consumed by article and template preview; selected template is captured by composer/scheduler, with a run snapshot preserved across later setting changes. Source IDs/focus mode/keywords/refresh interval/Wi-Fi-only/title translation load in Board; source fetching and translation observe the page cancellation owner. Search registry reads shared search preferences lazily per actual run. |
+
+## Artifact correspondence, measured before this rereview's repairs
+
+The P8 fingerprint document was used solely as a comparison baseline. All 804 listed current `harmony/` source hashes matched it; all 804 generated source copies in each standalone matched the current source. Existing signed HAP SHA256 and all three recorded app/module/pages configuration hashes also matched P8:
+
+- Novel: `8c47fa423d12975aa96c88c5f7208ca47ee6d36b2a5188b12ac00036757f6f8e`.
+- DeepRead: `23109b82fe0429f1ce853a5e1456b634f3b3f8b6e760953eb5b8576bd2ae932e`.
+
+The actual `module.json` inside each HAP was read: Novel bundle `app.amber.novel`; DeepRead bundle `app.amber.deepread.reader`; both versionCode 2/versionName 0.0.2; both only INTERNET/KEEP_BACKGROUND_RUNNING/GET_NETWORK_INFO/VIBRATE; only Novel has `NovelPolishWorkAbility`. These checks establish baseline artifact correspondence and packaged identity. They do not establish correspondence to repairs made later in this rereview or a new install/launch/device acceptance result.
+
+## Verification and rejected candidate
+
+Ran 56 focused existing tests, all passed: standalone prepare (6), product identity (7), standalone settings lifecycle/model resolver (3), polish notification summaries (2), DeepRead notification owner (4), Want routes (15), DeepRead activity (2), DeepRead model selection/template entry (9), shared KeepAlive/tracker (8). The INT-01 actual function chain reproduced separately, despite those existing tests being green.
+
+Rejected candidate: `NotificationNotifier.buildArticleWantAgent` uses requestCode 991 and UPDATE_PRESENT_FLAG for all article topics. That alone does **not** establish cross-topic target reuse. Official local WantAgent documentation says existing extras can update; the platform matching key must first match. OpenHarmony [5.0.0 Want::IsEquals](https://github.com/openharmony/ability_ability_base/blob/OpenHarmony-5.0.0-Release/interfaces/kits/native/want/src/want.cpp#L1259) explicitly compares `parameters_` as well as operation/type; 5.1/6.0 and current master do the same. [PendingWantManager](https://github.com/openharmony/ability_ability_runtime/blob/master/services/abilitymgr/src/pending_want_manager.cpp#L303) uses that equality after request-code/user/type checks. Different topic parameters defeat the suspected collision; no finding was filed for it.
+
+## Independent checks of the two Novel repairs added during this round
+
+Read the implemented `creation.rename` guard and `candidate_provenance.novelPlanDigest` metadata change, then ran `novel_rename_jobs.test.ts` and `novel_candidate_provenance.test.ts`: 16/16 passed.
+
+- Rename guard lists durable ghostwrite/polish jobs and rejects only if at least one is neither completed nor cancelled. Its scope is the service rename entry; repository `commitProject` and `commitMutation` remain available to other mutations. Actual additional in-memory file-repository probes started/paused a ghostwrite job and a polish job, saved chapter body via `creation.saveChapter`, observed rename rejection, cancelled via the creation service, and successfully renamed. A separate persisted failed polish probe (resume → claim → fail) also rejected rename, then service cancellation restored rename. Existing regression covers ghostwrite running/pause/failure CAS preservation and cancellation.
+- Cross-branch check: repository job lists are scoped to current checkout branch. However actual service `switchBranch` calls repository `assertNoActiveNovelJob`, which treats every non-completed/non-cancelled job as unfinished. Additional real creation/repository probes for both ghostwrite and polish confirmed branch switching fails in paused and persisted failed stages with `当前分支已有未结束的小说作业`; checkout remains unchanged. A normal product path cannot first switch away from an unfinished job and bypass the rename check. No cross-branch finding was filed from branch-filtering alone.
+- Provenance uses the shared metadata normalizer, conditionally adds nonempty aliases/tags/customKind/non-default mode, and retains the existing default digest representation. Existing regression pins the old default fixture digest `a284ac10` and covers legacy messages without fabricated provenance, branch/source checks and completed/incomplete polish.
+- Five additional actual generation/adoption probes each asserted the model's real system prompt contains injected aliases, tags and custom kind, checkpointed a candidate through the creation service and file repository, edited exactly aliases/tags/customKind/injectionMode or enable state through `upsertMaterial`, then called actual `collectMessage`. Every changed-source candidate was rejected with `计划或设定已变更` and persisted chapter count stayed zero. These checks exercise the behavior behind the digest rather than duplicating its expression in a test.
+
+These repairs passed independent source/domain verification. No fresh provider request, background callback, device gesture, notification click or release signing acceptance was claimed. INT-01 and INT-02 are fixed in source and await the parent's build/device verification.

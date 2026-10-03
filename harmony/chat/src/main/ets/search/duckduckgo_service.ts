@@ -2,7 +2,7 @@
 // Android 基准: search/.../DuckDuckGoSearchService.kt(全文 109 行;普通 object 非 SearchService)
 // 偏差:Lite 端点已被 202 验证页拦截,改为仅走 HTML POST(对齐 iOS 免费搜索重做)
 // 偏差登记:Jsoup → mini-DOM;Jsoup timeout → HttpClient Port 默认
-import type { SearchCommonOptions, SearchResult, SearchResultItem } from './search_service.ts';
+import type { SearchCommonOptions, SearchRequestContext, SearchResult, SearchResultItem } from './search_service.ts';
 import { searchSdkRuntime } from './search_service.ts';
 import { javaUrlEncodeForm, javaUrlDecodeForm } from './url_codec.ts';
 import type { HtmlDocument, HtmlElement } from './html_dom.ts';
@@ -75,7 +75,7 @@ const parseHtmlResults = (doc: HtmlDocument, limit: number): SearchResultItem[] 
 
 // POST html.duckduckgo.com/html/(deedy5/ddgs 同款端点);Lite 端点现已对首个请求
 // 返回 202 验证页,不再使用
-const fetchDdgHtml = (query: string): Promise<string> =>
+const fetchDdgHtml = (query: string, context?: SearchRequestContext): Promise<string> =>
   searchSdkRuntime().http.fetch({
     url: 'https://html.duckduckgo.com/html/',
     method: 'POST',
@@ -87,7 +87,7 @@ const fetchDdgHtml = (query: string): Promise<string> =>
       'Referer': 'https://html.duckduckgo.com/',
     },
     body: `q=${javaUrlEncodeForm(query)}&b=&kl=wt-wt`,
-  }).then((r): string => {
+  }, context).then((r): string => {
     // 202 = 反爬验证页;429/403/5xx 的限流页/挑战页不得当结果页解析
     if (r.status === 202) throw new Error('DuckDuckGo requires human verification');
     if (r.status < 200 || r.status >= 300) {
@@ -98,8 +98,9 @@ const fetchDdgHtml = (query: string): Promise<string> =>
 
 export const duckDuckGoSearch = async (
   query: string, commonOptions: SearchCommonOptions,
+  context?: SearchRequestContext,
 ): Promise<SearchResult> => {
-  const doc = parseHtml(await fetchDdgHtml(query));
+  const doc = parseHtml(await fetchDdgHtml(query, context));
   const results: SearchResultItem[] = parseHtmlResults(doc, commonOptions.resultSize);
   if (results.length > 0) {
     return { answer: null, items: results };

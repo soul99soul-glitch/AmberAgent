@@ -164,6 +164,10 @@ interface SettleWaiter {
 }
 
 export class WebMountSession {
+  private publishChatUi: boolean;
+  constructor(publishChatUi: boolean = true) {
+    this.publishChatUi = publishChatUi;
+  }
   private controller: webview.WebviewController = new webview.WebviewController();
   private currentUrl: string = '';
   private pageReady: boolean = false;
@@ -188,7 +192,7 @@ export class WebMountSession {
   // 租约切换(发布 AppStorage,UI 订阅 'webmountLease')
   public setLease(value: string): void {
     this.lease = value;
-    AppStorage.setOrCreate<string>('webmountLease', value);
+    if (this.publishChatUi) AppStorage.setOrCreate<string>('webmountLease', value);
   }
 
   public getLease(): string {
@@ -401,8 +405,10 @@ export class WebMountSession {
     // E12:每次外部文档提交即换文档身份(ref/页内模板全部作废);内部页无文档
     this.documentId = this.isInternalUrl(finalUrl) ? '' : newId();
     // 页面状态发布(ChatPage 接管条订阅 'webmountUrl'/'webmountReady')
-    AppStorage.setOrCreate<string>('webmountUrl', this.currentUrl);
-    AppStorage.setOrCreate<boolean>('webmountReady', this.pageReady);
+    if (this.publishChatUi) {
+      AppStorage.setOrCreate<string>('webmountUrl', this.currentUrl);
+      AppStorage.setOrCreate<boolean>('webmountReady', this.pageReady);
+    }
     const waiters: SettleWaiter[] = this.pageEndWaiters;
     this.pageEndWaiters = [];
     for (const w of waiters) w.settle();

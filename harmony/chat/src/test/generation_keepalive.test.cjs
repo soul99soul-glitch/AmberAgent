@@ -21,6 +21,7 @@ const loadModule = (name, imports) => {
       throw new Error(`unexpected import ${spec}`);
     },
     Error, Promise, Map, JSON, String, Number, Date, setTimeout, clearTimeout,
+    canIUse: () => true,
   }, { filename });
   return exports;
 };
@@ -31,27 +32,30 @@ const trackerImports = () => ({
 });
 
 const keepAliveFixture = () => {
-  const calls = { starts: 0, stops: 0, publishes: [] };
+  const calls = { starts: 0, stops: 0, publishes: [], startContexts: [], stopContexts: [] };
   const gate = { startDeferred: null };
-  const notification = { notificationId: 4242, slotType: 4, contentType: 9 };
+  const notification = { notificationId: 4242, slotType: 4, contentType: 5 };
   const imports = {
+    './ProductIdentity.ets': { getAppBundleName: () => 'app.amber.deepread' },
     '@kit.ArkTS': { util: { TextEncoder: { create: () => ({ encodeInto: (s) => new TextEncoder().encode(s) }) } } },
     '@kit.BackgroundTasksKit': {
       backgroundTaskManager: {
         startBackgroundRunning: (context, modes, want) => {
           calls.starts++;
+          calls.startContexts.push(context);
           if (gate.startDeferred !== null) return gate.startDeferred.promise;
           return Promise.resolve(notification);
         },
-        stopBackgroundRunning: async () => { calls.stops++; },
+        stopBackgroundRunning: async (context) => { calls.stops++; calls.stopContexts.push(context); },
       },
     },
-    '@kit.AbilityKit': { wantAgent: { getWantAgent: async () => ({}), OperationType: { START_ABILITY: 0 } } },
+    '@kit.AbilityKit': { wantAgent: { getWantAgent: async (info) => ({ info }),
+      OperationType: { START_ABILITY: 0 }, WantAgentFlags: { UPDATE_PRESENT_FLAG: 1 } } },
     '@kit.NotificationKit': {
       notificationManager: {
         publish: async (request) => { calls.publishes.push(JSON.parse(JSON.stringify(request))); },
         SlotType: { LIVE_VIEW: 4 },
-        ContentType: { NOTIFICATION_CONTENT_SYSTEM_LIVE_VIEW: 9 },
+        ContentType: { NOTIFICATION_CONTENT_SYSTEM_LIVE_VIEW: 5 },
       },
     },
     '@kit.PerformanceAnalysisKit': { hilog: { info: () => {}, warn: () => {} } },
@@ -64,6 +68,86 @@ const flush = async (turns = 6) => { for (let i = 0; i < turns; i++) await new P
 const tick = async (ms = 1100) => { await new Promise((r) => setTimeout(r, ms)); await flush(); };
 const ctx = {};
 const snap = (source, runId, active, chars, bytes) => ({ source, runId, generationActive: active, receivedChars: chars, receivedBytes: bytes });
+
+test('UIAbility owner survives WorkScheduler progress and the last run stops with its original context', async () => {
+  const { api, calls } = keepAliveFixture();
+  const uiContext = { kind: 'UIAbilityContext' };
+  const extensionContext = { kind: 'WorkSchedulerExtensionContext' };
+  api.reportGenerationProgress(uiContext, snap('novel', 'job', true, 0, 0));
+  await api.setGenerationKeepAliveBackground(uiContext, true);
+  api.reportGenerationProgress(extensionContext, snap('novel', 'job', true, 10, 30));
+  api.reportGenerationProgress(extensionContext, snap('novel', 'job', false, 10, 30));
+  await flush();
+  assert.equal(calls.startContexts[0], uiContext);
+  assert.equal(calls.stopContexts[0], uiContext);
+  assert.equal(api.generationKeepAliveHeld(), false);
+  await api.disposeGenerationKeepAlive(uiContext);
+});
+
+test('cold WorkScheduler progress does not request a UIAbility background lease', async () => {
+  const { api, calls } = keepAliveFixture();
+  const extensionContext = { kind: 'WorkSchedulerExtensionContext' };
+  api.reportGenerationProgress(extensionContext, snap('novel', 'cold-job', true, 10, 30));
+  await flush();
+  assert.equal(calls.starts, 0);
+  api.reportGenerationProgress(extensionContext, snap('novel', 'cold-job', false, 10, 30));
+  await flush();
+  assert.equal(calls.stops, 0);
+});
+
+// This stub checks outgoing requests; it does not model the system owner-update filter or prove capsule visibility.
+test('outgoing notification metadata and click target follow the remaining activity even without byte growth', async () => {
+  const { api, calls } = keepAliveFixture();
+  const chat = { ...snap('chat', 'A', true, 2, 6), title: '会话 A', conversationId: 'conversation-A' };
+  api.reportGenerationProgress(ctx, chat);
+  await api.setGenerationKeepAliveBackground(ctx, true);
+  await tick();
+  let request = calls.publishes.at(-1);
+  assert.equal(request.content.systemLiveView.capsule.title, 'Amber · 回复中');
+  assert.equal(request.content.systemLiveView.title, '会话 A · 回复中');
+  assert.equal(request.wantAgent.info.wants[0].parameters.conversationId, 'conversation-A');
+  // B has no output yet: membership alone must update request metadata and aggregate click target.
+  api.reportGenerationProgress(ctx, { ...snap('deepread', 'B', true, 0, 0), topicId: 'topic-B' });
+  await tick();
+  request = calls.publishes.at(-1);
+  assert.equal(request.content.systemLiveView.capsule.title, 'Amber · 2 个任务');
+  assert.deepEqual(request.wantAgent.info.wants[0].parameters, {});
+  api.reportGenerationProgress(ctx, { ...chat, generationActive: false });
+  await tick();
+  request = calls.publishes.at(-1);
+  assert.equal(request.content.systemLiveView.capsule.title, 'Amber · 深读中');
+  assert.equal(request.wantAgent.info.wants[0].parameters.topicId, 'topic-B');
+  assert.equal(calls.stops, 0);
+  api.reportGenerationProgress(ctx, snap('deepread', 'B', false, 0, 0));
+  await flush();
+  assert.equal(calls.stops, 1);
+  await api.disposeGenerationKeepAlive(ctx);
+});
+
+test('replacement activity refreshes its full title when display prefix and bytes stay unchanged', async () => {
+  const { api, calls } = keepAliveFixture();
+  const prefix = '完整文章标题'.repeat(20);
+  const old = { ...snap('deepread', 'topic:1', true, 0, 0), topicId: 'topic', title: `${prefix}旧标题` };
+  const replacement = { ...snap('deepread', 'topic:2', true, 0, 0), topicId: 'topic', title: `${prefix}新标题` };
+  api.reportGenerationProgress(ctx, old);
+  await api.setGenerationKeepAliveBackground(ctx, true);
+  await tick();
+  assert.equal(calls.publishes.at(-1).wantAgent.info.wants[0].parameters.title, old.title);
+  const initialCount = calls.publishes.length;
+  const displayTitle = calls.publishes.at(-1).content.systemLiveView.title;
+  // A late owner finishes after its replacement registers. The activity set
+  // never empties, and the timer merges the intermediate two-activity state.
+  api.reportGenerationProgress(ctx, replacement);
+  api.reportGenerationProgress(ctx, { ...old, generationActive: false });
+  await tick();
+  assert.equal(calls.stops, 0);
+  assert.equal(calls.publishes.length, initialCount + 1);
+  assert.equal(calls.publishes.at(-1).content.systemLiveView.title, displayTitle);
+  assert.equal(calls.publishes.at(-1).wantAgent.info.wants[0].parameters.title, replacement.title);
+  api.reportGenerationProgress(ctx, { ...replacement, generationActive: false });
+  await flush();
+  await api.disposeGenerationKeepAlive(ctx);
+});
 
 test('A/B activity lifecycle: shared task, per-run removal, same-ID absolute progress, silence stays silent', async () => {
   const { api, calls } = keepAliveFixture();
@@ -108,7 +192,7 @@ test('foreground during a pending start stops the late-acquired task immediately
   assert.equal(calls.starts, 1);
   // start 尚未 resolve 即回前台(desired 同步落地,串行 op 随后追赶)
   const foreground = api.setGenerationKeepAliveBackground(ctx, false);
-  resolveStart({ notificationId: 4242, slotType: 4, contentType: 9 });
+  resolveStart({ notificationId: 4242, slotType: 4, contentType: 5 });
   await backgrounded;
   await foreground;
   await flush(8);
@@ -150,4 +234,27 @@ test('tracker: history baseline is zero, growth counts once, retry never decreas
   assert.equal(regained.chars, 32 - expectChars);
   assert.equal(regained.bytes, 36 - (2 * 3 + 10 + 12));
   assert.equal(tracker.totals().chars, 32);
+});
+
+test('tracker skips unchanged history UTF8 work but measures immutable replacements and retry maxima', () => {
+  let encodes = 0;
+  const imports = {
+    './ProductIdentity.ets': { getAppBundleName: () => 'app.amber.deepread' }, '@kit.ArkTS': { util: { TextEncoder: { create: () => ({ encodeInto: (text) => {
+    encodes++; return new TextEncoder().encode(text);
+  } }) } } } };
+  const { GenerationProgressTracker } = loadModule('GenerationProgressTracker.ets', imports);
+  const tracker = new GenerationProgressTracker();
+  const message = (id, text) => ({ id, role: 'assistant', parts: [{ type: 'text', text }] });
+  const history = message('history', '历史');
+  tracker.seedBaseline([history]);
+  assert.equal(encodes, 1);
+  const first = message('tail', '你');
+  tracker.observe([history, first]);
+  tracker.observe([history, first]);
+  assert.equal(encodes, 2, 'unchanged message references should skip concatenation and UTF8 encoding');
+  tracker.observe([history, message('tail', '你好')]);
+  tracker.observe([history, message('tail', '你')]);
+  tracker.observe([history, message('tail', '你好！')]);
+  assert.equal(encodes, 5);
+  assert.deepEqual({ ...tracker.totals() }, { chars: 3, bytes: 9 });
 });

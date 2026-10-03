@@ -22,12 +22,12 @@ export const POLISH_COMPLETION_SENTINEL: string = '<AMBER_NOVEL_POLISH_COMPLETE>
 
 const INK_GUIDE: string = '写作要求:保持人物性格、语气与情节连贯;不虚构与已有内容矛盾的设定;语言自然,避免翻译腔与过度形容词。';
 
-const QUICK_START_SYSTEM: string = `你是小说创作的起点助手。用户只提供了一个模糊的念头,你的任务是把这个念头发展成可写的设定:
-1. 题材与基调(2-3 句)
-2. 主角与核心冲突(3-5 条要点)
-3. 开篇建议(第一章写什么,3-5 句梗概)
-${INK_GUIDE}
-请用清晰的分节短文回复,不要输出章节正文。`;
+const QUICK_START_SYSTEM: string = `你是小说创作的起点助手。把作者的念头发展成可写的设定与开篇建议。
+只输出严格 JSON，不要代码围栏或额外文字：
+{"overview":"清楚易读的创作概览，包含题材基调、核心冲突和第一章建议","proposals":[{"kind":"world|character|relationship|outline|requirement|other","title":"资料标题","content":"一项可独立审阅、编辑、采纳的完整资料","aliases":[],"tags":[],"customKind":"","injectionMode":"smart"}]}
+proposals 必须有 1–12 项。每项只能包含一个主题；所有提案需作者逐项确认后才成为正式资料。
+不要输出章节正文，不要自行虚构作者的写作禁令。
+${INK_GUIDE}`;
 
 const DISCUSSION_SYSTEM: string = `你是小说创作的讨论伙伴。与作者讨论设定、人物、情节走向;
 给出具体、可操作的建议而不是空泛评价。作者可能随时把你说的设定采用为正式设定。
@@ -52,10 +52,17 @@ const POLISH_SYSTEM: string = `你是小说润色引擎。对给出的章节全�
 - 保留分段结构;不新增或删除情节线
 - 输出润色后的完整章节全文,并在最后一行单独输出完成标记 ${POLISH_COMPLETION_SENTINEL}`;
 
+export const CHAPTER_CONTRACT_PROPOSAL_SYSTEM: string =
+  '你是小说本章策划助手。根据作者资料提出草稿，只输出完整 JSON：'
+  + '{"outlinePlacement":"","goalAndConflict":"","mustHappen":[],"mustNotHappen":[],"endingHook":"","visibleFacts":[]}。'
+  + 'visibleFacts 仅写本章视角可知事实；未获作者确认的提案不是正式事实。';
+
 const REGENERATE_SYSTEM: string = `你是小说章节重写引擎。对给出的章节做全新的重写(不是润色):
-- 保持章节的目标情节不变,但叙事方式、场景细节可以重新设计
+- 按作者改稿要求重新设计章节；允许改变情节、人物认知与事实，修复指出的矛盾
+- 原章作为改写来源；作者明确修改的事实优先，未要求改变的资料继续作为约束
 - 直接输出完整章节正文,不要输出章节标题
-${INK_GUIDE}`;
+保持语言自然、人物动机可理解，避免翻译腔与过度形容词。
+不要把润色的“不得改变事实”规则用于本次重生成。`;
 
 export const novelPromptTemplate = (kind: NovelRunKind): NovelPromptTemplate => {
   const map: Record<NovelRunKind, string> = {

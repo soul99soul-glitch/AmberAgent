@@ -10,6 +10,7 @@
 
 import { newId } from './ids.ts';
 import type { BuiltInTools, CustomBody, ModelAbility } from './provider_model.ts';
+import { defaultModelAbilities } from './provider_model.ts';
 import type { CustomHeader } from './assistant.ts';
 import type { OpenAIAuthMode, OpenAIBrand } from './provider_model.ts';
 
@@ -44,7 +45,8 @@ export const makeProviderModel = (opts: Partial<ProviderModel> = {}): ProviderMo
   customBodies: opts.customBodies ?? [],
   inputModalities: opts.inputModalities ?? ['text'],
   outputModalities: opts.outputModalities ?? ['text'],
-  abilities: opts.abilities ?? [],
+  abilities: opts.abilities ?? (opts.type === 'image' || opts.type === 'embedding'
+    ? [] : defaultModelAbilities(opts.modelId ?? '')),
   tools: opts.tools ?? [],
   contextWindowTokens: opts.contextWindowTokens ?? null,
   providerOverwrite: opts.providerOverwrite ?? null,
@@ -212,8 +214,9 @@ export const googleAuthModeFixedBaseUrl = (mode: GoogleAuthMode): string | null 
 export const hasUsableAuth = (setting: ProviderSetting): boolean => {
   if (!setting.enabled) return false;
   if (setting.type === 'openai') {
-    // OAuth/coding-plan 未实现;Responses API 已落地(域层 openai_responses_*)
-    return setting.authMode === 'api_key' && setting.apiKey.trim().length > 0;
+    // API Key/Token Plan 使用保存的 Key，OAuth 使用保存的 access token；
+    // 请求层按 authMode 生成鉴权头，OAuth 在运行前刷新凭据。
+    return setting.apiKey.trim().length > 0;
   }
   if (setting.type === 'google') {
     if (setting.authMode !== 'api_key') {

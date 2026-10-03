@@ -1,3 +1,4 @@
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
 // SettingDeepReadPage — 深度阅读设置(AI 配置 + 热榜源开关 + 搜索源配置面板)
 //   原误置于 HistoryPage,归位独立页(首页功能区/设置入口可达)。
 //
@@ -21,11 +22,15 @@ import type { DeepReadTemplateDef, CustomTemplateDef } from '../platform_impl/De
 import { router, promptAction } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { getAppContainer, getModelRegistry, resolveChatProviderChoice } from '../di/AppContainer.ets';
+import type { DeepReadModelOption } from '../di/AppContainer.ets';
+import type { TaskModelReference } from '@amber/chat-domain';
+import { loadDeepReadModelSelection, saveDeepReadModelSelection } from '../platform_impl/DeepReadModelSelection.ets';
+import type { DeepReadModelSelectionState } from '../platform_impl/DeepReadModelSelection.ets';
 import { chatChoiceToDeepReadDraft } from '../platform_impl/ChatDeepReadDraft.ets';
 import type { ChatDeepReadDraftResult } from '../platform_impl/ChatDeepReadDraft.ets';
 import type { Storage, ModelConfig } from '@amber/deepread-domain';
 import { makeModelConfig } from '@amber/deepread-domain';
-import { NEWSNOW_PRESETS } from '../platform_impl/NewsNowProvider.ets';
+import { HOTLIST_PRESETS } from '../platform_impl/NewsNowProvider.ets';
 import type { NewsNowPreset } from '../platform_impl/NewsNowProvider.ets';
 
 const DOMAIN: number = 0x0001;
@@ -64,6 +69,9 @@ struct SettingDeepReadPage {
   @State chatCopyMessage: string = '';
   @State copyingChat: boolean = false;
   @State hotlistToggles: SourceToggle[] = [];
+  @State hotlistRefreshMinutes: number = 60;
+  @State hotlistWifiOnly: boolean = false;
+  @State hotlistTranslateZh: boolean = false;
   @State selectedSource: string = 'tavily';
   @State showSourcePicker: boolean = false;
   @State currentKey: string = '';
@@ -87,11 +95,18 @@ struct SettingDeepReadPage {
   @State newModel: string = 'deepseek-chat';
   @State modelSaved: string = '';
   @State modelSheetOpen: boolean = false;
+  @State taskModelReference: TaskModelReference | null = null;
+  @State taskModelOptions: DeepReadModelOption[] = [];
+  @State taskModelLabel: string = '正在读取模型';
+  @State taskModelDetail: string = '';
+  @State modelError: string = '';
+  @State savingModel: boolean = false;
 
   private storage: Storage | null = null;
   private pageAlive: boolean = false;
   private loadToken: number = 0;
   private pageLoad: Promise<void> = Promise.resolve();
+  private modelLoadToken: number = 0;
 
   onBackPress(): boolean {
     if (!this.modelSheetOpen) return false;
@@ -112,6 +127,7 @@ struct SettingDeepReadPage {
   aboutToDisappear(): void {
     this.pageAlive = false;
     this.loadToken++;
+    this.modelLoadToken++;
   }
 
   // 从模板工作台返回时刷新自定义模板列表(aboutToAppear 在栈内返回不重跑)
@@ -121,6 +137,7 @@ struct SettingDeepReadPage {
     loadCustomTemplates(storage).then((list: CustomTemplateDef[]): void => {
       if (this.pageAlive) this.customTemplates = list;
     }).catch((): void => {});
+    this.refreshTaskModelSelection();
   }
 
   private async loadPage(token: number): Promise<void> {
@@ -131,11 +148,14 @@ struct SettingDeepReadPage {
     const model: string = await storage.get<string>('ai_model', 'deepseek-chat');
     // 加载热榜源开关
     const hotlist: SourceToggle[] = [];
-    for (let i = 0; i < NEWSNOW_PRESETS.length; i++) {
-      const p: NewsNowPreset = NEWSNOW_PRESETS[i];
-      const enabled: string = await storage.get<string>('source_' + p.id, 'true');
+    for (let i = 0; i < HOTLIST_PRESETS.length; i++) {
+      const p: NewsNowPreset = HOTLIST_PRESETS[i];
+      const enabled: string = await storage.get<string>('source_' + p.id, p.defaultEnabled === false ? 'false' : 'true');
       hotlist.push({ id: p.id, displayName: p.displayName, enabled: enabled === 'true' });
     }
+    const hotlistRefreshMinutes: number = await storage.get<number>('deepread_hotlist_refresh_minutes', 60);
+    const hotlistWifiOnly: string = await storage.get<string>('deepread_hotlist_wifi_only', 'false');
+    const hotlistTranslateZh: string = await storage.get<string>('deepread_hotlist_translate_zh', 'false');
     // 加载当前选中的搜索源和 key
     const selectedSource: string = await storage.get<string>('active_search_source', 'tavily');
     const currentKey: string = await storage.get<string>(selectedSource + '_api_key', '');
@@ -145,7 +165,7 @@ struct SettingDeepReadPage {
     const focusKeywords: string = await storage.get<string>('deepread_focus_keywords', '');
     const focusMode: string = await storage.get<string>('deepread_focus_mode', 'all');
     const fontMode: string = await storage.get<string>('deepread_font_mode', 'default');
-    const fontScale: number = await storage.get<number>('deepread_font_scale', 100);
+    const fontScale: number = Number(await storage.get<number>('deepread_font_scale', 100));
     const boardModelId: string = await storage.get<string>('deepread_model_id', '');
     const tplId: string = await storage.get<string>('deepread_template_id', 'none');
     if (!this.pageAlive || token !== this.loadToken) return;
@@ -153,16 +173,68 @@ struct SettingDeepReadPage {
     this.aiBaseUrl = aiBaseUrl;
     this.model = model;
     this.hotlistToggles = hotlist;
+    this.hotlistRefreshMinutes = hotlistRefreshMinutes;
+    this.hotlistWifiOnly = hotlistWifiOnly === 'true';
+    this.hotlistTranslateZh = hotlistTranslateZh === 'true';
     this.selectedSource = selectedSource;
     this.currentKey = currentKey;
     this.models = models;
     this.focusKeywords = focusKeywords;
     this.focusModeIndex = focusMode === 'focus_first' ? 1 : focusMode === 'focus_only' ? 2 : 0;
     this.fontModeIndex = fontMode === 'serif' ? 1 : 0;
-    this.fontScalePercent = fontScale;
+    this.fontScalePercent = Math.max(70, Math.min(180, Number.isFinite(fontScale) ? fontScale : 100));
     this.boardModelId = boardModelId;
     this.templateId = tplId;
     this.customTemplates = await loadCustomTemplates(storage);
+    await this.refreshTaskModelSelection();
+  }
+
+  private async refreshTaskModelSelection(): Promise<void> {
+    const token: number = ++this.modelLoadToken;
+    try {
+      const selection: DeepReadModelSelectionState = await loadDeepReadModelSelection();
+      if (!this.pageAlive || token !== this.modelLoadToken) return;
+      this.taskModelReference = selection.reference;
+      this.taskModelOptions = selection.options;
+      this.taskModelLabel = selection.label;
+      this.taskModelDetail = selection.detail;
+      this.modelError = '';
+    } catch (error) {
+      if (!this.pageAlive || token !== this.modelLoadToken) return;
+      this.modelError = `读取模型设置失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  private async selectTaskModel(option: DeepReadModelOption | null): Promise<void> {
+    if (this.savingModel) return;
+    const token: number = this.loadToken;
+    this.modelLoadToken++;
+    this.savingModel = true;
+    this.modelError = '';
+    this.saved = '';
+    try {
+      const reference: TaskModelReference = await saveDeepReadModelSelection(option);
+      if (!this.pageAlive || token !== this.loadToken) return;
+      this.taskModelReference = reference;
+      this.taskModelLabel = option === null ? '跟随当前模型' : `${option.providerLabel} / ${option.label}`;
+      this.taskModelDetail = option === null ? '每轮任务开始时读取最新聊天选择。' : '固定使用此服务商与模型。';
+      this.saved = '深度阅读模型已保存 ✓';
+      this.modelSheetOpen = false;
+      await this.refreshTaskModelSelection();
+    } catch (error) {
+      if (this.pageAlive && token === this.loadToken) {
+        this.modelError = `模型保存失败：${error instanceof Error ? error.message : String(error)}`;
+        promptAction.showToast({ message: this.modelError });
+      }
+    } finally {
+      this.savingModel = false;
+    }
+  }
+
+  private taskModelSelected(option: DeepReadModelOption): boolean {
+    const reference: TaskModelReference | null = this.taskModelReference;
+    return reference !== null && reference.kind === 'fixed'
+      && reference.pair.providerId === option.providerId && reference.pair.modelId === option.modelId;
   }
 
   private async fillCurrentChatDraft(): Promise<void> {
@@ -224,9 +296,7 @@ struct SettingDeepReadPage {
     this.saved = '阅读体验已保存 ✓';
   }
 
-  // ── 深读模型选择(对齐 iOS BoardSettings 模型区:跟随聊天配置 / 模型库快照)──
-  // 引擎链静态读 ai_base_url/ai_api_key + (deepread_model_id || ai_model),
-  // 选择即把凭据快照写入既有键,不改动引擎。
+  // 历史快照字段与 helpers 保留参考；当前模型入口只写 deepread_task_model。
 
   private currentBoardModelLabel(): string {
     if (this.boardModelId.trim().length > 0) return this.boardModelId.trim();
@@ -235,6 +305,7 @@ struct SettingDeepReadPage {
 
   private showModelMenu(): void {
     this.modelSheetOpen = true;
+    this.refreshTaskModelSelection();
   }
 
   @Builder
@@ -249,20 +320,26 @@ struct SettingDeepReadPage {
           .width('100%').padding({ left: 20, right: 20, top: 18, bottom: 10 })
         Scroll() {
           Column() {
-            this.ModelSheetRow('跟随当前聊天配置', this.boardModelId.trim().length === 0, (): void => {
-              this.followChatConfig();
+            this.ModelSheetRow('跟随当前模型', this.taskModelReference?.kind === 'auto', (): void => {
+              this.selectTaskModel(null);
             })
-            ForEach(this.models, (m: ModelConfig): void => {
-              this.ModelSheetRow(m.label.length > 0 ? `${m.label}（${m.model}）` : m.model,
-                this.boardModelId.trim() === m.model, (): void => {
-                  this.applyRegistryModel(m);
-                })
-            }, (m: ModelConfig): string => m.id)
-            if (this.models.length === 0) {
-              Text('模型库为空，可在下方「高级 · 模型库」添加。')
+            ForEach(this.taskModelOptions, (option: DeepReadModelOption): void => {
+              this.ModelSheetRow(`${option.providerLabel} / ${option.label}${option.available ? '' : '（不可用）'}`,
+                this.taskModelSelected(option), (): void => { this.selectTaskModel(option); }, option.available)
+            }, (option: DeepReadModelOption): string => `${option.providerId}:${option.modelId}`)
+            if (this.taskModelOptions.length === 0) {
+              Text('暂无已配置模型，请先添加模型服务商。')
                 .fontSize(12).lineHeight(17).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
                 .width('100%').padding({ left: 20, right: 20, top: 8, bottom: 8 })
             }
+            if (this.modelError.length > 0) {
+              Text(this.modelError).fontSize(13).lineHeight(18).fontFamily(FONT_SANS_MEDIUM).fontColor(ERROR)
+                .width('100%').padding({ left: 20, right: 20, top: 8, bottom: 8 })
+            }
+            this.ModelSheetRow('配置模型服务商', false, (): void => {
+              this.modelSheetOpen = false;
+              router.pushUrl({ url: 'pages/ChatProviderSettingsPage' });
+            })
           }
           .width('100%')
         }
@@ -283,12 +360,12 @@ struct SettingDeepReadPage {
   }
 
   @Builder
-  ModelSheetRow(label: string, selected: boolean, onTap: () => void): void {
+  ModelSheetRow(label: string, selected: boolean, onTap: () => void, available: boolean = true): void {
     Row() {
       Text(label)
         .fontSize(15).lineHeight(lineHeightForSize(15)).fontFamily(FONT_SANS_MEDIUM)
-        .fontColor(selected ? this.accentColorStore : INK)
-        .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        .fontColor(!available ? INK3 : selected ? this.accentColorStore : INK)
+        .layoutWeight(1).maxLines(3).wordBreak(WordBreak.BREAK_ALL)
       if (selected) {
         Icon({ name: 'check', iconSize: 16, color: this.accentColorStore })
       }
@@ -297,10 +374,8 @@ struct SettingDeepReadPage {
     .constraintSize({ minHeight: 48 })
     .padding({ left: 20, right: 20, top: 10, bottom: 10 })
     .alignItems(VerticalAlign.Center)
-    .onClick((): void => {
-      this.modelSheetOpen = false;
-      onTap();
-    })
+    .enabled(available && !this.savingModel)
+    .onClick((): void => { onTap(); })
   }
 
   private async followChatConfig(): Promise<void> {
@@ -383,23 +458,63 @@ struct SettingDeepReadPage {
 
   async toggleHotlist(id: string): Promise<void> {
     const newToggles: SourceToggle[] = [];
+    let newEnabled: boolean = false;
     for (let i = 0; i < this.hotlistToggles.length; i++) {
       const t: SourceToggle = this.hotlistToggles[i];
       if (t.id === id) {
-        const newEnabled: boolean = !t.enabled;
+        newEnabled = !t.enabled;
         newToggles.push({ id: t.id, displayName: t.displayName, enabled: newEnabled });
-        await this.storage!.set<string>('source_' + id, newEnabled ? 'true' : 'false');
       } else {
         newToggles.push(t);
       }
     }
     this.hotlistToggles = newToggles;
+    try {
+      await this.storage!.set<string>('source_' + id, newEnabled ? 'true' : 'false');
+    } catch (_error) {
+      this.hotlistToggles = this.hotlistToggles.map((toggle: SourceToggle): SourceToggle =>
+        toggle.id === id ? { id: toggle.id, displayName: toggle.displayName, enabled: !newEnabled } : toggle);
+      this.saved = '热榜源设置保存失败，请重试';
+      promptAction.showToast({ message: this.saved });
+    }
   }
 
   async saveSourceConfig(): Promise<void> {
     await this.storage!.set<string>('active_search_source', this.selectedSource);
     await this.storage!.set<string>(this.selectedSource + '_api_key', this.currentKey);
     this.saved = '已保存 ✓';
+  }
+
+  private async saveHotlistRefresh(index: number): Promise<void> {
+    const minutes: number = [15, 30, 60, 120][index];
+    try {
+      await this.storage!.set<number>('deepread_hotlist_refresh_minutes', minutes);
+      this.hotlistRefreshMinutes = minutes;
+    } catch (error) {
+      this.saved = `刷新设置保存失败：${String(error)}`;
+    }
+  }
+
+  private async toggleHotlistWifi(): Promise<void> {
+    const previous: boolean = this.hotlistWifiOnly;
+    this.hotlistWifiOnly = !previous;
+    try {
+      await this.storage!.set<string>('deepread_hotlist_wifi_only', this.hotlistWifiOnly ? 'true' : 'false');
+    } catch (error) {
+      this.hotlistWifiOnly = previous;
+      this.saved = `网络设置保存失败：${String(error)}`;
+    }
+  }
+
+  private async toggleHotlistTranslation(): Promise<void> {
+    const previous: boolean = this.hotlistTranslateZh;
+    this.hotlistTranslateZh = !previous;
+    try {
+      await this.storage!.set<string>('deepread_hotlist_translate_zh', this.hotlistTranslateZh ? 'true' : 'false');
+    } catch (error) {
+      this.hotlistTranslateZh = previous;
+      this.saved = `标题设置保存失败：${String(error)}`;
+    }
   }
 
   async testSource(): Promise<void> {
@@ -455,11 +570,15 @@ struct SettingDeepReadPage {
           PlainSection({ label: '模型' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.ModelPickerCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
-          FooterNote({ text: '从模型库选择会把该模型的地址与密钥快照给深度阅读；跟随则使用当前聊天配置。' })
+          FooterNote({ text: '深度阅读与模板 AI 共用此选择；跟随当前模型或固定已配置的服务商与模型，每轮开始时读取配置。' })
 
           PlainSection({ label: '热榜源' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.HotlistCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
+          PlainSection({ label: '热榜刷新' })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.HotlistRefreshCard(); } })
+            .margin({ left: GUTTER, right: GUTTER })
+          FooterNote({ text: '进入热榜时按缓存时间刷新；下拉可立即刷新。中文标题仅调整显示，原始标题和来源保持不变。' })
 
           PlainSection({ label: '关注筛选' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.FocusCard(); } })
@@ -472,24 +591,19 @@ struct SettingDeepReadPage {
           PlainSection({ label: '搜索源' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.SourceCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
-          FooterNote({ text: 'NewsNow/DuckDuckGo/HackerNews/Jina 始终可用,无需 key。' })
+          FooterNote({ text: '深度阅读使用搜索开关、已启用服务与免费引擎配置；来源收集在下一轮任务中读取最新设置。' })
 
-          PlainSection({ label: '高级 · 手动 AI 配置' })
-          CardGroup({ radius: 18, stroke: true, content: (): void => { this.AiConfigCard(); } })
-            .margin({ left: GUTTER, right: GUTTER })
-
-          PlainSection({ label: '高级 · 模型库' })
+          if (getProductKind() === 'agent') {
+          PlainSection({ label: '高级 · 议会模型库' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.ModelsCard(); } })
             .margin({ left: GUTTER, right: GUTTER })
-          FooterNote({ text: '模型库用于议会席位；聊天和小说使用聊天服务商配置。' })
+          FooterNote({ text: '此模型库用于议会席位；深度阅读、聊天和小说使用聊天服务商配置。' })
           if (this.models.length === 0) {
             FooterNote({ text: '暂无模型,请在下方添加。议会的每个席位需指定一个模型。' })
           }
 
-          Row() {
-            BtnFill({ label: '保存全部', onTap: (): void => { this.save(); } })
           }
-          .width('100%').justifyContent(FlexAlign.Center).margin({ top: 16 })
+
           if (this.saved.length > 0) {
             Text(this.saved)
               .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
@@ -531,14 +645,15 @@ struct SettingDeepReadPage {
     .padding({ left: inset, right: 14 })
   }
 
-  // 卡片行级 accent 动作(保存/应用;44 热区,右对齐)
+  // 关注筛选行级动作(应用;实际 Text 44 热区,右对齐)
   @Builder
   CardAction(label: string, onTap: () => void): void {
     Row() {
       Blank()
       Text(label)
         .fontSize(15).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(15))
-        .fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColorStore)
+        .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+        .constraintSize({ minHeight: 44 })
         .padding({ left: 14, right: 14, top: 10, bottom: 10 })
         .onClick((): void => { onTap(); })
     }
@@ -577,8 +692,11 @@ struct SettingDeepReadPage {
           Blank()
           PillSelect({
             options: this.focusModes, selectedIndex: this.focusModeIndex,
+            triggerColor: INK,
+            triggerMinHeight: 44,
             onSelect: (i: number): void => { this.focusModeIndex = i; },
           })
+          .width(112)
         }
         .width('100%').alignItems(VerticalAlign.Center)
         .constraintSize({ minHeight: 44 })
@@ -605,7 +723,8 @@ struct SettingDeepReadPage {
               Text(m)
                 .fontSize(13).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(13))
                 .fontFamily(FONT_SANS_MEDIUM)
-                .fontColor(this.fontModeIndex === i ? this.accentColorStore : INK3)
+                .fontColor(this.fontModeIndex === i ? INK : INK3)
+                .constraintSize({ minHeight: 44 })
                 .padding({ left: 12, right: 12, top: 6, bottom: 6 })
                 .borderRadius(8)
                 .backgroundColor(this.fontModeIndex === i
@@ -627,14 +746,24 @@ struct SettingDeepReadPage {
         }
         .width('100%').alignItems(VerticalAlign.Center)
         .margin({ top: 12 })
-        Slider({ value: this.fontScalePercent, min: 80, max: 130, step: 5, style: SliderStyle.OutSet })
+        Slider({ value: this.fontScalePercent, min: 70, max: 180, step: 5, style: SliderStyle.OutSet })
           .width('100%')
           .selectedColor(this.accentColorStore)
           .onChange((v: number): void => { this.fontScalePercent = Math.round(v); })
       }
       .width('100%').padding({ left: 14, right: 14, top: 12, bottom: 4 })
       this.CardHairline(14)
-      this.CardAction('保存阅读体验', (): void => { this.saveReading(); })
+      Row() {
+        Blank()
+        Text('保存阅读体验')
+          .fontSize(15).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(15))
+          .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
+          .constraintSize({ minHeight: 44 })
+          .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+          .onClick((): void => { this.saveReading(); })
+      }
+      .width('100%').alignItems(VerticalAlign.Center)
+      .padding({ left: 14, right: 4 })
       this.CardHairline(14)
       Column() {
         Text('文章模板')
@@ -646,7 +775,8 @@ struct SettingDeepReadPage {
             Text(t.name)
               .fontSize(13).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(13))
               .fontFamily(FONT_SANS_MEDIUM)
-              .fontColor(this.templateId === t.id ? this.accentColorStore : INK3)
+              .fontColor(this.templateId === t.id ? INK : INK3)
+              .constraintSize({ minHeight: 44 })
               .padding({ left: 12, right: 12, top: 6, bottom: 6 })
               .borderRadius(8)
               .backgroundColor(this.templateId === t.id
@@ -657,9 +787,9 @@ struct SettingDeepReadPage {
         .margin({ top: 6 })
         Text('管理自定义模板')
           .fontSize(13).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(13))
-          .fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColorStore)
+          .fontFamily(FONT_SANS_MEDIUM).fontColor(INK)
           .margin({ top: 10 })
-          .constraintSize({ minHeight: 36 })
+          .constraintSize({ minHeight: 44 })
           .onClick((): void => {
             router.pushUrl({ url: 'pages/DeepReadTemplateWorkbenchPage' });
           })
@@ -672,11 +802,24 @@ struct SettingDeepReadPage {
   @Builder
   ModelPickerCard(): void {
     Column() {
-      CardRow({ label: '深度阅读模型', valueText: this.currentBoardModelLabel(),
-        onRowClick: (): void => { this.showModelMenu(); } })
+      CardRow({ label: '深度阅读模型', desc: '点按选择跟随或固定模型', isLast: true,
+        onRowClick: (): void => { this.showModelMenu(); } }).enabled(!this.savingModel)
+      Column({ space: 6 }) {
+        Text(this.taskModelLabel).fontSize(14).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(14))
+          .fontFamily(FONT_SANS_MEDIUM).fontColor(INK).width('100%').wordBreak(WordBreak.BREAK_ALL)
+        if (this.taskModelDetail.length > 0) {
+          Text(this.taskModelDetail).fontSize(12).lineHeight(17).fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(INK3).width('100%')
+        }
+        if (this.modelError.length > 0) {
+          Text(this.modelError).fontSize(12).lineHeight(17).fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(ERROR).width('100%')
+        }
+      }
+      .width('100%').alignItems(HorizontalAlign.Start).padding({ left: 14, right: 14, bottom: 12 })
       this.CardHairline(14)
       CardRow({ label: '聊天服务商配置',
-        desc: '聊天和小说共用；任务模型可另选服务商', isLast: true,
+        desc: '管理共用服务商、认证方式与模型', isLast: true,
         onRowClick: (): void => { router.pushUrl({ url: 'pages/ChatProviderSettingsPage' }); } })
     }
     .width('100%')
@@ -829,6 +972,37 @@ struct SettingDeepReadPage {
 
   @Builder
   SourceCard(): void {
+    CardRow({ label: '搜索服务配置', desc: '首选服务、Google 补充搜索与免费来源', isLast: true,
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/DeepReadSearchSettingsPage' }); } })
+  }
+
+  @Builder
+  HotlistRefreshCard(): void {
+    Column() {
+      Row() {
+        Text('缓存刷新间隔')
+          .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+          .fontFamily(FONT_SANS_MEDIUM).fontColor(INK).layoutWeight(1)
+        PillSelect({ options: ['15 分钟', '30 分钟', '1 小时', '2 小时'],
+          selectedIndex: [15, 30, 60, 120].indexOf(this.hotlistRefreshMinutes),
+          triggerColor: INK, triggerMinHeight: 44,
+          onSelect: (index: number): void => { this.saveHotlistRefresh(index); } })
+          .width(112)
+      }
+      .width('100%').alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 52 }).padding({ left: 14, right: 14, top: 8, bottom: 8 })
+      this.CardHairline(14)
+      CardToggleRow({ label: '仅在 Wi-Fi 下刷新', desc: '移动网络下保留缓存与现有榜单',
+        checked: this.hotlistWifiOnly, onToggle: (): void => { this.toggleHotlistWifi(); } })
+      CardToggleRow({ label: '显示中文标题', desc: '使用深读模型翻译英文标题', isLast: true,
+        checked: this.hotlistTranslateZh, onToggle: (): void => { this.toggleHotlistTranslation(); } })
+    }
+    .width('100%')
+  }
+
+  // 历史单源表单保留兼容参考；当前入口只使用统一搜索服务设置。
+  @Builder
+  LegacySourceCard(): void {
     Column() {
       Column() {
         CardRow({

@@ -1,3 +1,4 @@
+import { createEntryJevAutoApprovalReview } from './JevAutoApprovalSupport.ets';
 // Per-run tool catalog. No callback below depends on a ChatPage instance.
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
@@ -16,11 +17,12 @@ import {
   createDeepReadOpenTool, createDeepReadPlaybookTools, createHealthSummaryTool,
   createMcpManagementTools, createMcpServerTools, createMemoryTools,
   createRunPlanUpdateTool, createSearchTools, createSkillTools, createTerminalApprovalGuard,
+  createProviderManagementTools, PROVIDERS_KEY,
   currentMessages, defaultToolInvocationHooks,
   filterToolProfile, makeCompactPolicy, makeTextGenerationParams, patchAssistant,
 } from '@amber/chat-domain';
 import {
-  getAgentPromptConfigTool, getChatKvStore, getChatRepository, getCompactStore,
+  getAgentPromptConfigTool, getAppContainer, getChatAssistants, getChatKvStore, getChatRepository, getCompactStore,
   getDeepReadPlaybookRepository, getMcpManager, getPermissionsStatusTool,
   getPluginStore, getRecipeStore, getSessionGrantStore, getSkillManager,
   getSkillWorkspacePort, getSubAgentTools, getWorkspaceManager,
@@ -28,11 +30,13 @@ import {
 import type { ChatRuntime, SubAgentToolsContext } from '../di/AppContainer.ets';
 import { systemLanguage } from './AgentRuntimePrefs.ets';
 import { mutateAssistant } from './AssistantMutation.ets';
+import { sharedKvMutex } from './AtomicJsonFile.ets';
 import { createAssistantLocalPrimitives } from './AssistantLocalPrimitives.ets';
 import { guardConversationBrowserTools, assertConversationBrowserOwner } from './ConversationBrowserGuard.ets';
 import { buildConversationCompressProvider } from './ConversationRunDependencies.ets';
 import type { DetachedConversationContext, PreparedConversationSeed } from './ConversationRunService.ets';
 import { inflateRawEntry } from './EntryDocumentParser.ets';
+import { getChatCouncilTools } from './CouncilChatSupport.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from './EntryLocalToolPorts.ets';
 import { createRunToolCatalog, scopeRunTools } from './RunToolCatalog.ets';
 import type { RunToolCatalogSnapshot } from './RunToolCatalog.ets';
@@ -267,7 +271,9 @@ export const buildConversationToolLoop = async (ctx: DetachedConversationContext
     now: (): number => Date.now(),
   };
   const goalAdapter = createWebMountGoalAdapter(goalHostPorts);
+  const councilTools: AgentTool[] = await getChatCouncilTools();
   const profiledTools: AgentTool[] = guardConversationBrowserTools(filterToolProfile([
+    ...councilTools,
     ...createAssistantLocalPrimitives({ assistant: rt.assistant, conversationId: ctx.conversationId,
       workspace: getWorkspaceManager(), activityStore: ctx.activityStore,
       terminalRuntime: rt.terminalRuntime, moshRuntime: rt.moshRuntime,
@@ -282,16 +288,11 @@ export const buildConversationToolLoop = async (ctx: DetachedConversationContext
     }) : []),
     ...(webmountEnabled ? [createWebMountGoalTool()] : []),
     ...(webmountEnabled ? createFeishuDocsTools(localOptions.indexOf('webmount') >= 0) : []),
-    ...createSkillTools({
-      enabledSkills: rt.assistant.enabledSkills,
-      allSkills: rt.allSkills,
-      skillManager: getSkillManager(),
-      setSkillEnabled: (name: string, enable: boolean): Promise<void> => setSkillEnabled(rt, name, enable),
-      workspace: getSkillWorkspacePort(),
-      inflateRaw: inflateRawEntry,
-    }),
     ...createMcpManagementTools({ settings: getMcpSettingsStore(), manager: getMcpManager(),
       skills: getSkillManager(), assistantIds: [...rt.assistant.mcpServers] }),
+    ...createProviderManagementTools({ store: getChatKvStore(), http: getAppContainer().httpClient,
+      withLock: (action: () => Promise<UIMessagePart[]>): Promise<UIMessagePart[]> =>
+        sharedKvMutex.withLock(PROVIDERS_KEY, action) }),
     ...createMcpServerTools({ manager: getMcpManager(), activity: mcpActivityPort(ctx.activityStore),
       assistantIds: [...rt.assistant.mcpServers] }),
     ...((runtime.enableCoreMemory || runtime.enableShortTermMemory || runtime.enableLongTermMemory)
@@ -333,15 +334,31 @@ export const buildConversationToolLoop = async (ctx: DetachedConversationContext
   warnIfToolAbilityMissing(ctx);
   const recipeStore: RecipeStore = await getRecipeStore();
   const pluginStore: PluginStore = await getPluginStore();
-  const catalog = async (): Promise<RunToolCatalogSnapshot> => createRunToolCatalog({
-    primitives: profiledTools, profile: rt.assistant.toolProfile, conversationId: ctx.conversationId,
-    recipeStore, pluginStore, reranker: jevToolSearchReranker(),
-  });
+  const catalog = async (): Promise<RunToolCatalogSnapshot> => {
+    // Skill management changes this assistant during the loop. Refresh only its
+    // skill catalog; the provider, model and all other run settings stay captured.
+    const latestAssistant: Assistant | undefined = (await getChatAssistants()).find(
+      (assistant: Assistant): boolean => assistant.id === rt.assistant.id);
+    const skillTools: AgentTool[] = createSkillTools({
+      enabledSkills: latestAssistant?.enabledSkills ?? [],
+      allSkills: getSkillManager().listSkills(),
+      skillManager: getSkillManager(),
+      setSkillEnabled: (name: string, enable: boolean): Promise<void> => setSkillEnabled(rt, name, enable),
+      workspace: getSkillWorkspacePort(),
+      inflateRaw: inflateRawEntry,
+    });
+    return createRunToolCatalog({
+      primitives: [...profiledTools, ...skillTools], profile: rt.assistant.toolProfile,
+      conversationId: ctx.conversationId, recipeStore, pluginStore, reranker: jevToolSearchReranker(),
+    });
+  };
   let snapshot: RunToolCatalogSnapshot = await catalog();
   ctx.baseTools = snapshot.baseTools;
   const tools: AgentTool[] = scopeRunTools([...snapshot.tools, ...ctx.subAgentTools], ctx.conversationId, ctx.activityStore);
   const options: ToolLoopOptions = {
-    dispatcher: new AgentToolDispatcher({ hooks: terminalGuard === null
+    dispatcher: new AgentToolDispatcher({ autoApprovalReview: createEntryJevAutoApprovalReview(currentMessages(ctx.conversation),
+      (): UIMessage[] => currentMessages(ctx.conversation)),
+      hooks: terminalGuard === null
       ? defaultToolInvocationHooks() : [...defaultToolInvocationHooks(), terminalGuard.hook] }),
     captureInvocationMetadata: terminalGuard === null ? undefined : terminalGuard.captureInvocationMetadata,
     tools,

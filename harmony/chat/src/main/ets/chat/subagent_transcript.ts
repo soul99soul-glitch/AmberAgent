@@ -139,7 +139,7 @@ const numericDisplayTextLexeme = (line: string): string | null => {
   return displayText !== null ? line.substring(displayText.start, displayText.end) : null;
 };
 
-const displayTextFromTranscriptLine = (line: string): string | null => {
+const displayTextFromTranscriptLine = (line: string, includeFinalResult: boolean): string | null => {
   let event: unknown;
   try {
     event = JSON.parse(line);
@@ -154,8 +154,17 @@ const displayTextFromTranscriptLine = (line: string): string | null => {
   if (typeof rawDisplayText === 'string') displayText = rawDisplayText;
   if (typeof rawDisplayText === 'boolean') displayText = String(rawDisplayText);
   if (typeof rawDisplayText === 'number') displayText = numericDisplayTextLexeme(line);
-  if (displayText === null || isBlank(displayText)) return null;
-  return displayText;
+  if (displayText !== null && !isBlank(displayText)) return displayText;
+  if (!includeFinalResult || event['event'] !== 'finished') return null;
+  let result: unknown = payload['result'];
+  if (typeof result === 'string') {
+    try { result = JSON.parse(result); } catch { return null; }
+  }
+  if (!isRecord(result)) return null;
+  const summary: unknown = result['summary'];
+  if (typeof summary === 'string' && !isBlank(summary)) return summary;
+  const error: unknown = result['error'];
+  return typeof error === 'string' && !isBlank(error) ? error : null;
 };
 
 export const appendSubAgentTranscriptEvent = async (
@@ -177,6 +186,7 @@ export const readSubAgentDisplayTextFromTranscript = async (
   transcriptPath: string,
   runRoot: string,
   files: SubAgentTranscriptPort,
+  includeFinalResult: boolean = false,
 ): Promise<string> => {
   if (isBlank(transcriptPath)) return '';
   try {
@@ -197,7 +207,7 @@ export const readSubAgentDisplayTextFromTranscript = async (
     const lines: string[] = text.split(/\r\n|\n|\r/);
     for (let index: number = lines.length - 1; index >= 0; index--) {
       if (isBlank(lines[index])) continue;
-      const displayText: string | null = displayTextFromTranscriptLine(lines[index]);
+      const displayText: string | null = displayTextFromTranscriptLine(lines[index], includeFinalResult);
       if (displayText !== null) return displayText;
     }
     return '';

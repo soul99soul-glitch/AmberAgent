@@ -1,5 +1,6 @@
 // jina_service — Jina Search/Reader(D-066)
 // Android 基准: search/.../JinaSearchService.kt(全文 199 行;SearchService<JinaOptions>)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type { InputSchemaObj } from '../chat/tool.ts';
@@ -48,6 +49,7 @@ export const jinaSearchService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: JinaOptions = asJinaOptions(serviceOptions);
     const query: string = primitiveContentOrNull(params, 'query') ?? ((): never => {
@@ -66,7 +68,7 @@ export const jinaSearchService: SearchService = {
       method: 'POST',
       headers,
       body: JSON.stringify({ q: query }),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`response failed #${resp.status}`);
     }
@@ -88,6 +90,7 @@ export const jinaSearchService: SearchService = {
 
   scrape: async (
     params: JsonObject, _commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<ScrapedResult> => {
     const opts: JinaOptions = asJinaOptions(serviceOptions);
     // Kotlin 原文笔误('urls is required')逐字保留
@@ -108,7 +111,7 @@ export const jinaSearchService: SearchService = {
       method: 'POST',
       headers,
       body: JSON.stringify({ url }),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`response failed for url ${url} #${resp.status}`);
     }

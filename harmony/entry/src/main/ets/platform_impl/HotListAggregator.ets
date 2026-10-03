@@ -1,7 +1,7 @@
-// HotListAggregator — 跨源热榜话题聚合(照搬 Android HotListAggregator.kt)
+// HotListAggregator — 跨源热榜话题聚合(基于 Android HotListAggregator.kt)
 //
 // 标题归一化(去标点/空白折叠/小写)→ 实体抽取(别名词典 + 英文 token + 中文连续段)
-// → 同话题判定(实体交集≥2 / 单实体且标题相等 / 同语言 bigram Jaccard≥0.4 且长度≥6)
+// → 实体 Jaccard≥0.5 且交集≥2 判定;中文同语言标题另保留 bigram 相似匹配
 // → 分组合并出 HotTopic(sources/sourceCount/bestRank/latestFetchedAt)
 // → 排序:sourceCount↓ → bestRank↑ → latestFetchedAt↓,取 limit。
 
@@ -14,11 +14,14 @@ export interface HotTopicSource {
   title: string;
   url: string;
   heat: string;
+  displayTitle?: string;
+  summary?: string;
 }
 
 export interface HotTopic {
   id: string;
   title: string;
+  displayTitle?: string;
   sources: HotTopicSource[];
   sourceCount: number;
   bestRank: number;
@@ -125,11 +128,17 @@ const bigramJaccard = (left: string, right: string): number => {
 };
 
 const areSameTopic = (left: Candidate, right: Candidate): boolean => {
+  if (left.normalizedTitle.length > 0 && left.normalizedTitle === right.normalizedTitle) return true;
   let shared: number = 0;
   left.entities.forEach((e: string): void => {
     if (right.entities.has(e)) shared++;
   });
-  if (shared >= 2) return true;
+  // AI/agent 或出版社/电讯前缀等两词不能代表同一事件。
+  // 以既有 token/别名集合的重合比例判断，避免把相关领域的文章变成同一研究输入。
+  const union: number = left.entities.size + right.entities.size - shared;
+  const entityMatch: boolean = shared >= 2 && shared / union >= 0.5;
+  if (!hasChinese(left.normalizedTitle) && !hasChinese(right.normalizedTitle)) return entityMatch;
+  if (entityMatch) return true;
   if (shared === 1 && left.normalizedTitle === right.normalizedTitle) return true;
   if (hasChinese(left.item.title) === hasChinese(right.item.title)) {
     if (bigramJaccard(left.normalizedTitle, right.normalizedTitle) >= 0.4
@@ -164,6 +173,7 @@ export const aggregateHotTopics = (
         fetchedAt: sec.fetchedAt,
         providerItemCount: sec.items.length,
         item: item,
+        // 翻译只用于显示，不能改变原始话题身份及其研究来源分组。
         normalizedTitle: normalizeTitle(item.title),
         entities: extractEntities(item.title),
       });
@@ -197,6 +207,8 @@ export const aggregateHotTopics = (
       title: c.item.title,
       url: c.item.url,
       heat: c.item.heat,
+      summary: c.item.summary,
+      displayTitle: c.item.displayTitle,
     }));
     let bestRank: number = sources[0].rank;
     let latest: number = g[0].fetchedAt;
@@ -214,6 +226,7 @@ export const aggregateHotTopics = (
     return {
       id: chosen.item.url.length > 0 ? chosen.item.url : chosen.item.title,
       title: chosen.item.title,
+      displayTitle: chosen.item.displayTitle,
       sources: sources,
       sourceCount: providerIds.length,
       bestRank: bestRank,

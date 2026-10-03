@@ -5,11 +5,8 @@
 //   - File.exists()/isFile()/length()/absolutePath → fileIo.statSync 映射
 //   - bufferedReader 字符读取 → 整读 + UTF-8 decode + 截断(语义等价;
 //     64MB 上限已由上层判定)
-// 偏差(登记):
-//   - PDF 解析未移植(MuPDF native 平台阻断,spike 登记)→ parsePdf 不提供,
-//     HAR 侧抛错走 '[ERROR, failed to read file]'(与 Android 解析失败同文案);
-//     DOCX/PPTX/EPUB 已落地(D-112/D-113/D-114)
-//   - OfficeNativeSwitch(native 桥)不移植
+// PDF uses the API 12 PDFKit text-object reader; Office parsers remain local.
+// OfficeNativeSwitch(Android JNI bridge) is not used on HarmonyOS.
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import type { UIMessagePartDocument } from '@amber/chat-domain';
@@ -24,9 +21,8 @@ import {
   createEntryXmlPull, createEntryXmlPullNoNs, inflateRawEntry, parseDocxEntry, parseEpubEntry,
   parsePptxEntry,
 } from './EntryDocumentParser.ets';
-
-const S_IFMT: number = 0o170000;
-const S_IFREG: number = 0o100000;
+import { documentAttachmentMime } from './DocumentAttachmentSupport.ets';
+import { parsePdfEntry, parsePdfPath, parsePdfPreviewBytes } from './PdfDocumentParser.ets';
 
 const statOne = (document: UIMessagePartDocument): Promise<DocumentFileHandle | null> => {
   // toUri().toFile():非 file scheme → 非法 uri(null)
@@ -36,7 +32,7 @@ const statOne = (document: UIMessagePartDocument): Promise<DocumentFileHandle | 
     const st = fileIo.statSync(path);
     const handle: DocumentFileHandle = {
       exists: true,
-      isFile: (st.mode & S_IFMT) === S_IFREG,
+      isFile: st.isFile(),
       sizeBytes: st.size,
       absolutePath: path,
     };
@@ -67,11 +63,11 @@ const readText = (handle: DocumentFileHandle, maxCharsPlusOne: number): Promise<
   }
 };
 
-// DOCX/PPTX/EPUB 已接线(D-112/D-113/D-114);PDF 不提供(MuPDF native 平台阻断,
-//   HAR 侧抛错走 '[ERROR, failed to read file]' 同 Android 解析失败文案路径)
+// PDF/DOCX/PPTX/EPUB share the existing document-prompt dispatch.
 export const createEntryDocumentReader = (): DocumentReaderDeps => ({
   statFile: statOne,
   readTextFile: readText,
+  parsePdf: parsePdfEntry,
   parseDocx: parseDocxEntry,
   parsePptx: parsePptxEntry,
   parseEpub: parseEpubEntry,
@@ -80,18 +76,17 @@ export const createEntryDocumentReader = (): DocumentReaderDeps => ({
 // ===== F44 文档附件预览(只读) =====
 // 聊天文档 chip 打开路径最小实现:把 data:*;base64 / file:// 文本与
 //   DOCX/PPTX/EPUB 解析为预览文本。约束:
-//   - 不写临时真实文件:data: 直接在内存字节上走占位/解析;file:// 只读原文件
+//   - Office/text data: 在内存解析；PDF data: 短暂缓存后解析，finally 清理
 //   - 不外网读取任意 URL:仅接受 data: 与 file://,其余(含 http/https)直接拒绝
-//   - PDF 明确不支持(未移植 MuPDF native):返回显式提示,不静默走二进制占位
+//   - PDF 提取文本层；扫描件无文本时明确提示，不静默返回空白
 //   - 输入上限 10MiB(与 ChatPage picker readUriBytes 同口径,更保守);
 //     data: 先按 base64 长度估算再解码,file:// 先 stat 校验大小再 open/read
 //   - 输出截断 100k chars(一屏预览足够,避免把 10MiB 文本灌进 UI)
 // 复用域层:isLikelyTextFile(分类)/readDocumentContent(mime 分发 + 错误文案)/
 //   parseDocxFromZip·parsePptxFromZip·parseEpubFromZip(inflateRawEntry +
 //   createEntryXmlPull/createEntryXmlPullNoNs)。
-// 范围说明:既有 createEntryDocumentReader.statFile 只支持 file://,故「发送」
-//   data: 文档仍走 '[ERROR, invalid file uri]' 缺陷;本函数只服务预览,不改动
-//   该 Port 的现有语义(待后续单独修)。
+// 预览仍可读取待导入的 data: 文档；发送侧经 materializeDocumentAttachment
+// 转为 upload/ 下的 file:// 后持久化，生产读取复用 createEntryDocumentReader。
 
 export const MAX_PREVIEW_INPUT_BYTES: number = 10 * 1024 * 1024;
 export const MAX_PREVIEW_CHARS: number = 100 * 1024;
@@ -101,19 +96,9 @@ const MIME_DOCX: string = 'application/vnd.openxmlformats-officedocument.wordpro
 const MIME_PPTX: string = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 const MIME_EPUB: string = 'application/epub+zip';
 
-const hasExtension = (fileName: string, ext: string): boolean => {
-  const dot: number = fileName.lastIndexOf('.');
-  return dot >= 0 && fileName.substring(dot + 1).toLowerCase() === ext;
-};
-
 // picker 的 mimeByName 未收录 epub 等 → 按扩展名兜底,保证 office 解析可达
-const effectiveMime = (document: UIMessagePartDocument): string => {
-  if (document.mime === MIME_PDF || hasExtension(document.fileName, 'pdf')) return MIME_PDF;
-  if (document.mime === MIME_DOCX || hasExtension(document.fileName, 'docx')) return MIME_DOCX;
-  if (document.mime === MIME_PPTX || hasExtension(document.fileName, 'pptx')) return MIME_PPTX;
-  if (document.mime === MIME_EPUB || hasExtension(document.fileName, 'epub')) return MIME_EPUB;
-  return document.mime;
-};
+const effectiveMime = (document: UIMessagePartDocument): string =>
+  documentAttachmentMime(document.fileName, document.mime);
 
 // data:*;base64:先估算解码长度(每 4 字符至多 3 字节)再解码,超限不分配
 const decodeBase64DataUrl = (url: string): Uint8Array | null => {
@@ -138,7 +123,7 @@ const decodeBase64DataUrl = (url: string): Uint8Array | null => {
 const readLocalPreviewBytes = (url: string): Uint8Array => {
   const path: string = url.substring('file://'.length);
   const st: fileIo.Stat = fileIo.statSync(path);
-  if ((st.mode & S_IFMT) !== S_IFREG) throw new Error('not a regular file');
+  if (!st.isFile()) throw new Error('not a regular file');
   if (st.size > MAX_PREVIEW_INPUT_BYTES) {
     throw new Error(`file exceeds preview limit (${st.size} bytes)`);
   }
@@ -163,7 +148,27 @@ export const readDocumentPreview = async (
   document: UIMessagePartDocument,
 ): Promise<string> => {
   if (effectiveMime(document) === MIME_PDF) {
-    return `[ERROR, pdf preview not supported: ${document.fileName}]`;
+    try {
+      if (document.url.startsWith('file://')) {
+        const handle: DocumentFileHandle | null = await statOne(document);
+        if (handle === null || !handle.exists || !handle.isFile) {
+          return `[ERROR, file not found: ${document.fileName}]`;
+        }
+        if (handle.sizeBytes > MAX_PREVIEW_INPUT_BYTES) {
+          return `[ERROR, file exceeds preview limit: ${document.fileName}]`;
+        }
+        return truncatePreview(await parsePdfPath(handle.absolutePath, MAX_PREVIEW_CHARS + 1));
+      }
+      if (document.url.startsWith('data:')) {
+        const bytes: Uint8Array | null = decodeBase64DataUrl(document.url);
+        if (bytes === null) return `[ERROR, unsupported data url: ${document.fileName}]`;
+        return truncatePreview(await parsePdfPreviewBytes(bytes, MAX_PREVIEW_CHARS + 1));
+      }
+      return `[ERROR, unsupported file uri: ${document.fileName}]`;
+    } catch (error) {
+      const message: string = error instanceof Error ? error.message : String(error);
+      return `[ERROR, failed to read file: ${document.fileName} (${message})]`;
+    }
   }
   const office: boolean = effectiveMime(document) === MIME_DOCX
     || effectiveMime(document) === MIME_PPTX || effectiveMime(document) === MIME_EPUB;

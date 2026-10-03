@@ -40,3 +40,23 @@ export const beginConversationRestore = (conversationIds: string[]): (() => void
     for (const id of conversationIds) restoring.delete(id);
   };
 };
+
+// Precompaction may outlive the generation that launched it. Track its own
+// lifetime so manual compaction and conversation restore cannot race its writes.
+const activeCompactions: Map<string, number> = new Map<string, number>();
+
+export const isConversationCompacting = (id: string): boolean => (activeCompactions.get(id) ?? 0) > 0;
+
+export const beginConversationCompaction = (id: string): (() => void) => {
+  const releaseRun: () => void = beginConversationRun(id);
+  activeCompactions.set(id, (activeCompactions.get(id) ?? 0) + 1);
+  let released: boolean = false;
+  return (): void => {
+    if (released) return;
+    released = true;
+    const remaining: number = (activeCompactions.get(id) ?? 1) - 1;
+    if (remaining > 0) activeCompactions.set(id, remaining);
+    else activeCompactions.delete(id);
+    releaseRun();
+  };
+};

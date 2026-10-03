@@ -1,4 +1,4 @@
-import type { JevMode, JevSettings, JevQuestion, JevEvaluation } from './jev_models.ts';
+import type { JevMode, JevSettings, JevQuestion, JevEvaluation, JevNewPurposeSettings, JevPurpose } from './jev_models.ts';
 import type { JsonObject, JsonValue } from './json.ts';
 import type { UIMessagePartTool } from './message.ts';
 import type { Conversation } from './conversation.ts';
@@ -24,12 +24,25 @@ export interface JevApprovalBatch {
   state: JsonObject; questions: Record<string, JevQuestion>; facts: JevApprovalTriage;
 }
 
-export const resolveJevPurposeMode = (settings: JevSettings, purpose: string): JevMode => {
+export const jevPurposeSettings = (settings: JevSettings, purpose: JevPurpose): JevNewPurposeSettings | null => {
+  if (purpose === 'approval_triage') return settings.approvalTriage;
+  if (purpose === 'web_automation') return settings.webAutomation;
+  if (purpose === 'tool_context_selection') return settings.toolContextSelection;
+  if (purpose === 'context_retention') return settings.contextRetention;
+  if (purpose === 'auto_approval') return settings.autoApproval;
+  if (purpose === 'completion_check') return settings.completionCheck;
+  return null;
+};
+export const resolveJevPurposeMode = (settings: JevSettings, purpose: JevPurpose): JevMode => {
   if (settings.mode === 'off') return 'off';
-  const mode: JevMode = purpose === 'approval_triage' ? settings.approvalTriage.mode
-    : purpose === 'web_automation' ? settings.webAutomation.mode : settings.mode;
+  const mode: JevMode = jevPurposeSettings(settings, purpose)?.mode ?? settings.mode;
   return settings.mode === 'shadow' && mode === 'active' ? 'shadow' : mode;
 };
+export const jevPurposeConsentUnchanged = (before: JevSettings, after: JevSettings, purpose: JevPurpose): boolean =>
+  before.mode === after.mode && before.apiMode === after.apiMode && before.apiKey === after.apiKey
+  && before.baseUrl === after.baseUrl && before.model === after.model
+  && resolveJevPurposeMode(after, purpose) !== 'off'
+  && JSON.stringify(jevPurposeSettings(before, purpose)) === JSON.stringify(jevPurposeSettings(after, purpose));
 export const jevFactFromProbability = (p: number): JevFact => {
   if (!Number.isFinite(p) || p < 0 || p > 1) throw new Error('Invalid Jev fact probability');
   return p >= 0.65 ? 'yes' : p <= 0.35 ? 'no' : 'unknown';

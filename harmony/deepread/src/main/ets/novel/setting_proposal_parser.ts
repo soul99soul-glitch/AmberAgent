@@ -1,3 +1,5 @@
+import { parseNovelMaterialFields } from './material_fields.ts';
+import type { NovelMaterialFieldsPayload } from './material_fields.ts';
 // novel/setting_proposal_parser — 讨论/写作输出中的设定提案 JSON 解析
 //
 // iOS: NovelDiscussionAskParser / setting proposal card 同源语义。
@@ -13,7 +15,7 @@ const TITLE_CHARS = 300;
 const CONTENT_CHARS = 20_000;
 export const MAX_PROPOSALS = 12;
 
-interface RawChange {
+interface RawChange extends NovelMaterialFieldsPayload {
   kind?: unknown;
   title?: unknown;
   key?: unknown;
@@ -70,6 +72,7 @@ export const parseSettingProposals = (
     out.push(makeNovelSettingProposal({
       sourceMessageId: sourceMessageId,
       kind: mapSuggestionKind(it.kind),
+      ...parseNovelMaterialFields(it),
       title: title,
       content: content,
       now: now,

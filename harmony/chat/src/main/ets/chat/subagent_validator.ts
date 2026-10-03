@@ -32,6 +32,12 @@ const SMART_SUB_AGENT_NAMES: string[] = [
   'Thomas', 'Lucy', 'Daniel', 'Ella', 'Samuel', 'Mia',
 ];
 
+// 常见的显式英文人名也保留；自动命名仍沿用默认池。
+const RECOGNIZED_SUB_AGENT_NAMES: string[] = SMART_SUB_AGENT_NAMES.concat([
+  'Alex', 'Chloe', 'Julia', 'Leo', 'Nora', 'Owen', 'Ryan', 'Noah',
+  'Ethan', 'Liam', 'Ava', 'Emily', 'Lily', 'Zoe', 'Olivia', 'Isabel',
+]);
+
 const GENERIC_NAME_PARTS: string[] = [
   'general', 'helper', 'all-purpose', 'allpurpose', 'fullstack', 'universal',
   '万能', '通用', '全能', '全栈',
@@ -157,6 +163,23 @@ const smartSubAgentName = (
   const hash: number = kotlinStringHashCode(seed);
   const absolute: number = hash === -2147483648 ? 0 : Math.abs(hash);
   return available[absolute % available.length];
+};
+
+// 数字尾缀仅清理已知人名；角色/任务名称改用英文人名，内部角色 id 不变。
+export const subAgentDynamicName = (
+  requestedName: string, seed: string, usedNames: Set<string> = new Set<string>(),
+): string => {
+  const base: string = requestedName.trim().replace(/(?:[_-]?\d+)$/, '').toLowerCase();
+  const preferred: string | undefined = RECOGNIZED_SUB_AGENT_NAMES.find(
+    (name: string): boolean => name.toLowerCase() === base);
+  if (preferred !== undefined) {
+    let used: boolean = false;
+    usedNames.forEach((name: string): void => {
+      if (name.toLowerCase() === base) used = true;
+    });
+    if (!used) return preferred;
+  }
+  return smartSubAgentName(seed, usedNames);
 };
 
 const looksLikeBulkToolDump = (value: string): boolean => {
@@ -658,7 +681,7 @@ const resolveDynamicDefinition = (
 
   const definition: SubAgentDefinition = makeSubAgentDefinition({
     id,
-    name: rawName,
+    name: subAgentDynamicName(rawName, [taskObjective, description, systemPrompt].join('|')),
     description,
     systemPrompt,
     toolAllowlist: requestedTools,

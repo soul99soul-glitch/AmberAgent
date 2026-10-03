@@ -78,23 +78,29 @@ const CLOSING_TAG_REGEX = /<\/think>/;
 
 const transformThinkMessage = (
   ctx: TransformerContext, message: UIMessage, finishOpenReasoningAt: string | null,
+  finishedTimes?: Map<string, string>,
 ): UIMessage => {
   if (message.role !== 'assistant') return message;
   if (!message.parts.some((p: UIMessagePart): boolean => p.type === 'text')) return message;
   let changed: boolean = false;
   const parts: UIMessagePart[] = [];
-  for (const part of message.parts) {
+  for (let index = 0; index < message.parts.length; index++) {
+    const part = message.parts[index];
     if (part.type === 'text' && THINKING_REGEX.test(part.text)) {
       changed = true;
       const m: RegExpMatchArray | null = part.text.match(THINKING_REGEX);
       const stripped: string = part.text.replace(THINKING_REGEX, '');
       const reasoning: string = (m !== null && m[1] !== undefined ? m[1] : '').trim();
       const hasClosingTag: boolean = CLOSING_TAG_REGEX.test(part.text);
+      const timeKey: string = `${message.id}/${message.createdAt}/${index}`;
+      const finishedAt: string | null = finishedTimes?.get(timeKey)
+        ?? finishOpenReasoningAt ?? (hasClosingTag ? clockOf(ctx).nowIso() : null);
+      if (finishedAt !== null) finishedTimes?.set(timeKey, finishedAt);
       const reasoningPart: UIMessagePartReasoning = {
         type: 'reasoning',
         reasoning,
         createdAt: message.createdAt,
-        finishedAt: finishOpenReasoningAt ?? (hasClosingTag ? clockOf(ctx).nowIso() : null),
+        finishedAt,
         metadata: null,
       };
       parts.push(reasoningPart);
@@ -106,11 +112,11 @@ const transformThinkMessage = (
   return changed ? { ...message, parts } : message;
 };
 
-export const thinkTagTransformer: TailSafeOutputMessageTransformer = {
+const makeThinkTagTransformer = (finishedTimes?: Map<string, string>): TailSafeOutputMessageTransformer => ({
   visualTransform(ctx: TransformerContext, messages: UIMessage[]): UIMessage[] {
     let changed: boolean = false;
     const out: UIMessage[] = messages.map((m: UIMessage): UIMessage => {
-      const next: UIMessage = transformThinkMessage(ctx, m, null);
+      const next: UIMessage = transformThinkMessage(ctx, m, null, finishedTimes);
       if (next !== m) changed = true;
       return next;
     });
@@ -118,20 +124,27 @@ export const thinkTagTransformer: TailSafeOutputMessageTransformer = {
   },
 
   visualTransformTail(ctx: TransformerContext, message: UIMessage): UIMessage {
-    return transformThinkMessage(ctx, message, null);
+    return transformThinkMessage(ctx, message, null, finishedTimes);
   },
 
   onGenerationFinish(ctx: TransformerContext, messages: UIMessage[]): UIMessage[] {
     const now: string = clockOf(ctx).nowIso();
     let changed: boolean = false;
     const out: UIMessage[] = messages.map((m: UIMessage): UIMessage => {
-      const next: UIMessage = transformThinkMessage(ctx, m, now);
+      const next: UIMessage = transformThinkMessage(ctx, m, now, finishedTimes);
       if (next !== m) changed = true;
       return next;
     });
     return changed ? out : messages;
   },
-};
+});
+
+// Chat 每次运行单独持有首个闭合时间，后续正文 chunk 和终态不延长思考时长。
+export const createThinkTagTransformer = (): TailSafeOutputMessageTransformer =>
+  makeThinkTagTransformer(new Map<string, string>());
+
+// 保留其他消费者的无状态接口，不引入跨会话缓存。
+export const thinkTagTransformer: TailSafeOutputMessageTransformer = makeThinkTagTransformer();
 
 // ===== replaceRegexes(AssistantRegexProcessor.kt:9-42,JVM 路径) =====
 // 过滤 enabled && visualOnly == visual && scope 命中;非法规则编译失败即跳过;顺序 fold

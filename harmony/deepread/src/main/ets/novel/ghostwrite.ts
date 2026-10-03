@@ -40,6 +40,7 @@ export interface GhostwriteFinding {
 }
 
 export interface FrozenPlan {
+  upcomingArc?: string[];
   path: 'plan/this-chapter.md';
   planId: string;
   content: string;
@@ -119,11 +120,14 @@ export interface DurableGhostwriteJob {
   modelPolicyAtStart: NovelModelPolicy;
   progress: GhostwriteProgress[];
   failure: string | null;
+  // 作者下一次写稿的一次性要求，成功保存新候选后消费。
+  authorBrief?: string;
   createdAt: number;
   updatedAt: number;
 }
 
 export interface FreezeGhostwritePlanInput {
+  upcomingArc?: string[];
   planId: string;
   content: string;
   expectedCas: WorkspaceCas;
@@ -221,7 +225,11 @@ export const defaultGhostwriteDigest = (content: string): string => {
 export const freezeGhostwritePlan = (input: FreezeGhostwritePlanInput): FrozenPlan => {
   const content: string = input.content.trim();
   if (content.length === 0) throw invalidInput('代笔前必须存在本章计划');
-  const digest: string = (input.digest ?? defaultGhostwriteDigest)(content);
+  if (input.upcomingArc !== undefined && (!Array.isArray(input.upcomingArc) || input.upcomingArc.length > 8
+    || input.upcomingArc.some(beat => typeof beat !== 'string' || !beat.trim() || beat.length > 160)))
+    throw invalidInput('冻结后续走向无效');
+  const digestText: string = input.upcomingArc === undefined ? content : content + '\n--upcoming-arc--\n' + JSON.stringify(input.upcomingArc);
+  const digest: string = (input.digest ?? defaultGhostwriteDigest)(digestText);
   requireId(digest, 'plan digest');
   return {
     path: 'plan/this-chapter.md',
@@ -229,6 +237,7 @@ export const freezeGhostwritePlan = (input: FreezeGhostwritePlanInput): FrozenPl
     content,
     digest,
     expectedCas: validateCas(input.expectedCas),
+    ...(input.upcomingArc === undefined ? {} : { upcomingArc: input.upcomingArc.slice() }),
   };
 };
 
@@ -297,6 +306,7 @@ export const makeGhostwriteJob = (input: MakeGhostwriteJobInput): DurableGhostwr
   const plan: FrozenPlan = freezeGhostwritePlan({
     planId: input.frozenPlan.planId,
     content: input.frozenPlan.content,
+    upcomingArc: input.frozenPlan.upcomingArc,
     expectedCas: input.frozenPlan.expectedCas,
     digest: (): string => input.frozenPlan.digest,
   });
@@ -354,10 +364,15 @@ export const validateDurableGhostwriteJob = (job: DurableGhostwriteJob): Durable
   if (!Number.isInteger(job.claimEpoch) || job.claimEpoch < 0) throw invalidInput('claim epoch 无效');
   requireTimestamp(job.createdAt, 'createdAt');
   requireTimestamp(job.updatedAt, 'updatedAt');
+  if (job.authorBrief !== undefined && (job.authorBrief.trim().length === 0 ||
+    job.authorBrief !== job.authorBrief.trim() || job.authorBrief.length > 2400)) {
+    throw invalidInput('作者修订要求无效');
+  }
   if (job.frozenPlan !== null) {
     const plan: FrozenPlan = freezeGhostwritePlan({
       planId: job.frozenPlan.planId,
       content: job.frozenPlan.content,
+      upcomingArc: job.frozenPlan.upcomingArc,
       expectedCas: job.frozenPlan.expectedCas,
       digest: (): string => job.frozenPlan?.digest ?? '',
     });
@@ -368,10 +383,11 @@ export const validateDurableGhostwriteJob = (job: DurableGhostwriteJob): Durable
     if (job.candidate.planId !== job.frozenPlan.planId || job.candidate.planDigest !== job.frozenPlan.digest) {
       throw invalidInput('candidate 与冻结计划不匹配');
     }
-    const expectedCandidateAttempt: number = job.stage === 'rewriting_1' || job.stage === 'rewriting_2'
+    const executionStage: GhostwriteStage = job.resumeStage ?? job.stage;
+    const expectedCandidateAttempt: number = executionStage === 'rewriting_1' || executionStage === 'rewriting_2'
       ? job.rewriteCount - 1 : job.rewriteCount;
     if (job.candidate.chapterOrdinal !== job.currentChapterOrdinal ||
-      job.candidate.attempt !== expectedCandidateAttempt) {
+      (job.stage !== 'cancelled' && job.candidate.attempt !== expectedCandidateAttempt)) {
       throw invalidInput('candidate 与当前代笔进度不匹配');
     }
   }
@@ -462,6 +478,7 @@ export const withGhostwriteCandidate = (
     stage: 'reviewing',
     candidate: checked,
     review: null,
+    authorBrief: undefined,
     resumeStage: null,
     updatedAt: requireTimestamp(now, 'updatedAt'),
   };

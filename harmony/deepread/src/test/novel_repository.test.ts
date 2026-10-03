@@ -110,7 +110,7 @@ test('restorePrevious migrates the newest legacy deleted JSON into an active wor
   assert.equal((await repo.loadProject('legacy-deleted')).updatedAt, NOW + 10);
 });
 
-test('restorePrevious chooses the newest project across workspace and legacy deleted stores', async () => {
+test('restorePrevious prioritizes actual deletion timestamp over unrecorded legacy updated time', async () => {
   const fs = createMemoryFileStore();
   const repo = createFileNovelRepository(fs);
   await repo.createProject({
@@ -126,9 +126,9 @@ test('restorePrevious chooses the newest project across workspace and legacy del
 
   const restored = await repo.restorePrevious();
 
-  assert.equal(restored?.id, 'legacy-newer');
-  assert.equal(await fs.exists('novel_deleted/legacy-newer.novel.json'), false);
-  assert.equal(await fs.exists('amberagent/novel-workspace/.deleted/workspace-older'), true);
+  assert.equal(restored?.id, 'workspace-older');
+  assert.equal(await fs.exists('novel_deleted/legacy-newer.novel.json'), true);
+  assert.equal(await fs.exists('amberagent/novel-workspace/.deleted/workspace-older'), false);
 });
 
 test('restorePrevious keeps corrupt legacy deleted JSON as evidence', async () => {

@@ -15,10 +15,19 @@ export interface SearchHit {
 export interface SearchProvider {
   readonly name: string;
   // signal 可选:真实取消底层搜索请求(R20)。既有实现可忽略,调用方仍可不传。
-  search(queries: string[], signal?: AbortSignalLike): Promise<SearchHit[]>;
+  search(queries: string[], signal?: AbortSignalLike, onFailure?: (query: string, error: string) => void): Promise<SearchHit[]>;
 }
 
 export interface SearchProviderRegistry {
   enabled(): SearchProvider[];
   fallback(): SearchProvider[];
+  /** Capture providers and reader policy once, before a research run uses its cache. */
+  snapshot?(): Promise<SearchProviderSnapshot>;
+}
+
+export interface SearchProviderSnapshot {
+  providers: SearchProvider[];
+  readerEnabled: boolean;
+  /** Internal cache identity; never logged or included in model prompts. */
+  cacheKey: string;
 }

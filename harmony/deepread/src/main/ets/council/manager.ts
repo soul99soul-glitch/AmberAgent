@@ -128,9 +128,9 @@ export interface ModelCouncilDeps {
 }
 
 // 转录事件(各自 typed,便于 JSON.stringify)
-interface TranscriptStarted { event: string; runId: string; mode: string; }
+interface TranscriptStarted { event: string; runId: string; mode: string; run: ModelCouncilRun; }
 interface TranscriptTurn { event: string; turn: ModelCouncilTurn; }
-interface TranscriptFinished { event: string; status: string; }
+interface TranscriptFinished { event: string; status: string; run: ModelCouncilRun; }
 
 let runSeq = 0;
 const newRunId = (): string => {
@@ -178,7 +178,7 @@ export class ModelCouncilManager {
     };
     this.runs.set(runId, run);
     this.signals.set(runId, new CancelSignal());
-    const started: TranscriptStarted = { event: 'started', runId: runId, mode: spec.mode };
+    const started: TranscriptStarted = { event: 'started', runId: runId, mode: spec.mode, run: this.copyRun(run) };
     this.writeTranscriptLine(runId, JSON.stringify(started));
     this.completions.set(runId, this.executeCouncil(run));
     return this.copyRun(run);
@@ -211,15 +211,29 @@ export class ModelCouncilManager {
     return this.snapshot(runId);
   }
 
-  async wait(runId: string, timeoutMs: number): Promise<ModelCouncilRun | null> {
+  async wait(runId: string, timeoutMs: number, signal?: AbortSignalLike): Promise<ModelCouncilRun | null> {
+    const cancelled = (): Error => {
+      const error = new Error('council wait aborted');
+      error.name = 'AbortError';
+      return error;
+    };
+    if (signal?.aborted) throw cancelled();
     const comp: Promise<void> | undefined = this.completions.get(runId);
     if (comp !== undefined) {
       let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([
-        comp,
-        new Promise<void>(res => { timer = setTimeout(res, timeoutMs); }),
-      ]);
-      if (timer !== undefined) clearTimeout(timer);
+      let onAbort: (() => void) | null = null;
+      try {
+        await new Promise<void>((resolve, reject): void => {
+          onAbort = (): void => { reject(cancelled()); };
+          signal?.addEventListener?.('abort', onAbort);
+          timer = setTimeout(resolve, timeoutMs);
+          comp.then(resolve, reject);
+          if (signal?.aborted) onAbort();
+        });
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        if (onAbort !== null) signal?.removeEventListener?.('abort', onAbort);
+      }
     }
     return this.snapshot(runId);
   }
@@ -352,7 +366,7 @@ export class ModelCouncilManager {
     } finally {
       if (deadlineTimer !== null) clearTimeout(deadlineTimer);
       run.updatedAtMs = this.nowMs();
-      const finished: TranscriptFinished = { event: 'finished', status: run.status };
+      const finished: TranscriptFinished = { event: 'finished', status: run.status, run: this.copyRun(run) };
       this.writeTranscriptLine(run.runId, JSON.stringify(finished));
       await this.transcriptWrites.get(run.runId);
       const archiveErrors: string[] = this.transcriptErrors.get(run.runId) ?? [];
@@ -379,6 +393,7 @@ export class ModelCouncilManager {
 
   private async runRound(run: ModelCouncilRun, round: number, signal: CancelSignal): Promise<void> {
     const seats: ModelCouncilSeat[] = run.task.seats;
+    const previousTurns: ModelCouncilTurn[] = run.turns.filter(turn => turn.round < round);
     const semaphores: Map<string, Semaphore> = new Map();
     const promises: Array<Promise<void>> = [];
     for (let i = 0; i < seats.length; i++) {
@@ -390,13 +405,14 @@ export class ModelCouncilManager {
         semaphores.set(key, sem);
       }
       const s: Semaphore = sem;
-      promises.push(withPermit(s, () => this.runSeat(run, round, seat, signal)));
+      promises.push(withPermit(s, () => this.runSeat(run, round, seat, signal, previousTurns)));
     }
     await Promise.all(promises);
   }
 
   private async runSeat(
     run: ModelCouncilRun, round: number, seat: ModelCouncilSeat, signal: CancelSignal,
+    previousTurns: ModelCouncilTurn[],
   ): Promise<void> {
     const runId: string = run.runId;
     const model: ModelConfig | null = this.getModel(seat.modelId);
@@ -419,8 +435,8 @@ export class ModelCouncilManager {
       run.task.mode === 'debate' && round >= 3 && round === run.task.rounds;
     let userPrompt: string;
     if (round === 1) userPrompt = openingPrompt(run.task, seat);
-    else if (isFinalRound) userPrompt = finalPositionPrompt(run.task, seat, run.turns);
-    else userPrompt = responsePrompt(run.task, seat, run.turns);
+    else if (isFinalRound) userPrompt = finalPositionPrompt(run.task, seat, previousTurns);
+    else userPrompt = responsePrompt(run.task, seat, previousTurns);
 
     let cumulative: string = prefix;
     // 席位级子 signal:超时只取消本席底层请求(不动根 signal,其余席位继续);
@@ -535,6 +551,7 @@ export class ModelCouncilManager {
           signal: synthSignal,
           toolMode: 'off',
         }), synthSignal), this.setting.seatTimeoutMs);
+        if (res.text.trim().length === 0) throw new Error('empty response text');
         const result = makeEmptyResult();
         applyVerdictText(result, res.text, res.warnings);
         result.perSeatSummaries = this.perSeatSummaries(run);

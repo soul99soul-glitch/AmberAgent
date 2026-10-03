@@ -8,11 +8,12 @@ import type { JsonObject } from '@amber/chat-domain';
 import {
   loadJevSettings, makeJevSettings,
   JEV_TYPESAFE_ENDPOINT, JEV_VERCEL_DEFAULT_BASE,
-  buildJevRequest, decodeJevResponse,
+  buildJevRequest, decodeJevResponse, resolveJevPurposeMode, jevPurposeConsentUnchanged, jevPurposeSettings,
   buildJevNoulBatch, readJevNoulBatchProbabilities,
-  type JevEvaluation, type JevMode, type JevQuestion, type JevSettings, type JevNoulBatchSpec, type JevEvaluateResult,
+  type JevPurpose, type JevEvaluation, type JevMode, type JevQuestion, type JevSettings, type JevNoulBatchSpec, type JevEvaluateResult,
 } from '@amber/chat-domain';
-import type { AbortSignalLike } from '@amber/deepread-domain';
+import type { AbortSignalLike, HttpResponse } from '@amber/deepread-domain';
+import { EntryAbortController } from './EntryAbortController.ets';
 import { getAppContainer, getChatKvStore } from '../di/AppContainer.ets';
 import type { ToolSearchReranker, ScoredTool } from '@amber/chat-domain';
 import type { AgentTool, UIMessagePart, JsonValue, InputSchemaObj } from '@amber/chat-domain';
@@ -53,11 +54,19 @@ export const loadJevRuntimeStatus = async (): Promise<JevRuntimeStatus> => {
   };
 };
 
-const bumpBudget = async (): Promise<void> => {
-  const kv = getChatKvStore();
-  const raw: string | null = await kv.get(budgetDayKey());
-  const count: number = raw !== null ? Number(raw) || 0 : 0;
-  await kv.put(budgetDayKey(), `${count + 1}`);
+let budgetTail: Promise<void> = Promise.resolve();
+const reserveBudget = (cancelled: () => boolean): Promise<string> => {
+  const reservation: Promise<string> = budgetTail.then(async (): Promise<string> => {
+    if (cancelled()) return 'cancelled';
+    const status: JevRuntimeStatus = await loadJevRuntimeStatus();
+    if (cancelled()) return 'cancelled';
+    if (status.cooldownUntil > Date.now()) return 'cooldown';
+    if (status.todayCount >= JEV_DAILY_BUDGET) return 'budget_exhausted';
+    await getChatKvStore().put(budgetDayKey(), `${status.todayCount + 1}`);
+    return '';
+  });
+  budgetTail = reservation.then((): void => {}, (): void => {});
+  return reservation;
 };
 
 const noteError = async (message: string): Promise<void> => {
@@ -66,63 +75,88 @@ const noteError = async (message: string): Promise<void> => {
   await kv.put(JEV_COOLDOWN_KEY, `${Date.now() + JEV_ERROR_COOLDOWN_MS}`);
 };
 
-// 统一评估入口(off/预算/冷却 → skipped 语义;失败回退调用方本地路径)
-export const jevEvaluate = async (
-  state: JsonObject,
-  questions: Record<string, JevQuestion>,
-  signal?: AbortSignalLike,
+const skipped = (reason: string): JevEvaluateResult => ({ ok: false, reason, evaluation: null, shadow: false });
+const hasPurposeConsent = (settings: JevSettings, purpose: JevPurpose | null): boolean => {
+  if (purpose === null) return true;
+  const scopes = jevPurposeSettings(settings, purpose);
+  if (purpose === 'tool_context_selection') return scopes !== null && scopes.allowToolOutput;
+  if (purpose === 'context_retention') return scopes !== null && scopes.allowToolOutput;
+  if (purpose === 'auto_approval') return scopes !== null && scopes.allowToolMetadata;
+  if (purpose === 'completion_check') return scopes !== null && scopes.allowTaskText;
+  return true;
+};
+
+const evaluateOperation = async (
+  purpose: JevPurpose | null, state: JsonObject, questions: Record<string, JevQuestion>, signal?: AbortSignalLike, expectedSettings?: JevSettings,
 ): Promise<JevEvaluateResult> => {
   const cancelled = (): boolean => signal?.aborted === true;
-  if (cancelled()) return { ok: false, reason: 'cancelled', evaluation: null, shadow: false };
-  const kv = getChatKvStore();
-  const settings: JevSettings = await loadJevSettings(kv);
-  if (cancelled()) return { ok: false, reason: 'cancelled', evaluation: null, shadow: false };
-  if (settings.mode === 'off') return { ok: false, reason: 'off', evaluation: null, shadow: false };
-  if (settings.apiKey.length === 0) return { ok: false, reason: 'no_api_key', evaluation: null, shadow: false };
-  if (settings.model.length === 0) return { ok: false, reason: 'no_model', evaluation: null, shadow: false };
-  const status: JevRuntimeStatus = await loadJevRuntimeStatus();
-  if (cancelled()) return { ok: false, reason: 'cancelled', evaluation: null, shadow: false };
-  if (status.todayCount >= JEV_DAILY_BUDGET) {
-    return { ok: false, reason: 'budget_exhausted', evaluation: null, shadow: false };
-  }
-  if (status.cooldownUntil > Date.now()) {
-    return { ok: false, reason: 'cooldown', evaluation: null, shadow: false };
-  }
-  const stateJson: string = JSON.stringify(state);
-  if (stateJson.length > JEV_STATE_MAX_CHARS) {
-    return { ok: false, reason: 'state_too_large', evaluation: null, shadow: false };
-  }
+  if (cancelled()) return skipped('cancelled');
+  const settings: JevSettings = await loadJevSettings(getChatKvStore());
+  if (expectedSettings !== undefined && !jevPurposeConsentUnchanged(expectedSettings, settings, purpose ?? 'tool_discovery')) return skipped('settings_changed');
+  const effective: JevMode = purpose === null ? settings.mode : resolveJevPurposeMode(settings, purpose);
+  if (cancelled()) return skipped('cancelled');
+  if (effective === 'off') return skipped('off');
+  if (!hasPurposeConsent(settings, purpose)) return skipped('consent');
+  if (settings.apiKey.length === 0) return skipped('no_api_key');
+  if (settings.model.length === 0) return skipped('no_model');
+  if (JSON.stringify(state).length > JEV_STATE_MAX_CHARS) return skipped('state_too_large');
   const endpoint: string = settings.apiMode === 'vercel'
-    ? (settings.baseUrl.length > 0 ? settings.baseUrl : JEV_VERCEL_DEFAULT_BASE)
-    : JEV_TYPESAFE_ENDPOINT;
+    ? (settings.baseUrl.length > 0 ? settings.baseUrl : JEV_VERCEL_DEFAULT_BASE) : JEV_TYPESAFE_ENDPOINT;
   try {
-    const spec = buildJevRequest(
-      settings.apiMode, endpoint, settings.apiKey, settings.model, state, questions);
-    const resp = await getAppContainer().httpClient.fetch({
-      url: spec.url,
-      method: 'POST',
-      headers: spec.headers,
-      body: spec.body,
+    const reason: string = await reserveBudget(cancelled);
+    if (reason.length > 0) return skipped(reason);
+    const current: JevSettings = await loadJevSettings(getChatKvStore());
+    if (cancelled()) return skipped('cancelled');
+    if (!jevPurposeConsentUnchanged(settings, current, purpose ?? 'tool_discovery')) return skipped('settings_changed');
+    const spec = buildJevRequest(settings.apiMode, endpoint, settings.apiKey, settings.model, state, questions);
+    const request: Promise<HttpResponse> = getAppContainer().httpClient.fetch({
+      url: spec.url, method: 'POST', headers: spec.headers, body: spec.body,
     }, { signal });
-    if (cancelled()) return { ok: false, reason: 'cancelled', evaluation: null, shadow: false };
+    const resp: HttpResponse = await request;
+    if (cancelled()) return skipped('cancelled');
+    const latest: JevSettings = await loadJevSettings(getChatKvStore());
+    if (cancelled()) return skipped('cancelled');
+    if (!jevPurposeConsentUnchanged(settings, latest, purpose ?? 'tool_discovery')) return skipped('settings_changed');
     if (resp.status < 200 || resp.status >= 300) {
       await noteError(`HTTP ${resp.status}`);
-      return { ok: false, reason: `http_${resp.status}`, evaluation: null, shadow: false };
+      return skipped(`http_${resp.status}`);
     }
     const evaluation: JevEvaluation = decodeJevResponse(resp.body, questions, settings.apiMode);
-    await bumpBudget();
-    return {
-      ok: true,
-      reason: 'ok',
-      evaluation,
-      shadow: settings.mode === 'shadow',
-    };
-  } catch (e) {
-    if (cancelled()) return { ok: false, reason: 'cancelled', evaluation: null, shadow: false };
-    await noteError(e instanceof Error ? e.message : String(e));
-    return { ok: false, reason: 'transport_or_decode', evaluation: null, shadow: false };
+    return { ok: true, reason: 'ok', evaluation, shadow: effective === 'shadow' };
+  } catch (error) {
+    if (cancelled()) return skipped('cancelled');
+    await noteError(error instanceof Error ? error.message : String(error));
+    return skipped('transport_or_decode');
   }
 };
+
+// The single deadline covers settings reads and queued reservations as well as transport.
+const evaluate = async (
+  purpose: JevPurpose | null, state: JsonObject, questions: Record<string, JevQuestion>, signal?: AbortSignalLike, expectedSettings?: JevSettings,
+): Promise<JevEvaluateResult> => {
+  if (signal?.aborted === true) return skipped('cancelled');
+  const controller: EntryAbortController = new EntryAbortController();
+  let timedOut: boolean = false;
+  let stop: () => void = (): void => {};
+  const stopped: Promise<JevEvaluateResult> = new Promise((resolve): void => {
+    stop = (): void => { controller.abort(); resolve(skipped(timedOut ? 'deadline' : 'cancelled')); };
+  });
+  const relay = (): void => { stop(); };
+  signal?.addEventListener?.('abort', relay);
+  const timer: number = setTimeout((): void => { timedOut = true; stop(); }, 1200);
+  try {
+    return await Promise.race([evaluateOperation(purpose, state, questions, controller.signal, expectedSettings), stopped]);
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener?.('abort', relay);
+  }
+};
+
+// Existing global-purpose callers keep their previous scope and mode behavior.
+export const jevEvaluate = (state: JsonObject, questions: Record<string, JevQuestion>, signal?: AbortSignalLike): Promise<JevEvaluateResult> =>
+  evaluate(null, state, questions, signal);
+export const jevEvaluatePurpose = (purpose: JevPurpose, state: JsonObject, questions: Record<string, JevQuestion>, signal?: AbortSignalLike, expectedSettings?: JevSettings): Promise<JevEvaluateResult> =>
+  evaluate(purpose, state, questions, signal, expectedSettings);
 
 // ── TOOL_DISCOVERY:tool_search 语义重排(ACTIVE 改序,SHADOW 原序+记录) ──
 
@@ -225,6 +259,7 @@ export const jevChoiceSelect = async (
 // 用途标识(设置页/jev_status 如实展示)
 export const JEV_WIRED_PURPOSES: string[] = [
   'tool_discovery', 'memory_recall', 'context_selection', 'model_routing', 'approval_triage',
+  'tool_context_selection', 'context_retention', 'auto_approval', 'completion_check',
 ];
 
 // jev_status 工具(只读;Android JevStatusTool 对齐)

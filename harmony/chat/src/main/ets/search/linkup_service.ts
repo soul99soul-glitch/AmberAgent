@@ -1,6 +1,7 @@
 // linkup_service — LinkUp 搜索/抓取(D-068b)
 // Android 基准: search/.../LinkUpService.kt(全文 174 行;含 scrape)
 // 偏差登记:Log.i(query) 不移植(宪章隐私)
+import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
 import type {
@@ -30,6 +31,7 @@ export const linkUpService: SearchService = {
 
   search: async (
     params: JsonObject, commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: LinkUpOptions = asOptions(serviceOptions);
     const query: string = requireQuery(params);
@@ -48,7 +50,7 @@ export const linkUpService: SearchService = {
         outputType: 'sourcedAnswer',
         includeImages: 'false',
       }),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`response failed #${resp.status}: ${resp.body}`);
     }
@@ -72,6 +74,7 @@ export const linkUpService: SearchService = {
 
   scrape: async (
     params: JsonObject, _commonOptions: SearchCommonOptions, serviceOptions: SearchServiceOptions,
+    context?: SearchRequestContext,
   ): Promise<ScrapedResult> => {
     const opts: LinkUpOptions = asOptions(serviceOptions);
     const urlv = params['url'];
@@ -93,7 +96,7 @@ export const linkUpService: SearchService = {
         renderJs: false,
         extractImages: false,
       }),
-    });
+    }, context);
     if (resp.status < 200 || resp.status >= 300) {
       throw new Error(`response failed #${resp.status}: ${resp.body}`);
     }
