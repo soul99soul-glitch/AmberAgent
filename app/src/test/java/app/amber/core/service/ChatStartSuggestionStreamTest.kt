@@ -75,6 +75,25 @@ class ChatStartSuggestionStreamTest {
     }
 
     @Test
+    fun `empty reasoning markers between text deltas do not split suggestion lines`() = runBlocking {
+        val server = server { exchange ->
+            isStream(exchange)
+            exchange.responseHeaders.set("Content-Type", "text/event-stream")
+            exchange.sendResponseHeaders(200, 0)
+            exchange.responseBody.use { body ->
+                body.write("data: {\"id\":\"s\",\"model\":\"fixture\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"\",\"content\":\"整理小说\"}}]}\n\n".toByteArray())
+                body.write("data: {\"id\":\"s\",\"model\":\"fixture\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"\",\"content\":\"大纲\\n优化安卓渲染\\n复盘本周计划\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".toByteArray())
+            }
+        }
+        try {
+            val (generator, settings) = generator(server, OkHttpClient())
+            assertEquals(listOf("整理小说大纲", "优化安卓渲染", "复盘本周计划"), generator.generate(settings, Locale.CHINESE))
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
     fun `cancellation after headers cancels the call without waiting for the body`() = runBlocking {
         val canceled = AtomicInteger()
         val releaseBody = CountDownLatch(1)

@@ -4,6 +4,7 @@ import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.model.MemoryScope
@@ -63,7 +64,7 @@ class ChatStartSuggestionGenerator(
                     customBody = model.customBodies,
                 ),
             ).collect { chunk -> result += chunk }
-            parseSuggestions(result.toText())
+            parseSuggestions(result.parts.filterIsInstance<UIMessagePart.Text>().joinToString("") { it.text })
         }.orEmpty()
     }
 
