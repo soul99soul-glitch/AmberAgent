@@ -610,7 +610,7 @@ internal fun ChatListNormal(
                                     // 注意 2026-05-14 教训（ChatMessage.kt:235 注释）：
                                     // 嵌套多层动画曾致流式卡顿——只允许这一处、
                                     // 永远不要在消息内部再叠加。
-                                    // 离底阅读时由 holdReadingOnTailGrowth 同帧抵消增高，
+                                    // 离底阅读时由 holdReadingOnTailGrowth 抵消增高（滞后一帧），
                                     // 近底仍原生钉底跟随；它须在最外层，读到动画后的尺寸。
                                     if (isLoadingMessage || (isLastMessage && drainAmortizeGrace)) {
                                         Modifier.holdReadingOnTailGrowth(
