@@ -1421,6 +1421,7 @@ private fun ChatPageContent(
             // 401/慢响应时整屏空白看着像卡死. 改成 isEmpty 时 hero 一直保留 (loading 时 hero 上叠
             // 半透蒙层 spinner 反馈), 直到第一个 chunk 落 (messageNodes 非空) 再切到 ChatList.
             if (conversation.messageNodes.isEmpty()) {
+                val startSuggestions by rememberChatStartSuggestions(vm, setting)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1477,6 +1478,7 @@ private fun ChatPageContent(
                         inputState.attachmentImports.isNotEmpty()
                     if (loadingJob == null && !imeVisible && !inputHasContent) {
                         EmptyChatSuggestions(
+                            generatedSuggestions = startSuggestions,
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
                                 .padding(horizontal = 16.dp)
@@ -1734,14 +1736,17 @@ private fun ChatShelfPanelHost(
 @Composable
 private fun EmptyChatSuggestions(
     modifier: Modifier = Modifier,
+    generatedSuggestions: List<String> = emptyList(),
     onSelect: (String) -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
-    val suggestions = listOf(
-        stringResource(R.string.amber_redesign_suggestion_board),
-        stringResource(R.string.amber_redesign_suggestion_reply),
-        stringResource(R.string.amber_redesign_suggestion_concept),
-    )
+    val suggestions = generatedSuggestions.ifEmpty {
+        listOf(
+            stringResource(R.string.amber_redesign_suggestion_board),
+            stringResource(R.string.amber_redesign_suggestion_reply),
+            stringResource(R.string.amber_redesign_suggestion_concept),
+        )
+    }
     FlowRow(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),

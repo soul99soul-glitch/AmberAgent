@@ -4,6 +4,7 @@ import android.content.Context
 import app.amber.core.recap.ConversationRecapGenerator
 import app.amber.core.recap.ConversationRecapStore
 import app.amber.core.service.ChatService
+import app.amber.core.service.ChatStartSuggestionGenerator
 import app.amber.core.service.ConversationAccess
 import app.amber.core.service.PendingMessageStore
 import app.amber.core.service.UserInputPreprocessor
@@ -22,6 +23,8 @@ import org.koin.dsl.module
  * follow-up — same pattern, larger scope.
  */
 val chatModule = module {
+    single { ChatStartSuggestionGenerator(get(), get(), get()) }
+
     single {
         PendingMessageStore(
             context = get(),

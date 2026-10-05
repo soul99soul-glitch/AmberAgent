@@ -53,6 +53,7 @@ val viewModelModule = module {
             regenerateMessageOrchestrator = get(),
             branchMessageOrchestrator = get(),
             conversationDraftStore = get(),
+            startSuggestionGenerator = get(),
         )
     }
     viewModelOf(::ChatDrawerVM)

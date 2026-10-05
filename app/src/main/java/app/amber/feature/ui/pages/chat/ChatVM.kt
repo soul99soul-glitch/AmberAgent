@@ -58,6 +58,7 @@ import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.FavoriteRepository
 import app.amber.core.service.ChatError
 import app.amber.core.service.ChatService
+import app.amber.core.service.ChatStartSuggestionGenerator
 import app.amber.core.service.ConversationTimelineLoadState
 import app.amber.core.service.PendingUserMessage
 import app.amber.core.service.PendingUserMessageMode
@@ -92,7 +93,18 @@ class ChatVM(
     private val regenerateMessageOrchestrator: RegenerateMessageOrchestrator,
     private val branchMessageOrchestrator: BranchMessageOrchestrator,
     private val conversationDraftStore: ConversationDraftStore,
+    private val startSuggestionGenerator: ChatStartSuggestionGenerator,
 ) : ViewModel() {
+    suspend fun generateStartSuggestions(settings: Settings, locale: java.util.Locale): List<String> =
+        try {
+            startSuggestionGenerator.generate(settings, locale)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not generate conversation starters", error)
+            emptyList()
+        }
+
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
     val timelineLoadState: StateFlow<ConversationTimelineLoadState> =
