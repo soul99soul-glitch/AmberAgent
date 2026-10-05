@@ -19,6 +19,7 @@ class CancellableCallScopeTest {
     fun `cancelling coroutine cancels call after response headers arrive`() = runBlocking {
         val server = ServerSocket(0)
         val headersSent = CountDownLatch(1)
+        val bodyReadStarted = CountDownLatch(1)
         val releaseServer = CountDownLatch(1)
         val serverThread = Thread {
             server.accept().use { socket ->
@@ -42,11 +43,13 @@ class CancellableCallScopeTest {
             val reading = async(Dispatchers.IO) {
                 withCancellableCall {
                     awaitResponse(OkHttpClient().newCall(request)).use { response ->
+                        bodyReadStarted.countDown()
                         response.body.source().readByteArray()
                     }
                 }
             }
             assertTrue(headersSent.await(1, TimeUnit.SECONDS))
+            assertTrue(bodyReadStarted.await(1, TimeUnit.SECONDS))
 
             withTimeout(1_000) {
                 reading.cancelAndJoin()

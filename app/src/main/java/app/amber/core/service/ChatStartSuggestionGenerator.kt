@@ -4,6 +4,7 @@ import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
+import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.model.MemoryScope
 import app.amber.core.memory.prompt.MemoryPromptBuilder
@@ -15,6 +16,7 @@ import app.amber.core.settings.Settings
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.resolveTaskChatModel
 import java.util.Locale
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** Empty-chat suggestions are ephemeral; generating them never reinforces memories. */
@@ -34,7 +36,10 @@ class ChatStartSuggestionGenerator(
             val records = memoryRepository.getActiveRecords(scopes, now)
             val memoryContext = buildContext(settings, records, profileStore.get(), locale, now)
             if (memoryContext.isBlank()) return@withTimeoutOrNull emptyList()
-            val result = providerCatalog.text(provider).complete(
+            var result = UIMessage.assistant("")
+            // The existing SSE flows cancel their Call on collection cancellation,
+            // including a stall after headers. Keep partial output off the UI.
+            providerCatalog.text(provider).stream(
                 providerSetting = provider,
                 messages = listOf(
                     UIMessage.system(
@@ -57,8 +62,8 @@ class ChatStartSuggestionGenerator(
                     customHeaders = model.customHeaders,
                     customBody = model.customBodies,
                 ),
-            )
-            parseSuggestions(result.choices.firstOrNull()?.message?.toText().orEmpty())
+            ).collect { chunk -> result += chunk }
+            parseSuggestions(result.toText())
         }.orEmpty()
     }
 
@@ -91,7 +96,15 @@ class ChatStartSuggestionGenerator(
                     it.sourceMemoryIds.all { id -> id in activeIds }
                 }
             }
-            val selected = MemoryRecallStore.rankRecords(settings, emptyList(), active, now).map { it.record }
+            val ranked = MemoryRecallStore.scoreAll(settings, emptyList(), active, now).selections
+            // Starters need recent project context as well as stable preferences.
+            // Preserve pinned priority and apply the same item/character budget.
+            val recentProjects = ranked.filter { it.record.kind == MemoryKind.PROJECT }
+                .sortedByDescending { it.record.updatedAt }.take(2)
+            val selected = MemoryRecallStore.budgeted(
+                (ranked.filter { it.record.pinned } + recentProjects + ranked).distinctBy { it.record.id },
+                settings,
+            ).map { it.record }
             return MemoryPromptBuilder.buildMemoryContext(
                 records = selected,
                 locale = locale,
@@ -100,11 +113,12 @@ class ChatStartSuggestionGenerator(
         }
 
         internal fun parseSuggestions(text: String): List<String> {
-            val suggestions = text.lineSequence()
+            val lines = text.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.toList()
+            if (lines.size != 3) return emptyList()
+            val suggestions = lines.asSequence()
                 .map { it.trim().replace(Regex("^(?:[-*•]|\\d+[.)、])\\s*"), "").trim() }
                 .filter { it.isNotBlank() && it.length <= 24 && !it.contains('`') }
                 .distinctBy { it.lowercase(Locale.ROOT).replace(Regex("\\s+"), "") }
-                .take(3)
                 .toList()
             return suggestions.takeIf { it.size == 3 }.orEmpty()
         }

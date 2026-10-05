@@ -8,13 +8,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.isImeVisible
@@ -32,7 +30,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -74,7 +71,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.font.FontWeight
@@ -154,7 +150,6 @@ import app.amber.feature.ui.components.ai.SubAgentStatusDock
 import app.amber.core.repository.ConversationRepository
 import app.amber.feature.ui.components.ai.SandboxActivitySheet
 import app.amber.feature.ui.components.ai.TopModelMenu
-import app.amber.feature.ui.components.ds.BlinkingCursor
 import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
@@ -1422,85 +1417,25 @@ private fun ChatPageContent(
             // 半透蒙层 spinner 反馈), 直到第一个 chunk 落 (messageNodes 非空) 再切到 ChatList.
             if (conversation.messageNodes.isEmpty()) {
                 val startSuggestions by rememberChatStartSuggestions(vm, setting)
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                ) {
-                    val nick = setting.displaySetting.userNickname.trim()
-                    val heroText = if (nick.isNotEmpty()) {
-                        stringResource(R.string.chat_page_hero_greeting_with_name, nick)
-                    } else {
-                        stringResource(R.string.chat_page_hero_greeting)
-                    }
-                    val chatTheme = LocalChatTheme.current
-                    val amberTokens = LocalAmberTokens.current
-                    val heroDim = if (loadingJob != null) 0.45f else 1f
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(bottom = 48.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.amber_wordmark),
-                                contentDescription = "Amber",
-                                modifier = Modifier.size(width = 118.dp, height = 30.dp),
-                                tint = amberTokens.ink.copy(alpha = heroDim),
-                            )
-                            BlinkingCursor(
-                                width = 8.dp,
-                                height = 18.dp,
-                                modifier = Modifier,
-                            )
-                        }
-                        Text(
-                            text = heroText,
-                            modifier = Modifier
-                                .padding(top = 16.dp)
-                                .widthIn(max = 288.dp),
-                            color = chatTheme.ink.copy(alpha = heroDim),
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Medium,
-                            letterSpacing = (-0.24).sp,
-                            lineHeight = 29.sp,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        )
-                    }
-                    val imeVisible = WindowInsets.isImeVisible
-                    val inputHasContent = inputState.textContent.text.isNotEmpty() ||
-                        inputState.messageContent.isNotEmpty() ||
-                        inputState.attachmentImports.isNotEmpty()
-                    if (loadingJob == null && !imeVisible && !inputHasContent) {
-                        EmptyChatSuggestions(
-                            generatedSuggestions = startSuggestions,
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(horizontal = 16.dp)
-                                .padding(bottom = 16.dp),
-                            onSelect = { suggestion ->
-                                inputState.setMessageText(suggestion)
-                                suggestionFillPulseKey += 1
-                            },
-                        )
-                    }
-                    if (loadingJob != null) {
-                        // 上叠 spinner 给 "loading && empty" 中间态一个反馈
-                        androidx.compose.material3.CircularProgressIndicator(
-                            color = chatTheme.accent,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .padding(top = 120.dp)
-                                .size(28.dp),
-                        )
-                    }
+                val nick = setting.displaySetting.userNickname.trim()
+                val heroText = if (nick.isNotEmpty()) {
+                    stringResource(R.string.chat_page_hero_greeting_with_name, nick)
+                } else {
+                    stringResource(R.string.chat_page_hero_greeting)
                 }
+                val inputHasContent = inputState.textContent.text.isNotEmpty() ||
+                    inputState.messageContent.isNotEmpty() || inputState.attachmentImports.isNotEmpty()
+                ChatEmptyContent(
+                    heroText = heroText,
+                    generatedSuggestions = startSuggestions,
+                    loading = loadingJob != null,
+                    showSuggestions = loadingJob == null && !WindowInsets.isImeVisible && !inputHasContent,
+                    onSelect = { suggestion ->
+                        inputState.setMessageText(suggestion)
+                        suggestionFillPulseKey += 1
+                    },
+                    modifier = Modifier.fillMaxSize().padding(innerPadding),
+                )
             }
             }  // end timeline fade Box
             }  // end if (!initialized) else branch (ChatList + hero)
@@ -1730,51 +1665,6 @@ private fun ChatShelfPanelHost(
             }
         }
         ChatShelfPanelContent(items = items, onOpen = onOpen)
-    }
-}
-
-@Composable
-private fun EmptyChatSuggestions(
-    modifier: Modifier = Modifier,
-    generatedSuggestions: List<String> = emptyList(),
-    onSelect: (String) -> Unit,
-) {
-    val tokens = LocalAmberTokens.current
-    val suggestions = generatedSuggestions.ifEmpty {
-        listOf(
-            stringResource(R.string.amber_redesign_suggestion_board),
-            stringResource(R.string.amber_redesign_suggestion_reply),
-            stringResource(R.string.amber_redesign_suggestion_concept),
-        )
-    }
-    FlowRow(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        suggestions.forEach { suggestion ->
-            Surface(
-                onClick = { onSelect(suggestion) },
-                modifier = Modifier.heightIn(min = 40.dp),
-                shape = CircleShape,
-                color = Color.Transparent,
-                contentColor = tokens.ink2,
-                border = BorderStroke(1.dp, tokens.accent.copy(alpha = 0.10f)),
-                tonalElevation = 0.dp,
-            ) {
-                Box(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = suggestion,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = tokens.ink2,
-                    )
-                }
-            }
-        }
     }
 }
 

@@ -71,4 +71,23 @@ class ChatStartSuggestionGeneratorTest {
         assertTrue(ChatStartSuggestionGenerator.parseSuggestions("Write Kotlin\nwrite kotlin\nAnother task").isEmpty())
         assertTrue(ChatStartSuggestionGenerator.parseSuggestions("A\nB\n" + "x".repeat(25)).isEmpty())
     }
+
+    @Test
+    fun `recent project survives a full budget of stable user facts`() {
+        val facts = (1..12).map { record(it, MemoryScope.LONG_TERM, "Stable preference $it") }
+        val project = record(13, MemoryScope.SHORT_TERM, "New Android project")
+            .copy(kind = MemoryKind.PROJECT, updatedAt = now + 1)
+        val context = ChatStartSuggestionGenerator.buildContext(
+            Settings(), facts + project, null, Locale.ENGLISH, now,
+        )
+        assertTrue(context.contains(project.content))
+        assertEquals(12, context.lineSequence().count { it.startsWith("- [") })
+    }
+
+    @Test
+    fun `preamble with three tasks is rejected instead of becoming a button`() {
+        assertTrue(ChatStartSuggestionGenerator.parseSuggestions(
+            "建议如下：\n整理小说大纲\n优化安卓渲染\n复盘本周计划",
+        ).isEmpty())
+    }
 }

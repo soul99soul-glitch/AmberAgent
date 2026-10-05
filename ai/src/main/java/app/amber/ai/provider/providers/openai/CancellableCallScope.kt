@@ -1,5 +1,6 @@
 package app.amber.ai.provider.providers.openai
 
+import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -23,13 +24,17 @@ internal class CancellableCallScope(
     }
 }
 
+@OptIn(InternalCoroutinesApi::class)
 internal suspend fun <T> withCancellableCall(
     block: suspend CancellableCallScope.() -> T,
 ): T {
     val context = currentCoroutineContext()
     val job = checkNotNull(context[Job])
     val callScope = CancellableCallScope()
-    val completionHandle = job.invokeOnCompletion { callScope.cancel() }
+    // Cancel during the cancelling phase so a blocking response-body read can finish.
+    val completionHandle = job.invokeOnCompletion(onCancelling = true, invokeImmediately = true) {
+        callScope.cancel()
+    }
     return try {
         callScope.block()
     } finally {
