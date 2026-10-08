@@ -1,0 +1,25 @@
+{
+  "ai": {
+    "tests": 209,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "feature/tools/access": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "app": {
+    "tests": 231,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "failed": [
+      "app.amber.feature.miniapp.MiniAppSystemCapabilityBridgeTest::runnerGateUsesUpdatedHighRiskApprovalWithoutRecreation"
+    ]
+  }
+}

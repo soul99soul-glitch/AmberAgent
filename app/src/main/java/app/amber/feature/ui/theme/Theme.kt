@@ -32,8 +32,10 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.serialization.Serializable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.amber.agent.StandaloneSurfaces
 import app.amber.core.settings.themeContrast
 import app.amber.core.settings.themeRgb
+import app.amber.feature.ui.pages.board.DeepReadAccentChoice
 import app.amber.feature.ui.hooks.rememberAmoledDarkMode
 import app.amber.feature.ui.hooks.rememberColorMode
 import app.amber.feature.ui.hooks.rememberUserSettingsState
@@ -252,7 +254,15 @@ fun AmberAgentTheme(
         themePack?.let { themePackPaperTokens(it.paper, darkTheme) } ?: baseTokens(amberBase)
     }
     val amberAccent = themePack?.accentHex?.let(::parseThemeColor)
-        ?: parseAccent(displaySetting.accentColor)
+        // Standalone DeepRead carries its own product accent (iOS
+        // DeepReadAppearance parity) — apply it here so tokens, chatTheme and
+        // the M3 colorScheme all derive from it, including inside dialogs and
+        // bottom sheets that compose content in a separate window.
+        ?: if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+            DeepReadAccentChoice.colorFor(settings.agentRuntime.todayBoard.deepReadAccent, darkTheme)
+        } else {
+            parseAccent(displaySetting.accentColor)
+        }
     val amberTokens = remember(themeBaseTokens, amberAccent, effectiveAmoledDarkMode, darkTheme, themeDesign, themePack?.inkHex) {
         val tokens = buildAmberTokens(themeBaseTokens, amberAccent, themeDesign)
         val documentInk = themePack?.inkHex?.let(::parseThemeColor)

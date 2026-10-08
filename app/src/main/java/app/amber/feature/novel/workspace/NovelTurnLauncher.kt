@@ -4,6 +4,7 @@ import app.amber.core.agent.runtime.AgentRunId
 import app.amber.core.agent.runtime.AgentRunSnapshot
 import app.amber.core.agent.runtime.AgentRunner
 import app.amber.core.agent.runtime.RunStatus
+import app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -88,7 +89,9 @@ class NovelTurnLauncher(
             payload.completion.invokeOnCompletion { terminalObserver.cancel() }
         }
         val eventFlow = events.receiveAsFlow().onEach { event ->
-            if (event.isTerminal()) payload.terminalDelivered.set(true)
+            NovelWorkspaceRestoreBoundary.write(request.restoreEpoch) {
+                if (event.isTerminal()) payload.terminalDelivered.set(true)
+            }
         }.onCompletion { cause ->
             if (cause is CancellationException && !payload.terminalDelivered.get()) {
                 // Claim before cancelling: a handler racing this path either owns

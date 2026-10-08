@@ -68,7 +68,9 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Gradle debug build
-        run: ./gradlew :app:assembleDebug --no-daemon --console=plain
+        # `surface` flavors: CI validates the canonical `full` product only;
+        # standalone flavors (novel/deepread) are verified locally.
+        run: ./gradlew :app:assembleFullDebug --no-daemon --console=plain
 
       - name: Verify native libraries in debug APK
         run: |
@@ -83,7 +85,7 @@ jobs:
             "lib/arm64-v8a/libmarkdown_preprocess.so"
             "lib/arm64-v8a/libhtml_diff_normalizer.so"
           )
-          for APK in app/build/outputs/apk/debug/*.apk; do
+          for APK in app/build/outputs/apk/full/debug/*.apk; do
             APK_ENTRIES="$(unzip -Z1 "$APK")"
             for so in "${expected[@]}"; do
               if ! grep -Fxq "$so" <<< "$APK_ENTRIES"; then
@@ -97,7 +99,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: AmberAgent-debug-${{ github.run_number }}
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/full/debug/*.apk
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

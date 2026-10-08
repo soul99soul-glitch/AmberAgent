@@ -648,6 +648,7 @@ private fun MiniAppSourcePreview(
                         view: WebView,
                         request: WebResourceRequest,
                     ): WebResourceResponse? {
+                        MiniAppShell.libraryResponse(view.context, request.url.toString())?.let { return it }
                         return when (request.url.scheme?.lowercase()) {
                             "https" -> {
                                 val allowed = runCatching {

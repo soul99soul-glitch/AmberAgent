@@ -142,7 +142,7 @@ import kotlinx.serialization.json.JsonPrimitive
         ThemePackageEntity::class,
         LiveCardEntity::class,
     ],
-    version = 20
+    version = 21
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -619,6 +619,15 @@ abstract class AppDatabase : RoomDatabase() {
                     "ALTER TABLE `memoryentity` ADD COLUMN `use_count` " +
                         "INTEGER NOT NULL DEFAULT 0"
                 )
+            }
+        }
+
+        /** Per-topic deep-read template ids + structured synthesis payloads (iOS task.templateId/structuredJSON). */
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `deep_read_cache` ADD COLUMN `template_id` TEXT")
+                db.execSQL("ALTER TABLE `deep_read_cache` ADD COLUMN `structured_json` TEXT")
+                db.execSQL("ALTER TABLE `hot_topic_cache` ADD COLUMN `template_id` TEXT")
             }
         }
 

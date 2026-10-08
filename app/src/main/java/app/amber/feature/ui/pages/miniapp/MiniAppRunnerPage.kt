@@ -327,12 +327,8 @@ private fun MiniAppWebView(
     val shellHtml = remember(context, app.id, app.htmlContent, bridgeScript, sessionToken) {
         MiniAppShell.inject(context, app.htmlContent, bridgeScript, sessionToken)
     }
-    val sendGate = remember(capabilityFlags, capabilityPermissionStore, appSettings) {
-        CapabilityMiniAppSendGate(
-            capabilityFlags = capabilityFlags,
-            permissionStore = capabilityPermissionStore,
-            highRiskAutoApproved = { appSettings.agentRuntime.autoApproveHighRiskToolCalls },
-        )
+    val sendGate = remember(settingsStore, capabilityFlags, capabilityPermissionStore) {
+        createRunnerSendGate(settingsStore, capabilityFlags, capabilityPermissionStore)
     }
     val background = MaterialTheme.colorScheme.background
     val foreground = MaterialTheme.colorScheme.onBackground
@@ -420,6 +416,7 @@ private fun MiniAppWebView(
                         request: WebResourceRequest,
                     ): WebResourceResponse? {
                         val scheme = request.url.scheme?.lowercase()
+                        MiniAppShell.libraryResponse(view.context, request.url.toString())?.let { return it }
                         return when (scheme) {
                             "https" -> {
                                 val allowed = runCatching {
@@ -528,6 +525,16 @@ private fun MiniAppWebView(
         }
     }
 }
+
+internal fun createRunnerSendGate(
+    settingsStore: SettingsAggregator,
+    capabilityFlags: CapabilityFlags,
+    permissionStore: CapabilityPermissionStore,
+) = CapabilityMiniAppSendGate(
+    capabilityFlags = capabilityFlags,
+    permissionStore = permissionStore,
+    highRiskAutoApproved = { settingsStore.settingsFlow.value.agentRuntime.autoApproveHighRiskToolCalls },
+)
 
 private suspend fun markRunnerVisit(repository: MiniAppRepository, appId: String) {
     try {

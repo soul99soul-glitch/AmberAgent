@@ -1,5 +1,8 @@
 package app.amber.agent.data.sync
 
+import android.app.Application
+import androidx.room.Room
+import app.amber.agent.data.db.AppDatabase
 import app.amber.core.sync.core.SyncArchiveManager
 import java.io.File
 import kotlinx.serialization.json.Json
@@ -10,7 +13,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], application = Application::class)
 class SyncArchiveTableCoverageTest {
     @Test
     fun syncTablesCoverDurableAppDatabaseTables() {
@@ -61,10 +70,18 @@ class SyncArchiveTableCoverageTest {
     }
 
     private fun appDatabaseSchemaTables(): List<String> {
+        val database = Room.inMemoryDatabaseBuilder(
+            RuntimeEnvironment.getApplication(), AppDatabase::class.java,
+        ).allowMainThreadQueries().build()
+        val version = try {
+            database.openHelper.writableDatabase.version
+        } finally {
+            database.close()
+        }
         val schema = listOf(
-            File("schemas/app.amber.agent.data.db.AppDatabase/15.json"),
-            File("app/schemas/app.amber.agent.data.db.AppDatabase/15.json"),
-        ).firstOrNull { it.exists() } ?: error("AppDatabase schema 15.json not found")
+            File("schemas/app.amber.agent.data.db.AppDatabase/$version.json"),
+            File("app/schemas/app.amber.agent.data.db.AppDatabase/$version.json"),
+        ).firstOrNull { it.exists() } ?: error("AppDatabase schema $version.json not found")
 
         val root = Json.parseToJsonElement(schema.readText()).jsonObject
         return root.getValue("database")

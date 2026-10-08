@@ -15,12 +15,15 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +59,7 @@ import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.ProviderSetting
 import app.amber.agent.Screen
 import app.amber.agent.R
+import app.amber.agent.StandaloneSurfaces
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MAX
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MIN
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_STEP
@@ -69,7 +73,9 @@ import app.amber.feature.board.TodayBoardSetting
 import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.board.hotlist.HotListScheduler
 import app.amber.feature.board.hotlist.normalizeHotListFocusKeywords
+import app.amber.feature.board.hotlist.deepread.DeepReadMoments
 import app.amber.core.settings.findModelById
+import app.amber.core.ai.tools.SearchOrchestrator
 import app.amber.agent.data.db.entity.BoardFocusRuleEntity
 import app.amber.agent.data.db.entity.BoardWeightEntity
 import app.amber.agent.data.db.entity.HotListSourceEntity
@@ -101,11 +107,17 @@ import com.composables.icons.lucide.Clock
 import com.composables.icons.lucide.FileText
 import com.composables.icons.lucide.LayoutDashboard
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Cpu
+import com.composables.icons.lucide.Globe
 import com.composables.icons.lucide.MessageSquare
 import com.composables.icons.lucide.MessagesSquare
 import com.composables.icons.lucide.Megaphone
+import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.RotateCw
+import com.composables.icons.lucide.ScanSearch
+import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.SlidersHorizontal
+import com.composables.icons.lucide.WandSparkles
 
 @Composable
 fun SettingTodayBoardPage(
@@ -253,84 +265,327 @@ fun SettingTodayBoardPage(
 
     ExperimentalSettingsScaffold(
         title = pane.localizedTitle(),
+        titleStyle = deepReadEditorialSerif?.let { serif ->
+            LocalAmberType.current.screenTitle.copy(fontFamily = serif, fontWeight = FontWeight.Bold)
+        },
     ) { innerPadding ->
         LazyColumn(
-            Modifier.fillMaxSize().amberCanvas(),
+            Modifier
+                .fillMaxSize()
+                .amberCanvas()
+                .let {
+                    if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+                        it.deepReadPaper(night = DeepReadMoments.isNight(), tokens = LocalAmberTokens.current)
+                    } else it
+                },
             contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 0.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             when (pane) {
                 TodayBoardSettingsPane.ROOT -> {
-                    item {
-                        BoardSectionCard(title = stringResource(R.string.board_settings_general)) {
-                            SourceSwitch(
-                                title = stringResource(R.string.board_enable_title),
-                                description = stringResource(R.string.board_enable_description),
-                                checked = board.enabled,
-                                icon = Lucide.LayoutDashboard,
-                            ) {
-                                update { it.copy(enabled = !it.enabled) }
-                            }
-                            BoardDivider()
-                            DetailNavigationRow(
-                                title = stringResource(R.string.board_model_background),
-                                description = null,
-                                icon = Lucide.RotateCw,
-                                onClick = {
-                                    navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.GENERAL.route))
-                                },
+                    // Standalone deepread: iOS DeepReadSettingsView parity —
+                    // 外观 / 文章生成 / 多来源搜索 cards first, then the board
+                    // feature cards. The full app skips straight to features.
+                    if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+                        item {
+                            val selectedTemplateName = DeepReadTemplateCatalog.name(
+                                board.deepReadTemplateId,
+                                customDeepReadTemplates
+                                    .firstOrNull { it.id == board.deepReadTemplateId }?.name,
                             )
+                            BoardSectionCard(
+                                title = stringResource(R.string.deepread_settings_appearance),
+                                footer = stringResource(R.string.deepread_settings_appearance_footer),
+                            ) {
+                                DeepReadAccentPicker(
+                                    selectedId = board.deepReadAccent,
+                                    onSelect = { choice -> update { it.copy(deepReadAccent = choice.id) } },
+                                )
+                                BoardDivider()
+                                DetailNavigationRow(
+                                    title = stringResource(R.string.deepread_settings_layout_style),
+                                    value = selectedTemplateName,
+                                    icon = Lucide.BookOpenText,
+                                    onClick = {
+                                        navController.navigate(
+                                            Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.STYLE.route)
+                                        )
+                                    },
+                                )
+                            }
+                        }
+
+                        item {
+                            // Mirrors BoardModelRow semantics: null boardModelId
+                            // means "follow main chat model", not a pinned model.
+                            val boardModel = board.boardModelId
+                                ?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+                                ?.let { settings.findModelById(it) }
+                            BoardSectionCard(
+                                title = stringResource(R.string.deepread_settings_generation),
+                                footer = stringResource(R.string.deepread_settings_gen_footer),
+                            ) {
+                                DetailNavigationRow(
+                                    title = stringResource(R.string.deepread_settings_gen_model),
+                                    value = boardModel?.displayName ?: stringResource(R.string.deepread_board_use_default_model),
+                                    icon = Lucide.WandSparkles,
+                                    onClick = {
+                                        navController.navigate(
+                                            Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.MODEL.route)
+                                        )
+                                    },
+                                )
+                                BoardDivider()
+                                // 前台/后台 execution strategy belongs with
+                                // generation ops (folded from the old 通用 card).
+                                DetailNavigationRow(
+                                    title = stringResource(R.string.board_model_background),
+                                    icon = Lucide.RotateCw,
+                                    onClick = {
+                                        navController.navigate(
+                                            Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.GENERAL.route)
+                                        )
+                                    },
+                                )
+                                BoardDivider()
+                                DetailNavigationRow(
+                                    title = stringResource(R.string.setting_page_providers),
+                                    icon = Lucide.Cpu,
+                                    onClick = { navController.navigate(Screen.SettingProvider) },
+                                )
+                                BoardDivider()
+                                // iOS "＋ 添加模型服务" accent action row.
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { navController.navigate(Screen.SettingProvider) }
+                                        .heightIn(min = 52.dp)
+                                        .padding(horizontal = 14.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        Lucide.Plus,
+                                        contentDescription = null,
+                                        tint = LocalAmberTokens.current.accent,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                    Text(
+                                        stringResource(R.string.deepread_settings_add_model),
+                                        style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                                        color = LocalAmberTokens.current.accent,
+                                    )
+                                }
+                            }
+                        }
+
+                        // iOS "多来源搜索" — everything that feeds the digest
+                        // lives in one card: hotlist sources, the search service,
+                        // and personal signals with their weights.
+                        item {
+                            BoardSectionCard(
+                                title = stringResource(R.string.deepread_settings_search),
+                                footer = stringResource(R.string.deepread_settings_sources_footer),
+                            ) {
+                                DetailNavigationRow(
+                                    title = stringResource(R.string.deepread_board_sources_focus_title),
+                                    icon = Lucide.BookOpenText,
+                                    onClick = {
+                                        navController.navigate(
+                                            Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.HOT_LIST.route)
+                                        )
+                                    },
+                                )
+                                BoardDivider()
+                                DetailNavigationRow(
+                                    title = stringResource(R.string.setting_page_search_service),
+                                    value = "${settings.searchEnabledServiceIds.size}/${settings.searchServices.size}",
+                                    icon = Lucide.ScanSearch,
+                                    onClick = { navController.navigate(Screen.SettingSearch) },
+                                )
+                                BoardDivider()
+                                DetailNavigationRow(
+                                    title = stringResource(R.string.deepread_board_signals_weights),
+                                    icon = Lucide.SlidersHorizontal,
+                                    onClick = {
+                                        navController.navigate(
+                                            Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.REVIEW.route)
+                                        )
+                                    },
+                                )
+                            }
+                        }
+
+                        // iOS "免费聚合与正文读取" — the keyless built-in
+                        // sources. Android consumes them as three switches:
+                        // DuckDuckGo+Bing ride one aggregate, Jina reads page
+                        // text, Google WebView is the last-resort fallback.
+                        // (Wikipedia/HackerNews flags exist in prefs but have
+                        // no Android consumer — don't expose dead toggles.)
+                        item {
+                            BoardSectionCard(title = stringResource(R.string.deepread_settings_free_aggregate)) {
+                                SourceSwitch(
+                                    title = stringResource(R.string.setting_page_search_builtin_free_aggregate),
+                                    description = stringResource(R.string.setting_page_search_builtin_free_aggregate_desc),
+                                    checked = SearchOrchestrator.freeAggregateEnabled(settings),
+                                    icon = Lucide.Globe,
+                                ) {
+                                    vm.updateSettings { current ->
+                                        // The aggregate is one source on
+                                        // Android — both flags move together.
+                                        val target = !(current.searchBuiltinDuckDuckGoEnabled ||
+                                            current.searchBuiltinBingEnabled)
+                                        current.copy(
+                                            searchBuiltinDuckDuckGoEnabled = target,
+                                            searchBuiltinBingEnabled = target,
+                                        )
+                                    }
+                                }
+                                BoardDivider()
+                                SourceSwitch(
+                                    title = stringResource(R.string.setting_page_search_builtin_jina),
+                                    description = stringResource(R.string.setting_page_search_builtin_jina_desc),
+                                    checked = settings.searchBuiltinJinaEnabled,
+                                    icon = Lucide.BookOpenText,
+                                ) {
+                                    vm.updateSettings { it.copy(searchBuiltinJinaEnabled = !it.searchBuiltinJinaEnabled) }
+                                }
+                                BoardDivider()
+                                SourceSwitch(
+                                    title = stringResource(R.string.setting_page_search_google_webview_fallback),
+                                    description = stringResource(R.string.setting_page_search_google_webview_fallback_desc),
+                                    checked = settings.searchGoogleWebViewFallbackEnabled,
+                                    icon = Lucide.Search,
+                                ) {
+                                    vm.updateSettings { it.copy(searchGoogleWebViewFallbackEnabled = !it.searchGoogleWebViewFallbackEnabled) }
+                                }
+                            }
+                        }
+
+                        // iOS-style 通用: the product switch plus refresh
+                        // scheduling — what was previously split across
+                        // 通用 / 热榜 / 今日复盘 shell cards.
+                        item {
+                            BoardSectionCard(title = stringResource(R.string.board_settings_general)) {
+                                SourceSwitch(
+                                    title = stringResource(R.string.deepread_board_enable_title),
+                                    description = stringResource(R.string.deepread_board_enable_description),
+                                    checked = board.enabled,
+                                    icon = Lucide.LayoutDashboard,
+                                ) {
+                                    update { it.copy(enabled = !it.enabled) }
+                                }
+                                BoardDivider()
+                                IntervalRow(board.hotListRefreshIntervalMinutes) { value ->
+                                    update { it.copy(hotListRefreshIntervalMinutes = value) }
+                                }
+                                BoardDivider()
+                                SourceSwitch(
+                                    title = stringResource(R.string.board_wifi_only),
+                                    description = stringResource(R.string.deepread_board_wifi_only_description),
+                                    checked = board.hotListWifiOnly,
+                                    icon = Lucide.Cloud,
+                                ) {
+                                    update { it.copy(hotListWifiOnly = !it.hotListWifiOnly) }
+                                }
+                            }
+                        }
+                    } else {
+                        // Full app keeps its original feature-shell cards.
+                        item {
+                            BoardSectionCard(title = stringResource(R.string.board_settings_general)) {
+                                SourceSwitch(
+                                    title = stringResource(R.string.board_enable_title),
+                                    description = stringResource(R.string.board_enable_description),
+                                    checked = board.enabled,
+                                    icon = Lucide.LayoutDashboard,
+                                ) {
+                                    update { it.copy(enabled = !it.enabled) }
+                                }
+                                BoardDivider()
+                                DetailNavigationRow(
+                                    title = stringResource(R.string.board_model_background),
+                                    description = null,
+                                    icon = Lucide.RotateCw,
+                                    onClick = {
+                                        navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.GENERAL.route))
+                                    },
+                                )
+                            }
+                        }
+
+                        item {
+                            BoardSectionCard(title = stringResource(R.string.board_hotlist)) {
+                                IntervalRow(board.hotListRefreshIntervalMinutes) { value ->
+                                    update { it.copy(hotListRefreshIntervalMinutes = value) }
+                                }
+                                BoardDivider()
+                                SourceSwitch(
+                                    title = stringResource(R.string.board_wifi_only),
+                                    description = stringResource(R.string.board_wifi_only_description),
+                                    checked = board.hotListWifiOnly,
+                                    icon = Lucide.Cloud,
+                                ) {
+                                    update { it.copy(hotListWifiOnly = !it.hotListWifiOnly) }
+                                }
+                                BoardDivider()
+                                DetailNavigationRow(
+                                    title = stringResource(R.string.board_sources_focus_deep_read),
+                                    description = null,
+                                    icon = Lucide.BookOpenText,
+                                    onClick = {
+                                        navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.HOT_LIST.route))
+                                    },
+                                )
+                            }
+                        }
+
+                        item {
+                            BoardSectionCard(title = stringResource(R.string.board_daily_review)) {
+                                DetailNavigationRow(
+                                    title = stringResource(R.string.board_signal_sources_focus),
+                                    description = null,
+                                    icon = Lucide.SlidersHorizontal,
+                                    onClick = {
+                                        navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.REVIEW.route))
+                                    },
+                                )
+                            }
                         }
                     }
 
-                    item {
-                        BoardSectionCard(title = stringResource(R.string.board_hotlist)) {
-                            IntervalRow(board.hotListRefreshIntervalMinutes) { value ->
-                                update { it.copy(hotListRefreshIntervalMinutes = value) }
-                            }
-                            BoardDivider()
-                            SourceSwitch(
-                                title = stringResource(R.string.board_wifi_only),
-                                description = stringResource(R.string.board_wifi_only_description),
-                                checked = board.hotListWifiOnly,
-                                icon = Lucide.Cloud,
-                            ) {
-                                update { it.copy(hotListWifiOnly = !it.hotListWifiOnly) }
-                            }
-                            BoardDivider()
-                            DetailNavigationRow(
-                                title = stringResource(R.string.board_sources_focus_deep_read),
-                                description = null,
-                                icon = Lucide.BookOpenText,
-                                onClick = {
-                                    navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.HOT_LIST.route))
-                                },
-                            )
-                        }
-                    }
-
-                    item {
-                        BoardSectionCard(title = stringResource(R.string.board_daily_review)) {
-                            DetailNavigationRow(
-                                title = stringResource(R.string.board_signal_sources_focus),
-                                description = null,
-                                icon = Lucide.SlidersHorizontal,
-                                onClick = {
-                                    navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.REVIEW.route))
-                                },
-                            )
-                        }
-                    }
                 }
 
                 TodayBoardSettingsPane.GENERAL -> {
                     item {
                         BoardSectionCard(title = stringResource(R.string.board_settings_general)) {
-                            BoardModelRow(board = board, settings = settings, update = ::update)
-                            BoardDivider()
+                            // Standalone deepread keeps the model picker under
+                            // 文章生成 → 生成模型 (iOS parity); duplicating it here
+                            // would give two entries to the same setting.
+                            if (StandaloneSurfaces.current != StandaloneSurfaces.DEEP_READ) {
+                                BoardModelRow(board = board, settings = settings, update = ::update)
+                                BoardDivider()
+                            }
                             BackgroundStrategyRow(board.backgroundStrategy) { value ->
                                 update { it.copy(backgroundStrategy = value) }
                             }
+                        }
+                    }
+                }
+
+                TodayBoardSettingsPane.MODEL -> {
+                    item {
+                        BoardSectionCard(title = stringResource(R.string.deepread_settings_gen_model)) {
+                            BoardModelRow(
+                                board = board,
+                                settings = settings,
+                                update = ::update,
+                                initiallyExpanded = true,
+                                // The pane title and card header already say
+                                // 生成模型 — a third identical label inside the
+                                // card reads as a bug, not structure.
+                                showHeading = false,
+                            )
                         }
                     }
                 }
@@ -376,6 +631,46 @@ fun SettingTodayBoardPage(
                             )
                         }
                     }
+                    // Standalone deepread: reading typography + templates live in
+                    // the dedicated STYLE pane (iOS 版式与样式). Rendering them
+                    // here too would give two entries to the same settings.
+                    if (StandaloneSurfaces.current != StandaloneSurfaces.DEEP_READ) {
+                        item {
+                            BoardSectionCard(title = stringResource(R.string.deep_read_title)) {
+                                ReadingFontRow(board = board, fontStates = fontStates, update = ::update)
+                                BoardDivider()
+                                DeepReadCacheTtlRow(board = board, update = ::update)
+                            }
+                        }
+                        item {
+                            DeepReadTemplateSettingsRow(
+                                board = board,
+                                customTemplates = customDeepReadTemplates,
+                                invalidTemplateCount = invalidDeepReadTemplateCount,
+                                fontCss = templateFontCss,
+                                fontRepository = fontRepository,
+                                onSelect = { templateId -> update { it.copy(deepReadTemplateId = templateId) } },
+                                onDelete = { template ->
+                                    scope.launch {
+                                        deepReadTemplateRepository.deleteTemplate(template.id)
+                                        if (board.deepReadTemplateId == template.id) {
+                                            update {
+                                                it.copy(
+                                                    deepReadTemplateId = app.amber.feature.board.DeepReadTemplateIds.COMPOSE_MAGAZINE
+                                                )
+                                            }
+                                        }
+                                    }
+                                },
+                                onCreateTemplate = { navController.navigate(Screen.DeepReadTemplateWorkbench) },
+                            )
+                        }
+                    }
+                }
+
+                // Standalone "版式与样式" page (iOS DeepReadTemplatesView parity):
+                // reading typography + template gallery in one place.
+                TodayBoardSettingsPane.STYLE -> {
                     item {
                         BoardSectionCard(title = stringResource(R.string.deep_read_title)) {
                             ReadingFontRow(board = board, fontStates = fontStates, update = ::update)
@@ -438,17 +733,22 @@ fun SettingTodayBoardPage(
                                 BoardSignalSourceType.CALENDAR in board.enabledSources,
                                 icon = Lucide.AlarmClock,
                             ) { toggleSignalSource(BoardSignalSourceType.CALENDAR, ::update) }
-                            BoardDivider()
-                            SourceSwitch(stringResource(R.string.board_signal_feishu_messages), stringResource(R.string.board_signal_feishu_messages_description), BoardSignalSourceType.FEISHU_MSG in board.enabledSources, icon = Lucide.MessagesSquare) {
-                                toggleSignalSource(BoardSignalSourceType.FEISHU_MSG, ::update)
-                            }
-                            BoardDivider()
-                            SourceSwitch(stringResource(R.string.board_signal_feishu_docs), stringResource(R.string.board_signal_feishu_docs_description), BoardSignalSourceType.FEISHU_DOC in board.enabledSources, icon = Lucide.FileText) {
-                                toggleSignalSource(BoardSignalSourceType.FEISHU_DOC, ::update)
-                            }
-                            BoardDivider()
-                            SourceSwitch(stringResource(R.string.board_signal_chat_history), stringResource(R.string.board_signal_chat_history_description), BoardSignalSourceType.CHAT_HISTORY in board.enabledSources, icon = Lucide.MessageSquare) {
-                                toggleSignalSource(BoardSignalSourceType.CHAT_HISTORY, ::update)
+                            // Feishu credentials and chat history only exist in the
+                            // full agent app; in standalone surfaces these toggles
+                            // could never produce data — don't offer them.
+                            if (StandaloneSurfaces.allowsAgentFeatures) {
+                                BoardDivider()
+                                SourceSwitch(stringResource(R.string.board_signal_feishu_messages), stringResource(R.string.board_signal_feishu_messages_description), BoardSignalSourceType.FEISHU_MSG in board.enabledSources, icon = Lucide.MessagesSquare) {
+                                    toggleSignalSource(BoardSignalSourceType.FEISHU_MSG, ::update)
+                                }
+                                BoardDivider()
+                                SourceSwitch(stringResource(R.string.board_signal_feishu_docs), stringResource(R.string.board_signal_feishu_docs_description), BoardSignalSourceType.FEISHU_DOC in board.enabledSources, icon = Lucide.FileText) {
+                                    toggleSignalSource(BoardSignalSourceType.FEISHU_DOC, ::update)
+                                }
+                                BoardDivider()
+                                SourceSwitch(stringResource(R.string.board_signal_chat_history), stringResource(R.string.board_signal_chat_history_description), BoardSignalSourceType.CHAT_HISTORY in board.enabledSources, icon = Lucide.MessageSquare) {
+                                    toggleSignalSource(BoardSignalSourceType.CHAT_HISTORY, ::update)
+                                }
                             }
                         }
                     }
@@ -482,6 +782,12 @@ private enum class TodayBoardSettingsPane(val route: String) {
     GENERAL("general"),
     HOT_LIST("hot_list"),
     REVIEW("review"),
+    // Standalone-only "版式与样式" page — iOS DeepReadTemplatesView parity.
+    STYLE("style"),
+    // Standalone-only "生成模型" page — iOS DeepReadSettingsView's single
+    // model picker parity (the full app's multi-role SettingModelPage is
+    // agent-only and must not surface in standalone products).
+    MODEL("model"),
     ;
 
     companion object {
@@ -492,15 +798,28 @@ private enum class TodayBoardSettingsPane(val route: String) {
 
 @Composable
 private fun TodayBoardSettingsPane.localizedTitle(): String = when (this) {
-    TodayBoardSettingsPane.ROOT -> stringResource(R.string.board_settings_title)
+    // In the standalone deepread app this page IS the product settings —
+    // "今日看板" is internal full-app vocabulary the user never sees (iOS tab
+    // title is just "设置").
+    TodayBoardSettingsPane.ROOT -> stringResource(
+        if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) R.string.settings else R.string.board_settings_title,
+    )
     TodayBoardSettingsPane.GENERAL -> stringResource(R.string.board_settings_general_title)
     TodayBoardSettingsPane.HOT_LIST -> stringResource(R.string.board_settings_hotlist_title)
-    TodayBoardSettingsPane.REVIEW -> stringResource(R.string.board_settings_review_title)
+    TodayBoardSettingsPane.REVIEW -> stringResource(
+        // Standalone pane only holds signal sources + weights — "复盘" is
+        // full-app feature vocabulary with no surface here.
+        if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) R.string.deepread_board_signals_weights
+        else R.string.board_settings_review_title,
+    )
+    TodayBoardSettingsPane.STYLE -> stringResource(R.string.deepread_settings_layout_style)
+    TodayBoardSettingsPane.MODEL -> stringResource(R.string.deepread_settings_gen_model)
 }
 
 @Composable
 private fun BoardSectionCard(
     title: String,
+    footer: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
@@ -518,6 +837,7 @@ private fun BoardSectionCard(
             Text(title, style = LocalAmberType.current.eyebrow, color = tokens.ink2)
             androidx.compose.material3.HorizontalDivider(Modifier.weight(1f), color = tokens.line)
         }
+        Spacer(Modifier.height(8.dp))
         Surface(
             Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
@@ -527,6 +847,15 @@ private fun BoardSectionCard(
         ) {
             Column(Modifier.fillMaxWidth(), content = content)
         }
+        footer?.takeIf { it.isNotBlank() }?.let {
+            // iOS Form section footer: muted caption under the card.
+            Text(
+                it,
+                style = LocalAmberType.current.secondary,
+                color = tokens.ink3,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+            )
+        }
     }
 }
 
@@ -534,7 +863,8 @@ private fun BoardSectionCard(
 private fun BoardDivider() {
     val tokens = LocalAmberTokens.current
     androidx.compose.material3.HorizontalDivider(
-        Modifier.padding(start = 48.dp),
+        // Align the hairline with the row label: icon(14+32) + gap(12) = 58dp.
+        Modifier.padding(start = 58.dp),
         color = tokens.line,
     )
 }
@@ -543,6 +873,7 @@ private fun BoardDivider() {
 private fun DetailNavigationRow(
     title: String,
     description: String? = null,
+    value: String? = null,
     icon: ImageVector? = null,
     onClick: () -> Unit,
 ) {
@@ -575,6 +906,17 @@ private fun DetailNavigationRow(
                     color = tokens.ink3,
                 )
             }
+        }
+        value?.takeIf { it.isNotBlank() }?.let {
+            // iOS LabeledContent value — current selection shown beside the chevron.
+            Text(
+                text = it,
+                style = LocalAmberType.current.secondary,
+                color = tokens.ink3,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 160.dp),
+            )
         }
         Icon(
             Lucide.ChevronRight,
@@ -781,17 +1123,28 @@ private fun BoardModelRow(
     board: TodayBoardSetting,
     settings: app.amber.core.settings.Settings,
     update: (block: (TodayBoardSetting) -> TodayBoardSetting) -> Unit,
+    initiallyExpanded: Boolean = false,
+    showHeading: Boolean = true,
 ) {
     val boardModelUuid = board.boardModelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
     val boardModel: Model? = boardModelUuid?.let { uuid -> settings.findModelById(uuid) }
     val selectedProvider = boardModel?.findProviderForBoard(settings.providers)
-    var expanded by rememberSaveable { mutableStateOf(false) }
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
 
     Column(
         modifier = Modifier.fillMaxWidth().padding(12.dp).animateContentSize(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(stringResource(R.string.board_model_title), style = MaterialTheme.typography.titleSmall)
+        if (showHeading) {
+            Text(
+                stringResource(
+                    // "看板" is full-app vocabulary; standalone products name the role.
+                    if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) R.string.deepread_settings_gen_model
+                    else R.string.board_model_title,
+                ),
+                style = MaterialTheme.typography.titleSmall,
+            )
+        }
         Row(
             modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -806,12 +1159,18 @@ private fun BoardModelRow(
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = boardModel?.displayName ?: stringResource(R.string.board_follow_main_model),
+                    text = boardModel?.displayName ?: stringResource(
+                        if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) R.string.deepread_board_use_default_model
+                        else R.string.board_follow_main_model,
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = workspaceColors().ink,
                 )
                 Text(
-                    text = selectedProvider?.name ?: stringResource(R.string.board_using_current_model),
+                    text = selectedProvider?.name ?: stringResource(
+                        if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) R.string.deepread_board_follow_default_model
+                        else R.string.board_using_current_model,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = workspaceColors().muted,
                 )
@@ -840,7 +1199,10 @@ private fun BoardModelRow(
                     currentModel = boardModel?.id,
                     providers = settings.providers,
                     modelType = ModelType.CHAT,
-                    clearLabel = stringResource(R.string.board_follow_main_model),
+                    clearLabel = stringResource(
+                        if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) R.string.deepread_board_use_default_model
+                        else R.string.board_follow_main_model,
+                    ),
                     onClear = { update { it.copy(boardModelId = null) } },
                     onSelect = { model -> update { it.copy(boardModelId = model.id.toString()) } },
                     dense = true,
@@ -970,6 +1332,10 @@ private fun FocusRulesEditor(
 private fun SourceWeightsEditor(weights: Map<String, Int>, onChange: (sourceType: String, weight: Int) -> Unit) {
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         BOARD_WEIGHT_SOURCES.forEach { source ->
+            // Feishu/chat-history sources can never produce data outside the
+            // full agent app — hide their weights there too.
+            if (!StandaloneSurfaces.allowsAgentFeatures &&
+                source.sourceType in AGENT_ONLY_SIGNAL_SOURCES) return@forEach
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f)) {
@@ -1170,9 +1536,7 @@ private val BOARD_WEIGHT_SOURCES = listOf(
     BoardWeightSource(BoardSignalSourceType.CHAT_HISTORY, "聊天记录", "最近对话中的真实待办和项目上下文"),
 )
 
-private val REVIEW_SIGNAL_SOURCES = setOf(
-    BoardSignalSourceType.NOTIFICATION,
-    BoardSignalSourceType.CALENDAR,
+private val AGENT_ONLY_SIGNAL_SOURCES = setOf(
     BoardSignalSourceType.FEISHU_MSG,
     BoardSignalSourceType.FEISHU_DOC,
     BoardSignalSourceType.CHAT_HISTORY,

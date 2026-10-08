@@ -10,6 +10,7 @@ import app.amber.core.jev.JevPolicy
 import app.amber.core.jev.JevRuntime
 import app.amber.core.jev.JevCouncilPoolRanker
 import app.amber.core.jev.JevToolOutputProjector
+import app.amber.core.jev.JevToolResultRetention
 import app.amber.core.jev.JevToolSemanticSearch
 import app.amber.core.jev.MemorySemanticReranker
 import app.amber.core.jev.JevWebGoalRunner
@@ -66,6 +67,9 @@ val jevModule = module {
     single<MemorySemanticReranker> { get<JevMemoryReranker>() }
     single { JevToolSemanticSearch(get()) }
     single { JevToolOutputProjector(get()) }
+    single { JevToolResultRetention(get()) }
+    single { app.amber.core.jev.JevAutoApprovalGate(get()) }
+    single { app.amber.core.jev.JevCompletionCheck(get()) }
     single { JevCouncilPoolRanker(get()) }
     single<CouncilPoolRanker> { get<JevCouncilPoolRanker>() }
     single { JevWebGoalRunner(get()) }

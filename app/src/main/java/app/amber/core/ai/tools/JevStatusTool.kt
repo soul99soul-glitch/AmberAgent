@@ -140,4 +140,7 @@ private fun JevPurpose.description(): String = when (this) {
     JevPurpose.MODEL_ROUTING -> "Task-fit ranking of council model-pool seats."
     JevPurpose.WEB_AUTOMATION -> "Bounded action decisions inside the wm_run_goal web loop."
     JevPurpose.SCREEN_AUTOMATION -> "Bounded action decisions inside the screen_run_goal accessibility loop (sends screen content + task text)."
+    JevPurpose.COMPLETION_CHECK -> "After files were changed with no check run, asks whether the final reply claims completion; if so, runs one more round to verify (sends the final reply + changed paths)."
+    JevPurpose.AUTO_APPROVAL_GATE -> "Second check when auto-approval releases a tool call; high risk turns it back into a manual approval (sends tool name, arguments + recent user messages)."
+    JevPurpose.TOOL_RESULT_RETENTION -> "Background keep/clear decision for older tool results before compaction clears them (sends tool output samples + conversation outline)."
 }

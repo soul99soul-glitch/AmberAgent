@@ -370,8 +370,9 @@ class NovelWorkspaceBranchFlowTest {
         assertTrue("status 应报主线 head：\n$output", output.contains("head: ${mainHead.id}"))
         assertTrue(output.contains(NovelWorkspaceLedger.Message.COLLECTION))
         assertTrue(output.contains("branch: 主线"))
-        // 主线刚提交的合法新章不再被当成脏文件。
-        assertFalse("status 不应报 dirty：\n$output", output.contains("dirty:"))
+        // 主线刚提交的合法新章不再被当成脏文件；剧情尚未跟进，状态必须如实报告。
+        assertTrue("status 应只报剧情需更新：\n$output", output.contains("dirty: plot/"))
+        assertTrue(output.contains("plot stale: true"))
     }
 
     /** 历史记录兼容：branchSlug == null 的旧 undo 按主线解释，不跨分支生效。 */

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- 宣纸暖白：与 iOS 小说独立应用图标纸面同源采样（#EBE2D2）。 -->
+  <color name="ic_launcher_bg_amber">#EBE2D2</color>
+</resources>

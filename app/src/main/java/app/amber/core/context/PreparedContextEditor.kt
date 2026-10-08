@@ -7,9 +7,14 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 
 object PreparedContextEditor {
+    /**
+     * @param retainedToolCallIds Jev 压缩保留判定需保留原文的结果：只跳过清空，
+     *   超长结果仍按 trim 规则截成预览。
+     */
     fun edit(
         messages: List<UIMessage>,
         keepRecentMessages: Int,
+        retainedToolCallIds: Set<String> = emptySet(),
     ): PreparedContextEditResult {
         val originalTokens = ConversationContextPlanner.estimateTokens(messages)
         val trim = applyStage(
@@ -24,7 +29,9 @@ object PreparedContextEditor {
             reason = "retriable historical tool results are replaced with placeholders",
             messages = trim.messages,
         ) { message, index ->
-            editMessageTools(message, index, trim.messages.size, keepRecentMessages, ::clearToolResult)
+            editMessageTools(message, index, trim.messages.size, keepRecentMessages) { tool ->
+                if (tool.toolCallId in retainedToolCallIds) tool else clearToolResult(tool)
+            }
         }
         return PreparedContextEditResult(
             messages = clear.messages,
@@ -35,6 +42,10 @@ object PreparedContextEditor {
             )
         )
     }
+
+    /** 压缩保留的候选口径：移出保留窗口后会被清空的结果（与清空规则同源）。 */
+    fun wouldClearToolResult(tool: UIMessagePart.Tool, message: UIMessage): Boolean =
+        !message.hasMultimodalPart() && clearToolResult(tool) != tool
 
     private fun applyStage(
         stage: String,

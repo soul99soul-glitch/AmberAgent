@@ -1,0 +1,183 @@
+{
+  "command": "./gradlew --offline --continue -I /tmp/amber-review-test-heap.gradle -PantigravityClientId=review-fixture-client -PantigravityClientSecret=review-fixture-secret testDebugUnitTest",
+  "log": "/tmp/amber-review-final-all-tests-green.log",
+  "build": "SUCCESSFUL",
+  "modules": {
+    "core/settings": {
+      "tests": 95,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 95,
+      "suites": 12
+    },
+    "core/jev": {
+      "tests": 39,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 39,
+      "suites": 4
+    },
+    "core/agent-runtime-impl": {
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 20,
+      "suites": 3
+    },
+    "core/agent-store-room": {
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 11,
+      "suites": 1
+    },
+    "app": {
+      "tests": 2696,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 14,
+      "passed": 2682,
+      "suites": 418
+    },
+    "highlight": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 1,
+      "suites": 1
+    },
+    "document": {
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 7,
+      "suites": 3
+    },
+    "search": {
+      "tests": 16,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 16,
+      "suites": 3
+    },
+    "common": {
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 9,
+      "suites": 2
+    },
+    "ai": {
+      "tests": 210,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 210,
+      "suites": 31
+    },
+    "feature/tools/access": {
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 12,
+      "suites": 2
+    },
+    "feature/tools/api": {
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 9,
+      "suites": 3
+    },
+    "feature/workspace": {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 2,
+      "suites": 1
+    },
+    "feature/terminal": {
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 8,
+      "passed": 9,
+      "suites": 3
+    },
+    "feature/novel": {
+      "tests": 56,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "passed": 55,
+      "suites": 12
+    },
+    "feature/task": {
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 11,
+      "suites": 1
+    },
+    "feature/novel-workspace": {
+      "tests": 155,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "passed": 154,
+      "suites": 22
+    },
+    "feature/modelcouncil": {
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "passed": 24,
+      "suites": 3
+    }
+  },
+  "total": {
+    "tests": 3390,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 24,
+    "passed": 3366
+  },
+  "assembly": {
+    "command": "./gradlew --offline :app:assembleDebug",
+    "log": "/tmp/amber-review-final-assemble-debug.log",
+    "build": "SUCCESSFUL",
+    "generated_ai_build_config_contains_no_synthetic_test_values": true,
+    "artifacts": [
+      {
+        "path": "/Users/arquiel/Downloads/AI/amberagent-Android/app/build/outputs/apk/debug/app-universal-debug.apk",
+        "bytes": 114234923,
+        "sha256": "1fa289a599c265248bc97487a099a2659b4bebbfb475aede642faab854bf855a",
+        "signature_verified": true,
+        "signature_validation": "Verifies\nVerified using v1 scheme (JAR signing): false\nVerified using v2 scheme (APK Signature Scheme v2): true\nVerified using v3 scheme (APK Signature Scheme v3): false\nVerified using v3.1 scheme (APK Signature Scheme v3.1): false\nVerified using v4 scheme (APK Signature Scheme v4): false\nVerified for SourceStamp: false\nNumber of signers: 1"
+      },
+      {
+        "path": "/Users/arquiel/Downloads/AI/amberagent-Android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk",
+        "bytes": 114234923,
+        "sha256": "1fa289a599c265248bc97487a099a2659b4bebbfb475aede642faab854bf855a",
+        "signature_verified": true,
+        "signature_validation": "Verifies\nVerified using v1 scheme (JAR signing): false\nVerified using v2 scheme (APK Signature Scheme v2): true\nVerified using v3 scheme (APK Signature Scheme v3): false\nVerified using v3.1 scheme (APK Signature Scheme v3.1): false\nVerified using v4 scheme (APK Signature Scheme v4): false\nVerified for SourceStamp: false\nNumber of signers: 1"
+      }
+    ],
+    "preserved_log": ".workflow/android-review-20261002/results/final-assemble-debug.log"
+  },
+  "preserved_log": ".workflow/android-review-20261002/results/final-tests.log",
+  "independent_final_acceptance": "results/phase5-review.md"
+}

@@ -47,6 +47,14 @@ class JevStatusToolTest {
         client = JevClient(transport = noNetworkTransport),
         apiKeyProvider = { "secret-key" },
         clock = { 1_000_000L },
+        // 独立计数：共享的 IN_MEMORY 会带入同一 JVM 中其他测试的请求数。
+        usageStore = object : app.amber.core.jev.JevUsageStore {
+            private val map = HashMap<String, app.amber.core.jev.JevDailyUsage>()
+            override fun load(dayKey: String) = map[dayKey] ?: app.amber.core.jev.JevDailyUsage()
+            override fun store(dayKey: String, usage: app.amber.core.jev.JevDailyUsage) {
+                map[dayKey] = usage
+            }
+        },
     )
 
     private fun payload(settings: Settings): kotlinx.serialization.json.JsonObject = runBlocking {

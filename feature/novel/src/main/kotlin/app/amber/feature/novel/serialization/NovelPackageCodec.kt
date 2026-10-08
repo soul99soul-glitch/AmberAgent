@@ -12,14 +12,10 @@ object NovelPackageCodec {
         return NovelSwiftCompatibleJson.encodePackageFromDocument(document)
     }
 
-    fun decode(bytes: ByteArray): NovelProjectDocumentV1 {
-        if (bytes.isEmpty()) throw NovelError.InvalidPackage("empty package")
-        if (bytes.size > NovelSwiftWireContract.MAX_ENVELOPE_BYTES) {
-            throw NovelError.PackageTooLarge(NovelSwiftWireContract.MAX_ENVELOPE_BYTES)
-        }
-        return try {
+    fun decode(bytes: ByteArray): NovelProjectDocumentV1 =
+        decode(bytes) { rawEnvelope ->
             val doc = NovelLegacyForkMigration.migrate(
-                NovelSwiftCompatibleJson.decodeProjectDocumentFromPackage(bytes),
+                NovelSwiftCompatibleJson.decodeProjectDocumentFromPackage(rawEnvelope),
             )
             // Import normalization: running runs become interrupted
             val normalized = doc.copy(
@@ -38,6 +34,21 @@ object NovelPackageCodec {
             )
             NovelDocumentValidator.validate(normalized)
             normalized
+        }
+
+    fun decodeForWorkspaceImport(bytes: ByteArray): NovelProjectDocumentV1 =
+        decode(bytes, NovelSwiftCompatibleJson::decodeWorkspaceImportDocumentFromPackage)
+
+    private fun decode(
+        bytes: ByteArray,
+        decodeDocument: (ByteArray) -> NovelProjectDocumentV1,
+    ): NovelProjectDocumentV1 {
+        if (bytes.isEmpty()) throw NovelError.InvalidPackage("empty package")
+        if (bytes.size > NovelSwiftWireContract.MAX_ENVELOPE_BYTES) {
+            throw NovelError.PackageTooLarge(NovelSwiftWireContract.MAX_ENVELOPE_BYTES)
+        }
+        return try {
+            decodeDocument(bytes)
         } catch (error: NovelError) {
             throw error
         } catch (error: Exception) {

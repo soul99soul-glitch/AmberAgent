@@ -255,8 +255,8 @@ class NovelWorkspaceGhostwriteJobModeTest {
         val store = NovelWorkspaceStore(dir)
         val t0 = Instant.parse("2026-08-20T00:00:00Z")
         val ledger = NovelWorkspaceLedgerStore(
-            head = "P-9",
-            heads = mapOf("B-1" to "P-9"),
+            head = "P-JUNK",
+            heads = mapOf("B-1" to "P-JUNK"),
             commits = listOf(
                 NovelWorkspaceLedger.makeCommit(
                     id = "C-INIT", parentId = null,
@@ -271,28 +271,28 @@ class NovelWorkspaceGhostwriteJobModeTest {
                 // 创建（t0.5）时，旧 floor 比较会计入它，精确比较排除。
                 NovelWorkspaceLedger.makeCommit(
                     id = "P-EARLY", parentId = "C-INIT",
-                    files = mapOf("branches/主线/chapters/001-a.md" to "h2"),
+                    files = mapOf("branches/主线/chapters/001-a.md" to "h2", "branches/主线/chapters/004-d.md" to "h4"),
                     message = NovelWorkspaceLedger.Message.POLISH,
                     createdAt = t0,
                 ),
                 // 范围外章节（job 范围 [1,3]）：不计。
                 NovelWorkspaceLedger.makeCommit(
                     id = "P-RANGE", parentId = "P-EARLY",
-                    files = mapOf("branches/主线/chapters/004-d.md" to "h5"),
+                    files = mapOf("branches/主线/chapters/001-a.md" to "h2", "branches/主线/chapters/004-d.md" to "h5"),
                     message = NovelWorkspaceLedger.Message.POLISH,
                     createdAt = t0.plusSeconds(1),
                 ),
                 // 范围内且不早于 job 创建：计入。
                 NovelWorkspaceLedger.makeCommit(
                     id = "P-IN", parentId = "P-RANGE",
-                    files = mapOf("branches/主线/chapters/002-b.md" to "h3"),
+                    files = mapOf("branches/主线/chapters/001-a.md" to "h2", "branches/主线/chapters/004-d.md" to "h5", "branches/主线/chapters/002-b.md" to "h3"),
                     message = NovelWorkspaceLedger.Message.POLISH,
                     createdAt = t0.plusSeconds(2),
                 ),
                 // 润色 commit 但不改任何可解析序号的章节路径：忽略。
                 NovelWorkspaceLedger.makeCommit(
                     id = "P-JUNK", parentId = "P-IN",
-                    files = mapOf("branches/主线/notes.md" to "n1"),
+                    files = mapOf("branches/主线/chapters/001-a.md" to "h2", "branches/主线/chapters/004-d.md" to "h5", "branches/主线/chapters/002-b.md" to "h3", "branches/主线/notes.md" to "n1"),
                     message = NovelWorkspaceLedger.Message.POLISH,
                     createdAt = t0.plusSeconds(3),
                 ),
@@ -349,4 +349,43 @@ class NovelWorkspaceGhostwriteJobModeTest {
             NovelWorkspaceGhostwriteJobs.load(dir, "J-PF")?.mode,
         )
     }
+    @Test
+    fun `owned polish progress counts distinct ordinals even unchanged and excludes other jobs and branches`() {
+        val dir = tempFolder.root.resolve("owned-polish")
+        assertTrue(dir.mkdirs())
+        val t0 = Instant.parse("2026-09-30T00:00:00Z")
+        val files = mapOf("branches/主线/chapters/001-a.md" to "same", "branches/主线/chapters/002-b.md" to "same")
+        fun commit(id: String, parent: String?, job: String? = null, ordinal: Int? = null) = NovelWorkspaceLedger.makeCommit(
+            id, parent, files,
+            if (job == null) NovelWorkspaceLedger.Message.INITIAL else NovelWorkspaceLedger.Message.POLISH,
+            t0,
+            polishJobId = job,
+            polishChapterOrdinal = ordinal,
+        )
+        val ledger = NovelWorkspaceLedgerStore(
+            head = "OTHER-BRANCH",
+            heads = mapOf("B-1" to "OWNED-2", "B-2" to "OTHER-BRANCH"),
+            commits = listOf(
+                commit("INIT", null),
+                commit("OLD-JOB", "INIT", "old-job", 1),
+                commit("OWNED-1", "OLD-JOB", "job", 1),
+                commit("DUPLICATE", "OWNED-1", "job", 1),
+                commit("OUTSIDE", "DUPLICATE", "job", 4),
+                commit("OWNED-2", "OUTSIDE", "job", 2),
+                commit("OTHER-BRANCH", "INIT", "job", 3),
+            ),
+        )
+        NovelWorkspaceLedger.save(ledger, dir)
+        val job = NovelWorkspaceGhostwriteJob(
+            id = "job", branchId = "B-1", branchSlug = "主线",
+            targetChapterCount = 3, startOrdinal = 1, endOrdinal = 3,
+            mode = NovelWorkspaceGhostwriteMode.Polish, polishUsesCommitProvenance = true,
+            createdAt = t0.plusSeconds(1), updatedAt = t0.plusSeconds(1),
+        )
+        assertEquals(2, NovelWorkspaceGhostwriteJobs.progress(job, NovelWorkspaceStore(dir)))
+        val encoded = json.encodeToString(NovelWorkspaceGhostwriteJob.serializer(), job)
+        assertTrue(encoded.contains("polishUsesCommitProvenance"))
+        assertEquals(job, json.decodeFromString(NovelWorkspaceGhostwriteJob.serializer(), encoded))
+    }
+
 }

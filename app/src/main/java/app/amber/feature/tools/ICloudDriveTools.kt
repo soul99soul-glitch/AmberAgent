@@ -125,9 +125,7 @@ class ICloudDriveTools(
                 val result = manager.readText(
                     path = input.string("path"),
                     nodeRef = input.string("node_ref"),
-                    maxBytes = ((startChar.toLong() + maxChars + 1) * 4)
-                        .coerceAtMost(MAX_ICLOUD_READ_BYTES.toLong())
-                        .toInt(),
+                    maxBytes = MAX_ICLOUD_READ_BYTES,
                 )
                 val content = result.value.content
                 val endExclusive = (startChar + maxChars).coerceAtMost(content.length)

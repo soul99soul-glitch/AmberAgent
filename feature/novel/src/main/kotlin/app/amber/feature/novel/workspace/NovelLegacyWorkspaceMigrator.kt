@@ -30,13 +30,15 @@ object NovelLegacyWorkspaceMigrator {
         val usedPaths = mutableSetOf<String>()
 
         val activeBranches = document.branches.filter { it.lifecycle == NovelBranchLifecycle.Active }
-        val mainBranch = activeBranches.firstOrNull { it.id == document.project.mainBranchID }
-        val mainSlug = NovelWorkspaceSlug.reservedPath(
-            NovelWorkspaceSlug.slug(mainBranch?.name ?: "main"),
-            usedPaths,
-            document.project.mainBranchID.rawValue,
-        )
-        usedPaths.clear()
+        val usedBranchSlugs = mutableSetOf<String>()
+        val branchSlugs = activeBranches.associate { branch ->
+            branch.id.rawValue to NovelWorkspaceSlug.reservedPath(
+                NovelWorkspaceSlug.slug(branch.name),
+                usedBranchSlugs,
+                branch.id.rawValue,
+            )
+        }
+        val mainSlug = branchSlugs[document.project.mainBranchID.rawValue] ?: "main"
 
         files.add(
             NovelWorkspaceFile(
@@ -71,7 +73,7 @@ object NovelLegacyWorkspaceMigrator {
             val revision = document.materialRevisions.firstOrNull { it.id == material.currentRevisionID }
                 ?: continue
             val relative = "setting/${materialFolder(material.kind)}/${NovelWorkspaceSlug.slug(revision.title)}"
-            val path = NovelWorkspaceSlug.reservedPath(relative, usedPaths, material.id.rawValue)
+            val path = NovelWorkspaceSlug.reservedPath(relative, usedPaths, material.id.rawValue) + ".md"
             val fields = mutableListOf(
                 "id" to material.id.rawValue,
                 "kind" to "material",
@@ -88,16 +90,6 @@ object NovelLegacyWorkspaceMigrator {
                     path = path,
                     content = NovelWorkspaceMarkdown.render(fields, aliases = revision.aliases, body = revision.content),
                 ),
-            )
-        }
-
-        val branchSlugs = mutableMapOf<String, String>()
-        val usedBranchSlugs = mutableSetOf<String>()
-        for (branch in activeBranches) {
-            branchSlugs[branch.id.rawValue] = NovelWorkspaceSlug.reservedPath(
-                NovelWorkspaceSlug.slug(branch.name),
-                usedBranchSlugs,
-                branch.id.rawValue,
             )
         }
 

@@ -96,4 +96,23 @@ class MiniAppSourceChecksTest {
         assertFalse(MiniAppSourceChecks.hasUnsavedChanges("a", "a"))
         assertTrue(MiniAppSourceChecks.hasUnsavedChanges("a", "b"))
     }
+
+    @Test
+    fun stringsAndCommentsDoNotHideFollowingBrackets() {
+        listOf("const x={a:'x'};", "f('x');", "const x=['x'];", "function f(){/* note */}")
+            .forEach { script ->
+                assertEquals(script, emptyList<MiniAppSourceChecks.Issue>(),
+                    MiniAppSourceChecks.issues("<html><body><script>$script</script></body></html>"))
+            }
+        assertEquals(emptyList<MiniAppSourceChecks.Issue>(),
+            MiniAppSourceChecks.issues("<html><head><style>a{content:'x'}</style></head></html>"))
+    }
+
+    @Test
+    fun stringsAndCommentsDoNotHideUnexpectedClosingBrackets() {
+        assertNotNull(MiniAppSourceChecks.scriptBraceIssue(
+            "<html><script>const x='x'};</script></html>"))
+        assertNotNull(MiniAppSourceChecks.scriptBraceIssue(
+            "<html><script>/* note */}</script></html>"))
+    }
 }

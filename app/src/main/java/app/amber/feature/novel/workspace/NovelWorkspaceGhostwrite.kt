@@ -39,6 +39,7 @@ class NovelWorkspaceGhostwriteCoordinator(
         val commitId: String?,
         val candidate: NovelWorkspaceGhostwriteCandidate? = null,
         val error: String? = null,
+        val retryable: Boolean = true,
     )
 
     data class JointReviewTurnResult(
@@ -532,14 +533,7 @@ class NovelWorkspaceGhostwriteCoordinator(
         return "第 $chapterOrdinal 章" to text
     }
 
-    /**
-     * Unattended single-chapter polish: one auto-committing agent turn whose write tool
-     * is host-locked to the existing chapter file ([NovelWorkspaceRuntime.TurnRequest.polishChapterPath]).
-     * Guards (timeout, single retry at the batch level, host-write fallback) reuse the
-     * ghostwrite parameters. Turn success = the branch head advanced with a 「润色」
-     * commit (the tool path); a narrated final answer of chapter length takes the
-     * host-write path preserving the chapter's front matter.
-     */
+    /** Read-only polish generation and independent factual review precede the host commit. */
     suspend fun polishOneChapter(
         projectDirectory: File,
         branchId: String,
@@ -553,124 +547,12 @@ class NovelWorkspaceGhostwriteCoordinator(
         ownerExecutionId: String? = null,
         locale: Locale = Locale.CHINESE,
         fallbackErrorMessage: String = "Generation failed",
-    ): GhostwriteChapterResult {
-        val store = NovelWorkspaceStore(projectDirectory)
-        val chaptersPrefix = NovelWorkspacePaths.branchPrefix(branchSlug) + "/chapters"
-        val chapterPath = store.list(chaptersPrefix).firstOrNull {
-            NovelWorkspacePaths.chapterOrdinalFromPath(it) == chapterOrdinal
-        } ?: return GhostwriteChapterResult(
-            commitId = null,
-            error = localized(
-                locale,
-                chinese = "第 $chapterOrdinal 章不存在，无法润色",
-                english = "Chapter $chapterOrdinal does not exist and cannot be polished.",
-            ),
-        )
-        val chapterBody = store.read(chapterPath)
-            ?.let { NovelWorkspaceMarkdown.parseFile(it).body }
-            .orEmpty()
-        val commitIdBeforeTurn = NovelWorkspaceLedger.load(projectDirectory).headOf(branchId)?.id
-        val turnHandle = turnLauncher.launch(
-            NovelWorkspaceRuntime.TurnRequest(
-                projectDirectory = projectDirectory,
-                branchId = branchId,
-                branchSlug = branchSlug,
-                userText = localized(
-                    locale,
-                    chinese = "请润色第 $chapterOrdinal 章。",
-                    english = "Polish chapter $chapterOrdinal.",
-                ),
-                systemPrompt = NovelWorkspacePrompts.polishChapter(
-                    chapterOrdinal = chapterOrdinal,
-                    chapterPath = chapterPath,
-                    chapterBody = chapterBody,
-                    writingPreference = readWritingPreference(store),
-                    locale = locale,
-                ),
-                settings = settings,
-                model = model,
-                maxSteps = maxSteps,
-                autoApproveCanon = true,
-                autoCommitMessage = NovelWorkspaceLedger.Message.POLISH,
-                injection = injection,
-                ownerJobId = ownerJobId,
-                ownerExecutionId = ownerExecutionId,
-                polishChapterPath = chapterPath,
-                fallbackErrorMessage = fallbackErrorMessage,
-                locale = locale,
-            ),
-            runtime,
-        )
-        val terminal = try {
-            kotlinx.coroutines.withTimeout(CHAPTER_TURN_TIMEOUT_MS) {
-                turnHandle.events.first { event ->
-                    event is NovelWorkspaceRuntime.TurnEvent.Completed ||
-                        event is NovelWorkspaceRuntime.TurnEvent.Failed
-                }
-            }
-        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
-            runCatching { turnHandle.awaitTerminal() }
-            return GhostwriteChapterResult(
-                commitId = null,
-                error = localized(
-                    locale,
-                    chinese = "本章润色超时（${CHAPTER_TURN_TIMEOUT_MS / 60_000} 分钟无完成），已中止本轮",
-                    english = "Chapter polishing timed out (${CHAPTER_TURN_TIMEOUT_MS / 60_000} minutes without completion); this turn was aborted.",
-                ),
-            )
-        }
-        val failure = terminal as? NovelWorkspaceRuntime.TurnEvent.Failed
-        if (failure != null) return GhostwriteChapterResult(commitId = null, error = failure.message)
-        // Tool path: the runtime committed the buffered chapter write as a 「润色」 commit.
-        val commit = NovelWorkspaceLedger.load(projectDirectory).headOf(branchId)
-        if (commit != null && commit.id != commitIdBeforeTurn &&
-            commit.message == NovelWorkspaceLedger.Message.POLISH
-        ) {
-            return GhostwriteChapterResult(commitId = commit.id)
-        }
-        // Host-write fallback (same rationale as ghostwrite): a substantial final
-        // answer IS the polished chapter — replace the body, keep the front matter.
-        val finalText = (terminal as? NovelWorkspaceRuntime.TurnEvent.Completed)
-            ?.finalText
-            ?.trim()
-            .orEmpty()
-        if (finalText.length >= MIN_HOSTWRITE_CHARS) {
-            val filed = try {
-                runtime.commitPolishedChapter(
-                    projectDirectory = projectDirectory,
-                    branchId = branchId,
-                    branchSlug = branchSlug,
-                    chapterPath = chapterPath,
-                    polishedBody = finalText,
-                    ownerJobId = ownerJobId,
-                    ownerExecutionId = ownerExecutionId,
-                )
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                return GhostwriteChapterResult(
-                    commitId = null,
-                    error = localizedOwnerError(
-                        error = error,
-                        locale = locale,
-                        fallbackErrorMessage = fallbackErrorMessage,
-                        chinese = "润色已暂停或取消",
-                        english = "The polishing batch is paused or cancelled.",
-                    ),
-                )
-            }
-            return GhostwriteChapterResult(commitId = filed.id)
-        }
-        return GhostwriteChapterResult(commitId = null)
-    }
-
-    /** Writing preference = the setting/writing card body (same source as the panel). */
-    private fun readWritingPreference(store: NovelWorkspaceStore): String =
-        store.list(NovelWorkspacePaths.SETTING_DIR + "/writing")
-            .firstOrNull()
-            ?.let { store.read(it) }
-            ?.let { NovelWorkspaceMarkdown.parseFile(it).body }
-            .orEmpty()
+        reviewModel: Model = model,
+    ): GhostwriteChapterResult = NovelWorkspacePolisher(runtime, turnLauncher).runChapter(
+        projectDirectory, branchId, branchSlug, settings, model, reviewModel,
+        chapterOrdinal, maxSteps, injection, ownerJobId, ownerExecutionId,
+        locale, fallbackErrorMessage,
+    )
 
     sealed interface BatchResult {
         data class Completed(val chaptersWritten: Int) : BatchResult
@@ -714,17 +596,18 @@ class NovelWorkspaceGhostwriteCoordinator(
                 NovelWorkspaceLedger.isPlotStale(store, NovelWorkspaceLedger.load(projectDirectory), job.branchSlug)
             ) {
                 try {
-                    runtime.commitPolishPointer(
-                        projectDirectory,
-                        branchId,
-                        job.branchSlug,
-                        job.startOrdinal + written - 1,
-                    )
+                    NovelWorkspaceGhostwriteJobs.withRunningOwner(projectDirectory, job.id, job.executionKey) {
+                        repairDanglingPolishPointer(projectDirectory, job.branchSlug)
+                        true
+                    } ?: return BatchResult.Stopped(written)
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
                     return BatchResult.Failed(written, pointerCommitFailure(error))
                 }
+            }
+            if (polish && NovelWorkspaceLedger.isPlotStale(store, NovelWorkspaceLedger.load(projectDirectory), job.branchSlug)) {
+                return BatchResult.Failed(written, localized(locale, "剧情落后于正文，请先更新剧情再继续润色", "The plot is behind the manuscript. Update it before continuing to polish."))
             }
             while (written < job.targetChapterCount) {
                 if (isPaused() || isCancelled(job, projectDirectory)) return BatchResult.Stopped(written)
@@ -963,6 +846,7 @@ class NovelWorkspaceGhostwriteCoordinator(
                 }
                 var chapter = if (polish) {
                     polishOneChapter(
+                        reviewModel = reviewModel,
                         projectDirectory = projectDirectory,
                         branchId = branchId,
                         branchSlug = job.branchSlug,
@@ -992,7 +876,7 @@ class NovelWorkspaceGhostwriteCoordinator(
                 }
                 // One retry absorbs transient provider blips (rate limit, dropped
                 // connection); a second failure ends the batch with the error surfaced.
-                if (chapter.error != null) {
+                if (chapter.error != null && chapter.retryable) {
                     if (isPaused() || isCancelled(job, projectDirectory)) return BatchResult.Stopped(written)
                     delay(CHAPTER_RETRY_DELAY_MS)
                     // Re-check after the backoff: pause during the wait must not
@@ -1000,6 +884,7 @@ class NovelWorkspaceGhostwriteCoordinator(
                     if (isPaused() || isCancelled(job, projectDirectory)) return BatchResult.Stopped(written)
                     chapter = if (polish) {
                         polishOneChapter(
+                            reviewModel = reviewModel,
                             projectDirectory = projectDirectory,
                             branchId = branchId,
                             branchSlug = job.branchSlug,
@@ -1029,6 +914,7 @@ class NovelWorkspaceGhostwriteCoordinator(
                     }
                 }
                 if (chapter.error != null) {
+                    if (isPaused() || isCancelled(job, projectDirectory)) return BatchResult.Stopped(written)
                     return BatchResult.Failed(written, chapter.error)
                 }
                 // Polish freshness pairing: a round that actually landed a 润色 commit
@@ -1042,7 +928,12 @@ class NovelWorkspaceGhostwriteCoordinator(
                 // 由 runBatch 入口补发 + repairDanglingPolishPointer 自愈兜底。
                 if (polish && chapter.commitId != null) {
                     try {
-                        runtime.commitPolishPointer(projectDirectory, branchId, job.branchSlug, nextOrdinal)
+                        NovelWorkspaceGhostwriteJobs.withRunningOwner(projectDirectory, job.id, job.executionKey) {
+                            check(NovelWorkspaceLedger.load(projectDirectory).headOf(branchId)?.id == chapter.commitId) {
+                                "润色收录后正文版本已变化，不能更新剧情指针"
+                            }
+                            runtime.commitPolishPointer(projectDirectory, branchId, job.branchSlug, nextOrdinal)
+                        } ?: return BatchResult.Stopped(written)
                     } catch (error: CancellationException) {
                         throw error
                     } catch (error: Exception) {
@@ -1140,7 +1031,7 @@ class NovelWorkspaceGhostwriteCoordinator(
         fromOrdinal: Int,
         toOrdinal: Int,
         locale: Locale = Locale.CHINESE,
-    ): NovelWorkspaceGhostwriteJob {
+    ): NovelWorkspaceGhostwriteJob = NovelWorkspaceGhostwriteJobs.withNoActiveBranch(projectDirectory, branchSlug) {
         require(fromOrdinal in 1..toOrdinal) {
             localized(locale, "润色范围无效", "The polishing range is invalid.")
         }
@@ -1169,8 +1060,8 @@ class NovelWorkspaceGhostwriteCoordinator(
         check(missing == null) {
             localized(locale, "第 $missing 章不存在，无法润色", "Chapter $missing does not exist and cannot be polished.")
         }
-        return newPolishJob(projectDirectory, branchSlug, fromOrdinal, toOrdinal, locale)
-    }
+        newPolishJob(projectDirectory, branchSlug, fromOrdinal, toOrdinal, locale)
+    } ?: error(localized(locale, "已有批次占用当前分支，请先继续或取消该批次", "A batch already occupies this branch. Resume or cancel it first."))
 
     /** Create a new batch job (cursor = current manuscript state). */
     fun newJob(
@@ -1253,6 +1144,10 @@ class NovelWorkspaceGhostwriteCoordinator(
         toOrdinal: Int,
         locale: Locale = Locale.CHINESE,
     ): NovelWorkspaceGhostwriteJob {
+        val store = NovelWorkspaceStore(projectDirectory)
+        val ledger = NovelWorkspaceLedger.load(projectDirectory)
+        val branchId = NovelWorkspaceLedger.branchId(store, ledger, branchSlug)
+            ?: error(localized(locale, "当前分支没有可用的账本绑定", "The current branch has no ledger binding."))
         val jobId = UUID.randomUUID().toString().uppercase()
         val job = NovelWorkspaceGhostwriteJob(
             id = jobId,
@@ -1262,6 +1157,10 @@ class NovelWorkspaceGhostwriteCoordinator(
             startOrdinal = fromOrdinal,
             endOrdinal = toOrdinal,
             mode = NovelWorkspaceGhostwriteMode.Polish,
+            polishUsesCommitProvenance = true,
+            branchId = branchId,
+            currentChapterOrdinal = fromOrdinal,
+            stage = NovelWorkspaceGhostwriteStage.Writing,
             status = NovelWorkspaceGhostwriteJob.STATUS_RUNNING,
             createdAt = Instant.now(),
             updatedAt = Instant.now(),
@@ -1308,7 +1207,7 @@ class NovelWorkspaceGhostwriteCoordinator(
         /**
          * Upper bound used by Android's batch WakeLock. A reviewed chapter can run an
          * initial candidate plus two targeted rewrites; every candidate and review has
-         * one provider retry. Legacy write and polish retain one turn plus one retry.
+         * one provider retry. Polish includes independent review; each attempt retains the single provider retry.
          */
         fun maximumBatchRuntimeMs(job: NovelWorkspaceGhostwriteJob): Long {
             val perChapter = if (job.isVersionBound) {
@@ -1318,6 +1217,8 @@ class NovelWorkspaceGhostwriteCoordinator(
                         2L * REVIEW_TURN_TIMEOUT_MS +
                         2L * CHAPTER_RETRY_DELAY_MS
                     )
+            } else if (job.mode == NovelWorkspaceGhostwriteMode.Polish) {
+                2L * (CHAPTER_TURN_TIMEOUT_MS + REVIEW_TURN_TIMEOUT_MS) + CHAPTER_RETRY_DELAY_MS
             } else {
                 2L * CHAPTER_TURN_TIMEOUT_MS + CHAPTER_RETRY_DELAY_MS
             }

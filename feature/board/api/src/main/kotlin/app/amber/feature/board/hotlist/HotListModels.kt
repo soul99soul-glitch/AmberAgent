@@ -22,6 +22,18 @@ object HotListProviderIds {
 const val HOT_LIST_TOPIC_CACHE_LIMIT = 80
 const val HOT_LIST_TOPIC_DISPLAY_LIMIT = 20
 
+/** Topic-id prefix for user-created deep-read topics (kept out of the hot-list dashboard). */
+const val CUSTOM_TOPIC_ID_PREFIX = "custom-"
+
+/** Provider id on [HotTopicSource] for user-provided seeds (pasted text, links, files). */
+const val CUSTOM_TOPIC_PROVIDER_ID = "custom_source"
+
+/** Mirrors MAX_SEED_SOURCES in DeepReadSourcePrefetcher: extra seeds are dropped. */
+const val MAX_CUSTOM_SEED_SOURCES = 4
+
+/** Minimum body length for a pasted/extracted text seed to survive seed filtering. */
+const val MIN_CUSTOM_SEED_TEXT_CHARS = 60
+
 @Serializable
 data class HotListItem(
     val rank: Int,
@@ -49,6 +61,11 @@ data class HotTopicSource(
     val url: String? = null,
     val heat: String? = null,
     val images: List<String> = emptyList(),
+    /**
+     * Inline body text for user-provided seeds (pasted text, extracted file text).
+     * When non-blank it replaces the synthetic hot-list preamble as the seed content.
+     */
+    val content: String? = null,
 )
 
 @Serializable
@@ -59,6 +76,11 @@ data class HotTopic(
     val sourceCount: Int,
     val bestRank: Int,
     val latestFetchedAt: Long,
+    /**
+     * Generation/display template picked at topic creation (iOS task.templateId).
+     * Null on dashboard topics: they follow the board setting at generation time.
+     */
+    val deepReadTemplateId: String? = null,
 )
 
 data class HotListProviderSnapshot(
@@ -87,6 +109,17 @@ val HotListItem.presentationTitle: String
 
 val HotTopicSource.presentationTitle: String
     get() = displayTitle?.takeIf { it.isNotBlank() } ?: title
+
+/**
+ * One user-provided seed for a custom deep-read topic: a pasted text block,
+ * a web link, or text extracted from an imported file.
+ */
+data class DeepReadSeedInput(
+    val title: String,
+    val providerName: String,
+    val url: String? = null,
+    val content: String? = null,
+)
 
 fun HotListDashboard.filterEnabledSources(enabledSourceIds: Set<String>): HotListDashboard {
     if (enabledSourceIds.isEmpty()) {

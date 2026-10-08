@@ -111,7 +111,7 @@ class ScratchVerifyTest {
     }
 
     @Test
-    fun `renameProject breaks the head-vs-branch invariant`() {
+    fun `renameProject preserves the head-vs-branch invariant`() {
         val dir = tempFolder.newFolder("book3")
         val repo = NovelWorkspaceProjectRepository(dir)
         val result = repo.createBlank("项目甲", mainBranchName = "主线")
@@ -142,13 +142,14 @@ class ScratchVerifyTest {
         val branchId = before.heads.keys.first()
         assertEquals(before.head, before.heads[branchId])
 
-        // Rename: updates project.md title and appends a commit via appending() only.
+        // Rename updates project.md and advances its mirrored branch head.
         repo.renameProject(result.projectDirectory.name.uppercase(), "项目乙")
         val after = NovelWorkspaceLedger.load(result.projectDirectory)
         // Head advanced to the rename commit...
         assertEquals("项目乙", NovelWorkspaceProjectTitle.read(NovelWorkspaceStore(result.projectDirectory)))
         assertNotEquals(before.head, after.head)
-        // ...but the branch pointer did NOT follow (appending() only changes `head`).
-        assertNotEquals(after.head, after.heads[branchId])
+        // The branch pointer follows the rename commit and preserves its parent.
+        assertEquals(after.head, after.heads[branchId])
+        assertEquals(before.head, after.headCommit?.parentId)
     }
 }

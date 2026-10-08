@@ -99,4 +99,9 @@ class ConversationDraftStore(
         }
         if (restoreWriteGate == null) persist() else restoreWriteGate.withCurrentWriterOrCancel(persist)
     }
+
+    suspend fun clearIfCurrent(conversationId: String, draftId: String) {
+        val persist: suspend () -> Unit = { dao.deleteIfCurrent(conversationId, draftId); Unit }
+        if (restoreWriteGate == null) persist() else restoreWriteGate.withCurrentWriterOrCancel(persist)
+    }
 }

@@ -92,6 +92,7 @@ fun FlatTextField(
     isError: Boolean = false,
     singleLine: Boolean = true,
     mono: Boolean = false,
+    fontFamily: androidx.compose.ui.text.font.FontFamily? = null,
     maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
     minLines: Int = 1,
     supportingText: String? = null,
@@ -147,7 +148,7 @@ fun FlatTextField(
                     color = textColor,
                     letterSpacing = 0.2.sp,
                     lineHeight = 21.sp,
-                    fontFamily = if (mono) JetbrainsMono else AmberSans,
+                    fontFamily = fontFamily ?: if (mono) JetbrainsMono else AmberSans,
                 ),
             )
         }

@@ -667,6 +667,7 @@ class OpenAIProvider(
         OpenAIAuthMode.GROK_OAUTH -> copy(
             baseUrl = GROK_CLI_PROXY_BASE_URL,
             useResponseApi = false,
+            chatCompletionsPath = "/chat/completions",
         )
         else -> this
     }

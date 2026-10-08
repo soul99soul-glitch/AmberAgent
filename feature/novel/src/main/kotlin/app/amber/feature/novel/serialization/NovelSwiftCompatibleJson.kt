@@ -3,6 +3,7 @@ package app.amber.feature.novel.serialization
 import app.amber.feature.novel.model.NovelPackageEnvelopeV1
 import app.amber.feature.novel.model.NovelProjectDocumentV1
 import app.amber.feature.novel.model.NovelProjectId
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.elementNames
@@ -15,9 +16,11 @@ import kotlinx.serialization.json.JsonEncoder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.decodeFromStream
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import java.util.Base64
+import java.io.ByteArrayInputStream
 
 /**
  * Swift Codable-compatible project/package codecs for Novel V1.
@@ -81,7 +84,21 @@ object NovelSwiftCompatibleJson {
         return canonicalJson(element).toByteArray(Charsets.UTF_8)
     }
 
-    fun decodeProjectDocumentFromPackage(rawEnvelope: ByteArray): NovelProjectDocumentV1 {
+    fun decodeProjectDocumentFromPackage(rawEnvelope: ByteArray): NovelProjectDocumentV1 =
+        decodeProjectDocumentFromPackage(rawEnvelope, ::decodeProjectDocument)
+
+    /** Workspace conversion consumes known fields, so it needs no whole-document JSON tree. */
+    @OptIn(ExperimentalSerializationApi::class)
+    fun decodeWorkspaceImportDocumentFromPackage(rawEnvelope: ByteArray): NovelProjectDocumentV1 =
+        decodeProjectDocumentFromPackage(rawEnvelope) { projectBytes ->
+            json.decodeFromStream(NovelWorkspaceImportDocument.serializer(), ByteArrayInputStream(projectBytes))
+                .asDocument()
+        }
+
+    private fun decodeProjectDocumentFromPackage(
+        rawEnvelope: ByteArray,
+        decodeDocument: (ByteArray) -> NovelProjectDocumentV1,
+    ): NovelProjectDocumentV1 {
         val envelope = decodePackageEnvelope(rawEnvelope)
         validateEnvelopeMetadata(envelope)
         val projectBytes = decodeStrictBase64(envelope.projectJsonBase64)
@@ -91,7 +108,7 @@ object NovelSwiftCompatibleJson {
         require(sha256Hex(projectBytes) == envelope.projectSha256.lowercase()) {
             "Project payload SHA-256 does not match"
         }
-        val document = decodeProjectDocument(projectBytes)
+        val document = decodeDocument(projectBytes)
         require(document.schemaVersion == envelope.projectSchemaVersion) {
             "Envelope and project schema versions differ"
         }

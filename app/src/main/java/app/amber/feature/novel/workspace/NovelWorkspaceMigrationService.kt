@@ -5,6 +5,7 @@ import app.amber.feature.novel.model.NovelProjectLoadAccess
 import app.amber.feature.novel.persistence.NovelProjectPersisting
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
 import app.amber.feature.novelworkspace.NovelWorkspaceSessions
+import app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary
 import java.time.Instant
 import kotlinx.coroutines.CancellationException
 
@@ -25,8 +26,11 @@ class NovelWorkspaceMigrationService(
         data class Rejected(val reason: String) : Result
     }
 
-    suspend fun migrate(projectId: NovelProjectId, now: Instant = Instant.now()): Result {
-        if (workspaceRepository.exists(projectId.rawValue)) {
+    suspend fun migrate(projectId: NovelProjectId, now: Instant = Instant.now()): Result =
+        migrateAtEpoch(projectId, now, NovelWorkspaceRestoreBoundary.currentEpoch())
+
+    private suspend fun migrateAtEpoch(projectId: NovelProjectId, now: Instant, restoreEpoch: Long): Result {
+        if (NovelWorkspaceRestoreBoundary.write(restoreEpoch) { workspaceRepository.exists(projectId.rawValue) }) {
             return Result.AlreadyMigrated(projectId.rawValue)
         }
         val loaded = try {
@@ -42,40 +46,55 @@ class NovelWorkspaceMigrationService(
         val document = loaded.document
         val files = NovelLegacyWorkspaceMigrator.workspaceFiles(document, exportedAt = now)
         val sessions = NovelLegacyWorkspaceMigrator.sessionsFile(document)
-        val installed = try {
-            workspaceRepository.install(projectId.rawValue, files, now = now)
-        } catch (error: Exception) {
-            return Result.Rejected(error.message ?: "工作区写入失败")
+        return NovelWorkspaceRestoreBoundary.write(restoreEpoch) {
+            if (workspaceRepository.exists(projectId.rawValue)) return@write Result.AlreadyMigrated(projectId.rawValue)
+            val installed = try {
+                workspaceRepository.install(projectId.rawValue, files, now = now)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                return@write Result.Rejected(error.message ?: "工作区写入失败")
+            }
+            try {
+                NovelWorkspaceSessions.save(sessions, installed.projectDirectory)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                // Keep rollback in the installation boundary: a restored copy can never
+                // replace this directory between the failed save and its removal.
+                workspaceRepository.delete(projectId.rawValue)
+                return@write Result.Rejected(error.message ?: "会话记录写入失败")
+            }
+            Result.Completed(
+                projectId = projectId.rawValue,
+                projectName = document.project.name,
+                plotMissing = installed.plotMissing,
+            )
         }
-        try {
-            NovelWorkspaceSessions.save(sessions, installed.projectDirectory)
-        } catch (error: Exception) {
-            // install() has already made the manifest visible. Remove only this newly
-            // generated workspace copy so the untouched legacy source can retry later.
-            workspaceRepository.delete(projectId.rawValue)
-            return Result.Rejected(error.message ?: "会话记录写入失败")
-        }
-        return Result.Completed(
-            projectId = projectId.rawValue,
-            projectName = document.project.name,
-            plotMissing = installed.plotMissing,
-        )
     }
 
     data class MigrateAllResult(val migrated: Int, val skipped: Int, val failed: Int)
 
     /**
      * Migrate every legacy project to the workspace format. Idempotent: an existing
-     * workspace copy is skipped; originals are left untouched as rollback copies.
+     * workspace copy is skipped; a restored native snapshot disables automatic migration.
+     * Originals remain available as rollback copies and for explicit migration.
      */
-    suspend fun migrateAll(now: Instant = Instant.now()): MigrateAllResult {
+    suspend fun migrateAll(
+        now: Instant = Instant.now(),
+        restoreEpoch: Long = NovelWorkspaceRestoreBoundary.currentEpoch(),
+    ): MigrateAllResult {
+        if (!NovelWorkspaceRestoreBoundary.write(restoreEpoch) { workspaceRepository.allowsAutomaticMigration() }) {
+            return MigrateAllResult(migrated = 0, skipped = 0, failed = 0)
+        }
         val legacy = legacyRepository.listProjects()
+        NovelWorkspaceRestoreBoundary.write(restoreEpoch) { Unit }
         var migrated = 0
         var skipped = 0
         var failed = 0
         for (summary in legacy) {
             val result = try {
-                migrate(summary.id, now)
+                migrateAtEpoch(summary.id, now, restoreEpoch)
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {

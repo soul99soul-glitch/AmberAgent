@@ -14,7 +14,7 @@ import kotlinx.serialization.json.put
  *
  * 只作用于"已完成、超过 [PROJECT_AFTER_CHARS] 字符的纯文本工具输出"：
  * 按段落/围栏块切分、程序先标 must-keep，剩余块经 Jev 判相关性，
- * 低相关且无保留信号的块替换为省略标记（可用 conversation_expand 恢复）。
+ * 低相关且无保留信号的块替换为省略标记（同参再次调用该工具即得全文）。
  * 该投影只修改发往模型的请求副本；持久化会话与压缩摘要源始终是原文。
  * shadow/失败/超时/缺题一律原样返回。
  */
@@ -24,14 +24,28 @@ class JevToolOutputProjector(private val runtime: JevRuntime) {
         messages: List<UIMessage>,
         runKey: String?,
     ): List<UIMessage> {
-        if (runtime.configFor(JevPurpose.CONTEXT_SELECTION) == null) return messages
+        val config = runtime.configFor(JevPurpose.CONTEXT_SELECTION) ?: return messages
+        if (config.mode == JevMode.SHADOW) {
+            runtime.launchInBackground { projectAll(messages, backgroundRunKey(runKey, JevPurpose.CONTEXT_SELECTION)) }
+            return messages
+        }
+        return projectAll(messages, runKey)
+    }
+
+    private suspend fun projectAll(
+        messages: List<UIMessage>,
+        runKey: String?,
+    ): List<UIMessage> {
         val taskText = messages.lastOrNull { it.role == MessageRole.USER }?.toText().orEmpty()
         if (taskText.isBlank()) return messages
+        // 同名同参的再次调用是模型在取回被省略的原文：后一次保持全文。
+        val seenCalls = HashSet<Pair<String, JsonElement>>()
         var changed = false
         val projected = messages.map { message ->
             val parts = message.parts.map { part ->
                 if (part is UIMessagePart.Tool) {
-                    val next = projectTool(part, taskText, runKey)
+                    val reread = !seenCalls.add(part.toolName to part.inputAsJson())
+                    val next = if (reread) part else projectTool(part, taskText, runKey)
                     if (next != part) {
                         changed = true
                         next
@@ -49,6 +63,7 @@ class JevToolOutputProjector(private val runtime: JevRuntime) {
 
     private suspend fun projectTool(tool: UIMessagePart.Tool, taskText: String, runKey: String?): UIMessagePart.Tool {
         // 与 PreparedContextEditor 相同的硬守卫：未执行/待审批/含多模态/工具级失败信号不筛。
+        if (tool.toolName !in REPEATABLE_OUTPUT_TOOLS) return tool
         if (!tool.isExecuted) return tool
         if (tool.approvalState is ToolApprovalState.Pending) return tool
         val textParts = tool.output.filterIsInstance<UIMessagePart.Text>()
@@ -113,7 +128,7 @@ class JevToolOutputProjector(private val runtime: JevRuntime) {
             runKey = runKey,
             state = state,
             questions = questions,
-            requiredScopes = setOf(JevDataScope.TOOL_OUTPUT, JevDataScope.TASK_TEXT),
+            requiredScopes = JevPurpose.CONTEXT_SELECTION.requiredScopes,
             cacheAnchor = anchor,
         ) ?: return null
         val evaluated = outcome.evaluated ?: return null
@@ -156,6 +171,18 @@ class JevToolOutputProjector(private val runtime: JevRuntime) {
 
 
     companion object {
+        // Only tools whose fresh same-argument calls are allowed by the kernel's duplicate
+        // guard, and which actually observe data rather than repeat an effect, can promise rereads.
+        private val REPEATABLE_OUTPUT_TOOLS = setOf(
+            "file_read", "file_list", "file_search",
+            "terminal_job_wait", "terminal_job_read", "terminal_session_read",
+            "subagent_wait", "subagent_read", "model_council_wait", "model_council_read",
+            "js_cell_wait", "webview_wait_for_load", "webview_read", "webview_find_text", "webview_links",
+            "wm_wait", "wm_observe", "wm_state", "wm_extract", "wm_get", "wm_find", "wm_network_inspect",
+            "wm_screenshot", "wm_visual_snapshot", "wm_zcode_read",
+            "screen_read_ui", "screen_find_text", "screen_wait_for_text", "screen_screenshot",
+        )
+
         /** 与 ToolResultCompactor 的截断阈值一致：仅处理显著长于既有裁剪线的结果。 */
         const val PROJECT_AFTER_CHARS = 8_000
         const val MIN_BLOCKS = 2
@@ -247,6 +274,6 @@ class JevToolOutputProjector(private val runtime: JevRuntime) {
 
         internal fun omissionMarker(toolName: String, index: Int, total: Int): String =
             "[omitted by context filter: block ${index + 1}/$total of $toolName output was judged irrelevant to the current task. " +
-                "Call conversation_expand if the original text is needed.]"
+                "Call $toolName again with the same arguments if the original text is needed.]"
     }
 }

@@ -20,14 +20,18 @@ enum class JevMode { OFF, SHADOW, ACTIVE }
 @Serializable
 enum class JevApiMode { TYPESAFE, VERCEL }
 
+/** [requiredScopes]：该用途每次请求都需要的外发授权；运行时与设置页的可用性判断共用这一处定义。 */
 @Serializable
-enum class JevPurpose {
-    TOOL_DISCOVERY,
-    MEMORY_RECALL,
-    CONTEXT_SELECTION,
-    MODEL_ROUTING,
-    WEB_AUTOMATION,
-    SCREEN_AUTOMATION,
+enum class JevPurpose(val requiredScopes: Set<JevDataScope>) {
+    TOOL_DISCOVERY(setOf(JevDataScope.TOOL_METADATA, JevDataScope.TASK_TEXT)),
+    MEMORY_RECALL(setOf(JevDataScope.PERSONAL_MEMORY, JevDataScope.TASK_TEXT)),
+    CONTEXT_SELECTION(setOf(JevDataScope.TOOL_OUTPUT, JevDataScope.TASK_TEXT)),
+    MODEL_ROUTING(setOf(JevDataScope.TASK_TEXT, JevDataScope.TOOL_METADATA)),
+    WEB_AUTOMATION(setOf(JevDataScope.WEB_CONTENT, JevDataScope.TASK_TEXT)),
+    SCREEN_AUTOMATION(setOf(JevDataScope.SCREEN_CONTENT, JevDataScope.TASK_TEXT)),
+    TOOL_RESULT_RETENTION(setOf(JevDataScope.TOOL_OUTPUT, JevDataScope.TASK_TEXT)),
+    AUTO_APPROVAL_GATE(setOf(JevDataScope.TOOL_METADATA, JevDataScope.TASK_TEXT)),
+    COMPLETION_CHECK(setOf(JevDataScope.TASK_TEXT, JevDataScope.TOOL_METADATA)),
 }
 
 /** 数据外发范围。请求所需范围全部被允许才发送；shadow 同样外发，不是本地模式。 */

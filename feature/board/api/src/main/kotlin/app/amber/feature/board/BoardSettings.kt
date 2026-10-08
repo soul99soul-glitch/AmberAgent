@@ -125,7 +125,50 @@ object DeepReadTemplateIds {
     const val EDITORIAL_SLANT = "editorial_slant"
     const val CUSTOM_PREFIX = "custom:"
 
+    // Generation templates (iOS `DeepReadSynthesisTemplate`); AUTO asks the model
+    // which concrete template fits the collected sources.
+    const val AUTO = "deepread_auto"
+    const val BRIEF = "deepread_brief"
+    const val QA = "deepread_qa"
+    const val DEBATE = "deepread_debate"
+    const val TIMELINE = "deepread_timeline"
+    const val REVIEW = "deepread_review"
+
+    /** Every built-in choice in iOS display order: auto, magazine pair, then the five synthesis kinds. */
+    val GENERATION_OPTIONS: List<String> = listOf(
+        AUTO,
+        COMPOSE_MAGAZINE,
+        EDITORIAL_SLANT,
+        BRIEF,
+        QA,
+        DEBATE,
+        TIMELINE,
+        REVIEW,
+    )
+
     fun custom(id: String): String = if (id.startsWith(CUSTOM_PREFIX)) id else "$CUSTOM_PREFIX$id"
+
+    /** iOS `IOSDeepReadTemplate.normalized(id)` parity — legacy ids fold onto built-ins. */
+    fun normalize(id: String?): String = when (id?.trim()) {
+        null, "", "ios_magazine", "ios_analysis" -> COMPOSE_MAGAZINE
+        "ios_reading" -> EDITORIAL_SLANT
+        else -> id.trim()
+    }
+
+    fun isSynthesis(id: String?): Boolean =
+        normalize(id) in setOf(AUTO, BRIEF, QA, DEBATE, TIMELINE, REVIEW)
+}
+
+/**
+ * Standalone DeepRead app accent ids — iOS `DeepReadAccent` parity. Stored on
+ * [TodayBoardSetting.deepReadAccent]; color/name resolution lives in the UI layer.
+ */
+object DeepReadAccentIds {
+    const val CINNABAR = "cinnabar"
+    const val INDIGO = "indigo"
+    const val PINE = "pine"
+    const val WISTERIA = "wisteria"
+    const val INK = "ink"
 }
 
 const val DEEP_READ_FONT_SCALE_MIN = 0.85f
@@ -188,6 +231,12 @@ data class TodayBoardSetting(
     val boardReadingFontPackId: String? = null,
     val deepReadFontScale: Float = 1.0f,
     val deepReadTemplateId: String = DeepReadTemplateIds.COMPOSE_MAGAZINE,
+    /**
+     * Standalone DeepRead product accent (iOS `DeepReadAppearance.accent`). Only
+     * consumed when `StandaloneSurfaces.current == DEEP_READ`; the full app keeps
+     * the user's global accent on board pages.
+     */
+    val deepReadAccent: String = DeepReadAccentIds.CINNABAR,
     val density: TodayBoardDensity = TodayBoardDensity.STANDARD,
     val backgroundStrategy: TodayBoardBackgroundStrategy = TodayBoardBackgroundStrategy.SMART,
     val foregroundCompensationGapMs: Long = 2 * 60 * 60 * 1000L,

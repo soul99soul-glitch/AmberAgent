@@ -42,6 +42,21 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import app.amber.core.settings.Capability
+import app.amber.core.settings.CapabilityFlags
+import app.amber.feature.runtime.CapabilityPermissionStore
+import app.amber.feature.tools.Capability as ToolCapability
+import app.amber.feature.tools.CapabilityPolicy
+import app.amber.feature.ui.pages.miniapp.createRunnerSendGate
+import kotlinx.coroutines.flow.filterNot
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.test.resetMain
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
@@ -55,6 +70,7 @@ import org.robolectric.annotation.Config
  * — the actual production dispatch path, not a mirrored helper.
  */
 @RunWith(RobolectricTestRunner::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 @Config(sdk = [34], application = Application::class)
 class MiniAppSystemCapabilityBridgeTest {
 
@@ -87,6 +103,7 @@ class MiniAppSystemCapabilityBridgeTest {
 
     @Before
     fun setUp() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
         context = RuntimeEnvironment.getApplication()
         testRoot = java.nio.file.Files.createTempDirectory("miniapp-bridge-test").toFile()
         val secretStore = SecretStore(
@@ -142,6 +159,32 @@ class MiniAppSystemCapabilityBridgeTest {
     fun tearDown() {
         db.close()
         testRoot.deleteRecursively()
+        Dispatchers.resetMain()
+    }
+
+    @Test
+    fun runnerGateUsesUpdatedHighRiskApprovalWithoutRecreation() = runBlocking {
+        val flagsData = androidx.datastore.preferences.core.PreferenceDataStoreFactory.create {
+            java.io.File(testRoot, "runner-flags.preferences_pb")
+        }
+        val permissionsData = androidx.datastore.preferences.core.PreferenceDataStoreFactory.create {
+            java.io.File(testRoot, "runner-permissions.preferences_pb")
+        }
+        val flags = CapabilityFlags(flagsData)
+        val policies = CapabilityPermissionStore(permissionsData)
+        flags.setEnabled(Capability.CapabilityPermissions, true)
+        policies.setPolicy(ToolCapability.MINIAPP_SEND, CapabilityPolicy.AUTO)
+        withTimeout(5_000) { settingsStore.settingsFlow.filterNot { it.init }.first() }
+        assertTrue(flags.isEnabled(Capability.CapabilityPermissions))
+        assertEquals(CapabilityPolicy.AUTO, policies.policies()[ToolCapability.MINIAPP_SEND])
+        settingsStore.update { it.copy(agentRuntime = it.agentRuntime.copy(autoApproveHighRiskToolCalls = true)) }
+        // Same factory as the real AndroidView bridge and same gate object for both requests.
+        val gate = createRunnerSendGate(settingsStore, flags, policies)
+        assertEquals(MiniAppSendDecision.AllowAuto, gate.decide())
+        settingsStore.update { it.copy(agentRuntime = it.agentRuntime.copy(autoApproveHighRiskToolCalls = false)) }
+        assertEquals(MiniAppSendDecision.RequireConfirm, gate.decide())
+        settingsStore.update { it.copy(agentRuntime = it.agentRuntime.copy(autoApproveHighRiskToolCalls = true)) }
+        assertEquals(MiniAppSendDecision.AllowAuto, gate.decide())
     }
 
     private fun appEntity(permissions: List<String>, version: Int = 1): MiniAppEntity = MiniAppEntity(
@@ -162,6 +205,9 @@ class MiniAppSystemCapabilityBridgeTest {
         confirmation: MiniAppUserConfirmation,
         setting: MiniAppSetting = MiniAppSetting(),
         settingProvider: (() -> MiniAppSetting)? = null,
+        httpClient: MiniAppHttpClient = MiniAppHttpClient(),
+        sendMessage: suspend (String, List<app.amber.ai.ui.UIMessagePart>) -> Boolean = { _, _ -> true },
+        sendDecision: MiniAppSendDecision = MiniAppSendDecision.AllowAuto,
     ): MiniAppBridge {
         val apps = mutableMapOf(app.id to app)
         return MiniAppBridge(
@@ -179,7 +225,7 @@ class MiniAppSystemCapabilityBridgeTest {
             ),
             repository = repository,
             storage = MiniAppStorage(context),
-            httpClient = MiniAppHttpClient(),
+            httpClient = httpClient,
             searchBridge = MiniAppSearchBridge(settingsStore),
             aiBridge = MiniAppAiBridge(context, settingsStore, providerCatalog),
             confirmation = confirmation,
@@ -191,7 +237,7 @@ class MiniAppSystemCapabilityBridgeTest {
             themeProvider = { MiniAppTheme(dark = false, background = "", foreground = "", primary = "") },
             conversationWriter = MiniAppConversationWriter(
                 ConversationDraftStore(db.conversationDraftDao(), db.conversationDao()),
-                sendMessage = { _, _ -> true },
+                sendMessage = sendMessage,
             ),
             workspaceWriter = MiniAppWorkspaceWriter(
                 ArtifactRepository(
@@ -202,7 +248,7 @@ class MiniAppSystemCapabilityBridgeTest {
                 ),
             ),
             sendGate = object : MiniAppSendGate {
-                override suspend fun decide(): MiniAppSendDecision = MiniAppSendDecision.AllowAuto
+                override suspend fun decide(): MiniAppSendDecision = sendDecision
             },
             systemCapabilityHandler = handler,
         )
@@ -240,6 +286,74 @@ class MiniAppSystemCapabilityBridgeTest {
     }
 
     private var nextRequestId = 1
+
+    @Test
+    fun conversationImageIsSnapshottedThroughGuardedClientBeforeDraftOrSend() = runBlocking {
+        val miniApp = appEntity(listOf("host.sendToConversation"))
+        repository.upsert(miniApp)
+        val id = "image-target"
+        db.conversationDao().insert(app.amber.agent.data.db.entity.ConversationEntity(
+            id, "assistant", "chat", "[]", 1, 1, "[]", false))
+        val fetched = mutableListOf<String>()
+        val bytes = byteArrayOf(1, 2, 3, 4)
+        val guard = MiniAppUrlGuard { host -> listOf(java.net.InetAddress.getByName(
+            if (host == "private.test") "192.168.1.2" else "93.184.216.34")) }
+        val client = okhttp3.OkHttpClient.Builder().followRedirects(false).addInterceptor { chain ->
+            val request = chain.request()
+            fetched += request.url.toString()
+            val builder = okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1)
+            if (request.url.host == "redirect.test") {
+                builder.code(302).message("Found").header("Location", "https://private.test/image.png")
+                    .body(ByteArray(0).toResponseBody(null)).build()
+            } else {
+                builder.code(200).message("OK").header("Content-Type", "image/png")
+                    .body(bytes.toResponseBody("image/png".toMediaType())).build()
+            }
+        }.build()
+        var sent: List<app.amber.ai.ui.UIMessagePart>? = null
+        val bridge = bridgeOf(miniApp, null, ScriptedConfirmation(true),
+            setting = MiniAppSetting(enabled = true, hostWriteEnabled = true),
+            httpClient = MiniAppHttpClient(guard, client), sendMessage = { _, parts -> sent = parts; true })
+        fun params(url: String, mode: String) = """{"conversationId":"$id","text":"image","mode":"$mode","attachments":[{"kind":"image","url":"$url"}]}"""
+        try {
+            val expected = "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(bytes)
+            val draftResponse = bridge.request("host.sendToConversation", params("HTTPS://public.test/image.png?signature=whole", "draft"))
+            assertTrue("${draftResponse.errorCode}: ${draftResponse.error}", draftResponse.ok)
+            val draft = ConversationDraftStore(db.conversationDraftDao(), db.conversationDao()).load(id)!!
+            assertEquals(expected, (draft.attachments.single() as app.amber.ai.ui.UIMessagePart.Image).url)
+            val sendResponse = bridge.request("host.sendToConversation", params("https://public.test/image.png", "send"))
+            assertTrue("${sendResponse.errorCode}: ${sendResponse.error}", sendResponse.ok)
+            assertEquals(expected, (sent!!.filterIsInstance<app.amber.ai.ui.UIMessagePart.Image>().single()).url)
+            val beforeDenied = fetched.size
+            assertFalse(bridge.request("host.sendToConversation", params("https://private.test/image.png", "draft")).ok)
+            assertEquals(beforeDenied, fetched.size)
+            assertFalse(bridge.request("host.sendToConversation", params("https://redirect.test/image.png", "send")).ok)
+            assertEquals("https://redirect.test/image.png", fetched.last())
+            assertFalse(fetched.any { it.contains("private.test") })
+        } finally { bridge.close() }
+    }
+
+    @Test
+    fun deniedSendDoesNotFetchAnAttachmentBeforeItsApproval() = runBlocking {
+        val miniApp = appEntity(listOf("host.sendToConversation"))
+        repository.upsert(miniApp)
+        var fetches = 0
+        val guard = MiniAppUrlGuard { listOf(java.net.InetAddress.getByName("93.184.216.34")) }
+        val client = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+            fetches++
+            okhttp3.Response.Builder().request(chain.request()).protocol(okhttp3.Protocol.HTTP_1_1)
+                .code(200).message("OK").body(byteArrayOf(1).toResponseBody("image/png".toMediaType())).build()
+        }.build()
+        val bridge = bridgeOf(miniApp, null, ScriptedConfirmation(false),
+            setting = MiniAppSetting(hostWriteEnabled = true), httpClient = MiniAppHttpClient(guard, client),
+            sendDecision = MiniAppSendDecision.RequireConfirm)
+        try {
+            val result = bridge.request("host.sendToConversation", """{"conversationId":"target","mode":"send","text":"image","attachments":[{"kind":"image","url":"https://public.test/image.png"}]}""")
+            assertFalse(result.ok)
+            assertEquals("user_denied", result.errorCode)
+            assertEquals(0, fetches)
+        } finally { bridge.close() }
+    }
 
     @Test
     fun appInfoReportsDurableAppGrantsAndHonestBridgeVersion() = runBlocking {

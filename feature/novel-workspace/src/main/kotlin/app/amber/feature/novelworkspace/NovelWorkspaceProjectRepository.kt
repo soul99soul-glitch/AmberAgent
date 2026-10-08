@@ -18,6 +18,22 @@ data class NovelWorkspaceProjectSummary(
  */
 class NovelWorkspaceProjectRepository(private val rootDirectory: File) {
 
+    /** A restored native snapshot is authoritative; retained migration originals stay untouched. */
+    fun allowsAutomaticMigration(): Boolean = !File(rootDirectory, ".native-restored").isFile
+
+    fun recordNativeRestore() = NovelWorkspaceRestoreBoundary.write {
+        rootDirectory.mkdirs()
+        val destination = File(rootDirectory, ".native-restored")
+        val temp = File.createTempFile("native-restore-", ".tmp", rootDirectory)
+        try {
+            temp.writeText("Native snapshot restored; legacy originals are available for explicit migration.\n")
+            java.io.RandomAccessFile(temp, "rw").use { it.fd.sync() }
+            NovelWorkspaceLedger.atomicMove(temp, destination)
+        } finally {
+            temp.delete()
+        }
+    }
+
     fun projectDirectory(id: String): File {
         require(isValidProjectId(id)) { "Invalid workspace project id: $id" }
         return File(rootDirectory, id.lowercase())
@@ -30,7 +46,7 @@ class NovelWorkspaceProjectRepository(private val rootDirectory: File) {
         projectId: String,
         files: List<NovelWorkspaceFile>,
         now: Instant = Instant.now(),
-    ): NovelWorkspaceInstaller.Result {
+    ): NovelWorkspaceInstaller.Result = NovelWorkspaceRestoreBoundary.write {
         if (!rootDirectory.exists() && !rootDirectory.mkdirs()) {
             throw NovelWorkspaceIoError("Cannot create workspace root: $rootDirectory")
         }
@@ -41,7 +57,7 @@ class NovelWorkspaceProjectRepository(private val rootDirectory: File) {
         if (directory.exists() && NovelWorkspaceStore(directory).exists()) {
             throw NovelWorkspaceIoError("Workspace project already exists: $projectId")
         }
-        return NovelWorkspaceInstaller.install(files, directory, now = now)
+        return@write NovelWorkspaceInstaller.install(files, directory, now = now)
     }
 
     /**
@@ -52,7 +68,7 @@ class NovelWorkspaceProjectRepository(private val rootDirectory: File) {
         name: String,
         mainBranchName: String = "主线",
         now: Instant = Instant.now(),
-    ): NovelWorkspaceInstaller.Result {
+    ): NovelWorkspaceInstaller.Result = NovelWorkspaceRestoreBoundary.write {
         val projectId = UUID.randomUUID().toString().uppercase()
         val branchId = UUID.randomUUID().toString().uppercase()
         val slug = NovelWorkspaceSlug.slug(mainBranchName).ifEmpty { "main" }
@@ -110,7 +126,7 @@ class NovelWorkspaceProjectRepository(private val rootDirectory: File) {
             NovelWorkspaceSessionsFile(),
             result.projectDirectory,
         )
-        return result
+        return@write result
     }
 
     /** Scan for readable workspace projects; unreadable directories are skipped, not fatal. */
@@ -122,7 +138,7 @@ class NovelWorkspaceProjectRepository(private val rootDirectory: File) {
             .sortedWith(compareByDescending<NovelWorkspaceProjectSummary> { it.updatedAt }.thenBy { it.name })
     }
 
-    fun delete(id: String) {
+    fun delete(id: String) = NovelWorkspaceRestoreBoundary.write {
         val directory = projectDirectory(id)
         NovelWorkspaceGhostwriteJobs.listActive(directory).firstOrNull()?.let {
             throw NovelWorkspaceIoError("当前项目仍有代笔批次运行，请先让批次完成或取消后再删除")
@@ -133,7 +149,7 @@ class NovelWorkspaceProjectRepository(private val rootDirectory: File) {
     }
 
     /** Rename a project: update project.md title and commit (host-level, self-contained). */
-    fun renameProject(id: String, newName: String, now: Instant = Instant.now()) {
+    fun renameProject(id: String, newName: String, now: Instant = Instant.now()) = NovelWorkspaceRestoreBoundary.write {
         val directory = projectDirectory(id)
         NovelWorkspaceGhostwriteJobs.listActive(directory).firstOrNull()?.let {
             throw NovelWorkspaceIoError("当前项目仍有代笔批次运行，请先让批次完成或取消后再重命名")
@@ -161,7 +177,14 @@ class NovelWorkspaceProjectRepository(private val rootDirectory: File) {
             message = NovelWorkspaceLedger.Message.GENERIC,
             createdAt = now,
         )
-        NovelWorkspaceLedger.save(NovelWorkspaceLedger.appending(commit, ledger), directory)
+        NovelWorkspaceLedger.save(
+            NovelWorkspaceLedger.appending(commit, ledger).copy(
+                heads = ledger.heads.mapValues { (_, head) ->
+                    if (head == ledger.head) commitId else head
+                },
+            ),
+            directory,
+        )
         store.materializeCheckout()
     }
 
@@ -183,7 +206,9 @@ class NovelWorkspaceProjectRepository(private val rootDirectory: File) {
     }.getOrNull()
 
     companion object {
-        fun defaultRoot(filesDir: File): File = File(filesDir, "amberagent/novel-workspace")
+        const val RELATIVE_ROOT = "amberagent/novel-workspace"
+
+        fun defaultRoot(filesDir: File): File = File(filesDir, RELATIVE_ROOT)
 
         /** Uppercase UUID (NovelProjectId-compatible); directory names are lowercased. */
         fun isValidProjectId(id: String): Boolean {

@@ -43,7 +43,7 @@ object NovelWorkspaceUnresolvedStore {
         }
     }
 
-    fun save(unresolved: NovelWorkspaceUnresolvedFile, projectDirectory: File) {
+    fun save(unresolved: NovelWorkspaceUnresolvedFile, projectDirectory: File) = NovelWorkspaceRestoreBoundary.write {
         val ledgerDir = File(projectDirectory, NovelWorkspaceLedger.DIRECTORY_NAME)
         if (!ledgerDir.exists() && !ledgerDir.mkdirs()) {
             throw NovelWorkspaceIoError("Cannot create ledger directory: $ledgerDir")
@@ -68,7 +68,7 @@ object NovelWorkspaceUnresolvedStore {
         fromOrdinal: Int,
         sinceCommitId: String,
         at: Instant = Instant.now(),
-    ) {
+    ) = NovelWorkspaceRestoreBoundary.write {
         val current = load(projectDirectory)
         val existing = current.branches[branchSlug]
         val replacement = if (existing != null && existing.fromOrdinal <= fromOrdinal) {
@@ -88,9 +88,9 @@ object NovelWorkspaceUnresolvedStore {
         )
     }
 
-    fun clear(projectDirectory: File, branchSlug: String) {
+    fun clear(projectDirectory: File, branchSlug: String) = NovelWorkspaceRestoreBoundary.write {
         val current = load(projectDirectory)
-        if (branchSlug !in current.branches) return
+        if (branchSlug !in current.branches) return@write
         save(current.copy(branches = current.branches - branchSlug), projectDirectory)
     }
 

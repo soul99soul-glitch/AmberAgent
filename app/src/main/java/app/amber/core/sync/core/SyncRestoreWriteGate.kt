@@ -49,6 +49,22 @@ class SyncRestoreWriteGate {
     @Volatile
     private var restoreDataCommitted: Boolean = false
 
+    @Volatile
+    private var restoredFileRoots: Set<String>? = null
+    @Volatile
+    private var replacedFileRoots: Set<String>? = null
+
+    /** A null set preserves callers that predate file-specific restore listeners. */
+    fun restoresFileRoot(relativeRoot: String): Boolean = restoring &&
+        (restoredFileRoots == null || relativeRoot in restoredFileRoots.orEmpty())
+
+    fun adoptsFileSnapshot(relativeRoot: String): Boolean = restoring &&
+        (replacedFileRoots == null || relativeRoot in replacedFileRoots.orEmpty())
+
+    fun markFileSnapshotAdopted(relativeRoot: String) {
+        if (restoring) replacedFileRoots = replacedFileRoots.orEmpty() + relativeRoot
+    }
+
     fun currentEpoch(): Long = epoch.get()
 
     fun isRestoring(): Boolean = restoring
@@ -84,9 +100,15 @@ class SyncRestoreWriteGate {
      * both when the restore starts and when it ends, so an old callback cannot
      * become valid merely because the restore failed or was cancelled.
      */
-    suspend fun <T> withRestore(block: suspend (restoreEpoch: Long) -> T): T = restoreMutex.withLock {
+    suspend fun <T> withRestore(
+        affectedFileRoots: Set<String>? = null,
+        adoptedFileRoots: Set<String>? = affectedFileRoots,
+        block: suspend (restoreEpoch: Long) -> T,
+    ): T = restoreMutex.withLock {
         val restoreEpoch = epoch.incrementAndGet()
         restoring = true
+        restoredFileRoots = affectedFileRoots
+        replacedFileRoots = adoptedFileRoots
         restoreDataCommitted = false
         restoreStarted.forEach { listener -> runCatching(listener) }
         var succeeded = false
@@ -100,6 +122,8 @@ class SyncRestoreWriteGate {
             epoch.incrementAndGet()
             restoreDataCommitted = false
             restoring = false
+            restoredFileRoots = null
+            replacedFileRoots = null
         }
     }
 

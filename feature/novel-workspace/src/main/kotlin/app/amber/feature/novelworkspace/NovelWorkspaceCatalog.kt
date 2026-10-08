@@ -46,7 +46,7 @@ object NovelWorkspaceCatalog {
 
     fun load(store: NovelWorkspaceStore, ledger: NovelWorkspaceLedgerStore, branchSlug: String): NovelWorkspaceCatalogData {
         val lastCommitTimes = lastCommitTimes(ledger)
-        val groups = settingGroups(store, lastCommitTimes)
+        val groups = settingGroups(store, branchSlug, lastCommitTimes)
         val nodes = NovelWorkspaceNodes.collect(store, branchSlug)
         val foreshadowing = nodes
             .filter { it.nodeKind == NovelWorkspaceNodes.KIND_FORESHADOWING }
@@ -71,23 +71,24 @@ object NovelWorkspaceCatalog {
 
     private fun settingGroups(
         store: NovelWorkspaceStore,
+        branchSlug: String,
         lastCommitTimes: Map<String, Instant>,
     ): List<NovelWorkspaceSettingGroup> {
-        val paths = store.list(NovelWorkspacePaths.SETTING_DIR)
-        val grouped = paths.groupBy { path ->
-            val rest = path.removePrefix("${NovelWorkspacePaths.SETTING_DIR}/")
+        val entries = NovelWorkspaceEffectiveMaterials.collect(store, branchSlug)
+        val grouped = entries.groupBy { entry ->
+            val rest = entry.settingRelativePath
             if (rest.contains('/')) rest.substringBefore('/') else ROOT_GROUP
         }
-        return grouped.map { (directory, groupPaths) ->
+        return grouped.map { (directory, groupEntries) ->
             NovelWorkspaceSettingGroup(
                 directory = directory,
-                entries = groupPaths.map { path ->
+                entries = groupEntries.map { entry ->
                     NovelWorkspaceSettingEntry(
-                        path = path,
-                        title = NovelWorkspaceMarkdown.parseFile(store.read(path) ?: "").fields["title"]
+                        path = entry.path,
+                        title = entry.parsed.fields["title"]
                             ?.takeIf { it.isNotBlank() }
-                            ?: NovelWorkspacePaths.fileNameTitle(path),
-                        updatedAt = lastCommitTimes[path],
+                            ?: NovelWorkspacePaths.fileNameTitle(entry.path),
+                        updatedAt = lastCommitTimes[entry.path],
                     )
                 }.sortedBy { it.title },
             )

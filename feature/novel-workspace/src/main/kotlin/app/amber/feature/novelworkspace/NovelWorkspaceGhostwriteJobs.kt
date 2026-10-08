@@ -147,6 +147,8 @@ data class NovelWorkspaceGhostwriteJob(
     /** Polish only: last ordinal of the polish range (inclusive); 0 = unused (Write). */
     val endOrdinal: Int = 0,
     val mode: NovelWorkspaceGhostwriteMode = NovelWorkspaceGhostwriteMode.Write,
+    /** New polish jobs use owned commits; absent on already saved legacy polish batches. */
+    val polishUsesCommitProvenance: Boolean = false,
     /** Immutable branch identity captured when the author confirms the batch. */
     val branchId: String = "",
     /** Initial and current CAS boundary for this job's branch. */
@@ -215,6 +217,11 @@ object NovelWorkspaceGhostwriteJobs {
 
     @Synchronized
     fun save(job: NovelWorkspaceGhostwriteJob, projectDirectory: File) {
+        requireWritable()
+        writeJob(job, projectDirectory)
+    }
+
+    private fun writeJob(job: NovelWorkspaceGhostwriteJob, projectDirectory: File) {
         val directory = dir(projectDirectory)
         if (!directory.exists() && !directory.mkdirs()) {
             throw NovelWorkspaceIoError("Cannot create jobs directory: $directory")
@@ -250,6 +257,7 @@ object NovelWorkspaceGhostwriteJobs {
     /** Atomically claim the branch for a new batch inside this app process. */
     @Synchronized
     fun saveIfNoActive(job: NovelWorkspaceGhostwriteJob, projectDirectory: File): Boolean {
+        requireWritable()
         if (activeFor(projectDirectory, job.branchSlug) != null) return false
         save(job, projectDirectory)
         return true
@@ -262,6 +270,7 @@ object NovelWorkspaceGhostwriteJobs {
         branchSlug: String,
         block: () -> T,
     ): T? {
+        requireWritable()
         if (activeFor(projectDirectory, branchSlug) != null) return null
         return block()
     }
@@ -274,6 +283,7 @@ object NovelWorkspaceGhostwriteJobs {
         expectedExecutionId: String? = null,
         expectedBranchSlug: String? = null,
     ): NovelWorkspaceGhostwriteJob? {
+        requireWritable()
         val current = load(projectDirectory, jobId) ?: return null
         if (current.status != NovelWorkspaceGhostwriteJob.STATUS_FAILED) return null
         if (expectedExecutionId != null && current.executionKey != expectedExecutionId) return null
@@ -300,6 +310,7 @@ object NovelWorkspaceGhostwriteJobs {
         expectedExecutionId: String? = null,
         expectedBranchSlug: String? = null,
     ): NovelWorkspaceGhostwriteJob? {
+        requireWritable()
         val current = load(projectDirectory, jobId) ?: return null
         if (current.status != NovelWorkspaceGhostwriteJob.STATUS_PAUSED) return null
         if (expectedExecutionId != null && current.executionKey != expectedExecutionId) return null
@@ -322,6 +333,7 @@ object NovelWorkspaceGhostwriteJobs {
         reason: String? = null,
         expectedExecutionId: String? = null,
     ): NovelWorkspaceGhostwriteJob? {
+        requireWritable()
         val current = load(projectDirectory, jobId) ?: return null
         if (current.status !in expectedStatuses) return null
         if (expectedExecutionId != null && current.executionKey != expectedExecutionId) return null
@@ -340,6 +352,7 @@ object NovelWorkspaceGhostwriteJobs {
         executionId: String,
         block: () -> T,
     ): T? {
+        requireWritable()
         val current = load(projectDirectory, jobId) ?: return null
         if (current.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
             current.executionKey != executionId
@@ -362,6 +375,7 @@ object NovelWorkspaceGhostwriteJobs {
         planId: String,
         planDigest: String,
     ): NovelWorkspaceGhostwriteJob? {
+        requireWritable()
         val current = load(projectDirectory, jobId) ?: return null
         if (current.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
             current.executionKey != executionId ||
@@ -408,6 +422,7 @@ object NovelWorkspaceGhostwriteJobs {
         chapterOrdinal: Int,
         rewrite: Boolean,
     ): NovelWorkspaceGhostwriteJob? {
+        requireWritable()
         val current = load(projectDirectory, jobId) ?: return null
         if (current.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
             current.executionKey != executionId ||
@@ -439,6 +454,7 @@ object NovelWorkspaceGhostwriteJobs {
         executionId: String,
         candidate: NovelWorkspaceGhostwriteCandidate,
     ): NovelWorkspaceGhostwriteJob? {
+        requireWritable()
         val current = load(projectDirectory, jobId) ?: return null
         if (current.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
             current.executionKey != executionId ||
@@ -476,6 +492,7 @@ object NovelWorkspaceGhostwriteJobs {
         executionId: String,
         review: NovelWorkspaceJointReviewResult,
     ): NovelWorkspaceGhostwriteJob? {
+        requireWritable()
         val current = load(projectDirectory, jobId) ?: return null
         val candidate = current.pendingCandidate ?: return null
         if (current.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
@@ -515,6 +532,7 @@ object NovelWorkspaceGhostwriteJobs {
         candidateId: String,
         nextPlan: String,
     ): NovelWorkspaceGhostwriteJob? {
+        requireWritable()
         val current = load(projectDirectory, jobId) ?: return null
         val candidate = current.pendingCandidate ?: return null
         val review = current.pendingReview ?: return null
@@ -557,6 +575,7 @@ object NovelWorkspaceGhostwriteJobs {
         commitId: String,
         candidateId: String,
     ): NovelWorkspaceGhostwriteJob? {
+        requireWritable()
         val current = load(projectDirectory, jobId) ?: return null
         current.receipts.firstOrNull { it.candidateId == candidateId }?.let { receipt ->
             return current.takeIf { receipt.commitId == commitId }
@@ -751,6 +770,7 @@ object NovelWorkspaceGhostwriteJobs {
         observedJob: NovelWorkspaceGhostwriteJob,
         hasUnfinishedWork: Boolean,
     ): NovelWorkspaceGhostwriteJob? {
+        requireWritable()
         if (hasUnfinishedWork || observedJob.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING) return null
         val current = load(projectDirectory, observedJob.id) ?: return null
         if (current.executionKey != observedJob.executionKey || current.status != observedJob.status) return null
@@ -771,6 +791,7 @@ object NovelWorkspaceGhostwriteJobs {
 
     @Synchronized
     fun dismissFailed(projectDirectory: File, jobId: String, executionId: String): Boolean {
+        requireWritable()
         val current = load(projectDirectory, jobId) ?: return false
         if (current.status != NovelWorkspaceGhostwriteJob.STATUS_FAILED || current.executionKey != executionId) return false
         if (!File(dir(projectDirectory), "$jobId.json").delete()) {
@@ -778,6 +799,26 @@ object NovelWorkspaceGhostwriteJobs {
         }
         return true
     }
+
+    /** Restore maintenance alone can pause jobs while ordinary durable writes are blocked. */
+    @Synchronized
+    fun pauseRunningForRestore(projectDirectory: File) {
+        val now = Instant.now()
+        for (job in decodeAll(projectDirectory)) {
+            if (job.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING) continue
+            writeJob(
+                job.copy(
+                    status = NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+                    executionId = UUID.randomUUID().toString().uppercase(),
+                    updatedAt = now,
+                ),
+                projectDirectory,
+            )
+        }
+    }
+
+    // These entry points already hold this object's monitor across their entire transaction.
+    private fun requireWritable() = NovelWorkspaceRestoreBoundary.write { Unit }
 
     /**
      * Progress = durable branch-head state since the job started. Write mode counts
@@ -787,11 +828,9 @@ object NovelWorkspaceGhostwriteJobs {
      * none; paths whose ordinal cannot be parsed are ignored), so a crashed polish
      * batch also resumes from the ledger instead of a counter.
      *
-     * 取舍：边界用精确 [NovelWorkspaceGhostwriteJob.createdAt] 比较，不再向下取整到秒。
-     * commit 的 createdAt 持久化本就秒截断，job 再取整会把「job 创建前同一秒内」的旧
-     * 润色 commit 计入新 job（取消旧批次 1 秒内新建时静默跳过范围首章）。残留窗口：
-     * 同秒重启时 job 从磁盘读回也是秒截断，恰好落在同一秒的旧 commit 仍可能被计入
-     * 一次 —— 后果只是该章被多润色一次，安全方向。
+     * New polish jobs count distinct chapter ordinals in their own branch-ancestry
+     * commit metadata. An unchanged but reviewed chapter still finishes. Already saved
+     * older polish jobs additionally recognize their original time-bound commits.
      */
     fun progress(
         job: NovelWorkspaceGhostwriteJob,
@@ -801,19 +840,23 @@ object NovelWorkspaceGhostwriteJobs {
         if (job.mode == NovelWorkspaceGhostwriteMode.Polish) {
             val chaptersPrefix = NovelWorkspacePaths.branchPrefix(job.branchSlug) + "/chapters/"
             val ordinalRange = job.startOrdinal..job.endOrdinal
-            val polished = ledger.commits.count { commit ->
-                commit.message == NovelWorkspaceLedger.Message.POLISH &&
-                    // Exact compare: commit timestamps are persisted second-truncated, so
-                    // flooring the job boundary widened the same-second window (see KDoc).
-                    !commit.createdAt.isBefore(job.createdAt) &&
-                    NovelWorkspaceLedger.changedPaths(commit, ledger.commits)
-                        .asSequence()
-                        .mapNotNull { path ->
-                            path.takeIf { it.startsWith(chaptersPrefix) }
-                                ?.let(NovelWorkspacePaths::chapterOrdinalFromPath)
-                        }
-                        .any { it in ordinalRange }
-            }
+            val branchId = job.branchId.ifBlank { NovelWorkspaceLedger.branchId(store, ledger, job.branchSlug).orEmpty() }
+            val headId = ledger.heads[branchId] ?: return 0
+            val polished = ledger.ancestry(headId).asSequence()
+                .filter { it.message == NovelWorkspaceLedger.Message.POLISH }
+                .flatMap { commit ->
+                    when {
+                        commit.polishJobId == job.id -> listOfNotNull(commit.polishChapterOrdinal).asSequence()
+                        !job.polishUsesCommitProvenance && commit.polishJobId == null && !commit.createdAt.isBefore(job.createdAt) ->
+                            NovelWorkspaceLedger.changedPaths(commit, ledger.commits).asSequence()
+                                .filter { it.startsWith(chaptersPrefix) && it in commit.files }
+                                .mapNotNull(NovelWorkspacePaths::chapterOrdinalFromPath)
+                        else -> emptySequence()
+                    }
+                }
+                .filter { it in ordinalRange }
+                .distinct()
+                .count()
             return polished.coerceIn(0, job.targetChapterCount)
         }
         val boundJob = load(store.rootDirectory, job.id)

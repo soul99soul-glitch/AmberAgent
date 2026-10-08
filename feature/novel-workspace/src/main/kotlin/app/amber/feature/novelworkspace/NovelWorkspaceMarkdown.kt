@@ -18,22 +18,14 @@ object NovelWorkspaceMarkdown {
 
     fun parseFile(text: String): ParsedFile {
         val trimmed = text.trim()
-        if (!trimmed.startsWith("---")) {
-            return ParsedFile(body = trimmed)
-        }
-        val rest = trimmed.drop(3).trimStart('\n', '\r')
-        val end = rest.indexOf("\n---")
-        if (end < 0) {
-            return ParsedFile(body = trimmed)
-        }
-        val front = rest.substring(0, end)
-        val body = rest.substring(end + "\n---".length).trim()
+        val closing = closingFence(trimmed) ?: return ParsedFile(body = trimmed)
+        val front = trimmed.substring(trimmed.indexOf('\n') + 1, closing.first)
+        val body = trimmed.substring(closing.last + 1).trim()
         val fields = LinkedHashMap<String, String>()
         val lists = LinkedHashMap<String, MutableList<String>>()
         val maps = LinkedHashMap<String, MutableList<Map<String, String>>>()
         var currentList: String? = null
-        for (rawLine in front.split('\n')) {
-            val line = rawLine.trimEnd('\r')
+        for (line in scalarLines(front)) {
             val listItem = line.trim()
             if (line.startsWith("  - ") || line.startsWith("- ")) {
                 val key = currentList ?: continue
@@ -58,7 +50,7 @@ object NovelWorkspaceMarkdown {
                 fields[key] = unquote(value)
             }
         }
-        return ParsedFile(fields = fields, lists = lists, maps = maps, body = body)
+        return ParsedFile(fields = fields, lists = lists, maps = maps, body = if (fields.isEmpty() && lists.isEmpty() && maps.isEmpty()) trimmed else body)
     }
 
     /**
@@ -86,8 +78,7 @@ object NovelWorkspaceMarkdown {
     fun parseMapping(text: String): Map<String, String> {
         val result = LinkedHashMap<String, String>()
         var prefix = ""
-        for (rawLine in text.split('\n')) {
-            val line = rawLine.trimEnd('\r')
+        for (line in scalarLines(text)) {
             if (line.startsWith("  ")) {
                 val trimmed = line.trim()
                 val colon = trimmed.indexOf(':')
@@ -184,6 +175,104 @@ object NovelWorkspaceMarkdown {
         val fence = lines.joinToString("\n")
         val trimmedBody = body.trim()
         return if (trimmedBody.isEmpty()) "$fence\n" else "$fence\n\n$trimmedBody\n"
+    }
+
+    /** Replace prose without rebuilding imported lists, relations, or unknown YAML. */
+    fun withBody(text: String, body: String): String {
+        val header = rawHeader(text) ?: return body.trim()
+        val newline = if (header.contains("\r\n")) "\r\n" else "\n"
+        val fence = header.removeSuffix("\r")
+        return if (body.isBlank()) fence + newline else fence + newline + newline + body.trim() + newline
+    }
+
+    /** Change selected scalar fields, preserving every other front-matter line. */
+    fun withFields(text: String, fields: Map<String, String>): String {
+        val header = rawHeader(text) ?: return render(fields.toList(), body = parseFile(text).body)
+        val newline = if (header.contains("\r\n")) "\r\n" else "\n"
+        val remaining = fields.toMutableMap()
+        val lines = scalarLines(header.removeSuffix("\r")).toMutableList()
+        for (index in 1 until lines.lastIndex) {
+            val line = lines[index]
+            val key = line.substringBefore(':')
+            if (!line.startsWith(' ') && !line.startsWith('\t') && ':' in line && key in remaining) {
+                lines[index] = "$key: ${yamlScalar(remaining.remove(key)!!)}"
+            }
+        }
+        lines.addAll(lines.lastIndex, remaining.map { (key, value) -> "$key: ${yamlScalar(value)}" })
+        val replaced = lines.joinToString("\n").replace("\n", newline)
+        val prefixLength = text.length - text.trimStart().length
+        val closingCarriageReturn = if (header.endsWith('\r')) "\r" else ""
+        return text.take(prefixLength) + replaced + closingCarriageReturn +
+            text.substring(prefixLength + header.length)
+    }
+
+    private fun rawHeader(text: String): String? {
+        val trimmed = text.trimStart()
+        if (!trimmed.startsWith("---\n") && !trimmed.startsWith("---\r\n")) return null
+        val parsed = parseFile(trimmed)
+        if (parsed.fields.isEmpty() && parsed.lists.isEmpty() && parsed.maps.isEmpty()) return null
+        val closing = closingFence(trimmed) ?: return null
+        return trimmed.substring(0, closing.last + 1)
+    }
+
+    /** Raw newlines inside quoted values are part of the existing exporter wire. */
+    private fun scalarLines(text: String): List<String> {
+        val lines = text.split('\n').map { it.removeSuffix("\r") }
+        val result = mutableListOf<String>()
+        var index = 0
+        while (index < lines.size) {
+            val record = StringBuilder(lines[index++])
+            val value = scalarValue(record.toString())
+            var quoted = value.startsWith('"') && !hasClosingQuote(value, 1)
+            while (quoted && index < lines.size) {
+                val next = lines[index++]
+                record.append('\n').append(next)
+                quoted = !hasClosingQuote(next, 0)
+            }
+            result.add(record.toString())
+        }
+        return result
+    }
+
+    private fun scalarValue(line: String): String {
+        val trimmed = line.trim()
+        return when {
+            trimmed.startsWith("#") -> ""
+            trimmed.startsWith("- ") -> trimmed.drop(2).trim()
+            else -> line.substringAfter(':', "").trim()
+        }
+    }
+
+    private fun hasClosingQuote(value: String, start: Int): Boolean {
+        var escaped = false
+        for (index in start until value.length) {
+            when {
+                escaped -> escaped = false
+                value[index] == '\\' -> escaped = true
+                value[index] == '"' -> return true
+            }
+        }
+        return false
+    }
+
+    /** A fence-looking line inside a quoted scalar does not end front matter. */
+    private fun closingFence(text: String): IntRange? {
+        if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) return null
+        var start = text.indexOf('\n') + 1
+        var quoted = false
+        while (start < text.length) {
+            val end = text.indexOf('\n', start).takeIf { it >= 0 } ?: text.length
+            val line = text.substring(start, end).removeSuffix("\r")
+            if (!quoted && line == "---") return start until end
+            quoted = if (quoted) {
+                !hasClosingQuote(line, 0)
+            } else {
+                val value = scalarValue(line)
+                value.startsWith('"') && !hasClosingQuote(value, 1)
+            }
+            start = end + 1
+        }
+        return null
     }
 
     fun yamlScalar(value: String): String {

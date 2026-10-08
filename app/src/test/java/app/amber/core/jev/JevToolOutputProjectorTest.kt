@@ -4,6 +4,10 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.Settings
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -26,6 +30,7 @@ class JevToolOutputProjectorTest {
     private fun runtime(
         transport: FakeTransport,
         mode: JevMode,
+        shadowScope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined),
     ): JevRuntime {
         val settings = Settings(
             jev = JevSetting(
@@ -41,6 +46,7 @@ class JevToolOutputProjectorTest {
                 clock = { 1_000_000L },
             ),
             settingsProvider = { settings },
+            backgroundScope = shadowScope,
         )
     }
 
@@ -101,11 +107,52 @@ class JevToolOutputProjectorTest {
     @Test
     fun shadowLeavesMessagesUnchanged() = runTest {
         val transport = FakeTransport { successAnswer("0" to 0.9, "1" to 0.05, "2" to 0.05, "3" to 0.05) }
-        val projector = JevToolOutputProjector(runtime(transport, JevMode.SHADOW))
+        val projector = JevToolOutputProjector(runtime(transport, JevMode.SHADOW, backgroundScope))
         val original = listOf(taskMessage(), message(longToolOutput()))
         val result = projector.projectMessages(original, runKey = "run-1")
+        // backgroundScope 的任务不计入 advanceUntilIdle，用 runCurrent 执行后台 shadow。
+        runCurrent()
         assertEquals(original, result)
         assertEquals(1, transport.calls)
+    }
+
+    /** shadow 不等 Jev：请求副本立即原样返回，判断在后台完成。 */
+    @Test
+    fun shadowReturnsWithoutWaitingForJev() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val transport = FakeTransport {
+            gate.await()
+            successAnswer("0" to 0.9, "1" to 0.05, "2" to 0.05, "3" to 0.05)
+        }
+        val projector = JevToolOutputProjector(runtime(transport, JevMode.SHADOW, backgroundScope))
+        val original = listOf(taskMessage(), message(longToolOutput()))
+        assertEquals(original, projector.projectMessages(original, runKey = "run-1"))
+        assertEquals(0L, testScheduler.currentTime)
+        gate.complete(Unit)
+        // backgroundScope 的任务不计入 advanceUntilIdle，用 runCurrent 执行后台 shadow。
+        runCurrent()
+        assertEquals(1, transport.calls)
+    }
+
+    /** 同名同参的再次调用是模型在取回原文：后一次保持全文，前一次的投影不变。 */
+    @Test
+    fun sameToolSameArgsRereadKeepsFullText() = runTest {
+        val transport = FakeTransport { request ->
+            val ids = Regex("\"Is the block with i=(\\d+)").findAll(request.body).map { it.groupValues[1] }.toList()
+            successAnswer(*ids.map { it to 0.05 }.toTypedArray())
+        }
+        val projector = JevToolOutputProjector(runtime(transport, JevMode.ACTIVE))
+        val first = longToolOutput()
+        val reread = first.copy(toolCallId = "call-2")
+        val result = projector.projectMessages(
+            listOf(taskMessage(), message(first), message(reread)),
+            runKey = "run-1",
+        )
+        val firstText = ((result[1].parts.single() as UIMessagePart.Tool).output.single() as UIMessagePart.Text).text
+        val rereadText = ((result[2].parts.single() as UIMessagePart.Tool).output.single() as UIMessagePart.Text).text
+        assertTrue("first call still projected", firstText.contains("omitted by context filter"))
+        assertEquals((reread.output.single() as UIMessagePart.Text).text, rereadText)
+        assertTrue("marker points at re-calling the tool", firstText.contains("same arguments"))
     }
 
     @Test
@@ -138,7 +185,7 @@ class JevToolOutputProjectorTest {
         val projector = JevToolOutputProjector(runtime(transport, JevMode.ACTIVE))
         val failed = UIMessagePart.Tool(
             toolCallId = "c3",
-            toolName = "terminal_execute",
+            toolName = "file_read",
             input = "{}",
             output = listOf(
                 UIMessagePart.Text(
@@ -214,4 +261,15 @@ class JevToolOutputProjectorTest {
         assertTrue(JevToolOutputProjector.isMustKeepBlock("Approval: required before continuing"))
         assertFalse(JevToolOutputProjector.isMustKeepBlock("lorem ipsum dolor sit amet"))
     }
+    @Test
+    fun executionToolOutputIsNotProjectedIntoAnUnusableRereadPromise() = runTest {
+        val transport = FakeTransport { successAnswer("0" to 0.9, "1" to 0.05, "2" to 0.05, "3" to 0.05) }
+        val projector = JevToolOutputProjector(runtime(transport, JevMode.ACTIVE))
+        for (name in listOf("terminal_execute", "terminal_session_exec", "wm_eval")) {
+            val original = listOf(taskMessage(), message(longToolOutput().copy(toolName = name)))
+            assertEquals(name, original, projector.projectMessages(original, "run-$name"))
+        }
+        assertEquals("unsafe-to-replay output should never be sent for projection", 0, transport.calls)
+    }
+
 }

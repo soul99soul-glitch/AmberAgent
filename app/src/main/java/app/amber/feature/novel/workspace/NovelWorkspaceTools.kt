@@ -7,6 +7,8 @@ import app.amber.feature.novelworkspace.NovelWorkspaceLedger
 import app.amber.feature.novelworkspace.NovelWorkspaceMarkdown
 import app.amber.feature.novelworkspace.NovelWorkspacePaths
 import app.amber.feature.novelworkspace.NovelWorkspaceStore
+import app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary
+import app.amber.feature.novelworkspace.NovelWorkspaceUnresolvedStore
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -40,6 +42,7 @@ class NovelWorkspaceToolSession(
      * polish must not move the story; the host owns the plot-pointer commit).
      */
     private val polishTargetPath: String? = null,
+    private val restoreEpoch: Long = NovelWorkspaceRestoreBoundary.currentEpoch(),
 ) {
 
     /** Locked by the first chapter write of a ghostwrite turn (see [ghostwriteChapterRefusal]). */
@@ -160,8 +163,8 @@ class NovelWorkspaceToolSession(
             val status = NovelWorkspaceLedger.status(
                 head = branchId?.let { ledger.headOf(it) },
                 working = store.fileTree(),
-                plotStale = false,
-                unresolved = false,
+                plotStale = NovelWorkspaceLedger.isPlotStale(store, ledger, branchSlug),
+                unresolved = NovelWorkspaceUnresolvedStore.entryFor(store.rootDirectory, branchSlug) != null,
             )
             textResult(
                 buildString {
@@ -169,6 +172,8 @@ class NovelWorkspaceToolSession(
                     appendLine("branch: $branchSlug")
                     appendLine("working chapters: ${chapters.size}")
                     appendLine("head: ${status.headID ?: "(no commits)"} ${status.message.orEmpty()}")
+                    appendLine("plot stale: ${status.plotStale}")
+                    appendLine("unresolved: ${status.unresolved}")
                     if (status.dirtyPaths.isNotEmpty()) {
                         appendLine("dirty: ${status.dirtyPaths.joinToString(", ")}")
                     }
@@ -213,71 +218,76 @@ class NovelWorkspaceToolSession(
         // NovelWorkspaceRuntime.approve(); free paths are a fixed whitelist; host files refuse.
         needsApproval = false,
         execute = { input ->
-            val path = requirePath(input)
-            val content = input.str("content") ?: ""
-            val reason = input.str("reason")
-            android.util.Log.i(
-                "NovelWorkspace",
-                "write tool: path=$path contentLen=${content.length} keys=${input.toString().take(120)}",
-            )
-            if (readOnly) {
-                return@Tool textResult("当前轮次为只读生成，不能修改工作区；请在最终回答中返回完整内容。")
-            }
-            when {
-                isOtherBranchPath(path) -> {
-                    textResult("无法写入其他分支：$path。当前轮次只能修改 branches/$branchSlug/。")
+            NovelWorkspaceRestoreBoundary.write(restoreEpoch) toolWrite@{
+                val path = requirePath(input)
+                val content = input.str("content") ?: ""
+                val reason = input.str("reason")
+                android.util.Log.i(
+                    "NovelWorkspace",
+                    "write tool: path=$path contentLen=${content.length} keys=${input.toString().take(120)}",
+                )
+                if (readOnly) {
+                    return@toolWrite textResult("当前轮次为只读生成，不能修改工作区；请在最终回答中返回完整内容。")
                 }
-                NovelWorkspacePaths.isProtectedPath(path) -> {
-                    if (autoApproveCanon) {
-                        // Unattended canon writes are restricted to this turn's one
-                        // locked target chapter: touching anything older (or a second
-                        // new chapter) lands in the same commit and trips the D-D
-                        // unresolved gate, killing the batch one turn later.
-                        chapterWriteRefusal(path)?.let { return@Tool textResult(it) }
-                        // Polish replaces the body only: auto-approved writes land raw,
-                        // so the host re-renders the EXISTING chapter front matter
-                        // around the new body — chapter identity (id/ordinal/title)
-                        // is host-owned and must survive a polish batch.
-                        val contentToBuffer = if (path == polishTargetPath) {
-                            polishedContent(path, content)
+                if (polishTargetPath != null && path != polishTargetPath) {
+                    return@toolWrite textResult("润色轮只能修改 $polishTargetPath；不能改动其他章节、资料、计划或草稿。")
+                }
+                when {
+                    isOtherBranchPath(path) -> {
+                        textResult("无法写入其他分支：$path。当前轮次只能修改 branches/$branchSlug/。")
+                    }
+                    NovelWorkspacePaths.isProtectedPath(path) -> {
+                        if (autoApproveCanon) {
+                            // Unattended canon writes are restricted to this turn's one
+                            // locked target chapter: touching anything older (or a second
+                            // new chapter) lands in the same commit and trips the D-D
+                            // unresolved gate, killing the batch one turn later.
+                            chapterWriteRefusal(path)?.let { return@toolWrite textResult(it) }
+                            // Polish replaces the body only: auto-approved writes land raw,
+                            // so the host re-renders the EXISTING chapter front matter
+                            // around the new body — chapter identity (id/ordinal/title)
+                            // is host-owned and must survive a polish batch.
+                            val contentToBuffer = if (path == polishTargetPath) {
+                                polishedContent(path, content)
+                            } else {
+                                content
+                            }
+                            // Buffer until the runtime's final owner-token check. An
+                            // obsolete Worker must never write into a resumed execution.
+                            batch.add(NovelWorkspaceWriteEntry(path, contentToBuffer, reason))
+                            textResult("已暂存 $path（本轮完成后自动收录）。")
                         } else {
-                            content
+                            batch.add(NovelWorkspaceWriteEntry(path, content, reason))
+                            textResult(
+                                "已登记修改提案（$path），等待作者确认后才会写入正文。" +
+                                    "本轮不要再次写同一文件，可以收尾。",
+                            )
                         }
-                        // Buffer until the runtime's final owner-token check. An
-                        // obsolete Worker must never write into a resumed execution.
-                        batch.add(NovelWorkspaceWriteEntry(path, contentToBuffer, reason))
-                        textResult("已暂存 $path（本轮完成后自动收录）。")
-                    } else {
-                        batch.add(NovelWorkspaceWriteEntry(path, content, reason))
+                    }
+                    NovelWorkspacePaths.isFreeWritePath(path) -> {
+                        if (autoApproveCanon && confirmedPlanLocked && path == confirmedPlanPath()) {
+                            textResult("本章计划已由当前代笔批次确认，完成前不能由模型改写。")
+                        } else if (autoApproveCanon) {
+                            // The same execution-token rule applies to plan/setting/draft
+                            // writes made by an unattended provider.
+                            batch.add(NovelWorkspaceWriteEntry(path, content, reason))
+                            textResult("已暂存 $path（本轮完成后自动收录）。")
+                        } else {
+                            batch.rememberPrevious(path, store.read(path))
+                            store.write(path, content)
+                            batch.noteFreeWrite()
+                            textResult("已保存 $path")
+                        }
+                    }
+                    else -> {
+                        android.util.Log.i("NovelWorkspace", "write tool: REJECTED path=$path")
                         textResult(
-                            "已登记修改提案（$path），等待作者确认后才会写入正文。" +
-                                "本轮不要再次写同一文件，可以收尾。",
+                            "无法写入 $path（路径前缀不被接受，注意目录名全小写）。" +
+                                "设定请写入 setting/<分组>/<文件>.md（如 setting/characters/主角.md）；" +
+                                "灵感写 inbox/<文件>.md；草稿写 drafts/<文件>.md；章节大纲写 branches/主线/plan/。" +
+                                "manifest.yaml、project.md、branch.md 由宿主管理，不可直接写。请换用正确前缀重试。",
                         )
                     }
-                }
-                NovelWorkspacePaths.isFreeWritePath(path) -> {
-                    if (autoApproveCanon && confirmedPlanLocked && path == confirmedPlanPath()) {
-                        textResult("本章计划已由当前代笔批次确认，完成前不能由模型改写。")
-                    } else if (autoApproveCanon) {
-                        // The same execution-token rule applies to plan/setting/draft
-                        // writes made by an unattended provider.
-                        batch.add(NovelWorkspaceWriteEntry(path, content, reason))
-                        textResult("已暂存 $path（本轮完成后自动收录）。")
-                    } else {
-                        batch.rememberPrevious(path, store.read(path))
-                        store.write(path, content)
-                        batch.noteFreeWrite()
-                        textResult("已保存 $path")
-                    }
-                }
-                else -> {
-                    android.util.Log.i("NovelWorkspace", "write tool: REJECTED path=$path")
-                    textResult(
-                        "无法写入 $path（路径前缀不被接受，注意目录名全小写）。" +
-                            "设定请写入 setting/<分组>/<文件>.md（如 setting/characters/主角.md）；" +
-                            "灵感写 inbox/<文件>.md；草稿写 drafts/<文件>.md；章节大纲写 branches/主线/plan/。" +
-                            "manifest.yaml、project.md、branch.md 由宿主管理，不可直接写。请换用正确前缀重试。",
-                    )
                 }
             }
         },
@@ -386,7 +396,7 @@ class NovelWorkspaceWriteBatch {
     }
 
     fun rememberPrevious(path: String, content: String?) {
-        previousContents.putIfAbsent(path, content)
+        if (!previousContents.containsKey(path)) previousContents[path] = content
     }
 
     fun previousSnapshot(): Map<String, String?> = previousContents.toMap()

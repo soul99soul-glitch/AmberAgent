@@ -269,13 +269,18 @@ internal class AnthropicMessagesAdapter(
         }
 
         is UIMessagePart.Image -> {
-            val encoded = part.encodeBase64(withPrefix = false).getOrThrow()
             buildJsonObject {
                 put("type", "image")
                 put("source", buildJsonObject {
-                    put("type", "base64")
-                    put("media_type", encoded.mimeType)
-                    put("data", encoded.base64)
+                    if (part.url.startsWith("https://", ignoreCase = true) || part.url.startsWith("http://", ignoreCase = true)) {
+                        put("type", "url")
+                        put("url", part.url)
+                    } else {
+                        val encoded = part.encodeBase64(withPrefix = false).getOrThrow()
+                        put("type", "base64")
+                        put("media_type", encoded.mimeType)
+                        put("data", encoded.base64)
+                    }
                 })
             }
         }

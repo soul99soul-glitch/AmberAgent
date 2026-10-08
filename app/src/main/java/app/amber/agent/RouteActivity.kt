@@ -25,6 +25,8 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.CubicBezierEasing
@@ -47,6 +49,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -114,6 +117,7 @@ import app.amber.feature.ui.pages.zcode.ZCodePage
 import app.amber.feature.ui.pages.zcode.ZCodeSessionPage
 import app.amber.feature.ui.pages.log.LogPage
 import app.amber.feature.ui.pages.miniapp.MiniAppListPage
+import app.amber.feature.ui.pages.novel.NovelLaunchCurtain
 import app.amber.feature.ui.pages.novel.NovelMarkdownWorkspacePage
 import app.amber.feature.ui.pages.novel.NovelProjectsPage
 import app.amber.feature.ui.pages.miniapp.MiniAppRunnerPage
@@ -168,6 +172,9 @@ import app.amber.feature.ui.pages.webview.WebViewPage
 import app.amber.feature.ui.pages.webmount.WebMountSessionPage
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.feature.ui.theme.AmberAgentTheme
+import app.amber.feature.ui.adaptive.TwoPaneRole
+import app.amber.feature.ui.adaptive.rememberAdaptiveSceneStrategies
+import app.amber.feature.ui.adaptive.twoPaneMetadata
 import app.amber.feature.ui.theme.ThemePageChrome
 import app.amber.feature.ui.theme.rememberThemePageChromeDecorator
 import app.amber.feature.ui.theme.themePageChromeMetadata
@@ -182,6 +189,10 @@ private const val TAG = "RouteActivity"
 private const val ROUTE_TRANSITION_DURATION_MILLIS = 320
 private val RouteTransitionEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 private val RouteTransitionSpec = tween<IntOffset>(
+    durationMillis = ROUTE_TRANSITION_DURATION_MILLIS,
+    easing = RouteTransitionEasing,
+)
+private val RouteTransitionSpecFloat = tween<Float>(
     durationMillis = ROUTE_TRANSITION_DURATION_MILLIS,
     easing = RouteTransitionEasing,
 )
@@ -433,6 +444,15 @@ class RouteActivity : ComponentActivity() {
         newIntentHandler?.invoke(intent)
     }
 
+    private fun standaloneStartScreen(intent: Intent): Screen? = when (StandaloneSurfaces.current) {
+        StandaloneSurfaces.NOVEL ->
+            app.amber.feature.novel.workspace.NovelWorkspaceNotificationRoute.screenFrom(intent)
+                ?: Screen.NovelProjects
+        StandaloneSurfaces.DEEP_READ ->
+            deepReadScreenFromIntent(intent) ?: Screen.TodayBoard
+        else -> null
+    }
+
     private fun deepReadScreenFromIntent(intent: Intent): Screen.DeepRead? {
         if (!intent.getBooleanExtra(DeepReadNotifier.EXTRA_OPEN_DEEP_READ, false)) return null
         val topicId = intent.getStringExtra(DeepReadNotifier.EXTRA_TOPIC_ID)
@@ -548,6 +568,12 @@ class RouteActivity : ComponentActivity() {
 
         val notificationLink = remember { notificationDeepLinkFrom(intent) }
         val startScreen = remember {
+            // Standalone products (app.amber.novel / app.amber.deepread) resolve
+            // only their own surface deep-links; everything else lands on the
+            // product home.
+            standaloneStartScreen(intent)?.let { screen ->
+                return@remember screen
+            }
             // Cold-start notification taps must win over launch-mode/last-
             // conversation resolution. This prevents a mismatched run from
             // being hidden by an unrelated last session.
@@ -655,6 +681,7 @@ class RouteActivity : ComponentActivity() {
                     alignment = Alignment.TopCenter,
                     showCloseButton = true,
                 )
+                Box(Modifier.fillMaxSize()) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -669,6 +696,7 @@ class RouteActivity : ComponentActivity() {
                         ),
                         modifier = Modifier.fillMaxSize().weight(1f),
                         onBack = { backStack.removeLastOrNull() },
+                        sceneStrategies = rememberAdaptiveSceneStrategies(),
                         transitionSpec = {
                             if (backStack.size == 1) fadeIn() togetherWith fadeOut()
                             else routePushTransition()
@@ -676,7 +704,7 @@ class RouteActivity : ComponentActivity() {
                         popTransitionSpec = { routePopTransition() },
                         predictivePopTransitionSpec = { routePopTransition() },
                         entryProvider = entryProvider {
-                            entry<Screen.Chat> { key ->
+                            entry<Screen.Chat>(metadata = twoPaneMetadata(TwoPaneRole.Detail)) { key ->
                                 ChatPage(
                                     enterTransition = LocalNavAnimatedContentScope.current.transition,
                                     id = Uuid.parse(key.id),
@@ -711,7 +739,9 @@ class RouteActivity : ComponentActivity() {
                                 HistoryPage()
                             }
 
-                            entry<Screen.SessionHome>(metadata = themePageChromeMetadata(ThemePageChrome.Home)) {
+                            entry<Screen.SessionHome>(
+                                metadata = themePageChromeMetadata(ThemePageChrome.Home) + twoPaneMetadata(TwoPaneRole.List),
+                            ) {
                                 SessionHomePage()
                             }
 
@@ -902,7 +932,33 @@ class RouteActivity : ComponentActivity() {
                                 TodayBoardPage()
                             }
 
-                            entry<Screen.DeepRead> { key ->
+                            entry<Screen.DeepRead>(
+                                // Standalone product opens articles like iOS's
+                                // `.zoom` transition — the page rises out of the
+                                // card instead of sliding in. The full app keeps
+                                // the shared slide.
+                                metadata = NavDisplay.transitionSpec {
+                                    if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+                                        (scaleIn(animationSpec = RouteTransitionSpecFloat, initialScale = 0.94f) + fadeIn(tween(220))) togetherWith fadeOut(tween(140))
+                                    } else {
+                                        routePushTransition()
+                                    }
+                                } + NavDisplay.popTransitionSpec {
+                                    if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+                                        fadeIn(tween(200)) togetherWith
+                                            (scaleOut(animationSpec = RouteTransitionSpecFloat, targetScale = 0.94f) + fadeOut(tween(240)))
+                                    } else {
+                                        routePopTransition()
+                                    }
+                                } + NavDisplay.predictivePopTransitionSpec {
+                                    if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+                                        fadeIn(tween(200)) togetherWith
+                                            (scaleOut(animationSpec = RouteTransitionSpecFloat, targetScale = 0.94f) + fadeOut(tween(240)))
+                                    } else {
+                                        routePopTransition()
+                                    }
+                                },
+                            ) { key ->
                                 DeepReadScreen(
                                     topicId = key.topicId,
                                     title = key.title,
@@ -1001,6 +1057,17 @@ class RouteActivity : ComponentActivity() {
                             }
                         }
                     )
+                }
+                if (StandaloneSurfaces.current == StandaloneSurfaces.NOVEL) {
+                    // Cold-launch seal curtain — once per launch, skipped under
+                    // reduce-motion/TalkBack inside the composable itself.
+                    var curtainDone by rememberSaveable { mutableStateOf(false) }
+                    if (!curtainDone) {
+                        NovelLaunchCurtain(
+                            onFinish = { curtainDone = true },
+                        )
+                    }
+                }
                 }
             }
         }

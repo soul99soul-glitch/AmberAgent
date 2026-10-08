@@ -73,6 +73,6 @@ object NovelWorkspacePaths {
         val segments = path.split('/')
         require(segments.none { it.isEmpty() }) { "Workspace path has empty segments: $path" }
         require(segments.none { it == ".." }) { "Workspace path escapes the tree: $path" }
-        require(!segments.first().startsWith(".")) { "Workspace path is hidden: $path" }
+        require(segments.none { it.startsWith(".") }) { "Workspace path is hidden: $path" }
     }
 }

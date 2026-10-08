@@ -23,6 +23,8 @@ import java.time.Instant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -147,7 +149,7 @@ class NovelWorkspacePolishBatchTest {
 
     /**
      * Scripted polish turn: reads the host's user text (「请润色第 N 章。」) and answers
-     * with a novel_workspace_write of the locked chapter's polished body.
+     * with a read-only prose candidate, then a hash-bound factual review.
      */
     private class PolishingFakeKernel(
         private val chapterPaths: Map<Int, String>,
@@ -156,19 +158,33 @@ class NovelWorkspacePolishBatchTest {
         private val failFirstNCalls: Int = 0,
     ) : RunKernel {
         var calls = 0
+        var reviewCalls = 0
+        var reviewFactsUnchanged = true
+        var malformedReview = false
+        var beforeReviewFinal: (() -> Unit)? = null
         val systemPrompts = mutableListOf<String>()
         val userTexts = mutableListOf<String>()
 
-        /** Test hook invoked after tools execute, before the final answer. */
+        /** Test hook invoked before the candidate's final answer. */
         var beforeFinal: (() -> Unit)? = null
 
         override fun run(session: GenerationRunSession): Flow<GenerationChunk> = flow {
-            calls += 1
-            if (calls <= failFirstNCalls) throw RuntimeException("provider 429")
             val systemText = session.messages
                 .filter { it.role == MessageRole.SYSTEM }
                 .flatMap { it.parts.filterIsInstance<UIMessagePart.Text>() }
                 .joinToString("\n") { it.text }
+            if (systemText.contains("## Original")) {
+                reviewCalls += 1
+                beforeReviewFinal?.invoke()
+                val reply = if (malformedReview) "审核通过" else reviewReply(systemText, reviewFactsUnchanged)
+                emit(GenerationChunk.Messages(session.messages + UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(UIMessagePart.Text(reply)),
+                )))
+                return@flow
+            }
+            calls += 1
+            if (calls <= failFirstNCalls) throw RuntimeException("provider 429")
             systemPrompts += systemText
             val userText = session.messages
                 .filter { it.role == MessageRole.USER }
@@ -176,25 +192,11 @@ class NovelWorkspacePolishBatchTest {
                 .joinToString("\n") { it.text }
             userTexts += userText
             val ordinal = Regex("第 (\\d+) 章").find(userText)?.groupValues?.get(1)?.toIntOrNull()
-            val path = checkNotNull(chapterPaths[ordinal]) { "no scripted chapter for $ordinal" }
-            val tool = session.tools.first { it.name == "novel_workspace_write" }
-            val input = buildJsonObject {
-                put("path", path)
-                put("content", polishedBody(ordinal!!))
-            }
-            val output = tool.execute(input)
+            checkNotNull(chapterPaths[ordinal]) { "no scripted chapter for $ordinal" }
             beforeFinal?.invoke()
             val assistant = UIMessage(
                 role = MessageRole.ASSISTANT,
-                parts = listOf(
-                    UIMessagePart.Tool(
-                        toolCallId = "call-$calls",
-                        toolName = "novel_workspace_write",
-                        input = input.toString(),
-                        output = output,
-                    ),
-                    UIMessagePart.Text("润色完成。"),
-                ),
+                parts = listOf(UIMessagePart.Text(polishedBody(checkNotNull(ordinal)))),
             )
             emit(GenerationChunk.Messages(session.messages + assistant))
         }
@@ -281,6 +283,7 @@ class NovelWorkspacePolishBatchTest {
         // Ledger-derived progress agrees.
         assertEquals(2, NovelWorkspaceGhostwriteJobs.progress(job, store))
         assertEquals(2, generator.calls)
+        assertEquals(2, generator.reviewCalls)
         // The polish turn prompt carried the original body + discipline.
         assertTrue(generator.systemPrompts.all { it.contains(NovelWorkspacePrompts.WORKSPACE_DISCIPLINE.take(20)) })
         assertTrue(generator.systemPrompts[0].contains("陈桥驿的风先到。"))
@@ -431,7 +434,7 @@ class NovelWorkspacePolishBatchTest {
                 calls += 1
                 val assistant = UIMessage(
                     role = MessageRole.ASSISTANT,
-                    parts = listOf(UIMessagePart.Text("我先看看这一章的现状。")),
+                    parts = listOf(UIMessagePart.Text("")),
                 )
                 emit(GenerationChunk.Messages(session.messages + assistant))
             }
@@ -467,37 +470,21 @@ class NovelWorkspacePolishBatchTest {
     fun `polish no-output round does not commit a stray plot pointer`() = runTest {
         val dir = installProject()
         installChaptersAndPlot(dir)
-        // Round 1 polishes chapter 1 via the tool path; every later round is small talk.
+        // Only the first generation returns prose; reviews never count as new output.
         val kernel = object : RunKernel {
             var calls = 0
             override fun run(session: GenerationRunSession): Flow<GenerationChunk> = flow {
-                calls += 1
-                val assistant = if (calls == 1) {
-                    val tool = session.tools.first { it.name == "novel_workspace_write" }
-                    val input = buildJsonObject {
-                        put("path", chapterPaths.getValue(1))
-                        put("content", "润色后的第 1 章正文，文字更凝练。")
-                    }
-                    val output = tool.execute(input)
-                    UIMessage(
-                        role = MessageRole.ASSISTANT,
-                        parts = listOf(
-                            UIMessagePart.Tool(
-                                toolCallId = "call-1",
-                                toolName = "novel_workspace_write",
-                                input = input.toString(),
-                                output = output,
-                            ),
-                            UIMessagePart.Text("润色完成。"),
-                        ),
-                    )
+                val systemText = systemText(session)
+                val text = if (systemText.contains("## Original")) {
+                    reviewReply(systemText)
                 } else {
-                    UIMessage(
-                        role = MessageRole.ASSISTANT,
-                        parts = listOf(UIMessagePart.Text("我先看看这一章的现状。")),
-                    )
+                    calls += 1
+                    if (calls == 1) "润色后的第 1 章正文，文字更凝练。" else ""
                 }
-                emit(GenerationChunk.Messages(session.messages + assistant))
+                emit(GenerationChunk.Messages(session.messages + UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(UIMessagePart.Text(text)),
+                )))
             }
         }
         val coordinator = polishCoordinator(NovelWorkspaceRuntime(kernel), testScheduler)
@@ -539,7 +526,7 @@ class NovelWorkspacePolishBatchTest {
                 calls += 1
                 val assistant = UIMessage(
                     role = MessageRole.ASSISTANT,
-                    parts = listOf(UIMessagePart.Text(narrated)),
+                    parts = listOf(UIMessagePart.Text(if (systemText(session).contains("## Original")) reviewReply(systemText(session)) else narrated)),
                 )
                 emit(GenerationChunk.Messages(session.messages + assistant))
             }
@@ -587,6 +574,11 @@ class NovelWorkspacePolishBatchTest {
         // Crash window: chapter 1's 润色 commit landed, its pairing pointer never did.
         NovelWorkspaceRuntime(NoopKernel).commitPolishedChapter(
             dir, "B-1", "主线", chapterPaths.getValue(1), "第 1 章已润色但指针悬挂。",
+            expectedHeadId = NovelWorkspaceLedger.load(dir).headOf("B-1")?.id,
+            expectedTreeDigest = NovelWorkspaceLedger.treeSHA256(NovelWorkspaceStore(dir).fileTree()),
+            expectedChapterContent = checkNotNull(NovelWorkspaceStore(dir).read(chapterPaths.getValue(1))),
+            ownerJobId = job.id,
+            ownerExecutionId = job.executionKey,
         )
         assertTrue(NovelWorkspaceLedger.isPlotStale(NovelWorkspaceStore(dir), NovelWorkspaceLedger.load(dir), "主线"))
         assertEquals(1, NovelWorkspaceGhostwriteJobs.progress(job, NovelWorkspaceStore(dir)))
@@ -621,6 +613,9 @@ class NovelWorkspacePolishBatchTest {
         val coordinator = polishCoordinator(NovelWorkspaceRuntime(NoopKernel), testScheduler)
         NovelWorkspaceRuntime(NoopKernel).commitPolishedChapter(
             dir, "B-1", "主线", chapterPaths.getValue(1), "悬挂润色的第 1 章。",
+            expectedHeadId = NovelWorkspaceLedger.load(dir).headOf("B-1")?.id,
+            expectedTreeDigest = NovelWorkspaceLedger.treeSHA256(NovelWorkspaceStore(dir).fileTree()),
+            expectedChapterContent = checkNotNull(NovelWorkspaceStore(dir).read(chapterPaths.getValue(1))),
         )
         assertTrue(NovelWorkspaceLedger.isPlotStale(NovelWorkspaceStore(dir), NovelWorkspaceLedger.load(dir), "主线"))
 
@@ -663,5 +658,193 @@ class NovelWorkspacePolishBatchTest {
         assertTrue(error!!.message!!.contains("剧情落后于正文"))
         // 拒绝路径不占用分支。
         assertEquals(0, NovelWorkspaceGhostwriteJobs.listActive(dir).size)
+    }
+
+    @Test
+    fun `facts-changing polish review stops without writing or rerolling the candidate`() = runTest {
+        val dir = installProject()
+        installChaptersAndPlot(dir)
+        val before = NovelWorkspaceStore(dir).read(chapterPaths.getValue(1))
+        val generator = PolishingFakeKernel(chapterPaths, { "赵大死在了陈桥驿。" }).apply {
+            reviewFactsUnchanged = false
+        }
+        val coordinator = polishCoordinator(NovelWorkspaceRuntime(generator), testScheduler)
+        val job = persistedJob(dir, coordinator.newPolishJob(dir, "主线", 1, 1))
+
+        val result = coordinator.runBatch(job, dir, "B-1", Settings(), Model(), isPaused = { false }) { }
+
+        assertTrue(result is NovelWorkspaceGhostwriteCoordinator.BatchResult.Failed)
+        assertTrue((result as NovelWorkspaceGhostwriteCoordinator.BatchResult.Failed).error.contains("人物结局被改变"))
+        assertEquals(1, generator.calls)
+        assertEquals(1, generator.reviewCalls)
+        assertEquals(before, NovelWorkspaceStore(dir).read(chapterPaths.getValue(1)))
+        assertEquals(0, NovelWorkspaceLedger.load(dir).commits.count { it.message == NovelWorkspaceLedger.Message.POLISH })
+    }
+
+    @Test
+    fun `unparseable polish review refuses to collect`() = runTest {
+        val dir = installProject()
+        installChaptersAndPlot(dir)
+        val before = NovelWorkspaceStore(dir).read(chapterPaths.getValue(1))
+        val generator = PolishingFakeKernel(chapterPaths, { "陈桥驿，风先到了。" }).apply { malformedReview = true }
+        val coordinator = polishCoordinator(NovelWorkspaceRuntime(generator), testScheduler)
+        val job = persistedJob(dir, coordinator.newPolishJob(dir, "主线", 1, 1))
+
+        val result = coordinator.runBatch(job, dir, "B-1", Settings(), Model(), isPaused = { false }) { }
+
+        assertTrue(result is NovelWorkspaceGhostwriteCoordinator.BatchResult.Failed)
+        assertEquals(before, NovelWorkspaceStore(dir).read(chapterPaths.getValue(1)))
+        assertEquals(1, generator.calls)
+        assertEquals(1, generator.reviewCalls)
+    }
+
+    @Test
+    fun `a reviewed candidate cannot overwrite a manuscript changed during review`() = runTest {
+        val dir = installProject()
+        installChaptersAndPlot(dir)
+        val path = chapterPaths.getValue(1)
+        val generator = PolishingFakeKernel(chapterPaths, { "陈桥驿，风先到了。" }).apply {
+            beforeReviewFinal = { NovelWorkspaceStore(dir).write(path, "其他写入的新正文。") }
+        }
+        val coordinator = polishCoordinator(NovelWorkspaceRuntime(generator), testScheduler)
+        val job = persistedJob(dir, coordinator.newPolishJob(dir, "主线", 1, 1))
+
+        val result = coordinator.runBatch(job, dir, "B-1", Settings(), Model(), isPaused = { false }) { }
+
+        assertTrue(result is NovelWorkspaceGhostwriteCoordinator.BatchResult.Failed)
+        assertEquals("其他写入的新正文。", NovelWorkspaceStore(dir).read(path))
+        assertEquals(0, NovelWorkspaceLedger.load(dir).commits.count { it.message == NovelWorkspaceLedger.Message.POLISH })
+    }
+
+    @Test
+    fun `polish write target rejects free paths and other canon paths in both approval modes`() = runTest {
+        val dir = installProject()
+        val store = NovelWorkspaceStore(dir)
+        for (autoApprove in listOf(false, true)) {
+            val batch = NovelWorkspaceWriteBatch()
+            val tool = NovelWorkspaceToolSession(
+                store, "主线", "赵大来了", batch,
+                autoApproveCanon = autoApprove,
+                polishTargetPath = chapterPaths.getValue(1),
+            ).tools().first { it.name == "novel_workspace_write" }
+            for (path in listOf("setting/writing/偏好.md", "drafts/越界.md", "inbox/越界.md", "branches/主线/plan/this-chapter.md", "branches/主线/plot/current.md", chapterPaths.getValue(2))) {
+                val output = tool.execute(buildJsonObject { put("path", path); put("content", "越界修改") })
+                assertTrue(output.filterIsInstance<UIMessagePart.Text>().joinToString { it.text }.contains("润色轮只能修改"))
+                assertNull(store.read(path))
+            }
+            assertTrue(batch.snapshot().isEmpty())
+        }
+    }
+
+    @Test
+    fun `workspace status reports actual plot staleness and unresolved edits`() = runTest {
+        val dir = installProject()
+        installChaptersAndPlot(dir)
+        val runtime = NovelWorkspaceRuntime(NoopKernel)
+        runtime.saveChapterEdit(dir, "B-1", "主线", chapterPaths.getValue(1), "山呼", "人物发生变化的全新情节。")
+        val tool = NovelWorkspaceToolSession(NovelWorkspaceStore(dir), "主线", "赵大来了", NovelWorkspaceWriteBatch())
+            .tools().first { it.name == "novel_workspace_status" }
+
+        val output = tool.execute(buildJsonObject { }).filterIsInstance<UIMessagePart.Text>().joinToString { it.text }
+
+        assertTrue(output.contains("plot stale: true"))
+        assertTrue(output.contains("unresolved: true"))
+    }
+
+    @Test
+    fun `unchanged reviewed chapter completes and projects reviewing and committing stages`() = runTest {
+        val dir = installProject()
+        installChaptersAndPlot(dir)
+        val original = bodyOf(NovelWorkspaceStore(dir), chapterPaths.getValue(1))
+        val generator = PolishingFakeKernel(chapterPaths, { original })
+        val coordinator = polishCoordinator(NovelWorkspaceRuntime(generator), testScheduler)
+        val job = persistedJob(dir, coordinator.newPolishJob(dir, "主线", 1, 1))
+        var reviewing = false
+        var committing = false
+        generator.beforeReviewFinal = {
+            reviewing = NovelWorkspaceGhostwriteJobs.load(dir, job.id)?.stage == app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteStage.Reviewing
+        }
+
+        val result = coordinator.runBatch(job, dir, "B-1", Settings(), Model(), isPaused = { false }) {
+            committing = NovelWorkspaceGhostwriteJobs.load(dir, job.id)?.stage == app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteStage.Committing
+        }
+
+        assertTrue(result is NovelWorkspaceGhostwriteCoordinator.BatchResult.Completed)
+        assertEquals(1, generator.calls)
+        assertEquals(1, generator.reviewCalls)
+        assertTrue(reviewing)
+        assertTrue(committing)
+        assertEquals(1, NovelWorkspaceGhostwriteJobs.progress(job, NovelWorkspaceStore(dir)))
+        assertEquals(original, bodyOf(NovelWorkspaceStore(dir), chapterPaths.getValue(1)))
+    }
+
+    @Test
+    fun `retry refuses real story staleness after a failed batch without manufacturing a polish pointer`() = runTest {
+        val dir = installProject()
+        installChaptersAndPlot(dir)
+        val generator = PolishingFakeKernel(chapterPaths, { ordinal ->
+            if (ordinal == 2) throw RuntimeException("第二章生成失败")
+            "陈桥驿，风先到了。"
+        })
+        val coordinator = polishCoordinator(NovelWorkspaceRuntime(generator), testScheduler)
+        val job = persistedJob(dir, coordinator.newPolishJob(dir, "主线", 1, 2))
+        val first = coordinator.runBatch(job, dir, "B-1", Settings(), Model(), isPaused = { false }) { }
+        assertTrue(first is NovelWorkspaceGhostwriteCoordinator.BatchResult.Failed)
+        NovelWorkspaceGhostwriteJobs.transition(dir, job.id, setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING), NovelWorkspaceGhostwriteJob.STATUS_FAILED)
+        NovelWorkspaceRuntime(NoopKernel).saveChapterEdit(dir, "B-1", "主线", chapterPaths.getValue(3), "陈桥", "最后一章发生新的故事事件。")
+        val beforePointerCount = NovelWorkspaceLedger.load(dir).commits.count { it.message == NovelWorkspaceLedger.Message.PLOT_POINTER }
+        val callsBeforeRetry = generator.calls
+        val restarted = checkNotNull(NovelWorkspaceGhostwriteJobs.restartFailed(dir, job.id, job.executionKey))
+
+        val result = coordinator.runBatch(restarted, dir, "B-1", Settings(), Model(), isPaused = { false }) { }
+
+        assertTrue(result is NovelWorkspaceGhostwriteCoordinator.BatchResult.Failed)
+        assertTrue((result as NovelWorkspaceGhostwriteCoordinator.BatchResult.Failed).error.contains("剧情落后"))
+        assertEquals(callsBeforeRetry, generator.calls)
+        assertTrue(NovelWorkspaceLedger.isPlotStale(NovelWorkspaceStore(dir), NovelWorkspaceLedger.load(dir), "主线"))
+        assertEquals(beforePointerCount, NovelWorkspaceLedger.load(dir).commits.count { it.message == NovelWorkspaceLedger.Message.PLOT_POINTER })
+    }
+
+    @Test
+    fun `starting another polish batch cannot repair a pointer owned by an active batch`() = runTest {
+        val dir = installProject()
+        installChaptersAndPlot(dir)
+        val runtime = NovelWorkspaceRuntime(NoopKernel)
+        val coordinator = polishCoordinator(runtime, testScheduler)
+        val job = persistedJob(dir, coordinator.newPolishJob(dir, "主线", 1, 2))
+        val path = chapterPaths.getValue(1)
+        val store = NovelWorkspaceStore(dir)
+        runtime.commitPolishedChapter(
+            dir, "B-1", "主线", path, "陈桥驿，风先到了。",
+            expectedHeadId = NovelWorkspaceLedger.load(dir).headOf("B-1")?.id,
+            expectedTreeDigest = NovelWorkspaceLedger.treeSHA256(store.fileTree()),
+            expectedChapterContent = checkNotNull(store.read(path)),
+            ownerJobId = job.id,
+            ownerExecutionId = job.executionKey,
+        )
+        val headBefore = NovelWorkspaceLedger.load(dir).headOf("B-1")?.id
+
+        val error = runCatching { coordinator.preparePolishBatch(dir, "主线", 1, 2) }.exceptionOrNull()
+
+        assertTrue(error is IllegalStateException)
+        assertEquals(headBefore, NovelWorkspaceLedger.load(dir).headOf("B-1")?.id)
+        assertTrue(NovelWorkspaceLedger.isPlotStale(store, NovelWorkspaceLedger.load(dir), "主线"))
+    }
+
+    companion object {
+        private fun systemText(session: GenerationRunSession): String = session.messages
+            .filter { it.role == MessageRole.SYSTEM }
+            .flatMap { it.parts.filterIsInstance<UIMessagePart.Text>() }
+            .joinToString("\n") { it.text }
+
+        private fun reviewReply(prompt: String, factsUnchanged: Boolean = true): String {
+            fun hash(field: String) = checkNotNull(Regex("\"$field\":\"([0-9a-f]{64})\"").find(prompt)).groupValues[1]
+            return buildJsonObject {
+                put("originalSHA256", hash("originalSHA256"))
+                put("candidateSHA256", hash("candidateSHA256"))
+                put("factsUnchanged", factsUnchanged)
+                put("issues", JsonArray(if (factsUnchanged) emptyList() else listOf(JsonPrimitive("人物结局被改变"))))
+            }.toString()
+        }
     }
 }

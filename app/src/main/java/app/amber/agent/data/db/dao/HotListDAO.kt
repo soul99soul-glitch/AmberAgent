@@ -25,14 +25,21 @@ interface HotListDAO {
     @Query(
         """
         SELECT * FROM hot_topic_cache
+        WHERE (:excludedIdPattern = '' OR topic_id NOT LIKE :excludedIdPattern)
         ORDER BY source_count DESC, best_rank ASC, latest_fetched_at DESC
         LIMIT :limit
         """
     )
-    fun observeHotTopics(limit: Int = 10): Flow<List<HotTopicCacheEntity>>
+    fun observeHotTopics(
+        limit: Int = 10,
+        excludedIdPattern: String = "",
+    ): Flow<List<HotTopicCacheEntity>>
 
     @Query("SELECT * FROM hot_topic_cache WHERE topic_id = :topicId")
     suspend fun getHotTopic(topicId: String): HotTopicCacheEntity?
+
+    @Query("SELECT * FROM hot_topic_cache WHERE topic_id LIKE :idPattern")
+    suspend fun getTopicsByIdPattern(idPattern: String): List<HotTopicCacheEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertHotTopics(entities: List<HotTopicCacheEntity>)
@@ -69,8 +76,46 @@ interface HotListDAO {
     @Query("SELECT * FROM deep_read_cache ORDER BY updated_at DESC")
     fun observeAllDeepReads(): Flow<List<DeepReadCacheEntity>>
 
+    /** Total deep-read rows — feeds the discovery masthead "No.XXX" issue number. */
+    @Query("SELECT COUNT(*) FROM deep_read_cache")
+    fun observeDeepReadCount(): Flow<Int>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertDeepRead(entity: DeepReadCacheEntity)
+
+    /** Updates generated fields without overwriting the user's current pin. */
+    @Query("""
+        UPDATE deep_read_cache SET title = :title, output_json = :outputJson,
+            created_at = :createdAt, expires_at = :expiresAt, updated_at = :updatedAt,
+            source_url = COALESCE(:sourceUrl, source_url),
+            template_id = COALESCE(:templateId, template_id),
+            structured_json = COALESCE(:structuredJson, structured_json)
+        WHERE topic_id = :topicId
+    """)
+    suspend fun updateDeepReadContent(
+        topicId: String,
+        title: String,
+        outputJson: String,
+        createdAt: Long,
+        expiresAt: Long,
+        updatedAt: Long,
+        sourceUrl: String?,
+        templateId: String?,
+        structuredJson: String?,
+    ): Int
+
+    @Transaction
+    suspend fun saveDeepReadContent(entity: DeepReadCacheEntity) {
+        val updated = updateDeepReadContent(
+            entity.topicId, entity.title, entity.outputJson, entity.createdAt,
+            entity.expiresAt, entity.updatedAt, entity.sourceUrl,
+            entity.templateId, entity.structuredJson,
+        )
+        if (updated == 0) upsertDeepRead(entity)
+    }
+
+    @Query("UPDATE deep_read_cache SET structured_json = NULL WHERE topic_id = :topicId")
+    suspend fun clearDeepReadStructuredJson(topicId: String)
 
     @Query("DELETE FROM deep_read_cache WHERE topic_id = :topicId")
     suspend fun deleteDeepRead(topicId: String)

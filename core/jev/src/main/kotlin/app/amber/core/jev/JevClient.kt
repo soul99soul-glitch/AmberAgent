@@ -25,7 +25,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 /** 一次出站 HTTP 尝试的分类结果；重试与预算由 [JevDecisionCoordinator] 决定。 */
 sealed interface JevCallResult {
@@ -365,33 +364,43 @@ class OkHttpJevTransport(
                 .tag(JevHttpRequest::class.java, request)
                 .post(request.body.toRequestBody("application/json".toMediaType()))
                 .build()
-            try {
-                callFactory(httpRequest).awaitResponse().use { response ->
-                    val body = response.body?.bytes()
-                    JevTransportResponse.Http(
-                        code = response.code,
-                        body = body?.takeIf { it.size <= JevLimits.MAX_RESPONSE_BODY_BYTES * 2 },
-                        retryAfterHeader = response.header("Retry-After"),
-                    )
+            callFactory(httpRequest).awaitTransportResponse()
+        }
+}
+
+/** Keep cancellation attached through bounded body IO, not just until the headers arrive. */
+private suspend fun Call.awaitTransportResponse(): JevTransportResponse = suspendCancellableCoroutine { continuation ->
+    // Install first: a test/local Call may invoke onResponse synchronously from enqueue.
+    continuation.invokeOnCancellation { cancel() }
+    enqueue(object : Callback {
+        override fun onResponse(call: Call, response: Response) {
+            if (!continuation.isActive) {
+                response.close()
+                return
+            }
+            val result = try {
+                response.use {
+                    val body = it.body
+                    val limit = JevLimits.MAX_RESPONSE_BODY_BYTES.toLong()
+                    val source = body?.source()
+                    if (body != null && (body.contentLength() > limit || source?.request(limit + 1) == true)) {
+                        JevTransportResponse.Failure("response body too large")
+                    } else {
+                        JevTransportResponse.Http(
+                            code = it.code,
+                            body = source?.readByteArray(),
+                            retryAfterHeader = it.header("Retry-After"),
+                        )
+                    }
                 }
             } catch (e: IOException) {
                 JevTransportResponse.Failure(e.message ?: e.javaClass.simpleName)
             }
-        }
-}
-
-/** enqueue 包装：协程取消即 Call.cancel，失败经 [IOException] 传播。 */
-private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { continuation ->
-    enqueue(object : Callback {
-        override fun onResponse(call: Call, response: Response) {
-            // 竞态：deadline 已取消 continuation 时关闭迟到响应，避免连接泄漏。
-            continuation.resume(response) { _ -> response.close() }
+            if (continuation.isActive) continuation.resume(result)
         }
 
         override fun onFailure(call: Call, e: IOException) {
-            if (continuation.isCancelled) return
-            continuation.resumeWithException(e)
+            if (continuation.isActive) continuation.resume(JevTransportResponse.Failure(e.message ?: e.javaClass.simpleName))
         }
     })
-    continuation.invokeOnCancellation { runCatching { cancel() } }
 }

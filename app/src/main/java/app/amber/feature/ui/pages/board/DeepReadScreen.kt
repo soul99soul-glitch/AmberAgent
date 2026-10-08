@@ -3,6 +3,7 @@ package app.amber.feature.ui.pages.board
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.os.Build
 import android.view.WindowManager
 import androidx.compose.foundation.Canvas
@@ -46,6 +47,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -60,10 +62,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -74,8 +78,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.heightIn
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MAX
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MIN
 import app.amber.feature.board.DeepReadTemplateIds
@@ -84,9 +91,11 @@ import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.board.hotlist.deepread.CorePoint
 import app.amber.feature.board.hotlist.deepread.DeepAnalysis
 import app.amber.feature.board.hotlist.deepread.DeepReadDiagram
+import app.amber.feature.board.hotlist.deepread.DeepReadMoments
 import app.amber.feature.board.hotlist.deepread.DeepReadGenerationPhase
 import app.amber.feature.board.hotlist.deepread.DeepReadGenerationStage
 import app.amber.feature.board.hotlist.deepread.DeepReadOutput
+import app.amber.feature.board.hotlist.deepread.DeepReadMarkdownExporter
 import app.amber.feature.board.hotlist.deepread.DeepReadScheduler
 import app.amber.feature.board.hotlist.deepread.DeepReadSectionState
 import app.amber.feature.board.hotlist.deepread.DeepReadSectionStatus
@@ -103,7 +112,9 @@ import app.amber.feature.board.hotlist.deepread.hasAnyReadySection
 import app.amber.feature.board.hotlist.deepread.sectionFailureMessage
 import app.amber.feature.board.hotlist.deepread.withInferredSectionStates
 import app.amber.agent.R
+import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateArticle
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRenderer
+import app.amber.feature.board.hotlist.deepread.template.DeepReadSynthesisWriter
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRepository
 import app.amber.feature.board.hotlist.deepread.verifiedImageUrls
 import app.amber.feature.ui.components.message.LocalSearchSources
@@ -128,6 +139,7 @@ import org.koin.compose.koinInject
 import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.ArrowRight
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Share2
 
 @Composable
 fun DeepReadScreen(
@@ -177,6 +189,12 @@ fun DeepReadScreen(
     val cacheEntryFlow = remember(topicId, fromHistory) {
         hotListRepository.observeDeepReadEntry(topicId, includeExpired = fromHistory)
     }
+    // Latched on the first persisted snapshot: whether the entry already carried
+    // readable content when we arrived. Entries that did can never earn a
+    // milestone on this visit (iOS parity: wasFirstDraft = old content empty).
+    var entryHadReady by remember(topicId) {
+        mutableStateOf<Boolean?>(if (fromHistory || initialForceRegenerate) true else null)
+    }
     val initialCacheState = remember(topicId, fromHistory) {
         val preview = hotListRepository.deepReadHistoryPreview(topicId).takeIf { fromHistory }
         DeepReadCacheState(
@@ -189,6 +207,9 @@ fun DeepReadScreen(
         key1 = cacheEntryFlow,
     ) {
         cacheEntryFlow.collect { entry ->
+            if (entryHadReady == null) {
+                entryHadReady = entry?.output?.withInferredSectionStates()?.hasAnyReadySection() == true
+            }
             value = DeepReadCacheState(loaded = true, entry = entry)
         }
     }
@@ -196,10 +217,47 @@ fun DeepReadScreen(
     val output = remember(cacheEntry) { cacheEntry?.output?.withInferredSectionStates() }
     val historyExpired = cacheEntry?.expired == true
     val historyLoading = fromHistory && !cacheState.loaded
+    // The entry's stored template wins over the board default (iOS task.templateId);
+    // synthesis entries keep `deepread_auto`/`deepread_*` while their structured
+    // payload rides in structured_json.
+    val entryTemplateId = DeepReadTemplateIds.normalize(cacheEntry?.templateId ?: board.deepReadTemplateId)
+    val templateArticle = remember(cacheEntry?.structuredJson) {
+        DeepReadTemplateArticle.decode(cacheEntry?.structuredJson)
+    }
+    val customTemplate = customTemplates.firstOrNull { it.id == entryTemplateId }
+    val selectedCustomMissing = entryTemplateId.startsWith(DeepReadTemplateIds.CUSTOM_PREFIX) &&
+        customTemplate == null
+    val templateSelected = templateArticle != null ||
+        entryTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT || customTemplate != null
+    // A synthesis entry whose stored payload can't decode would otherwise
+    // render as a hollow "complete" page — surface it as a retryable error.
+    val synthesisPayloadBroken = DeepReadTemplateIds.isSynthesis(entryTemplateId) &&
+        !cacheEntry?.structuredJson.isNullOrBlank() && templateArticle == null
     var runError by remember(topicId) { mutableStateOf<String?>(null) }
     var initialForceConsumed by rememberSaveable(topicId, sourceUrl) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val navController = LocalNavController.current
+    val context = LocalContext.current
+    val shareChooserTitle = stringResource(R.string.deep_read_share_chooser)
+
+    fun shareDeepRead(data: DeepReadOutput) {
+        // Synthesis articles export their structured markdown (iOS markdown(article)).
+        val markdown = templateArticle?.let { DeepReadSynthesisWriter.markdown(it) }
+            ?: DeepReadMarkdownExporter.toMarkdown(title, data)
+        runCatching {
+            context.startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, title)
+                        putExtra(Intent.EXTRA_TEXT, markdown)
+                    },
+                    shareChooserTitle,
+                )
+            )
+        }
+    }
+
     val listState = rememberLazyListState()
     val darkTheme = LocalDarkMode.current
     DeepReadImmersiveWindowEffect(darkTheme = darkTheme)
@@ -213,6 +271,39 @@ fun DeepReadScreen(
     val phaseRunning = lifecycleRunning && output?.generationPhase?.isActiveDeepReadPhase() == true
     val generating = lifecycleRunning || anySectionRunning || phaseRunning
     val complete = output?.isComplete() == true
+
+    // 付印 moment: a seal slams down when a run finishes while the reader watches
+    // (iOS DeepReadMoment parity). Entries that arrived already-complete never
+    // re-print; retries that kept old content stamp 付印, not a milestone.
+    var pressSeal by remember(topicId) { mutableStateOf<DeepReadMoments.PressSeal?>(null) }
+    var pressSealFire by remember(topicId) { mutableIntStateOf(0) }
+    var sawGenerating by remember(topicId) { mutableStateOf(false) }
+    var prevComplete by remember(topicId) { mutableStateOf<Boolean?>(null) }
+    // Order matters: `sawGenerating` must latch before `complete` flips in the
+    // same frame, so this effect is declared ahead of the seal effect.
+    LaunchedEffect(generating) { if (generating) sawGenerating = true }
+    LaunchedEffect(complete) {
+        val prev = prevComplete
+        prevComplete = complete
+        if (prev == false && complete && sawGenerating) {
+            val count = withContext(Dispatchers.IO) {
+                runCatching { hotListRepository.countCompletedDeepReads() }.getOrDefault(0)
+            }
+            pressSeal = DeepReadMoments.pressSeal(
+                finishedWithError = output?.sectionFailureMessage() != null,
+                wasFirstDraft = entryHadReady != true,
+                completedCount = count,
+            )
+            if (pressSeal != null) pressSealFire += 1
+        }
+    }
+    LaunchedEffect(pressSeal) {
+        val seal = pressSeal ?: return@LaunchedEffect
+        // 付印 fades fast; milestone seals linger a little longer — then both go,
+        // or a tap dismisses them early.
+        kotlinx.coroutines.delay(if (seal.milestone == null) 1400 else 2600)
+        if (pressSeal == seal) pressSeal = null
+    }
 
     fun runAll(force: Boolean = false) {
         if (!confirmed) return
@@ -240,10 +331,6 @@ fun DeepReadScreen(
     }
 
     val palette = magazinePalette()
-    val customTemplate = customTemplates.firstOrNull { it.id == board.deepReadTemplateId }
-    val selectedCustomMissing = board.deepReadTemplateId.startsWith(DeepReadTemplateIds.CUSTOM_PREFIX) &&
-        customTemplate == null
-    val templateSelected = board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT || customTemplate != null
     val sectionFailureMessage = output?.sectionFailureMessage()
     val firstFailedStage = output?.firstFailedStage()
     val failureRetryLabel = when {
@@ -259,7 +346,10 @@ fun DeepReadScreen(
     val initialDisplayError = (runError ?: sectionFailureMessage)
         ?.takeIf { !generating && (output == null || !output.hasAnyReadySection()) }
 
-    Box(Modifier.fillMaxSize().amberCanvas()) {
+    val amberTokens = LocalAmberTokens.current
+    // Warm-paper grain; past 22:00 a desk-lamp glow fades in (iOS parity).
+    val night = remember { DeepReadMoments.isNight() }
+    Box(Modifier.fillMaxSize().amberCanvas().deepReadPaper(night = night, tokens = amberTokens)) {
         when {
             !confirmed -> DeepReadConfirmation(
                 modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
@@ -304,16 +394,27 @@ fun DeepReadScreen(
                 retryLabel = stringResource(R.string.regenerate),
             )
 
+            synthesisPayloadBroken -> DeepReadError(
+                error = stringResource(
+                    R.string.deep_read_synthesis_template_failed,
+                    DeepReadTemplateCatalog.name(entryTemplateId),
+                ),
+                modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
+                onRetry = { runAll(force = true) },
+                retryLabel = stringResource(R.string.regenerate),
+            )
+
             templateSelected && !selectedCustomMissing -> {
                 val data = remember(output, generating) {
                     (output?.withInferredSectionStates() ?: DeepReadOutput()).asVisibleGeneratingOutput(generating)
                 }
                 Box(Modifier.fillMaxSize()) {
-                    DeepReadTemplateArticle(
+                    DeepReadTemplateArticleView(
                         title = title,
                         output = data,
                         palette = palette,
                         fontCss = templateFontCss,
+                        templateArticle = templateArticle,
                         customTemplateHtml = customTemplate?.html,
                         fontRepository = fontRepository,
                         fontScale = deepReadFontScale,
@@ -362,6 +463,15 @@ fun DeepReadScreen(
                             .statusBarsPadding()
                             .padding(start = 18.dp, top = 10.dp),
                     )
+                    if (data.hasAnyReadySection()) {
+                        DeepReadShareButton(
+                            onClick = { shareDeepRead(data) },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .statusBarsPadding()
+                                .padding(end = 18.dp, top = 10.dp),
+                        )
+                    }
                 }
             }
 
@@ -381,22 +491,33 @@ fun DeepReadScreen(
                             .asVisibleGeneratingOutput(generating = true)
                     }
                     Box(Modifier.fillMaxSize()) {
-                        DeepReadArticle(
-                            title = title,
-                            output = data,
-                            palette = palette,
-                            fontFamily = readingFontFamily,
-                            fontScale = deepReadFontScale,
-                            listState = listState,
-                            onRetrySection = ::runOne,
-                        )
-                        RunningStageNotice(
-                            progress = data.deepReadProgressSnapshot(running = true, locale = appLocale),
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .statusBarsPadding()
-                                .padding(horizontal = 18.dp, vertical = 10.dp),
-                        )
+                        if (generating) {
+                            // iOS DeepReadNewsroomView: while nothing is readable
+                            // yet, the press room takes the whole page — stage
+                            // rail, type tray, rotating desk notes.
+                            DeepReadNewsroomView(
+                                title = title,
+                                stage = NewsroomStage.from(output?.generationPhase),
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            DeepReadArticle(
+                                title = title,
+                                output = data,
+                                palette = palette,
+                                fontFamily = readingFontFamily,
+                                fontScale = deepReadFontScale,
+                                listState = listState,
+                                onRetrySection = ::runOne,
+                            )
+                            RunningStageNotice(
+                                progress = data.deepReadProgressSnapshot(running = true, locale = appLocale),
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .statusBarsPadding()
+                                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                            )
+                        }
                         DeepReadBackButton(
                             onClick = { navController.popBackStack() },
                             modifier = Modifier
@@ -412,11 +533,12 @@ fun DeepReadScreen(
                 val data = output
                 Box(Modifier.fillMaxSize()) {
                     if (complete && templateSelected) {
-                        DeepReadTemplateArticle(
+                        DeepReadTemplateArticleView(
                             title = title,
                             output = data,
                             palette = palette,
                             fontCss = templateFontCss,
+                            templateArticle = templateArticle,
                             customTemplateHtml = customTemplate?.html,
                             fontRepository = fontRepository,
                             fontScale = deepReadFontScale,
@@ -485,6 +607,45 @@ fun DeepReadScreen(
                             .statusBarsPadding()
                             .padding(start = 18.dp, top = 10.dp),
                     )
+                    DeepReadShareButton(
+                        onClick = { shareDeepRead(data) },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .statusBarsPadding()
+                            .padding(end = 18.dp, top = 10.dp),
+                    )
+                }
+            }
+        }
+
+        pressSeal?.let { seal ->
+            // Transient flourish: auto-dismisses in ~1.4–2.6 s, so it stays
+            // invisible to accessibility services rather than announcing an
+            // unlabeled full-screen button.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clearAndSetSemantics { }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { pressSeal = null },
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    DeepReadInkStamp(
+                        text = seal.inscription,
+                        size = 112.dp,
+                        modifier = Modifier.deepReadStampSlam(pressSealFire),
+                    )
+                    Text(
+                        text = seal.milestone?.let {
+                            stringResource(R.string.deep_read_seal_caption_milestone, it)
+                        } ?: stringResource(R.string.deep_read_seal_caption_done),
+                        style = LocalAmberType.current.meta,
+                        color = LocalAmberTokens.current.ink2,
+                        modifier = Modifier.padding(top = 14.dp),
+                    )
                 }
             }
         }
@@ -542,6 +703,28 @@ private fun DeepReadBackButton(
             Lucide.ArrowLeft,
             contentDescription = stringResource(R.string.back),
             modifier = Modifier.size(18.dp),
+            tint = tokens.ink,
+        )
+    }
+}
+
+@Composable
+private fun DeepReadShareButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalAmberTokens.current
+    IconButton(
+        onClick = onClick,
+        modifier = modifier
+            .size(38.dp)
+            .background(tokens.surface.copy(alpha = 0.72f), CircleShape)
+            .border(1.dp, tokens.line2, CircleShape),
+    ) {
+        Icon(
+            Lucide.Share2,
+            contentDescription = stringResource(R.string.share),
+            modifier = Modifier.size(17.dp),
             tint = tokens.ink,
         )
     }
@@ -627,11 +810,12 @@ private fun TemplateFallbackNotice(message: String, modifier: Modifier = Modifie
 }
 
 @Composable
-private fun DeepReadTemplateArticle(
+private fun DeepReadTemplateArticleView(
     title: String,
     output: DeepReadOutput,
     palette: MagazinePalette,
     fontCss: String,
+    templateArticle: DeepReadTemplateArticle? = null,
     customTemplateHtml: String? = null,
     fontRepository: SlidesFontRepository,
     fontScale: Float,
@@ -645,18 +829,22 @@ private fun DeepReadTemplateArticle(
     val displayOutput = remember(output, failedImageUrls) {
         output.withoutTemplateImages(failedImageUrls)
     }
-    val rendered = remember(title, displayOutput, fontCss, customTemplateHtml, darkTheme) {
+    val rendered = remember(title, displayOutput, fontCss, customTemplateHtml, templateArticle, darkTheme) {
         runCatching {
-            if (customTemplateHtml != null) {
-                DeepReadTemplateRenderer.renderCustom(
+            when {
+                templateArticle != null -> DeepReadTemplateRenderer.renderTemplateArticle(
+                    article = templateArticle,
+                    fontCss = fontCss,
+                    darkTheme = darkTheme,
+                )
+                customTemplateHtml != null -> DeepReadTemplateRenderer.renderCustom(
                     title = title,
                     output = displayOutput,
                     templateHtml = customTemplateHtml,
                     fontCss = fontCss,
                     darkTheme = darkTheme,
                 )
-            } else {
-                DeepReadTemplateRenderer.renderEditorialSlant(
+                else -> DeepReadTemplateRenderer.renderEditorialSlant(
                     title = title,
                     output = displayOutput,
                     fontCss = fontCss,
@@ -782,7 +970,16 @@ private fun DeepReadConfirmation(
     onConfirm: () -> Unit,
 ) {
     DeepReadScaledText(fontScale) {
-        Box(modifier.fillMaxSize().background(palette.background), contentAlignment = Alignment.Center) {
+        Box(
+            modifier
+                .fillMaxSize()
+                .background(palette.background)
+                .deepReadPaper(
+                    night = remember { DeepReadMoments.isNight() },
+                    tokens = LocalAmberTokens.current,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
             Column(
                 modifier = Modifier.padding(28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -833,6 +1030,10 @@ private fun DeepReadArticle(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(palette.background)
+                    .deepReadPaper(
+                        night = remember { DeepReadMoments.isNight() },
+                        tokens = LocalAmberTokens.current,
+                    )
                     .navigationBarsPadding(),
                 contentPadding = PaddingValues(
                     top = 8.dp,

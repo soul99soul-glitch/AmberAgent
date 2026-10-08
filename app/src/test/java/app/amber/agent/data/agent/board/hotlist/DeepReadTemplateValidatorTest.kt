@@ -23,6 +23,26 @@ import org.junit.Test
 
 class DeepReadTemplateValidatorTest {
     @Test
+    fun customRendererTreatsPlaceholderSyntaxInArticleTextLiterally() {
+        val template = """<!doctype html><html><body>
+            <h1>{{title}}</h1><p>{{summary}}</p>
+            <section>{{narrative_html}}</section><section>{{analysis_html}}</section>
+            <nav>{{extended_reading_html}}</nav></body></html>"""
+        val title = "关于 {{analysis_html}} 的说明"
+        val summary = "摘要中的 {{extended_reading_html}} 是字面文本。"
+
+        val rendered = DeepReadTemplateRenderer.renderCustom(
+            title = title,
+            output = DeepReadOutput(summary = summary, analysis = DeepAnalysis(implications = "分析内容")),
+            templateHtml = template,
+        )
+
+        assertTrue(rendered.html.contains("<h1>$title</h1>"))
+        assertTrue(rendered.html.contains("<p>$summary</p>"))
+        assertTrue(rendered.html.contains("分析内容"))
+    }
+
+    @Test
     fun acceptsStaticHtmlAndCss() {
         val result = DeepReadTemplateValidator.validate(
             """

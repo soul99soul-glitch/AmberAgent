@@ -45,7 +45,7 @@ object NovelWorkspaceUndo {
         }
     }
 
-    fun save(record: NovelWorkspaceUndoRecord, projectDirectory: File) {
+    fun save(record: NovelWorkspaceUndoRecord, projectDirectory: File) = NovelWorkspaceRestoreBoundary.write {
         val ledgerDir = File(projectDirectory, NovelWorkspaceLedger.DIRECTORY_NAME)
         if (!ledgerDir.exists() && !ledgerDir.mkdirs()) {
             throw NovelWorkspaceIoError("Cannot create ledger directory: $ledgerDir")
@@ -61,7 +61,8 @@ object NovelWorkspaceUndo {
         }
     }
 
-    fun clear(projectDirectory: File) {
+    fun clear(projectDirectory: File) = NovelWorkspaceRestoreBoundary.write {
         file(projectDirectory).delete()
+        Unit
     }
 }

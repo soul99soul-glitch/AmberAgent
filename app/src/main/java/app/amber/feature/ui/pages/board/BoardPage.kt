@@ -2,6 +2,13 @@ package app.amber.feature.ui.pages.board
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,18 +35,20 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,10 +78,12 @@ import com.composables.icons.lucide.NotebookTabs
 import com.composables.icons.lucide.RotateCw
 import com.composables.icons.lucide.Share2
 import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.SquarePen
 import com.composables.icons.lucide.History
 import app.amber.agent.Screen
 import app.amber.agent.R
 import app.amber.agent.Screen.DeepRead
+import app.amber.agent.StandaloneSurfaces
 import app.amber.feature.board.TodayBoardHotListFilterMode
 import app.amber.feature.board.hotlist.HotListDashboard
 import app.amber.feature.board.hotlist.HOT_LIST_TOPIC_DISPLAY_LIMIT
@@ -80,6 +91,7 @@ import app.amber.feature.board.hotlist.HotListItem
 import app.amber.feature.board.hotlist.HotListProviderIds
 import app.amber.feature.board.hotlist.HotListProviderSnapshot
 import app.amber.feature.board.hotlist.HotTopic
+import app.amber.feature.board.hotlist.deepread.DeepReadMoments
 import app.amber.feature.board.hotlist.presentationTitle
 import app.amber.feature.ui.components.ds.Hairline
 import app.amber.feature.ui.components.ds.amberCanvas
@@ -87,6 +99,7 @@ import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ds.LiveDot
+import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
@@ -103,6 +116,7 @@ fun TodayBoardPage() {
     val dashboard by vm.hotListDashboard.collectAsStateWithLifecycle(
         initialValue = HotListDashboard(emptyList(), emptyList(), 0L),
     )
+    val issueCount by vm.deepReadCount.collectAsStateWithLifecycle(initialValue = 0)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
@@ -110,6 +124,34 @@ fun TodayBoardPage() {
     val sharePanelError = stringResource(R.string.board_share_panel_error)
     var pendingDeepRead by remember { mutableStateOf<PendingDeepReadRequest?>(null) }
     var selectedTopic by remember { mutableStateOf<HotTopic?>(null) }
+    var showDeepReadCreate by remember { mutableStateOf(false) }
+    var scatterTick by remember { mutableIntStateOf(0) }
+    var scatterActive by remember { mutableStateOf(false) }
+    var luckyPick by remember { mutableStateOf<HotTopic?>(null) }
+
+    // Hidden gesture (iOS DiscoveryView): shaking scatters the feed like loose
+    // pages, then a bottom banner offers one lucky headline. Off while the board
+    // is disabled or any sheet/dialog/flow is active.
+    rememberShakeDetector(
+        enabled = boardEnabled && pendingDeepRead == null && selectedTopic == null &&
+            !showDeepReadCreate && dashboard.topics.isNotEmpty(),
+    ) {
+        scatterTick++
+        scatterActive = true
+        if (luckyPick == null) luckyPick = dashboard.topics.random()
+    }
+    if (scatterActive) {
+        LaunchedEffect(scatterTick) {
+            delay(720)
+            scatterActive = false
+        }
+    }
+    if (luckyPick != null) {
+        LaunchedEffect(luckyPick) {
+            delay(3_500)
+            luckyPick = null
+        }
+    }
 
     fun requestDeepRead(topic: HotTopic, forceRegenerate: Boolean = false) {
         if (settings.agentRuntime.todayBoard.deepReadFirstUseConfirmed) {
@@ -147,13 +189,24 @@ fun TodayBoardPage() {
         }
     }
 
+    val standaloneDeepRead = StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ
     Scaffold(
-        modifier = Modifier.amberCanvas(),
+        modifier = Modifier
+            .amberCanvas()
+            // Paper grain + night lamp on the discovery surface too — iOS paints
+            // the paper treatment under every reading page, not only articles.
+            .let { if (standaloneDeepRead) it.deepReadPaper(night = DeepReadMoments.isNight(), tokens = LocalAmberTokens.current) else it },
         topBar = {
             WorkspaceTopBar(
                 title = stringResource(R.string.deep_read_title),
+                titleStyle = deepReadEditorialSerif?.let { serif ->
+                    LocalAmberType.current.screenTitle.copy(fontFamily = serif, fontWeight = FontWeight.Bold)
+                },
                 navigationIcon = { BackButton() },
                 actions = {
+                    IconButton(onClick = { showDeepReadCreate = true }) {
+                        Icon(Lucide.SquarePen, contentDescription = stringResource(R.string.deep_read_create_title))
+                    }
                     IconButton(onClick = { navController.navigate(Screen.DeepReadHistory) }) {
                         Icon(Lucide.History, contentDescription = stringResource(R.string.deep_read_history_title))
                     }
@@ -172,21 +225,58 @@ fun TodayBoardPage() {
                     .padding(innerPadding),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(stringResource(R.string.board_disabled), style = LocalAmberType.current.body)
+                Text(
+                    stringResource(
+                        if (standaloneDeepRead) R.string.deepread_board_disabled
+                        else R.string.board_disabled,
+                    ),
+                    style = LocalAmberType.current.body,
+                )
             }
             return@Scaffold
         }
 
-        HotListTab(
-            modifier = Modifier.fillMaxSize().padding(innerPadding),
-            dashboard = dashboard,
-            filterMode = settings.agentRuntime.todayBoard.hotListFilterMode,
-            onRefresh = vm::refreshHotList,
-            onTopicClick = { topic -> selectedTopic = topic },
-            onProviderItemClick = { provider, item ->
-                scope.launch { selectedTopic = vm.createProviderTopic(provider, item) }
-            },
-        )
+        Box(Modifier.fillMaxSize().padding(innerPadding)) {
+            HotListTab(
+                modifier = Modifier.fillMaxSize(),
+                dashboard = dashboard,
+                filterMode = settings.agentRuntime.todayBoard.hotListFilterMode,
+                issueCount = issueCount + 1,
+                scatterSeed = scatterTick,
+                scatterActive = scatterActive,
+                onRefresh = vm::refreshHotList,
+                onTopicClick = { topic -> selectedTopic = topic },
+                onProviderItemClick = { provider, item ->
+                    scope.launch { selectedTopic = vm.createProviderTopic(provider, item) }
+                },
+            )
+            // Keep the last pick so the slide-out doesn't play over an empty shell.
+            var bannerTopic by remember { mutableStateOf<HotTopic?>(null) }
+            if (luckyPick != null) bannerTopic = luckyPick
+            AnimatedVisibility(
+                visible = luckyPick != null,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter = slideInVertically(
+                    animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
+                    initialOffsetY = { it },
+                ) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            ) {
+                bannerTopic?.let { topic ->
+                    DeepReadLuckyBanner(
+                        pick = LuckyPick(
+                            title = topic.title,
+                            detail = topicMeta(topic).source ?: "",
+                            onRead = {
+                                luckyPick = null
+                                selectedTopic = topic
+                            },
+                        ),
+                        onDismiss = { luckyPick = null },
+                    )
+                }
+            }
+        }
     }
 
     pendingDeepRead?.let { request ->
@@ -249,6 +339,19 @@ fun TodayBoardPage() {
             },
         )
     }
+
+    if (showDeepReadCreate) {
+        DeepReadCreateSheet(
+            onDismiss = { showDeepReadCreate = false },
+            onStart = { title, seeds, templateId ->
+                showDeepReadCreate = false
+                scope.launch {
+                    val topic = vm.prepareCustomDeepReadTopic(title, seeds, templateId)
+                    requestDeepRead(topic)
+                }
+            },
+        )
+    }
 }
 
 private data class PendingDeepReadRequest(
@@ -266,12 +369,13 @@ internal fun HotListActionSheet(
     onOpenOriginal: () -> Unit,
     onShare: () -> Unit,
 ) {
+    val sheetTokens = LocalAmberTokens.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
-        containerColor = LocalAmberTokens.current.raised,
-        contentColor = LocalAmberTokens.current.ink,
+        containerColor = sheetTokens.raised,
+        contentColor = sheetTokens.ink,
         tonalElevation = 0.dp,
         dragHandle = {
             Box(
@@ -280,7 +384,7 @@ internal fun HotListActionSheet(
                     .width(36.dp)
                     .height(4.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(LocalAmberTokens.current.line2),
+                    .background(sheetTokens.line2),
             )
         },
     ) {
@@ -293,7 +397,11 @@ internal fun HotListActionSheet(
         ) {
             Text(
                 topic.title,
-                style = LocalAmberType.current.sessionTitle,
+                style = LocalAmberType.current.sessionTitle.copy(
+                    fontFamily = deepReadEditorialSerif,
+                    fontWeight = FontWeight.SemiBold,
+                    lineHeight = 25.sp,
+                ),
             )
             if (topic.sources.isNotEmpty()) {
                 val sourceLabels = mutableListOf<String>()
@@ -391,6 +499,9 @@ private fun HotListTab(
     modifier: Modifier = Modifier,
     dashboard: HotListDashboard,
     filterMode: TodayBoardHotListFilterMode,
+    issueCount: Int = 0,
+    scatterSeed: Int = 0,
+    scatterActive: Boolean = false,
     onRefresh: () -> Unit,
     onTopicClick: (HotTopic) -> Unit,
     onProviderItemClick: (HotListProviderSnapshot, HotListItem) -> Unit,
@@ -398,6 +509,8 @@ private fun HotListTab(
     val pullState = rememberPullToRefreshState()
     var isRefreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    var listAppeared by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { listAppeared = true }
 
     LaunchedEffect(dashboard.shouldShowSkeleton) {
         if (dashboard.shouldShowSkeleton) onRefresh()
@@ -406,6 +519,8 @@ private fun HotListTab(
         if (isRefreshing) isRefreshing = false
     }
 
+    val standaloneDeepRead = StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ
+    val tokens = LocalAmberTokens.current
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = {
@@ -418,39 +533,69 @@ private fun HotListTab(
         },
         state = pullState,
         modifier = modifier,
+        indicator = {
+            PullToRefreshDefaults.Indicator(
+                state = pullState,
+                isRefreshing = isRefreshing,
+                modifier = Modifier.align(Alignment.TopCenter),
+                containerColor = tokens.raised,
+                color = tokens.accent,
+            )
+        },
     ) {
         if (!dashboard.hasEnabledSources) {
-            Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-                EmptyLine(stringResource(R.string.board_no_enabled_sources))
+            if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+                Column(
+                    Modifier.fillMaxSize().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        Lucide.NotebookTabs,
+                        contentDescription = null,
+                        tint = tokens.accent.copy(alpha = 0.7f),
+                        modifier = Modifier.size(34.dp),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        stringResource(R.string.deepread_board_no_enabled_sources),
+                        style = LocalAmberType.current.secondary,
+                        color = tokens.ink3,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+            } else {
+                Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                    EmptyLine(stringResource(R.string.board_no_enabled_sources))
+                }
             }
         } else if (dashboard.isEmpty) {
             HotListSkeleton()
         } else {
+            Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                // Standalone paints a 64dp paper-fog at the bottom edge — the
+                // matching bottom padding keeps the last row readable.
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 0.dp,
+                    bottom = if (standaloneDeepRead) 72.dp else 0.dp,
+                ),
             ) {
-                item {
-                    Row(
-                        Modifier
+                // No persistent pull hint — iOS parity is `.refreshable` only;
+                // PullToRefreshBox already renders its own indicator on drag.
+                item("masthead") {
+                    // Editorial masthead (iOS DiscoveryView): ink rule, issue
+                    // dateline, serif headline with the hidden stamp egg. The
+                    // festival badge rides inside the masthead's date row.
+                    DeepReadMasthead(
+                        issue = issueCount,
+                        modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 10.dp, bottom = 2.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Lucide.RotateCw,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = LocalAmberTokens.current.ink3,
-                        )
-                        Spacer(Modifier.width(7.dp))
-                        Text(
-                            "下拉刷新",
-                            style = LocalAmberType.current.meta.copy(fontSize = 11.sp),
-                            color = LocalAmberTokens.current.ink2,
-                        )
-                    }
+                            .padding(bottom = 4.dp),
+                    )
                 }
                 item {
                     RubricHead(
@@ -463,7 +608,10 @@ private fun HotListTab(
                     item {
                         EmptyLine(
                             if (filterMode == TodayBoardHotListFilterMode.FOCUS_ONLY) {
-                                stringResource(R.string.board_focus_empty)
+                                stringResource(
+                                    if (standaloneDeepRead) R.string.deepread_board_focus_empty
+                                    else R.string.board_focus_empty,
+                                )
                             } else {
                                 stringResource(R.string.board_combined_empty)
                             }
@@ -472,6 +620,11 @@ private fun HotListTab(
                 }
                 val topics = dashboard.topics.take(HOT_LIST_TOPIC_DISPLAY_LIMIT)
                 itemsIndexed(topics, key = { _, it -> it.id }) { index, topic ->
+                    // Rows rise with a short stagger; later rows enter instantly.
+                    // A shake tosses the whole page like loose newspaper sheets.
+                    val enter = Modifier
+                        .deepReadEntrance(index, listAppeared)
+                        .deepReadScatter(index, scatterSeed, scatterActive)
                     if (index == 0) {
                         LeadStory(
                             rank = topic.bestRank,
@@ -479,6 +632,7 @@ private fun HotListTab(
                             dek = null,
                             meta = topicMeta(topic),
                             onClick = { onTopicClick(topic) },
+                            modifier = enter,
                         )
                     } else {
                         IndexRow(
@@ -487,6 +641,7 @@ private fun HotListTab(
                             meta = topicMeta(topic),
                             onClick = { onTopicClick(topic) },
                             last = index == topics.lastIndex,
+                            modifier = enter,
                         )
                     }
                 }
@@ -509,6 +664,7 @@ private fun HotListTab(
                             providerItems,
                             key = { i, _ -> "${provider.providerId}-$i" },
                         ) { index, item ->
+                            val scatter = Modifier.deepReadScatter(index, scatterSeed, scatterActive)
                             if (index == 0) {
                                 LeadStory(
                                     rank = item.rank,
@@ -519,6 +675,7 @@ private fun HotListTab(
                                         detail = item.heat,
                                     ),
                                     onClick = { onProviderItemClick(provider, item) },
+                                    modifier = scatter,
                                 )
                             } else {
                                 IndexRow(
@@ -530,11 +687,29 @@ private fun HotListTab(
                                     ),
                                     onClick = { onProviderItemClick(provider, item) },
                                     last = index == providerItems.lastIndex,
+                                    modifier = scatter,
                                 )
                             }
                         }
                     }
                 }
+            }
+            // Paper fog: the index dissolves into the page near the bottom edge —
+            // the flat counterpart of iOS's per-card scrollTransition dimming.
+            if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(64.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            androidx.compose.ui.graphics.Brush.verticalGradient(
+                                0f to tokens.bg.copy(alpha = 0f),
+                                1f to tokens.bg,
+                            ),
+                        ),
+                )
+            }
             }
         }
     }
@@ -627,8 +802,15 @@ private fun RubricHead(label: String, status: String?, first: Boolean) {
                 withStyle(SpanStyle(color = t.accent)) { append("//") }
                 withStyle(SpanStyle(color = t.ink2)) { append(" $label") }
             },
-            style = LocalAmberType.current.meta.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium),
+            style = LocalAmberType.current.meta.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.4.sp),
         )
+        if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+            // Column rule continuing past the rubric — the flat editorial
+            // divider newspapers run between section labels and the dateline.
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.weight(1f).height(1.dp).background(t.line))
+            Spacer(Modifier.width(10.dp))
+        }
         if (!status.isNullOrBlank()) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 LiveDot(dotSize = 6.dp)
@@ -640,12 +822,17 @@ private fun RubricHead(label: String, status: String?, first: Boolean) {
 
 /** Hero row: big accent mono rank + 19.5sp title + optional dek + mono meta. */
 @Composable
-private fun LeadStory(rank: Int, title: String, dek: String?, meta: MetaData, onClick: () -> Unit) {
+private fun LeadStory(rank: Int, title: String, dek: String?, meta: MetaData, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val t = LocalAmberTokens.current
+    val pressMod = if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+        Modifier.pressableDeepRead(onClick)
+    } else {
+        Modifier.pressable(onClick)
+    }
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .then(pressMod)
             .bottomHairline(t.line)
             .padding(top = 16.dp, bottom = 15.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -653,18 +840,24 @@ private fun LeadStory(rank: Int, title: String, dek: String?, meta: MetaData, on
     ) {
         Text(
             rank2(rank),
+            // Serif display figure on the lead story — the broadsheet "press"
+            // number; index rows keep the mono index voice below.
             style = LocalAmberType.current.meta.copy(
-                fontSize = 32.sp,
+                fontFamily = deepReadEditorialSerif ?: LocalAmberType.current.meta.fontFamily,
+                // Three-digit ranks shrink rather than wrap inside the column.
+                fontSize = if (rank > 99) 24.sp else 32.sp,
                 fontWeight = FontWeight.Bold,
                 lineHeight = 34.sp,
             ),
             color = t.accent,
+            maxLines = 1,
             modifier = Modifier.width(52.dp).padding(top = 2.dp),
         )
         Column(Modifier.weight(1f)) {
             Text(
                 title,
                 style = LocalAmberType.current.sessionTitle.copy(
+                    fontFamily = deepReadEditorialSerif,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     lineHeight = 28.sp,
@@ -686,12 +879,17 @@ private fun LeadStory(rank: Int, title: String, dek: String?, meta: MetaData, on
 
 /** Index row: small grey mono rank + 16sp 2-line title + mono meta. */
 @Composable
-private fun IndexRow(rank: Int, title: String, meta: MetaData, onClick: () -> Unit, last: Boolean) {
+private fun IndexRow(rank: Int, title: String, meta: MetaData, onClick: () -> Unit, last: Boolean, modifier: Modifier = Modifier) {
     val t = LocalAmberTokens.current
+    val pressMod = if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+        Modifier.pressableDeepRead(onClick)
+    } else {
+        Modifier.pressable(onClick)
+    }
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .then(pressMod)
             .bottomHairline(t.line, show = !last)
             .padding(vertical = 13.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -707,6 +905,7 @@ private fun IndexRow(rank: Int, title: String, meta: MetaData, onClick: () -> Un
             Text(
                 title,
                 style = LocalAmberType.current.sessionTitle.copy(
+                    fontFamily = deepReadEditorialSerif,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     lineHeight = 21.sp,
@@ -741,9 +940,9 @@ private fun HotListSkeleton() {
             ) {
                 Box(
                     Modifier
+                        .padding(top = 8.dp)
                         .fillMaxWidth(0.84f)
                         .height(14.dp)
-                        .padding(top = 8.dp)
                         .clip(RoundedCornerShape(7.dp))
                         .background(LocalAmberTokens.current.surface2),
                 )

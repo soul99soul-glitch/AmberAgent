@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import app.amber.feature.board.hotlist.CUSTOM_TOPIC_PROVIDER_ID
 import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.board.hotlist.HotTopicSource
 import app.amber.feature.board.hotlist.presentationTitle
@@ -255,8 +256,12 @@ class DeepReadSourcePrefetcher(
                     images = emptyList(),
                 )
             }
+        // On url/title collisions prefer the seed carrying content: the raw URL
+        // userSeed dies on fetch failure, while a stored (hot-list or custom)
+        // seed still has its fallback body. Order of first occurrence is kept.
         return (listOfNotNull(userSeed) + hotSeeds)
-            .distinctBy { it.url.ifBlank { it.title } }
+            .groupBy { it.url.ifBlank { it.title } }
+            .map { (_, dupes) -> dupes.maxByOrNull { it.content.isNotBlank() } ?: dupes.first() }
     }
 
     private suspend fun enrichSeedSource(source: DeepReadSource, topicTitle: String): DeepReadSource {
@@ -281,7 +286,7 @@ class DeepReadSourcePrefetcher(
             }
         }.orEmpty()
         val content = (direct ?: source.content).take(SOURCE_EXCERPT_LIMIT)
-        val evidenceText = direct.orEmpty().take(SOURCE_EXCERPT_LIMIT)
+        val evidenceText = (direct ?: source.evidenceText).take(SOURCE_EXCERPT_LIMIT)
         val imageCandidates = buildImageCandidates(
             topicTitle = topicTitle,
             sourceUrl = source.url,
@@ -622,27 +627,45 @@ class DeepReadSourcePrefetcher(
     private fun List<HotTopicSource>.toDeepReadSources(topicTitle: String): List<DeepReadSource> =
         map { source ->
             val url = source.url?.takeIf { it.isHttpOrHttpsUrl() }.orEmpty()
+            val inlineContent = source.content?.takeIf { it.isNotBlank() }
             DeepReadSource(
                 title = source.presentationTitle,
                 url = url,
                 source = source.providerName,
-                content = buildString {
-                    append("热榜话题：")
-                    append(topicTitle)
-                    append("。来源：")
-                    append(source.providerName)
-                    append(" 第")
-                    append(source.rank)
-                    append(" 名，标题：")
-                    append(source.presentationTitle)
-                    if (!source.heat.isNullOrBlank()) {
-                        append("，热度：")
-                        append(source.heat)
+                content = inlineContent ?: if (source.providerId == CUSTOM_TOPIC_PROVIDER_ID) {
+                    buildString {
+                        append("用户自定义来源：")
+                        append(source.presentationTitle)
+                        append("。提供者：")
+                        append(source.providerName)
+                        if (!source.url.isNullOrBlank()) {
+                            append("，链接：")
+                            append(source.url)
+                        }
+                        append("。主题：")
+                        append(topicTitle)
+                        append("。")
                     }
-                    append("。")
+                } else {
+                    buildString {
+                        append("热榜话题：")
+                        append(topicTitle)
+                        append("。来源：")
+                        append(source.providerName)
+                        append(" 第")
+                        append(source.rank)
+                        append(" 名，标题：")
+                        append(source.presentationTitle)
+                        if (!source.heat.isNullOrBlank()) {
+                            append("，热度：")
+                            append(source.heat)
+                        }
+                        append("。")
+                    }
                 },
                 publishedAt = null,
                 images = source.images,
+                evidenceText = inlineContent.orEmpty(),
             )
         }.take(MAX_SEED_SOURCES)
 

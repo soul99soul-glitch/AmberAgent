@@ -21,8 +21,9 @@ import java.security.SecureRandom
  */
 class DeviceBoundBackupKey(private val store: SecretStore) {
     /** 读取设备秘密；不存在时生成并持久化（幂等，重入安全）。 */
+    @Synchronized
     fun getOrCreate(): String =
-        store.read(DESCRIPTOR) ?: randomSecret().also { store.create(DESCRIPTOR, it) }
+        store.read(DESCRIPTOR) ?: randomSecret().also { store.update(DESCRIPTOR, it) }
 
     /** 仅读取；Keystore 失效/未创建时返回 null（调用方按“非本设备”处理）。 */
     fun current(): String? = store.read(DESCRIPTOR)

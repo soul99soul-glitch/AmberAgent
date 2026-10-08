@@ -1,13 +1,17 @@
 package app.amber.feature.board.hotlist
 
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import app.amber.feature.board.DeepReadTemplateIds
 import app.amber.feature.board.hotlist.deepread.DeepReadOutput
+import app.amber.feature.board.hotlist.deepread.isComplete
+import app.amber.feature.board.hotlist.deepread.withInferredSectionStates
 import app.amber.agent.data.db.dao.HotListDAO
 import app.amber.agent.data.db.entity.DeepReadCacheEntity
 import app.amber.agent.data.db.entity.HotListCacheEntity
@@ -26,7 +30,7 @@ class HotListRepository(
     private val deepReadHistoryPreviews = ConcurrentHashMap<String, DeepReadHistoryItem>()
 
     fun observeDashboard(): Flow<HotListDashboard> = combine(
-        dao.observeHotTopics(HOT_LIST_TOPIC_CACHE_LIMIT),
+        dao.observeHotTopics(HOT_LIST_TOPIC_CACHE_LIMIT, "$CUSTOM_TOPIC_ID_PREFIX%"),
         dao.observeProviderCaches(),
     ) { topicEntities, providerEntities ->
         val providers = providerEntities.map { it.toSnapshot(json) }
@@ -59,6 +63,31 @@ class HotListRepository(
             val now = System.currentTimeMillis()
             entities.map { it.toHistoryItem(json, now) }
         }
+
+    /** Raw entry for run bookkeeping — expiry filters belong to readers, not writers. */
+    suspend fun getDeepReadEntry(topicId: String): DeepReadHistoryItem? =
+        dao.getDeepRead(topicId)?.toHistoryItem(json)
+
+    /** Clears a stale synthesis payload when a run falls back to the magazine pipeline. */
+    suspend fun clearDeepReadStructuredJson(topicId: String) {
+        withUserWrite { dao.clearDeepReadStructuredJson(topicId) }
+    }
+
+    /**
+     * Entries that completed a full generation and are still valid — the basis
+     * for the 付印 milestone count (first/tenth/hundredth). Decoding every row is
+     * acceptable here: the query runs once per observed completion on Dispatchers.IO.
+     */
+    suspend fun countCompletedDeepReads(): Int {
+        val now = System.currentTimeMillis()
+        return dao.observeAllDeepReads().first().count { entity ->
+            val item = entity.toHistoryItem(json, now)
+            item.output?.withInferredSectionStates()?.isComplete() == true && !item.expired
+        }
+    }
+
+    /** All cached deep-read rows — the masthead issue counter (No.N+1). */
+    fun observeDeepReadCount(): Flow<Int> = dao.observeDeepReadCount()
 
     fun rememberDeepReadHistoryPreview(item: DeepReadHistoryItem) {
         deepReadHistoryPreviews[item.topicId] = item
@@ -123,10 +152,14 @@ class HotListRepository(
                 bestRank = topic.bestRank,
                 latestFetchedAt = topic.latestFetchedAt,
                 updatedAt = now,
+                templateId = topic.deepReadTemplateId,
             )
         }
         withOwnerWrite {
-            dao.replaceHotTopics(entities)
+            // Custom deep-read seed topics are user-owned; a hot-list refresh
+            // must not wipe the sources a still-running/scheduled deep read needs.
+            val preserved = dao.getTopicsByIdPattern("$CUSTOM_TOPIC_ID_PREFIX%")
+            dao.replaceHotTopics(entities + preserved)
         }
     }
 
@@ -140,6 +173,7 @@ class HotListRepository(
             bestRank = topic.bestRank,
             latestFetchedAt = topic.latestFetchedAt,
             updatedAt = now,
+            templateId = topic.deepReadTemplateId,
         )
         withUserWrite {
             dao.upsertHotTopics(listOf(entity))
@@ -162,6 +196,7 @@ class HotListRepository(
     suspend fun materializeFreshDeepRead(
         topicId: String,
         title: String,
+        requestedTemplateId: String? = null,
         now: Long = System.currentTimeMillis(),
     ): DeepReadOutput? {
         dao.getDeepRead(topicId)?.let { direct ->
@@ -169,6 +204,15 @@ class HotListRepository(
         }
         if (title.isBlank()) return null
         val fallback = dao.getFreshDeepReadByTitle(title, now) ?: return null
+        // A same-titled entry is only reusable when it was generated under the
+        // template this run resolved — otherwise an explicit per-task pick would
+        // silently inherit an old magazine/synthesis article.
+        if (requestedTemplateId != null &&
+            DeepReadTemplateIds.normalize(fallback.templateId) !=
+            DeepReadTemplateIds.normalize(requestedTemplateId)
+        ) {
+            return null
+        }
         val output = fallback.toFreshDeepRead(json, now) ?: return null
         if (fallback.topicId != topicId) {
             withOwnerWrite {
@@ -191,17 +235,10 @@ class HotListRepository(
         now: Long = System.currentTimeMillis(),
         ttlDays: Int = DEFAULT_TTL_DAYS,
         sourceUrl: String? = null,
+        templateId: String? = null,
+        structuredJson: String? = null,
     ) {
-        // Preserve existing pinned state across regeneration: upsert uses REPLACE, so a
-        // freshly-built entity with pinned=false (default) would clobber a user's pin.
-        val existing = dao.getDeepRead(topicId)
-        val existingPinned = existing?.pinned == true
-        // Writer/section updates do not carry the seed URL. Preserve it unless a
-        // caller supplies a new non-blank URL for the same topic.
-        val persistedSourceUrl = sourceUrl
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: existing?.sourceUrl
+        val persistedSourceUrl = sourceUrl?.trim()?.takeIf { it.isNotEmpty() }
         val expiresAt = if (ttlDays <= 0) Long.MAX_VALUE else now + ttlDays * DAY_MS
         val entity = DeepReadCacheEntity(
             topicId = topicId,
@@ -210,10 +247,13 @@ class HotListRepository(
             createdAt = now,
             expiresAt = expiresAt,
             updatedAt = now,
-            pinned = existingPinned,
             sourceUrl = persistedSourceUrl,
+            templateId = templateId,
+            structuredJson = structuredJson,
         )
-        withOwnerWrite { dao.upsertDeepRead(entity) }
+        // The Room transaction preserves current pin/source metadata at write time,
+        // including user changes made while this owner waited for the restore gate.
+        withOwnerWrite { dao.saveDeepReadContent(entity) }
     }
 
     suspend fun clearDeepRead(topicId: String) = withOwnerOrUserWrite {
@@ -293,6 +333,10 @@ data class DeepReadHistoryItem(
     val expired: Boolean,
     val pinned: Boolean = false,
     val sourceUrl: String? = null,
+    /** Generation/display template this entry was produced with (iOS task.templateId). */
+    val templateId: String? = null,
+    /** Structured synthesis payload — decodes via `DeepReadTemplateArticle.decode`. */
+    val structuredJson: String? = null,
 )
 
 private fun HotListCacheEntity.toSnapshot(json: Json): HotListProviderSnapshot =
@@ -317,6 +361,7 @@ private fun HotTopicCacheEntity.toTopic(json: Json): HotTopic =
         sourceCount = sourceCount,
         bestRank = bestRank,
         latestFetchedAt = latestFetchedAt,
+        deepReadTemplateId = templateId,
     )
 
 private fun DeepReadCacheEntity.toFreshDeepRead(json: Json, now: Long = System.currentTimeMillis()): DeepReadOutput? {
@@ -338,6 +383,8 @@ private fun DeepReadCacheEntity.toHistoryItem(
         expired = !DeepReadCachePolicy.isFresh(expiresAt, now, pinned),
         pinned = pinned,
         sourceUrl = sourceUrl,
+        templateId = templateId,
+        structuredJson = structuredJson,
     )
 
 private fun DeepReadCacheEntity.toDeepReadOutput(json: Json): DeepReadOutput? =

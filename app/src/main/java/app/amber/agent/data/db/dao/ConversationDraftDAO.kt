@@ -18,6 +18,9 @@ interface ConversationDraftDAO {
     @Query("DELETE FROM conversation_draft WHERE conversation_id = :conversationId")
     suspend fun delete(conversationId: String): Int
 
+    @Query("DELETE FROM conversation_draft WHERE conversation_id = :conversationId AND draft_id = :draftId")
+    suspend fun deleteIfCurrent(conversationId: String, draftId: String): Int
+
     /** P8-08：聚合仍存在所属会话的草稿（会话已删除的草稿不再出现）。 */
     @Query(
         "SELECT d.* FROM conversation_draft d " +

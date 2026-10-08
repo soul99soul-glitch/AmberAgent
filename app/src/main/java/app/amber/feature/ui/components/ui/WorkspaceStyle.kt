@@ -288,6 +288,7 @@ fun WorkspaceTextButton(
 fun WorkspaceTopBar(
     title: String,
     modifier: Modifier = Modifier,
+    titleStyle: androidx.compose.ui.text.TextStyle? = null,
     navigationIcon: @Composable () -> Unit = {},
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
     scrollBehavior: TopAppBarScrollBehavior? = null,
@@ -303,7 +304,7 @@ fun WorkspaceTopBar(
         title = {
             Text(
                 text = title,
-                style = LocalAmberType.current.screenTitle,
+                style = titleStyle ?: LocalAmberType.current.screenTitle,
                 color = workspace.ink,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

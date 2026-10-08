@@ -24,13 +24,15 @@ object NovelWorkspaceInstaller {
         projectDirectory: File,
         mainBranchId: String = UUID.randomUUID().toString().uppercase(),
         now: Instant = Instant.now(),
-    ): Result {
+    ): Result = NovelWorkspaceRestoreBoundary.write {
         val parsed = NovelWorkspaceParsed.parse(files)
         if (!parsed.hasKnownFormat) {
             throw NovelWorkspaceFormatError(
                 "Unrecognized workspace format: ${parsed.format} v${parsed.formatVersion}",
             )
         }
+        files.forEach { NovelWorkspacePaths.validate(it.path) }
+        val manifest = files.last { it.path == NovelWorkspacePaths.MANIFEST }
         if (projectDirectory.exists() && projectDirectory.listFiles()?.isNotEmpty() == true) {
             // 完整目标（已有 manifest = 已安装过的书）保持既有短路，绝不覆盖。
             if (File(projectDirectory, NovelWorkspacePaths.MANIFEST).exists()) {
@@ -45,7 +47,7 @@ object NovelWorkspaceInstaller {
         }
         val store = NovelWorkspaceStore(projectDirectory)
         for (file in files) {
-            NovelWorkspacePaths.validate(file.path)
+            if (file.path == NovelWorkspacePaths.MANIFEST) continue
             store.write(file.path, file.content)
         }
 
@@ -57,6 +59,13 @@ object NovelWorkspaceInstaller {
             files = store.fileTree(),
             message = NovelWorkspaceLedger.Message.INITIAL,
             createdAt = now,
+            stalePlotBranches = files.mapNotNull { file ->
+                val segments = file.path.split('/')
+                segments.takeIf {
+                    it.size == 3 && it[0] == NovelWorkspacePaths.BRANCHES_DIR && it[2] == "branch.md" &&
+                        NovelWorkspaceMarkdown.parseFile(file.content).fields["syncStatus"] == "needsSync"
+                }?.get(1)
+            }.toSet(),
         )
         // Register a head for EVERY branch that ships a branch.md with an id (multi-branch
         // legacy books): all their files are part of the initial tree, so each head starts
@@ -84,7 +93,11 @@ object NovelWorkspaceInstaller {
             projectDirectory,
         )
         store.materializeCheckout()
-        return Result(
+        // Manifest publishes a completed installation. The ledger excludes it, but
+        // the author mirror includes it before the book becomes visible.
+        NovelWorkspaceStore(store.checkoutDirectory).write(manifest.path, manifest.content)
+        store.write(manifest.path, manifest.content)
+        return@write Result(
             projectDirectory = projectDirectory,
             initialCommitId = commitId,
             mainBranchId = branchId,

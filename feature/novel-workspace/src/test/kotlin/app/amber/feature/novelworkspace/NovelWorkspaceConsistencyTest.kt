@@ -338,6 +338,59 @@ class NovelWorkspaceConsistencyTest {
     }
 
     @Test
+    fun `deleted chapter participates in changed paths freshness and middle edit gate`() {
+        val store = store()
+        val ch1 = "branches/主线/chapters/001-山呼.md"
+        val ch2 = "branches/主线/chapters/002-入汴.md"
+        val plot = "branches/主线/plot/current.md"
+        store.write(ch2, "第二章正文")
+        val original = commit("C1", null, mapOf(ch1 to "h1", ch2 to "h2", plot to "p1"), "2026-08-19T00:00:00Z")
+        val removed = commit("C2", "C1", original.files - ch1, "2026-08-19T00:01:00Z")
+        val ledger = NovelWorkspaceLedgerStore(head = removed.id, commits = listOf(original, removed))
+
+        assertEquals(setOf(ch1), NovelWorkspaceLedger.changedPaths(removed, ledger.commits))
+        assertTrue(NovelWorkspaceLedger.isPlotStale(store, ledger, "主线"))
+        assertEquals(2, NovelWorkspaceLedger.firstUnresolvedOrdinalAfterEdit(store, ledger, "主线", removed))
+    }
+
+    @Test
+    fun `chapter title changes remain in the diff but do not invalidate story state`() {
+        val store = store()
+        val ch1 = "branches/主线/chapters/001-山呼.md"
+        val ch2 = "branches/主线/chapters/002-入汴.md"
+        val plot = "branches/主线/plot/current.md"
+        store.write(ch1, "第一章正文")
+        store.write(ch2, "第二章正文")
+        val original = commit("C1", null, mapOf(ch1 to "h1", ch2 to "h2", plot to "p1"), "2026-08-19T00:00:00Z")
+        val renamed = commit("C2", "C1", original.files + (ch1 to "renamed"), "2026-08-19T00:01:00Z")
+            .copy(metadataOnlyPaths = setOf(ch1))
+        val ledger = NovelWorkspaceLedgerStore(head = renamed.id, commits = listOf(original, renamed))
+        NovelWorkspaceLedger.save(ledger, store.rootDirectory)
+        val restored = NovelWorkspaceLedger.load(store.rootDirectory)
+
+        assertEquals(setOf(ch1), NovelWorkspaceLedger.changedPaths(renamed, restored.commits))
+        assertFalse(NovelWorkspaceLedger.isPlotStale(store, restored, "主线"))
+        assertNull(NovelWorkspaceLedger.firstUnresolvedOrdinalAfterEdit(store, restored, "主线", renamed))
+        assertNull(NovelWorkspaceLedger.danglingPolishChapterOrdinal(store, restored, "主线"))
+    }
+
+    @Test
+    fun `a title edit after a dangling polish does not hide the chapter needing its pointer`() {
+        val store = store()
+        val ch1 = "branches/主线/chapters/001-山呼.md"
+        val plot = "branches/主线/plot/current.md"
+        val original = commit("C1", null, mapOf(ch1 to "h1", plot to "p1"), "2026-08-19T00:00:00Z")
+        val polished = commit("C2", "C1", original.files + (ch1 to "polished"), "2026-08-19T00:01:00Z")
+            .copy(message = NovelWorkspaceLedger.Message.POLISH)
+        val renamed = commit("C3", "C2", polished.files + (ch1 to "renamed"), "2026-08-19T00:02:00Z")
+            .copy(metadataOnlyPaths = setOf(ch1))
+        val ledger = NovelWorkspaceLedgerStore(head = renamed.id, commits = listOf(original, polished, renamed))
+
+        assertTrue(NovelWorkspaceLedger.isPlotStale(store, ledger, "主线"))
+        assertEquals(1, NovelWorkspaceLedger.danglingPolishChapterOrdinal(store, ledger, "主线"))
+    }
+
+    @Test
     fun `unresolved store set read clear`() {
         val dir = tempFolder.newFolder("unresolved-book")
         assertNull(NovelWorkspaceUnresolvedStore.entryFor(dir, "主线"))

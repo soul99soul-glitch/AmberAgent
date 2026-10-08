@@ -438,6 +438,100 @@ class NovelWorkspaceRuntimeTest {
     }
 
     @Test
+    fun `reopening retains proposal identity bindings and edits before durable approval`() = runTest {
+        val dir = installProject()
+        val path = "branches/主线/chapters/001-山呼.md"
+        val originalRuntime = NovelWorkspaceRuntime(LoopingFakeKernel(listOf(
+            "novel_workspace_write" to buildJsonObject {
+                put("path", path)
+                put("content", "待确认的正文。")
+            },
+        ), "已准备修改。"))
+        val proposal = originalRuntime.runTurn(request(dir)).toList()
+            .filterIsInstance<NovelWorkspaceRuntime.TurnEvent.Completed>().single().proposal!!
+        val reopened = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
+        reopened.loadProposals(dir)
+        assertEquals(proposal, reopened.pendingProposals.value.single())
+
+        reopened.editProposal(proposal.id, proposal.entries.map { it.copy(content = "作者修订后的正文。") })
+        val edited = NovelWorkspaceProposalStore.load(dir).single()
+        assertEquals(proposal.copy(entries = edited.entries), edited)
+        assertEquals("作者修订后的正文。", edited.entries.single().content)
+        reopened.approve(proposal.id)
+
+        val afterApproval = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
+        afterApproval.loadProposals(dir)
+        assertTrue(afterApproval.pendingProposals.value.isEmpty())
+        assertEquals("作者修订后的正文。", NovelWorkspaceMarkdown.parseFile(NovelWorkspaceStore(dir).read(path)!!).body)
+    }
+
+    @Test
+    fun `editing reopened stale proposal keeps its original CAS and rejection is durable`() = runTest {
+        val dir = installProject()
+        val path = "branches/主线/chapters/001-山呼.md"
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(listOf(
+            "novel_workspace_write" to buildJsonObject {
+                put("path", path)
+                put("content", "旧版本上的提案。")
+            },
+        ), "已准备修改。"))
+        val proposal = runtime.runTurn(request(dir)).toList()
+            .filterIsInstance<NovelWorkspaceRuntime.TurnEvent.Completed>().single().proposal!!
+        runtime.saveChapterEdit(dir, "B-1", "主线", path, "山呼", "已确认的新版本。")
+        val reopened = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
+        reopened.loadProposals(dir)
+        reopened.editProposal(proposal.id, proposal.entries.map { it.copy(content = "编辑旧提案不会重置版本绑定。") })
+        assertEquals(proposal.baseHeadId, reopened.pendingProposals.value.single().baseHeadId)
+        assertEquals(proposal.baseTreeDigest, reopened.pendingProposals.value.single().baseTreeDigest)
+        assertTrue(runCatching { reopened.approve(proposal.id) }.exceptionOrNull()?.message?.contains("提案已过期") == true)
+        assertEquals(proposal.id, NovelWorkspaceProposalStore.load(dir).single().id)
+        assertEquals("已确认的新版本。", NovelWorkspaceMarkdown.parseFile(NovelWorkspaceStore(dir).read(path)!!).body)
+
+        reopened.reject(proposal.id)
+        val nextRuntime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
+        nextRuntime.loadProposals(dir)
+        assertTrue(nextRuntime.pendingProposals.value.isEmpty())
+    }
+
+    @Test
+    fun `proposal editing cannot retarget host files`() = runTest {
+        val dir = installProject()
+        val path = "branches/主线/chapters/001-山呼.md"
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(listOf(
+            "novel_workspace_write" to buildJsonObject {
+                put("path", path)
+                put("content", "待确认的正文。")
+            },
+        ), "已准备修改。"))
+        val proposal = runtime.runTurn(request(dir)).toList()
+            .filterIsInstance<NovelWorkspaceRuntime.TurnEvent.Completed>().single().proposal!!
+
+        assertNotNull(runCatching {
+            runtime.editProposal(proposal.id, proposal.entries.map { it.copy(path = "project.md") })
+        }.exceptionOrNull())
+        assertEquals(proposal, NovelWorkspaceProposalStore.load(dir).single())
+    }
+
+    @Test
+    fun `unreadable pending proposals are preserved and block replacing the only copy`() = runTest {
+        val dir = installProject()
+        val file = File(dir, ".amber/proposals.json")
+        val corrupt = "{ interrupted pending proposal data"
+        file.writeText(corrupt)
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(listOf(
+            "novel_workspace_write" to buildJsonObject {
+                put("path", "branches/主线/chapters/001-山呼.md")
+                put("content", "不应覆盖旧提案。")
+            },
+        ), "已准备修改。"))
+
+        assertTrue(runCatching { runtime.loadProposals(dir) }.exceptionOrNull()?.message?.contains("读取失败") == true)
+        assertTrue(runtime.runTurn(request(dir)).toList().last() is NovelWorkspaceRuntime.TurnEvent.Failed)
+        assertEquals(corrupt, file.readText())
+        assertEquals("陈桥驿的风先到。", NovelWorkspaceMarkdown.parseFile(NovelWorkspaceStore(dir).read("branches/主线/chapters/001-山呼.md")!!).body)
+    }
+
+    @Test
     fun `workspace tools never pause the generic approval pipeline`() = runTest {
         // needsApproval=true would make GenerationHandler stop at WaitingUser before
         // execute() runs; the novel runtime drives its own author gate instead.
@@ -623,6 +717,158 @@ class NovelWorkspaceRuntimeTest {
         // Undoing the exact commit that opened the gate must release that gate too.
         assertTrue(runtime.undoLast(dir))
         assertNull(NovelWorkspaceUnresolvedStore.entryFor(dir, "主线"))
+    }
+
+    @Test
+    fun `renaming a middle chapter preserves fresh plot until its body changes`() {
+        val dir = installProject()
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
+        val store = NovelWorkspaceStore(dir)
+        val chapterPath = "branches/主线/chapters/001-山呼.md"
+        store.write("drafts/d2.md", "第二章正文。")
+        runtime.collectDraft(dir, "B-1", "主线", "drafts/d2.md", NovelWorkspaceCollectTarget.NewChapter, chapterTitle = "入汴")
+        runtime.saveFileEdit(dir, "B-1", "主线", "branches/主线/plot/current.md", "已写到第二章。")
+
+        val renamed = runtime.saveChapterEdit(dir, "B-1", "主线", chapterPath, "山呼（新标题）", "陈桥驿的风先到。")
+        val ledger = NovelWorkspaceLedger.load(dir)
+        assertEquals(setOf(chapterPath), renamed.metadataOnlyPaths)
+        assertEquals(setOf(chapterPath), NovelWorkspaceLedger.changedPaths(renamed, ledger.commits))
+        assertFalse(NovelWorkspaceLedger.isPlotStale(store, ledger, "主线"))
+        assertNull(NovelWorkspaceUnresolvedStore.entryFor(dir, "主线"))
+        assertEquals("山呼（新标题）", NovelWorkspaceMarkdown.parseFile(store.read(chapterPath)!!).fields["title"])
+
+        val changed = runtime.saveChapterEdit(dir, "B-1", "主线", chapterPath, "山呼（新标题）", "新的正文事实。")
+        assertTrue(changed.metadataOnlyPaths.isEmpty())
+        assertTrue(NovelWorkspaceLedger.isPlotStale(store, NovelWorkspaceLedger.load(dir), "主线"))
+        assertEquals(2, NovelWorkspaceUnresolvedStore.entryFor(dir, "主线")?.fromOrdinal)
+    }
+
+    @Test
+    fun `renaming a dirty middle chapter cannot hide its uncommitted body change`() {
+        val dir = installProject()
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
+        val store = NovelWorkspaceStore(dir)
+        val chapterPath = "branches/主线/chapters/001-山呼.md"
+        store.write("drafts/d2.md", "第二章正文。")
+        runtime.collectDraft(dir, "B-1", "主线", "drafts/d2.md", NovelWorkspaceCollectTarget.NewChapter, chapterTitle = "入汴")
+        runtime.saveFileEdit(dir, "B-1", "主线", "branches/主线/plot/current.md", "已写到第二章。")
+        val parsed = NovelWorkspaceMarkdown.parseFile(store.read(chapterPath)!!)
+        store.write(chapterPath, NovelWorkspaceMarkdown.render(
+            fields = parsed.fields.toList(),
+            aliases = parsed.lists["aliases"].orEmpty(),
+            body = "尚未提交的新正文事实。",
+        ))
+
+        val saved = runtime.saveChapterEdit(dir, "B-1", "主线", chapterPath, "山呼（新标题）", "尚未提交的新正文事实。")
+
+        assertTrue(saved.metadataOnlyPaths.isEmpty())
+        assertTrue(NovelWorkspaceLedger.isPlotStale(store, NovelWorkspaceLedger.load(dir), "主线"))
+        assertEquals(2, NovelWorkspaceUnresolvedStore.entryFor(dir, "主线")?.fromOrdinal)
+    }
+
+    @Test
+    fun `interactive polish plain text becomes an approval proposal without changing canon`() = runTest {
+        val dir = installProject()
+        val chapterPath = "branches/主线/chapters/001-山呼.md"
+        val store = NovelWorkspaceStore(dir)
+        val original = store.read(chapterPath)
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), "润色后的正文。"))
+
+        val result = runtime.runTurn(request(dir).copy(polishChapterPath = chapterPath))
+            .toList().filterIsInstance<NovelWorkspaceRuntime.TurnEvent.Completed>().single()
+        assertEquals(original, store.read(chapterPath))
+        assertEquals(chapterPath, result.proposal?.entries?.single()?.path)
+        assertEquals("润色后的正文。", result.proposal?.entries?.single()?.content)
+        runtime.approve(result.proposal!!.id)
+        assertEquals("润色后的正文。", NovelWorkspaceMarkdown.parseFile(store.read(chapterPath)!!).body)
+    }
+
+    @Test
+    fun `interactive polish proposal retains the original tree binding when files change during generation`() = runTest {
+        val dir = installProject()
+        val chapterPath = "branches/主线/chapters/001-山呼.md"
+        val store = NovelWorkspaceStore(dir)
+        val original = store.read(chapterPath)
+        val runtime = NovelWorkspaceRuntime(
+            LoopingFakeKernel(emptyList(), "润色后的正文。", beforeFinal = {
+                store.write("setting/world/新资料.md", "新增资料。")
+            }),
+        )
+        val proposal = runtime.runTurn(request(dir).copy(polishChapterPath = chapterPath))
+            .toList().filterIsInstance<NovelWorkspaceRuntime.TurnEvent.Completed>().single().proposal!!
+
+        assertTrue(runCatching { runtime.approve(proposal.id) }.exceptionOrNull()?.message?.contains("提案已过期") == true)
+        assertEquals(original, store.read(chapterPath))
+    }
+
+    @Test
+    fun `unreviewed auto approval cannot suppress middle chapter gate using polish marker`() = runTest {
+        val dir = installProject()
+        val chapterPath = "branches/主线/chapters/001-山呼.md"
+        val store = NovelWorkspaceStore(dir)
+        val setupRuntime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
+        store.write("drafts/d2.md", "第二章正文。")
+        setupRuntime.collectDraft(dir, "B-1", "主线", "drafts/d2.md", NovelWorkspaceCollectTarget.NewChapter, chapterTitle = "入汴")
+        val runtime = NovelWorkspaceRuntime(
+            LoopingFakeKernel(listOf("novel_workspace_write" to buildJsonObject {
+                put("path", chapterPath)
+                put("content", "改变后的正文。")
+            }), "完成。"),
+        )
+
+        val result = runtime.runTurn(request(dir).copy(
+            polishChapterPath = chapterPath,
+            autoApproveCanon = true,
+            autoCommitMessage = NovelWorkspaceLedger.Message.POLISH,
+        )).toList()
+
+        assertTrue(result.last() is NovelWorkspaceRuntime.TurnEvent.Completed)
+        assertEquals(2, NovelWorkspaceUnresolvedStore.entryFor(dir, "主线")?.fromOrdinal)
+        val ledger = NovelWorkspaceLedger.load(dir)
+        assertEquals(NovelWorkspaceLedger.Message.MANUAL_EDIT, ledger.commits.last().message)
+        assertNull(NovelWorkspaceLedger.danglingPolishChapterOrdinal(store, ledger, "主线"))
+    }
+
+    @Test
+    fun `reviewed polish host write refuses stale tree or original chapter bindings`() {
+        val dir = installProject()
+        val chapterPath = "branches/主线/chapters/001-山呼.md"
+        val store = NovelWorkspaceStore(dir)
+        val original = store.read(chapterPath)!!
+        val ledger = NovelWorkspaceLedger.load(dir)
+        val treeDigest = NovelWorkspaceLedger.treeSHA256(store.fileTree())
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
+        store.write("setting/world/新资料.md", "新增资料。")
+
+        val staleTree = runCatching {
+            runtime.commitPolishedChapter(
+                dir, "B-1", "主线", chapterPath, "润色后的正文。",
+                expectedHeadId = ledger.headOf("B-1")?.id,
+                expectedTreeDigest = treeDigest,
+                expectedChapterContent = original,
+            )
+        }.exceptionOrNull()
+        assertTrue(staleTree?.message?.contains("正文版本已变化") == true)
+        assertEquals(original, store.read(chapterPath))
+
+        val staleChapter = runCatching {
+            runtime.commitPolishedChapter(
+                dir, "B-1", "主线", chapterPath, "润色后的正文。",
+                expectedHeadId = ledger.headOf("B-1")?.id,
+                expectedTreeDigest = NovelWorkspaceLedger.treeSHA256(store.fileTree()),
+                expectedChapterContent = "旧版原稿。",
+            )
+        }.exceptionOrNull()
+        assertTrue(staleChapter?.message?.contains("正文版本已变化") == true)
+        assertEquals(original, store.read(chapterPath))
+
+        runtime.commitPolishedChapter(
+            dir, "B-1", "主线", chapterPath, "润色后的正文。",
+            expectedHeadId = ledger.headOf("B-1")?.id,
+            expectedTreeDigest = NovelWorkspaceLedger.treeSHA256(store.fileTree()),
+            expectedChapterContent = original,
+        )
+        assertEquals("润色后的正文。", NovelWorkspaceMarkdown.parseFile(store.read(chapterPath)!!).body)
     }
 
     @Test

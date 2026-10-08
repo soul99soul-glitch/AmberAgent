@@ -1,0 +1,39 @@
+{
+  "feature/novel-workspace": {
+    "tests": 155,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1,
+    "failures_detail": []
+  },
+  "feature/novel": {
+    "tests": 56,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1,
+    "failures_detail": []
+  },
+  "core/jev": {
+    "tests": 39,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failures_detail": []
+  },
+  "feature/task": {
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failures_detail": []
+  },
+  "app": {
+    "tests": 444,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "failures_detail": [
+      "app.amber.agent.di.KoinGraphVerifyTest::every definition's dependencies resolve in the startup graph"
+    ]
+  }
+}

@@ -52,6 +52,9 @@ data class HotTopicCacheEntity(
     val latestFetchedAt: Long,
     @ColumnInfo("updated_at")
     val updatedAt: Long,
+    /** Per-topic generation/display template picked at creation (iOS task.templateId). */
+    @ColumnInfo(name = "template_id")
+    val templateId: String? = null,
 )
 
 @Entity(
@@ -80,6 +83,12 @@ data class DeepReadCacheEntity(
     /** URL used to create this result; retained so history/Continue can reopen it. */
     @ColumnInfo(name = "source_url")
     val sourceUrl: String? = null,
+    /** Generation/display template used for this entry (iOS task.templateId). */
+    @ColumnInfo(name = "template_id")
+    val templateId: String? = null,
+    /** Structured article JSON for generation templates (shape "template_synthesis"). */
+    @ColumnInfo(name = "structured_json")
+    val structuredJson: String? = null,
 )
 
 @Entity(

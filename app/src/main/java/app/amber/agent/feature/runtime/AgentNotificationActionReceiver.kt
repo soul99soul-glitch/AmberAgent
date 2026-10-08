@@ -15,7 +15,8 @@ import org.koin.core.component.get
 import kotlin.uuid.Uuid
 
 /**
- * Notification action receiver — stop, approve, deny and ask_user short reply.
+ * Notification action receiver — stop, approve, deny, ask_user short reply
+ * and retry from the failure card.
  *
  * P1-05: stop carries runId and ChatService validates ownership before
  * cancelling — a stale or mismatched runId cancels nothing.
@@ -33,6 +34,7 @@ class AgentNotificationActionReceiver : BroadcastReceiver(), KoinComponent {
             ACTION_APPROVE_TOOL -> decideTool(context, intent, approved = true)
             ACTION_DENY_TOOL -> decideTool(context, intent, approved = false)
             ACTION_REPLY_ASK_USER -> replyAskUser(context, intent)
+            ACTION_RETRY_GENERATION -> retryGeneration(intent)
             else -> return
         }
     }
@@ -49,6 +51,19 @@ class AgentNotificationActionReceiver : BroadcastReceiver(), KoinComponent {
         get<AppScope>().launch {
             try {
                 get<ChatService>().stopGeneration(conversationId, runId)
+            } finally {
+                pendingResult.finish()
+            }
+        }
+    }
+
+    private fun retryGeneration(intent: Intent) {
+        val conversationId = conversationIdOf(intent) ?: return
+        val runId = intent.getStringExtra(EXTRA_RUN_ID)?.takeIf { it.isNotBlank() }
+        val pendingResult = goAsync()
+        get<AppScope>().launch {
+            try {
+                get<ChatService>().retryFromNotification(conversationId, runId)
             } finally {
                 pendingResult.finish()
             }
@@ -137,6 +152,7 @@ class AgentNotificationActionReceiver : BroadcastReceiver(), KoinComponent {
         const val ACTION_APPROVE_TOOL = "app.amber.agent.action.APPROVE_TOOL"
         const val ACTION_DENY_TOOL = "app.amber.agent.action.DENY_TOOL"
         const val ACTION_REPLY_ASK_USER = "app.amber.agent.action.REPLY_ASK_USER"
+        const val ACTION_RETRY_GENERATION = "app.amber.agent.action.RETRY_GENERATION"
         const val EXTRA_CONVERSATION_ID = "conversation_id"
         const val EXTRA_RUN_ID = "run_id"
         const val EXTRA_TOOL_CALL_ID = "tool_call_id"

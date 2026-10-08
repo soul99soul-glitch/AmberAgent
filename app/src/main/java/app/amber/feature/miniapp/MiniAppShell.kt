@@ -1,12 +1,36 @@
 package app.amber.feature.miniapp
 
 import android.content.Context
+import android.webkit.WebResourceResponse
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import app.amber.agent.R
+import app.amber.core.ai.generative.GuizangHtmlDeckValidator
 
 object MiniAppShell {
     const val BASE_URL = "https://miniapp.amberagent.local/"
+
+    /** Model-facing URL of the bundled three.js, shared with iOS so MiniApp HTML stays portable. */
+    const val MODEL_LIB_THREE_URL = "amber-miniapp-lib://three.min.js"
+    /** Android WebView won't reliably load custom-scheme scripts from an https page, so the shell rewrites to same-origin. */
+    const val LIB_BASE_URL = "${BASE_URL}__amber-lib/"
+    const val LIB_THREE_URL = "${LIB_BASE_URL}three.min.js"
+
+    fun rewriteLibraryUrls(html: String): String =
+        html.replace(MODEL_LIB_THREE_URL, LIB_THREE_URL, ignoreCase = true)
+
+    fun libraryAssetPath(url: String): String? =
+        if (url.equals(LIB_THREE_URL, ignoreCase = true)) GuizangHtmlDeckValidator.THREE_ASSET_PATH else null
+
+    /** Serves app-bundled libraries from assets; returns null for any other URL. */
+    fun libraryResponse(context: Context, url: String): WebResourceResponse? {
+        val assetPath = libraryAssetPath(url) ?: return null
+        return runCatching {
+            WebResourceResponse("application/javascript", "utf-8", context.assets.open(assetPath)).apply {
+                responseHeaders = mapOf("Cache-Control" to "no-store")
+            }
+        }.getOrNull()
+    }
 
     fun inject(context: Context, html: String, bridgeScript: String, sessionToken: String): String {
         val tokenScript = """
@@ -63,13 +87,13 @@ object MiniAppShell {
             </script>
         """.trimIndent()
         val prefix = """
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https:; connect-src 'none'; font-src data:;">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' $LIB_BASE_URL; style-src 'unsafe-inline'; img-src data: https:; connect-src 'none'; font-src data:;">
             $tokenScript
             $guardScript
             <script>
             $bridgeScript
             </script>
         """.trimIndent()
-        return "$prefix\n$html"
+        return "$prefix\n${rewriteLibraryUrls(html)}"
     }
 }

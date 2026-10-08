@@ -43,6 +43,10 @@ class Navigator(private val backStack: MutableList<NavKey>) {
     fun popBackStack() {
         if (backStack.size > 1) backStack.removeLastOrNull()
     }
+
+    /** Whether popping would leave the current root. Reads as snapshot state. */
+    val canPop: Boolean
+        get() = backStack.size > 1
 }
 
 class NavigateOptionsBuilder {

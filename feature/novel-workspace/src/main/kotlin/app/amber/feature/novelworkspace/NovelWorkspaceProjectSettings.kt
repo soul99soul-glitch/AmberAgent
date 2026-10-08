@@ -30,6 +30,8 @@ data class NovelWorkspaceProjectSettings(
     val reviewModelId: String? = null,
     /** Which sections the injected brief carries; null = defaults (all on). */
     val injection: NovelWorkspaceInjectionFlags? = null,
+    /** Author's selected workspace mode; starting a batch still uses its existing owner gates. */
+    val ghostwriteMode: Boolean = false,
 )
 
 object NovelWorkspaceProjectSettingsStore {
@@ -50,7 +52,7 @@ object NovelWorkspaceProjectSettingsStore {
         }
     }
 
-    fun save(settings: NovelWorkspaceProjectSettings, projectDirectory: File) {
+    fun save(settings: NovelWorkspaceProjectSettings, projectDirectory: File) = NovelWorkspaceRestoreBoundary.write {
         val ledgerDir = File(projectDirectory, NovelWorkspaceLedger.DIRECTORY_NAME)
         if (!ledgerDir.exists() && !ledgerDir.mkdirs()) {
             throw NovelWorkspaceIoError("Cannot create ledger directory: $ledgerDir")

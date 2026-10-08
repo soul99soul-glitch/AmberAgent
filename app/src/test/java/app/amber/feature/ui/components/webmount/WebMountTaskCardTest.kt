@@ -171,12 +171,16 @@ class WebMountTaskCardTest {
             compose.waitForIdle()
             compose.onRoot().fetchSemanticsNode().boundsInRoot.height
         }
-        assertTrue("Height transition: $expandedHeight -> $heights", heights.any { it < expandedHeight && it > 36f })
         compose.mainClock.advanceTimeBy(400)
         compose.mainClock.autoAdvance = true
-        compose.onNodeWithText("打开云盘").assertIsDisplayed()
+        val collapsedHeight = compose.onRoot().fetchSemanticsNode().boundsInRoot.height
+        assertTrue(
+            "Height transition: $expandedHeight -> $heights -> $collapsedHeight",
+            heights.any { it < expandedHeight && it > collapsedHeight },
+        )
+        compose.onNodeWithText("打开云盘", substring = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("关闭").assertDoesNotExist()
-        compose.onRoot().assertHeightIsEqualTo(36.dp)
+        compose.onRoot().assertHeightIsEqualTo(44.dp)
 
         compose.runOnIdle {
             val view = requireNotNull(renderedView)
@@ -193,7 +197,7 @@ class WebMountTaskCardTest {
 
         compose.runOnIdle { activity = "读取文件" }
         compose.waitForIdle()
-        compose.onNodeWithText("读取文件").assertIsDisplayed()
+        compose.onNodeWithText("读取文件", substring = true).assertIsDisplayed()
 
         compose.onNodeWithContentDescription("展开").performClick()
         compose.onNodeWithContentDescription("关闭").performClick()

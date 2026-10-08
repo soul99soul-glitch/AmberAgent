@@ -203,7 +203,7 @@ class JevScreenGoalRunner(
     }.take(JevLimits.MAX_QUESTIONS_PER_REQUEST - 2)
 
     companion object {
-        private val SCOPES = setOf(JevDataScope.SCREEN_CONTENT, JevDataScope.TASK_TEXT)
+        private val SCOPES = JevPurpose.SCREEN_AUTOMATION.requiredScopes
         // Noul is a classification score, not a security guarantee. Native identity checks,
         // excluded actions and explicit tool approval remain mandatory. Threshold values live
         // in JevPolicy (screenReadOnlyThreshold tuned against real-device probes 0.84–0.88).

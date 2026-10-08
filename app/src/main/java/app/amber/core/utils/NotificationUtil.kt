@@ -52,6 +52,12 @@ class NotificationConfig {
     var progressMax: Int? = null
     var progress: Int = 0
     var progressIndeterminate: Boolean = false
+    var style: NotificationCompat.Style? = null
+    var whenMillis: Long? = null
+    var usesChronometer: Boolean = false
+    var timeoutAfterMillis: Long? = null
+    /** 锁屏等不安全场景展示的公开版本；为 null 时沿用系统默认的隐私处理。 */
+    var publicVersion: NotificationConfig? = null
 
     // Live Update 相关
     var requestPromotedOngoing: Boolean = false
@@ -202,6 +208,11 @@ object NotificationUtil {
             if (config.useBigTextStyle) {
                 setStyle(NotificationCompat.BigTextStyle().bigText(config.content))
             }
+            config.style?.let { setStyle(it) }
+            config.whenMillis?.let { setWhen(it) }
+            if (config.usesChronometer) setUsesChronometer(true)
+            config.timeoutAfterMillis?.let { setTimeoutAfter(it) }
+            config.publicVersion?.let { setPublicVersion(buildNotification(context, channelId, it).build()) }
 
             if (config.useDefaults) {
                 setDefaults(NotificationCompat.DEFAULT_ALL)

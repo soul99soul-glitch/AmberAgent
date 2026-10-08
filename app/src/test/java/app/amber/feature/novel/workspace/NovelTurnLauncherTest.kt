@@ -12,7 +12,10 @@ import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.GenerationRunSession
 import app.amber.core.ai.RunKernel
 import app.amber.core.settings.Settings
+import app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary
+import app.amber.feature.novelworkspace.NovelWorkspaceRestoreCancelled
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -22,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -32,6 +36,35 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NovelTurnLauncherTest {
+
+    @Test
+    fun `queued events from before restore are cancelled before delivery`() = runTest {
+        val runner = ControlledRunner()
+        val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        val payloads = NovelTurnPayloads()
+        val launcher = NovelTurnLauncher(runner, payloads, scope)
+        val handle = launcher.launch(request(), NovelWorkspaceRuntime(NoopKernel))
+        val payload = checkNotNull(payloads.resolve(handle.runId.value))
+        payload.events.send(NovelWorkspaceRuntime.TurnEvent.Delta("旧输出"))
+        payload.events.send(NovelWorkspaceRuntime.TurnEvent.Completed("旧完成", proposal = null))
+        NovelWorkspaceRestoreBoundary.beginRestore()
+        NovelWorkspaceRestoreBoundary.finishRestore()
+
+        val received = mutableListOf<NovelWorkspaceRuntime.TurnEvent>()
+        val cancellation = try {
+            handle.events.toList(received)
+            null
+        } catch (error: CancellationException) {
+            error
+        }
+
+        assertTrue(cancellation is NovelWorkspaceRestoreCancelled)
+        assertTrue(received.isEmpty())
+        assertFalse(payload.terminalDelivered.get())
+        assertEquals(listOf(handle.runId), runner.cancelled)
+        assertNull(payloads.resolve(handle.runId.value))
+        scope.cancel()
+    }
 
     @Test
     fun `terminal first waits for handler settle without cancelling the run`() = runTest {

@@ -299,61 +299,95 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                             }
                         },
                     )
-                    item(
-                        headlineContent = {
-                            Text(
-                                stringResource(R.string.setting_jev_shadow_notice),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = workspaceColors().muted,
-                            )
-                        },
-                    )
+                    // 测试模式只在开发者模式下可选，提示也只对开发者显示。
+                    if (settings.developerMode) {
+                        item(
+                            headlineContent = {
+                                Text(
+                                    stringResource(R.string.setting_jev_shadow_notice),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = workspaceColors().muted,
+                                )
+                            },
+                        )
+                    }
                 }
             }
 
             item("purposes") {
                 SettingCardGroup(title = stringResource(R.string.setting_jev_purposes_section)) {
                     JevPurpose.entries.forEach { purpose ->
-                        // supportingContent 槽模式（对照 SettingAgentExecutionPage）：
-                        // 由 CardGroup 行提供统一内边距，避免自绘 padding 造成组内错位。
-                        item(
-                            headlineContent = { Text(purpose.title()) },
-                            supportingContent = {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(
-                                        purpose.description(),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = workspaceColors().muted,
-                                    )
-                                    SettingSegmentedChoice(
-                                        options = JevMode.entries,
-                                        // 显示/编辑存储值而非 modeFor 有效值：主开关关闭时
-                                        // 控件仍可预配置，不是看着无响应的死控件。
-                                        selected = jev.purposes[purpose] ?: JevMode.OFF,
-                                        onSelected = { mode ->
-                                            updateJev { current ->
-                                                current.copy(
-                                                    purposes = if (mode == JevMode.OFF) {
-                                                        current.purposes - purpose
-                                                    } else {
-                                                        current.purposes + (purpose to mode)
-                                                    },
+                        val stored = jev.purposes[purpose] ?: JevMode.OFF
+                        fun select(mode: JevMode) = updateJev { current ->
+                            current.copy(
+                                purposes = if (mode == JevMode.OFF) {
+                                    current.purposes - purpose
+                                } else {
+                                    current.purposes + (purpose to mode)
+                                },
+                            )
+                        }
+                        if (settings.developerMode) {
+                            // 开发者模式：关闭 / 测试 / 开启三档。supportingContent 槽模式（对照
+                            // SettingAgentExecutionPage）由 CardGroup 行提供统一内边距，避免组内错位。
+                            item(
+                                headlineContent = { Text(purpose.title()) },
+                                supportingContent = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(
+                                            purpose.description(),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = workspaceColors().muted,
+                                        )
+                                        SettingSegmentedChoice(
+                                            options = JevMode.entries,
+                                            // 显示/编辑存储值而非 modeFor 有效值：主开关关闭时
+                                            // 控件仍可预配置，不是看着无响应的死控件。
+                                            selected = stored,
+                                            onSelected = ::select,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            label = { mode ->
+                                                Text(
+                                                    mode.label(),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
                                                 )
-                                            }
-                                        },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        label = { mode ->
-                                            Text(
-                                                mode.label(),
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
+                                            },
+                                        )
+                                    }
+                                },
+                            )
+                        } else {
+                            // 普通用户只看开关与能否使用：开 = 生效（ACTIVE），关 = 不用。
+                            val unavailable = purpose.unavailableReason(jev).takeIf { stored != JevMode.OFF }
+                            item(
+                                headlineContent = { Text(purpose.title()) },
+                                supportingContent = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(purpose.description())
+                                        when {
+                                            unavailable != null -> Text(
+                                                unavailable,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.error,
                                             )
-                                        },
+                                            stored == JevMode.SHADOW -> Text(
+                                                stringResource(R.string.setting_jev_testing_note),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = workspaceColors().muted,
+                                            )
+                                        }
+                                    }
+                                },
+                                trailingContent = {
+                                    Switch(
+                                        checked = stored != JevMode.OFF,
+                                        onCheckedChange = { on -> select(if (on) JevMode.ACTIVE else JevMode.OFF) },
                                     )
-                                }
-                            },
-                        )
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -727,6 +761,9 @@ private fun JevPurpose.title(): String = stringResource(
         JevPurpose.MODEL_ROUTING -> R.string.setting_jev_purpose_model_routing
         JevPurpose.WEB_AUTOMATION -> R.string.setting_jev_purpose_web_automation
         JevPurpose.SCREEN_AUTOMATION -> R.string.setting_jev_purpose_screen_automation
+        JevPurpose.TOOL_RESULT_RETENTION -> R.string.setting_jev_purpose_tool_result_retention
+        JevPurpose.AUTO_APPROVAL_GATE -> R.string.setting_jev_purpose_auto_approval_gate
+        JevPurpose.COMPLETION_CHECK -> R.string.setting_jev_purpose_completion_check
     },
 )
 
@@ -739,6 +776,9 @@ private fun JevPurpose.description(): String = stringResource(
         JevPurpose.MODEL_ROUTING -> R.string.setting_jev_purpose_model_routing_desc
         JevPurpose.WEB_AUTOMATION -> R.string.setting_jev_purpose_web_automation_desc
         JevPurpose.SCREEN_AUTOMATION -> R.string.setting_jev_purpose_screen_automation_desc
+        JevPurpose.TOOL_RESULT_RETENTION -> R.string.setting_jev_purpose_tool_result_retention_desc
+        JevPurpose.AUTO_APPROVAL_GATE -> R.string.setting_jev_purpose_auto_approval_gate_desc
+        JevPurpose.COMPLETION_CHECK -> R.string.setting_jev_purpose_completion_check_desc
     },
 )
 
@@ -774,6 +814,21 @@ private fun outcomeLabel(outcome: String): String = when {
     outcome == JevMetricEntry.OUTCOME_FAILED -> stringResource(R.string.setting_jev_outcome_failed)
     outcome.startsWith("fallback") -> stringResource(R.string.setting_jev_outcome_fallback)
     else -> outcome
+}
+
+/** 开关已打开但用不了的原因；可用时返回 null。 */
+@Composable
+private fun JevPurpose.unavailableReason(jev: JevSetting): String? {
+    val missing = requiredScopes - jev.dataScopes
+    return when {
+        !jev.enabled -> stringResource(R.string.setting_jev_unavailable_master_off)
+        jev.apiKeyMask == null -> stringResource(R.string.setting_jev_unavailable_no_key)
+        missing.isNotEmpty() -> stringResource(
+            R.string.setting_jev_unavailable_scopes,
+            missing.map { it.title() }.joinToString(stringResource(R.string.setting_jev_list_separator)),
+        )
+        else -> null
+    }
 }
 
 @Composable

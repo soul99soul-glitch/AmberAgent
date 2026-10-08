@@ -610,6 +610,7 @@ class ModelCouncilManager(
                 status = AgentTaskStatus.RUNNING,
                 summary = "${turn.seatName}: ${(turn.content.ifBlank { turn.error }).take(700)}",
                 cancelCapability = true,
+                expectedStatus = AgentTaskStatus.RUNNING,
             )
         }
         appendEvent(runtimeRun, "turn", turnToPayload(next, turn))

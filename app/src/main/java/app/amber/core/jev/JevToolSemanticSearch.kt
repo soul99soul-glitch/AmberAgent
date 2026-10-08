@@ -11,7 +11,8 @@ import kotlinx.serialization.json.put
  * 工具发现语义搜索（TOOL_DISCOVERY 用途）。
  *
  * 候选已由 ToolSearchIndex 按 profile/scope 硬过滤后给出；逐候选 Noul 判
- * 相关性，active 且未过期才返回应用结果，其余形态返回 null 走词面回退。
+ * 相关性，active 且未过期才返回应用结果，其余形态返回 null 走词面回退；
+ * shadow 在后台判分，只落校准记录，不阻塞词面结果。
  * 每个分块独立缓存锚；runKey 由 forRun 捕获，用于单轮预算隔离。
  */
 class JevToolSemanticSearch(private val runtime: JevRuntime) : ToolSemanticSearch {
@@ -38,6 +39,22 @@ class JevToolSemanticSearch(private val runtime: JevRuntime) : ToolSemanticSearc
         if (candidates.isEmpty() || query.isBlank()) return null
         val purpose = JevPurpose.TOOL_DISCOVERY
         val initialConfig = runtime.configFor(purpose) ?: return null
+        if (initialConfig.mode == JevMode.SHADOW) {
+            runtime.launchInBackground { score(query, category, limit, candidates, backgroundRunKey(runKey, JevPurpose.TOOL_DISCOVERY), initialConfig) }
+            return null
+        }
+        return score(query, category, limit, candidates, runKey, initialConfig)
+    }
+
+    private suspend fun score(
+        query: String,
+        category: String?,
+        limit: Int,
+        candidates: List<SemanticToolCandidate>,
+        runKey: String?,
+        initialConfig: JevRuntimeConfig,
+    ): SemanticToolRankResult? {
+        val purpose = JevPurpose.TOOL_DISCOVERY
         val threshold = runtime.policy.toolDiscoveryMinRelevance
         val scores = LinkedHashMap<String, Double>(candidates.size)
         var mode: JevMode? = null
@@ -79,7 +96,7 @@ class JevToolSemanticSearch(private val runtime: JevRuntime) : ToolSemanticSearc
                 runKey = runKey,
                 state = state,
                 questions = questions,
-                requiredScopes = setOf(JevDataScope.TOOL_METADATA, JevDataScope.TASK_TEXT),
+                requiredScopes = JevPurpose.TOOL_DISCOVERY.requiredScopes,
                 cacheAnchor = anchor,
             ) ?: return null
             val evaluated = outcome.evaluated ?: return null

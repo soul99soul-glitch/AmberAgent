@@ -10,6 +10,16 @@ import androidx.core.net.toUri
 import app.amber.ai.ui.UIMessagePart
 import java.io.ByteArrayOutputStream
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /** ISO BMFF ftyp brands for HEIC/HEIF containers (HEVC codec, Android 9+ / API 28). */
 private val HEIF_BRANDS = setOf(
@@ -29,6 +39,68 @@ class ImageEncodingException(
     val imageUrl: String,
     cause: Throwable
 ) : IllegalArgumentException("Failed to encode image: ${cause.message}", cause)
+
+/** Gemini inlineData needs bytes; unlike OpenAI it cannot accept a URL in its base64 field. */
+internal suspend fun UIMessagePart.Image.resolveRemoteImage(client: Call.Factory): UIMessagePart.Image {
+    if (!url.startsWith("https://", ignoreCase = true) && !url.startsWith("http://", ignoreCase = true)) return this
+    try {
+        return withContext(Dispatchers.IO) {
+            val request = Request.Builder().url(url).get().build()
+            client.newCall(request).awaitRemoteImage { response ->
+                require(response.isSuccessful) { "Image download failed: HTTP ${response.code}" }
+                val body = requireNotNull(response.body) { "Image download returned no body" }
+                val mime = body.contentType()?.let { "${it.type}/${it.subtype}" }
+                require(mime in setOf("image/png", "image/jpeg", "image/webp", "image/gif")) {
+                    "Unsupported remote image MIME type: $mime"
+                }
+                require(body.contentLength() <= MAX_REMOTE_IMAGE_BYTES) { "Remote image is too large" }
+                val bytes = body.byteStream().use { input ->
+                    val output = ByteArrayOutputStream()
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        require(output.size() + read <= MAX_REMOTE_IMAGE_BYTES) { "Remote image is too large" }
+                        output.write(buffer, 0, read)
+                    }
+                    output.toByteArray()
+                }
+                require(bytes.isNotEmpty()) { "Image download returned an empty body" }
+                copy(url = "data:$mime;base64," + java.util.Base64.getEncoder().encodeToString(bytes))
+            }
+        }
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        throw ImageEncodingException(url, error)
+    }
+}
+
+/** The continuation owns this Call until the bounded body read finishes, not just its headers. */
+private suspend fun Call.awaitRemoteImage(read: (Response) -> UIMessagePart.Image): UIMessagePart.Image =
+    suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { cancel() }
+        enqueue(object : Callback {
+            override fun onResponse(call: Call, response: Response) {
+                if (!continuation.isActive) {
+                    response.close()
+                    return
+                }
+                try {
+                    val image = response.use(read)
+                    if (continuation.isActive) continuation.resume(image)
+                } catch (error: Exception) {
+                    if (continuation.isActive) continuation.resumeWithException(error)
+                }
+            }
+
+            override fun onFailure(call: Call, error: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(error)
+            }
+        })
+    }
+
+private const val MAX_REMOTE_IMAGE_BYTES = 5 * 1024 * 1024
 
 internal enum class ExifTransformType {
     NONE,

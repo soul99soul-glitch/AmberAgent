@@ -337,6 +337,9 @@ internal class GeminiGenerateContentAdapter(
         }
 
         is UIMessagePart.Image -> {
+            require(!part.url.startsWith("https://", ignoreCase = true) && !part.url.startsWith("http://", ignoreCase = true)) {
+                "Remote images must be resolved before Gemini request encoding"
+            }
             val encoded = part.encodeBase64(withPrefix = false).getOrThrow()
             buildJsonObject {
                 put("inlineData", buildJsonObject {

@@ -11,4 +11,7 @@
   <include
     domain="file"
     path="upload/" />
+  <include
+    domain="file"
+    path="amberagent/novel-workspace/" />
 </full-backup-content>

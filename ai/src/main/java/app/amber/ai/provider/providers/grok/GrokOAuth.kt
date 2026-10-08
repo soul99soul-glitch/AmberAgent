@@ -30,8 +30,8 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import kotlin.uuid.Uuid
 
-/** Grok CLI OAuth 与 CLI proxy 的公开协议常量（与 iOS 对端保持一致）。 */
-const val GROK_OAUTH_CLIENT_ID = "********-****-****-****-************"
+/** Public Grok CLI OAuth identity, registered by xAI; PKCE does not use a client secret. */
+const val GROK_OAUTH_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
 const val GROK_OAUTH_AUTHORIZATION_ENDPOINT = "https://auth.x.ai/oauth2/authorize"
 const val GROK_OAUTH_TOKEN_ENDPOINT = "https://auth.x.ai/oauth2/token"
 const val GROK_CLI_PROXY_BASE_URL = "https://cli-chat-proxy.grok.com/v1"
@@ -44,6 +44,19 @@ private const val REFRESH_SKEW_MS = 2 * 60 * 1000L
 private const val FALLBACK_TOKEN_LIFETIME_MS = 60 * 60 * 1000L
 private const val AUTH_TIMEOUT_MS = 5 * 60 * 1000L
 private const val TAG = "GrokOAuth"
+
+internal fun grokAuthorizationUrl(state: String, nonce: String, challenge: String): String = buildString {
+    append(GROK_OAUTH_AUTHORIZATION_ENDPOINT).append('?')
+    val values = listOf(
+        "response_type" to "code", "client_id" to GROK_OAUTH_CLIENT_ID,
+        "redirect_uri" to GROK_OAUTH_REDIRECT_URI, "scope" to GROK_OAUTH_SCOPE,
+        "state" to state, "nonce" to nonce, "code_challenge" to challenge,
+        "code_challenge_method" to "S256", "referrer" to "grok-cli",
+    )
+    append(values.joinToString("&") { (key, value) ->
+        "$key=${URLEncoder.encode(value, "UTF-8")}"
+    })
+}
 
 /** provider UUID 绑定的凭据；只序列化进 Keystore 保护的 OAuthTokenSecureStore。 */
 @Serializable
@@ -149,10 +162,17 @@ class GrokOAuthClient(private val httpClient: OkHttpClient, private val authStor
         next
     }
 
-    private fun saveIfCurrent(id: Uuid, expectedGeneration: Long, tokens: GrokOAuthTokens): Boolean =
+    private fun saveIfCurrent(
+        id: Uuid,
+        expectedGeneration: Long,
+        tokens: GrokOAuthTokens,
+        advanceGeneration: Boolean = false,
+    ): Boolean =
         synchronized(generationLock(id)) {
             if (generations[id.toString()] ?: 0L != expectedGeneration) return@synchronized false
             authStore.save(id, tokens)
+            // 新登录提交后，旧凭据发起的刷新响应不能再修改这份会话。
+            if (advanceGeneration) generations[id.toString()] = expectedGeneration + 1L
             true
         }
 
@@ -160,7 +180,7 @@ class GrokOAuthClient(private val httpClient: OkHttpClient, private val authStor
         synchronized(generationLock(id)) {
             val key = id.toString()
             if (generations[key] ?: 0L != expectedGeneration) return@synchronized false
-            generations[key] = expectedGeneration + 1L
+            // 清除失效的旧 token，不取消正在等待回调的新登录。
             authStore.clearTokens(id)
             true
         }
@@ -171,7 +191,7 @@ class GrokOAuthClient(private val httpClient: OkHttpClient, private val authStor
     private fun staleSession(): Nothing = error("Grok OAuth 会话已变更，已丢弃过期响应，请重试。")
 
     suspend fun authorize(context: Context, providerId: Uuid): GrokOAuthTokens {
-        val server = LoopbackOAuthCallbackServer(port = 8787)
+        val server = LoopbackOAuthCallbackServer(port = 8787, allowedOrigin = "https://accounts.x.ai")
         val loginGeneration = beginAuthorization(providerId)
         return server.use { running ->
             val verifier = randomBytes(64)
@@ -180,25 +200,14 @@ class GrokOAuthClient(private val httpClient: OkHttpClient, private val authStor
                 MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)),
                 Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP,
             )
-            val url = buildString {
-                append(GROK_OAUTH_AUTHORIZATION_ENDPOINT).append('?')
-                val values = listOf(
-                    "response_type" to "code", "client_id" to GROK_OAUTH_CLIENT_ID,
-                    "redirect_uri" to GROK_OAUTH_REDIRECT_URI, "scope" to GROK_OAUTH_SCOPE,
-                    "state" to state, "nonce" to randomBytes(16), "code_challenge" to challenge,
-                    "code_challenge_method" to "S256", "referrer" to "grok-cli",
-                )
-                append(values.joinToString("&") { (key, value) ->
-                    "$key=${URLEncoder.encode(value, "UTF-8")}"
-                })
-            }
+            val url = grokAuthorizationUrl(state, randomBytes(16), challenge)
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             val callback = withTimeoutOrNull(AUTH_TIMEOUT_MS) { running.awaitCallback() }
                 ?: error("Grok 授权超时，请重试。")
             require(callback.isSuccess) { "Grok 授权失败：${callback.error.orEmpty()} ${callback.errorDescription.orEmpty()}".trim() }
             require(callback.state == state) { "Grok OAuth state 不一致，请重试。" }
             val tokens = exchange(callback.code!!, verifier)
-            if (!saveIfCurrent(providerId, loginGeneration, tokens)) staleSession()
+            if (!saveIfCurrent(providerId, loginGeneration, tokens, advanceGeneration = true)) staleSession()
             tokens
         }
     }

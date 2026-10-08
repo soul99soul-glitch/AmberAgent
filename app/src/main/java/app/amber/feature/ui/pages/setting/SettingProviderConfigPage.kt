@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +50,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import kotlinx.coroutines.CancellationException
 import app.amber.ai.provider.GoogleAuthMode
 import app.amber.ai.provider.BalanceResultPath
@@ -69,7 +73,9 @@ import app.amber.ai.provider.providers.google.OBSOLETE_GEMINI_OAUTH_MODEL_IDS
 import app.amber.ai.provider.providers.google.defaultGeminiOAuthModelList
 import app.amber.ai.provider.providers.grok.GROK_CLI_PROXY_BASE_URL
 import app.amber.ai.provider.providers.grok.GrokAuthStore
+import app.amber.ai.provider.providers.grok.GrokAuthStatus
 import app.amber.ai.provider.providers.grok.GrokOAuthClient
+import app.amber.ai.provider.providers.grok.GrokOAuthTokens
 import app.amber.ai.provider.providers.grok.defaultGrokOAuthModels
 import app.amber.ai.provider.providers.isCodexOAuthReviewModel
 import app.amber.ai.provider.providers.openai.OPENAI_CODEX_BACKEND_BASE_URL
@@ -222,6 +228,9 @@ internal fun ProviderConsole(
     onModelCandidatesInvalidated: () -> Unit = {},
     actionContent: (@Composable (ProviderSetting) -> Unit)? = null,
 ) {
+    val grokTokens = if (provider is ProviderSetting.OpenAI && provider.authMode == OpenAIAuthMode.GROK_OAUTH) {
+        rememberGrokOAuthTokens(provider)
+    } else null
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -235,6 +244,9 @@ internal fun ProviderConsole(
                 ProviderConsoleIdentity(
                     provider = provider,
                     onEdit = onEdit,
+                    oauthUsable = grokTokens?.let {
+                        GrokAuthStatus.from(it.value, System.currentTimeMillis()).usable
+                    },
                 )
             }
         }
@@ -253,6 +265,7 @@ internal fun ProviderConsole(
                 onModelCandidatesInvalidated = onModelCandidatesInvalidated,
                 autoStartOAuth = autoStartOAuth,
                 onAutoStartConsumed = onAutoStartConsumed,
+                grokTokens = grokTokens,
             )
         }
         item("endpoint") {
@@ -295,6 +308,7 @@ internal fun ProviderConsole(
 private fun ProviderConsoleIdentity(
     provider: ProviderSetting,
     onEdit: (ProviderSetting) -> Unit,
+    oauthUsable: Boolean? = null,
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
@@ -321,11 +335,13 @@ private fun ProviderConsoleIdentity(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                itemVerticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                val connected = provider.enabled && provider.hasUsableAuth()
+                val connected = provider.hasUsableAuth(oauthUsable)
                 ProviderConfigStatusPill(
                     connected = connected,
                     text = when {
@@ -334,18 +350,28 @@ private fun ProviderConsoleIdentity(
                         else -> "未连接"
                     },
                 )
-                Text("·", style = type.meta, color = t.ink4)
-                ProviderConfigAuthBadge(provider.providerAuthLabel())
-                Text("·", style = type.meta, color = t.ink4)
-                Text(
-                    text = stringResource(
-                        R.string.setting_provider_page_model_count,
-                        provider.models.size,
-                    ),
-                    style = type.meta.copy(fontSize = 10.5.sp),
-                    color = t.ink2,
-                    maxLines = 1,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text("·", style = type.meta, color = t.ink4)
+                    ProviderConfigAuthBadge(provider.providerAuthLabel())
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text("·", style = type.meta, color = t.ink4)
+                    Text(
+                        text = stringResource(
+                            R.string.setting_provider_page_model_count,
+                            provider.models.size,
+                        ),
+                        style = type.meta.copy(fontSize = 10.5.sp),
+                        color = t.ink2,
+                        maxLines = 1,
+                    )
+                }
             }
         }
         ProviderToggle(
@@ -509,6 +535,7 @@ private fun ProviderAuthSection(
     onModelCandidatesInvalidated: () -> Unit,
     autoStartOAuth: Boolean,
     onAutoStartConsumed: () -> Unit,
+    grokTokens: MutableState<GrokOAuthTokens?>?,
 ) {
     ProviderSectionLabel(stringResource(R.string.setting_provider_page_authentication))
     ProviderCard(modifier = Modifier.fillMaxWidth()) {
@@ -525,6 +552,7 @@ private fun ProviderAuthSection(
                     onModelCandidatesInvalidated = onModelCandidatesInvalidated,
                     autoStartOAuth = autoStartOAuth,
                     onAutoStartConsumed = onAutoStartConsumed,
+                    grokTokens = grokTokens,
                 )
                 is ProviderSetting.Google -> GoogleAuthConsole(
                     provider = provider,
@@ -551,8 +579,10 @@ private fun OpenAIAuthConsole(
     onModelCandidatesInvalidated: () -> Unit,
     autoStartOAuth: Boolean,
     onAutoStartConsumed: () -> Unit,
+    grokTokens: MutableState<GrokOAuthTokens?>?,
 ) {
     val isGrok = provider.isGrokProvider()
+    val grokStore = if (isGrok) koinInject<GrokAuthStore>() else null
     val availableModes = if (isGrok) {
         listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.GROK_OAUTH)
     } else provider.brand.availableAuthModes()
@@ -562,7 +592,11 @@ private fun OpenAIAuthConsole(
             selected = provider.authMode,
             onSelected = { mode ->
                 if (provider.authMode != mode) {
-                    onEdit(provider.switchOpenAIAuthMode(mode))
+                    if (mode == OpenAIAuthMode.GROK_OAUTH) {
+                        grokStore?.clearBackup(provider.id)
+                        grokStore?.saveBackup(provider.id, provider.baseUrl)
+                    }
+                    onEdit(provider.switchOpenAIAuthMode(mode, grokStore?.getBackup(provider.id)))
                 }
             },
         )
@@ -588,6 +622,7 @@ private fun OpenAIAuthConsole(
         provider.authMode == OpenAIAuthMode.GROK_OAUTH -> {
             GrokOAuthConsole(
                 provider = provider,
+                tokenState = checkNotNull(grokTokens),
                 onCommit = onCommit,
                 autoStartOAuth = autoStartOAuth,
                 onAutoStartConsumed = onAutoStartConsumed,
@@ -667,8 +702,19 @@ private fun GoogleAuthConsole(
 }
 
 @Composable
+private fun rememberGrokOAuthTokens(provider: ProviderSetting.OpenAI): MutableState<GrokOAuthTokens?> {
+    val store = koinInject<GrokAuthStore>()
+    val tokens = remember(provider.id, store) { mutableStateOf(store.get(provider.id)) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        tokens.value = store.get(provider.id)
+    }
+    return tokens
+}
+
+@Composable
 private fun GrokOAuthConsole(
     provider: ProviderSetting.OpenAI,
+    tokenState: MutableState<GrokOAuthTokens?>,
     onCommit: (ProviderSetting.OpenAI) -> Unit,
     autoStartOAuth: Boolean,
     onAutoStartConsumed: () -> Unit,
@@ -679,7 +725,7 @@ private fun GrokOAuthConsole(
     val httpClient = koinInject<OkHttpClient>()
     val store = koinInject<GrokAuthStore>()
     val client = remember(httpClient, store) { GrokOAuthClient(httpClient, store) }
-    var tokens by remember(provider.id) { mutableStateOf(store.get(provider.id)) }
+    var tokens by tokenState
     val latestProvider by rememberUpdatedState(provider)
     LaunchedEffect(provider.id, provider.authMode) {
         if (provider.authMode == OpenAIAuthMode.GROK_OAUTH && store.getBackup(provider.id) == null) {
@@ -717,10 +763,18 @@ private fun GrokOAuthConsole(
     ProviderLabeledField("API Base URL") {
         ProviderTextField(value = GROK_CLI_PROXY_BASE_URL, onValueChange = {}, mono = true, readOnly = true)
     }
-    ProviderMonoNote(tokens?.let { "已登录 Grok${it.email?.let { email -> "：$email" } ?: ""}" } ?: "尚未登录 Grok")
+    ProviderMonoNote(
+        if (busy) "正在等待 Grok 授权，请在浏览器完成登录"
+        else tokens?.let { "已登录 Grok${it.email?.let { email -> "：$email" } ?: ""}" } ?: "尚未登录 Grok",
+    )
     ProviderCommandButton(
-        text = if (tokens == null) "登录 Grok" else "重新登录 Grok",
+        text = when {
+            busy -> "等待 Grok 授权…"
+            tokens == null -> "登录 Grok"
+            else -> "重新登录 Grok"
+        },
         accent = tokens == null,
+        enabled = !busy,
         onClick = { scope.launch { login() } },
         modifier = Modifier.fillMaxWidth(),
     )
@@ -731,13 +785,7 @@ private fun GrokOAuthConsole(
                 client.logout(provider.id)
                 tokens = null
                 onCommit(
-                    provider.copy(
-                        authMode = OpenAIAuthMode.API_KEY,
-                        baseUrl = store.getBackup(provider.id) ?: "https://api.x.ai/v1",
-                        // The xAI API-key preset uses the Responses API; Grok
-                        // mode had forced chat-completions, so restore it.
-                        useResponseApi = true,
-                    ),
+                    provider.switchOpenAIAuthMode(OpenAIAuthMode.API_KEY, store.getBackup(provider.id)),
                 )
                 store.clearBackup(provider.id)
                 toaster.show("已退出 Grok", type = ToastType.Success)
@@ -804,7 +852,7 @@ private fun OpenAIEndpointFields(
             readOnly = fixed,
         )
     }
-    if (!provider.authMode.isCodingPlan() && provider.authMode != OpenAIAuthMode.CODEX_OAUTH) {
+    if (!provider.authMode.isCodingPlan() && !fixed) {
         if (!provider.useResponseApi) {
             ProviderLabeledField("API Path") {
                 ProviderTextField(
@@ -1504,7 +1552,10 @@ internal fun ProviderSetting.OpenAI.isGrokProvider(): Boolean =
     name.equals("xAI", ignoreCase = true) || baseUrl.contains("api.x.ai", ignoreCase = true) ||
         baseUrl.contains("cli-chat-proxy.grok.com", ignoreCase = true)
 
-private fun ProviderSetting.OpenAI.switchOpenAIAuthMode(mode: OpenAIAuthMode): ProviderSetting.OpenAI {
+internal fun ProviderSetting.OpenAI.switchOpenAIAuthMode(
+    mode: OpenAIAuthMode,
+    grokBaseUrl: String? = null,
+): ProviderSetting.OpenAI {
     val pinned = mode.fixedBaseUrl()
     if (mode == OpenAIAuthMode.GROK_OAUTH) {
         // Keep the API-key endpoint until OAuth succeeds. GrokOAuthConsole
@@ -1523,6 +1574,14 @@ private fun ProviderSetting.OpenAI.switchOpenAIAuthMode(mode: OpenAIAuthMode): P
         OpenAIAuthMode.MIMO_CODING_PLAN,
         OpenAIAuthMode.MINIMAX_TOKEN_PLAN -> copy(authMode = mode, baseUrl = pinned ?: baseUrl)
         OpenAIAuthMode.API_KEY -> {
+            if (authMode == OpenAIAuthMode.GROK_OAUTH) {
+                return copy(
+                    authMode = OpenAIAuthMode.API_KEY,
+                    baseUrl = grokBaseUrl ?: "https://api.x.ai/v1",
+                    // Match logout: the xAI API-key preset uses Responses.
+                    useResponseApi = true,
+                )
+            }
             val leavingManagedMode = authMode != OpenAIAuthMode.API_KEY
             val restoredBaseUrl = if (leavingManagedMode) {
                 (resetBaseUrlToDefault() as ProviderSetting.OpenAI).baseUrl

@@ -32,6 +32,7 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.ssh.SshProfileStore
 import java.io.BufferedWriter
 import java.io.File
+import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -446,10 +447,11 @@ class TerminalRuntime(
     }
 
     private suspend fun readSessionOutput(session: TerminalSession) {
-        val buffer = ByteArray(DEFAULT_READ_BYTES)
+        val buffer = CharArray(DEFAULT_READ_BYTES)
+        val reader = InputStreamReader(session.process.inputStream, Charsets.UTF_8)
         try {
             while (true) {
-                val count = session.process.inputStream.read(buffer)
+                val count = reader.read(buffer)
                 if (count <= 0) break
                 session.output.append(String(buffer, 0, count))
                 session.lastActivityMs = System.currentTimeMillis()
@@ -717,10 +719,11 @@ class TerminalRuntime(
     }
 
     private fun readProcessOutput(job: TerminalJob, process: Process) {
-        val buffer = ByteArray(8 * 1024)
+        val buffer = CharArray(8 * 1024)
+        val reader = InputStreamReader(process.inputStream, Charsets.UTF_8)
         try {
             while (true) {
-                val count = process.inputStream.read(buffer)
+                val count = reader.read(buffer)
                 if (count <= 0) break
                 appendJobOutput(job, String(buffer, 0, count))
             }

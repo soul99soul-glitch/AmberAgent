@@ -9,6 +9,9 @@ import app.amber.agent.AppScope
 import app.amber.feature.board.BoardRepository
 import app.amber.feature.board.TODAY_BOARD_AUTO_MUTE_DISMISS_COUNT
 import app.amber.feature.board.TODAY_BOARD_HARD_MUTE_WEIGHT
+import app.amber.feature.board.hotlist.CUSTOM_TOPIC_ID_PREFIX
+import app.amber.feature.board.hotlist.CUSTOM_TOPIC_PROVIDER_ID
+import app.amber.feature.board.hotlist.DeepReadSeedInput
 import app.amber.feature.board.hotlist.HotListDashboard
 import app.amber.feature.board.hotlist.HotListItem
 import app.amber.feature.board.hotlist.HotListProviderSnapshot
@@ -26,6 +29,7 @@ import app.amber.agent.data.db.entity.BoardWeightEntity
 import app.amber.agent.data.db.entity.DailyReviewEntity
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 class BoardViewModel(
     private val boardRepository: BoardRepository,
@@ -50,6 +54,9 @@ class BoardViewModel(
     }
 
     val settings = settingsStore.settingsFlow
+
+    /** Masthead issue counter — iOS shows No.tasks+1 in the discovery dateline. */
+    val deepReadCount: Flow<Int> = hotListRepository.observeDeepReadCount()
 
     val hotListDashboard: Flow<HotListDashboard> = combine(
         hotListRepository.observeDashboard(),
@@ -136,6 +143,42 @@ class BoardViewModel(
         if (forceRegenerate) {
             hotListRepository.clearDeepRead(topic.id)
         }
+        return topic
+    }
+
+    /**
+     * Builds a user-created deep-read topic from pasted text / link / file seeds,
+     * persists it in the hot-topic cache (so the prefetcher picks the seeds up on
+     * every run, including retries and process restarts), and returns it for the
+     * regular [prepareDeepReadTopic] + navigate flow.
+     */
+    suspend fun prepareCustomDeepReadTopic(
+        title: String,
+        seeds: List<DeepReadSeedInput>,
+        templateId: String? = null,
+    ): HotTopic {
+        val sources = seeds.mapIndexed { index, seed ->
+            HotTopicSource(
+                providerId = CUSTOM_TOPIC_PROVIDER_ID,
+                providerName = seed.providerName,
+                rank = index + 1,
+                title = seed.title,
+                url = seed.url,
+                content = seed.content,
+            )
+        }
+        val topic = HotTopic(
+            id = CUSTOM_TOPIC_ID_PREFIX + UUID.randomUUID().toString(),
+            title = title.trim(),
+            sources = sources,
+            sourceCount = sources.size,
+            bestRank = 1,
+            latestFetchedAt = System.currentTimeMillis(),
+            // The per-topic pick wins over the board default at run time
+            // (iOS task.templateId), and is stored for history labels.
+            deepReadTemplateId = templateId?.takeIf { it.isNotBlank() },
+        )
+        hotListRepository.upsertTopic(topic)
         return topic
     }
 

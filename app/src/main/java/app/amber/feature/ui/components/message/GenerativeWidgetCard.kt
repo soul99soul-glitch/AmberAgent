@@ -1046,6 +1046,10 @@ private fun createGuizangDeckArchive(
         zip.writeTextEntry("index.html", exportHtml)
         zip.writeAssetEntry(context, "assets/motion.min.js", GuizangHtmlDeckValidator.MOTION_ASSET_PATH)
         zip.writeAssetEntry(context, "assets/lucide.min.js", GuizangHtmlDeckValidator.LUCIDE_ASSET_PATH)
+        val usesThree = exportHtml.contains("assets/three.min.js")
+        if (usesThree) {
+            zip.writeAssetEntry(context, "assets/three.min.js", GuizangHtmlDeckValidator.THREE_ASSET_PATH)
+        }
         zip.writeTextEntry(
             "README.md",
             """
@@ -1054,6 +1058,7 @@ private fun createGuizangDeckArchive(
             ${context.getString(R.string.generative_widget_full_html_readme_index_html)}
             ${context.getString(R.string.generative_widget_full_html_readme_motion_js)}
             ${context.getString(R.string.generative_widget_full_html_readme_lucide_js)}
+            ${if (usesThree) context.getString(R.string.generative_widget_full_html_readme_three_js) else ""}
             ${context.getString(R.string.generative_widget_full_html_readme_cover_svg)}
             ${context.getString(R.string.generative_widget_full_html_readme_remote_assets)}
             """.trimIndent(),

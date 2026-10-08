@@ -166,6 +166,110 @@ class DeepReadRepositoryTest {
     }
 
     @Test
+    fun upsertTopicRoundTripsCustomSeedContent() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        val body = "用户粘贴的长文本正文，超过种子最低字数要求。".repeat(4)
+        val topic = HotTopic(
+            id = "${CUSTOM_TOPIC_ID_PREFIX}abc123",
+            title = "自定义主题",
+            sources = listOf(
+                HotTopicSource(
+                    providerId = CUSTOM_TOPIC_PROVIDER_ID,
+                    providerName = "粘贴文本",
+                    rank = 1,
+                    title = "粘贴文本",
+                    content = body,
+                ),
+                HotTopicSource(
+                    providerId = CUSTOM_TOPIC_PROVIDER_ID,
+                    providerName = "网页链接",
+                    rank = 2,
+                    title = "https://example.com/a",
+                    url = "https://example.com/a",
+                ),
+            ),
+            sourceCount = 2,
+            bestRank = 1,
+            latestFetchedAt = 1_000L,
+        )
+
+        repo.upsertTopic(topic)
+
+        val stored = repo.getHotTopic(topic.id)
+        assertEquals(body, stored?.sources?.get(0)?.content)
+        assertEquals("https://example.com/a", stored?.sources?.get(1)?.url)
+    }
+
+    @Test
+    fun replaceTopicsPreservesCustomDeepReadTopics() = runTest {
+        val dao = FakeHotListDao()
+        val repo = HotListRepository(dao, json)
+        val custom = HotTopic(
+            id = "${CUSTOM_TOPIC_ID_PREFIX}keep-me",
+            title = "我的自定义主题",
+            sources = listOf(
+                HotTopicSource(
+                    providerId = CUSTOM_TOPIC_PROVIDER_ID,
+                    providerName = "粘贴文本",
+                    rank = 1,
+                    title = "粘贴文本",
+                    content = "保留这段用户文本。".repeat(8),
+                ),
+            ),
+            sourceCount = 1,
+            bestRank = 1,
+            latestFetchedAt = 1_000L,
+        )
+        repo.upsertTopic(custom)
+
+        repo.replaceTopics(
+            listOf(
+                HotTopic(
+                    id = "hot-1",
+                    title = "新热榜话题",
+                    sources = emptyList(),
+                    sourceCount = 0,
+                    bestRank = 1,
+                    latestFetchedAt = 2_000L,
+                )
+            )
+        )
+
+        assertEquals("我的自定义主题", repo.getHotTopic(custom.id)?.title)
+        assertEquals("保留这段用户文本。".repeat(8), repo.getHotTopic(custom.id)?.sources?.single()?.content)
+        assertEquals("新热榜话题", repo.getHotTopic("hot-1")?.title)
+    }
+
+    @Test
+    fun observeDashboardHidesCustomTopics() = runTest {
+        val repo = HotListRepository(FakeHotListDao(), json)
+        repo.upsertTopic(
+            HotTopic(
+                id = "${CUSTOM_TOPIC_ID_PREFIX}hidden",
+                title = "自定义隐藏话题",
+                sources = emptyList(),
+                sourceCount = 0,
+                bestRank = 1,
+                latestFetchedAt = 1_000L,
+            )
+        )
+        repo.upsertTopic(
+            HotTopic(
+                id = "hot-visible",
+                title = "可见热榜话题",
+                sources = emptyList(),
+                sourceCount = 0,
+                bestRank = 2,
+                latestFetchedAt = 2_000L,
+            )
+        )
+
+        val dashboard = repo.observeDashboard().first()
+
+        assertEquals(listOf("hot-visible"), dashboard.topics.map { it.id })
+    }
+
+    @Test
     fun sectionWriterToolsMergeSectionsAndMarkComplete() = runTest {
         val repo = HotListRepository(FakeHotListDao(), json)
         val writer = DeepReadSectionWriterTools(repo, "topic", "话题")
@@ -646,14 +750,27 @@ private class FakeHotListDao : HotListDAO {
         providerCaches.value = providerCaches.value.filterNot { it.providerId == entity.providerId } + entity
     }
 
-    override fun observeHotTopics(limit: Int): Flow<List<HotTopicCacheEntity>> =
-        hotTopics.map { it.take(limit) }
+    override fun observeHotTopics(
+        limit: Int,
+        excludedIdPattern: String,
+    ): Flow<List<HotTopicCacheEntity>> =
+        hotTopics.map { list ->
+            list.filter {
+                excludedIdPattern.isEmpty() ||
+                    !it.topicId.matchesLikePattern(excludedIdPattern)
+            }.take(limit)
+        }
 
     override suspend fun getHotTopic(topicId: String): HotTopicCacheEntity? =
         hotTopics.value.firstOrNull { it.topicId == topicId }
 
+    override suspend fun getTopicsByIdPattern(idPattern: String): List<HotTopicCacheEntity> =
+        hotTopics.value.filter { it.topicId.matchesLikePattern(idPattern) }
+
     override suspend fun upsertHotTopics(entities: List<HotTopicCacheEntity>) {
-        hotTopics.value = entities
+        val byId = hotTopics.value.associateBy { it.topicId }.toMutableMap()
+        entities.forEach { byId[it.topicId] = it }
+        hotTopics.value = byId.values.toList()
     }
 
     override suspend fun clearHotTopics() {
@@ -682,6 +799,9 @@ private class FakeHotListDao : HotListDAO {
             deepReads.values.sortedByDescending { it.updatedAt }
         }
 
+    override fun observeDeepReadCount(): Flow<Int> =
+        deepReadFlowsSnapshot.map { deepReads.size }
+
     override suspend fun upsertDeepRead(entity: DeepReadCacheEntity) {
         deepReads[entity.topicId] = entity
         deepReadFlows.getOrPut(entity.topicId) { MutableStateFlow(null) }.value = entity
@@ -692,6 +812,27 @@ private class FakeHotListDao : HotListDAO {
         deepReads.remove(topicId)
         deepReadFlows.getOrPut(topicId) { MutableStateFlow(null) }.value = null
         deepReadFlowsSnapshot.value++
+    }
+
+    override suspend fun updateDeepReadContent(
+        topicId: String, title: String, outputJson: String, createdAt: Long,
+        expiresAt: Long, updatedAt: Long, sourceUrl: String?,
+        templateId: String?, structuredJson: String?,
+    ): Int {
+        val current = deepReads[topicId] ?: return 0
+        upsertDeepRead(current.copy(
+            title = title, outputJson = outputJson, createdAt = createdAt,
+            expiresAt = expiresAt, updatedAt = updatedAt,
+            sourceUrl = sourceUrl ?: current.sourceUrl,
+            templateId = templateId ?: current.templateId,
+            structuredJson = structuredJson ?: current.structuredJson,
+        ))
+        return 1
+    }
+
+    override suspend fun clearDeepReadStructuredJson(topicId: String) {
+        val current = deepReads[topicId] ?: return
+        upsertDeepRead(current.copy(structuredJson = null))
     }
 
     override suspend fun setDeepReadPinned(topicId: String, pinned: Boolean) {
@@ -718,3 +859,6 @@ private class FakeHotListDao : HotListDAO {
         sources.value = sources.value.filterNot { it.id == id }
     }
 }
+
+private fun String.matchesLikePattern(pattern: String): Boolean =
+    matches(Regex(pattern.replace("%", ".*")))

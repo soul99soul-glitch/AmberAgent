@@ -4,6 +4,8 @@ import app.amber.agent.data.workspace.ArtifactRepository
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** P3-04 receipt returned to the MiniApp for `host.createArtifact`. */
 data class CreateArtifactReceipt(
@@ -42,6 +44,7 @@ data class CreateArtifactReceipt(
 class MiniAppWorkspaceWriter(
     private val artifactRepository: ArtifactRepository,
 ) {
+    private val createMutex = Mutex()
     suspend fun createArtifact(
         appId: String,
         effectId: String?,
@@ -49,10 +52,10 @@ class MiniAppWorkspaceWriter(
         content: String,
         type: String,
         mimeType: String,
-    ): CreateArtifactReceipt {
+    ): CreateArtifactReceipt = createMutex.withLock {
         if (!effectId.isNullOrBlank()) {
             artifactRepository.findByMiniAppEffect(appId, effectId)?.let { existing ->
-                return CreateArtifactReceipt(
+                return@withLock CreateArtifactReceipt(
                     artifactId = existing.artifactId,
                     route = CreateArtifactReceipt.routeOf(existing.artifactId),
                     status = "existing",
@@ -69,7 +72,7 @@ class MiniAppWorkspaceWriter(
             type = type,
             mimeType = mimeType,
         )
-        return CreateArtifactReceipt(
+        CreateArtifactReceipt(
             artifactId = created.artifactId,
             route = CreateArtifactReceipt.routeOf(created.artifactId),
             status = "created",

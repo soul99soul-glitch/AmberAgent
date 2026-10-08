@@ -61,7 +61,7 @@ object NovelWorkspaceBranches {
             }
         }
 
-        fun save(active: NovelWorkspaceActiveBranch, projectDirectory: File) {
+        fun save(active: NovelWorkspaceActiveBranch, projectDirectory: File) = NovelWorkspaceRestoreBoundary.write {
             val ledgerDir = File(projectDirectory, NovelWorkspaceLedger.DIRECTORY_NAME)
             if (!ledgerDir.exists() && !ledgerDir.mkdirs()) {
                 throw NovelWorkspaceIoError("Cannot create ledger directory: $ledgerDir")
@@ -173,7 +173,7 @@ object NovelWorkspaceBranches {
         newName: String,
         now: Instant = Instant.now(),
         locale: Locale = Locale.CHINESE,
-    ): NovelWorkspaceBranchInfo {
+    ): NovelWorkspaceBranchInfo = NovelWorkspaceRestoreBoundary.write {
         val store = NovelWorkspaceStore(projectDirectory)
         val newSlug = NovelWorkspaceSlug.slug(newName)
         if (newSlug.isEmpty()) {
@@ -246,7 +246,7 @@ object NovelWorkspaceBranches {
         NovelWorkspaceLedger.save(updated, projectDirectory)
         // 新增文件发生在 commitTree 之外：重建整树镜像，作者视图不缺新分支目录。
         store.materializeCheckout()
-        return NovelWorkspaceBranchInfo(
+        return@write NovelWorkspaceBranchInfo(
             slug = newSlug,
             id = newId,
             title = newName.trim(),
@@ -265,7 +265,7 @@ object NovelWorkspaceBranches {
         projectDirectory: File,
         targetSlug: String,
         locale: Locale = Locale.CHINESE,
-    ) {
+    ) = NovelWorkspaceRestoreBoundary.write {
         val store = NovelWorkspaceStore(projectDirectory)
         if (store.list(NovelWorkspacePaths.branchPrefix(targetSlug)).isEmpty()) {
             throw NovelWorkspaceIoError(localized(locale, "分支不存在：$targetSlug", "Branch does not exist: $targetSlug"))

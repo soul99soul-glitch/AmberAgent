@@ -85,7 +85,7 @@ class JevCouncilPoolRanker(private val runtime: JevRuntime) : CouncilPoolRanker 
                 runKey = null,
                 state = state,
                 questions = questions,
-                requiredScopes = setOf(JevDataScope.TASK_TEXT, JevDataScope.TOOL_METADATA),
+                requiredScopes = JevPurpose.MODEL_ROUTING.requiredScopes,
                 cacheAnchor = anchor,
             ) ?: return null
             val evaluated = outcome.evaluated ?: return null

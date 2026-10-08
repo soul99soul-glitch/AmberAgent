@@ -821,7 +821,7 @@ class ChatGenerationRoundEngine(
                 - `widget_code` is only a static SVG cover preview.
                 - `spec.html` is the full live deck HTML as one JSON string.
                 - `spec.html` must contain `<div id="deck">` and one or more `<section class="slide ...">` pages.
-                - Scripts may only use `${GuizangHtmlDeckValidator.LOCAL_MOTION_URL}` and `${GuizangHtmlDeckValidator.LOCAL_LUCIDE_URL}`. Do not use CDN script URLs.
+                - Scripts may only use `${GuizangHtmlDeckValidator.LOCAL_MOTION_URL}`, `${GuizangHtmlDeckValidator.LOCAL_LUCIDE_URL}`, and `${GuizangHtmlDeckValidator.LOCAL_THREE_URL}`. Do not use CDN script URLs.
                 - Preserve the requested PPT/deck content and style; keep the JSON valid, complete, and compact enough to fit. Never emit partial spec.html.
             """.trimIndent()
         }

@@ -35,6 +35,8 @@ import app.amber.ai.ui.ImageGenerationItem
 import app.amber.ai.ui.ImageGenerationResult
 import app.amber.ai.ui.MessageChunk
 import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.util.resolveRemoteImage
 import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.configureReferHeaders
 import app.amber.ai.util.json
@@ -64,6 +66,12 @@ class GoogleProvider(
 ) : TextModelGateway<ProviderSetting.Google>, ImageModelGateway<ProviderSetting.Google> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
     private val contentAdapter = GeminiGenerateContentAdapter()
+    private suspend fun resolveRemoteImages(messages: List<UIMessage>): List<UIMessage> =
+        messages.map { message ->
+            message.copy(parts = message.parts.map { part ->
+                if (part is UIMessagePart.Image) part.resolveRemoteImage(client) else part
+            })
+        }
     private val serviceAccountTokenProvider by lazy {
         ServiceAccountTokenProvider(client)
     }
@@ -219,7 +227,7 @@ class GoogleProvider(
     ): MessageChunk = withContext(Dispatchers.IO) {
         val isCodeAssist = isCodeAssistOAuthMode(providerSetting)
         val isAntigravity = isAntigravityOAuthMode(providerSetting)
-        val requestBody = contentAdapter.encodeRequest(messages, params, codeAssistTransport = isCodeAssist)
+        val requestBody = contentAdapter.encodeRequest(resolveRemoteImages(messages), params, codeAssistTransport = isCodeAssist)
         val request = when {
             isCodeAssist -> {
                 val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)
@@ -275,7 +283,7 @@ class GoogleProvider(
         // Auth is `Authorization: Bearer <access_token>` instead of `x-goog-api-key`.
         val isCodeAssist = isCodeAssistOAuthMode(providerSetting)
         val isAntigravity = isAntigravityOAuthMode(providerSetting)
-        val requestBody = contentAdapter.encodeRequest(messages, params, codeAssistTransport = isCodeAssist)
+        val requestBody = contentAdapter.encodeRequest(resolveRemoteImages(messages), params, codeAssistTransport = isCodeAssist)
         val request = when {
             isCodeAssist -> {
                 val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)

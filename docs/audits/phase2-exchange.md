@@ -2,6 +2,32 @@
 
 本记录以 iOS 仓库 `HEAD=1023e8a08f5957157226725b43dbf3e2e7078a17` 的真实实现为准。iOS 仓库只读；Android 端的实现位于 `feature/novel-workspace`。交换对象是 Novel workspace 文件树，不是两端的内部数据库快照，也不是实时同步协议。
 
+## 2026-10-01：Android 直接导入 `.ambernovel` 项目包
+
+小说列表的导入入口现在调用 `NovelWorkspaceProjectImport.importProject`，按文件内容识别工作区 ZIP 与 `.ambernovel` JSON envelope，不依赖文件扩展名或文件提供者的 MIME。
+
+- ZIP 沿用 `NovelWorkspaceExchange.readZipFiles` 和现有安装逻辑。
+- `.ambernovel` 使用 `NovelPackageCodec.decodeForWorkspaceImport`，校验格式、版本、长度、Base64 和 SHA-256，流式读取工作区与讨论所需字段，检查书稿引用，再经 `NovelLegacyWorkspaceMigrator` 转成工作区文件。支持范围为现有 v1 项目包契约；超出已支持 schema 的包拒绝导入。
+- 每次导入生成新的本地项目 ID 和初始 ledger；源项目 ID 保留为来源元数据。现有小说不会被覆盖。
+- 转换保留现有迁移器支持的活动分支、已选章节、弃稿、设定、分支设定覆盖、剧情、计划、未解决设定提案和可用候选草稿。项目包的讨论消息另存为新项目的本地 sessions；ZIP 仍只交换公开工作区树。
+- 不恢复源平台运行任务、CAS/checkpoints 或完整版本历史；未知扩展字段在这条 JSON → 工作区转换路径上没有完整往返保留承诺。此功能不改变 Android 的工作区 ZIP 导出格式。
+
+新增 `NovelWorkspaceProjectImportTest` 验证包导入、内容与讨论记录、重复导入、ZIP、额外 iOS 字段、损坏校验和恢复 epoch；`NovelProjectsImportTest` 验证正式 ViewModel 入口、成功跳转、已有书保留和失败提示。输入使用本仓 `test-fixtures/novel-v1`，其中项目包按 Swift Codable 规则构造，不能据此宣称当前 iOS App 真机导出已验收。
+
+首次定点验证：项目包导入 6、项目 codec 10、已有迁移器 4、工作区 ZIP 7、应用迁移服务 5、应用导入入口 3，共 35 项 JVM/Robolectric 测试通过，0 失败、0 跳过；`:app:assembleDebug --offline` 通过。该阶段没有用用户实际 iOS 导出文件验收。
+
+### 实际大项目包的内存崩溃修复与真机验收
+
+真机 crash buffer 显示导入在 `NovelProjectDocumentWireSerializer.deserialize` 的整份 JSON 树构建阶段发生 OOM，堆上限为 512MB。实际项目包为 70,017,556 bytes，内层 JSON 为 52,430,646 bytes；原导入路径在相同 512MB JVM 限制下复现 OOM。
+
+工作区导入改用独立的 `NovelWorkspaceImportDocument` 流式解码，只读取现有转换器消费的书稿与讨论字段。源运行态的操作历史、注入回执、checkpoints 等不再构造为 Android 领域对象，因此 iOS 历史里的 `workspacePlot` 不阻挡书稿迁移。包的校验和、schema、项目 ID 校验继续保留；主分支、已选章节版本、设定版本、分支设定覆盖及当前剧情引用须存在。原 `NovelPackageCodec.decode` 的原生文档解码、未知字段保留和完整运行态验证行为保持。回读测试另定位到全局设定转换路径缺少 `.md` 后缀，一并修复。
+
+- 回归：59 项 JVM/Robolectric 测试通过，0 失败、0 跳过，包含实际 70MB 包在 512MB 限制下完整安装、iOS 运行历史兼容、原生 codec 严格性、设定文件可见性和缺失正文引用拒绝。
+- 真实包重放测试 `NovelWorkspaceLargePackageImportTest` 通过 `AMBER_NOVEL_IMPORT_REPRO_PATH` 指向本地私有样本；普通测试未配置该变量时跳过，书稿不会加入仓库。
+- `:app:assembleGraphite --offline` 通过；主包 `app.amber.agent` 2.6.8 / 396 使用与已安装应用一致的证书签署，16KB zipalign 通过，保留数据覆盖安装到 M610BB / `506e0b25`。
+- 真机新增项目进入工作区，回读实际文件与源包逐项比对：53 章正文、5 份弃稿、19 项设定的标题/内容一致，596 条讨论正文一致，当前分支大纲一致。首次安装时间及数据目录保持；真机 APK SHA256 与交付包一致。crash buffer 仅保留修复前的 23:38:14 崩溃，没有本次新增崩溃。
+- 交付包及证据：`/tmp/amber-ios-import-oom-20261001/Amber-2.6.8-ios-import-memory-fix.apk`、`verified-device-import.json`、`device-imported-book.tar`、`test-red.log`、`validation.log`。私有书稿与设备回读仅留在本地临时目录。该结果验证此实际项目包，不外推任意大小包的内存表现。
+
 ## 已确认的生产链路
 
 ```text

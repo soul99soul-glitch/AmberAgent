@@ -36,6 +36,8 @@
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
   <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
   <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+  <!-- Android 17+: required for LAN sockets, e.g. connecting to a Mac-hosted Synara. -->
+  <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
   <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
   <!-- Health Connect platform permissions (API 34+; no Jetpack client dependency). -->
   <uses-permission android:name="android.permission.health.READ_STEPS" />
@@ -119,7 +121,7 @@
       android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     <activity
       android:name="app.amber.agent.RouteActivity"
-      android:configChanges="keyboardHidden|orientation|screenSize"
+      android:configChanges="keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout"
       android:exported="true"
       android:importantForAutofill="noExcludeDescendants"
       android:theme="@style/Theme.amberagent"

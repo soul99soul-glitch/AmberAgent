@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -183,9 +184,11 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                             ProviderLiveDot(size = 8.dp)
                         }
                     }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        itemVerticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Text(
                             text = provider.name,
@@ -194,23 +197,33 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        Text("·", style = type.meta, color = t.ink4)
-                        Text(
-                            text = provider.providerAuthLabel(),
-                            style = type.meta.copy(fontSize = 10.5.sp),
-                            color = t.ink2,
-                            maxLines = 1,
-                        )
-                        Text("·", style = type.meta, color = t.ink4)
-                        Text(
-                            text = stringResource(
-                                R.string.setting_provider_page_model_count,
-                                provider.models.size,
-                            ),
-                            style = type.meta.copy(fontSize = 10.5.sp),
-                            color = t.ink2,
-                            maxLines = 1,
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            Text("·", style = type.meta, color = t.ink4)
+                            Text(
+                                text = provider.providerAuthLabel(),
+                                style = type.meta.copy(fontSize = 10.5.sp),
+                                color = t.ink2,
+                                maxLines = 1,
+                            )
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            Text("·", style = type.meta, color = t.ink4)
+                            Text(
+                                text = stringResource(
+                                    R.string.setting_provider_page_model_count,
+                                    provider.models.size,
+                                ),
+                                style = type.meta.copy(fontSize = 10.5.sp),
+                                color = t.ink2,
+                                maxLines = 1,
+                            )
+                        }
                     }
                     ProviderDetailTabs(
                         tabs = listOf(

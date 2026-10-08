@@ -1,24 +1,45 @@
 name: Android Release Build
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: 'jetbrains'
+          java-version: |
+            17
+            21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK and NDK packages
+        run: |
+          sdkmanager --install "platforms;android-36" "platforms;android-37.0" \
+            "build-tools;36.0.0" "ndk;27.0.12077973"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/27.0.12077973" >> "$GITHUB_ENV"
 
       - name: Set up Rust and Android target
         uses: dtolnay/rust-toolchain@1.95.0
@@ -28,80 +49,81 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked --version 3.5.4
 
-      - name: Set up Android NDK
-        id: setup-ndk
-        run: |
-          set -euo pipefail
-          ANDROID_SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          SDKMANAGER="${ANDROID_SDK}/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(find "${ANDROID_SDK}" -path '*/cmdline-tools/*/bin/sdkmanager' -type f | sort -r | head -n 1)"
-          fi
-          test -x "$SDKMANAGER"
-          "$SDKMANAGER" --install "ndk;27.0.12077973"
-          NDK_PATH="${ANDROID_SDK}/ndk/27.0.12077973"
-          echo "ndk-path=${NDK_PATH}" >> "$GITHUB_OUTPUT"
-          echo "${NDK_PATH}" >> "$GITHUB_PATH"
-
-      - name: Gradle cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-android-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-
       - name: Cargo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             native/target
-          key: ${{ runner.os }}-android-cargo-${{ hashFiles('native/**/Cargo.lock', 'native/**/Cargo.toml') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-android-cargo-1.95.0-ndk27-${{ hashFiles('native/**/Cargo.lock', 'native/**/Cargo.toml', 'native/**/*.rs') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-android-cargo-1.95.0-ndk27-
 
       - name: Prepare signed build files
-        run: |
-          echo "${{ secrets.KEY_BASE64 }}" | base64 -d > app/app.key
-          echo "${{ secrets.SIGNING_CONFIG }}" > local.properties
-          echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > app/google-services.json
-
-      - name: Gradle release build
         env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease -PuploadCrashlyticsMapping=false
-
-      - name: Verify native libraries in release APK
+          KEY_BASE64: ${{ secrets.KEY_BASE64 }}
+          SIGNING_CONFIG: ${{ secrets.SIGNING_CONFIG }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           set -euo pipefail
-          APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
-          APK_ENTRIES="$(unzip -Z1 "$APK")"
-          expected=(
-            "lib/arm64-v8a/liboffice_parsers.so"
-            "lib/arm64-v8a/libmarkdown_parser.so"
-            "lib/arm64-v8a/libhighlight_parser.so"
-            "lib/arm64-v8a/libregex_transformer.so"
-            "lib/arm64-v8a/libreader_extractor.so"
-            "lib/arm64-v8a/libsync_crypto.so"
-            "lib/arm64-v8a/libmarkdown_preprocess.so"
-            "lib/arm64-v8a/libhtml_diff_normalizer.so"
-          )
-          missing=()
-          for so in "${expected[@]}"; do
-            if ! grep -Fxq "$so" <<< "$APK_ENTRIES"; then
-              missing+=("$so")
-            fi
+          : "${KEY_BASE64:?Missing KEY_BASE64 secret}"
+          : "${SIGNING_CONFIG:?Missing SIGNING_CONFIG secret}"
+          : "${GOOGLE_SERVICES_JSON:?Missing GOOGLE_SERVICES_JSON secret}"
+          printf '%s' "$KEY_BASE64" | base64 --decode > app/app.key
+          printf '%s\n' "$SIGNING_CONFIG" > local.properties
+          printf '%s\n' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+
+      - name: Gradle release build
+        # assembleFullRelease also verifies all eight required Rust libraries in
+        # every APK. `surface` flavors: release publishes the canonical `full`
+        # product only; standalone flavors (novel/deepread) build locally.
+        run: ./gradlew :app:assembleFullRelease -PuploadCrashlyticsMapping=false --no-daemon --console=plain
+
+      - name: Verify release APK signatures
+        run: |
+          set -euo pipefail
+          for APK in app/build/outputs/apk/full/release/*.apk; do
+            "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify "$APK"
           done
-          if (( ${#missing[@]} > 0 )); then
-            printf 'Missing native library: %s\n' "${missing[@]}" >&2
-            exit 1
-          fi
+
+      - name: Remove signed build files
+        if: always()
+        run: rm -f app/app.key local.properties app/google-services.json
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
-        if: success()
+        uses: actions/upload-artifact@v7
         with:
           name: android-release-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/full/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download signed APKs
+        uses: actions/download-artifact@v8
+        with:
+          name: android-release-apk
+          path: release-apks
+
+      - name: Publish Android prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="android-build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          printf 'Android 签名 Release APK（ARM64），由 main 自动构建。\n\nCommit: %s\nBuild: %s/%s/actions/runs/%s\n\n下载任意一个 APK 安装；universal 包目前也仅支持 ARM64。\n' \
+            "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > release-notes.md
+          gh release create "$TAG" release-apks/*.apk \
+            --target "$GITHUB_SHA" \
+            --title "AmberAgent Android build ${GITHUB_RUN_NUMBER}" \
+            --notes-file release-notes.md \
+            --prerelease --latest=false

@@ -18,13 +18,15 @@ Core 只接收两端已经共同消费且平台无关的稳定契约；当前 An
 
 构建成功后，在运行详情页的 **Artifacts** 下载 `AmberAgent-debug-<运行编号>`，解压后安装其中一个 APK。产物保留 14 天；当前只支持 ARM64，`universal` APK 也仅包含 ARM64 库。
 
-自动构建无需配置 Secrets。Debug 包名为 `app.amber.agent.graphite`，可以与正式版共存；CI 使用临时 Debug 签名，不保证不同构建之间可以覆盖安装。需要稳定签名的正式包时，手动运行现有的 `Android Release Build`，并在仓库的 **Settings → Secrets and variables → Actions** 配置：
+Debug 自动构建无需配置 Secrets。Debug 包名为 `app.amber.agent.graphite`，可以与正式版共存；CI 使用临时 Debug 签名，不保证不同构建之间可以覆盖安装。
+
+`Android Release Build` 在推送到 `main` 时自动构建签名 Release APK；也可手动触发。它使用与 Debug 流程相同的 JDK/SDK/NDK 环境，检查每个 APK 的八个 required `.so` 和 APK 签名。需要在仓库的 **Settings → Secrets and variables → Actions** 配置：
 
 - `KEY_BASE64`：签名 keystore 的 Base64 内容，流程还原为 `app/app.key`。
 - `SIGNING_CONFIG`：包含 `storeFile=app.key`、`storePassword`、`keyAlias`、`keyPassword` 的多行 Java properties 内容。
 - `GOOGLE_SERVICES_JSON`：包含 `app.amber.agent` 客户端的完整 Firebase 配置。
 
-Release 产物位于对应运行详情页的 `android-release-apk`；两个流程都只上传 Actions 构建产物。
+Release 产物会上传到运行详情页的 `android-release-apk`。在 `main` 构建成功后，还会自动发布到仓库的 [Releases](https://github.com/soul99soul-glitch/AmberAgent/releases)，标为预发布版，tag 为 `android-build-<运行编号>-<重跑次数>`，直接下载 APK 即可安装；其他分支手动构建只上传 Artifact。Release 包名为 `app.amber.agent`，持续使用上述 keystore 签名；Debug 的独立包名不变。
 
 ## SSH
 

@@ -166,9 +166,14 @@ class MiniAppRepository(
         MiniAppHtmlValidator.validate(htmlContent)
         val now = System.currentTimeMillis()
         return database.withTransaction {
+            val current = dao.getById(app.id)
+                ?: throw MiniAppValidationException("MiniApp no longer exists")
+            if (current.version != app.version) {
+                throw MiniAppValidationException("MiniApp changed while the source editor was open")
+            }
             val nextVersion = versionDao.maxVersionNumber(app.id) + 1
             val hash = sha256(htmlContent)
-            val updated = app.copy(
+            val updated = current.copy(
                 htmlContent = htmlContent,
                 htmlHash = hash,
                 version = nextVersion,
@@ -191,9 +196,11 @@ class MiniAppRepository(
     }
 
     suspend fun restoreVersion(appId: String, versionNumber: Int): MiniAppEntity? = withDurableWrite {
-        val app = dao.getById(appId) ?: return@withDurableWrite null
-        val version = versionDao.get(appId, versionNumber) ?: return@withDurableWrite null
-        saveNewVersionInternal(app, version.htmlContent, "Restored from v$versionNumber")
+        database.withTransaction {
+            val app = dao.getById(appId) ?: return@withTransaction null
+            val version = versionDao.get(appId, versionNumber) ?: return@withTransaction null
+            saveNewVersionInternal(app, version.htmlContent, "Restored from v$versionNumber")
+        }
     }
 
     suspend fun setGrant(appId: String, permission: String, decision: MiniAppGrantDecision) = withDurableWrite {

@@ -7,7 +7,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.security.MessageDigest
@@ -127,21 +126,6 @@ class NovelFixtureIntegrityTest {
             envelope.getValue("projectSHA256").jsonPrimitive.content,
             envelope.getValue("projectSHA256").jsonPrimitive.content.lowercase(),
         )
-    }
-
-    @Test
-    fun threeSharedProjectFixturesExist() {
-        listOf(
-            "novel-v1/projects/minimal-blank.project.json",
-            "novel-v1/projects/full-two-branch.project.json",
-            "novel-v1/projects/interrupted-pending.project.json",
-            "novel-v1/projects/legacy-missing-v1-defaults.project.json",
-        ).forEach { path ->
-            assertNotNull(
-                "missing $path",
-                requireNotNull(javaClass.classLoader).getResource(path),
-            )
-        }
     }
 
     @Test

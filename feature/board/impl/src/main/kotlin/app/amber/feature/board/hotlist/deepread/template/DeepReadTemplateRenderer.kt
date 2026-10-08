@@ -177,6 +177,136 @@ object DeepReadTemplateRenderer {
         )
     }
 
+    /** Sample structured article for the template-settings preview (one per kind). */
+    fun sampleTemplateArticle(
+        template: DeepReadSynthesisTemplate,
+        locale: Locale = Locale.CHINESE,
+    ): DeepReadTemplateArticle {
+        val chinese = locale.isChineseLocale()
+        val sources = listOf(
+            DeepReadTemplateArticle.Source(1, if (chinese) "厂商发布会纪要" else "Launch briefing", "https://example.com/a", if (chinese) "示例站" else "Example"),
+            DeepReadTemplateArticle.Source(2, if (chinese) "媒体上手评测" else "Hands-on review", "https://example.com/b", if (chinese) "评测站" else "ReviewSite"),
+            DeepReadTemplateArticle.Source(3, if (chinese) "社区讨论帖" else "Community thread", null, if (chinese) "论坛" else "Forum"),
+        )
+        val base = DeepReadTemplateArticle(
+            template = template.wireId,
+            title = if (chinese) "新一代移动芯片发布" else "Next-gen mobile chip unveiled",
+            lede = if (chinese) "厂商在发布会上公布了新一代移动芯片，主打端侧 AI 算力与能效提升，多家媒体给出了不一致的评价。" else "The launch focuses on on-device AI performance and efficiency; reviewers disagree on the real-world gains.",
+            sources = sources,
+        )
+        return when (template) {
+            DeepReadSynthesisTemplate.AUTO, DeepReadSynthesisTemplate.BRIEF -> base.copy(
+                template = DeepReadSynthesisTemplate.BRIEF.wireId,
+                brief = DeepReadTemplateArticle.Brief(
+                    points = if (chinese) listOf(
+                        "NPU 算力提升约 40%，主打本地大模型推理",
+                        "能效比优化，官方宣称续航提升 15%",
+                        "首批搭载机型下月上市",
+                        "影像管线新增 RAW 域 AI 处理",
+                        "售价区间与上代基本持平",
+                    ) else listOf(
+                        "NPU gains ~40% for on-device inference",
+                        "Efficiency up; maker claims 15% better battery",
+                        "First phones ship next month",
+                        "RAW-domain AI processing for the camera",
+                        "Pricing roughly flat vs last generation",
+                    ),
+                    background = if (chinese) "端侧 AI 是今年旗舰芯片竞争的主线，各家都在把大模型推理搬进 SoC。" else "On-device AI is this year's flagship battleground.",
+                    impact = if (chinese) "如果实测兑现，换机周期可能缩短；开发者将获得更统一的本地推理接口。" else "If benchmarks hold, upgrade cycles may shorten and apps get a common inference path.",
+                    uncertain = if (chinese) listOf("实测续航提升未经第三方验证", "AI 功能在各地区上线时间不同") else listOf("Battery claims are unverified", "AI features roll out by region"),
+                ),
+            )
+            DeepReadSynthesisTemplate.QA -> base.copy(
+                qa = listOf(
+                    DeepReadTemplateArticle.Answer(
+                        if (chinese) "这次升级最大的变化是什么？" else "What's the biggest change?",
+                        if (chinese) "NPU 从协处理器升级为独立计算单元，支持更大参数量级的模型常驻。" else "The NPU is now a standalone unit able to keep larger models resident.",
+                        listOf(1, 2),
+                    ),
+                    DeepReadTemplateArticle.Answer(
+                        if (chinese) "续航真的会提升吗？" else "Will battery life actually improve?",
+                        if (chinese) "官方口径提升 15%，但媒体的续航模型测试只观察到 8% 左右，仍需更多实测。" else "The maker claims 15%; one review bench saw ~8%, so real gains remain uncertain.",
+                        listOf(2),
+                    ),
+                    DeepReadTemplateArticle.Answer(
+                        if (chinese) "值不值得首发入手？" else "Should you buy at launch?",
+                        if (chinese) "如果看重 AI 功能可以等首批评测；单纯性能提升不足以构成换机理由。" else "Wait for reviews if AI features matter; raw performance alone isn't a reason to upgrade.",
+                        listOf(2, 3),
+                    ),
+                ),
+            )
+            DeepReadSynthesisTemplate.DEBATE -> base.copy(
+                debate = DeepReadTemplateArticle.Debate(
+                    dispute = if (chinese) "端侧 AI 是真需求还是营销噱头？" else "Is on-device AI a real need or marketing?",
+                    camps = listOf(
+                        DeepReadTemplateArticle.Debate.Camp(
+                            stance = "pro",
+                            label = if (chinese) "支持方" else "Supporters",
+                            holders = if (chinese) listOf("芯片厂商", "部分开发者") else listOf("Chip makers", "Some developers"),
+                            argument = if (chinese) "本地推理保护隐私且离线可用，是交互范式的升级。" else "Local inference is private and works offline — a genuine interaction upgrade.",
+                            quote = if (chinese) "这是十年来最重要的一次架构变化" else "The biggest architecture shift in a decade",
+                            quoteBy = if (chinese) "厂商 CEO" else "The CEO",
+                            sources = listOf(1),
+                        ),
+                        DeepReadTemplateArticle.Debate.Camp(
+                            stance = "con",
+                            label = if (chinese) "质疑方" else "Skeptics",
+                            holders = if (chinese) listOf("评测媒体") else listOf("Reviewers"),
+                            argument = if (chinese) "目前的 AI 功能停留在演示层面，日常感知不强，功耗成本却真实存在。" else "AI features feel like demos today while the silicon cost is real.",
+                            quote = if (chinese) "我关掉这些开关后，体验没有任何不同" else "I toggled them off and noticed nothing",
+                            quoteBy = if (chinese) "评测编辑" else "A reviewer",
+                            sources = listOf(2),
+                        ),
+                        DeepReadTemplateArticle.Debate.Camp(
+                            stance = "neutral",
+                            label = if (chinese) "观望方" else "Wait-and-see",
+                            holders = if (chinese) listOf("社区用户") else listOf("Community"),
+                            argument = if (chinese) "关键看第三方应用是否跟进；生态成熟前不宜下结论。" else "It hinges on third-party apps; too early to judge.",
+                            sources = listOf(3),
+                        ),
+                    ),
+                    takeaway = if (chinese) "如果你已经有明确要用的 AI 应用，这次升级值得关注；否则可以等生态成熟。" else "Worth attention if you already use AI apps; otherwise wait for the ecosystem.",
+                ),
+            )
+            DeepReadSynthesisTemplate.TIMELINE -> base.copy(
+                timeline = DeepReadTemplateArticle.Timeline(
+                    events = listOf(
+                        DeepReadTemplateArticle.Timeline.Event(if (chinese) "3 月" else "March", if (chinese) "厂商预热新架构" else "Maker teases the new architecture", false, listOf(3)),
+                        DeepReadTemplateArticle.Timeline.Event(if (chinese) "5 月" else "May", if (chinese) "发布会正式公布芯片与首批机型" else "Launch event details chip and first phones", true, listOf(1)),
+                        DeepReadTemplateArticle.Timeline.Event(if (chinese) "6 月" else "June", if (chinese) "首批媒体评测解禁" else "First reviews drop", false, listOf(2)),
+                    ),
+                    turns = listOf(
+                        DeepReadTemplateArticle.Timeline.Turn(if (chinese) "5 月" else "May", if (chinese) "发布会把竞争焦点从跑分转向端侧 AI 场景，此后所有报道都围绕这一点展开。" else "The launch reframed the race around on-device AI; coverage has followed since."),
+                    ),
+                ),
+            )
+            DeepReadSynthesisTemplate.REVIEW -> base.copy(
+                review = DeepReadTemplateArticle.Review(
+                    verdict = if (chinese) "性能稳步提升，AI 卖点有待验证" else "Steady gains; AI pitch unproven",
+                    consensus = if (chinese) listOf("CPU/GPU 性能稳步提升", "发热控制优于上代", "AI 功能演示多于实用") else listOf("Steady CPU/GPU gains", "Better thermals", "AI features demo more than deliver"),
+                    splits = listOf(
+                        DeepReadTemplateArticle.Review.Split(
+                            if (chinese) "续航" else "Battery",
+                            listOf(
+                                DeepReadTemplateArticle.Review.View(1, if (chinese) "官方宣称提升 15%" else "Maker claims +15%"),
+                                DeepReadTemplateArticle.Review.View(2, if (chinese) "实测约 8%" else "Measured ~8%"),
+                            ),
+                        ),
+                    ),
+                    specs = listOf(
+                        DeepReadTemplateArticle.Review.Spec("NPU", if (chinese) "45 TOPS" else "45 TOPS"),
+                        DeepReadTemplateArticle.Review.Spec(if (chinese) "制程" else "Process", "3nm"),
+                        DeepReadTemplateArticle.Review.Spec(if (chinese) "首批机型" else "First phones", if (chinese) "3 款" else "3 models"),
+                    ),
+                    scores = listOf(
+                        DeepReadTemplateArticle.Review.Score(2, "8.5", if (chinese) "编辑评分" else "Editor's score"),
+                    ),
+                    conclusion = if (chinese) "如果你需要端侧 AI 可以首发入手；否则建议等价格调整。" else "Buy at launch for on-device AI; otherwise wait for a price cut.",
+                ),
+            )
+        }
+    }
+
     fun renderCustom(
         title: String,
         output: DeepReadOutput,
@@ -205,8 +335,8 @@ object DeepReadTemplateRenderer {
             "extended_reading_html" to output.extendedReadingHtml(locale),
             "font_css" to fontCss + "\n" + runtimeCss,
         )
-        val html = placeholders.entries.fold(templateHtml) { current, (key, value) ->
-            current.replace("{{$key}}", value)
+        val html = Regex("\\{\\{([a-z_]+)\\}\\}").replace(templateHtml) { match ->
+            placeholders[match.groupValues[1]] ?: match.value
         }.withRuntimeCss(fontCss + "\n" + runtimeCss, trailingCss = darkCss)
         return DeepReadRenderedTemplate(
             html = html,
@@ -259,6 +389,239 @@ object DeepReadTemplateRenderer {
             allowedImageUrls = safeImages,
             allowedLinkUrls = output.safeLinkUrls(),
         )
+    }
+
+    /**
+     * Renders a structured synthesis article — iOS `DeepReadTemplateArticleRenderer`
+     * parity. Shares the magazine head/fonts/skeleton styles and adds the
+     * template-specific blocks: numbered points, Q&A, camps, timeline, review
+     * specs/scores, and the numbered source list with `[n]` citations.
+     */
+    fun renderTemplateArticle(
+        article: DeepReadTemplateArticle,
+        fontCss: String = DEFAULT_FONT_CSS,
+        darkTheme: Boolean = false,
+        locale: Locale = Locale.CHINESE,
+    ): DeepReadRenderedTemplate {
+        val sites = article.sources.associate { it.id to it.site }
+        val html = buildString {
+            appendLine("<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style>")
+            appendLine(fontCss)
+            appendLine(BASE_CSS)
+            appendLine(templateRuntimeCss(darkTheme))
+            appendLine(SYNTHESIS_CSS)
+            if (darkTheme) appendLine(SYNTHESIS_DARK_CSS)
+            appendLine("</style></head><body>")
+            append("<article class=\"template\">")
+            append("<section class=\"headline\"><p class=\"kicker\">${locale.synthesisTemplateName(article.kind).escapeHtml()}</p><h1>${article.title.escapeHtml()}</h1>")
+            if (article.lede.isNotBlank()) {
+                append("<div class=\"summary markdown-body\"><p>${article.lede.markdownInlineHtml()}</p></div>")
+            }
+            append("</section>")
+
+            article.brief?.let { brief ->
+                if (brief.points.isNotEmpty()) {
+                    append(synthesisSection(locale.synthesisLabel("points"), "<ol class=\"numbered\">" + brief.points.joinToString("") { "<li>${it.markdownInlineHtml()}</li>" } + "</ol>"))
+                }
+                if (brief.background.isNotBlank()) {
+                    append(synthesisSection(locale.synthesisLabel("background"), synthesisBlock(brief.background)))
+                }
+                if (brief.impact.isNotBlank()) {
+                    append(synthesisSection(locale.synthesisLabel("impact"), synthesisBlock(brief.impact)))
+                }
+                if (brief.uncertain.isNotEmpty()) {
+                    append("<section class=\"uncertain\"><p class=\"section\">${locale.synthesisLabel("uncertain")}</p><ul>" + brief.uncertain.joinToString("") { "<li>${it.markdownInlineHtml()}</li>" } + "</ul></section>")
+                }
+            }
+            article.qa?.let { qa ->
+                if (qa.isNotEmpty()) {
+                    append("<section class=\"qa\">")
+                    qa.forEachIndexed { index, item ->
+                        append("<div class=\"qa-item\"><p class=\"q\"><span class=\"qn\">Q${index + 1}</span><span>${item.question.markdownInlineHtml()}</span></p>")
+                        append("<div class=\"a\">${synthesisBlock(item.answer, item.sources)}</div></div>")
+                    }
+                    append("</section>")
+                }
+            }
+            article.debate?.let { debate ->
+                if (debate.dispute.isNotBlank()) {
+                    append("<section class=\"fact\"><p class=\"section\">${locale.synthesisLabel("dispute")}</p><p class=\"line\">${debate.dispute.markdownInlineHtml()}</p></section>")
+                }
+                append("<section class=\"camps\"><p class=\"section\">${locale.synthesisLabel("camps")}</p>")
+                debate.camps.forEach { camp ->
+                    val stanceLabel = when (camp.stance) {
+                        "pro" -> locale.synthesisLabel("stance_pro")
+                        "con" -> locale.synthesisLabel("stance_con")
+                        else -> locale.synthesisLabel("stance_neutral")
+                    }
+                    append("<div class=\"camp ${camp.stance.escapeHtml()}\"><p class=\"camp-head\"><span class=\"badge\">$stanceLabel</span><b>${camp.label.escapeHtml()}</b></p>")
+                    if (camp.holders.isNotEmpty()) {
+                        append("<p class=\"holders\">${camp.holders.joinToString("、").escapeHtml()}</p>")
+                    }
+                    append(synthesisBlock(camp.argument, camp.sources))
+                    if (camp.quote.isNotBlank()) {
+                        append("<blockquote><p>“${camp.quote.escapeHtml()}”</p>")
+                        if (camp.quoteBy.isNotBlank()) append("<small>—— ${camp.quoteBy.escapeHtml()}</small>")
+                        append("</blockquote>")
+                    }
+                    append("</div>")
+                }
+                append("</section>")
+                if (debate.takeaway.isNotBlank()) {
+                    append("<section class=\"argument\"><div class=\"claim\"><b>${locale.synthesisLabel("takeaway")}</b>${synthesisBlock(debate.takeaway)}</div></section>")
+                }
+            }
+            article.timeline?.let { timeline ->
+                append("<section class=\"events\"><p class=\"section\">${locale.synthesisLabel("timeline")}</p><ol>")
+                timeline.events.forEach { event ->
+                    append("<li${if (event.turning) " class=\"turn\"" else ""}><span class=\"date\">${event.date.escapeHtml()}</span><p>${event.event.markdownInlineHtml()}${synthesisCite(event.sources)}</p></li>")
+                }
+                append("</ol></section>")
+                if (timeline.turns.isNotEmpty()) {
+                    append("<section class=\"parties\"><p class=\"section\">${locale.synthesisLabel("turns")}</p>")
+                    timeline.turns.forEach { turn ->
+                        append("<div class=\"party\"><b>${turn.date.escapeHtml()}</b>${synthesisBlock(turn.why)}</div>")
+                    }
+                    append("</section>")
+                }
+            }
+            article.review?.let { review ->
+                append("<section class=\"verdict\"><p class=\"section\">${locale.synthesisLabel("verdict")}</p><p class=\"line\">${review.verdict.markdownInlineHtml()}</p></section>")
+                if (review.consensus.isNotEmpty()) {
+                    append("<section class=\"proscons\"><p class=\"section\">${locale.synthesisLabel("consensus")}</p><div class=\"pair\"><div class=\"good\"><b>${locale.synthesisLabel("agree")}</b><ul>")
+                    append(review.consensus.joinToString("") { "<li>${it.markdownInlineHtml()}</li>" })
+                    append("</ul></div></div></section>")
+                }
+                review.splits.forEach { split ->
+                    append("<section class=\"parties\"><p class=\"section\">${locale.synthesisLabel("split")} · ${split.topic.escapeHtml()}</p>")
+                    split.views.forEach { view ->
+                        append("<div class=\"party\"><b>${sites[view.source].orEmpty().escapeHtml()}</b><p>${view.view.markdownInlineHtml()}${synthesisCite(listOf(view.source))}</p></div>")
+                    }
+                    append("</section>")
+                }
+                if (review.specs.isNotEmpty()) {
+                    append("<section class=\"specs\"><p class=\"section\">${locale.synthesisLabel("specs")}</p><div class=\"table-wrap\"><table>")
+                    review.specs.forEach { spec ->
+                        append("<tr><td>${spec.name.escapeHtml()}</td><td>${spec.value.escapeHtml()}</td></tr>")
+                    }
+                    append("</table></div></section>")
+                }
+                if (review.scores.isNotEmpty()) {
+                    append("<section class=\"scores\"><p class=\"section\">${locale.synthesisLabel("scores")}</p><div class=\"score-grid\">")
+                    review.scores.forEach { score ->
+                        append("<div><span class=\"score\">${score.score.escapeHtml()}</span><b>${sites[score.source].orEmpty().escapeHtml()}</b>")
+                        if (score.note.isNotBlank()) append("<small>${score.note.escapeHtml()}</small>")
+                        append("</div>")
+                    }
+                    append("</div></section>")
+                }
+                if (review.conclusion.isNotBlank()) {
+                    append("<section class=\"argument\"><div class=\"claim\"><b>${locale.synthesisLabel("worth_it")}</b>${synthesisBlock(review.conclusion)}</div></section>")
+                }
+            }
+
+            if (article.sources.isNotEmpty()) {
+                append("<section class=\"refs\"><p class=\"section\">${locale.synthesisLabel("sources")}</p><ol>")
+                article.sources.forEach { source ->
+                    append("<li><span class=\"n\">[${source.id}]</span><div>")
+                    val title = source.title.escapeHtml()
+                    val url = source.url
+                    append(if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
+                        "<a href=\"${url.escapeHtml()}\">$title</a>"
+                    } else title)
+                    append("<small>${source.site.escapeHtml()}</small></div></li>")
+                }
+                append("</ol></section>")
+            }
+            append("</article></body></html>")
+        }
+        return DeepReadRenderedTemplate(
+            html = html,
+            allowedImageUrls = emptySet(),
+            allowedLinkUrls = article.sources.mapNotNull { it.url }
+                .filter { it.startsWith("http://") || it.startsWith("https://") }
+                .toSet(),
+        )
+    }
+
+    private fun synthesisSection(title: String, body: String): String =
+        "<section><p class=\"section\">${title.escapeHtml()}</p>$body</section>"
+
+    /// Long fields may hold lists or several paragraphs, so they render as blocks;
+    /// citations trail the last paragraph (iOS `block(_:cite:)` parity).
+    private fun synthesisBlock(text: String, cite: List<Int> = emptyList()): String {
+        val html = text.markdownBlockHtml()
+        val marks = synthesisCite(cite)
+        if (marks.isEmpty()) return html
+        val close = html.lastIndexOf("</p>")
+        return if (close >= 0 && html.substring(close + 4).isBlank()) {
+            html.substring(0, close) + marks + "</p>"
+        } else {
+            html + "<p>$marks</p>"
+        }
+    }
+
+    private fun synthesisCite(ids: List<Int>): String =
+        if (ids.isEmpty()) "" else "<sup class=\"cite\">${ids.joinToString("") { "[$it]" }}</sup>"
+
+    private fun Locale.synthesisTemplateName(template: DeepReadSynthesisTemplate): String =
+        if (isChineseLocale()) template.displayNameZh else when (template) {
+            DeepReadSynthesisTemplate.AUTO -> "Auto"
+            DeepReadSynthesisTemplate.BRIEF -> "Brief"
+            DeepReadSynthesisTemplate.QA -> "Q&A"
+            DeepReadSynthesisTemplate.DEBATE -> "Debate"
+            DeepReadSynthesisTemplate.TIMELINE -> "Timeline"
+            DeepReadSynthesisTemplate.REVIEW -> "Review"
+        }
+
+    private fun Locale.synthesisLabel(key: String): String = if (isChineseLocale()) {
+        when (key) {
+            "points" -> "要点"
+            "background" -> "背景"
+            "impact" -> "影响"
+            "uncertain" -> "待核实"
+            "dispute" -> "核心争议"
+            "camps" -> "各方阵营"
+            "takeaway" -> "你可以怎么看"
+            "timeline" -> "时间线"
+            "turns" -> "转折点"
+            "verdict" -> "结论"
+            "consensus" -> "各家共识"
+            "agree" -> "一致认为"
+            "split" -> "分歧"
+            "specs" -> "关键规格"
+            "scores" -> "打分对照"
+            "worth_it" -> "买不买"
+            "sources" -> "来源"
+            "stance_pro" -> "支持"
+            "stance_con" -> "反对"
+            "stance_neutral" -> "中立"
+            else -> key
+        }
+    } else {
+        when (key) {
+            "points" -> "Key points"
+            "background" -> "Background"
+            "impact" -> "Impact"
+            "uncertain" -> "Unverified"
+            "dispute" -> "Core dispute"
+            "camps" -> "Camps"
+            "takeaway" -> "How to read it"
+            "timeline" -> "Timeline"
+            "turns" -> "Turning points"
+            "verdict" -> "Verdict"
+            "consensus" -> "Consensus"
+            "agree" -> "All agree"
+            "split" -> "Split"
+            "specs" -> "Key specs"
+            "scores" -> "Scores"
+            "worth_it" -> "Worth it?"
+            "sources" -> "Sources"
+            "stance_pro" -> "Support"
+            "stance_con" -> "Oppose"
+            "stance_neutral" -> "Neutral"
+            else -> key
+        }
     }
 
     private fun DeepReadOutput.safeImageUrls(): Set<String> = verifiedImageUrls()
@@ -818,6 +1181,89 @@ object DeepReadTemplateRenderer {
         .markdown-body a{color:#d18752;}
         .markdown-body th,.markdown-body td{border-top-color:#3a332b;}
         .markdown-body blockquote{border-left-color:#d18752;}
+    """
+
+    // iOS DeepReadTemplateArticleRenderer.css with the Android palette inlined
+    // (accent #ef4444 / dark #d18752, border #ddd / #3a332b, muted #6b7280 / #a89d90).
+    private const val SYNTHESIS_CSS = """
+        .template section p{margin:0 0 10px;}
+        .numbered{margin:0;padding-left:1.4em;}
+        .numbered li{font-size:15px;line-height:1.65;margin:0 0 8px;}
+        .cite{font-family:var(--deep-read-sans);font-size:10px;color:#ef4444;margin-left:2px;}
+        .uncertain ul{margin:0;padding-left:1.4em;}
+        .uncertain li{font-size:15px;line-height:1.65;margin:0 0 8px;color:#6b7280;}
+        .qa-item{padding:14px 0;border-top:1px solid #ddd;}
+        .qa-item .q{font-size:17px;line-height:1.5;font-weight:600;margin:0 0 8px;display:flex;gap:10px;}
+        .qa-item .q .qn{font-family:var(--deep-read-sans);font-size:12px;font-weight:700;color:#ef4444;padding-top:3px;flex:0 0 auto;}
+        .qa-item .a{padding-left:30px;}
+        .qa-item .a p{font-size:15px;line-height:1.75;}
+        .camp{border:1px solid #ddd;border-left:4px solid #6b7280;border-radius:12px;padding:12px 14px;margin:0 0 10px;}
+        .camp.pro{border-left-color:#15803d;} .camp.con{border-left-color:#b91c1c;} .camp.neutral{border-left-color:#6b7280;}
+        .camp.pro .badge{color:#15803d;} .camp.con .badge{color:#b91c1c;} .camp.neutral .badge{color:#6b7280;}
+        .camp-head{display:flex;gap:8px;align-items:center;margin:0 0 4px;}
+        .camp-head .badge{font-family:var(--deep-read-sans);font-size:11px;font-weight:700;}
+        .camp-head b{font-size:16px;}
+        .camp p{font-size:15px;line-height:1.7;}
+        .camp p.holders{font-family:var(--deep-read-sans);font-size:12px;color:#6b7280;margin:0 0 8px;letter-spacing:0;text-transform:none;}
+        .camp p.camp-head{margin:0 0 4px;}
+        .camp blockquote{margin:8px 0 0;padding-left:10px;border-left:2px solid #ddd;}
+        .camp blockquote p{font-style:italic;margin:0;font-size:15px;line-height:1.6;}
+        .camp blockquote small{font-family:var(--deep-read-sans);font-size:11px;color:#6b7280;letter-spacing:0;text-transform:none;}
+        .events ol{list-style:none;margin:0;padding:0;}
+        .events li{padding:11px 0;border-top:1px solid #ddd;}
+        .events li .date{display:block;font-family:var(--deep-read-sans);letter-spacing:.14em;text-transform:uppercase;color:#ef4444;font-size:10px;margin-bottom:4px;}
+        .events li p{font-size:15px;line-height:1.65;margin:0;}
+        .events li.turn .date::before{content:"● ";color:#ef4444;}
+        .events li.turn p{font-weight:600;}
+        .parties .party{padding:10px 0;border-top:1px solid #ddd;}
+        .parties .party b{display:block;font-family:var(--deep-read-sans);font-size:12px;color:#991b1b;margin-bottom:3px;}
+        .fact .line,.verdict .line{font-size:18px;line-height:1.5;font-weight:500;}
+        .proscons .pair .good{border:1px solid #ddd;border-radius:12px;padding:12px 14px;}
+        .proscons .pair .good>b{display:block;font-family:var(--deep-read-sans);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#15803d;margin-bottom:8px;}
+        .proscons ul{margin:0;padding-left:1.4em;}
+        .proscons li{font-size:15px;line-height:1.65;margin:0 0 6px;}
+        .specs .table-wrap{overflow-x:auto;}
+        .specs table{width:100%;border-collapse:collapse;font-family:var(--deep-read-sans);font-size:13px;line-height:1.5;}
+        .specs td{border-top:1px solid #ddd;padding:8px 8px 8px 0;vertical-align:top;}
+        .specs td:first-child{color:#6b7280;white-space:nowrap;}
+        .argument .claim{border:1px solid #ddd;border-left:4px solid #ef4444;border-radius:12px;padding:12px 14px;}
+        .argument .claim>b{display:block;font-family:var(--deep-read-sans);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#ef4444;margin-bottom:8px;}
+        .score-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;}
+        .score-grid div{border:1px solid #ddd;border-radius:12px;padding:12px;text-align:center;}
+        .score-grid .score{display:block;font-size:26px;font-weight:700;color:#ef4444;}
+        .score-grid b{display:block;font-family:var(--deep-read-sans);font-size:12px;margin-top:2px;}
+        .score-grid small{display:block;font-family:var(--deep-read-sans);font-size:11px;color:#6b7280;margin-top:4px;letter-spacing:0;text-transform:none;}
+        .refs ol{list-style:none;margin:0;padding:0;}
+        .refs li{display:grid;grid-template-columns:30px minmax(0,1fr);gap:6px;padding:8px 0;border-top:1px solid #ddd;}
+        .refs .n{font-family:var(--deep-read-sans);font-size:11px;color:#ef4444;padding-top:2px;}
+        .refs a{font-size:14px;line-height:1.5;color:#191919;text-decoration:none;}
+        .refs small{display:block;font-family:var(--deep-read-sans);font-size:11px;color:#6b7280;letter-spacing:0;text-transform:none;}
+    """
+
+    private const val SYNTHESIS_DARK_CSS = """
+        .cite{color:#d18752;}
+        .uncertain li{color:#a89d90;}
+        .qa-item,.events li,.parties .party,.refs li{border-top-color:#3a332b;}
+        .qa-item .q .qn{color:#d18752;}
+        .camp{border-color:#3a332b;}
+        .camp.pro{border-left-color:#4c9a72;} .camp.con{border-left-color:#d18752;} .camp.neutral{border-left-color:#a89d90;}
+        .camp.pro .badge{color:#4c9a72;} .camp.con .badge{color:#d18752;} .camp.neutral .badge{color:#a89d90;}
+        .camp p.holders,.camp blockquote small{color:#a89d90;}
+        .camp blockquote{border-left-color:#3a332b;}
+        .events li .date,.events li.turn .date::before{color:#d18752;}
+        .parties .party b{color:#d18752;}
+        .proscons .pair .good{border-color:#3a332b;}
+        .proscons .pair .good>b{color:#4c9a72;}
+        .specs td{border-top-color:#3a332b;}
+        .specs td:first-child{color:#a89d90;}
+        .argument .claim{border-color:#3a332b;border-left-color:#d18752;}
+        .argument .claim>b{color:#d18752;}
+        .score-grid div{border-color:#3a332b;}
+        .score-grid .score{color:#d18752;}
+        .score-grid small{color:#a89d90;}
+        .refs .n{color:#d18752;}
+        .refs a{color:#f1ece3;}
+        .refs small{color:#a89d90;}
     """
 
     private const val EMPTY_IMAGE_FALLBACK_CSS = """

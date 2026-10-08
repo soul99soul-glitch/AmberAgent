@@ -1,0 +1,39 @@
+<!-- 实时活动进度条上的追踪点：琥珀金圆底 + Amber 标志。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+  android:width="24dp"
+  android:height="24dp"
+  android:viewportWidth="128"
+  android:viewportHeight="128">
+  <path
+    android:fillColor="#C99C54"
+    android:pathData="M64,64m-64,0a64,64 0,1 0,128 0a64,64 0,1 0,-128 0" />
+  <group
+    android:pivotX="64"
+    android:pivotY="64"
+    android:scaleX="0.7"
+    android:scaleY="0.7">
+    <path
+      android:fillColor="@android:color/transparent"
+      android:strokeColor="@android:color/white"
+      android:strokeWidth="9"
+      android:strokeLineCap="round"
+      android:strokeLineJoin="round"
+      android:pathData="M38,24H76L94,42V104H38Z" />
+    <path
+      android:fillColor="@android:color/transparent"
+      android:strokeColor="@android:color/white"
+      android:strokeWidth="9"
+      android:strokeLineCap="round"
+      android:strokeLineJoin="round"
+      android:pathData="M75,24V43H94" />
+    <path
+      android:fillColor="@android:color/transparent"
+      android:strokeColor="@android:color/white"
+      android:strokeWidth="8"
+      android:strokeLineCap="round"
+      android:pathData="M51,60H78M51,76H70" />
+    <path
+      android:fillColor="@android:color/white"
+      android:pathData="M80,86m-6,0a6,6 0,1 0,12 0a6,6 0,1 0,-12 0" />
+  </group>
+</vector>

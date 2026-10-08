@@ -32,10 +32,10 @@ object NovelWorkspaceSessions {
 
     private val json = Json { encodeDefaults = false; ignoreUnknownKeys = true }
 
-    fun load(projectDirectory: File): NovelWorkspaceSessionsFile {
+    fun load(projectDirectory: File): NovelWorkspaceSessionsFile = NovelWorkspaceRestoreBoundary.write {
         val file = File(File(projectDirectory, NovelWorkspaceLedger.DIRECTORY_NAME), FILE_NAME)
-        if (!file.exists()) return NovelWorkspaceSessionsFile()
-        return try {
+        if (!file.exists()) return@write NovelWorkspaceSessionsFile()
+        try {
             json.decodeFromString(NovelWorkspaceSessionsFile.serializer(), file.readText(Charsets.UTF_8))
         } catch (error: Exception) {
             // Same quarantine rule as the ledger: never let a later save silently
@@ -47,7 +47,7 @@ object NovelWorkspaceSessions {
         }
     }
 
-    fun save(sessions: NovelWorkspaceSessionsFile, projectDirectory: File) {
+    fun save(sessions: NovelWorkspaceSessionsFile, projectDirectory: File) = NovelWorkspaceRestoreBoundary.write {
         val ledgerDir = File(projectDirectory, NovelWorkspaceLedger.DIRECTORY_NAME)
         if (!ledgerDir.exists() && !ledgerDir.mkdirs()) {
             throw NovelWorkspaceIoError("Cannot create ledger directory: $ledgerDir")

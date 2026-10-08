@@ -396,7 +396,7 @@ class NovelWorkspaceGhostwriteWorker(
                 },
             ),
         )
-        val launch = Intent(context, RouteActivity::class.java)
+        val launch = NovelWorkspaceNotificationRoute.intent(context, directory.name, job.branchSlug, job.id)
         val pendingIntent = PendingIntent.getActivity(
             context,
             job.id.hashCode(),

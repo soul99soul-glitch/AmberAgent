@@ -13,6 +13,61 @@ import java.net.ServerSocket
 import java.net.Socket
 
 class LoopbackOAuthCallbackServerTest {
+    @Test
+    fun `default listener keeps redirect behavior without enabling browser fetch`() = runBlocking {
+        val port = freePort()
+        LoopbackOAuthCallbackServer(port).use { server ->
+            val awaiting = async(start = CoroutineStart.UNDISPATCHED) { server.awaitCallback() }
+            val preflight = sendRequest(port, "OPTIONS /callback HTTP/1.1\r\nOrigin: https://accounts.x.ai\r\nAccess-Control-Request-Method: GET\r\n\r\n")
+            val response = sendRequest(port, "GET /callback?code=abc HTTP/1.1\r\nOrigin: https://accounts.x.ai\r\n\r\n")
+            assertEquals("abc", withTimeout(1_000) { awaiting.await() }.code)
+            assertTrue(preflight.startsWith("HTTP/1.1 404 Not Found"))
+            assertTrue(!response.contains("Access-Control-Allow-Origin:"))
+        }
+    }
+
+    @Test
+    fun `accounts app preflight allows private network GET without consuming callback`() = runBlocking {
+        val port = freePort()
+        LoopbackOAuthCallbackServer(port, allowedOrigin = "https://accounts.x.ai").use { server ->
+            val awaiting = async(start = CoroutineStart.UNDISPATCHED) { server.awaitCallback() }
+            val preflight = sendRequest(
+                port,
+                "OPTIONS /callback?code=abc&state=state-1 HTTP/1.1\r\n" +
+                    "Origin: https://accounts.x.ai\r\n" +
+                    "Access-Control-Request-Method: GET\r\n" +
+                    "Access-Control-Request-Private-Network: true\r\n\r\n",
+            )
+            val response = sendRequest(
+                port,
+                "GET /callback?code=abc&state=state-1 HTTP/1.1\r\n" +
+                    "Origin: https://accounts.x.ai\r\n\r\n",
+            )
+            assertEquals("abc", withTimeout(1_000) { awaiting.await() }.code)
+            assertTrue(preflight.startsWith("HTTP/1.1 200 OK"))
+            assertTrue(preflight.contains("Access-Control-Allow-Origin: https://accounts.x.ai\r\n"))
+            assertTrue(preflight.contains("Access-Control-Allow-Methods: GET\r\n"))
+            assertTrue(preflight.contains("Access-Control-Allow-Private-Network: true\r\n"))
+            assertTrue(response.contains("Access-Control-Allow-Origin: https://accounts.x.ai\r\n"))
+        }
+    }
+
+    @Test
+    fun `untrusted origin cannot consume accounts app callback`() = runBlocking {
+        val port = freePort()
+        LoopbackOAuthCallbackServer(port, allowedOrigin = "https://accounts.x.ai").use { server ->
+            val awaiting = async(start = CoroutineStart.UNDISPATCHED) { server.awaitCallback() }
+            val rejected = sendRequest(
+                port,
+                "GET /callback?code=wrong HTTP/1.1\r\nOrigin: https://other.example\r\n\r\n",
+            )
+            sendRequest(port, "GET /callback?code=abc&state=state-1 HTTP/1.1\r\n\r\n")
+            assertEquals("abc", withTimeout(1_000) { awaiting.await() }.code)
+            assertTrue(rejected.startsWith("HTTP/1.1 403 Forbidden"))
+            assertTrue(!rejected.contains("Access-Control-Allow-Origin:"))
+        }
+    }
+
 
     @Test
     fun `parses successful callback and returns success html`() = runBlocking {

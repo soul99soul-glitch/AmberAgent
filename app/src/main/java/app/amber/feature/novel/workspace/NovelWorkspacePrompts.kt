@@ -298,13 +298,9 @@ object NovelWorkspacePrompts {
     }
 
     /**
-     * Batch polish (unattended): the host pastes the current chapter body plus the
-     * writing preference (same setting/writing source as 重写本章), and the model writes
-     * the full polished chapter back to the SAME chapter file. The turn runs on the
-     * ghostwrite canon path (autoApproveCanon), so the write tool is host-locked to
-     * exactly this path. Polish must not move the story: facts, character states and
-     * the timeline stay byte-for-byte equivalent in meaning — only prose improves —
-     * and the host pairs the commit with a 「剧情指针」 commit afterwards.
+     * Polish improves wording while preserving story facts. Interactive turns propose
+     * one chapter write for author approval; batch turns return a read-only candidate
+     * that the host independently reviews before committing.
      */
     fun polishChapter(
         chapterOrdinal: Int,
@@ -312,10 +308,11 @@ object NovelWorkspacePrompts {
         chapterBody: String,
         writingPreference: String?,
         locale: Locale = Locale.CHINESE,
+        readOnlyCandidate: Boolean = false,
     ): String = if (isChinese(locale)) buildString {
         appendLine(WORKSPACE_DISCIPLINE)
         appendLine()
-        appendLine("当前是批量润色轮（无人值守）：请润色第 $chapterOrdinal 章。只改善文笔，绝不改变故事。")
+        appendLine("当前是润色候选生成：请润色第 $chapterOrdinal 章。只改善文笔，绝不改变故事。")
         appendLine()
         appendLine("## 当前章正文（$chapterPath）")
         appendLine(chapterBody.trim().ifEmpty { "（空章节）" })
@@ -328,12 +325,17 @@ object NovelWorkspacePrompts {
         appendLine("要求：")
         appendLine("1. 情节事实、人物状态、人物关系、时间线必须与当前章完全一致：不增删事件，不改动任何结果与因果，不提前透露后文。")
         appendLine("2. 只优化文字表达（对白、描写、节奏、去冗余），篇幅与当前章大致持平（±20%），不要续写新情节。")
-        appendLine("3. 把润色后的整章正文用 novel_workspace_write 写回 $chapterPath；除这一个文件外不要写任何文件（包括 plot/ 与其他章节）。")
-        append("4. 写完后收尾本轮，不要在回复里复述正文。")
+        if (readOnlyCandidate) {
+            appendLine("3. 本轮工具只读，不能写任何文件；最终回答只返回润色后的整章正文，不加标题、解释或代码围栏。")
+            append("4. 宿主会将原稿与候选独立比较，审核通过后才会收录。")
+        } else {
+            appendLine("3. 把润色后的整章正文用 novel_workspace_write 写回 $chapterPath，登记为作者待确认的提案；除这一个文件外不要写任何文件（包括 plot/ 与其他章节）。")
+            append("4. 写完后收尾本轮，等待作者预览并确认；不要声称已经收录。")
+        }
     } else buildString {
         appendLine(discipline(locale))
         appendLine()
-        appendLine("This is an unattended batch-polish turn. Polish chapter $chapterOrdinal. Improve prose only; do not change the story.")
+        appendLine("Generate a polish candidate for chapter $chapterOrdinal. Improve prose only; do not change the story.")
         appendLine()
         appendLine("## Current chapter ($chapterPath)")
         appendLine(chapterBody.trim().ifEmpty { "(empty chapter)" })
@@ -346,8 +348,35 @@ object NovelWorkspacePrompts {
         appendLine("Requirements:")
         appendLine("1. Keep plot facts, character states, relationships, and timeline exactly equivalent: add or remove no events, outcomes, or causes, and do not reveal later material.")
         appendLine("2. Improve only wording (dialogue, description, pacing, and redundancy), keeping length roughly stable (±20%); do not continue the story.")
-        appendLine("3. Use novel_workspace_write to write the polished full chapter back to $chapterPath; write no other file, including plot/ or other chapters.")
-        append("4. Wrap up after writing; do not repeat the prose in the response.")
+        if (readOnlyCandidate) {
+            appendLine("3. Tools are read-only. Return only the entire polished chapter in the final response, without a heading, explanation, or code fence.")
+            append("4. The host compares original and candidate independently and commits only after review passes.")
+        } else {
+            appendLine("3. Use novel_workspace_write to propose the polished full chapter back to $chapterPath; write no other file, including plot/ or other chapters.")
+            append("4. Wrap up and wait for author preview and approval. Do not claim it has been collected.")
+        }
+    }
+
+    fun polishFactReview(
+        originalBody: String,
+        candidateBody: String,
+        originalSHA256: String,
+        candidateSHA256: String,
+        locale: Locale = Locale.CHINESE,
+    ): String = buildString {
+        appendLine(discipline(locale))
+        appendLine(if (isChinese(locale)) {
+            "比较原稿与润色候选，独立检查事实、事件结果、因果、人物状态、关系、时间线与信息揭露是否完全一致。只读，不修改或重写。丢失事实、增加情节、只有说明而非完整正文均必须拒绝。文字表达变化可以接受；无法确认时拒绝。"
+        } else {
+            "Independently compare the original and polish candidate for identical facts, outcomes, causality, character states, relationships, timeline, and revelations. Read only; do not edit or rewrite. Reject missing facts, new story, or an explanation instead of complete prose. Wording changes are acceptable; reject when uncertain."
+        })
+        appendLine("Return strict JSON only with exactly these fields; retain the supplied hashes:")
+        appendLine("{\"originalSHA256\":\"$originalSHA256\",\"candidateSHA256\":\"$candidateSHA256\",\"factsUnchanged\":true,\"issues\":[]}")
+        appendLine("factsUnchanged is true only when all story facts are preserved and issues is empty. Otherwise return false and describe concrete differences in issues.")
+        appendLine("## Original")
+        appendLine(originalBody)
+        appendLine("## Candidate")
+        append(candidateBody)
     }
 
     /** Layer-3 review: read the newest chapter, check it against the injected brief. */

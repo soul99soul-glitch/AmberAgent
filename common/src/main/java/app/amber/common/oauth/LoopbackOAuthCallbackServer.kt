@@ -58,12 +58,13 @@ data class LoopbackOAuthCopy(
     }
 }
 
-/** A single-use RFC 8252 loopback redirect listener for the Google and Feishu OAuth flows. */
+/** Single-use RFC 8252 listener; allowedOrigin enables a provider's browser fetch callback. */
 class LoopbackOAuthCallbackServer(
     val port: Int = DEFAULT_PORT,
     private val acceptedSocketReadTimeoutMillis: Int = DEFAULT_ACCEPTED_SOCKET_READ_TIMEOUT_MILLIS,
     val callbackPath: String = DEFAULT_CALLBACK_PATH,
     private val copy: LoopbackOAuthCopy = LoopbackOAuthCopy.ENGLISH,
+    private val allowedOrigin: String? = null,
 ) : Closeable {
     private val serverSocket: ServerSocket = try {
         ServerSocket(port, 1, InetAddress.getByName("127.0.0.1"))
@@ -123,14 +124,17 @@ class LoopbackOAuthCallbackServer(
             val requestLine = readLine(input, MAX_REQUEST_LINE_BYTES)
                 ?: throw MalformedRequestException(copy.requestLineEmpty)
             var headerBytes = 0
+            val headers = mutableMapOf<String, String>()
             while (true) {
                 val header = readLine(input, MAX_REQUEST_LINE_BYTES)
                     ?: throw MalformedRequestException(copy.headersUnterminated)
                 headerBytes += header.length + 2
                 if (headerBytes > MAX_HEADER_BYTES) throw RequestTooLargeException()
                 if (header.isEmpty()) break
+                val colon = header.indexOf(':')
+                if (colon > 0) headers[header.substring(0, colon).trim().lowercase()] = header.substring(colon + 1).trim()
             }
-            parseRequestLine(requestLine)
+            parseRequestLine(requestLine, headers)
         } catch (_: RequestTooLargeException) {
             HandledRequest(
                 result = failure("request_too_large", copy.requestTooLarge),
@@ -154,7 +158,7 @@ class LoopbackOAuthCallbackServer(
         return handled
     }
 
-    private fun parseRequestLine(line: String): HandledRequest {
+    private fun parseRequestLine(line: String, headers: Map<String, String>): HandledRequest {
         val parts = line.split(' ', limit = 3)
         if (parts.size != 3 || parts[0].isBlank() || parts[1].isBlank() || !parts[2].startsWith("HTTP/")) {
             return HandledRequest(
@@ -167,6 +171,20 @@ class LoopbackOAuthCallbackServer(
         val method = parts[0]
         val target = parts[1]
         val path = target.substringBefore('?')
+        val origin = headers["origin"]
+        if (path == callbackPath && allowedOrigin != null && origin != null && origin != allowedOrigin) {
+            return HandledRequest(failure("origin_not_allowed", copy.invalidRequest), terminal = false, statusCode = 403)
+        }
+        val corsOrigin = allowedOrigin?.takeIf { it == origin }
+        if (path == callbackPath && method == "OPTIONS" && corsOrigin != null &&
+            headers["access-control-request-method"] == "GET"
+        ) {
+            return HandledRequest(
+                failure("preflight", copy.waitingForCallback), terminal = false, statusCode = 200,
+                corsOrigin = corsOrigin, preflight = true,
+                allowPrivateNetwork = headers["access-control-request-private-network"] == "true",
+            )
+        }
         if (method != "GET" || path != callbackPath) {
             return HandledRequest(
                 result = failure(
@@ -200,6 +218,7 @@ class LoopbackOAuthCallbackServer(
             ),
             terminal = true,
             statusCode = 200,
+            corsOrigin = corsOrigin,
         )
     }
 
@@ -229,8 +248,19 @@ class LoopbackOAuthCallbackServer(
         }.toByteArray(Charsets.UTF_8)
         val response = buildString {
             append("HTTP/1.1 ")
-            append(if (request.statusCode == 200) "200 OK" else if (request.statusCode == 404) "404 Not Found" else "400 Bad Request")
+            append(when (request.statusCode) {
+                200 -> "200 OK"
+                403 -> "403 Forbidden"
+                404 -> "404 Not Found"
+                else -> "400 Bad Request"
+            })
             append("\r\nContent-Type: text/html; charset=utf-8\r\n")
+            request.corsOrigin?.let {
+                append("Access-Control-Allow-Origin: ").append(it).append("\r\n")
+                append("Vary: Origin\r\n")
+                if (request.preflight) append("Access-Control-Allow-Methods: GET\r\n")
+                if (request.allowPrivateNetwork) append("Access-Control-Allow-Private-Network: true\r\n")
+            }
             append("Content-Length: ").append(body.size)
             append("\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n")
         }.toByteArray(Charsets.US_ASCII)
@@ -264,6 +294,9 @@ class LoopbackOAuthCallbackServer(
         val result: OAuthCallbackResult,
         val terminal: Boolean,
         val statusCode: Int,
+        val corsOrigin: String? = null,
+        val preflight: Boolean = false,
+        val allowPrivateNetwork: Boolean = false,
     )
 
     private class RequestTooLargeException : IOException()

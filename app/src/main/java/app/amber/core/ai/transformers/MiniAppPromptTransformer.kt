@@ -187,7 +187,8 @@ object MiniAppPromptTransformer : InputMessageTransformer, KoinComponent {
           "permissions": ["storage","toast","theme","network","externalImages","search","clipboard.copy","host.updateBoardSummary","host.context","host.sendToConversation","host.createArtifact","ai.generate","sharedStore","eventBus","launch","sensor","location","clipboard.read"],
           "html": "<!DOCTYPE html>..."
         }
-        Constraints: generate a single-file HTML document; do not use script src, iframe, form, eval, new Function, import(), XMLHttpRequest, WebSocket, localStorage, sessionStorage, or geolocation.
+        Constraints: generate a single-file HTML document; apart from the three.js tag below, do not use script src, iframe, form, eval, new Function, import(), XMLHttpRequest, WebSocket, localStorage, sessionStorage, or geolocation.
+        For 3D, use the bundled three.js (r186): write exactly <script src="amber-miniapp-lib://three.min.js"></script> in <head>, then use the global THREE; for touch rotate/zoom use new THREE.OrbitControls(camera, renderer.domElement). Do not import three or its addons, and do not use a CDN.
         Images may use data:image/... or https:// URLs; never use http://, relative, file, content, or blob URLs. Declare the externalImages permission for remote images.
         Network access must use await Amber.fetch({ url, method, headers, body, responseType }) or fetch("https://...") and must declare network; fetch is bridged to Amber.fetch.
         Search must use await Amber.search({ query, limit }) and must declare search; results contain title/url/snippet/source/publishedAt.
@@ -248,7 +249,8 @@ object MiniAppPromptTransformer : InputMessageTransformer, KoinComponent {
           "permissions": ["storage","toast","theme","network","externalImages","search","clipboard.copy","host.updateBoardSummary","host.context","host.sendToConversation","host.createArtifact","ai.generate","sharedStore","eventBus","launch","sensor","location","clipboard.read","haptics","device","screen","speech","share","openURL"],
           "html": "<!DOCTYPE html>..."
         }
-        约束：只生成单文件 HTML；不要使用 script src、iframe、form、eval、new Function、import()、XMLHttpRequest、WebSocket、localStorage、sessionStorage、geolocation。
+        约束：只生成单文件 HTML；除下方 three.js 外不要使用 script src、iframe、form、eval、new Function、import()、XMLHttpRequest、WebSocket、localStorage、sessionStorage、geolocation。
+        3D 可用内置 three.js（r186）：在 <head> 中原样写 <script src="amber-miniapp-lib://three.min.js"></script>，之后使用全局 THREE，触摸旋转/缩放用 new THREE.OrbitControls(camera, renderer.domElement)；不要 import three 或其 addons，不要用 CDN。
         图片允许 data:image/... 或 https:// 图片 URL；不要使用 http://、相对路径、file/content/blob URL。外链图片必须声明 externalImages 权限。
         网络通过 await Amber.fetch({ url, method, headers, body, responseType }) 或 fetch("https://...")，必须声明 network 权限；fetch 会被安全桥接到 Amber.fetch。
         搜索只能通过 await Amber.search({ query, limit })，必须声明 search 权限；搜索结果是 title/url/snippet/source/publishedAt 的结构化列表。

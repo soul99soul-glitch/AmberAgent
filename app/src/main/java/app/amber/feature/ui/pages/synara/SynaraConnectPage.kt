@@ -1,6 +1,10 @@
 package app.amber.feature.ui.pages.synara
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -27,6 +31,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -74,6 +82,27 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
     val draft = ui.draft
     val unknownQrError = stringResource(R.string.synara_unknown_error)
 
+    // Android 17+ blocks LAN sockets until ACCESS_LOCAL_NETWORK is granted at runtime.
+    // Ask right before the first LAN request; the action runs either way so a denial
+    // still surfaces the usual connection error.
+    var pendingLanAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val localNetworkLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        pendingLanAction?.invoke()
+        pendingLanAction = null
+    }
+
+    fun withLocalNetworkAccess(action: () -> Unit) {
+        if (Build.VERSION.SDK_INT < 37 ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            action()
+            return
+        }
+        pendingLanAction = action
+        localNetworkLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+    }
+
     fun normalizedConnection(): SynaraConnection? {
         val error = draft.validationError()
         if (error != null) {
@@ -93,15 +122,17 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
             return
         }
         vm.updateDraft { parsed }
-        vm.testConnection { conn ->
-            navController.navigate(
-                Screen.SynaraWorkspace(
-                    host = conn.host,
-                    port = conn.port,
-                    token = conn.token,
-                    useHttps = conn.useHttps,
-                ),
-            )
+        withLocalNetworkAccess {
+            vm.testConnection { conn ->
+                navController.navigate(
+                    Screen.SynaraWorkspace(
+                        host = conn.host,
+                        port = conn.port,
+                        token = conn.token,
+                        useHttps = conn.useHttps,
+                    ),
+                )
+            }
         }
     }
 
@@ -209,7 +240,7 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         OutlinedButton(
-                            onClick = { vm.testConnection() },
+                            onClick = { withLocalNetworkAccess { vm.testConnection() } },
                             enabled = !ui.checking,
                             modifier = Modifier
                                 .weight(1f)
@@ -222,8 +253,10 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                         Button(
                             onClick = {
                                 val conn = normalizedConnection() ?: return@Button
-                                vm.save {
-                                    navController.navigate(Screen.SynaraWorkspace(host = conn.host, port = conn.port, token = conn.token, useHttps = conn.useHttps))
+                                withLocalNetworkAccess {
+                                    vm.save {
+                                        navController.navigate(Screen.SynaraWorkspace(host = conn.host, port = conn.port, token = conn.token, useHttps = conn.useHttps))
+                                    }
                                 }
                             },
                             enabled = !ui.checking && draft.isConfigured,

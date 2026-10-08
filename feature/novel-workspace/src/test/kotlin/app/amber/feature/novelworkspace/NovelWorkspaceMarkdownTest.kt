@@ -40,6 +40,40 @@ class NovelWorkspaceMarkdownTest {
     }
 
     @Test
+    fun `body and title edits preserve relations lists policy and unknown header structure`() {
+        val header = """
+            ---
+            id: C-1
+            kind: material
+            materialKind: character
+            title: 赵大
+            injection: never
+            aliases:
+              - 老赵
+            relations:
+              - {with: 赵匡胤, type: 兄弟}
+            imported:
+              custom: 保留原始结构
+            # 导入者的注释
+            ---
+        """.trimIndent()
+        val original = "$header\n\n旧正文。\n"
+        val bodyEdit = NovelWorkspaceMarkdown.withBody(original, "新正文。")
+        assertEquals("$header\n\n新正文。\n", bodyEdit)
+        val titleEdit = NovelWorkspaceMarkdown.withFields(bodyEdit, mapOf("title" to "赵大（改名）"))
+        assertEquals("${header.replace("title: 赵大", "title: 赵大（改名）")}\n\n新正文。\n", titleEdit)
+        assertEquals(listOf("老赵"), NovelWorkspaceMarkdown.parseFile(titleEdit).lists["aliases"])
+        assertEquals("never", NovelWorkspaceMarkdown.parseFile(titleEdit).fields["injection"])
+        assertEquals(1, NovelWorkspaceMarkdown.parseFile(titleEdit).maps["relations"]?.size)
+    }
+
+    @Test
+    fun `raw body helper respects crlf headers and keeps thematic breaks as prose`() {
+        assertEquals("---\r\nid: A\r\n---\r\n\r\n新正文\r\n", NovelWorkspaceMarkdown.withBody("---\r\nid: A\r\n---\r\n旧正文", "新正文"))
+        assertEquals("新正文", NovelWorkspaceMarkdown.withBody("---\n开场\n---\n末段", "新正文"))
+    }
+
+    @Test
     fun `parse file round-trips rendered fields lists and body`() {
         val rendered = NovelWorkspaceMarkdown.render(
             fields = listOf(

@@ -42,7 +42,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.adaptive.currentWindowDpSize
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Transition
@@ -145,6 +144,7 @@ import app.amber.core.service.PendingUserMessage
 import app.amber.core.service.PendingUserMessageDisplayCopy
 import app.amber.core.service.PendingUserMessageMode
 import app.amber.core.service.previewText
+import app.amber.feature.ui.adaptive.LocalTwoPaneLayout
 import app.amber.feature.ui.components.ai.ChatInput
 import app.amber.feature.ui.components.ai.SubAgentStatusDock
 import app.amber.core.repository.ConversationRepository
@@ -271,12 +271,8 @@ fun ChatPage(
     val globalErrors by vm.globalErrors.collectAsStateWithLifecycle()
     val outcomeUnknown by vm.outcomeUnknown.collectAsStateWithLifecycle()
 
-    val windowAdaptiveInfo = currentWindowDpSize()
-    val compactTwoPane =
-        windowAdaptiveInfo.width >= 720.dp &&
-            windowAdaptiveInfo.height >= 450.dp
-    val isBigScreen =
-        compactTwoPane || windowAdaptiveInfo.width >= 1100.dp
+    // Beside the session list the list is the way back, so the header drops its back arrow.
+    val isBigScreen = LocalTwoPaneLayout.current != null
 
     val inputState = vm.inputState
     var anchorNodeId by remember(id, messageId, toolCallId) { mutableStateOf<Uuid?>(null) }

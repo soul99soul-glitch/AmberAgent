@@ -1668,12 +1668,21 @@ class ChatService(
                     }
 
                     // P8-11: a paused approval run keeps the live notification
-                    // (approve/deny/reply/stop actions); terminal outcomes
+                    // (approve/deny/reply/stop actions); a true completion turns
+                    // it into the green "done" card, other terminal outcomes
                     // dismiss it, failures replace it with the failure card.
                     val waitingForApproval = terminalPublish == RunTerminalState.WAITING_USER &&
                         getConversationFlow(conversationId).value.currentMessages.any { message ->
                             message.parts.any { it is UIMessagePart.Tool && it.isPending }
                         }
+                    // Completion only when the run truly completed (STEP_LIMIT /
+                    // WAITING_USER are never "done"); non-durable turns have no
+                    // persisted state and complete with the flow.
+                    val completed = cause == null &&
+                        (!durable || (terminalPublish == RunTerminalState.COMPLETED && terminalOwnerSucceeded))
+                    val alertOnCompletion = !isForeground.value &&
+                        turnSettings.displaySetting.enableNotificationOnMessageGeneration
+                    val completedCardShown = completed && turnSettings.agentRuntime.enableLiveStatusNotification
                     when {
                         waitingForApproval -> updateAgentLiveStatus(
                             conversationId = conversationId,
@@ -1681,6 +1690,15 @@ class ChatService(
                             senderName = senderName,
                             settings = turnSettings,
                             runId = runId.takeIf { durable },
+                        )
+
+                        completedCardShown -> liveStatusNotifier.notifyCompleted(
+                            conversationId = conversationId,
+                            senderName = senderName,
+                            messages = getConversationFlow(conversationId).value.currentMessages,
+                            hideSensitive = turnSettings.agentRuntime.hideSensitiveLiveStatus,
+                            alert = alertOnCompletion,
+                            launchIntent = getPendingIntent(context, conversationId, runId.takeIf { durable }),
                         )
 
                         cause == null -> cancelLiveUpdateNotification(conversationId)
@@ -1694,6 +1712,7 @@ class ChatService(
                             senderName = senderName,
                             error = cause,
                             launchIntent = getPendingIntent(context, conversationId, runId.takeIf { durable }),
+                            runId = runId.takeIf { durable },
                         )
                     }
 
@@ -1720,20 +1739,10 @@ class ChatService(
                     }
 
                     if (cause == null) {
-                        // Completion notification only when the run truly
-                        // completed (STEP_LIMIT / WAITING_USER are never
-                        // "done"); non-durable turns have no persisted state
-                        // and complete with the flow.
-                        val completed = if (durable) {
-                            terminalPublish == RunTerminalState.COMPLETED && terminalOwnerSucceeded
-                        } else {
-                            true
-                        }
-                        if (
-                            completed &&
-                            !isForeground.value &&
-                            turnSettings.displaySetting.enableNotificationOnMessageGeneration
-                        ) {
+                        // The green live "done" card already covers completion
+                        // (and alerts when backgrounded); the plain completion
+                        // notification remains for live status turned off.
+                        if (completed && alertOnCompletion && !completedCardShown) {
                             sendGenerationDoneNotification(conversationId, senderName, runId.takeIf { durable })
                         }
                         // Success side-effects (legacy onSuccess parity):
@@ -2196,6 +2205,20 @@ class ChatService(
         })
     }
 
+    /**
+     * 失败卡片上的“重试”：没有进行中的生成时，按应用内“重新生成”的同一路径
+     * 重新生成最后一条消息。已有生成在跑（例如用户已在应用里重试）则什么都不做。
+     */
+    suspend fun retryFromNotification(conversationId: Uuid, runId: String?) {
+        if (getGenerationJobStateFlow(conversationId).value?.isActive == true) {
+            Log.i(TAG, "retryFromNotification: generation already active for $conversationId (run=$runId)")
+            return
+        }
+        val lastMessage = ensureFullConversationLoaded(conversationId).currentMessages.lastOrNull() ?: return
+        cancelLiveUpdateNotification(conversationId)
+        regenerateAtMessage(conversationId, lastMessage)
+    }
+
     // ---- 处理工具调用审批 ----
 
     fun handleToolApproval(
@@ -2259,22 +2282,19 @@ class ChatService(
             )
             return@restore false
         }
-        // Mirrors the in-app path: cancel the paused generation job, apply the
-        // decision (approve/deny/answer), and resume the same run.
         val session = getOrCreateSession(conversationId)
-        session.getJob()?.cancel()
-        // Notification actions run in an AppScope coroutine rather than the
-        // in-app session job. Register that coroutine as the new owner before
-        // resuming so the UI observes the resumed generation and Stop/edit
-        // guards cannot treat the conversation as idle.
-        kotlinx.coroutines.currentCoroutineContext()[Job]?.let(session::setJob)
-        try {
-            applyToolApprovalDecision(conversationId, toolCallId, approved, reason, answer)
-        } catch (e: Exception) {
-            addError(e, conversationId, title = context.getString(R.string.error_title_tool_approval))
-            return@restore false
+        session.dispatchNotificationApproval(
+            scope = appScope,
+            context = restoreWriteContext(captureRestoreEpoch()),
+            onError = { error ->
+                addError(error, conversationId, title = context.getString(R.string.error_title_tool_approval))
+            },
+        ) { decisionPersisted ->
+            applyToolApprovalDecision(
+                conversationId, toolCallId, approved, reason, answer,
+                onDecisionPersisted = decisionPersisted,
+            )
         }
-        true
     }
 
     /**
@@ -2288,6 +2308,7 @@ class ChatService(
         approved: Boolean,
         reason: String,
         answer: String?,
+        onDecisionPersisted: () -> Unit = {},
     ) {
         val conversation = ensureFullConversationLoaded(conversationId)
         val approvedToolName = conversation.findToolName(toolCallId)
@@ -2331,6 +2352,9 @@ class ChatService(
 
         // Check if there are still pending tools
         val hasPendingTools = updatedNodes.any { node -> node.currentMessage.getTools().any { it.isPending } }
+        // Notification receivers may finish their broadcast after persistence
+        // and audit, while this already-owned job continues the model turn.
+        onDecisionPersisted()
 
         // Only continue generation when all pending tools are handled; the
         // resume runs inline on the caller's job (the in-app path wraps this
@@ -2372,6 +2396,8 @@ class ChatService(
             pendingTools.isEmpty() ||
             pendingTools.any { tool ->
                 tool.toolName == ASK_USER_TOOL_NAME ||
+                    // Jev 复核收紧的调用只能由用户逐个决定。
+                    tool.metadata?.containsKey(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) == true ||
                     tool.metadata?.get("run_id")?.jsonPrimitive?.contentOrNull != waitingRun.runId
             }
         ) return
@@ -2394,7 +2420,10 @@ class ChatService(
                 val updatedNodes = conversation.messageNodes.map { node ->
                     val messages = node.messages.map { message ->
                         val parts = message.parts.map { part ->
-                            if (part !is UIMessagePart.Tool || !part.isPending || part.toolName == "ask_user") {
+                            if (part !is UIMessagePart.Tool || !part.isPending || part.toolName == "ask_user" ||
+                                // Jev 复核收紧的调用不随开关批量批准，只能由用户在卡片上决定。
+                                part.metadata?.containsKey(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) == true
+                            ) {
                                 part
                             } else {
                                 changed = true

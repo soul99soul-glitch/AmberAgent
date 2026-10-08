@@ -118,6 +118,25 @@ class NovelWorkspacePromptsTest {
     }
 
     @Test
+    fun `batch polish requests read only prose candidate and hash bound factual review`() {
+        val candidate = NovelWorkspacePrompts.polishChapter(
+            chapterOrdinal = 2,
+            chapterPath = "branches/主线/chapters/002-启程.md",
+            chapterBody = "原稿",
+            writingPreference = "",
+            readOnlyCandidate = true,
+        )
+        assertTrue(candidate.contains("本轮工具只读"))
+        assertTrue(candidate.contains("最终回答只返回"))
+        val review = NovelWorkspacePrompts.polishFactReview("原稿", "候选", "original-hash", "candidate-hash")
+        assertTrue(review.contains("## Original\n原稿"))
+        assertTrue(review.contains("## Candidate\n候选"))
+        assertTrue(review.contains("\"originalSHA256\":\"original-hash\""))
+        assertTrue(review.contains("\"candidateSHA256\":\"candidate-hash\""))
+        assertTrue(review.contains("无法确认时拒绝"))
+    }
+
+    @Test
     fun `character proposal embeds name, sketch, existing cards and discipline`() {
         val prompt = NovelWorkspacePrompts.characterProposal(
             characterName = "沈砚",

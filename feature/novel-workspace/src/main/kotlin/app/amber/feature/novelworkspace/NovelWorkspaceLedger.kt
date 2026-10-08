@@ -62,6 +62,10 @@ object NovelWorkspaceLedger {
         files: Map<String, String>,
         message: String,
         createdAt: Instant,
+        metadataOnlyPaths: Set<String> = emptySet(),
+        polishJobId: String? = null,
+        polishChapterOrdinal: Int? = null,
+        stalePlotBranches: Set<String> = emptySet(),
     ): NovelWorkspaceCommit = NovelWorkspaceCommit(
         id = id,
         parentId = parentId,
@@ -69,6 +73,10 @@ object NovelWorkspaceLedger {
         message = message,
         treeSHA256 = treeSHA256(files),
         files = files,
+        metadataOnlyPaths = metadataOnlyPaths,
+        polishJobId = polishJobId,
+        polishChapterOrdinal = polishChapterOrdinal,
+        stalePlotBranches = stalePlotBranches,
     )
 
     /** Append (deduplicated by id) and advance head — mirrors iOS `appending(_:to:)`. */
@@ -102,10 +110,10 @@ object NovelWorkspaceLedger {
         )
     }
 
-    fun load(directory: File): NovelWorkspaceLedgerStore {
+    fun load(directory: File): NovelWorkspaceLedgerStore = NovelWorkspaceRestoreBoundary.write {
         val file = File(File(directory, DIRECTORY_NAME), STORE_FILE_NAME)
-        if (!file.exists()) return NovelWorkspaceLedgerStore()
-        return try {
+        if (!file.exists()) return@write NovelWorkspaceLedgerStore()
+        try {
             json.decodeFromString(NovelWorkspaceLedgerStore.serializer(), file.readText(Charsets.UTF_8))
         } catch (error: Exception) {
             // Quarantine the unreadable ledger instead of silently starting over:
@@ -117,7 +125,7 @@ object NovelWorkspaceLedger {
         }
     }
 
-    fun save(store: NovelWorkspaceLedgerStore, directory: File) {
+    fun save(store: NovelWorkspaceLedgerStore, directory: File) = NovelWorkspaceRestoreBoundary.write {
         val ledgerDir = File(directory, DIRECTORY_NAME)
         if (!ledgerDir.exists() && !ledgerDir.mkdirs()) {
             throw NovelWorkspaceIoError("Cannot create ledger directory: $ledgerDir")
@@ -156,8 +164,17 @@ object NovelWorkspaceLedger {
             ?.let { pid -> allCommits.firstOrNull { it.id == pid } }
             ?.files
             .orEmpty()
-        return commit.files.filter { (path, hash) -> parentFiles[path] != hash }.keys
+        return (parentFiles.keys + commit.files.keys)
+            .filterTo(linkedSetOf()) { path -> parentFiles[path] != commit.files[path] }
     }
+
+    /** Title-only edits are recorded in the tree but do not change story continuity. */
+    private fun changedChapterPaths(
+        commit: NovelWorkspaceCommit,
+        allCommits: List<NovelWorkspaceCommit>,
+        chapterPrefix: String,
+    ): Set<String> = changedPaths(commit, allCommits)
+        .filterTo(linkedSetOf()) { it.startsWith(chapterPrefix) && it !in commit.metadataOnlyPaths }
 
     /**
      * Cross-platform standard D-C (freshness): plot is stale when the manuscript moved
@@ -204,10 +221,21 @@ object NovelWorkspaceLedger {
         val chain = ledger.ancestry(headCommitId)
         var lastChapterChange = -1
         var lastPlotChange = -1
+        var importedStaleBaseline = false
         chain.forEachIndexed { index, commit ->
             val changed = changedPaths(commit, ledger.commits)
-            if (changed.any { it.startsWith(chapterPrefix) }) lastChapterChange = index
-            if (changed.any { it.startsWith(plotPrefix) }) lastPlotChange = index
+            if (changedChapterPaths(commit, ledger.commits, chapterPrefix).isNotEmpty()) lastChapterChange = index
+            if (branchSlug in commit.stalePlotBranches) {
+                // A source manuscript change can leave an old plot even after its
+                // final chapter was removed. Import does not certify that old plot.
+                importedStaleBaseline = true
+                lastChapterChange = index
+            } else if (changed.any { it.startsWith(plotPrefix) } ||
+                importedStaleBaseline && commit.message == Message.PLOT_POINTER
+            ) {
+                lastPlotChange = index
+                importedStaleBaseline = false
+            }
         }
         return lastChapterChange to lastPlotChange
     }
@@ -237,17 +265,16 @@ object NovelWorkspaceLedger {
         var lastPlotChange = -1
         chain.forEachIndexed { index, commit ->
             val changed = changedPaths(commit, ledger.commits)
-            if (changed.any { it.startsWith(chapterPrefix) }) lastChapterChange = index
+            if (changedChapterPaths(commit, ledger.commits, chapterPrefix).isNotEmpty()) lastChapterChange = index
             if (changed.any { it.startsWith(plotPrefix) }) lastPlotChange = index
         }
         // Not stale (plot is fresh or matches) → nothing dangling to heal.
         if (lastChapterChange < 0 || lastChapterChange <= lastPlotChange) return null
         val newest = chain[lastChapterChange]
         if (newest.message != Message.POLISH) return null
-        return changedPaths(newest, ledger.commits)
+        return changedChapterPaths(newest, ledger.commits, chapterPrefix)
             .mapNotNull { path ->
-                path.takeIf { it.startsWith(chapterPrefix) }
-                    ?.let(NovelWorkspacePaths::chapterOrdinalFromPath)
+                NovelWorkspacePaths.chapterOrdinalFromPath(path)
             }
             .maxOrNull()
     }
@@ -265,8 +292,7 @@ object NovelWorkspaceLedger {
         commit: NovelWorkspaceCommit,
     ): Int? {
         val chapterPrefix = NovelWorkspacePaths.branchPrefix(branchSlug) + "/chapters/"
-        val edited = changedPaths(commit, ledger.commits)
-            .filter { it.startsWith(chapterPrefix) }
+        val edited = changedChapterPaths(commit, ledger.commits, chapterPrefix)
             .mapNotNull { NovelWorkspacePaths.chapterOrdinalFromPath(it) }
         if (edited.isEmpty()) return null
         val newest = workingChapterOrdinals(store, branchSlug).maxOrNull() ?: return null
@@ -328,6 +354,13 @@ data class NovelWorkspaceCommit(
     val message: String,
     val treeSHA256: String,
     val files: Map<String, String> = emptyMap(),
+    /** Host-only metadata edits; absent in existing ledger files. */
+    val metadataOnlyPaths: Set<String> = emptySet(),
+    /** Reviewed polish completion, including candidates identical to their original. */
+    val polishJobId: String? = null,
+    val polishChapterOrdinal: Int? = null,
+    /** Source manuscript/plot mismatch retained only as the initial import baseline. */
+    val stalePlotBranches: Set<String> = emptySet(),
 )
 
 @Serializable

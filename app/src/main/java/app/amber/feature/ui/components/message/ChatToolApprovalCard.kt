@@ -54,6 +54,8 @@ internal fun ChatToolApprovalCard(
     onDeny: () -> Unit,
     onApprove: () -> Unit,
     actionsEnabled: Boolean = true,
+    /** 状态行下方的补充说明（如 Jev 复核暂停了自动批准的原因）。 */
+    notice: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalAmberTokens.current
@@ -130,6 +132,15 @@ internal fun ChatToolApprovalCard(
                     text = statusLabel,
                     style = type.secondary.copy(fontWeight = FontWeight.Medium),
                     color = tokens.accent,
+                )
+            }
+
+            if (notice != null) {
+                Text(
+                    text = notice,
+                    modifier = Modifier.padding(top = 6.dp),
+                    style = type.secondary,
+                    color = tokens.ink2,
                 )
             }
 

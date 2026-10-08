@@ -11,6 +11,7 @@ import kotlinx.serialization.json.put
  *
  * 候选与任务文本组装 state，逐条 Noul 判相关性；只有 active 且未过期才
  * 应用排序，其余形态（off/shadow/失败/超时/低置信）一律返回未应用。
+ * shadow 在后台判分，只落校准记录，不阻塞召回。
  * 缓存锚 = 任务文本 + 候选集内容摘要：同一用户轮的工具循环内复用结果，
  * steer 带来新用户消息即自然失效。
  */
@@ -24,6 +25,20 @@ class JevMemoryReranker(private val runtime: JevRuntime) : MemorySemanticReranke
         if (records.isEmpty() || taskText.isBlank()) return MemorySemanticResult.NOT_APPLIED
         val purpose = JevPurpose.MEMORY_RECALL
         val initialConfig = runtime.configFor(purpose) ?: return MemorySemanticResult.NOT_APPLIED
+        if (initialConfig.mode == JevMode.SHADOW) {
+            runtime.launchInBackground { score(records, taskText, backgroundRunKey(runKey, JevPurpose.MEMORY_RECALL), initialConfig) }
+            return MemorySemanticResult.NOT_APPLIED
+        }
+        return score(records, taskText, runKey, initialConfig)
+    }
+
+    private suspend fun score(
+        records: List<MemoryRecord>,
+        taskText: String,
+        runKey: String?,
+        initialConfig: JevRuntimeConfig,
+    ): MemorySemanticResult {
+        val purpose = JevPurpose.MEMORY_RECALL
         val threshold = runtime.policy.memoryRecallMinRelevance
         val candidates = records.take(MAX_CANDIDATES)
         val anchor = buildString {
@@ -63,7 +78,7 @@ class JevMemoryReranker(private val runtime: JevRuntime) : MemorySemanticReranke
                 runKey = runKey,
                 state = state,
                 questions = questions,
-                requiredScopes = setOf(JevDataScope.PERSONAL_MEMORY, JevDataScope.TASK_TEXT),
+                requiredScopes = JevPurpose.MEMORY_RECALL.requiredScopes,
                 cacheAnchor = "$anchor|$chunkIndex",
             ) ?: return MemorySemanticResult.NOT_APPLIED
             val evaluated = outcome.evaluated ?: return MemorySemanticResult.NOT_APPLIED

@@ -107,6 +107,7 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.modelcouncil.CouncilRoomManager
 import app.amber.feature.modelcouncil.CouncilRoomOpResult
 import app.amber.feature.modelcouncil.toCouncilParticipant
+import app.amber.feature.ui.adaptive.LocalTwoPaneLayout
 import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ds.AMBER_HDR_IDLE_HEADROOM
@@ -151,6 +152,7 @@ import com.composables.icons.lucide.Grid2x2
 import com.composables.icons.lucide.Image
 import com.composables.icons.lucide.Pen
 import com.composables.icons.lucide.Pin
+import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.ScanSearch
 import com.composables.icons.lucide.Settings
@@ -249,6 +251,18 @@ fun SessionHomePage() {
         }
     }
     val operationError = stringResource(R.string.error_title_operation)
+    // Beside a chat (tablet / unfolded landscape) the composer owns the bottom edge, so the
+    // floating new-session pill moves into the header.
+    val inTwoPane = LocalTwoPaneLayout.current != null
+    // 首页是 hub：用 push（保留 SessionHome 在栈底），返回能回到首页；不能用 navigateToChatPage
+    // （其内部 clearAndNavigate 会清掉首页）。popUpTo 在手机上是空操作（首页在栈顶才点得到），
+    // 两栏时把右栏已开的会话换掉，而不是越叠越深。
+    val openChat: (Screen.Chat) -> Unit = { chat ->
+        navController.navigate(chat) {
+            popUpTo(Screen.SessionHome)
+            launchSingleTop = true
+        }
+    }
 
     LaunchedEffect(homeSearchQuery, untitledConversationLabel) {
         vm.setHomeSearchQuery(homeSearchQuery, untitledConversationLabel)
@@ -343,8 +357,9 @@ fun SessionHomePage() {
                 toaster.show("会话已不存在，无法继续", type = ToastType.Error)
                 return@launch
             }
-            navController.navigate(candidate.route.toScreen()) {
-                launchSingleTop = true
+            when (val screen = candidate.route.toScreen()) {
+                is Screen.Chat -> openChat(screen)
+                else -> navController.navigate(screen) { launchSingleTop = true }
             }
         }
     }
@@ -372,7 +387,8 @@ fun SessionHomePage() {
                     .amberTraceMeasure("Amber Home list measure"),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
                     top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
-                    bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 100.dp,
+                    bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() +
+                        if (inTwoPane) 24.dp else 100.dp,
                 ),
             ) {
                 item(key = "home_header") {
@@ -384,6 +400,9 @@ fun SessionHomePage() {
                         onOpenSearch = { homeSearchExpanded = true },
                         onOpenSettings = { navController.navigate(Screen.Setting) },
                         onOpenProfile = { navController.navigate(Screen.Profile) },
+                        onNewSession = if (inTwoPane) {
+                            { openChat(Screen.Chat(id = Uuid.random().toString())) }
+                        } else null,
                     )
                 }
 
@@ -493,13 +512,7 @@ fun SessionHomePage() {
                             isLastVisited = isLastVisited,
                             isFirst = index == 0,
                             isLast = index == conversations.itemCount - 1,
-                            // 首页是 hub：用 push（保留 SessionHome 在栈底），返回能回到首页；
-                            // 不能用 navigateToChatPage（其内部 clearAndNavigate 会清掉首页）
-                            onOpen = {
-                                navController.navigate(
-                                    Screen.Chat(id = conversation.id.toString())
-                                ) { launchSingleTop = true }
-                            },
+                            onOpen = { openChat(Screen.Chat(id = conversation.id.toString())) },
                             onDelete = { vm.deleteConversation(conversation) },
                             onTogglePin = { vm.updatePinnedStatus(conversation) },
                         )
@@ -521,74 +534,74 @@ fun SessionHomePage() {
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
-        // 列表底部渐隐，给 FAB 让出视觉空间（对齐设计稿的 mask 渐隐）。
-        // 列表沉浸到小白条下方，渐隐也铺到屏幕底；高度 = navigationBars + 72
-        // （FAB 占位 bottom 24 + 胶囊高 48），盖住胶囊顶缘以上的列表行。
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 72.dp)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, tokens.bg),
-                    )
-                )
-        )
-
-        // Floating new-session button —— iOS 同款胶囊（铅笔 + 新对话）
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(end = 26.dp, bottom = 26.dp)
-                .height(48.dp)
-                .clickable(
-                    interactionSource = fabInteractionSource,
-                    indication = null,
-                    onClick = {
-                        // 新会话：push 保留首页在栈底，与列表点开一致
-                        navController.navigate(Screen.Chat(id = Uuid.random().toString())) {
-                            launchSingleTop = true
-                        }
-                    },
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
+        if (!inTwoPane) {
+            // 列表底部渐隐，给 FAB 让出视觉空间（对齐设计稿的 mask 渐隐）。
+            // 列表沉浸到小白条下方，渐隐也铺到屏幕底；高度 = navigationBars + 72
+            // （FAB 占位 bottom 24 + 胶囊高 48），盖住胶囊顶缘以上的列表行。
             Box(
                 modifier = Modifier
-                    .height(40.dp)
-                    .amberPressHighlight(
-                        fabInteractionSource,
-                        fabShape,
-                        DpOffset(0.dp, 4.dp),
-                        hdrHighlight = true,
-                        glowTint = tokens.accent,
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 72.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, tokens.bg),
+                        )
                     )
-                    .amberShadow(fabShape, AmberDepthStyle.Accent)
-                    .background(fabFill, fabShape)
-                    .amberRim(fabShape, AmberDepthStyle.Accent)
-                    .padding(horizontal = 14.dp),
+            )
+
+            // Floating new-session button —— iOS 同款胶囊（铅笔 + 新对话）
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(end = 26.dp, bottom = 26.dp)
+                    .height(48.dp)
+                    .clickable(
+                        interactionSource = fabInteractionSource,
+                        indication = null,
+                        onClick = {
+                            // 新会话：push 保留首页在栈底，与列表点开一致
+                            openChat(Screen.Chat(id = Uuid.random().toString()))
+                        },
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                Box(
+                    modifier = Modifier
+                        .height(40.dp)
+                        .amberPressHighlight(
+                            fabInteractionSource,
+                            fabShape,
+                            DpOffset(0.dp, 4.dp),
+                            hdrHighlight = true,
+                            glowTint = tokens.accent,
+                        )
+                        .amberShadow(fabShape, AmberDepthStyle.Accent)
+                        .background(fabFill, fabShape)
+                        .amberRim(fabShape, AmberDepthStyle.Accent)
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        imageVector = Lucide.Pen,
-                        contentDescription = stringResource(R.string.chat_page_new_message),
-                        modifier = Modifier.size(15.dp),
-                        tint = tokens.accentInk,
-                    )
-                    Text(
-                        text = stringResource(R.string.history_page_new_conversation),
-                        fontSize = 12.sp,
-                        lineHeight = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = tokens.accentInk,
-                        maxLines = 1,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            imageVector = Lucide.Pen,
+                            contentDescription = stringResource(R.string.chat_page_new_message),
+                            modifier = Modifier.size(15.dp),
+                            tint = tokens.accentInk,
+                        )
+                        Text(
+                            text = stringResource(R.string.history_page_new_conversation),
+                            fontSize = 12.sp,
+                            lineHeight = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = tokens.accentInk,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
@@ -651,15 +664,22 @@ internal fun HomeHeader(
     onOpenProfile: () -> Unit,
     hazeState: HazeState? = null,
     hazeSourceActive: Boolean = false,
+    /** Two-pane only: a header + replaces the floating pill; the narrow list drops labels to fit it. */
+    onNewSession: (() -> Unit)? = null,
 ) {
+    val compact = onNewSession != null
     val tokens = LocalAmberTokens.current
     val themePack = LocalThemePack.current
     val defaultUserName = stringResource(R.string.user_default_name)
     val searchInteraction = remember { MutableInteractionSource() }
     val settingsInteraction = remember { MutableInteractionSource() }
     val profileInteraction = remember { MutableInteractionSource() }
+    val newSessionInteraction = remember { MutableInteractionSource() }
     val controlRadius = themePack?.design?.components?.controlRadius?.toFloat()?.dp ?: 16.dp
-    val searchShape = remember(controlRadius) { AmberContinuousShape(controlRadius) }
+    // Compact (two-pane) search is icon-only: a circle matching the settings and avatar buttons.
+    val searchShape = remember(controlRadius, compact) {
+        if (compact) CircleShape else AmberContinuousShape(controlRadius)
+    }
     val searchSurfaceModifier = if (themePack == null) {
         Modifier.background(tokens.surface2, searchShape)
     } else {
@@ -728,7 +748,7 @@ internal fun HomeHeader(
 
             Box(
                 modifier = Modifier
-                    .widthIn(min = 58.dp)
+                    .widthIn(min = if (compact) 44.dp else 58.dp)
                     .height(44.dp)
                     .then(
                         if (!searchExpanded) {
@@ -766,7 +786,7 @@ internal fun HomeHeader(
                             .amberShadow(searchShape, AmberDepthStyle.Chip)
                             .then(searchSurfaceModifier)
                             .amberRim(searchShape, AmberDepthStyle.Chip)
-                            .padding(horizontal = 12.dp),
+                            .then(if (compact) Modifier.width(32.dp) else Modifier.padding(horizontal = 12.dp)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Row(
@@ -779,19 +799,21 @@ internal fun HomeHeader(
                                 modifier = Modifier.size(15.dp),
                                 tint = tokens.ink,
                             )
-                            Text(
-                                text = stringResource(R.string.history_page_search),
-                                fontSize = 12.5.sp,
-                                lineHeight = 16.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = tokens.ink,
-                                maxLines = 1,
-                            )
+                            if (!compact) {
+                                Text(
+                                    text = stringResource(R.string.history_page_search),
+                                    fontSize = 12.5.sp,
+                                    lineHeight = 16.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = tokens.ink,
+                                    maxLines = 1,
+                                )
+                            }
                         }
                     }
                 }
             }
-            Spacer(Modifier.width(4.dp))
+            if (!compact) Spacer(Modifier.width(4.dp))
 
             Box(
                 modifier = Modifier
@@ -821,7 +843,7 @@ internal fun HomeHeader(
                 }
             }
 
-            Spacer(Modifier.width(4.dp))
+            if (!compact) Spacer(Modifier.width(4.dp))
 
             // 头像点击进资料页（onUpdate=null 时 UIAvatar 不弹换头像框，仅响应 onClick）
             Box(
@@ -848,6 +870,42 @@ internal fun HomeHeader(
                         containerColor = tokens.accent,
                         showEditBadge = false,
                     )
+                }
+            }
+
+            if (onNewSession != null) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clickable(
+                            interactionSource = newSessionInteraction,
+                            indication = null,
+                            onClick = onNewSession,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .amberPressHighlight(
+                                newSessionInteraction,
+                                CircleShape,
+                                DpOffset(6.dp, 6.dp),
+                                hdrHighlight = true,
+                                glowTint = tokens.accent,
+                            )
+                            .amberShadow(CircleShape, AmberDepthStyle.Accent)
+                            .background(tokens.accent, CircleShape)
+                            .amberRim(CircleShape, AmberDepthStyle.Accent),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Lucide.Plus,
+                            contentDescription = stringResource(R.string.history_page_new_conversation),
+                            modifier = Modifier.size(18.dp),
+                            tint = tokens.accentInk,
+                        )
+                    }
                 }
             }
         }
@@ -1767,7 +1825,11 @@ private fun HomeEmptyStateContent(modifier: Modifier) {
             textAlign = TextAlign.Center,
         )
         Text(
-            text = stringResource(R.string.session_home_empty_hint),
+            // Two-pane moves the new-session button from the bottom corner into the header.
+            text = stringResource(
+                if (LocalTwoPaneLayout.current != null) R.string.session_home_empty_hint_two_pane
+                else R.string.session_home_empty_hint,
+            ),
             fontSize = 13.5.sp,
             color = tokens.ink3,
             textAlign = TextAlign.Center,

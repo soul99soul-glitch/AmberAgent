@@ -3,6 +3,7 @@ package app.amber.feature.ui.pages.novel
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -16,6 +17,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
@@ -44,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -54,10 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.amber.feature.ui.components.ds.BtnAccent
-import app.amber.feature.ui.components.ds.BtnInk
 import app.amber.feature.ui.components.ds.LiveDot
-import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -149,6 +150,7 @@ fun NovelEmptyState(
     icon: ImageVector = Lucide.BookOpenText,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    actionEnabled: Boolean = true,
 ) {
     val workspace = workspaceColors()
     val tokens = LocalAmberTokens.current
@@ -192,6 +194,7 @@ fun NovelEmptyState(
             NovelPrimaryButton(
                 text = actionLabel,
                 onClick = onAction,
+                enabled = actionEnabled,
                 accent = true,
                 compact = true,
             )
@@ -206,11 +209,13 @@ fun NovelEmptyState(
 object NovelControl {
     val ChipRadius = 999.dp
     val RadiusPrimary = 15.dp
-    val CompactHPad = 16.dp
-    val CompactVPad = 8.dp
-    /** 紧凑按钮的可见高度；48dp 触控区由外层透明盒子承担，胶囊本身不被撑胖。 */
-    val CompactHeight = 36.dp
-    val CompactShape: Shape = AmberContinuousShape(CompactHeight / 2)
+    val CompactHPad = 14.dp
+    val CompactVPad = 4.dp
+    val CompactTouchVPad = 6.dp
+    val CompactVisualMin = 36.dp
+    val CompactShape: Shape = AmberContinuousShape(CompactVisualMin / 2)
+    val PrimaryTouchVPad = 4.dp
+    val PrimaryVisualMin = 40.dp
     val QuietHPad = 10.dp
     val QuietVPad = 8.dp
     val ChipHPad = 14.dp
@@ -218,6 +223,31 @@ object NovelControl {
     val IconTap = 48.dp
     val IconGlyph = 18.dp
     val MinTouch = 48.dp
+}
+
+/** Quiet press feedback shared by novel controls; the hit area stays stationary. */
+@Composable
+internal fun Modifier.novelPressable(
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    role: Role = Role.Button,
+): Modifier {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val pressAlpha by animateFloatAsState(
+        targetValue = if (enabled && pressed) 0.84f else 1f,
+        animationSpec = tween(100),
+        label = "novelPress",
+    )
+    return this
+        .graphicsLayer { alpha = pressAlpha }
+        .clickable(
+            interactionSource = interaction,
+            indication = null,
+            enabled = enabled,
+            role = role,
+            onClick = onClick,
+        )
 }
 
 @Composable
@@ -287,7 +317,7 @@ fun NovelQuietButton(
         modifier = modifier
             .heightIn(min = NovelControl.MinTouch)
             .clip(RoundedCornerShape(NovelControl.ChipRadius))
-            .pressable(onClick = onClick, enabled = enabled)
+            .novelPressable(onClick = onClick, enabled = enabled)
             .padding(horizontal = NovelControl.QuietHPad, vertical = NovelControl.QuietVPad),
         contentAlignment = Alignment.Center,
     ) {
@@ -317,7 +347,7 @@ fun NovelIconButton(
         modifier = modifier
             .size(NovelControl.IconTap)
             .clip(RoundedCornerShape(10.dp))
-            .pressable(onClick = onClick, enabled = enabled),
+            .novelPressable(onClick = onClick, enabled = enabled),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -347,10 +377,12 @@ fun NovelGhostButton(
         danger -> workspace.red
         else -> tokens.ink
     }
-    NovelCompactTouchTarget(modifier = modifier, enabled = enabled, onClick = onClick) {
     Box(
-        modifier = Modifier
-            .heightIn(min = NovelControl.CompactHeight)
+        modifier = modifier
+            .heightIn(min = NovelControl.MinTouch)
+            .novelPressable(onClick = onClick, enabled = enabled)
+            .padding(vertical = NovelControl.CompactTouchVPad)
+            .heightIn(min = NovelControl.CompactVisualMin)
             .clip(shape)
             .border(
                 1.dp,
@@ -379,25 +411,6 @@ fun NovelGhostButton(
             textAlign = TextAlign.Center,
         )
     }
-    }
-}
-
-/** 48dp 透明触控区，居中放置可见控件；按压缩放作用于整个控件。 */
-@Composable
-private fun NovelCompactTouchTarget(
-    modifier: Modifier,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    Box(
-        modifier = modifier
-            .heightIn(min = NovelControl.MinTouch)
-            .pressable(onClick = onClick, enabled = enabled),
-        contentAlignment = Alignment.Center,
-    ) {
-        content()
-    }
 }
 
 @Composable
@@ -409,70 +422,45 @@ fun NovelPrimaryButton(
     accent: Boolean = false,
     /**
      * Compact footprint matches [NovelGhostButton] (action bars, proposal cards, dialogs).
-     * Full size uses design-system BtnInk/BtnAccent (sheet confirm, fork hero).
+     * Full size retains larger text and a stronger surface (sheet confirm, fork hero).
      */
     compact: Boolean = false,
 ) {
     val tokens = LocalAmberTokens.current
     val workspace = workspaceColors()
     val type = LocalAmberType.current
-    if (compact) {
-        val shape = NovelControl.CompactShape
-        val bg = when {
-            !enabled -> workspace.row
-            accent -> tokens.accent
-            else -> tokens.ink
-        }
-        val fg = when {
-            !enabled -> workspace.faint
-            accent -> tokens.accentInk
-            else -> tokens.bg
-        }
-        NovelCompactTouchTarget(modifier = modifier, enabled = enabled, onClick = onClick) {
-            Box(
-                modifier = Modifier
-                    .heightIn(min = NovelControl.CompactHeight)
-                    .clip(shape)
-                    .background(bg)
-                    .padding(horizontal = NovelControl.CompactHPad, vertical = NovelControl.CompactVPad),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = text,
-                    color = fg,
-                    style = type.meta.copy(fontWeight = FontWeight.SemiBold),
-                    maxLines = 2,
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-        return
+    val shape = if (compact) NovelControl.CompactShape else RoundedCornerShape(NovelControl.RadiusPrimary)
+    val bg = when {
+        !enabled -> workspace.row
+        accent -> tokens.accent
+        else -> tokens.ink
     }
-    // Full primary — same radius/padding as BtnInk/BtnAccent whether enabled or not.
-    val shape = RoundedCornerShape(NovelControl.RadiusPrimary)
-    if (!enabled) {
-        Box(
-            modifier = modifier
-                .heightIn(min = NovelControl.MinTouch)
-                .clip(shape)
-                .background(workspace.row)
-                .padding(horizontal = 18.dp, vertical = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text,
-                color = workspace.faint,
-                style = type.body.copy(fontWeight = FontWeight.SemiBold),
-                maxLines = 2,
-                textAlign = TextAlign.Center,
-            )
-        }
-        return
+    val fg = when {
+        !enabled -> workspace.faint
+        accent -> tokens.accentInk
+        else -> tokens.bg
     }
-    if (accent) {
-        BtnAccent(text = text, modifier = modifier, onClick = onClick)
-    } else {
-        BtnInk(text = text, modifier = modifier, onClick = onClick)
+    Box(
+        modifier = modifier
+            .heightIn(min = NovelControl.MinTouch)
+            .novelPressable(onClick = onClick, enabled = enabled)
+            .padding(vertical = if (compact) NovelControl.CompactTouchVPad else NovelControl.PrimaryTouchVPad)
+            .heightIn(min = if (compact) NovelControl.CompactVisualMin else NovelControl.PrimaryVisualMin)
+            .clip(shape)
+            .background(bg)
+            .padding(
+                horizontal = if (compact) NovelControl.CompactHPad else 18.dp,
+                vertical = if (compact) NovelControl.CompactVPad else 6.dp,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = fg,
+            style = (if (compact) type.meta else type.body).copy(fontWeight = FontWeight.SemiBold),
+            maxLines = 2,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

@@ -54,6 +54,7 @@ dependencies {
     implementation("androidx.compose.runtime:runtime")
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     // P1-01: 真实设置链路（Prefs/DataStore/AppScope 主线程调度）round-trip 测试，
     // 复用 app 模块既有 Robolectric 测试模式；SecretStore 用内存 fake（见 secret/TestSecretStore.kt）。
     testImplementation(libs.robolectric)

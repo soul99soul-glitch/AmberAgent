@@ -207,17 +207,20 @@ class ProviderConfigToolsTest {
                 imageGenerationModelId = settings.imageGenerationModelId,
             )
         }
-        // 等 DataStore 回读流把写后值刷新到 settingsFlow.value（eager 写 + 回读均一致）。
-        // 读取管线会把指向不存在模型的选择 id 自愈为 DEFAULT_AUTO_MODEL_ID，
-        // 因此模型 id 项同时接受种子值与自愈哨兵。
+        // IDs alone do not establish that baseUrl/models/auth and every slot are ready.
+        // Compare serialized configuration so transient UI lambdas are excluded.
+        val expectedProviders = JsonInstant.encodeToString(settings.providers)
+        val modelIds = settings.providers.flatMap { it.models }.map { it.id }.toSet()
+        fun expectedSlot(id: Uuid): Uuid = if (id in modelIds) id else DEFAULT_AUTO_MODEL_ID
         withTimeout(5_000) {
             settingsStore.settingsFlow.first { flow ->
-                flow.providers.map { p -> p.id } == settings.providers.map { p -> p.id } &&
-                    (flow.chatModelId == settings.chatModelId || flow.chatModelId == DEFAULT_AUTO_MODEL_ID) &&
-                    (
-                        flow.imageGenerationModelId == settings.imageGenerationModelId ||
-                            flow.imageGenerationModelId == DEFAULT_AUTO_MODEL_ID
-                        )
+                JsonInstant.encodeToString(flow.providers) == expectedProviders &&
+                    flow.chatModelId == expectedSlot(settings.chatModelId) &&
+                    flow.titleModelId == expectedSlot(settings.titleModelId) &&
+                    flow.ocrModelId == expectedSlot(settings.ocrModelId) &&
+                    flow.compressModelId == expectedSlot(settings.compressModelId) &&
+                    flow.suggestionModelId == expectedSlot(settings.suggestionModelId) &&
+                    flow.imageGenerationModelId == expectedSlot(settings.imageGenerationModelId)
             }
         }
     }

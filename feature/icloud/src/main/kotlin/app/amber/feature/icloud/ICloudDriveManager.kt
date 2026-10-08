@@ -2,12 +2,15 @@ package app.amber.feature.icloud
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 class ICloudDriveManager(
     context: Context,
@@ -117,13 +120,30 @@ class ICloudDriveManager(
             client.requestDriveAccess(session)
             val probePath = ICloudDrivePath.resolve(
                 vaultPath = _state.value.vaultPath,
-                relativePath = PROBE_FILE,
+                relativePath = ".amberagent_probe_${UUID.randomUUID()}.md",
             )
             val content = "AmberAgent iCloud write probe\n${System.currentTimeMillis()}\n"
-            client.writeText(session, probePath, content, overwrite = true)
-            val readBack = client.readText(session, probePath).content
-            require(readBack == content) { "Write probe read-back mismatch" }
-            client.delete(session, probePath)
+            var created = false
+            var probeError: Throwable? = null
+            try {
+                client.writeText(session, probePath, content, overwrite = false)
+                created = true
+                val readBack = client.readText(session, probePath).content
+                require(readBack == content) { "Write probe read-back mismatch" }
+            } catch (error: Throwable) {
+                probeError = error
+                throw error
+            } finally {
+                if (created) withContext(NonCancellable + Dispatchers.IO) {
+                    try {
+                        client.delete(session, probePath)
+                    } catch (cleanupError: Throwable) {
+                        val original = probeError
+                        if (original == null) throw cleanupError
+                        original.addSuppressed(cleanupError)
+                    }
+                }
+            }
             nodeCache.clear()
             prefs.edit().putBoolean(KEY_WRITE_VALIDATED, true).apply()
             updateStatus(
@@ -133,6 +153,7 @@ class ICloudDriveManager(
             )
         }.getOrElse { error ->
             prefs.edit().putBoolean(KEY_WRITE_VALIDATED, false).apply()
+            if (error is CancellationException) throw error
             updateStatus(ICloudDriveStatus.READ_ONLY, ICloudDriveCapability.READ_ONLY, error.message ?: error.toString())
         }
     }
@@ -327,7 +348,6 @@ class ICloudDriveManager(
         private const val KEY_LAST_CAPABILITY = "last_capability"
         private const val KEY_LAST_MESSAGE = "last_message"
         private const val KEY_LAST_UPDATED_AT = "last_updated_at"
-        private const val PROBE_FILE = ".amberagent_probe.md"
     }
 }
 

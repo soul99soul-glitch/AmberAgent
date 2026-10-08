@@ -82,6 +82,8 @@ class AgentTaskStore(
      * only update other fields. The clear flags mean "write exactly what was passed":
      * a non-null argument overwrites the stored value and a null argument clears it, so a
      * failure reporter can record an error and clear flags can reset both fields.
+     * [expectedStatus] rejects delayed projections whose owner has already moved
+     * the task; callers without a guard retain explicit retry/followup behavior.
      */
     suspend fun update(
         taskId: String,
@@ -100,11 +102,13 @@ class AgentTaskStore(
         outputRef: AgentTaskOutputRef? = null,
         lastHeartbeatMs: Long? = null,
         expectedSpec: JsonObject? = null,
+        expectedStatus: AgentTaskStatus? = null,
     ): AgentTaskSnapshot? {
         awaitReady()
         return mutex.withLock {
             val current = tasks[taskId] ?: return@withLock null
             if (expectedSpec != null && expectedSpec != current.spec) return@withLock null
+            if (expectedStatus != null && expectedStatus != current.status) return@withLock null
             val next = current.copy(
                 status = status ?: current.status,
                 queueState = queueState ?: status?.toQueueState(current.type) ?: current.queueState,

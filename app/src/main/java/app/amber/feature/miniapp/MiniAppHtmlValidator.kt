@@ -4,6 +4,9 @@ class MiniAppValidationException(message: String) : IllegalArgumentException(mes
 
 object MiniAppHtmlValidator {
     private val requiredHtmlPattern = Regex("""(?is)<\s*(html\b|!doctype\s+html)""")
+    /** App-bundled libraries are the only allowed `<script src>`; the exact tag form keeps extra attributes out. */
+    private val bundledLibraryScriptPattern =
+        Regex("""(?is)<script\s+src\s*=\s*(["'])amber-miniapp-lib://three\.min\.js\1\s*>""")
     private val blockedPatterns = listOf(
         Regex("""(?is)<\s*script\b[^>]*\bsrc\s*=""") to "External scripts are not allowed",
         Regex("""(?is)<\s*(iframe|object|embed|form)\b""") to "Embedded/submit-capable elements are not allowed",
@@ -41,7 +44,8 @@ object MiniAppHtmlValidator {
         if (!requiredHtmlPattern.containsMatchIn(html)) {
             throw MiniAppValidationException("HTML must include <html> or <!DOCTYPE html>")
         }
-        blockedPatterns.firstOrNull { (pattern, _) -> pattern.containsMatchIn(html) }?.let { (_, reason) ->
+        val checked = bundledLibraryScriptPattern.replace(html, "")
+        blockedPatterns.firstOrNull { (pattern, _) -> pattern.containsMatchIn(checked) }?.let { (_, reason) ->
             throw MiniAppValidationException(reason)
         }
         if (hasInvalidImageResource(html)) {

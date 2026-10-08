@@ -106,6 +106,7 @@ val boardModule = module {
             playbookRepository = get(),
             researchHarness = get(),
             appScope = get(),
+            providerCatalog = get(),
             restoreWriteGate = get(),
         )
     }

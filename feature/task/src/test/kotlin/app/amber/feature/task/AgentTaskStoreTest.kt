@@ -2,6 +2,7 @@ package app.amber.feature.task
 
 import android.content.ContextWrapper
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
@@ -32,6 +33,67 @@ class AgentTaskStoreTest {
     val tempFolder = TemporaryFolder()
 
     private val json = Json { encodeDefaults = true }
+
+    @Test
+    fun `late council progress cannot replace completed or cancelled task`() = runBlocking {
+        for (terminalStatus in listOf(AgentTaskStatus.COMPLETED, AgentTaskStatus.CANCELLED)) {
+            val root = tempFolder.newFolder("late-progress-${terminalStatus.name}")
+            val taskStore = store(root)
+            val running = snapshot(
+                status = AgentTaskStatus.RUNNING,
+                queueState = AgentTaskQueueState.ACTIVE,
+                recoveryState = AgentTaskRecoveryState.ACTIVE,
+                retryPolicy = AgentTaskRetryPolicy(),
+            )
+            taskStore.register(running)
+            val releaseProgress = CompletableDeferred<Unit>()
+            val delayedProgress = async {
+                releaseProgress.await()
+                taskStore.update(
+                    taskId = running.taskId,
+                    status = AgentTaskStatus.RUNNING,
+                    summary = "old seat output",
+                    cancelCapability = true,
+                    expectedStatus = AgentTaskStatus.RUNNING,
+                )
+            }
+            val terminal = taskStore.update(
+                taskId = running.taskId,
+                status = terminalStatus,
+                summary = "final result",
+                cancelCapability = false,
+            )!!
+            releaseProgress.complete(Unit)
+
+            assertNull(delayedProgress.await())
+            assertEquals(terminal, taskStore.read(running.taskId))
+            assertEquals(listOf(terminal), taskStore.tasksFlow.value)
+            assertEquals(terminal, readSnapshot(root, running.taskId))
+        }
+    }
+
+    @Test
+    fun `ordinary explicit followup can still move terminal task back to running`() = runBlocking {
+        val root = tempFolder.newFolder("explicit-followup")
+        val taskStore = store(root)
+        val completed = snapshot(
+            status = AgentTaskStatus.COMPLETED,
+            queueState = AgentTaskQueueState.TERMINAL,
+            recoveryState = AgentTaskRecoveryState.OUTPUT_ONLY,
+            retryPolicy = AgentTaskRetryPolicy(),
+        )
+        taskStore.register(completed)
+
+        val resumed = taskStore.update(
+            taskId = completed.taskId,
+            status = AgentTaskStatus.RUNNING,
+            cancelCapability = true,
+        )!!
+
+        assertEquals(AgentTaskStatus.RUNNING, resumed.status)
+        assertTrue(resumed.cancelCapability)
+        assertEquals(resumed, readSnapshot(root, completed.taskId))
+    }
 
     @Test
     fun `register atomically persists and reloads snapshot`() = runBlocking {

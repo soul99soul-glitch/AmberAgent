@@ -11,6 +11,7 @@ import app.amber.core.jev.JevWebGoalRunner
 import app.amber.core.jev.WebGoalAction
 import app.amber.core.jev.WebGoalDriver
 import app.amber.core.jev.WebGoalElement
+import app.amber.core.jev.isBlockedGoalTarget
 import app.amber.feature.webmount.primitives.WebMountLease
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -165,7 +166,7 @@ private class BridgeGoalDriver(
             timeoutMs = 6_000L,
             dispatchWithLease = dispatch,
         ) as? JsonObject ?: return emptyList()
-        return parseElements(payload, max)
+        return parseWebGoalElements(payload, max)
     }
 
     override suspend fun performAction(action: WebGoalAction): JsonObject {
@@ -223,31 +224,42 @@ private class BridgeGoalDriver(
         }
     }
 
-    /** 从 extract 结果通用收集带 ref 的节点（不依赖具体包装层结构）。 */
-    private fun parseElements(payload: JsonObject, max: Int): List<WebGoalElement> {
-        val snapshotId = payload.stringField("snapshot_id")
-        val out = mutableListOf<WebGoalElement>()
-        fun walk(element: JsonElement) {
-            if (out.size >= max) return
-            when (element) {
-                is JsonObject -> {
-                    val ref = (element["ref"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
-                    if (ref != null) {
-                        val label = sequenceOf("name", "label", "text", "accessible_name", "aria", "role")
-                            .mapNotNull { (element[it] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
-                            .firstOrNull() ?: ref
-                        out += WebGoalElement(ref = ref, snapshotId = snapshotId, label = label)
-                    }
-                    element.values.forEach(::walk)
-                }
-                is JsonArray -> element.forEach(::walk)
-                else -> Unit
-            }
-        }
-        walk(payload)
-        return out
-    }
-
-    private fun JsonObject.stringField(key: String): String? =
-        (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
 }
+
+/** 从 extract 结果通用收集带 ref 的节点（不依赖具体包装层结构）。 */
+internal fun parseWebGoalElements(payload: JsonObject, max: Int): List<WebGoalElement> {
+    val snapshotId = payload.stringField("snapshot_id")
+    val out = mutableListOf<WebGoalElement>()
+    fun walk(element: JsonElement) {
+        if (out.size >= max) return
+        when (element) {
+            is JsonObject -> {
+                val ref = (element["ref"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                if (ref != null) {
+                    val label = sequenceOf("name", "label", "text", "accessible_name", "aria", "role")
+                        .mapNotNull { (element[it] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
+                        .firstOrNull() ?: ref
+                    val candidate = WebGoalElement(
+                        ref = ref,
+                        snapshotId = snapshotId,
+                        label = label,
+                        role = element.stringField("role"),
+                        tag = element.stringField("tag"),
+                        inputType = element.stringField("input_type"),
+                        disabled = (element["disabled"] as? JsonPrimitive)?.contentOrNull == "true",
+                        readOnly = (element["readonly"] as? JsonPrimitive)?.contentOrNull == "true",
+                    )
+                    if (!candidate.isBlockedGoalTarget()) out += candidate
+                }
+                element.values.forEach(::walk)
+            }
+            is JsonArray -> element.forEach(::walk)
+            else -> Unit
+        }
+    }
+    walk(payload)
+    return out
+}
+
+private fun JsonObject.stringField(key: String): String? =
+    (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }

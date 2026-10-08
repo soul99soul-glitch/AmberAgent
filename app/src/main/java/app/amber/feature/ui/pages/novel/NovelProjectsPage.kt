@@ -14,6 +14,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,6 +36,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -42,7 +44,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import app.amber.feature.ui.components.ds.pressable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,6 +64,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.ai.provider.hasUsableAuth
+import app.amber.core.settings.findProvider
+import app.amber.core.settings.getCurrentChatModel
 import app.amber.feature.novelworkspace.NovelWorkspaceBookExport
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectSummary
 import app.amber.feature.ui.components.ds.AmberCard
@@ -70,8 +74,10 @@ import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTone
+import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
@@ -81,6 +87,9 @@ import kotlinx.coroutines.withContext
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.BookOpenText
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.KeyRound
+import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.Trash
 import com.composables.icons.lucide.EllipsisVertical
 import org.koin.androidx.compose.koinViewModel
@@ -95,7 +104,16 @@ fun NovelProjectsPage(
     viewModel: NovelProjectsViewModel = koinViewModel(),
 ) {
     val navController = LocalNavController.current
+    val appSettings = LocalSettings.current
+    // iOS root parity: surface a setup card when no usable writing model is
+    // configured — the standalone app otherwise has no discoverable path into
+    // provider settings before the first generation fails.
+    val needsModelSetup = remember(appSettings) {
+        val model = appSettings.getCurrentChatModel()
+        model == null || model.findProvider(appSettings.providers)?.hasUsableAuth() != true
+    }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val actionBlocked = state.busy || state.loading
     val workspace = workspaceColors()
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
@@ -109,6 +127,7 @@ fun NovelProjectsPage(
     var deleteTarget by remember { mutableStateOf<NovelWorkspaceProjectSummary?>(null) }
     var renameTarget by remember { mutableStateOf<NovelWorkspaceProjectSummary?>(null) }
     var bookExportTarget by remember { mutableStateOf<NovelWorkspaceProjectSummary?>(null) }
+    var workspaceExportTarget by remember { mutableStateOf<NovelWorkspaceProjectSummary?>(null) }
     var pendingExport by remember {
         mutableStateOf<Pair<String, ByteArray>?>(null)
     }
@@ -148,7 +167,7 @@ fun NovelProjectsPage(
                     when {
                         bytes == null -> viewModel.reportError(importTooLargeError)
                         bytes.isEmpty() -> viewModel.reportError(importEmptyError)
-                        else -> viewModel.importZip(bytes) { }
+                        else -> viewModel.importProject(bytes) { }
                     }
                 },
                 onFailure = {
@@ -277,8 +296,17 @@ fun NovelProjectsPage(
                         onClick = {
                             openImport.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                         },
-                        enabled = !state.busy,
+                        enabled = !actionBlocked,
                     )
+                    // Model/service setup entry — the standalone app has no other
+                    // path into provider settings (iOS root gear parity).
+                    IconButton(onClick = { navController.navigate(Screen.SettingProvider) }) {
+                        Icon(
+                            Lucide.Settings,
+                            contentDescription = stringResource(R.string.settings),
+                            tint = workspace.ink,
+                        )
+                    }
                 },
             )
         },
@@ -287,8 +315,8 @@ fun NovelProjectsPage(
             if (state.projects.isNotEmpty()) Box(
                 modifier = Modifier
                     .heightIn(min = 48.dp)
-                    .pressable(
-                        enabled = !state.busy,
+                    .novelPressable(
+                        enabled = !actionBlocked,
                         onClick = { showCreate = true },
                     ),
                 contentAlignment = Alignment.Center,
@@ -354,6 +382,10 @@ fun NovelProjectsPage(
                 state.projects.isEmpty() -> ProjectsPhase.Empty
                 else -> ProjectsPhase.List
             }
+            if (state.loading && state.projects.isNotEmpty()) Text(
+                stringResource(R.string.novel_loading), style = type.meta, color = workspace.muted,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
             AnimatedContent(
                 targetState = listPhase,
                 modifier = Modifier.fillMaxSize(),
@@ -371,22 +403,35 @@ fun NovelProjectsPage(
                         }
                     }
                     ProjectsPhase.Empty -> {
-                        NovelEmptyState(
-                            title = stringResource(R.string.novel_projects_empty_title),
-                            subtitle = stringResource(R.string.novel_projects_empty_subtitle),
-                            actionLabel = stringResource(R.string.novel_new_project),
-                            onAction = { if (!state.busy) showCreate = true },
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                        // Footer lives below the empty state via weight — on short
+                        // (landscape/split) screens the two must never overlap.
+                        Column(Modifier.fillMaxSize()) {
+                            NovelEmptyState(
+                                title = stringResource(R.string.novel_projects_empty_title),
+                                subtitle = stringResource(R.string.novel_projects_empty_subtitle),
+                                actionLabel = stringResource(R.string.novel_new_project),
+                                actionEnabled = !actionBlocked,
+                                onAction = { if (!actionBlocked) showCreate = true },
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                            )
+                            if (needsModelSetup) {
+                                NovelModelSetupPrompt(
+                                    onClick = { navController.navigate(Screen.SettingProvider) },
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                )
+                            }
+                            NovelInkFooter()
+                        }
                     }
                     ProjectsPhase.List -> {
+                        Box(Modifier.fillMaxSize()) {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(
                                 start = 16.dp,
                                 end = 16.dp,
                                 top = 8.dp,
-                                bottom = 96.dp,
+                                bottom = if (needsModelSetup) 152.dp else 96.dp,
                             ),
                             verticalArrangement = Arrangement.spacedBy(0.dp),
                         ) {
@@ -399,7 +444,7 @@ fun NovelProjectsPage(
                             ) { index, project ->
                                 NovelProjectCard(
                                     project = project,
-                                    busy = state.busy,
+                                    busy = actionBlocked,
                                     grouped = true,
                                     groupStart = index == 0,
                                     groupEnd = index == state.projects.lastIndex,
@@ -408,15 +453,24 @@ fun NovelProjectsPage(
                                     },
                                     onRename = { renameTarget = project },
                                     onDelete = { deleteTarget = project },
-                                    onExportZip = {
-                                        viewModel.exportZip(project.id) { name, bytes ->
-                                            pendingExport = name to bytes
-                                            createZipDoc.launch(name)
-                                        }
-                                    },
+                                    onExportZip = { workspaceExportTarget = project },
                                     onExportBook = { bookExportTarget = project },
                                 )
                             }
+                            item {
+                                // Quiet footer: nib mark + version, and the hidden
+                                // ink easter egg behind a 5-tap streak.
+                                NovelInkFooter()
+                            }
+                        }
+                        if (needsModelSetup) {
+                            NovelModelSetupPrompt(
+                                onClick = { navController.navigate(Screen.SettingProvider) },
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(16.dp),
+                            )
+                        }
                         }
                     }
                 }
@@ -427,6 +481,7 @@ fun NovelProjectsPage(
     if (showCreate) {
         NovelCreateProjectDialog(
             busy = state.busy,
+            actionBlocked = actionBlocked,
             errorMessage = state.errorMessage,
             onDismiss = { if (!state.busy) showCreate = false },
             onCreate = { name -> viewModel.createBlankWorkspace(name) },
@@ -462,7 +517,7 @@ fun NovelProjectsPage(
                         deleteTarget = null
                     },
                     danger = true,
-                    enabled = !state.busy,
+                    enabled = !actionBlocked,
                 )
             },
             dismissButton = {
@@ -493,7 +548,7 @@ fun NovelProjectsPage(
                     onValueChange = { name = it },
                     label = { Text(stringResource(R.string.novel_project_name)) },
                     singleLine = true,
-                    enabled = !state.busy,
+                    enabled = !actionBlocked,
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
@@ -504,7 +559,7 @@ fun NovelProjectsPage(
                         viewModel.renameProject(target.id, name)
                         renameTarget = null
                     },
-                    enabled = !state.busy && name.isNotBlank(),
+                    enabled = !actionBlocked && name.isNotBlank(),
                 )
             },
             dismissButton = {
@@ -539,14 +594,17 @@ fun NovelProjectsPage(
                     NovelGhostButton(
                         text = stringResource(R.string.novel_export_txt),
                         onClick = { startBookExport(target, NovelWorkspaceBookExport.Format.TXT) },
+                        enabled = !actionBlocked,
                     )
                     NovelGhostButton(
                         text = stringResource(R.string.chat_page_export_markdown),
                         onClick = { startBookExport(target, NovelWorkspaceBookExport.Format.MARKDOWN) },
+                        enabled = !actionBlocked,
                     )
                     NovelGhostButton(
                         text = stringResource(R.string.novel_export_epub),
                         onClick = { startBookExport(target, NovelWorkspaceBookExport.Format.EPUB) },
+                        enabled = !actionBlocked,
                     )
                 }
             },
@@ -556,6 +614,21 @@ fun NovelProjectsPage(
                     text = stringResource(R.string.cancel),
                     onClick = { bookExportTarget = null },
                 )
+            },
+        )
+    }
+
+    workspaceExportTarget?.let { target ->
+        NovelWorkspaceExportDialog(
+            projectName = target.name,
+            busy = actionBlocked,
+            onDismiss = { workspaceExportTarget = null },
+            onExport = {
+                workspaceExportTarget = null
+                viewModel.exportZip(target.id) { name, bytes ->
+                    pendingExport = name to bytes
+                    createZipDoc.launch(name)
+                }
             },
         )
     }
@@ -623,6 +696,7 @@ private fun NovelProjectCard(
                 .fillMaxWidth()
                 .heightIn(min = 64.dp)
                 .combinedClickable(
+                    enabled = !busy,
                     onClick = onOpen,
                     onLongClick = { menuExpanded = true },
                 )
@@ -661,7 +735,7 @@ private fun NovelProjectCard(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .clickable(role = Role.Button) { menuExpanded = true },
+                        .clickable(enabled = !busy, role = Role.Button) { menuExpanded = true },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -750,6 +824,7 @@ private fun NovelProjectCard(
 @Composable
 private fun NovelCreateProjectDialog(
     busy: Boolean,
+    actionBlocked: Boolean,
     errorMessage: String? = null,
     onDismiss: () -> Unit,
     onCreate: (String) -> Unit,
@@ -763,7 +838,7 @@ private fun NovelCreateProjectDialog(
         focusedContainerColor = workspace.paper,
         unfocusedContainerColor = workspace.paper,
     )
-    val canSubmit = name.isNotBlank() && !busy
+    val canSubmit = name.isNotBlank() && !actionBlocked
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -797,7 +872,7 @@ private fun NovelCreateProjectDialog(
                     onValueChange = { name = it },
                     label = { Text(stringResource(R.string.novel_project_name)) },
                     singleLine = true,
-                    enabled = !busy,
+                    enabled = !actionBlocked,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     colors = fieldColors,
@@ -825,4 +900,51 @@ private fun NovelCreateProjectDialog(
             )
         },
     )
+}
+
+/** Bottom card shown when no usable writing model exists; mirrors iOS NovelApp's
+ * NovelModelSetupPrompt and deep-links into provider settings. */
+@Composable
+private fun NovelModelSetupPrompt(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(AmberContinuousShape(20.dp))
+            .background(workspace.paper)
+            .border(workspaceBorder(), AmberContinuousShape(20.dp))
+            .novelPressable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            Lucide.KeyRound,
+            contentDescription = null,
+            tint = workspace.amber,
+            modifier = Modifier.size(20.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                stringResource(R.string.novel_setup_model_title),
+                style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                color = workspace.ink,
+            )
+            Text(
+                stringResource(R.string.novel_setup_model_body),
+                style = type.meta,
+                color = workspace.muted,
+            )
+        }
+        Icon(
+            Lucide.ChevronRight,
+            contentDescription = null,
+            tint = workspace.faint,
+            modifier = Modifier.size(16.dp),
+        )
+    }
 }

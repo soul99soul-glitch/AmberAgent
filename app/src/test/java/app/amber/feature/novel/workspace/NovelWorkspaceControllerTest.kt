@@ -19,8 +19,12 @@ import app.amber.core.agent.runtime.adapter.LegacyRunScope
 import app.amber.core.agent.runtime.impl.InMemoryAgentRegistry
 import app.amber.core.agent.runtime.impl.InProcessAgentRunner
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJobs
+import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJob
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
+import app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary
+import app.amber.feature.novelworkspace.NovelWorkspaceRestoreCancelled
 import app.amber.feature.novelworkspace.NovelWorkspaceStore
+import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -122,6 +126,55 @@ class NovelWorkspaceControllerTest {
         val job = NovelWorkspaceGhostwriteJobs.snapshot(project.projectDirectory).jobs.single()
         assertEquals("failed", job.status)
         assertNotNull(job.reason)
+    }
+
+    @Test fun actionsCapturedBeforeRestoreCannotChangeRestoredJobsOrWorkManager() = runTest {
+        val staleEpoch = NovelWorkspaceRestoreBoundary.currentEpoch()
+        NovelWorkspaceRestoreBoundary.beginRestore()
+        NovelWorkspaceRestoreBoundary.finishRestore()
+        for (action in listOf("start", "polish", "pause", "resume", "retry", "cancel", "reconcile")) {
+            val project = NovelWorkspaceProjectRepository(temporary.newFolder()).createBlank("Restore $action fixture")
+            val directory = project.projectDirectory
+            seedChapterPlan(directory)
+            if (action !in listOf("start", "polish")) {
+                val status = when (action) {
+                    "resume" -> NovelWorkspaceGhostwriteJob.STATUS_PAUSED
+                    "retry" -> NovelWorkspaceGhostwriteJob.STATUS_FAILED
+                    else -> NovelWorkspaceGhostwriteJob.STATUS_RUNNING
+                }
+                // A restore may retain a paused or failed execution key; old UI actions
+                // must be rejected before that key can acquire a new owner or be cancelled.
+                NovelWorkspaceGhostwriteJobs.save(
+                    NovelWorkspaceGhostwriteJob(
+                        id = "restored-job",
+                        executionId = "retained-execution",
+                        branchSlug = "主线",
+                        targetChapterCount = 2,
+                        startOrdinal = 0,
+                        status = status,
+                        createdAt = Instant.parse("2026-09-30T00:00:00Z"),
+                        updatedAt = Instant.parse("2026-09-30T00:00:00Z"),
+                    ), directory,
+                )
+            }
+            val jobsBefore = NovelWorkspaceGhostwriteJobs.snapshot(directory).jobs
+            val result = runCatching {
+                when (action) {
+                    "start" -> controller.startBatch(directory, directory.name, "主线", 2, expectedRestoreEpoch = staleEpoch)
+                    "polish" -> controller.startPolishBatch(directory, directory.name, "主线", 1, 1, expectedRestoreEpoch = staleEpoch)
+                    "pause" -> controller.pause(directory, "restored-job", "retained-execution", expectedRestoreEpoch = staleEpoch)
+                    "resume" -> controller.resume(directory, directory.name, "restored-job", "retained-execution", "主线", expectedRestoreEpoch = staleEpoch)
+                    "retry" -> controller.retryFailed(directory, directory.name, "restored-job", "retained-execution", "主线", expectedRestoreEpoch = staleEpoch)
+                    "cancel" -> controller.cancel(directory, "restored-job", "retained-execution", expectedRestoreEpoch = staleEpoch)
+                    else -> controller.reconcile(directory, expectedRestoreEpoch = staleEpoch)
+                }
+            }
+            assertTrue("$action should reject the stale restore epoch", result.exceptionOrNull() is NovelWorkspaceRestoreCancelled)
+            assertEquals(jobsBefore, NovelWorkspaceGhostwriteJobs.snapshot(directory).jobs)
+            assertTrue(withContext(Dispatchers.IO) {
+                manager.getWorkInfosByTag(NovelWorkspaceGhostwriteController.WORK_TAG).get().isEmpty()
+            })
+        }
     }
 
     private fun seedChapterPlan(directory: java.io.File) {

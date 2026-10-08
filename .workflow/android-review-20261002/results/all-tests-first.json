@@ -1,0 +1,131 @@
+{
+  "core/settings": {
+    "tests": 95,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "core/jev": {
+    "tests": 39,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "core/agent-runtime-impl": {
+    "tests": 20,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "core/agent-store-room": {
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "app": {
+    "tests": 2696,
+    "failures": 2,
+    "errors": 0,
+    "skipped": 14,
+    "failed": [
+      "app.amber.feature.miniapp.MiniAppSystemCapabilityBridgeTest::conversationImageIsSnapshottedThroughGuardedClientBeforeDraftOrSend",
+      "app.amber.agent.di.KoinGraphVerifyTest::every definition's dependencies resolve in the startup graph"
+    ]
+  },
+  "highlight": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "document": {
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "search": {
+    "tests": 16,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "common": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "ai": {
+    "tests": 210,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "feature/tools/access": {
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "feature/tools/api": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "feature/workspace": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "feature/terminal": {
+    "tests": 17,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 8,
+    "failed": []
+  },
+  "feature/novel": {
+    "tests": 56,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1,
+    "failed": []
+  },
+  "feature/task": {
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  "feature/novel-workspace": {
+    "tests": 155,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1,
+    "failed": []
+  },
+  "feature/modelcouncil": {
+    "tests": 24,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  }
+}

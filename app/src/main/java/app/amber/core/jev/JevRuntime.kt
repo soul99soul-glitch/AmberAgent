@@ -1,6 +1,10 @@
 package app.amber.core.jev
 
 import app.amber.core.settings.Settings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 
 /**
@@ -14,7 +18,14 @@ class JevRuntime(
     val policy: JevPolicy = JevPolicy(),
     /** 校准记录落点；默认内存实现（测试），生产由 DI 注入文件实现。 */
     val calibration: JevCalibrationStore = JevCalibrationStore.IN_MEMORY,
+    /** 不阻塞请求准备路径的判断（shadow 观测、压缩保留）所用的后台作用域。 */
+    private val backgroundScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
+    /** 在后台执行一次判断；调用方立即走原路径。异常只影响这一次判断。 */
+    fun launchInBackground(block: suspend () -> Unit) {
+        backgroundScope.launch { runCatching { block() } }
+    }
+
     fun configFor(purpose: JevPurpose): JevRuntimeConfig? {
         val setting = settingsProvider().jev
         val mode = setting.modeFor(purpose)
@@ -53,6 +64,13 @@ class JevRuntime(
         return JevRuntimeOutcome(config.mode, decision, stale)
     }
 }
+
+/**
+ * 后台判断按用途使用独立的 run 身份：不与同一轮前台 active 请求、也不与其他
+ * 用途的后台判断争用 per-run 串行锁（排队时间会吃掉请求自己的 deadline）。
+ */
+internal fun backgroundRunKey(runKey: String?, purpose: JevPurpose): String? =
+    runKey?.let { "$it#background:${purpose.name}" }
 
 class JevRuntimeOutcome internal constructor(
     val mode: JevMode,

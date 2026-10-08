@@ -29,13 +29,23 @@ object NovelWorkspaceContextAssembler {
         locale: Locale = Locale.CHINESE,
     ): String {
         val nodes = NovelWorkspaceNodes.collect(store, branchSlug)
+        val always = nodes.filter { node ->
+            node.injection == "always" && when (node.nodeKind) {
+                NovelWorkspaceNodes.KIND_FORESHADOWING -> flags.foreshadowing
+                NovelWorkspaceNodes.KIND_DECISION_LOG -> flags.decisions
+                else -> flags.neighborhood
+            }
+        }
+        val contextual = nodes.filter { it.injection != "off" && it.injection != "always" }
         val sections = mutableListOf<String>()
+        val alwaysSection = alwaysSection(always, locale)
 
         if (flags.plot) {
             plotSection(store, branchSlug, locale)?.let { sections.add(it) }
         }
+        alwaysSection?.let { sections.add(it) }
         if (flags.foreshadowing) {
-            foreshadowingSection(nodes, locale)?.let { sections.add(it) }
+            foreshadowingSection(contextual, locale)?.let { sections.add(it) }
         }
 
         if (flags.neighborhood) {
@@ -45,19 +55,20 @@ object NovelWorkspaceContextAssembler {
             if (plan != null) {
                 val planText = NovelWorkspaceMarkdown.parseFile(plan).body
                 val subgraph = NovelWorkspaceNodes.neighborhood(nodes, planText)
+                    .filter { it.injection != "always" }
                 neighborhoodSection(subgraph, locale)?.let { sections.add(it) }
             }
         }
 
         if (flags.decisions) {
-            decisionsSection(nodes.filter { it.nodeKind == NovelWorkspaceNodes.KIND_DECISION_LOG }, locale)
+            decisionsSection(contextual.filter { it.nodeKind == NovelWorkspaceNodes.KIND_DECISION_LOG }, locale)
                 ?.let { sections.add(it) }
         }
 
         val kept = mutableListOf<String>()
         var used = 0
         for (section in sections) {
-            if (used + section.length > maxChars && kept.isNotEmpty()) continue
+            if (used + section.length > maxChars && kept.isNotEmpty() && section != alwaysSection) continue
             kept.add(section)
             used += section.length
         }
@@ -148,6 +159,16 @@ object NovelWorkspaceContextAssembler {
             "## 本章相关节点（以这些为准，勿与之矛盾）\n$lines"
         } else {
             "## Chapter-related nodes (source of truth; do not contradict)\n$lines"
+        }
+    }
+
+    private fun alwaysSection(nodes: List<NovelWorkspaceNode>, locale: Locale): String? {
+        if (nodes.isEmpty()) return null
+        val lines = nodes.joinToString("\n") { node -> renderNode(node, locale) }
+        return if (isChinese(locale)) {
+            "## 固定注入资料（以这些为准）\n$lines"
+        } else {
+            "## Pinned materials (source of truth)\n$lines"
         }
     }
 

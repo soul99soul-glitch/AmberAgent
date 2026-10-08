@@ -301,7 +301,7 @@ class MiniAppBridge(
                             "host.sendToConversation (send)",
                             JsonPrimitive(text),
                         )
-                        conversationWriter.writeAndSend(conversationId, text, attachments).toJson()
+                        conversationWriter.writeAndSend(conversationId, text, snapshotConversationImages(attachments)).toJson()
                     }
 
                     else -> confirm(
@@ -318,7 +318,7 @@ class MiniAppBridge(
                             "host.sendToConversation (draft)",
                             JsonPrimitive(text),
                         )
-                        conversationWriter.writeDraft(conversationId, text, attachments).toJson()
+                        conversationWriter.writeDraft(conversationId, text, snapshotConversationImages(attachments)).toJson()
                     }
                 }
             }
@@ -509,6 +509,16 @@ class MiniAppBridge(
 
             else -> throw IllegalArgumentException("Unknown MiniApp bridge method: $method")
         }
+    }
+
+    /** Host-written images retain the MiniApp DNS/redirect boundary as durable snapshots. */
+    private suspend fun snapshotConversationImages(
+        attachments: List<app.amber.ai.ui.UIMessagePart>,
+    ): List<app.amber.ai.ui.UIMessagePart> = attachments.map { part ->
+        if (part is app.amber.ai.ui.UIMessagePart.Image && part.url.startsWith("https://", ignoreCase = true)) {
+            val image = httpClient.fetchImage(part.url)
+            part.copy(url = "data:${image.contentType};base64," + java.util.Base64.getEncoder().encodeToString(image.bytes))
+        } else part
     }
 
     /**

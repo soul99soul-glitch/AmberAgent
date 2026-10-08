@@ -14,6 +14,9 @@ import app.amber.feature.ui.context.LocalNavController
 @Composable
 fun BackButton(modifier: Modifier = Modifier) {
     val navController = LocalNavController.current
+    // On a start destination (standalone app home, deep-linked page as root)
+    // the button can only no-op — render nothing instead of a dead control.
+    if (!navController.canPop) return
     val workspace = workspaceColors()
     IconButton(
         onClick = { navController.popBackStack() },

@@ -48,8 +48,9 @@ object NovelWorkspaceSlug {
         } else {
             ""
         }
-        var base = leafPreferred.ifEmpty { fallback.take(8) }
-        if (base.isEmpty()) base = "untitled"
+        var base = leafPreferred.takeUnless { it.isEmpty() || it.startsWith(".") }
+            ?: fallback.take(8)
+        if (base.isEmpty() || base.startsWith(".")) base = "untitled"
         var candidate = base
         var suffix = 2
         while (prefix + candidate in used) {

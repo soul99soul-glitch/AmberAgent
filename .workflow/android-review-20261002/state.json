@@ -1,0 +1,40 @@
+{
+  "status": "complete",
+  "baseline": "/tmp/amber-android-review-20261002-baseline",
+  "head": "6a66f7a3c91f9b4f8f0335c8b0f58fa88dca77d9",
+  "phases": [
+    {
+      "id": 1,
+      "status": "complete",
+      "evidence": "Independent phase review closed; final 3390 tests/0fail/24skip; ordinary Debug assemble and v2 signature verified"
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "evidence": "Independent phase review closed; final 3390 tests/0fail/24skip; ordinary Debug assemble and v2 signature verified"
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "evidence": "Independent phase review closed; final 3390 tests/0fail/24skip; ordinary Debug assemble and v2 signature verified"
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "evidence": "Independent phase review closed; final 3390 tests/0fail/24skip; ordinary Debug assemble and v2 signature verified"
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "evidence": "Independent phase review closed; final 3390 tests/0fail/24skip; ordinary Debug assemble and v2 signature verified"
+    }
+  ],
+  "accepted_production_issue_groups": 48,
+  "severity": {
+    "P1": 21,
+    "P2": 26,
+    "P3": 1
+  },
+  "final_review": "results/phase5-review.md",
+  "report": "docs/reviews/2026-10-02-comprehensive-review.md"
+}

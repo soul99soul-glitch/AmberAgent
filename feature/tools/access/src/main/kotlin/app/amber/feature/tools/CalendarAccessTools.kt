@@ -238,21 +238,28 @@ internal fun buildCalendarUpdateValues(
         values.put(CalendarContract.Events.EVENT_LOCATION, input.string("location").orEmpty())
     }
 
-    val start = if (objectInput.containsKey("start_time") || objectInput.containsKey("start_epoch_ms")) {
+    val changesStart = objectInput.containsKey("start_time") || objectInput.containsKey("start_epoch_ms")
+    val changesEnd = objectInput.containsKey("end_time") || objectInput.containsKey("end_epoch_ms")
+    if (!changesStart && !changesEnd) return values
+    // Recurring rows use DURATION instead of DTEND. Editing their time range
+    // requires recurrence-aware handling; do not insert an invalid DTEND.
+    require(current.endEpochMs > 0L) { "Time changes to recurring calendar events are not supported" }
+
+    val start = if (changesStart) {
         input.timeMillis("start_time", "start_epoch_ms")
     } else {
         current.beginEpochMs
     }
-    val end = if (objectInput.containsKey("end_time") || objectInput.containsKey("end_epoch_ms")) {
+    val end = if (changesEnd) {
         input.timeMillis("end_time", "end_epoch_ms")
     } else {
         current.endEpochMs
     }
     require(end > start) { "end_time must be after start_time" }
-    if (objectInput.containsKey("start_time") || objectInput.containsKey("start_epoch_ms")) {
+    if (changesStart) {
         values.put(CalendarContract.Events.DTSTART, start)
     }
-    if (objectInput.containsKey("end_time") || objectInput.containsKey("end_epoch_ms")) {
+    if (changesEnd) {
         values.put(CalendarContract.Events.DTEND, end)
     }
     return values

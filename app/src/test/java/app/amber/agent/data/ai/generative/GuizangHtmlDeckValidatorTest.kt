@@ -126,6 +126,28 @@ class GuizangHtmlDeckValidatorTest {
     }
 
     @Test
+    fun servesBundledThreeAndRejectsCdnThree() {
+        val html = """
+            <div id="deck"><section class="slide"><canvas id="c"></canvas></section></div>
+            <script src="https://amberagent.local/full-html/three.min.js"></script>
+            <script>new THREE.OrbitControls(new THREE.PerspectiveCamera(), document.body)</script>
+        """.trimIndent()
+
+        assertTrue(GuizangHtmlDeckValidator.validateHtml(html).valid)
+        assertEquals(
+            GuizangHtmlDeckValidator.RuntimeAsset.THREE,
+            GuizangHtmlDeckValidator.runtimeAssetForUrl(GuizangHtmlDeckValidator.LOCAL_THREE_URL),
+        )
+        assertTrue(GuizangHtmlDeckValidator.rewriteRuntimeUrlsForArchive(html).contains("\"assets/three.min.js\""))
+
+        val cdn = html.replace(
+            GuizangHtmlDeckValidator.LOCAL_THREE_URL,
+            "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js",
+        )
+        assertFalse(GuizangHtmlDeckValidator.validateHtml(cdn).valid)
+    }
+
+    @Test
     fun normalizesCommonDeckShapeMistakesBeforeRuntime() {
         val orphanSlides = """
             <!DOCTYPE html>

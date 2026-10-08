@@ -9,6 +9,11 @@ import app.amber.agent.data.workspace.ArtifactRepository
 import app.amber.agent.data.workspace.ArtifactSourceKind
 import app.amber.feature.workspace.WorkspaceManager
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import app.amber.agent.data.db.dao.ArtifactDAO
+import app.amber.agent.data.db.entity.ArtifactEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
@@ -127,6 +132,53 @@ class MiniAppWorkspaceWriterTest {
         )
         assertNotSame(first.artifactId, third.artifactId)
         assertEquals(2, repository.list().count { it.sourceId == "app-2" })
+    }
+
+    @Test
+    fun concurrentDuplicateEffectCallsCreateExactlyOneArtifact() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            val firstLookup = CompletableDeferred<Unit>()
+            val resumeCreation = CompletableDeferred<Unit>()
+            var inserted = false
+            var first = true
+            val realDao = db.artifactDao()
+            val controlledDao = object : ArtifactDAO by realDao {
+                override suspend fun listBySourceKindAndSourceId(sourceKind: String, sourceId: String): List<ArtifactEntity> {
+                    if (first) {
+                        first = false
+                        firstLookup.complete(Unit)
+                        resumeCreation.await()
+                        return emptyList()
+                    }
+                    return if (inserted) realDao.listBySourceKindAndSourceId(sourceKind, sourceId) else emptyList()
+                }
+
+                override suspend fun insert(artifact: ArtifactEntity) {
+                    resumeCreation.await()
+                    realDao.insert(artifact)
+                    inserted = true
+                }
+            }
+            val repository = ArtifactRepository(controlledDao, workspaceManager,
+                db.messageNodeDao(), db.conversationDao())
+            val writer = MiniAppWorkspaceWriter(repository)
+            suspend fun create() = writer.createArtifact("concurrent-app", "same-effect",
+                "one title", "one body", "note", "text/plain")
+            val a = async { create() }
+            firstLookup.await()
+            // Runs until it reaches insert (old code) or waits for the writer lock (fixed code).
+            val b = async(start = CoroutineStart.UNDISPATCHED) { create() }
+            resumeCreation.complete(Unit)
+            val receipts = listOf(a.await(), b.await())
+            assertEquals(1, receipts.map { it.artifactId }.distinct().size)
+            assertEquals(setOf("created", "existing"), receipts.map { it.status }.toSet())
+            assertEquals(1, repository.list().count { it.sourceId == "concurrent-app" })
+            assertEquals(1, repository.referenceCount(receipts.first().artifactId))
+        } finally {
+            db.close()
+        }
     }
 
     @Test

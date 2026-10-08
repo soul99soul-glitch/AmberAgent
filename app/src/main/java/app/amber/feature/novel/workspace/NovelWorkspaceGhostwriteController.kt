@@ -11,6 +11,7 @@ import app.amber.core.utils.appLocale
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJob
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJobs
 import app.amber.feature.novelworkspace.NovelWorkspaceLedger
+import app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary
 import app.amber.feature.novelworkspace.NovelWorkspaceStore
 import app.amber.feature.novelworkspace.NovelWorkspaceUnresolvedStore
 import kotlinx.coroutines.Dispatchers
@@ -35,50 +36,55 @@ class NovelWorkspaceGhostwriteController(
         projectId: String,
         branchSlug: String,
         targetChapterCount: Int,
+        expectedRestoreEpoch: Long = NovelWorkspaceRestoreBoundary.currentEpoch(),
     ): NovelWorkspaceGhostwriteJob = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
-            require(targetChapterCount in 1..NovelWorkspaceGhostwriteCoordinator.MAX_GHOSTWRITE_CHAPTERS) {
-                localized(
-                    chinese = "代笔章数必须在 1 到 ${NovelWorkspaceGhostwriteCoordinator.MAX_GHOSTWRITE_CHAPTERS} 之间",
-                    english = "The ghostwrite target must be between 1 and ${NovelWorkspaceGhostwriteCoordinator.MAX_GHOSTWRITE_CHAPTERS} chapters.",
+            val job = NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                require(targetChapterCount in 1..NovelWorkspaceGhostwriteCoordinator.MAX_GHOSTWRITE_CHAPTERS) {
+                    localized(
+                        chinese = "代笔章数必须在 1 到 ${NovelWorkspaceGhostwriteCoordinator.MAX_GHOSTWRITE_CHAPTERS} 之间",
+                        english = "The ghostwrite target must be between 1 and ${NovelWorkspaceGhostwriteCoordinator.MAX_GHOSTWRITE_CHAPTERS} chapters.",
+                    )
+                }
+                val store = NovelWorkspaceStore(projectDirectory)
+                val ledger = NovelWorkspaceLedger.load(projectDirectory)
+                // Write mode commits chapters and plot together. A stale plot here is a real
+                // authoring gap; the dangling polish-pointer repair belongs to polish mode.
+                check(!NovelWorkspaceLedger.isPlotStale(store, ledger, branchSlug)) {
+                    context.getString(
+                        R.string.novel_ghostwrite_error_stale_plot,
+                        context.getString(R.string.novel_ghostwrite_task_write),
+                    )
+                }
+                check(NovelWorkspaceUnresolvedStore.entryFor(projectDirectory, branchSlug) == null) {
+                    context.getString(
+                        R.string.novel_ghostwrite_error_unresolved_edits,
+                        context.getString(R.string.novel_ghostwrite_task_write),
+                    )
+                }
+                coordinator.newJob(
+                    projectDirectory,
+                    branchSlug,
+                    targetChapterCount,
+                    locale = context.appLocale(),
                 )
             }
-            val store = NovelWorkspaceStore(projectDirectory)
-            val ledger = NovelWorkspaceLedger.load(projectDirectory)
-            // Write mode commits chapters and plot together. A stale plot here is a real
-            // authoring gap; the dangling polish-pointer repair belongs to polish mode.
-            check(!NovelWorkspaceLedger.isPlotStale(store, ledger, branchSlug)) {
-                context.getString(
-                    R.string.novel_ghostwrite_error_stale_plot,
-                    context.getString(R.string.novel_ghostwrite_task_write),
-                )
-            }
-            check(NovelWorkspaceUnresolvedStore.entryFor(projectDirectory, branchSlug) == null) {
-                context.getString(
-                    R.string.novel_ghostwrite_error_unresolved_edits,
-                    context.getString(R.string.novel_ghostwrite_task_write),
-                )
-            }
-            val job = coordinator.newJob(
-                projectDirectory,
-                branchSlug,
-                targetChapterCount,
-                locale = context.appLocale(),
-            )
             try {
-                enqueue(projectId, job, ExistingWorkPolicy.REPLACE)
+                enqueue(projectId, job, ExistingWorkPolicy.REPLACE, expectedRestoreEpoch)
             } catch (error: Exception) {
-                NovelWorkspaceGhostwriteJobs.transition(
-                    projectDirectory = projectDirectory,
-                    jobId = job.id,
-                    expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
-                    newStatus = NovelWorkspaceGhostwriteJob.STATUS_FAILED,
-                    reason = error.message ?: localized(
-                        chinese = "代笔任务入队失败",
-                        english = "Could not enqueue the ghostwrite batch.",
-                    ),
-                    expectedExecutionId = job.executionKey,
-                )
+                NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                    NovelWorkspaceGhostwriteJobs.transition(
+                        projectDirectory = projectDirectory,
+                        jobId = job.id,
+                        expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+                        newStatus = NovelWorkspaceGhostwriteJob.STATUS_FAILED,
+                        reason = error.message ?: localized(
+                            chinese = "代笔任务入队失败",
+                            english = "Could not enqueue the ghostwrite batch.",
+                        ),
+                        expectedExecutionId = job.executionKey,
+                    )
+                }
                 throw error
             }
             job
@@ -92,29 +98,34 @@ class NovelWorkspaceGhostwriteController(
         branchSlug: String,
         fromOrdinal: Int,
         toOrdinal: Int,
+        expectedRestoreEpoch: Long = NovelWorkspaceRestoreBoundary.currentEpoch(),
     ): NovelWorkspaceGhostwriteJob = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
-            val job = coordinator.preparePolishBatch(
-                projectDirectory,
-                branchSlug,
-                fromOrdinal,
-                toOrdinal,
-                locale = context.appLocale(),
-            )
-            try {
-                enqueue(projectId, job, ExistingWorkPolicy.REPLACE)
-            } catch (error: Exception) {
-                NovelWorkspaceGhostwriteJobs.transition(
-                    projectDirectory = projectDirectory,
-                    jobId = job.id,
-                    expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
-                    newStatus = NovelWorkspaceGhostwriteJob.STATUS_FAILED,
-                    reason = error.message ?: localized(
-                        chinese = "润色任务入队失败",
-                        english = "Could not enqueue the polishing batch.",
-                    ),
-                    expectedExecutionId = job.executionKey,
+            val job = NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                coordinator.preparePolishBatch(
+                    projectDirectory,
+                    branchSlug,
+                    fromOrdinal,
+                    toOrdinal,
+                    locale = context.appLocale(),
                 )
+            }
+            try {
+                enqueue(projectId, job, ExistingWorkPolicy.REPLACE, expectedRestoreEpoch)
+            } catch (error: Exception) {
+                NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                    NovelWorkspaceGhostwriteJobs.transition(
+                        projectDirectory = projectDirectory,
+                        jobId = job.id,
+                        expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+                        newStatus = NovelWorkspaceGhostwriteJob.STATUS_FAILED,
+                        reason = error.message ?: localized(
+                            chinese = "润色任务入队失败",
+                            english = "Could not enqueue the polishing batch.",
+                        ),
+                        expectedExecutionId = job.executionKey,
+                    )
+                }
                 throw error
             }
             job
@@ -125,6 +136,7 @@ class NovelWorkspaceGhostwriteController(
         projectId: String,
         job: NovelWorkspaceGhostwriteJob,
         policy: ExistingWorkPolicy,
+        expectedRestoreEpoch: Long,
     ) {
         val request = OneTimeWorkRequestBuilder<NovelWorkspaceGhostwriteWorker>()
             .setInputData(
@@ -145,30 +157,41 @@ class NovelWorkspaceGhostwriteController(
             .build()
         // Include the mode so an old queued write cannot cancel a polish enqueue. Branch
         // exclusivity is still enforced by saveIfNoActive/newPolishJob at the durable layer.
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            "$WORK_TAG:$projectId:${job.branchSlug}:${job.mode.value}",
-            policy,
-            request,
-        ).result.get()
+        val operation = NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "$WORK_TAG:$projectId:${job.branchSlug}:${job.mode.value}",
+                policy,
+                request,
+            )
+        }
+        operation.result.get()
     }
 
     private fun localized(chinese: String, english: String): String =
         if (context.appLocale().language.equals("zh", ignoreCase = true)) chinese else english
 
-    suspend fun pause(projectDirectory: java.io.File, jobId: String, executionId: String) =
+    suspend fun pause(
+        projectDirectory: java.io.File,
+        jobId: String,
+        executionId: String,
+        expectedRestoreEpoch: Long = NovelWorkspaceRestoreBoundary.currentEpoch(),
+    ) =
         withContext(Dispatchers.IO) {
             mutationMutex.withLock {
-                val paused = NovelWorkspaceGhostwriteJobs.transition(
-                    projectDirectory = projectDirectory,
-                    jobId = jobId,
-                    expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
-                    newStatus = NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
-                    expectedExecutionId = executionId,
-                )
+                val paused = NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                    NovelWorkspaceGhostwriteJobs.transition(
+                        projectDirectory = projectDirectory,
+                        jobId = jobId,
+                        expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+                        newStatus = NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+                        expectedExecutionId = executionId,
+                    )
+                }
                 if (paused != null) {
-                    WorkManager.getInstance(context)
-                        .cancelAllWorkByTag(executionTag(jobId, executionId))
-                        .result.get()
+                    val operation = NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                        WorkManager.getInstance(context).cancelAllWorkByTag(executionTag(jobId, executionId))
+                    }
+                    operation.result.get()
                 }
             }
         }
@@ -180,24 +203,29 @@ class NovelWorkspaceGhostwriteController(
         jobId: String,
         executionId: String,
         expectedBranchSlug: String? = null,
+        expectedRestoreEpoch: Long = NovelWorkspaceRestoreBoundary.currentEpoch(),
     ): NovelWorkspaceGhostwriteJob? = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
-            val job = NovelWorkspaceGhostwriteJobs.restartPaused(
-                projectDirectory,
-                jobId,
-                expectedExecutionId = executionId,
-                expectedBranchSlug = expectedBranchSlug,
-            ) ?: return@withLock null
-            try {
-                enqueue(projectId, job, ExistingWorkPolicy.REPLACE)
-            } catch (error: Exception) {
-                NovelWorkspaceGhostwriteJobs.transition(
-                    projectDirectory = projectDirectory,
-                    jobId = jobId,
-                    expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
-                    newStatus = NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
-                    expectedExecutionId = job.executionKey,
+            val job = NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                NovelWorkspaceGhostwriteJobs.restartPaused(
+                    projectDirectory,
+                    jobId,
+                    expectedExecutionId = executionId,
+                    expectedBranchSlug = expectedBranchSlug,
                 )
+            } ?: return@withLock null
+            try {
+                enqueue(projectId, job, ExistingWorkPolicy.REPLACE, expectedRestoreEpoch)
+            } catch (error: Exception) {
+                NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                    NovelWorkspaceGhostwriteJobs.transition(
+                        projectDirectory = projectDirectory,
+                        jobId = jobId,
+                        expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+                        newStatus = NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+                        expectedExecutionId = job.executionKey,
+                    )
+                }
                 throw error
             }
             job
@@ -211,78 +239,101 @@ class NovelWorkspaceGhostwriteController(
         jobId: String,
         executionId: String,
         expectedBranchSlug: String? = null,
+        expectedRestoreEpoch: Long = NovelWorkspaceRestoreBoundary.currentEpoch(),
     ): NovelWorkspaceGhostwriteJob = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
-            val job = checkNotNull(
-                NovelWorkspaceGhostwriteJobs.restartFailed(
-                    projectDirectory,
-                    jobId,
-                    expectedExecutionId = executionId,
-                    expectedBranchSlug = expectedBranchSlug,
-                ),
-            ) {
-                localized(
-                    chinese = "该代笔批次已不可继续",
-                    english = "This ghostwrite batch can no longer continue.",
-                )
+            val job = NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                checkNotNull(
+                    NovelWorkspaceGhostwriteJobs.restartFailed(
+                        projectDirectory,
+                        jobId,
+                        expectedExecutionId = executionId,
+                        expectedBranchSlug = expectedBranchSlug,
+                    ),
+                ) {
+                    localized(
+                        chinese = "该代笔批次已不可继续",
+                        english = "This ghostwrite batch can no longer continue.",
+                    )
+                }
             }
             try {
-                enqueue(projectId, job, ExistingWorkPolicy.REPLACE)
+                enqueue(projectId, job, ExistingWorkPolicy.REPLACE, expectedRestoreEpoch)
             } catch (error: Exception) {
-                NovelWorkspaceGhostwriteJobs.transition(
-                    projectDirectory = projectDirectory,
-                    jobId = jobId,
-                    expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
-                    newStatus = NovelWorkspaceGhostwriteJob.STATUS_FAILED,
-                    reason = error.message ?: localized(
-                        chinese = "代笔任务入队失败",
-                        english = "Could not enqueue the ghostwrite batch.",
-                    ),
-                    expectedExecutionId = job.executionKey,
-                )
+                NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                    NovelWorkspaceGhostwriteJobs.transition(
+                        projectDirectory = projectDirectory,
+                        jobId = jobId,
+                        expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+                        newStatus = NovelWorkspaceGhostwriteJob.STATUS_FAILED,
+                        reason = error.message ?: localized(
+                            chinese = "代笔任务入队失败",
+                            english = "Could not enqueue the ghostwrite batch.",
+                        ),
+                        expectedExecutionId = job.executionKey,
+                    )
+                }
                 throw error
             }
             job
         }
     }
 
-    suspend fun cancel(projectDirectory: java.io.File, jobId: String, executionId: String) =
+    suspend fun cancel(
+        projectDirectory: java.io.File,
+        jobId: String,
+        executionId: String,
+        expectedRestoreEpoch: Long = NovelWorkspaceRestoreBoundary.currentEpoch(),
+    ) =
         withContext(Dispatchers.IO) {
             mutationMutex.withLock {
-                val cancelled = NovelWorkspaceGhostwriteJobs.transition(
-                    projectDirectory = projectDirectory,
-                    jobId = jobId,
-                    expectedStatuses = setOf(
-                        NovelWorkspaceGhostwriteJob.STATUS_RUNNING,
-                        NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
-                    ),
-                    newStatus = NovelWorkspaceGhostwriteJob.STATUS_CANCELLED,
-                    expectedExecutionId = executionId,
-                )
+                val cancelled = NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                    NovelWorkspaceGhostwriteJobs.transition(
+                        projectDirectory = projectDirectory,
+                        jobId = jobId,
+                        expectedStatuses = setOf(
+                            NovelWorkspaceGhostwriteJob.STATUS_RUNNING,
+                            NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+                        ),
+                        newStatus = NovelWorkspaceGhostwriteJob.STATUS_CANCELLED,
+                        expectedExecutionId = executionId,
+                    )
+                }
                 if (cancelled != null) {
-                    WorkManager.getInstance(context).cancelAllWorkByTag(jobTag(jobId)).result.get()
+                    val operation = NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                        WorkManager.getInstance(context).cancelAllWorkByTag(jobTag(jobId))
+                    }
+                    operation.result.get()
                 }
             }
         }
 
     /** Serialize the WorkManager lookup with enqueue so a new batch is never mistaken for an orphan. */
-    suspend fun reconcile(projectDirectory: java.io.File) = withContext(Dispatchers.IO) {
+    suspend fun reconcile(
+        projectDirectory: java.io.File,
+        expectedRestoreEpoch: Long = NovelWorkspaceRestoreBoundary.currentEpoch(),
+    ) = withContext(Dispatchers.IO) {
         mutationMutex.withLock {
+            val jobs = NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                NovelWorkspaceGhostwriteJobs.listActive(projectDirectory)
+            }
             val workManager = WorkManager.getInstance(context)
-            for (job in NovelWorkspaceGhostwriteJobs.listActive(projectDirectory)) {
+            for (job in jobs) {
                 if (job.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING) continue
                 val work = workManager.getWorkInfosByTag(executionTag(job.id, job.executionKey)).get()
-                NovelWorkspaceGhostwriteJobs.recoverUnscheduled(
-                    projectDirectory,
-                    job,
-                    hasUnfinishedWork = work.any { !it.state.isFinished },
-                )
+                NovelWorkspaceRestoreBoundary.write(expectedRestoreEpoch) {
+                    NovelWorkspaceGhostwriteJobs.recoverUnscheduled(
+                        projectDirectory,
+                        job,
+                        hasUnfinishedWork = work.any { !it.state.isFinished },
+                    )
+                }
             }
         }
     }
 
     companion object {
-        private const val WORK_TAG = "novel_workspace_ghostwrite"
+        const val WORK_TAG = "novel_workspace_ghostwrite"
 
         private fun jobTag(jobId: String): String = "$WORK_TAG:$jobId"
 

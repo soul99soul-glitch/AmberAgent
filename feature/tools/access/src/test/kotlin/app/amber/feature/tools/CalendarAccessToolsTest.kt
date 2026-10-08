@@ -24,6 +24,31 @@ class CalendarAccessToolsTest {
     )
 
     @Test
+    fun recurringEventWithoutDtendAllowsNonTimeUpdates() {
+        val recurring = existing.copy(endEpochMs = 0L)
+        val values = buildCalendarUpdateValues(
+            Json.parseToJsonElement("""{"event_id":42,"title":"改标题","location":"会议室"}"""),
+            recurring,
+        )
+
+        assertEquals(setOf(CalendarContract.Events.TITLE, CalendarContract.Events.EVENT_LOCATION), values.keySet())
+        assertFalse(values.containsKey(CalendarContract.Events.DTSTART))
+        assertFalse(values.containsKey(CalendarContract.Events.DTEND))
+    }
+
+    @Test
+    fun recurringEventTimeChangesDoNotWriteInvalidDtend() {
+        val recurring = existing.copy(endEpochMs = 0L)
+        val error = runCatching {
+            buildCalendarUpdateValues(
+                Json.parseToJsonElement("""{"event_id":42,"end_epoch_ms":3000}"""), recurring,
+            )
+        }.exceptionOrNull()
+
+        assertEquals("Time changes to recurring calendar events are not supported", error?.message)
+    }
+
+    @Test
     fun missingEventSnapshotProducesVisibleNotFound() {
         // update/delete 的执行链在查不到事件时走这一分支（生产 requireCalendarEvent
         // → requireCalendarEventSnapshot），错误信息包含精确 event_id。
@@ -75,20 +100,6 @@ class CalendarAccessToolsTest {
         val error = runCatching { buildCalendarUpdateValues(input, existing) }.exceptionOrNull()
 
         assertEquals("At least one event field is required", error?.message)
-    }
-
-    @Test
-    fun updateMissingEvent_returnsVisibleError() {
-        val error = runCatching { requireCalendarEventSnapshot(99L, null) }.exceptionOrNull()
-
-        assertEquals("Event not found: 99", error?.message)
-    }
-
-    @Test
-    fun deleteMissingEvent_returnsVisibleError() {
-        val error = runCatching { requireCalendarEventSnapshot(100L, null) }.exceptionOrNull()
-
-        assertEquals("Event not found: 100", error?.message)
     }
 
     @Test

@@ -923,6 +923,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 onDeny = { showDenyDialog = true },
                 onApprove = { onToolApproval?.invoke(tool.toolCallId, true, "") },
                 actionsEnabled = onToolApproval != null,
+                notice = jevAutoApprovalNotice(tool),
             )
         } else {
             AgentToolCallCapsule(
@@ -1141,4 +1142,22 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             onDismissRequest = { showResult = false }
         )
     }
+}
+
+/** Jev 复核把自动批准收紧为人工审批时，审批卡上说明命中的风险类别。 */
+@Composable
+private fun jevAutoApprovalNotice(tool: UIMessagePart.Tool): String? {
+    val keys = (tool.metadata?.get(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) as? kotlinx.serialization.json.JsonArray)
+        ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+        ?.takeIf { it.isNotEmpty() }
+        ?: return null
+    val labels = keys.mapNotNull { key ->
+        when (app.amber.core.jev.JevAutoApprovalGate.Risk.fromKey(key)) {
+            app.amber.core.jev.JevAutoApprovalGate.Risk.DESTRUCTIVE -> stringResource(R.string.chat_tool_jev_risk_destructive)
+            app.amber.core.jev.JevAutoApprovalGate.Risk.EXFILTRATION -> stringResource(R.string.chat_tool_jev_risk_exfiltration)
+            app.amber.core.jev.JevAutoApprovalGate.Risk.OFF_TASK -> stringResource(R.string.chat_tool_jev_risk_off_task)
+            null -> null
+        }
+    }
+    return stringResource(R.string.chat_tool_jev_auto_approval_paused, labels.joinToString(stringResource(R.string.chat_tool_jev_risk_separator)))
 }

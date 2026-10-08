@@ -35,8 +35,12 @@ import app.amber.agent.data.db.AppDatabase
 import app.amber.agent.data.db.canonicalizeAmberOwnership
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.agent.data.db.fts.MessageFtsManager
+import app.amber.agent.data.workspace.ArtifactBackupContentStore
 import app.amber.core.files.FileFolders
 import app.amber.core.files.FilesManager
+import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
+import app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary
+import app.amber.feature.workspace.WorkspaceManager
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -65,6 +69,7 @@ class SyncArchiveManager(
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
     /** Grok OAuth token store；可选以兼容旧测试构造，生产由 DI 注入。 */
     private val grokAuthStore: GrokAuthStore? = null,
+    private val workspaceManager: WorkspaceManager? = null,
 ) {
     // Re-read the syncCrypto flag on every archive op so DataStore writes
     // take effect without a process restart. The flag check is sub-ms; the
@@ -192,14 +197,43 @@ class SyncArchiveManager(
         withContext(Dispatchers.IO) {
             try {
                 require(verification.consume()) { "恢复验证结果已失效，请重新验证备份" }
-                requireRestorePayloadCompatible(verification, request)
+                val preservedTables = preservedTablesForRestore(request, verification.payloadPreview)
+                requireRestorePayloadCompatible(verification, request, preservedTables)
+                val restoreNovelWorkspace = request.scope == RestoreScope.EVERYTHING &&
+                    verification.preview.manifest.mode == SyncMode.FULL &&
+                    verification.payloadPreview.datasets.any { it.id == NOVEL_WORKSPACE_DATASET }
+                val restoreArtifactContent = request.scope == RestoreScope.EVERYTHING &&
+                    verification.payloadPreview.datasets.any { it.id == ArtifactBackupContentStore.DATASET }
                 val restore = suspend {
-                    restorePayload(verification.payloadFile, verification.preview.manifest, request)
+                    restorePayload(
+                        verification.payloadFile,
+                        verification.preview.manifest,
+                        request,
+                        restoreNovelWorkspace = restoreNovelWorkspace,
+                        restoreArtifactContent = restoreArtifactContent,
+                        preservedTables = preservedTables,
+                    )
                 }
                 if (restoreWriteGate == null) {
                     restore()
                 } else {
-                    restoreWriteGate.withRestore { restore() }
+                    val journalRoot = File(context.cacheDir, FILE_RESTORE_JOURNAL_DIR)
+                    val interruptedNovelRestore = File(journalRoot, FILE_RESTORE_ROOTS)
+                        .takeIf { it.isFile }?.readLines()?.contains(NOVEL_WORKSPACE_ROOT) == true
+                    val affectedRoots = if (restoreNovelWorkspace || interruptedNovelRestore) {
+                        setOf(NOVEL_WORKSPACE_ROOT)
+                    } else {
+                        emptySet()
+                    }
+                    val adoptedRoots = if (interruptedNovelRestore && committedFileRestoreToken(journalRoot) != null) {
+                        setOf(NOVEL_WORKSPACE_ROOT)
+                    } else {
+                        emptySet()
+                    }
+                    restoreWriteGate.withRestore(
+                        affectedFileRoots = affectedRoots,
+                        adoptedFileRoots = adoptedRoots,
+                    ) { restore() }
                 }
                 verification.preview
             } finally {
@@ -210,6 +244,17 @@ class SyncArchiveManager(
     /** P7-02：中途取消 —— 解密后未写入，不残留任何临时文件。 */
     fun discardVerification(verification: SyncRestoreVerification) {
         verification.cleanup()
+    }
+
+    private fun preservedTablesForRestore(
+        request: SyncRestoreRequest,
+        payloadPreview: SyncPayloadPreview,
+    ): Set<String> = buildSet {
+        if (request.preserveConversations) addAll(CONVERSATION_TABLES)
+        if (request.preserveGenMedia) addAll(GEN_MEDIA_TABLES)
+        // Older backups never exported saved Live cards. Only an advertised
+        // dataset may replace local cards, including an explicitly empty table.
+        if (payloadPreview.datasets.none { it.id == "table:live_card" }) add("live_card")
     }
 
     /**
@@ -223,13 +268,10 @@ class SyncArchiveManager(
     private fun requireRestorePayloadCompatible(
         verification: SyncRestoreVerification,
         request: SyncRestoreRequest,
+        preservedTables: Set<String>,
     ) {
         if (request.scope != RestoreScope.EVERYTHING) return
 
-        val preservedTables = buildSet {
-            if (request.preserveConversations) addAll(CONVERSATION_TABLES)
-            if (request.preserveGenMedia) addAll(GEN_MEDIA_TABLES)
-        }
         val requiredDatasets = buildSet {
             add("settings")
             // Even an empty file tree is represented by this manifest dataset;
@@ -283,7 +325,7 @@ class SyncArchiveManager(
             }
         }
 
-    private fun buildPayload(
+    private suspend fun buildPayload(
         settings: Settings,
         mode: SyncMode,
         outputFile: File,
@@ -333,6 +375,7 @@ class SyncArchiveManager(
             summaries += SyncDatasetSummary("secrets", recordCount = if (mode == SyncMode.FULL) 1 else 0)
 
             val db = database.openHelper.writableDatabase
+            val artifactLocators = mutableListOf<String>()
             // Keep every exported table on one SQLite read snapshot. File roots
             // are external resources and intentionally remain outside this DB
             // transaction; the current ownership graph has no shared writer lock
@@ -343,13 +386,27 @@ class SyncArchiveManager(
                     val rowCount = writeTableEntry(zip, db, table)
                     summaries += SyncDatasetSummary("table:$table", recordCount = rowCount)
                 }
+                db.query("SELECT content_locator FROM artifact").use { cursor ->
+                    while (cursor.moveToNext()) artifactLocators += cursor.getString(0)
+                }
                 db.setTransactionSuccessful()
             } finally {
                 db.endTransaction()
             }
 
-            val fileSummary = writeFileTrees(zip)
-            summaries += fileSummary
+            val artifactSummary = writeArtifactBodies(zip, artifactLocators)
+            val fileSummary = writeFileTrees(zip, mode)
+            summaries += fileSummary.copy(
+                recordCount = fileSummary.recordCount + artifactSummary.recordCount,
+                byteCount = fileSummary.byteCount + artifactSummary.byteCount,
+            )
+            // File totals already include these bytes; this dataset declares ownership.
+            summaries += artifactSummary.copy(byteCount = 0)
+            if (mode == SyncMode.FULL) {
+                // Explicit replace contract, including an empty native workspace. File totals
+                // already include these bytes, so this dataset is only a presence marker.
+                summaries += SyncDatasetSummary(NOVEL_WORKSPACE_DATASET, recordCount = 0, byteCount = 0)
+            }
             writeTextEntry(zip, PAYLOAD_MANIFEST_ENTRY, json.encodeToString(SyncPayloadManifest(summaries)))
         }
     }
@@ -405,13 +462,32 @@ class SyncArchiveManager(
         payloadFile: File,
         manifest: SyncManifest,
         request: SyncRestoreRequest,
+        restoreNovelWorkspace: Boolean,
+        restoreArtifactContent: Boolean,
+        preservedTables: Set<String>,
     ) {
         recoverInterruptedFileRestore()
+        val stagedRestoreRoot = tempSyncDirectory("restore-stage")
+        try {
+            restorePayloadFromStage(payloadFile, manifest, request, restoreNovelWorkspace, restoreArtifactContent, preservedTables, stagedRestoreRoot)
+        } finally {
+            stagedRestoreRoot.deleteRecursively()
+        }
+    }
+
+    private suspend fun restorePayloadFromStage(
+        payloadFile: File,
+        manifest: SyncManifest,
+        request: SyncRestoreRequest,
+        restoreNovelWorkspace: Boolean,
+        restoreArtifactContent: Boolean,
+        preservedTables: Set<String>,
+        stagedRestoreRoot: File,
+    ) {
         val scope = request.scope
         var settingsJson: String? = null
         var secretsJson: String? = null
         val stagedTableFiles = linkedMapOf<String, File>()
-        val stagedRestoreRoot = tempSyncDirectory("restore-stage")
         val stagedTablesRoot = File(stagedRestoreRoot, "tables").canonicalFile.apply { mkdirs() }
         val stagedFilesRoot = File(stagedRestoreRoot, "files").canonicalFile.apply { mkdirs() }
         var restoredFileCount = 0
@@ -426,12 +502,9 @@ class SyncArchiveManager(
         // Same I/O optimization for the preserve toggles: don't stage roots
         // that the restore contract leaves local.
         val skipUpload = scope == RestoreScope.EVERYTHING && request.preserveConversations
-        val skipChatImages = scope == RestoreScope.EVERYTHING && request.preserveGenMedia
+        val skipChatImages = scope == RestoreScope.EVERYTHING &&
+            request.preserveGenMedia && request.preserveConversations
         val skipImages = scope == RestoreScope.EVERYTHING && request.preserveGenMedia
-        val preserveConversationTables =
-            scope == RestoreScope.EVERYTHING && request.preserveConversations
-        val preserveGenMediaTables =
-            scope == RestoreScope.EVERYTHING && request.preserveGenMedia
         ZipInputStream(FileInputStream(payloadFile).buffered()).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
@@ -473,6 +546,13 @@ class SyncArchiveManager(
                         !skipBulkPayload && entry.name.startsWith("files/") -> {
                             val relativePath = entry.name.removePrefix("files/")
                             requireSafeRelativePath(relativePath)
+                            val relativeRoot = SYNC_FILE_ROOTS.firstOrNull { relativePath.startsWith("$it/") }
+                            require(relativeRoot != null) { "Invalid sync file root: $relativePath" }
+                            if (relativeRoot == ArtifactBackupContentStore.RELATIVE_ROOT) {
+                                require(ArtifactBackupContentStore.isOwnedLocator(relativePath.removePrefix("$relativeRoot/"))) {
+                                    "Invalid artifact content path: $relativePath"
+                                }
+                            }
                             // Per-root skip for the preserve toggles. We don't
                             // need to drain the entry bytes — ZipInputStream's
                             // closeEntry() (at the bottom of the outer loop)
@@ -484,7 +564,9 @@ class SyncArchiveManager(
                             if (
                                 (skipUpload && isUpload) ||
                                 (skipChatImages && isChatImages) ||
-                                (skipImages && isImages)
+                                (skipImages && isImages) ||
+                                (!restoreNovelWorkspace && relativeRoot == NOVEL_WORKSPACE_ROOT) ||
+                                (!restoreArtifactContent && relativeRoot == ArtifactBackupContentStore.RELATIVE_ROOT)
                             ) {
                                 // intentionally drop — local files of this root stay.
                             } else {
@@ -521,10 +603,7 @@ class SyncArchiveManager(
         )
 
         if (scope == RestoreScope.EVERYTHING) {
-            val requiredTables = SYNC_TABLES.filterNot { table ->
-                (preserveConversationTables && table in CONVERSATION_TABLES) ||
-                    (preserveGenMediaTables && table in GEN_MEDIA_TABLES)
-            }.toSet()
+            val requiredTables = SYNC_TABLES.filterNot { it in preservedTables }.toSet()
             val missingTables = requiredTables - stagedTableFiles.keys
             require(missingTables.isEmpty()) {
                 context.getString(
@@ -549,74 +628,74 @@ class SyncArchiveManager(
                 currentSettings.copy(providers = decodedSettings.providers)
         }
 
-        try {
-            when (scope) {
-                RestoreScope.EVERYTHING -> {
-                    // Apply the preserve toggles: filter out tables the user
-                    // chose to keep, and tell replaceFileTreesFromStage which
-                    // file roots to leave alone. Default behavior (both flags
-                    // false) is the historical full-replace.
-                    val skippedTables = buildSet {
-                        if (preserveConversationTables) addAll(CONVERSATION_TABLES)
-                        if (preserveGenMediaTables) addAll(GEN_MEDIA_TABLES)
-                    }
-                    val filteredTableRows = if (skippedTables.isEmpty()) {
-                        stagedTableFiles
-                    } else {
-                        stagedTableFiles.filterKeys { it !in skippedTables }
-                    }
-                    val skippedFileRoots = buildSet {
-                        if (skipUpload) add(FileFolders.UPLOAD)
-                        if (skipChatImages) add(FileFolders.CHAT_IMAGES)
-                        if (skipImages) add(FileFolders.IMAGES)
-                    }
-                    val fileJournal = prepareFileTreeRestore(stagedFilesRoot, skippedFileRoots)
-                    var dataCommitted = false
-                    try {
-                        restoreTables(filteredTableRows, skippedTables, fileJournal.token)
-                        // The database transaction and file replacement now
-                        // describe one imported data set. Keep the journal
-                        // until secrets/settings/FTS have finished so a crash
-                        // after this point is recovered as a partial commit,
-                        // never as an old-file rollback.
-                        dataCommitted = true
-                        restoreWriteGate?.markDataCommitted()
-                        fileJournal.markDataCommitted()
-                        restoreSecrets(secretsJson)
-                        fileJournal.markPhase(FILE_RESTORE_SECRETS_APPLIED)
-                        // The restore already owns the write gate. Use the
-                        // restore-only reconciliation path so this does not
-                        // reacquire the non-reentrant gate.
-                        filesManager.syncFolderDuringRestore(FileFolders.UPLOAD)
-                        messageFtsManager.rebuildAllFromDatabase()
-                        fileJournal.markPhase(FILE_RESTORE_FTS_APPLIED)
-                        applyRestoredSettings(restoredSettingsJson, finalSettings)
-                        fileJournal.markPhase(FILE_RESTORE_SETTINGS_APPLIED)
-                        fileJournal.commit()
-                    } catch (error: Throwable) {
-                        if (!dataCommitted) {
-                            runCatching { fileJournal.rollback() }
-                                .exceptionOrNull()
-                                ?.let(error::addSuppressed)
-                            throw error
-                        }
-                        throw if (error is SyncRestorePartialCommitException) {
-                            error
-                        } else {
-                            SyncRestorePartialCommitException(error)
-                        }
-                    }
+        when (scope) {
+            RestoreScope.EVERYTHING -> {
+                // Apply the preserve toggles: filter out tables the user
+                // chose to keep, and tell replaceFileTreesFromStage which
+                // file roots to leave alone. Default behavior (both flags
+                // false) is the historical full-replace.
+                val filteredTableRows = if (preservedTables.isEmpty()) {
+                    stagedTableFiles
+                } else {
+                    stagedTableFiles.filterKeys { it !in preservedTables }
                 }
-                RestoreScope.CONFIG_ONLY -> {
-                    // No table or file work — the staged file tree we
-                    // didn't even fill (due to the skipBulkPayload guard
-                    // earlier) is wiped by the outer `finally` regardless.
+                val skippedFileRoots = buildSet {
+                    if (skipUpload) add(FileFolders.UPLOAD)
+                    if (skipChatImages) add(FileFolders.CHAT_IMAGES)
+                    if (skipImages) add(FileFolders.IMAGES)
+                    // Older FULL packages and STANDARD packages never replace local novels.
+                    if (!restoreNovelWorkspace) add(NOVEL_WORKSPACE_ROOT)
+                    if (!restoreArtifactContent) add(ArtifactBackupContentStore.RELATIVE_ROOT)
+                }
+                val mergeLocalRoots = if (request.preserveConversations != request.preserveGenMedia) {
+                    setOf(FileFolders.CHAT_IMAGES)
+                } else emptySet()
+                val fileJournal = prepareFileTreeRestore(stagedFilesRoot, skippedFileRoots, mergeLocalRoots)
+                var dataCommitted = false
+                try {
+                    restoreTables(filteredTableRows, preservedTables, fileJournal.token)
+                    // The database transaction and file replacement now
+                    // describe one imported data set. Keep the journal
+                    // until secrets/settings/FTS have finished so a crash
+                    // after this point is recovered as a partial commit,
+                    // never as an old-file rollback.
+                    dataCommitted = true
+                    if (restoreNovelWorkspace) restoreWriteGate?.markFileSnapshotAdopted(NOVEL_WORKSPACE_ROOT)
+                    restoreWriteGate?.markDataCommitted()
+                    fileJournal.markDataCommitted()
+                    restoreSecrets(secretsJson)
+                    fileJournal.markPhase(FILE_RESTORE_SECRETS_APPLIED)
+                    // The restore already owns the write gate. Use the
+                    // restore-only reconciliation path so this does not
+                    // reacquire the non-reentrant gate.
+                    filesManager.syncFolderDuringRestore(FileFolders.UPLOAD)
+                    messageFtsManager.rebuildAllFromDatabase()
+                    fileJournal.markPhase(FILE_RESTORE_FTS_APPLIED)
                     applyRestoredSettings(restoredSettingsJson, finalSettings)
+                    fileJournal.markPhase(FILE_RESTORE_SETTINGS_APPLIED)
+                    fileJournal.commit()
+                } catch (error: Throwable) {
+                    if (!dataCommitted) {
+                        runCatching { fileJournal.rollback() }
+                            .exceptionOrNull()
+                            ?.let(error::addSuppressed)
+                        throw error
+                    }
+                    throw if (error is SyncRestorePartialCommitException) {
+                        error
+                    } else {
+                        SyncRestorePartialCommitException(error)
+                    }
                 }
             }
-        } finally {
-            stagedRestoreRoot.deleteRecursively()
+            RestoreScope.CONFIG_ONLY -> {
+                // No table or file work — the staged file tree we
+                // didn't even fill (due to the skipBulkPayload guard
+                // earlier) is wiped by the outer `finally` regardless.
+                applyRestoredSettings(restoredSettingsJson, finalSettings)
+            }
         }
+
     }
 
     /**
@@ -721,10 +800,24 @@ class SyncArchiveManager(
         return values
     }
 
-    private fun writeFileTrees(zip: ZipOutputStream): SyncDatasetSummary {
+    private suspend fun writeArtifactBodies(zip: ZipOutputStream, locators: List<String>): SyncDatasetSummary {
+        val content = ArtifactBackupContentStore(workspaceManager ?: WorkspaceManager(context))
+        var count = 0
+        var bytes = 0L
+        locators.distinct().forEach { locator ->
+            val body = content.readForBackup(locator) ?: return@forEach
+            writeBytesEntry(zip, "files/${ArtifactBackupContentStore.RELATIVE_ROOT}/$locator", body)
+            count++
+            bytes += body.size
+        }
+        return SyncDatasetSummary(ArtifactBackupContentStore.DATASET, count, bytes)
+    }
+
+    private fun writeFileTrees(zip: ZipOutputStream, mode: SyncMode): SyncDatasetSummary {
         var count = 0
         var bytes = 0L
         SYNC_FILE_ROOTS.forEach { relativeRoot ->
+            if (relativeRoot == NOVEL_WORKSPACE_ROOT || relativeRoot == ArtifactBackupContentStore.RELATIVE_ROOT) return@forEach
             val root = File(context.filesDir, relativeRoot)
             if (!root.exists()) return@forEach
             root.walkTopDown()
@@ -735,6 +828,26 @@ class SyncArchiveManager(
                     count += 1
                     bytes += file.length()
                 }
+        }
+        if (mode == SyncMode.FULL) {
+            val snapshot = tempSyncDirectory("novel-snapshot")
+            val snapshotTree = File(snapshot, "workspace")
+            try {
+                // Copy under the same short owner lock as novel transactions. Compression,
+                // encryption and provider uploads happen after releasing that lock.
+                NovelWorkspaceRestoreBoundary.write {
+                    val root = File(context.filesDir, NOVEL_WORKSPACE_ROOT)
+                    if (root.exists()) root.copyRecursively(snapshotTree, overwrite = true)
+                }
+                snapshotTree.walkTopDown().filter { it.isFile }.forEach { file ->
+                    val relativePath = file.relativeTo(snapshotTree).invariantSeparatorsPath
+                    writeFileTreeEntry(zip, "files/$NOVEL_WORKSPACE_ROOT/$relativePath", file)
+                    count += 1
+                    bytes += file.length()
+                }
+            } finally {
+                snapshot.deleteRecursively()
+            }
         }
         return SyncDatasetSummary("files", recordCount = count, byteCount = bytes)
     }
@@ -759,6 +872,7 @@ class SyncArchiveManager(
     private fun prepareFileTreeRestore(
         stageRoot: File,
         preservedRoots: Set<String> = emptySet(),
+        mergeLocalRoots: Set<String> = emptySet(),
     ): FileTreeRestoreJournal {
         val filesDir = context.filesDir.canonicalFile
         val replacedRoots = SYNC_FILE_ROOTS.filterNot { it in preservedRoots }
@@ -769,13 +883,15 @@ class SyncArchiveManager(
                 }
             }
         }
-        val stagedRoots = stageRoot.listFiles().orEmpty().associateBy { staged ->
-            staged.name.also { relativeRoot ->
-                require(relativeRoot in SYNC_FILE_ROOTS) {
-                    "Invalid staged sync root: $relativeRoot"
-                }
-            }
+        // CHAT_IMAGES has chat and gallery consumers. In mixed preservation modes,
+        // import archive files and retain local files, with local bytes winning collisions.
+        mergeLocalRoots.forEach { relativeRoot ->
+            val local = targets.getValue(relativeRoot)
+            if (local.exists()) local.copyRecursively(File(stageRoot, relativeRoot), overwrite = true)
         }
+        // Native novel state is nested below amberagent; identify complete roots rather
+        // than treating its parent directory as a dataset to replace.
+        val stagedRoots = replacedRoots.associateWith { File(stageRoot, it).takeIf(File::exists) }
         val journalRoot = File(context.cacheDir, FILE_RESTORE_JOURNAL_DIR).canonicalFile
         val backupRoot = File(journalRoot, "backup").canonicalFile
         val restoreToken = UUID.randomUUID().toString()
@@ -803,6 +919,7 @@ class SyncArchiveManager(
                     }
                 }
             }
+            writeJournalText(File(journalRoot, FILE_RESTORE_STATE), FILE_RESTORE_ROOTS_BACKED_UP)
             replacedRoots.forEach { relativeRoot ->
                 stagedRoots[relativeRoot]?.copyRecursively(
                     target = File(filesDir, relativeRoot),
@@ -822,15 +939,16 @@ class SyncArchiveManager(
     private suspend fun recoverInterruptedFileRestore() {
         val journalRoot = File(context.cacheDir, FILE_RESTORE_JOURNAL_DIR).canonicalFile
         if (!journalRoot.exists()) return
-        val token = File(journalRoot, FILE_RESTORE_TOKEN).takeIf { it.isFile }?.readText()
-        if (token != null && readDatabaseRestoreMarker() == token) {
+        val committedToken = committedFileRestoreToken(journalRoot)
+        if (committedToken != null) {
             // The DB marker proves that the transaction committed. Any
             // journal state after that point may have stopped in secrets,
             // settings, or FTS; retain the imported data and replay the one
             // derived step that is safe without holding credentials.
+            restoreWriteGate?.markDataCommitted()
             messageFtsManager.rebuildAllFromDatabase()
             check(journalRoot.deleteRecursively()) { "Unable to clean completed restore journal" }
-            clearDatabaseRestoreMarker(token)
+            clearDatabaseRestoreMarker(committedToken)
             return
         }
         val roots = File(journalRoot, FILE_RESTORE_ROOTS)
@@ -843,8 +961,13 @@ class SyncArchiveManager(
             journalRoot = journalRoot,
             backupRoot = File(journalRoot, "backup").canonicalFile,
             replacedRoots = roots,
-            token = token.orEmpty(),
+            token = File(journalRoot, FILE_RESTORE_TOKEN).takeIf { it.isFile }?.readText().orEmpty(),
         ).rollback()
+    }
+
+    private fun committedFileRestoreToken(journalRoot: File): String? {
+        val token = File(journalRoot, FILE_RESTORE_TOKEN).takeIf { it.isFile }?.readText() ?: return null
+        return token.takeIf { readDatabaseRestoreMarker() == it }
     }
 
     private fun writeDatabaseRestoreMarker(db: androidx.sqlite.db.SupportSQLiteDatabase, token: String) {
@@ -908,12 +1031,14 @@ class SyncArchiveManager(
         }
 
         fun rollback() {
+            val state = File(journalRoot, FILE_RESTORE_STATE).takeIf { it.isFile }?.readText()
+            val backupsComplete = state != null && state != FILE_RESTORE_PENDING
             replacedRoots.forEach { relativeRoot ->
-                File(filesDir, relativeRoot).deleteRecursively()
-            }
-            backupRoot.listFiles().orEmpty().forEach { backup ->
-                if (backup.name !in replacedRoots) return@forEach
-                backup.copyRecursively(File(filesDir, backup.name), overwrite = true)
+                val backup = File(backupRoot, relativeRoot)
+                val target = File(filesDir, relativeRoot)
+                // In pending phase a later root may still be the untouched original.
+                if (backupsComplete || backup.exists()) target.deleteRecursively()
+                if (backup.exists()) backup.copyRecursively(target, overwrite = true)
             }
             journalRoot.deleteRecursively()
         }
@@ -1144,12 +1269,15 @@ class SyncArchiveManager(
         private const val FILE_RESTORE_ROOTS = "roots"
         private const val FILE_RESTORE_TOKEN = "token"
         private const val FILE_RESTORE_PENDING = "pending"
+        private const val FILE_RESTORE_ROOTS_BACKED_UP = "roots_backed_up"
         private const val FILE_RESTORE_FILES_REPLACED = "files_replaced"
         private const val FILE_RESTORE_DATA_COMMITTED = "data_committed"
         private const val FILE_RESTORE_SECRETS_APPLIED = "secrets_applied"
         private const val FILE_RESTORE_FTS_APPLIED = "fts_applied"
         private const val FILE_RESTORE_SETTINGS_APPLIED = "settings_applied"
         private const val RESTORE_MARKER_TABLE = "amber_sync_restore_marker"
+        private const val NOVEL_WORKSPACE_ROOT = NovelWorkspaceProjectRepository.RELATIVE_ROOT
+        private const val NOVEL_WORKSPACE_DATASET = "novel-workspace"
 
         // Pre-compressed/lossy formats: DEFLATE has no headroom and just burns CPU.
         // Listed by extension so the check stays cheap and stable across content
@@ -1228,6 +1356,7 @@ class SyncArchiveManager(
             "thread_result",
             "continue_candidate_dismiss",
             "theme_package",
+            "live_card",
         )
 
         private val SYNC_FILE_ROOTS = listOf(
@@ -1239,6 +1368,8 @@ class SyncArchiveManager(
             // cross-device restores leave all chat-inline images as broken
             // links. Added in the v1.6.x image-gen feature follow-up.
             FileFolders.CHAT_IMAGES,
+            NOVEL_WORKSPACE_ROOT,
+            ArtifactBackupContentStore.RELATIVE_ROOT,
         )
     }
 }

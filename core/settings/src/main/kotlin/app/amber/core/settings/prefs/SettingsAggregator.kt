@@ -2,18 +2,19 @@ package app.amber.core.settings.prefs
 
 import android.util.Log
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.IOException
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.OpenAIBrand
@@ -37,15 +38,14 @@ import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.secret.SecretRedactor
 import app.amber.core.settings.secret.SecretReference
 import app.amber.core.agent.utils.JsonInstant
-import app.amber.core.settings.toMutableStateFlow
 import app.amber.core.settings.withMigratedPromptDefaults
 import kotlin.uuid.Uuid
 
 private const val TAG = "SettingsAggregator"
 
 /**
- * Combines the six domain preference stores into the canonical [Settings]
- * flow and owns cross-domain consistency and atomic writes.
+ * Decodes the six domains from one committed Preferences snapshot and owns
+ * canonical [Settings] publication, cross-domain consistency and atomic writes.
  */
 class SettingsAggregator(
     private val dataStore: DataStore<Preferences>,
@@ -59,33 +59,34 @@ class SettingsAggregator(
     private val secretRedactor: SecretRedactor,
 ) {
 
-    private val _settingsFlow: MutableStateFlow<Settings> = combine(
-        uiPrefs.rawFlow,
-        searchPrefs.rawFlow,
-        agentPrefs.rawFlow,
-        providerPrefs.rawFlow,
-        chatPrefs.rawFlow,
-        extensionPrefs.rawFlow,
-    ) { arr: Array<Any?> ->
-        @Suppress("UNCHECKED_CAST")
-        composeRawSettings(
-            ui = arr[0] as UIPrefsData,
-            search = arr[1] as SearchPrefsData,
-            agent = arr[2] as AgentPrefsData,
-            provider = arr[3] as ProviderPrefsData,
-            chat = arr[4] as ChatPrefsData,
-            ext = arr[5] as ExtensionPrefsData,
-        )
+    private val writeMutex = Mutex()
+    private val _settingsFlow = MutableStateFlow(Settings.dummy())
+    private val readablePreferences = dataStore.data.catch { error ->
+        if (error is IOException) emit(emptyPreferences()) else throw error
     }
-        .map { applyBackfillAndSeed(it) }
-        .map { applyCrossDomainConsistency(it) }
-        .distinctUntilChanged()
-        .flowOn(Dispatchers.Default)
-        .toMutableStateFlow(scope, Settings.dummy())
 
     val settingsFlow: StateFlow<Settings> get() = _settingsFlow
 
-    private val writeMutex = Mutex()
+    init {
+        scope.launch {
+            runCatching {
+                readablePreferences.collect {
+                    writeMutex.withLock {
+                        withContext(Dispatchers.Default) {
+                            // A notification may predate an acknowledged update. Read
+                            // the latest durable snapshot and publish under its write lock.
+                            _settingsFlow.value = composeCurrentSettings(readablePreferences.first())
+                        }
+                    }
+                }
+            }.onFailure {
+                // Preserve the settings collection's existing fatal error contract.
+                it.printStackTrace()
+                Log.e(TAG, "Error while collecting settings flow: ${it.message}", it)
+                Runtime.getRuntime().halt(1)
+            }
+        }
+    }
 
     /** Atomic write: all settings keys are updated in one [dataStore.edit] block. */
     suspend fun update(settings: Settings) = writeMutex.withLock {
@@ -224,11 +225,9 @@ class SettingsAggregator(
                 p[PreferencesKeys.SEEDED_ROUTING_QUICK_MESSAGES_V1] = true
             }
         }
-        // Publish only after the redacted DataStore edit succeeds. The
-        // persisted snapshot is the source of truth; update { } reads it
-        // directly before applying its transform, so a delayed raw-flow
-        // emission cannot make a consecutive update lose fields.
-        _settingsFlow.value = settingsForWrite
+        // Publish the same canonical projection as the collector before
+        // acknowledging the write, while still holding writeMutex.
+        _settingsFlow.value = readCurrentSettings()
         // Do not sweep while the legacy profile/list still signals a migration retry.
         if (!legacyMigrationPending) {
             val activeRefs = dataStore.data.first().let { secretRedactor.readRefsStrict(it) }
@@ -236,9 +235,10 @@ class SettingsAggregator(
         }
     }
 
-    private suspend fun readCurrentSettings(): Settings {
-        val preferences = dataStore.data.first()
-        return applyCrossDomainConsistency(
+    private suspend fun readCurrentSettings(): Settings = composeCurrentSettings(dataStore.data.first())
+
+    private fun composeCurrentSettings(preferences: Preferences): Settings =
+        applyCrossDomainConsistency(
             applyBackfillAndSeed(
                 composeRawSettings(
                     ui = uiPrefs.readFrom(preferences),
@@ -250,7 +250,6 @@ class SettingsAggregator(
                 )
             )
         )
-    }
 
     /**
      * 恢复路径专用：把备份携带的 reference 写回 DataStore，
@@ -263,6 +262,7 @@ class SettingsAggregator(
                 val merged = secretRedactor.readRefsStrict(p) + refs.associateBy { it.descriptor().key }
                 secretRedactor.writeRefs(p, merged)
             }
+            _settingsFlow.value = readCurrentSettings()
         }
     }
 
@@ -282,10 +282,7 @@ class SettingsAggregator(
             dataStore.edit { p ->
                 p[PreferencesKeys.LAUNCH_COUNT] = launchCount
             }
-            val current = _settingsFlow.value
-            if (!current.init) {
-                _settingsFlow.value = current.copy(launchCount = launchCount)
-            }
+            _settingsFlow.value = readCurrentSettings()
         }
     }
 

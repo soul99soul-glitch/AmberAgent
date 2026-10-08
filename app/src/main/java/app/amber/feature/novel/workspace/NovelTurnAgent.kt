@@ -38,7 +38,7 @@ class NovelTurnAgent(
                 payload.request,
                 runId = scope.runId.value,
                 events = scope.events,
-            ).collect { event ->
+            ).captureAuthorOutput(payload.request, scope.runId.value).collect { event ->
                 payload.events.trySend(event)
                 when (event) {
                     is NovelWorkspaceRuntime.TurnEvent.Completed -> {
@@ -74,6 +74,14 @@ class NovelTurnAgent(
                 success = false,
                 error = "turn ended without a terminal event",
             )
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: Exception) {
+            // Snapshot persistence failures are user-visible, just like generation failures.
+            val message = error.message ?: payload.request.fallbackErrorMessage
+            payload.events.trySend(NovelWorkspaceRuntime.TurnEvent.Failed(message))
+            scope.events.commit(NovelTurnEventPayload.TurnFailed(message))
+            NovelTurnArtifact(success = false, error = message)
         } finally {
             payload.events.close()
             payload.completion.complete(Unit)

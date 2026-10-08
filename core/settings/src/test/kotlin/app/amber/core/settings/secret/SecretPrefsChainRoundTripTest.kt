@@ -33,11 +33,15 @@ import app.amber.search.SearchCommonOptions
 import androidx.datastore.core.DataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -48,10 +52,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
-import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.File
-import android.os.Looper
 
 /**
  * P1-01: 真实设置保存/读取链路 round-trip（Robolectric）。
@@ -62,6 +64,7 @@ import android.os.Looper
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class SecretPrefsChainRoundTripTest {
     private lateinit var context: Context
     private lateinit var tempDir: File
@@ -69,9 +72,11 @@ class SecretPrefsChainRoundTripTest {
     private lateinit var secretStore: SecretStore
     private lateinit var secretRedactor: SecretRedactor
     private lateinit var scope: AppScope
+    private val mainDispatcher = UnconfinedTestDispatcher()
 
     @Before
     fun setUp() {
+        Dispatchers.setMain(mainDispatcher)
         context = RuntimeEnvironment.getApplication()
         tempDir = File(context.cacheDir, "secret-prefs-chain-${System.nanoTime()}").apply { mkdirs() }
         dataStore = PreferenceDataStoreFactory.create(
@@ -86,28 +91,20 @@ class SecretPrefsChainRoundTripTest {
 
     @After
     fun tearDown() {
+        Dispatchers.resetMain()
         tempDir.deleteRecursively()
     }
 
     /**
-     * AppScope 的收集协程在 Dispatchers.Main 上调度；Robolectric PAUSED looper
-     * 不会自动执行排队任务，等待 flow 时显式 idle 主 looper（Robolectric 官方提示）。
+     * Main uses the test dispatcher so the collector can release its write lock
+     * even while a test is runBlocking on Robolectric's paused SDK Main thread.
+     * Wait for the requested state without polling or assuming publication means
+     * that an Android Looper continuation has already run.
      */
     private suspend fun <T> StateFlow<T>.awaitUntil(
         timeoutMs: Long = 5_000,
         predicate: (T) -> Boolean,
-    ): T {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (true) {
-            val current = value
-            if (predicate(current)) return current
-            if (System.currentTimeMillis() > deadline) {
-                throw IllegalStateException("awaitUntil timed out waiting for settings flow")
-            }
-            shadowOf(Looper.getMainLooper()).idle()
-            delay(10)
-        }
-    }
+    ): T = withTimeout(timeoutMs) { first(predicate) }
 
     // ---------------- SettingsAggregator（生产保存路径） ----------------
 

@@ -22,10 +22,14 @@ object GuizangHtmlDeckValidator {
     const val LEGACY_LOCAL_RUNTIME_BASE = "https://amberagent.local/guizang/"
     const val LOCAL_MOTION_URL = "${LOCAL_RUNTIME_BASE}motion.min.js"
     const val LOCAL_LUCIDE_URL = "${LOCAL_RUNTIME_BASE}lucide.min.js"
+    const val LOCAL_THREE_URL = "${LOCAL_RUNTIME_BASE}three.min.js"
     const val LEGACY_LOCAL_MOTION_URL = "${LEGACY_LOCAL_RUNTIME_BASE}motion.min.js"
     const val LEGACY_LOCAL_LUCIDE_URL = "${LEGACY_LOCAL_RUNTIME_BASE}lucide.min.js"
+    const val LEGACY_LOCAL_THREE_URL = "${LEGACY_LOCAL_RUNTIME_BASE}three.min.js"
     const val MOTION_ASSET_PATH = "generative-libs/guizang/motion.min.js"
     const val LUCIDE_ASSET_PATH = "generative-libs/guizang/lucide.min.js"
+    /** three.js core + OrbitControls as one classic script exposing `window.THREE`; rebuild with scripts/build-three-bundle.sh. */
+    const val THREE_ASSET_PATH = "generative-libs/guizang/three.min.js"
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -47,6 +51,7 @@ object GuizangHtmlDeckValidator {
     ) {
         MOTION(MOTION_ASSET_PATH, "application/javascript"),
         LUCIDE(LUCIDE_ASSET_PATH, "application/javascript"),
+        THREE(THREE_ASSET_PATH, "application/javascript"),
     }
 
     fun isRenderer(renderer: String?): Boolean {
@@ -172,15 +177,16 @@ object GuizangHtmlDeckValidator {
         normalizeDeckStructure(rewriteRuntimeUrls(html))
 
     fun rewriteRuntimeUrls(html: String): String =
-        rewriteRuntimeUrls(html, LOCAL_MOTION_URL, LOCAL_LUCIDE_URL)
+        rewriteRuntimeUrls(html, LOCAL_MOTION_URL, LOCAL_LUCIDE_URL, LOCAL_THREE_URL)
 
     fun rewriteRuntimeUrlsForArchive(html: String): String =
-        normalizeDeckStructure(rewriteRuntimeUrls(html, "assets/motion.min.js", "assets/lucide.min.js"))
+        normalizeDeckStructure(rewriteRuntimeUrls(html, "assets/motion.min.js", "assets/lucide.min.js", "assets/three.min.js"))
 
     fun runtimeAssetForUrl(url: String): RuntimeAsset? {
         val normalized = rewriteRuntimeUrls(url.trim())
         if (isKnownMotionUrl(normalized)) return RuntimeAsset.MOTION
         if (isKnownLucideUrl(normalized)) return RuntimeAsset.LUCIDE
+        if (isKnownThreeUrl(normalized)) return RuntimeAsset.THREE
         return null
     }
 
@@ -202,6 +208,7 @@ object GuizangHtmlDeckValidator {
         html: String,
         motionUrl: String,
         lucideUrl: String,
+        threeUrl: String,
     ): String =
         html
             .replace(
@@ -242,6 +249,12 @@ object GuizangHtmlDeckValidator {
             )
             .replace(LEGACY_LOCAL_MOTION_URL, motionUrl, ignoreCase = true)
             .replace(LEGACY_LOCAL_LUCIDE_URL, lucideUrl, ignoreCase = true)
+            .replace(
+                Regex("""(?<=['"])(?:\./)?assets/three\.min\.js(?=['"])""", RegexOption.IGNORE_CASE),
+                threeUrl,
+            )
+            .replace(LOCAL_THREE_URL, threeUrl, ignoreCase = true)
+            .replace(LEGACY_LOCAL_THREE_URL, threeUrl, ignoreCase = true)
 
     private fun normalizeDeckStructure(html: String): String {
         val normalizedContainers = normalizeDeckContainerSlides(normalizeSocialCardDeck(html))
@@ -498,6 +511,14 @@ object GuizangHtmlDeckValidator {
             lower == LEGACY_LOCAL_LUCIDE_URL ||
             lower == "./assets/lucide.min.js" ||
             lower == "assets/lucide.min.js"
+    }
+
+    private fun isKnownThreeUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower == LOCAL_THREE_URL ||
+            lower == LEGACY_LOCAL_THREE_URL ||
+            lower == "./assets/three.min.js" ||
+            lower == "assets/three.min.js"
     }
 
     private fun JsonObject.stringOrNull(key: String): String? =

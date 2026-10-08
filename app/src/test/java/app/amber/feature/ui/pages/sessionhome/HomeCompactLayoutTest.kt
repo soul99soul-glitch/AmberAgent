@@ -95,11 +95,15 @@ class HomeCompactLayoutTest {
     @Test
     fun idleCardHasTitleRightAlignedContinueAndCompactHeight() {
         var opened: ContinueCandidate? = null
+        var resumed = 0
         val candidate = candidate(running = false)
         content {
             HomeFeatureRail(
                 resumeCandidate = candidate,
-                onOpenResume = { opened = it },
+                onOpenResume = {
+                    opened = it
+                    resumed++
+                },
                 onDeepRead = {}, onMiniApps = {}, onNovel = {}, onWebMount = {}, onCouncil = {},
             )
         }
@@ -116,6 +120,8 @@ class HomeCompactLayoutTest {
         assertTrue("card including outer margins should stay compact", compose.onNodeWithTag("home-test-root").fetchSemanticsNode().boundsInRoot.height <= 140f)
         compose.onNode(hasText(action) and hasClickAction()).performClick()
         assertEquals(candidate.route, opened?.route)
+        assertEquals(1, resumed)
+        compose.onNodeWithText("3").assertDoesNotExist()
     }
 
     @Test
@@ -142,22 +148,6 @@ class HomeCompactLayoutTest {
         compose.onNodeWithText(phase, useUnmergedTree = true).assertDoesNotExist()
         compose.mainClock.advanceTimeBy(8_000)
         compose.onNodeWithText(article, useUnmergedTree = true).assertIsDisplayed()
-    }
-
-    @Test
-    fun continuePillAlwaysResumesTheShownCandidate() {
-        var resumed = 0
-        content {
-            HomeFeatureRail(
-                resumeCandidate = candidate(running = false),
-                onOpenResume = { resumed++ },
-                onDeepRead = {}, onMiniApps = {}, onNovel = {}, onWebMount = {}, onCouncil = {},
-            )
-        }
-        val label = context.getString(R.string.session_home_continue)
-        compose.onNodeWithText(label).performClick()
-        assertEquals(1, resumed)
-        compose.onNodeWithText("3").assertDoesNotExist()
     }
 
     @Test

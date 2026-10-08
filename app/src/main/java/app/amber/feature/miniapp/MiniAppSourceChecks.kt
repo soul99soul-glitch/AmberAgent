@@ -106,11 +106,13 @@ object MiniAppSourceChecks {
             when {
                 c == '/' && code.getOrNull(i + 1) == '/' -> {
                     while (i < code.length && code[i] != '\n') i++
+                    continue
                 }
 
                 c == '/' && code.getOrNull(i + 1) == '*' -> {
                     val end = code.indexOf("*/", i + 2)
                     i = if (end < 0) code.length else end + 2
+                    continue
                 }
 
                 c == '"' || c == '\'' || c == '`' -> {
@@ -121,6 +123,7 @@ object MiniAppSourceChecks {
                         else j++
                     }
                     i = j + 1
+                    continue
                 }
 
                 c in "([{" -> stack.addLast(c)

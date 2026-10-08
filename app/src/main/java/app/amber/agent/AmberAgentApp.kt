@@ -97,14 +97,18 @@ class AmberAgentApp : Application() {
         syncManagedFiles()
 
         recoverInterruptedAgentRuns()
-        recoverInterruptedNovelJobs()
+        if (StandaloneSurfaces.allowsNovel) {
+            recoverInterruptedNovelJobs()
+        }
 
-        // 任务气泡驱动循环：agent 任务（含 GUI 操控）运行中悬浮展示输出
-        runCatching { get<app.amber.feature.bubble.AgentTaskBubbleController>().start() }
-            .onFailure { Log.w(TAG, "start task bubble controller failed", it) }
+        if (StandaloneSurfaces.allowsAgentFeatures) {
+            // 任务气泡驱动循环：agent 任务（含 GUI 操控）运行中悬浮展示输出
+            runCatching { get<app.amber.feature.bubble.AgentTaskBubbleController>().start() }
+                .onFailure { Log.w(TAG, "start task bubble controller failed", it) }
 
-        // install bundled agent skills
-        installBuiltinSkills()
+            // install bundled agent skills
+            installBuiltinSkills()
+        }
 
         // Init remote config
         get<FirebaseRemoteConfig>().apply {
@@ -127,23 +131,31 @@ class AmberAgentApp : Application() {
                 runCatching { Firebase.crashlytics.recordException(it) }
             }
 
-        // Reschedule persisted mobile cron tasks after app startup.
-        rescheduleCronTasks()
-        // Reminder owner is durable and must be reattached after every process start.
-        rescheduleReminders()
+        if (StandaloneSurfaces.allowsAgentFeatures) {
+            // Reschedule persisted mobile cron tasks after app startup.
+            rescheduleCronTasks()
+            // Reminder owner is durable and must be reattached after every process start.
+            rescheduleReminders()
+        }
 
         // Migrate the persisted shape before cached-settings rescue can write it back.
         migrateAndRescueSettings()
 
-        // Keep Daydream background review aligned with memory settings.
-        syncMemoryDreamTasks()
+        seedStandaloneDefaults()
 
-        // Start Today Board notification collector if enabled.
-        startBoardNotificationCollector()
+        if (StandaloneSurfaces.allowsAgentFeatures) {
+            // Keep Daydream background review aligned with memory settings.
+            syncMemoryDreamTasks()
+        }
 
-        // Sync Today Board scheduler with settings + foreground-compensation hook.
-        syncTodayBoardScheduler()
-        syncHotListScheduler()
+        if (StandaloneSurfaces.allowsBoard) {
+            // Start Today Board notification collector if enabled.
+            startBoardNotificationCollector()
+
+            // Sync Today Board scheduler with settings + foreground-compensation hook.
+            syncTodayBoardScheduler()
+            syncHotListScheduler()
+        }
 
         // Attach best-effort app-level cleanup for singleton services that own process lifecycle observers.
         registerChatServiceCleanup()
@@ -152,6 +164,32 @@ class AmberAgentApp : Application() {
         incrementLaunchCount()
 
         // Composer.setDiagnosticStackTraceMode(ComposeStackTraceMode.Auto)
+    }
+
+    /**
+     * The standalone deep-read app IS the board — seed `todayBoard.enabled` on
+     * first launch so its home surface, manual refresh and schedulers all work
+     * without a settings detour. One-shot: a later user toggle is respected.
+     */
+    private fun seedStandaloneDefaults() {
+        if (StandaloneSurfaces.current != StandaloneSurfaces.DEEP_READ) return
+        val prefs = getSharedPreferences("standalone_defaults", MODE_PRIVATE)
+        if (prefs.getBoolean("board_enabled_seeded", false)) return
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching {
+                val store = get<SettingsAggregator>()
+                store.settingsFlow.first { !it.init }
+                store.update { current ->
+                    current.copy(
+                        agentRuntime = current.agentRuntime.copy(
+                            todayBoard = current.agentRuntime.todayBoard.copy(enabled = true),
+                        ),
+                    )
+                }
+            }.onSuccess {
+                prefs.edit().putBoolean("board_enabled_seeded", true).apply()
+            }.onFailure { Log.e(TAG, "standalone board seed failed", it) }
+        }
     }
 
     private fun registerChatServiceCleanup() {

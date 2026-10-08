@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import app.amber.agent.R
 import app.amber.feature.board.DeepReadTemplateIds
 import app.amber.feature.board.TodayBoardSetting
+import app.amber.feature.board.hotlist.deepread.template.DeepReadSynthesisTemplate
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplatePackage
 import app.amber.feature.board.hotlist.deepread.template.DeepReadRenderedTemplate
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRenderer
@@ -72,22 +74,35 @@ fun DeepReadTemplateSettingsRow(
         "__TEMPLATE_ERROR__",
     )
     val sampleOutput = remember { DeepReadTemplateRenderer.sampleOutput() }
-    val selectedTemplateName = when (board.deepReadTemplateId) {
-        DeepReadTemplateIds.COMPOSE_MAGAZINE -> stringResource(R.string.deep_read_template_default_magazine)
-        DeepReadTemplateIds.EDITORIAL_SLANT -> stringResource(R.string.deep_read_template_editorial_slant)
-        else -> customTemplates.firstOrNull { it.id == board.deepReadTemplateId }?.name
-            ?: stringResource(R.string.deep_read_template_current)
-    }
+    val selectedTemplateId = DeepReadTemplateIds.normalize(board.deepReadTemplateId)
+    val selectedTemplateName = DeepReadTemplateCatalog.name(
+        selectedTemplateId,
+        customTemplates.firstOrNull { it.id == board.deepReadTemplateId }?.name,
+    )
     fun previewSelectedTemplate() {
-        previewTarget = when (board.deepReadTemplateId) {
-            DeepReadTemplateIds.COMPOSE_MAGAZINE,
-            DeepReadTemplateIds.EDITORIAL_SLANT -> DeepReadTemplateRenderer.renderEditorialSlant(
-                title = sampleTitle,
-                output = sampleOutput,
+        val synthesisKind = DeepReadSynthesisTemplate.fromWireId(selectedTemplateId)
+        previewTarget = when {
+            synthesisKind != null -> DeepReadTemplateRenderer.renderTemplateArticle(
+                article = DeepReadTemplateRenderer.sampleTemplateArticle(
+                    // Auto previews the shape it most often resolves to.
+                    if (synthesisKind == DeepReadSynthesisTemplate.AUTO) {
+                        DeepReadSynthesisTemplate.BRIEF
+                    } else {
+                        synthesisKind
+                    },
+                ),
                 fontCss = fontCss,
                 darkTheme = darkTheme,
-            )
-                .toPreviewTarget(selectedTemplateName)
+            ).toPreviewTarget(selectedTemplateName)
+            selectedTemplateId == DeepReadTemplateIds.COMPOSE_MAGAZINE ||
+                selectedTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT ->
+                DeepReadTemplateRenderer.renderEditorialSlant(
+                    title = sampleTitle,
+                    output = sampleOutput,
+                    fontCss = fontCss,
+                    darkTheme = darkTheme,
+                )
+                    .toPreviewTarget(selectedTemplateName)
             else -> {
                 val template = customTemplates.firstOrNull { it.id == board.deepReadTemplateId }
                 if (template == null) {
@@ -159,19 +174,17 @@ fun DeepReadTemplateSettingsRow(
         }
 
         Spacer(Modifier.height(28.dp))
-        TemplateSectionLabel(stringResource(R.string.deep_read_template_default_magazine))
+        TemplateSectionLabel(stringResource(R.string.deep_read_template_label))
         Spacer(Modifier.height(10.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            TemplateChip(
-                selected = board.deepReadTemplateId == DeepReadTemplateIds.COMPOSE_MAGAZINE,
-                label = stringResource(R.string.deep_read_template_default_magazine),
-                onClick = { onSelect(DeepReadTemplateIds.COMPOSE_MAGAZINE) },
-            )
-            TemplateChip(
-                selected = board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT,
-                label = stringResource(R.string.deep_read_template_editorial_slant),
-                onClick = { onSelect(DeepReadTemplateIds.EDITORIAL_SLANT) },
-            )
+            DeepReadTemplateCatalog.options.forEach { templateId ->
+                TemplateChip(
+                    selected = selectedTemplateId == templateId,
+                    label = DeepReadTemplateCatalog.name(templateId),
+                    icon = DeepReadTemplateCatalog.icon(templateId),
+                    onClick = { onSelect(templateId) },
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
         Button(
@@ -281,6 +294,7 @@ private fun TemplateChip(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
 ) {
     val tokens = LocalAmberTokens.current
     Surface(
@@ -292,7 +306,16 @@ private fun TemplateChip(
             .heightIn(min = 32.dp)
             .clickable { onClick() },
     ) {
-        Text(label, modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp), style = LocalAmberType.current.secondary)
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(13.dp))
+            }
+            Text(label, style = LocalAmberType.current.secondary)
+        }
     }
 }
 

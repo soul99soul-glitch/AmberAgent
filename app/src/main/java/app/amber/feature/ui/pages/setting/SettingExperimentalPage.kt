@@ -418,6 +418,7 @@ internal fun ExperimentNote(
 @Composable
 internal fun ExperimentalSettingsScaffold(
     title: String,
+    titleStyle: androidx.compose.ui.text.TextStyle? = null,
     navigationIcon: @Composable () -> Unit = { BackButton() },
     content: @Composable (PaddingValues) -> Unit,
 ) {
@@ -426,6 +427,7 @@ internal fun ExperimentalSettingsScaffold(
         topBar = {
             WorkspaceTopBar(
                 title = title,
+                titleStyle = titleStyle,
                 navigationIcon = navigationIcon,
                 scrollBehavior = scrollBehavior,
             )

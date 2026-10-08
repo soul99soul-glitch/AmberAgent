@@ -71,5 +71,5 @@ private suspend fun currentOrLatestLocation(context: Context): Location? {
 private fun latestLocation(locationManager: LocationManager): Location? {
     return locationManager.getProviders(true)
         .mapNotNull { provider -> runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull() }
-        .maxWithOrNull(compareBy<Location> { it.time }.thenByDescending { -it.accuracy })
+        .maxWithOrNull(compareBy<Location> { it.time }.thenByDescending { it.accuracy })
 }

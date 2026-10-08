@@ -64,7 +64,7 @@ class MiniAppConversationWriter(
             // Queue/session rejected the message — keep the draft for the user.
             return SendToConversationReceipt(draft.conversationId, draft.draftId, "send_rejected")
         }
-        draftStore.clear(conversationId)
+        draftStore.clearIfCurrent(conversationId, draft.draftId)
         return SendToConversationReceipt(draft.conversationId, draft.draftId, "sent")
     }
 
@@ -84,10 +84,11 @@ class MiniAppConversationWriter(
             for (item in array) {
                 if (parts.size >= MAX_ATTACHMENTS) break
                 val obj = item as? JsonObject ?: continue
-                val url = obj["url"]?.jsonPrimitive?.contentOrNull
-                    ?.trim()
-                    ?.take(MAX_ATTACHMENT_URL_CHARS)
+                val url = obj["url"]?.jsonPrimitive?.contentOrNull?.trim()
                     ?.takeIf { it.isAllowedAttachmentUrl() } ?: continue
+                if (url.length > MAX_ATTACHMENT_URL_CHARS) {
+                    throw MiniAppValidationException("Attachment URL is too large")
+                }
                 val kind = obj["kind"]?.jsonPrimitive?.contentOrNull
                 val name = obj["name"]?.jsonPrimitive?.contentOrNull?.trim()
                 val mime = obj["mime"]?.jsonPrimitive?.contentOrNull?.trim()

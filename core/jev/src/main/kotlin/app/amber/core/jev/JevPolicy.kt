@@ -27,6 +27,12 @@ data class JevPolicy(
     val screenReadOnlyThreshold: Double = 0.8,
     /** SCREEN_AUTOMATION：DONE 核验低于此值 handback。 */
     val screenDoneVerifiedThreshold: Double = 0.85,
+    /** TOOL_RESULT_RETENTION：保留概率达到此值才跳过压缩清空（与 iOS 一致）。 */
+    val toolResultRetentionKeepProbability: Double = 0.7,
+    /** AUTO_APPROVAL_GATE：任一风险达到此值即收紧为人工审批；"用户明确要求"同阈值（与 iOS 一致）。 */
+    val autoApprovalRiskThreshold: Double = 0.8,
+    /** COMPLETION_CHECK：最终回复宣称完成/已验证的概率达到此值才续跑一轮。 */
+    val completionClaimThreshold: Double = 0.8,
 ) {
     companion object {
         /**

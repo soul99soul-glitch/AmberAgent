@@ -17,12 +17,18 @@ import kotlinx.coroutines.withTimeout
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelAbility
+import app.amber.ai.provider.ProviderCatalog
+import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.agent.AppScope
 import app.amber.agent.R
+import app.amber.feature.board.DeepReadTemplateIds
 import app.amber.feature.board.boardRequestBodies
 import app.amber.feature.board.boardRequestHeaders
 import app.amber.feature.board.hotlist.HotListRepository
+import app.amber.feature.board.hotlist.deepread.template.DeepReadSynthesisTemplate
+import app.amber.feature.board.hotlist.deepread.template.DeepReadSynthesisWriter
+import app.amber.feature.board.hotlist.deepread.template.displayNameZh
 import app.amber.agent.data.workspace.ArtifactRepository
 import app.amber.core.utils.JsonInstant
 import app.amber.feature.runtime.ToolInvocationContext
@@ -34,10 +40,12 @@ import app.amber.core.ai.GenerationRunSession
 import app.amber.core.ai.RunKernel
 import app.amber.core.agent.runtime.AgentEventWriter
 import app.amber.core.settings.Settings
+import app.amber.core.settings.findProvider
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.resolveTaskChatModel
 import app.amber.core.sync.core.SyncRestoreWriteEpoch
 import app.amber.core.sync.core.SyncRestoreWriteGate
+import java.io.IOException
 import java.net.URI
 import java.security.MessageDigest
 import java.time.LocalDate
@@ -57,6 +65,7 @@ class DeepReadAgentRunManager(
     private val playbookRepository: DeepReadPlaybookRepository,
     private val researchHarness: DeepReadResearchHarness,
     private val appScope: AppScope,
+    private val providerCatalog: ProviderCatalog,
     private val artifactRepository: ArtifactRepository? = null,
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
@@ -75,6 +84,22 @@ class DeepReadAgentRunManager(
         val playbookMarkdown: String,
         val writer: DeepReadSectionWriterTools,
         val locale: Locale,
+        /** Effective template id stored on the entry (iOS task.templateId). */
+        val templateId: String,
+        /** Prefetched sources as collected — input for synthesis templates. */
+        val prefetchedSources: List<DeepReadSource>,
+        /**
+         * The existing entry was produced by a synthesis template — used to
+         * expand a magazine fallback run over all missing stages instead of
+         * leaving a one-section hybrid after a failed-synthesis retry.
+         */
+        val wasSynthesisEntry: Boolean = false,
+        /**
+         * Concrete synthesis template to run. Non-null when the entry's template
+         * is a `deepread_*` generation template; for AUTO this carries the
+         * model's pick, or null when auto resolved to the classic magazine.
+         */
+        val synthesisChoice: DeepReadSynthesisTemplate? = null,
         // Step 5: the run scope's identity + protocol event writer, threaded
         // from the DeepRead agent handler so kernel rounds can leave a durable
         // audit trail. Null on bare/background callers (no run scope).
@@ -125,8 +150,6 @@ class DeepReadAgentRunManager(
         locale: Locale = Locale.getDefault(),
     ): Result<DeepReadOutput> = withCapturedRestoreWriteContext {
         topicMutex(topicId).withLock {
-            if (force) hotListRepository.clearDeepRead(topicId)
-
             val cached = if (force) null else fresh(topicId, topicTitle, seedUrl)
             if (cached?.isComplete() == true) {
                 persistCompletedArtifact(topicId, topicTitle, cached)
@@ -294,13 +317,28 @@ class DeepReadAgentRunManager(
             return Result.failure(error)
         }
 
+        // Synthesis templates replace the magazine section pipeline with one
+        // structured call (iOS DeepReadCreateView template branch).
+        context.synthesisChoice?.let { chosen ->
+            return runTemplateSynthesis(topicId, context, chosen)
+        }
+
+        // A synthesis entry whose rerun resolved to the magazine (AUTO re-pick)
+        // has no magazine body at all — generate every missing stage instead of
+        // only the one the caller asked for.
+        val effectiveStages = if (context.wasSynthesisEntry) {
+            missingStages(context.writer.currentOutput()).ifEmpty { stages }
+        } else {
+            stages
+        }
+
         return runCatching {
-            context.writer.markRunning(stages)
+            context.writer.markRunning(effectiveStages)
 
             // OVERVIEW must settle before NARRATIVE/ANALYSIS so they can read
             // overview.summary and overview.key_entities from writer state when
             // building their prompts.
-            if (DeepReadGenerationStage.OVERVIEW in stages) {
+            if (DeepReadGenerationStage.OVERVIEW in effectiveStages) {
                 runStageSupervisorLoop(context, DeepReadGenerationStage.OVERVIEW)
             }
 
@@ -308,20 +346,20 @@ class DeepReadAgentRunManager(
             // model is more reliable when analysis can read the narrative it is
             // meant to interpret, and it avoids two long generation/tool loops
             // competing at once on mobile networks.
-            if (DeepReadGenerationStage.NARRATIVE in stages) {
+            if (DeepReadGenerationStage.NARRATIVE in effectiveStages) {
                 runStageSupervisorLoop(context, DeepReadGenerationStage.NARRATIVE)
             }
-            if (DeepReadGenerationStage.ANALYSIS in stages) {
+            if (DeepReadGenerationStage.ANALYSIS in effectiveStages) {
                 runStageSupervisorLoop(context, DeepReadGenerationStage.ANALYSIS)
             }
 
             // EXTENDED_READING collates references and image_assets; needs the
             // prior stages settled.
-            if (DeepReadGenerationStage.EXTENDED_READING in stages) {
+            if (DeepReadGenerationStage.EXTENDED_READING in effectiveStages) {
                 runStageSupervisorLoop(context, DeepReadGenerationStage.EXTENDED_READING)
             }
 
-            val allTargetedReady = stages.all {
+            val allTargetedReady = effectiveStages.all {
                 context.writer.currentOutput().statusOf(it) == DeepReadSectionStatus.READY
             }
             val allSectionsReady = context.writer.currentOutput().sectionsReady()
@@ -337,7 +375,7 @@ class DeepReadAgentRunManager(
 
             // Anything that didn't reach READY gets a clear FAILED so the UI
             // shows an error instead of a perpetual loading skeleton.
-            val missing = stages.filter {
+            val missing = effectiveStages.filter {
                 context.writer.currentOutput().statusOf(it) != DeepReadSectionStatus.READY
             }
             markMissingFailed(
@@ -396,16 +434,53 @@ class DeepReadAgentRunManager(
                 return Result.failure(IllegalStateException(appContext.getString(R.string.tools_warning)))
             }
             val model = resolvedModel.withBoardRequestOptions(settings)
+
+            // Resolve the effective template before `force` wipes the row so an
+            // AUTO entry that already resolved to the magazine keeps that
+            // choice (iOS `hasStructuredBody` guard in resume).
+            val existingEntry = hotListRepository.getDeepReadEntry(topicId)
+            val templateId = if (topicId.startsWith(PREVIEW_TOPIC_PREFIX)) {
+                // Workbench previews always exercise the magazine pipeline —
+                // its section output is what custom HTML templates consume.
+                DeepReadTemplateIds.COMPOSE_MAGAZINE
+            } else {
+                DeepReadTemplateIds.normalize(
+                    existingEntry?.templateId?.takeIf { it.isNotBlank() }
+                        ?: hotListRepository.getHotTopic(topicId)?.deepReadTemplateId?.takeIf { it.isNotBlank() }
+                        ?: settings.agentRuntime.todayBoard.deepReadTemplateId,
+                )
+            }
+            val synthesisTemplate = DeepReadSynthesisTemplate.fromWireId(templateId)
+            // iOS `hasStructuredBody` = auto already resolved to the classic
+            // magazine: a magazine body with NO template article. An auto entry
+            // that produced a synthesis re-picks on rerun.
+            val autoAlreadyStructured = synthesisTemplate == DeepReadSynthesisTemplate.AUTO &&
+                existingEntry?.structuredJson.isNullOrBlank() &&
+                existingEntry?.output?.withInferredSectionStates()?.hasAnyReadySection() == true
+
+            if (force) {
+                // Restart content after admission succeeds. Keep the bookmarked row
+                // and source URL, and create a direct empty row to block title fallback.
+                hotListRepository.saveDeepRead(
+                    topicId = topicId,
+                    title = topicTitle,
+                    output = DeepReadOutput(),
+                    ttlDays = settings.agentRuntime.todayBoard.deepReadCacheTtlDays,
+                    sourceUrl = seedUrl,
+                    templateId = templateId,
+                )
+            }
             if (markCollecting) {
                 hotListRepository.saveDeepRead(
                     topicId = topicId,
                     title = topicTitle,
-                    output = (fresh(topicId, topicTitle, seedUrl) ?: DeepReadOutput()).copy(
+                    output = (fresh(topicId, topicTitle, seedUrl, templateId) ?: DeepReadOutput()).copy(
                         generationPhase = DeepReadGenerationPhase.COLLECTING,
                         generationComplete = false,
                     ),
                     ttlDays = settings.agentRuntime.todayBoard.deepReadCacheTtlDays,
                     sourceUrl = seedUrl,
+                    templateId = templateId,
                 )
             }
             val prefetchedSources = sourcePrefetcher.collect(
@@ -422,16 +497,40 @@ class DeepReadAgentRunManager(
                     hotListRepository.saveDeepRead(
                         topicId = topicId,
                         title = topicTitle,
-                        output = (fresh(topicId, topicTitle, seedUrl) ?: DeepReadOutput()).copy(
+                        output = (fresh(topicId, topicTitle, seedUrl, templateId) ?: DeepReadOutput()).copy(
                             generationPhase = DeepReadGenerationPhase.IDLE,
                         ),
                         ttlDays = settings.agentRuntime.todayBoard.deepReadCacheTtlDays,
                         sourceUrl = seedUrl,
+                        templateId = templateId,
                     )
                 }
                 return Result.failure(IllegalStateException(message))
             }
             Log.i(TAG, "deep read prefetch ready: ${prefetchedSources.size} sources for topic=$topicId")
+
+            // Generation templates (iOS DeepReadSynthesisTemplate) replace the
+            // magazine section pipeline with a single structured synthesis call.
+            // AUTO first asks the model which template fits the sources.
+            var synthesisChoice: DeepReadSynthesisTemplate? = null
+            if (synthesisTemplate != null && !autoAlreadyStructured) {
+                synthesisChoice = if (synthesisTemplate == DeepReadSynthesisTemplate.AUTO) {
+                    pickSynthesisTemplate(
+                        settings = settings,
+                        model = model,
+                        topicTitle = topicTitle,
+                        sources = prefetchedSources,
+                    )
+                } else {
+                    synthesisTemplate
+                }
+            }
+            if (synthesisChoice == null) {
+                // A magazine-family run must not inherit a stale template
+                // article (e.g. an earlier AUTO pick that has since re-rolled).
+                hotListRepository.clearDeepReadStructuredJson(topicId)
+            }
+
             val evidencePack = researchHarness.buildEvidencePack(topicTitle, prefetchedSources)
             val evidenceRegistry = DeepReadEvidenceRegistry()
             seedEvidenceRegistry(evidenceRegistry, prefetchedSources, evidencePack, output = null)
@@ -450,16 +549,22 @@ class DeepReadAgentRunManager(
             val playbook = playbookRepository.read()
 
             writer.markPhase(planningPhase)
-            val articlePlan = generateArticlePlan(
-                settings = hiddenSettings,
-                model = model,
-                topicTitle = topicTitle,
-                evidencePack = evidencePack,
-                playbookMarkdown = playbook.markdown,
-                locale = locale,
-                runId = runId,
-                events = events,
-            )
+            // Synthesis templates need no magazine outline — the template call
+            // produces the whole article in one shot (iOS skips generateViaLLM).
+            val articlePlan = if (synthesisChoice != null) {
+                DeepReadArticlePlan()
+            } else {
+                generateArticlePlan(
+                    settings = hiddenSettings,
+                    model = model,
+                    topicTitle = topicTitle,
+                    evidencePack = evidencePack,
+                    playbookMarkdown = playbook.markdown,
+                    locale = locale,
+                    runId = runId,
+                    events = events,
+                )
+            }
             Result.success(
                 DeepReadRunContext(
                     settings = settings,
@@ -473,6 +578,11 @@ class DeepReadAgentRunManager(
                     playbookMarkdown = playbook.markdown,
                     writer = writer,
                     locale = locale,
+                    templateId = templateId,
+                    prefetchedSources = prefetchedSources,
+                    wasSynthesisEntry = DeepReadTemplateIds.isSynthesis(existingEntry?.templateId) ||
+                        !existingEntry?.structuredJson.isNullOrBlank(),
+                    synthesisChoice = synthesisChoice,
                     runId = runId,
                     events = events,
                 )
@@ -1253,6 +1363,151 @@ class DeepReadAgentRunManager(
         settingsStore.settingsFlow.filterNot { it.init }.first()
             .agentRuntime.todayBoard.deepReadCacheTtlDays
 
+    // MARK: - Synthesis templates (iOS DeepReadSynthesisTemplate parity)
+
+    /**
+     * AUTO-only step: the model reads source titles/openings and picks a
+     * concrete template. Nil or `magazine` keeps the classic pipeline.
+     */
+    private suspend fun pickSynthesisTemplate(
+        settings: Settings,
+        model: Model,
+        topicTitle: String,
+        sources: List<DeepReadSource>,
+    ): DeepReadSynthesisTemplate? {
+        val numbered = DeepReadSynthesisWriter.numbered(sources)
+        if (numbered.isEmpty()) return null
+        // Pick failures — including a timed-out pick — degrade to the classic
+        // magazine pipeline rather than failing the run (iOS pick == nil).
+        val raw = try {
+            synthesizeTemplateText(
+                settings = settings,
+                model = model,
+                prompt = DeepReadSynthesisWriter.pickPrompt(topicTitle, numbered),
+                timeoutMs = SYNTHESIS_PICK_TIMEOUT_MS,
+            )
+        } catch (timeout: SynthesisCallTimeout) {
+            null
+        } ?: return null
+        return DeepReadSynthesisWriter.parsePick(raw)
+    }
+
+    /**
+     * Synthesis provider call exceeded its deadline. Deliberately NOT a
+     * CancellationException so it lands as a retryable worker failure
+     * ("timeout" marker) instead of a silent cancelled run.
+     */
+    private class SynthesisCallTimeout(timeoutMs: Long) :
+        Exception("deep read synthesis timed out after ${timeoutMs}ms")
+
+    /** Direct provider call for synthesis templates — iOS `synthesizeJSON` parity. */
+    private suspend fun synthesizeTemplateText(
+        settings: Settings,
+        model: Model,
+        prompt: String,
+        timeoutMs: Long,
+    ): String? {
+        val provider = model.findProvider(settings.providers) ?: return null
+        val params = TextGenerationParams(
+            model = model,
+            customHeaders = model.customHeaders,
+            customBody = model.customBodies,
+        )
+        return try {
+            withTimeout(timeoutMs) {
+                providerCatalog.text(provider).complete(
+                    providerSetting = provider,
+                    messages = listOf(
+                        UIMessage.system(SYNTHESIS_SYSTEM_PROMPT),
+                        UIMessage.user(prompt),
+                    ),
+                    params = params,
+                )
+            }.choices.firstOrNull()?.message?.toText()?.trim()
+        } catch (timeout: TimeoutCancellationException) {
+            Log.w(TAG, "deep read synthesis call timed out after ${timeoutMs}ms")
+            throw SynthesisCallTimeout(timeoutMs)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: IOException) {
+            // Network failures are retryable at the WorkManager layer — let
+            // them fail the run instead of masquerading as an empty reply.
+            Log.w(TAG, "deep read synthesis call hit a network error", error)
+            throw error
+        } catch (error: Throwable) {
+            Log.w(TAG, "deep read synthesis call failed", error)
+            null
+        }
+    }
+
+    /**
+     * Single-shot structured generation for one concrete synthesis template.
+     * Stores the article JSON in `structured_json` next to a complete marker
+     * output so cache/history/export keep working (iOS task.structuredJSON).
+     */
+    private suspend fun runTemplateSynthesis(
+        topicId: String,
+        context: DeepReadRunContext,
+        template: DeepReadSynthesisTemplate,
+    ): Result<DeepReadOutput> {
+        val numbered = DeepReadSynthesisWriter.numbered(context.prefetchedSources)
+        if (numbered.isEmpty()) {
+            return failSynthesis(
+                topicId,
+                context,
+                appContext.getString(R.string.deep_read_generation_failed),
+            )
+        }
+        context.writer.markPhase(DeepReadGenerationPhase.WRITING)
+        val raw = synthesizeTemplateText(
+            settings = context.settings,
+            model = context.model,
+            prompt = DeepReadSynthesisWriter.prompt(template, context.topicTitle, numbered),
+            timeoutMs = SYNTHESIS_TIMEOUT_MS,
+        )
+        val article = raw?.let {
+            DeepReadSynthesisWriter.parse(it, template, context.topicTitle, numbered)
+        } ?: return failSynthesis(
+            topicId,
+            context,
+            appContext.getString(
+                R.string.deep_read_synthesis_template_failed,
+                template.displayNameZh,
+            ),
+        )
+        val output = DeepReadOutput(
+            topicType = "template_synthesis",
+            generationComplete = true,
+            generationPhase = DeepReadGenerationPhase.COMPLETE,
+            summary = article.lede.ifBlank { article.title },
+            sectionStates = DeepReadGenerationStage.entries.associateWith {
+                DeepReadSectionState(DeepReadSectionStatus.READY)
+            },
+        )
+        hotListRepository.saveDeepRead(
+            topicId = topicId,
+            title = context.topicTitle,
+            output = output,
+            ttlDays = context.settings.agentRuntime.todayBoard.deepReadCacheTtlDays,
+            sourceUrl = context.seedUrl,
+            templateId = context.templateId,
+            structuredJson = article.encoded(),
+        )
+        persistCompletedArtifact(topicId, context.topicTitle, output)
+        Log.i(TAG, "deep read synthesis completed: topic=$topicId template=${template.wireId}")
+        return Result.success(output)
+    }
+
+    private suspend fun failSynthesis(
+        topicId: String,
+        context: DeepReadRunContext,
+        message: String,
+    ): Result<DeepReadOutput> {
+        context.writer.markPhase(DeepReadGenerationPhase.IDLE)
+        Log.w(TAG, "deep read synthesis failed: topic=$topicId reason=$message")
+        return Result.failure(IllegalStateException(message))
+    }
+
     private fun resolveModel(settings: Settings): Model? {
         val boardModelId = settings.agentRuntime.todayBoard.boardModelId
         val specific = boardModelId
@@ -1267,14 +1522,30 @@ class DeepReadAgentRunManager(
         tools = emptySet(),
     )
 
-    private suspend fun fresh(topicId: String, topicTitle: String, seedUrl: String?): DeepReadOutput? {
+    private suspend fun fresh(
+        topicId: String,
+        topicTitle: String,
+        seedUrl: String?,
+        requestedTemplateId: String? = null,
+    ): DeepReadOutput? {
         val output = if (seedUrl.isNullOrBlank()) {
-            hotListRepository.materializeFreshDeepRead(topicId, topicTitle)
+            hotListRepository.materializeFreshDeepRead(
+                topicId = topicId,
+                title = topicTitle,
+                requestedTemplateId = requestedTemplateId ?: resolveStoredTemplateId(topicId),
+            )
         } else {
             hotListRepository.getFreshDeepRead(topicId)
         }
         return output?.withInferredSectionStates()
     }
+
+    /** Same precedence as createRunContext: entry → hot topic → board default. */
+    private suspend fun resolveStoredTemplateId(topicId: String): String =
+        hotListRepository.getDeepReadEntry(topicId)?.templateId?.takeIf { it.isNotBlank() }
+            ?: hotListRepository.getHotTopic(topicId)?.deepReadTemplateId?.takeIf { it.isNotBlank() }
+            ?: settingsStore.settingsFlow.filterNot { it.init }.first()
+                .agentRuntime.todayBoard.deepReadTemplateId
 
     private fun topicMutex(topicId: String): Mutex = mutexes.getOrPut(topicId) { Mutex() }
 
@@ -1361,6 +1632,13 @@ class DeepReadAgentRunManager(
         private const val PROMPT_SOURCE_LIMIT = 12
         private const val PROMPT_SOURCE_EXCERPT_LIMIT = 2_000
         private const val PLAYBOOK_PROMPT_LIMIT = 12_000
+
+        // iOS `synthesizeJSON` defaults: pick is a light call (60s), generation
+        // gets the full synthesis budget (150s).
+        private const val SYNTHESIS_PICK_TIMEOUT_MS = 60_000L
+        private const val SYNTHESIS_TIMEOUT_MS = 150_000L
+        private const val SYNTHESIS_SYSTEM_PROMPT =
+            "你是 AmberAgent 的深度阅读结构化写作助手。只基于提供的来源写作，不编造，只输出合法 JSON 对象。"
         private val EVIDENCE_RECORDING_TOOL_NAMES = setOf("search_web", "scrape_web")
         private val DEEP_READ_TIMEOUT_MARKERS = listOf(
             "timed out",

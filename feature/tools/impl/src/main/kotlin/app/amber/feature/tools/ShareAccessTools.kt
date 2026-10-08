@@ -8,6 +8,7 @@ import kotlinx.serialization.json.put
 import app.amber.ai.core.Tool
 import app.amber.feature.workspace.WorkspaceManager
 import java.io.File
+import java.util.UUID
 
 fun createShareTextTool(context: Context, deps: SystemAccessDeps): Tool = Tool(
     name = "share_text",
@@ -81,7 +82,7 @@ private suspend fun cacheWorkspaceFileForSharing(
 ): File {
     val bytes = workspaceManager.readBytesCapped(path, MAX_SHARE_FILE_BYTES)
     val safeName = path.substringAfterLast('/').replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "shared.bin" }
-    val dir = File(context.cacheDir, "agent-share").apply { mkdirs() }
+    val dir = File(context.cacheDir, "agent-share/${UUID.randomUUID()}").apply { mkdirs() }
     return File(dir, safeName).apply { writeBytes(bytes) }
 }
 

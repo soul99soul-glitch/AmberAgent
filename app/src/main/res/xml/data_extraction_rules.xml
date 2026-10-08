@@ -12,6 +12,9 @@
     <include
       domain="file"
       path="upload/" />
+    <include
+      domain="file"
+      path="amberagent/novel-workspace/" />
   </cloud-backup>
   <device-transfer>
     <include
@@ -23,5 +26,8 @@
     <include
       domain="file"
       path="upload/" />
+    <include
+      domain="file"
+      path="amberagent/novel-workspace/" />
   </device-transfer>
 </data-extraction-rules>

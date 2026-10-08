@@ -4,6 +4,10 @@ import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryRecord
 import app.amber.core.memory.model.MemoryScope
 import app.amber.core.settings.Settings
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -35,7 +39,12 @@ class JevMemoryRerankerTest {
                 .toList()
     }
 
-    private fun runtime(mode: JevMode, calibration: JevCalibrationStore, transport: JevTransport): JevRuntime {
+    private fun runtime(
+        mode: JevMode,
+        calibration: JevCalibrationStore,
+        transport: JevTransport,
+        shadowScope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined),
+    ): JevRuntime {
         val settings = Settings(
             jev = JevSetting(
                 enabled = true,
@@ -51,6 +60,7 @@ class JevMemoryRerankerTest {
             ),
             settingsProvider = { settings },
             calibration = calibration,
+            backgroundScope = shadowScope,
         )
     }
 
@@ -96,14 +106,40 @@ class JevMemoryRerankerTest {
     fun shadowStillRecordsAllChunksWithoutApplying() = runTest {
         val calibration = FreshCalibrationStore()
         val transport = ScriptedTransport()
-        val result = JevMemoryReranker(runtime(JevMode.SHADOW, calibration, transport))
+        val result = JevMemoryReranker(runtime(JevMode.SHADOW, calibration, transport, backgroundScope))
             .rerank(records(40), taskText = "what did I say about coffee?", runKey = "run1")
+        // backgroundScope 的任务不计入 advanceUntilIdle，用 runCurrent 执行后台 shadow。
+        runCurrent()
 
         assertFalse(result.applied)
         assertEquals(2, transport.calls)
         assertEquals(1, calibration.records.size)
         assertEquals(JevMode.SHADOW, calibration.records.single().mode)
         assertEquals(40, calibration.records.single().scores.size)
+    }
+
+    /** shadow 不等 Jev：立即走原路径，判断在后台完成并照常落校准记录。 */
+    @Test
+    fun shadowReturnsWithoutWaitingForJev() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val inner = ScriptedTransport()
+        val transport = object : JevTransport {
+            override suspend fun execute(request: JevHttpRequest): JevTransportResponse {
+                gate.await()
+                return inner.execute(request)
+            }
+        }
+        val calibration = FreshCalibrationStore()
+        val result = JevMemoryReranker(runtime(JevMode.SHADOW, calibration, transport, backgroundScope))
+            .rerank(records(3), taskText = "what did I say about coffee?", runKey = "run1")
+
+        assertFalse(result.applied)
+        assertEquals(0L, testScheduler.currentTime)
+        gate.complete(Unit)
+        // backgroundScope 的任务不计入 advanceUntilIdle，用 runCurrent 执行后台 shadow。
+        runCurrent()
+        assertEquals(1, inner.calls)
+        assertEquals(JevMode.SHADOW, calibration.records.single().mode)
     }
 
     @Test

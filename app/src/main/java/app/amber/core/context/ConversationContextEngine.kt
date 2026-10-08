@@ -80,6 +80,8 @@ class ConversationContextEngine(
     private val context: Context,
     // Jev 长工具结果语义投影；null 保持纯确定性准备路径。
     private val toolOutputProjector: app.amber.core.jev.JevToolOutputProjector? = null,
+    // Jev 压缩保留：只读取已固定的判定，从不等待网络。
+    private val toolResultRetention: app.amber.core.jev.JevToolResultRetention? = null,
 ) {
     private val compactMutex = Mutex()
 
@@ -125,9 +127,13 @@ class ConversationContextEngine(
     ): PreparedContext {
         val policy = settings.agentRuntime.contextCompaction.toCompactPolicy()
         val editResult = if (policy.enabled) {
+            val keepRecentMessages = (policy.keepRecentTurns * 2).coerceAtLeast(4)
             PreparedContextEditor.edit(
                 messages = messages,
-                keepRecentMessages = (policy.keepRecentTurns * 2).coerceAtLeast(4),
+                keepRecentMessages = keepRecentMessages,
+                retainedToolCallIds = conversation?.let {
+                    toolResultRetention?.retainedToolCallIds(messages, it.id.toString(), keepRecentMessages, jevRunKey)
+                }.orEmpty(),
             )
         } else {
             val estimate = ConversationContextPlanner.estimateTokens(messages)

@@ -20,6 +20,8 @@ data class NovelWorkspaceNode(
     val status: String?,
     val relations: List<NovelWorkspaceRelation>,
     val body: String,
+    /** Imported material policy; off stays visible in the catalog but is never injected. */
+    val injection: String = "smart",
 ) {
     fun matches(text: String): Boolean {
         if (title.length >= 2 && text.contains(title)) return true
@@ -40,8 +42,10 @@ object NovelWorkspaceNodes {
 
     private val NON_NODE_KINDS = setOf("chapter", "plot", "plan", "project", "branch")
 
-    fun parse(path: String, content: String): NovelWorkspaceNode? {
-        val parsed = NovelWorkspaceMarkdown.parseFile(content)
+    fun parse(path: String, content: String): NovelWorkspaceNode? =
+        parse(path, NovelWorkspaceMarkdown.parseFile(content))
+
+    private fun parse(path: String, parsed: NovelWorkspaceMarkdown.ParsedFile): NovelWorkspaceNode? {
         val kind = parsed.fields["materialKind"] ?: parsed.fields["kind"] ?: return null
         if (kind in NON_NODE_KINDS) return null
         return NovelWorkspaceNode(
@@ -55,14 +59,17 @@ object NovelWorkspaceNodes {
                 NovelWorkspaceRelation(withRef = withRef, type = map["type"].orEmpty())
             },
             body = parsed.body,
+            injection = parsed.fields["injection"]?.lowercase(java.util.Locale.ROOT) ?: "smart",
         )
     }
 
-    /** Global setting cards plus this branch's foreshadowing files. */
+    /** Effective setting cards plus this branch's foreshadowing files. */
     fun collect(store: NovelWorkspaceStore, branchSlug: String): List<NovelWorkspaceNode> {
-        val paths = store.list(NovelWorkspacePaths.SETTING_DIR) +
-            store.list(NovelWorkspacePaths.branchPrefix(branchSlug) + "/" + FORESHADOWING_DIR)
-        return paths.mapNotNull { path ->
+        val settingNodes = NovelWorkspaceEffectiveMaterials.collect(store, branchSlug).mapNotNull { entry ->
+            parse(entry.path, entry.parsed)
+        }
+        val foreshadowing = store.list(NovelWorkspacePaths.branchPrefix(branchSlug) + "/" + FORESHADOWING_DIR)
+        return settingNodes + foreshadowing.mapNotNull { path ->
             val content = store.read(path) ?: return@mapNotNull null
             parse(path, content)
         }
@@ -78,12 +85,13 @@ object NovelWorkspaceNodes {
      * Order-preserving and de-duplicated so the brief stays stable.
      */
     fun neighborhood(nodes: List<NovelWorkspaceNode>, text: String): List<NovelWorkspaceNode> {
-        val matched = nodes.filter { it.matches(text) }
+        val eligible = nodes.filter { it.injection != "off" }
+        val matched = eligible.filter { it.matches(text) }
         val result = LinkedHashMap<String, NovelWorkspaceNode>()
         matched.forEach { result[it.path] = it }
         for (node in matched) {
             for (relation in node.relations) {
-                val neighbor = nodes.firstOrNull { other ->
+                val neighbor = eligible.firstOrNull { other ->
                     other.path != node.path && other.referredBy(relation.withRef)
                 }
                 if (neighbor != null) result.putIfAbsent(neighbor.path, neighbor)

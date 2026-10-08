@@ -37,6 +37,18 @@ class ClaudeProviderMessageTest {
         adapter.encodeConversation(messages, promptCaching = false)
 
     @Test
+    fun `remote image uses url source instead of invalid base64`() {
+        val url = "HTTPS://example.com/image.png?signature=full"
+        val content = invokeBuildMessages(listOf(UIMessage(
+            role = MessageRole.USER, parts = listOf(UIMessagePart.Image(url)),
+        ))).single().jsonObject.getValue("content").jsonArray
+        val source = content.single().jsonObject.getValue("source").jsonObject
+        assertEquals("url", source["type"]?.jsonPrimitive?.content)
+        assertEquals(url, source["url"]?.jsonPrimitive?.content)
+        assertTrue("Remote URL must not be sent as base64", "data" !in source)
+    }
+
+    @Test
     fun `multi-round tool calls should produce tool_use followed by tool_result`() {
         // Scenario: Multiple rounds of tool calls
         val assistantMessage = UIMessage(

@@ -55,6 +55,29 @@ class MiniAppHtmlValidatorTest {
     }
 
     @Test
+    fun allowsBundledThreeLibraryScriptOnly() {
+        MiniAppHtmlValidator.validate(
+            """<!DOCTYPE html><html><head><script src="amber-miniapp-lib://three.min.js"></script></head><body><script>new THREE.Scene();</script></body></html>"""
+        )
+        listOf(
+            """<!DOCTYPE html><html><script src="https://cdn.jsdelivr.net/npm/three/build/three.min.js"></script></html>""",
+            """<!DOCTYPE html><html><script src="amber-miniapp-lib://other.js"></script></html>""",
+            """<!DOCTYPE html><html><script src="https://example.com/a.js" src="amber-miniapp-lib://three.min.js"></script></html>""",
+        ).forEach { html ->
+            assertTrue("Expected validation failure for $html", runCatching { MiniAppHtmlValidator.validate(html) }.isFailure)
+        }
+    }
+
+    @Test
+    fun shellServesBundledThreeFromSameOriginOnly() {
+        val shell = MiniAppShell.rewriteLibraryUrls("""<script src="amber-miniapp-lib://three.min.js"></script>""")
+        assertTrue(shell.contains(MiniAppShell.LIB_THREE_URL))
+        assertTrue(MiniAppShell.libraryAssetPath(MiniAppShell.LIB_THREE_URL) != null)
+        assertTrue(MiniAppShell.libraryAssetPath("${MiniAppShell.BASE_URL}__amber-lib/../secrets.js") == null)
+        assertTrue(MiniAppShell.libraryAssetPath("https://example.com/__amber-lib/three.min.js") == null)
+    }
+
+    @Test
     fun rejectsOversizedHtml() {
         val html = "<!DOCTYPE html><html>${"x".repeat(768 * 1024)}</html>"
         assertTrue(runCatching { MiniAppHtmlValidator.validate(html) }.isFailure)

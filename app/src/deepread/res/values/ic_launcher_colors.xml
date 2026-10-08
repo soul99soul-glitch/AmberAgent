@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- 米白纸面：与 iOS 深读独立应用图标底色同源采样（#FBF7F1）。 -->
+  <color name="ic_launcher_bg_amber">#FBF7F1</color>
+</resources>

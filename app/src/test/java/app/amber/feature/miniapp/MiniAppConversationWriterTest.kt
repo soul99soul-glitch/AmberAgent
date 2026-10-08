@@ -19,6 +19,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
@@ -193,5 +195,56 @@ class MiniAppConversationWriterTest {
         assertTrue(attachments[0] is UIMessagePart.Image)
         assertEquals("https://example.com/doc.pdf", (attachments[1] as UIMessagePart.Document).url)
         assertEquals("application/pdf", (attachments[1] as UIMessagePart.Document).mime)
+    }
+
+    @Test
+    fun sendConsumesOnlyTheDraftThatWasSent() = runBlocking {
+        val db = inMemoryDb()
+        try {
+            insertConversation(db, "conv-replaced")
+            val store = storeOf(db)
+            val sending = CompletableDeferred<Unit>()
+            val resumeSend = CompletableDeferred<Unit>()
+            val writer = MiniAppConversationWriter(store) { _, _ ->
+                sending.complete(Unit)
+                resumeSend.await()
+                true
+            }
+            val receipt = async { writer.writeAndSend("conv-replaced", "draft A", emptyList()) }
+            sending.await()
+            val replacement = store.save("conv-replaced", "draft B", emptyList())
+            resumeSend.complete(Unit)
+            assertEquals("sent", receipt.await().status)
+            assertEquals(replacement, store.load("conv-replaced"))
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun oversizedAttachmentIsRejectedWithoutTruncatingItsPayload() {
+        val urls = listOf(
+            "data:image/png;base64," + "A".repeat(500_000),
+            "https://example.com/image?signature=" + "A".repeat(500_000),
+        )
+        urls.forEach { url ->
+            try {
+                MiniAppConversationWriter.parseAttachments(buildJsonArray {
+                    add(buildJsonObject { put("kind", "image"); put("url", url) })
+                })
+                fail("Oversized attachment must fail explicitly")
+            } catch (_: MiniAppValidationException) {
+                // A caller must never receive a silently mutated data URI / signed URL.
+            }
+        }
+    }
+
+    @Test
+    fun acceptedAttachmentKeepsEveryByte() {
+        val url = "https://example.com/image?signature=" + "a".repeat(1_500)
+        val image = MiniAppConversationWriter.parseAttachments(buildJsonArray {
+            add(buildJsonObject { put("kind", "image"); put("url", url) })
+        }).single() as UIMessagePart.Image
+        assertEquals(url, image.url)
     }
 }

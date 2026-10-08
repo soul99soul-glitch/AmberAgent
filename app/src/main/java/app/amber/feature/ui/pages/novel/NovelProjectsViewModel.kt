@@ -23,8 +23,7 @@ import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectSummary
 import app.amber.feature.novel.domain.NovelError
 import app.amber.feature.novel.model.NovelProjectId
-import java.io.ByteArrayInputStream
-import java.util.UUID
+import app.amber.feature.novel.workspace.NovelWorkspaceProjectImport
 
 data class NovelProjectsUiState(
     val projects: List<NovelWorkspaceProjectSummary> = emptyList(),
@@ -43,6 +42,7 @@ class NovelProjectsViewModel(
     private val workspaceMigrationService: app.amber.feature.novel.workspace.NovelWorkspaceMigrationService,
     private val legacyRepository: app.amber.feature.novel.persistence.NovelProjectPersisting,
     private val context: Context,
+    private val restoreBridge: app.amber.feature.novel.workspace.NovelWorkspaceRestoreBridge? = null,
 ) : ViewModel() {
     private val _state = MutableStateFlow(NovelProjectsUiState())
     val state: StateFlow<NovelProjectsUiState> = _state.asStateFlow()
@@ -51,11 +51,27 @@ class NovelProjectsViewModel(
     val openWorkspaceProjectId: SharedFlow<String> = _openWorkspaceProjectId.asSharedFlow()
 
     init {
+        restoreBridge?.let { bridge ->
+            viewModelScope.launch {
+                var observedEpoch = bridge.state.value.epoch
+                bridge.state.collect { restored ->
+                    if (restored.restoring) _state.value = _state.value.copy(loading = true, busy = true)
+                    else if (restored.epoch != observedEpoch) {
+                        _state.value = _state.value.copy(busy = false)
+                        refresh()
+                    }
+                    observedEpoch = restored.epoch
+                }
+            }
+        }
         // Cutover: any legacy-format book still on disk is migrated on first open so it
         // shows up in the workspace list; originals stay untouched as rollback copies.
+        val initialEpoch = app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.currentEpoch()
         viewModelScope.launch {
             try {
-                val result = withContext(Dispatchers.IO) { workspaceMigrationService.migrateAll() }
+                val result = withContext(Dispatchers.IO) {
+                    workspaceMigrationService.migrateAll(restoreEpoch = initialEpoch)
+                }
                 // Surface migration failures instead of silently dropping books from the list.
                 if (result.failed > 0) {
                     _state.value = _state.value.copy(
@@ -74,12 +90,17 @@ class NovelProjectsViewModel(
     }
 
     fun refresh() {
+        val expectedEpoch = app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.currentEpoch()
         viewModelScope.launch {
+            app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) { Unit }
             _state.value = _state.value.copy(loading = true)
             try {
                 val projects = withContext(Dispatchers.IO) {
-                    workspaceRepository.listProjects()
+                    app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) {
+                        workspaceRepository.listProjects()
+                    }
                 }
+                app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) { Unit }
                 _state.value = _state.value.copy(
                     projects = projects,
                     loading = false,
@@ -98,12 +119,17 @@ class NovelProjectsViewModel(
     /** Create a blank markdown-workspace book and open its workspace page. */
     fun createBlankWorkspace(name: String) {
         if (_state.value.busy) return
+        val expectedEpoch = app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.currentEpoch()
         viewModelScope.launch {
+            app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) { Unit }
             _state.value = _state.value.copy(busy = true, errorMessage = null, statusMessage = null)
             try {
                 val result = withContext(Dispatchers.IO) {
-                    workspaceRepository.createBlank(name = name.trim())
+                    app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) {
+                        workspaceRepository.createBlank(name = name.trim())
+                    }
                 }
+                app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) { Unit }
                 _openWorkspaceProjectId.tryEmit(result.projectDirectory.name.uppercase())
             } catch (error: CancellationException) {
                 throw error
@@ -112,7 +138,7 @@ class NovelProjectsViewModel(
                     errorMessage = error.message ?: context.getString(R.string.workspace_save_failed),
                 )
             } finally {
-                _state.value = _state.value.copy(busy = false)
+                if (app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.isCurrent(expectedEpoch)) _state.value = _state.value.copy(busy = false)
             }
         }
     }
@@ -121,42 +147,38 @@ class NovelProjectsViewModel(
         if (_state.value.busy) return
         val name = newName.trim()
         if (name.isEmpty()) return
+        val expectedEpoch = app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.currentEpoch()
         viewModelScope.launch {
+            app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) { Unit }
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             try {
-                withContext(Dispatchers.IO) { workspaceRepository.renameProject(projectId, name) }
+                withContext(Dispatchers.IO) {
+                    app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) {
+                        workspaceRepository.renameProject(projectId, name)
+                    }
+                }
                 refresh()
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 _state.value = _state.value.copy(errorMessage = error.message)
             } finally {
-                _state.value = _state.value.copy(busy = false)
+                if (app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.isCurrent(expectedEpoch)) _state.value = _state.value.copy(busy = false)
             }
         }
     }
 
     fun delete(projectId: String) {
+        if (_state.value.busy) return
+        val expectedEpoch = app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.currentEpoch()
         viewModelScope.launch {
+            app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) { Unit }
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             try {
                 withContext(Dispatchers.IO) {
-                    val directory = workspaceRepository.projectDirectory(projectId)
-                    if (NovelWorkspaceGhostwriteJobs.listActive(directory).isNotEmpty()) {
-                        throw NovelWorkspaceIoError("当前项目仍有代笔批次运行，请先让批次完成或取消后再删除")
-                    }
-                    // Also remove the legacy original, or the first-open migration would
-                    // resurrect the deleted book from its untouched legacy copy. Remove it
-                    // first so a workspace delete failure cannot make the next migration
-                    // recreate a book the author already deleted.
-                    try {
-                        val legacyId = NovelProjectId.parse(projectId)
-                        val legacy = legacyRepository.loadProject(legacyId)
-                        legacyRepository.deleteProject(legacyId, legacy.document.project.revision)
-                    } catch (_: NovelError.ProjectNotFound) {
-                        // Workspace-only imports have no legacy source to remove.
-                    }
-                    workspaceRepository.delete(projectId)
+                    if (restoreBridge != null) restoreBridge.withWriter(expectedEpoch) {
+                        deleteAtEpoch(projectId, expectedEpoch)
+                    } else deleteAtEpoch(projectId, expectedEpoch)
                 }
                 refresh()
             } catch (error: CancellationException) {
@@ -164,25 +186,49 @@ class NovelProjectsViewModel(
             } catch (error: Exception) {
                 _state.value = _state.value.copy(errorMessage = error.message)
             } finally {
-                _state.value = _state.value.copy(busy = false)
+                if (app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.isCurrent(expectedEpoch)) _state.value = _state.value.copy(busy = false)
             }
         }
     }
 
-    /** Import a workspace zip as a fresh project (always a new id). */
-    fun importZip(bytes: ByteArray, onSuccess: () -> Unit) {
+    private suspend fun deleteAtEpoch(projectId: String, expectedEpoch: Long) {
+        app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) {
+            val directory = workspaceRepository.projectDirectory(projectId)
+            if (NovelWorkspaceGhostwriteJobs.listActive(directory).isNotEmpty()) {
+                throw NovelWorkspaceIoError("当前项目仍有代笔批次运行，请先让批次完成或取消后再删除")
+            }
+        }
+        // Remove the migration source first, so reopening cannot resurrect a deleted book.
+        try {
+            val legacyId = NovelProjectId.parse(projectId)
+            val legacy = legacyRepository.loadProject(legacyId)
+            legacyRepository.deleteProject(legacyId, legacy.document.project.revision)
+        } catch (_: NovelError.ProjectNotFound) {
+            // Workspace-only books have no migration source.
+        }
+        app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) {
+            workspaceRepository.delete(projectId)
+        }
+    }
+
+    /** Import a workspace ZIP or .ambernovel package as a fresh project. */
+    fun importProject(bytes: ByteArray, onSuccess: () -> Unit) {
+        val expectedEpoch = app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.currentEpoch()
         viewModelScope.launch {
+            app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) { Unit }
             _state.value = _state.value.copy(busy = true, errorMessage = null, statusMessage = null)
             try {
-                val files = withContext(Dispatchers.IO) {
-                    NovelWorkspaceExchange.readZipFiles(ByteArrayInputStream(bytes))
-                }
-                val projectId = UUID.randomUUID().toString().uppercase()
                 val result = withContext(Dispatchers.IO) {
-                    workspaceRepository.install(projectId, files)
+                    NovelWorkspaceProjectImport.importProject(
+                        bytes,
+                        workspaceRepository,
+                        restoreEpoch = expectedEpoch,
+                    )
                 }
+                app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) { Unit }
                 showStatus(context.getString(R.string.export_import_success))
                 onSuccess()
+                app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) { Unit }
                 _openWorkspaceProjectId.tryEmit(result.projectDirectory.name.uppercase())
             } catch (error: CancellationException) {
                 throw error
@@ -192,19 +238,22 @@ class NovelProjectsViewModel(
                         ?: context.getString(R.string.export_import_failed, context.getString(R.string.novel_unknown_reason)),
                 )
             } finally {
-                _state.value = _state.value.copy(busy = false)
+                if (app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.isCurrent(expectedEpoch)) _state.value = _state.value.copy(busy = false)
             }
         }
     }
 
     /** Export the project tree as a workspace zip. */
     fun exportZip(projectId: String, onResult: (String, ByteArray) -> Unit) {
+        val expectedEpoch = app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.currentEpoch()
         viewModelScope.launch {
+            app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) { Unit }
             _state.value = _state.value.copy(busy = true, errorMessage = null, statusMessage = null)
             try {
                 val bytes = withContext(Dispatchers.IO) {
                     NovelWorkspaceExchange.exportZipBytes(workspaceRepository.projectDirectory(projectId))
                 }
+                app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.write(expectedEpoch) { Unit }
                 onResult("$projectId.zip", bytes)
             } catch (error: CancellationException) {
                 throw error
@@ -213,7 +262,7 @@ class NovelProjectsViewModel(
                     errorMessage = error.message ?: context.getString(R.string.novel_export_write_failed),
                 )
             } finally {
-                _state.value = _state.value.copy(busy = false)
+                if (app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.isCurrent(expectedEpoch)) _state.value = _state.value.copy(busy = false)
             }
         }
     }
@@ -221,6 +270,7 @@ class NovelProjectsViewModel(
     /** Assemble the exportable book for the project's ACTIVE branch（.amber/branch.json，
      *  缺失回退主线）；null with an error banner on failure. */
     suspend fun exportBook(projectId: String, format: NovelWorkspaceBookExport.Format): ByteArray? {
+        val expectedEpoch = app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.currentEpoch()
         if (_state.value.busy) return null
         _state.value = _state.value.copy(busy = true, errorMessage = null, statusMessage = null)
         return try {
@@ -241,7 +291,7 @@ class NovelProjectsViewModel(
             )
             null
         } finally {
-            _state.value = _state.value.copy(busy = false)
+            if (app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary.isCurrent(expectedEpoch)) _state.value = _state.value.copy(busy = false)
         }
     }
 

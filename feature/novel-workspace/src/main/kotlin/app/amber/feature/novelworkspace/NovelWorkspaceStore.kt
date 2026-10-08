@@ -20,8 +20,22 @@ class NovelWorkspaceStore(val rootDirectory: File) {
     /** Sorted tree-relative paths under [prefix] (whole tree when null). */
     fun list(prefix: String? = null): List<String> {
         if (!rootDirectory.exists()) return emptyList()
-        val normalized = prefix?.trim('/')?.ifEmpty { null }
-        if (normalized != null) NovelWorkspacePaths.validate(normalized)
+        val normalized = prefix?.trimEnd('/')?.ifEmpty { null }
+        if (prefix?.startsWith('/') == true) {
+            throw IllegalArgumentException("Workspace path must be tree-relative: $prefix")
+        }
+        if (normalized != null) {
+            val segments = normalized.split('/')
+            if (segments.drop(1).any { it.startsWith('.') }) {
+                // Hidden descendants are outside the visible query tree. Retain
+                // empty query results while rejecting actual path escapes.
+                require(!normalized.contains('\\') && !segments.first().startsWith('.') &&
+                    segments.none { it.isEmpty() || it == ".." }
+                ) { "Invalid workspace query path: $prefix" }
+                return emptyList()
+            }
+            NovelWorkspacePaths.validate(normalized)
+        }
         val results = mutableListOf<String>()
         // A prefix is an exact path boundary, not a name fragment. Only descend
         // directly when it names a visible directory; a file or non-directory
@@ -51,9 +65,13 @@ class NovelWorkspaceStore(val rootDirectory: File) {
     }
 
     /** Atomic write (temp + fsync + rename); parent directories are created. */
-    fun write(path: String, content: String) {
+    fun write(path: String, content: String) = NovelWorkspaceRestoreBoundary.write {
         NovelWorkspacePaths.validate(path)
         val file = resolve(path)
+        if (NovelWorkspaceChapterHistory.isChapterPath(path)) {
+            if (file.isFile) NovelWorkspaceChapterHistory.capture(rootDirectory, file.readText(Charsets.UTF_8))
+            NovelWorkspaceChapterHistory.capture(rootDirectory, content)
+        }
         val parent = file.parentFile
             ?: throw NovelWorkspaceIoError("Cannot resolve parent of $path")
         if (!parent.exists() && !parent.mkdirs()) {
@@ -69,9 +87,13 @@ class NovelWorkspaceStore(val rootDirectory: File) {
         }
     }
 
-    fun delete(path: String): Boolean {
+    fun delete(path: String): Boolean = NovelWorkspaceRestoreBoundary.write {
         NovelWorkspacePaths.validate(path)
-        return resolve(path).delete()
+        val file = resolve(path)
+        if (NovelWorkspaceChapterHistory.isChapterPath(path) && file.isFile) {
+            NovelWorkspaceChapterHistory.capture(rootDirectory, file.readText(Charsets.UTF_8))
+        }
+        return@write file.delete()
     }
 
     /**
@@ -95,7 +117,7 @@ class NovelWorkspaceStore(val rootDirectory: File) {
     }
 
     /** Refresh the author-view copy under `.amber/checkout/` from the book. */
-    fun materializeCheckout() {
+    fun materializeCheckout() = NovelWorkspaceRestoreBoundary.write {
         val target = checkoutDirectory
         if (target.exists()) target.deleteRecursively()
         if (!target.mkdirs()) {

@@ -6,6 +6,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -131,12 +132,20 @@ class ChatCompletionsAPI(
 
         Log.i(TAG, "generateText: model=${params.model.modelId}")
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
+        var response = client.newCall(request).await()
+        if (providerSetting.authMode == OpenAIAuthMode.GROK_OAUTH && response.code == 401) {
+            response.close()
+            val refreshedToken = bearerResolver(providerSetting, true)
+            response = client.newCall(request.newBuilder()
+                .header("Authorization", "Bearer $refreshedToken")
+                .build()).await()
         }
-
-        val bodyStr = response.body?.string() ?: ""
+        val bodyStr = response.use {
+            if (!it.isSuccessful) {
+                throw Exception("Failed to get response: ${it.code} ${it.body?.string()}")
+            }
+            it.body?.string().orEmpty()
+        }
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
         // 从 JsonObject 中提取必要的信息
@@ -170,6 +179,24 @@ class ChatCompletionsAPI(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
+    ): Flow<MessageChunk> = flow {
+        var emitted = false
+        try {
+            streamTextOnce(providerSetting, messages, params, forceRefresh = false).collect {
+                emitted = true
+                emit(it)
+            }
+        } catch (error: GrokUnauthorizedException) {
+            if (emitted) throw error
+            streamTextOnce(providerSetting, messages, params, forceRefresh = true).collect { emit(it) }
+        }
+    }
+
+    private fun streamTextOnce(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        forceRefresh: Boolean,
     ): Flow<MessageChunk> = callbackFlow {
         val requestBody = buildChatCompletionRequest(
             messages = messages,
@@ -178,7 +205,7 @@ class ChatCompletionsAPI(
             stream = true,
         )
 
-        val token = bearerResolver(providerSetting, false)
+        val token = bearerResolver(providerSetting, forceRefresh)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.customHeaders.toHeaders())
@@ -266,6 +293,11 @@ class ChatCompletionsAPI(
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                if (providerSetting.authMode == OpenAIAuthMode.GROK_OAUTH && response?.code == 401) {
+                    response.close()
+                    close(GrokUnauthorizedException())
+                    return
+                }
                 var exception = t
 
                 Log.w(TAG, "onFailure: status=${response?.code} type=${t?.javaClass?.simpleName}", t)
@@ -302,6 +334,7 @@ class ChatCompletionsAPI(
         }
     }
 
+    private class GrokUnauthorizedException : Exception("Grok chat request rejected: HTTP 401")
 
     private fun buildChatCompletionRequest(
         messages: List<UIMessage>,
