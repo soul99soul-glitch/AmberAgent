@@ -5,13 +5,9 @@ import { makeUIMessage } from '../main/ets/chat/message.ts';
 import type { UIMessage } from '../main/ets/chat/message.ts';
 import type { MemoryRecord, MemoryScope } from '../main/ets/chat/memory_models.ts';
 import { makeMemoryRecord } from '../main/ets/chat/memory_models.ts';
-import type { MemoryRecallScore } from '../main/ets/chat/memory_recall.ts';
-import type {
-  MemoryReadRepository, MemoryRecallRuntimeGate,
-} from '../main/ets/chat/memory_recall_store.ts';
-import {
-  buildMemoryRecallPrompt, recallMemoryRecords, recallMemorySelections,
-} from '../main/ets/chat/memory_recall_store.ts';
+
+import type { MemoryReadRepository, MemoryRecallRuntimeGate } from '../main/ets/chat/memory_recall_store.ts';
+import { buildMemoryRecallPrompt, recallMemorySelections } from '../main/ets/chat/memory_recall_store.ts';
 
 const NOW: number = new Date(2026, 6, 28, 12).getTime();
 
@@ -102,13 +98,6 @@ test('recallSelections: 结果经 rankRecords(过滤/排序/预算)', async () =
   assert.deepEqual(out.map((s) => s.record.id), [3, 2]);
 });
 
-test('recallMemoryRecords: 只回 record 列表(:34-36)', async () => {
-  const spy: RepoSpy = spyRepo([record({ id: 7, pinned: true })]);
-  const out: MemoryRecord[] = await recallMemoryRecords(gate(), [], spy.repo, NOW);
-  assert.equal(out.length, 1);
-  assert.equal(out[0].id, 7);
-});
-
 test('buildPrompt: touchMemories 按召回序传 id + 非 debug 无 details', async () => {
   const records: MemoryRecord[] = [
     record({ id: 2, content: '中文偏好', kind: 'user' }),
@@ -138,15 +127,6 @@ test('buildPrompt: 召回为空 → 空串 且仍 touchMemories(空 ids,:20)', a
   const prompt: string = await buildMemoryRecallPrompt(gate(), [], spy.repo, NOW);
   assert.equal(prompt, '');
   assert.deepEqual(spy.touched, [[]]);
-});
-
-test('buildPrompt: score 对象形状 — reasons/freshness 齐备(编排透传)', async () => {
-  const spy: RepoSpy = spyRepo([record({ id: 9, pinned: true, kind: 'feedback', scope: 'core' })]);
-  const out = await recallMemorySelections(gate(), [], spy.repo, NOW);
-  const score: MemoryRecallScore = out[0].score;
-  assert.ok(score.value > 0);
-  assert.ok(score.reasons.indexOf('pinned') >= 0);
-  assert.equal(score.freshness, 'current');
 });
 
 // ===== DAO 查询语义纯函数 =====

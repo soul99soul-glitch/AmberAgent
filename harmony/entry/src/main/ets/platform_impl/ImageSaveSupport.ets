@@ -1,14 +1,14 @@
 // ImageSaveSupport — 图片保存到系统相册(D7-4 提取;原 GeneratedImageCarousel 私有实现)
 //
 // showAssetsCreationDialog 弹窗授权(免 WRITE_IMAGEVIDEO);file:// 直存,
-// http(s) 先落 cache;用户取消 = 返回空列表静默;canIUse 包裹。
+// http(s)/data 图片先落 cache;用户取消 = 返回空列表静默;canIUse 包裹。
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { fileIo, fileUri } from '@kit.CoreFileKit';
-import { http } from '@kit.NetworkKit';
 import { promptAction } from '@kit.ArkUI';
 import { Context } from '@kit.AbilityKit';
 import { image } from '@kit.ImageKit';
 import { newId } from '@amber/chat-domain';
+import { prepareImageSource, releaseImageSource, PreparedImageSource } from './ImageSourceSupport.ets';
 
 // 一批临时图片只申请一次用户授权，文件顺序就是分页顺序。
 export const saveImageFilesToAlbum = async (paths: string[], extension: string = 'png'): Promise<boolean> => {
@@ -63,44 +63,15 @@ export const saveImageToAlbum = async (url: string, extension: string = 'png'): 
     promptAction.showToast({ message: '当前系统不支持保存到相册', duration: 2000 });
     return;
   }
-  let cachedPath: string = '';
+  let source: PreparedImageSource | null = null;
   try {
-    const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
-    let srcPath: string = '';
-    if (url.startsWith('file://')) {
-      srcPath = url.substring('file://'.length);
-    } else if (url.startsWith('http://') || url.startsWith('https://')) {
-      const req: http.HttpRequest = http.createHttp();
-      try {
-        const resp: http.HttpResponse = await req.request(url, {
-          method: http.RequestMethod.GET,
-          expectDataType: http.HttpDataType.ARRAY_BUFFER,
-          connectTimeout: 30000,
-          readTimeout: 60000,
-        });
-        if (!(resp.result instanceof ArrayBuffer)) throw new Error('download failed');
-        srcPath = `${ctx.cacheDir}/amber_save_${newId()}.${extension}`;
-        cachedPath = srcPath;
-        const tmp: fileIo.File = fileIo.openSync(
-          srcPath, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
-        try {
-          fileIo.writeSync(tmp.fd, resp.result as ArrayBuffer);
-        } finally {
-          fileIo.closeSync(tmp.fd);
-        }
-      } finally {
-        try { req.destroy(); } catch { /* 已销毁 */ }
-      }
-    } else {
-      promptAction.showToast({ message: '该图片不支持保存', duration: 1500 });
-      return;
-    }
-    await saveImageFilesToAlbum([srcPath], extension);
-  } catch (e) {
-    const msg: string = e instanceof Error ? e.message : String(e);
-    promptAction.showToast({ message: `保存失败:${msg}`, duration: 2000 });
+    source = await prepareImageSource(url, extension);
+    await saveImageFilesToAlbum([source.path], source.extension);
+  } catch (error) {
+    const message: string = error instanceof Error ? error.message : String(error);
+    promptAction.showToast({ message: `保存失败:${message}`, duration: 2000 });
   } finally {
-    if (cachedPath.length > 0) removeCachedImageFiles([cachedPath]);
+    if (source !== null) releaseImageSource(source);
   }
 };
 

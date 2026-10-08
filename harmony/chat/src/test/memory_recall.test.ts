@@ -5,8 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  DEFAULT_MEMORY_RECALL_SETTING, makeMemoryRecord,
-  memoryCandidateStatusFromWireName, memoryEventTypeFromWireName,
+  DEFAULT_MEMORY_RECALL_SETTING, makeMemoryRecord, memoryCandidateStatusFromWireName, memoryEventTypeFromWireName,
   memoryKindFromWireName, memoryScopeFromWireName,
 } from '../main/ets/chat/memory_models.ts';
 import {
@@ -16,8 +15,7 @@ import {
   classifyMemoryFreshness, deriveMemoryExpiresAt,
 } from '../main/ets/chat/memory_time_anchor.ts';
 import {
-  rankMemoryRecords, scoreMemoryRecord, tokenizeMemoryQuery,
-  memoryRecallScoreToDebugText, USER_ALWAYS_ELIGIBLE_CONFIDENCE,
+  rankMemoryRecords, scoreMemoryRecord, tokenizeMemoryQuery, USER_ALWAYS_ELIGIBLE_CONFIDENCE
 } from '../main/ets/chat/memory_recall.ts';
 import { makeUIMessage } from '../main/ets/chat/message.ts';
 import type { MemoryRecord } from '../main/ets/chat/memory_models.ts';
@@ -63,25 +61,27 @@ test('buildMemoryContext: 空 → 空串;单条逐字节', () => {
   assert.equal(buildMemoryContext([]), '');
   const out: string = buildMemoryContext([
     record({ content: '喜欢简体中文回复', scope: 'core', kind: 'user' }),
-  ]);
+  ], false, {}, NOW);
   assert.equal(out,
     '<memory_context>\n'
+    + '今天是 2026-07-28。相对时间以记忆的记录日期为准。\n'
     + '以下是与当前请求相关的记忆；若与当前用户消息冲突，以当前用户消息为准。\n'
-    + '- [core/user] 喜欢简体中文回复'
-    + '\n</memory_context>');
+    + '- [core/user] 喜欢简体中文回复 [memory:1] (记录日期=2026-07-28)'
+    + '\n使用某条记忆时附上它的 [[memory:编号]] 标记，只引用实际用于回答的记忆。\n</memory_context>');
 });
 
 test('buildMemoryContext: pinned 标记 + 多行压单行 + trim + 多条换行', () => {
   const out: string = buildMemoryContext([
     record({ id: 1, content: '  第一行\n第二行  ', pinned: true }),
     record({ id: 2, content: '第二条', kind: 'feedback', scope: 'short_term' }),
-  ]);
+  ], false, {}, NOW);
   assert.equal(out,
     '<memory_context>\n'
+    + '今天是 2026-07-28。相对时间以记忆的记录日期为准。\n'
     + '以下是与当前请求相关的记忆；若与当前用户消息冲突，以当前用户消息为准。\n'
-    + '- [long_term/note/pinned] 第一行 第二行\n'
-    + '- [short_term/feedback] 第二条'
-    + '\n</memory_context>');
+    + '- [long_term/note/pinned] 第一行 第二行 [memory:1] (记录日期=2026-07-28)\n'
+    + '- [short_term/feedback] 第二条 [memory:2] (记录日期=2026-07-28)'
+    + '\n使用某条记忆时附上它的 [[memory:编号]] 标记，只引用实际用于回答的记忆。\n</memory_context>');
 });
 
 test('buildMemoryContext: debug 后缀(id/confidence %.2f/details)', () => {
@@ -91,7 +91,7 @@ test('buildMemoryContext: debug 后缀(id/confidence %.2f/details)', () => {
     { 7: 'score=95.0, reasons=pinned|core, freshness=current' },
   );
   assert.ok(out.indexOf(
-    '- [long_term/note] x (id=7, confidence=0.50, score=95.0, reasons=pinned|core, freshness=current)') >= 0);
+    '- [long_term/note] x [memory:7] (记录日期=2026-07-28) (id=7, confidence=0.50, score=95.0, reasons=pinned|core, freshness=current)') >= 0);
   // debug 但无 details → 无 details 段
   const out2: string = buildMemoryContext(
     [record({ id: 8, content: 'y', confidence: 1 })], true);
@@ -227,13 +227,6 @@ test('score: lastUsedAt 新近度加成(0 天 → +8)', () => {
   const s = scoreMemoryRecord(r, new Set(), '', NOW);
   // 134 + lastUsed 8 = 142
   assert.equal(s.value, 142);
-});
-
-test('debugText 逐字', () => {
-  const text: string = memoryRecallScoreToDebugText({
-    value: 95.04, reasons: ['pinned', 'core'], freshness: 'current',
-  });
-  assert.equal(text, 'score=95.0, reasons=pinned|core, freshness=current');
 });
 
 // ===== rankRecords =====

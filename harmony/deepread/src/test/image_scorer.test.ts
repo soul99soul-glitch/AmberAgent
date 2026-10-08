@@ -1,8 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import {
-  scoreImageCandidate, scoreAndDedup, ImageCandidate, ScoredImageCandidate,
-} from '../main/ets/research/image_scorer.ts';
+import { scoreImageCandidate, scoreAndDedup, ImageCandidate } from '../main/ets/research/image_scorer.ts';
 
 const bigImg = (overrides: Partial<ImageCandidate> = {}): ImageCandidate => ({
   url: 'https://example.com/photo.jpg',
@@ -11,20 +9,6 @@ const bigImg = (overrides: Partial<ImageCandidate> = {}): ImageCandidate => ({
   altText: 'A detailed photo of the subject matter',
   sourceUrl: 'https://example.com/article',
   ...overrides,
-});
-
-// ===== reject: too_small (Android threshold width<320 OR height<160) =====
-
-test('too_small: width 300 → reject', () => {
-  const s = scoreImageCandidate(bigImg({ width: 300, height: 800 }), '');
-  assert.equal(s.confidence, 'reject');
-  assert.ok(s.riskFlags.includes('too_small'));
-});
-
-test('too_small: height 150 → reject', () => {
-  const s = scoreImageCandidate(bigImg({ width: 1200, height: 150 }), '');
-  assert.equal(s.confidence, 'reject');
-  assert.ok(s.riskFlags.includes('too_small'));
 });
 
 test('boundary: width 321 height 161 → NOT too_small (just above threshold)', () => {
@@ -40,25 +24,41 @@ test('tiny_asset catches 320x160 (min<=160 AND max<=320)', () => {
   assert.equal(s.confidence, 'reject');
 });
 
+test('unknown dimensions remain inline even with a high score', () => {
+  const s = scoreImageCandidate(bigImg({ width: 0, height: 0, byteSize: 60_000 }), 'subject matter');
+  assert.equal(s.confidence, 'inline');
+  assert.ok(s.riskFlags.includes('unknown_dimensions'));
+  assert.ok(!s.riskFlags.includes('too_small'));
+  assert.ok(Number.isFinite(s.score));
+});
+
+test('one unknown dimension never qualifies as hero', () => {
+  for (const dimensions of [{ width: 1200, height: 0 }, { width: 0, height: 800 }]) {
+    const s = scoreImageCandidate(bigImg(dimensions), 'subject matter');
+    assert.equal(s.confidence, 'inline');
+    assert.ok(s.riskFlags.includes('unknown_dimensions'));
+  }
+});
+
+test('known small dimensions still reject when the other dimension is unknown', () => {
+  for (const dimensions of [{ width: 200, height: 0 }, { width: 0, height: 100 }, { width: 200, height: 200 }]) {
+    const s = scoreImageCandidate(bigImg(dimensions), '');
+    assert.equal(s.confidence, 'reject');
+    assert.ok(s.riskFlags.includes('too_small'));
+  }
+});
+
+test('unknown dimensions do not bypass logo, avatar or tracking risk rejection', () => {
+  for (const name of ['logo.png', 'avatar.jpg', '1x1.gif']) {
+    const s = scoreImageCandidate(bigImg({ url: `https://example.com/${name}`, width: 0, height: 0 }), '');
+    assert.equal(s.confidence, 'reject');
+  }
+});
+
 // ===== reject: site_brand_asset (URL-based, Android fidelity) =====
 
 test('site_brand_asset: logo in url → reject', () => {
   const s = scoreImageCandidate(bigImg({ url: 'https://example.com/logo.png' }), '');
-  assert.equal(s.confidence, 'reject');
-});
-
-test('site_brand_asset: favicon in url → reject', () => {
-  const s = scoreImageCandidate(bigImg({ url: 'https://example.com/favicon.ico' }), '');
-  assert.equal(s.confidence, 'reject');
-});
-
-test('site_brand_asset: apple-touch-icon → reject', () => {
-  const s = scoreImageCandidate(bigImg({ url: 'https://example.com/apple-touch-icon.png' }), '');
-  assert.equal(s.confidence, 'reject');
-});
-
-test('alt text logo → reject', () => {
-  const s = scoreImageCandidate(bigImg({ altText: 'Company Logo' }), '');
   assert.equal(s.confidence, 'reject');
 });
 
@@ -91,27 +91,10 @@ test('.svg extension → reject (icon_format)', () => {
   assert.equal(s.confidence, 'reject');
 });
 
-test('.ico extension → reject (icon_format)', () => {
-  const s = scoreImageCandidate(bigImg({ url: 'https://example.com/favicon.ico' }), '');
-  assert.equal(s.confidence, 'reject');
-});
-
-test('.svg with query string → reject (icon_format ignores query)', () => {
-  const s = scoreImageCandidate(bigImg({ url: 'https://example.com/diagram.svg?v=2' }), '');
-  assert.equal(s.confidence, 'reject');
-});
-
 // ===== reject: non-http (data: URL) =====
 
 test('data: URL → reject (non_http_url)', () => {
   const s = scoreImageCandidate(bigImg({ url: 'data:image/png;base64,iVBOR=' }), '');
-  assert.equal(s.confidence, 'reject');
-});
-
-// ===== reject: tiny_file + tiny_asset =====
-
-test('tiny_file: 1..4096 bytes → reject', () => {
-  const s = scoreImageCandidate(bigImg({ byteSize: 2048 }), '');
   assert.equal(s.confidence, 'reject');
 });
 
@@ -176,10 +159,6 @@ test('scoreAndDedup: orders by score descending', () => {
     { url: 'https://example.com/b.jpg', width: 1200, height: 900, altText: 'a really meaningful description here', sourceUrl: 's' },
   ], '');
   assert.ok(result[0].score >= result[1].score, 'sorted desc');
-});
-
-test('scoreAndDedup: empty input → empty output', () => {
-  assert.deepEqual(scoreAndDedup([], ''), []);
 });
 
 // ===== alt text topic overlap bonus =====

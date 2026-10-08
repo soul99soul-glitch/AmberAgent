@@ -1,0 +1,14 @@
+{
+  "bundle": "app.amber.deepread.reader",
+  "scopedMainSources": 18,
+  "scopedMismatches": [],
+  "allMainSourcesVerified": 846,
+  "allMainMismatches": [],
+  "productIdentityGeneratedByPrepare": true,
+  "hap": ".harmony-standalone/deepread/entry/build/default/outputs/default/signed/entry-default-signed.hap",
+  "bytes": 62434645,
+  "sha256": "361ae0ceebddca4b724369882d10f3bb6ca69951c89bde7a4a2e9084f149021d",
+  "installedTarget": "127.0.0.1:5555",
+  "install": "success",
+  "launch": "success"
+}

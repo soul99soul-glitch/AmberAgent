@@ -12,7 +12,7 @@ function loadPureModule(filename) {
   cache.set(filename, exports);
   const requireModule = spec => {
     if (spec === '@amber/deepread-domain') return Object.assign({},
-      ...['models.ts', 'helpers.ts', 'enums.ts', 'input_sources.ts'].map(name => loadPureModule(path.join(domainRoot, name))));
+      ...['models.ts', 'helpers.ts', 'enums.ts', 'input_sources.ts', 'synthesis_templates.ts'].map(name => loadPureModule(path.join(domainRoot, name))));
     if (spec === '@amber/chat-domain') return loadPureModule(path.resolve(__dirname, '../../../chat/src/main/ets/chat/markdown_blocks.ts'));
     if (spec.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filename), spec);
@@ -38,10 +38,16 @@ function method(source, name) {
   }
   return source.slice(match.index, end);
 }
+// Method fixtures omit ArkUI's constructor. Retained roots require these actual
+// production prop/callback initializers before their original lifecycle runs.
+function rootComponentInitializers(source) {
+  return (source.match(/^  (?:@\w+(?:\([^)]*\))?\s*)*(?:onBackHandler|embeddedRoot|rootVisible|rootCreate):.*$/gm) || [])
+    .map(line => line.replace(/@\w+(?:\([^)]*\))?\s*/g, '')).join('\n');
+}
 function actualPage(file, names, env) {
   const source = fs.readFileSync(path.join(entryRoot, file), 'utf8');
-  const code = ts.transpileModule('class Page {' + names.map(name => method(source, name)).join('\n') + '} return new Page();',
+  const code = ts.transpileModule('class Page {' + rootComponentInitializers(source) + '\n' + names.map(name => method(source, name)).join('\n') + '} return new Page();',
     { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   return new Function(...Object.keys(env), code)(...Object.values(env));
 }
-module.exports = { entryRoot, domainRoot, loadPureModule, method, actualPage };
+module.exports = { entryRoot, domainRoot, loadPureModule, method, actualPage, rootComponentInitializers };

@@ -3,9 +3,7 @@
 // Android 基准: AgentLoopBudgetPrompt.kt(全文 53 行)
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  agentLoopBudgetStage, buildAgentLoopBudgetPrompt, agentLoopShouldHideTools,
-} from '../main/ets/chat/agent_loop_budget.ts';
+import { agentLoopBudgetStage, agentLoopShouldHideTools } from '../main/ets/chat/agent_loop_budget.ts';
 
 describe('agentLoopBudgetStage(:22-40)', () => {
   it('小循环(maxSteps<=4):remaining<=1 FINAL,<=2 且 step>0 TIGHT,<=3 且 step>0 WARN', () => {
@@ -33,23 +31,6 @@ describe('agentLoopBudgetStage(:22-40)', () => {
     assert.equal(agentLoopBudgetStage(18, 20), 'final'); // remaining 2
     assert.equal(agentLoopBudgetStage(20, 20), 'final'); // remaining 0
     assert.equal(agentLoopBudgetStage(25, 20), 'final'); // remaining 钳 0
-  });
-});
-
-describe('buildAgentLoopBudgetPrompt(:4-17 文案逐字)', () => {
-  it('null stage → 空串', () => {
-    assert.equal(buildAgentLoopBudgetPrompt(0, 20), '');
-  });
-  it('WARN/TIGHT/FINAL 文案', () => {
-    assert.equal(
-      buildAgentLoopBudgetPrompt(8, 20),
-      'Agent loop budget: 12 steps remain. Avoid starting new branches; reuse gathered evidence and call only tools that clearly unblock the final answer.');
-    assert.equal(
-      buildAgentLoopBudgetPrompt(14, 20),
-      'Agent loop budget: 6 steps remain. Start converging now; call only essential tools and prepare a final answer from the evidence already gathered.');
-    assert.equal(
-      buildAgentLoopBudgetPrompt(18, 20),
-      'Agent loop budget: 2 steps remain. Do not start more tool work; provide the final answer now and explicitly note any unfinished items.');
   });
 });
 

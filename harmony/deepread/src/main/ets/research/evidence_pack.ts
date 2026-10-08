@@ -26,6 +26,8 @@ export interface EvidenceCard {
 
 export interface DeepReadEvidencePack {
   allSources: DeepReadSource[];
+  /** Stable output.sources numbers, independent of evidence relevance ordering. */
+  sourceNumbers?: Record<string, number>;
   cardsByStage: Record<DeepReadGenerationStage, EvidenceCard[]>;
   requiredSourceIds: string[];
 }

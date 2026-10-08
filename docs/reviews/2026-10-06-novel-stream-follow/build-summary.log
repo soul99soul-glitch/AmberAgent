@@ -1,0 +1,9 @@
+> hvigor [32mFinished :entry:assembleHap... after 1 ms [39m
+> hvigor [32mUP-TO-DATE ::MakeProjectPackInfo...  [39m
+> hvigor [32mUP-TO-DATE ::ProcessProjectPrivacyProfile...  [39m
+> hvigor [32mUP-TO-DATE ::GeneratePackRes...  [39m
+> hvigor [32mFinished ::PackageApp... after 3 s 199 ms [39m
+> hvigor [32mFinished ::SignPackagesFromApp... after 1 ms [39m
+> hvigor [32mFinished ::SignApp... after 931 ms [39m
+> hvigor [32mFinished ::assembleApp... after 1 ms [39m
+> hvigor [32mBUILD SUCCESSFUL in 22 s 595 ms [39m

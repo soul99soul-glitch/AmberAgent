@@ -14,7 +14,8 @@ import type {
 } from './message.ts';
 import { newId, nowIso } from './ids.ts';
 import type { TokenUsage } from './usage.ts';
-import { withStreamToolIndex } from './tool_merge.ts';
+import { withStreamToolIndex, withStreamArgsReplace } from './tool_merge.ts';
+import { ProviderResponseError } from './provider_response_error.ts';
 
 const isObj = (v: JsonValue | undefined): v is JsonObject =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -55,16 +56,19 @@ export const parseGoogleMessagePart = (obj: JsonObject): UIMessagePart => {
   if ('functionCall' in obj) {
     const fc: JsonObject = isObj(obj['functionCall']) ? (obj['functionCall'] as JsonObject) : {};
     const name: string = strOrNull(fc['name']) ?? '';
-    // Android json.encodeToString(args):args 缺失 → "null"
-    const input: string = 'args' in fc ? JSON.stringify(fc['args']) : 'null';
+    // A function with no parameters legitimately omits args.
+    const input: string = 'args' in fc ? JSON.stringify(fc['args']) : '{}';
+    const wireId: string | null = strOrNull(fc['id']);
+    const metadata: JsonObject = { thoughtSignature: strOrNull(obj['thoughtSignature']) };
+    if (wireId !== null && wireId.trim().length > 0) metadata['gemini_wire_call_id'] = wireId;
     return {
       type: 'tool',
-      toolCallId: newId(), // Android Uuid.random;流式由 allocator 覆盖为稳定 id
+      toolCallId: wireId !== null && wireId.trim().length > 0 ? wireId : newId(),
       toolName: name,
       input,
       output: [],
       approvalState: { type: 'auto' },
-      metadata: { thoughtSignature: strOrNull(obj['thoughtSignature']) },
+      metadata,
     };
   }
 
@@ -177,6 +181,21 @@ export const parseGoogleUsageMeta = (obj: JsonObject | null): TokenUsage | null 
 export const unwrapGoogleResponse = (bodyJson: JsonObject): JsonObject =>
   isObj(bodyJson['response']) ? bodyJson['response'] : bodyJson;
 
+const FAILED_GOOGLE_FINISH_REASONS: string[] = [
+  'SAFETY', 'RECITATION', 'LANGUAGE', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII',
+  'MALFORMED_FUNCTION_CALL', 'UNEXPECTED_TOOL_CALL', 'TOO_MANY_TOOL_CALLS',
+  'IMAGE_SAFETY', 'IMAGE_PROHIBITED_CONTENT', 'IMAGE_RECITATION', 'IMAGE_OTHER', 'NO_IMAGE',
+  'MISSING_THOUGHT_SIGNATURE', 'MALFORMED_RESPONSE', 'ESCALATION', 'PUP_LIMITED_DISABLED',
+];
+
+export const googleFailedFinishReason = (chunk: MessageChunk): string | null => {
+  for (const choice of chunk.choices) {
+    const reason: string | null = choice.finishReason;
+    if (reason !== null && FAILED_GOOGLE_FINISH_REASONS.indexOf(reason.toUpperCase()) >= 0) return reason;
+  }
+  return null;
+};
+
 export const parseGoogleResponseBody = (rawJson: JsonObject, modelId: string): MessageChunk => {
   const bodyJson: JsonObject = unwrapGoogleResponse(rawJson);
   const feedback: JsonValue | undefined = bodyJson['promptFeedback'];
@@ -196,29 +215,39 @@ export const parseGoogleResponseBody = (rawJson: JsonObject, modelId: string): M
     }
   }
 
-  const choices: UIMessageChoice[] = candidatesRaw.map((candidate: JsonValue): UIMessageChoice => ({
-    index: 0,
+  const choices: UIMessageChoice[] = candidatesRaw.map((candidate: JsonValue, index: number): UIMessageChoice => ({
+    index,
     delta: null,
     message: parseGoogleMessage(isObj(candidate) ? candidate : {}),
-    finishReason: null,
+    finishReason: isObj(candidate) ? strOrNull(candidate['finishReason']) : null,
   }));
-  return {
+  const chunk: MessageChunk = {
     id: newId(), // Android Uuid.random
     model: modelId,
     choices,
     usage: parseGoogleUsageMeta(isObj(bodyJson['usageMetadata']) ? bodyJson['usageMetadata'] : null),
   };
+  const failure: string | null = googleFailedFinishReason(chunk);
+  if (failure !== null) {
+    const partial: MessageChunk = { ...chunk, choices: chunk.choices.map((choice: UIMessageChoice): UIMessageChoice => ({
+      ...choice,
+      message: choice.message === null ? null : { ...choice.message,
+        parts: choice.message.parts.filter((part: UIMessagePart): boolean => part.type !== 'tool') },
+    })) };
+    throw new ProviderResponseError(`Google generation failed: ${failure}`, partial);
+  }
+  return chunk;
 };
 
 // ===== 流式 tool id 稳定分配(:331-349) =====
-// Google functionCall 不携带 id;parseMessagePart 的随机 id 每个 chunk 都不同,
-// merge 层无法识别同一 tool。流 scope 内分配单调递增确定性 id + stream index。
+// Preserve opaque wire IDs; old endpoints without IDs get distinct local ordinals.
 
 export type GoogleToolIdAllocator = (message: UIMessage) => UIMessage;
 
 export const createGoogleStreamToolIdAllocator = (): GoogleToolIdAllocator => {
   const prefix: string = `google-fc-${newId().slice(0, 8)}`;
   const state: { next: number } = { next: 0 };
+  const wireIndexes: Map<string, number> = new Map();
   return (message: UIMessage): UIMessage => {
     if (!message.parts.some((p: UIMessagePart): boolean => p.type === 'tool')) {
       return message;
@@ -227,8 +256,15 @@ export const createGoogleStreamToolIdAllocator = (): GoogleToolIdAllocator => {
       ...message,
       parts: message.parts.map((part: UIMessagePart): UIMessagePart => {
         if (part.type !== 'tool') return part;
-        const ordinal: number = state.next;
-        state.next++;
+        const wireId: JsonValue | undefined = part.metadata?.['gemini_wire_call_id'];
+        if (typeof wireId === 'string' && wireId.trim().length > 0) {
+          const existing: number | undefined = wireIndexes.get(wireId);
+          const ordinal: number = existing ?? state.next++;
+          wireIndexes.set(wireId, ordinal);
+          // Gemini sends complete argument objects, rather than JSON string deltas.
+          return withStreamArgsReplace(withStreamToolIndex(part, ordinal));
+        }
+        const ordinal: number = state.next++;
         return withStreamToolIndex({ ...part, toolCallId: `${prefix}-${ordinal}` }, ordinal);
       }),
     };

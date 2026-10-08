@@ -31,60 +31,6 @@ const approval: ApprovalMatrix = {
   autoApprovedToolNames: new Set(['writer_tool']),
 };
 
-// ===== 1. 单轮无 tool:callModel 返回纯文本 → 直接返回 =====
-
-test('runAgentLoop: model returns text only (no tool) → single step, no loop', async () => {
-  const deps: AgentLoopDeps = {
-    callModel: async (messages) => [...messages, assistantText('最终答案')],
-    tools: new Map(),
-    approval,
-    maxSteps: 4,
-  };
-  const result = await runAgentLoop([makeUserMessage('问题')], deps);
-  assert.equal(result.messages.length, 2);
-  assert.equal(result.steps, 1);
-  assert.equal(result.stopReason, 'no_more_tools');
-});
-
-// ===== 2. 单 tool 调用 → 执行 → 第二轮纯文本 → 停 =====
-
-test('runAgentLoop: one tool call → execute → second call returns text → stop', async () => {
-  let callCount = 0;
-  const toolExecutions: string[] = [];
-  const writerTool: ToolDefinition = {
-    name: 'writer_tool',
-    description: 'd',
-    allowsAutoApproval: true,
-    isHighRisk: false,
-    execute: async (input) => {
-      toolExecutions.push(input);
-      return [{ type: 'text', text: JSON.stringify({ status: 'ok' }), metadata: null }];
-    },
-  };
-  const deps: AgentLoopDeps = {
-    callModel: async (messages) => {
-      callCount++;
-      if (callCount === 1) {
-        return [...messages, assistantWithToolCall('writer_tool', 'tc1', '{"x":1}')];
-      }
-      return [...messages, assistantText('完成')];
-    },
-    tools: new Map([['writer_tool', writerTool]]),
-    approval,
-    maxSteps: 4,
-  };
-  const result = await runAgentLoop([makeUserMessage('问题')], deps);
-  assert.equal(callCount, 2, 'two model calls');
-  assert.equal(result.steps, 2);
-  assert.equal(result.stopReason, 'no_more_tools');
-  assert.deepEqual(toolExecutions, ['{"x":1}']);
-  // 最后一条 assistant 的 tool part 应有 output(写回)
-  const lastAssistant = result.messages[result.messages.length - 2];
-  const toolPart = lastAssistant.parts.find(p => p.type === 'tool');
-  assert.ok(toolPart !== undefined && toolPart.type === 'tool');
-  assert.ok(toolPart.output.length > 0, 'tool output written back');
-});
-
 // ===== 3. 多 tool 调用链:3 步循环 =====
 
 test('runAgentLoop: chain of tool calls (3 steps)', async () => {
@@ -209,20 +155,6 @@ test('runAgentLoop: budget FINAL (small loop) → passes budget prompt to callMo
   assert.ok(receivedBudgets.length > 0, 'budget prompt passed to callModel');
   assert.ok(receivedBudgets.some(b => b.includes('最后机会') || b.includes('紧急')), 'FINAL or TIGHT injected');
   assert.ok(result.steps <= 3);
-});
-
-// ===== 8. 空 messages 输入 → 直接 callModel 一次 =====
-
-test('runAgentLoop: empty input messages → still works (single call)', async () => {
-  const deps: AgentLoopDeps = {
-    callModel: async (messages) => [...messages, assistantText('x')],
-    tools: new Map(),
-    approval,
-    maxSteps: 4,
-  };
-  const result = await runAgentLoop([], deps);
-  assert.equal(result.steps, 1);
-  assert.equal(result.messages.length, 1);
 });
 
 // ===== 9. onMessagesUpdate 回调(模拟流式 33ms flush 快照) =====

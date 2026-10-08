@@ -12,6 +12,9 @@ import {
   shareDeepReadMarkdown, saveDeepReadPdf, shareDeepReadPdf,
 } from '../platform_impl/DeepReadExportFiles.ets';
 import { BG, SURFACE, INK, INK3, LINE, ACCENT, ERROR, GUTTER } from '../design/tokens.ets';
+import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
+import { Icon } from './ui/Icon.ets';
 
 const PDF_DOCUMENT_URL: string = 'https://deepread-export.local/article';
 const PRINT_CSS: string = '<style>@page{size:A4}'
@@ -30,6 +33,11 @@ export struct DeepReadExportPanel {
   @Prop title: string = '';
   @Prop fontScale: number = 1;
   @Prop fontSerif: boolean = false;
+  @StorageProp('reduceMotion') reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') appBackgrounded: boolean = false;
+  @StorageProp('darkMode') darkMode: boolean = false;
+  @StorageProp('deepread.appearance.readerLayout') readerLayout: string = 'classic';
+  @StorageProp('deepread.appearance.readerStyle') readerStyle: string = 'classic';
   @Prop customTemplateHtml: string = '';
   onClose: () => void = (): void => {};
   isActive: () => boolean = (): boolean => true;
@@ -149,12 +157,20 @@ export struct DeepReadExportPanel {
     this.pdfWebInitialized = false;
     this.pdfDocumentUrl = `${PDF_DOCUMENT_URL}?preview=${++this.pdfPreviewId}`;
     const options: DeepReadRenderOptions = {
-      fontScale: this.fontScale, fontSerif: this.fontSerif, background: BG, foreground: INK,
-      muted: INK3, surface: SURFACE, border: LINE, accent: this.accentColorStore,
+      fontScale: this.fontScale, fontSerif: this.fontSerif,
+      readerLayout: getProductKind() === 'deepread' ? this.readerLayout : 'classic',
+      readerStyle: getProductKind() === 'deepread' ? this.readerStyle : 'classic', dark: this.darkMode,
+      background: getProductKind() === 'deepread' ? D.paper : BG,
+      foreground: getProductKind() === 'deepread' ? D.ink : INK,
+      muted: getProductKind() === 'deepread' ? D.muted : INK3,
+      surface: getProductKind() === 'deepread' ? D.card : SURFACE,
+      border: getProductKind() === 'deepread' ? D.rule : LINE,
+      accent: getProductKind() === 'deepread' ? D.accent : this.accentColorStore,
     };
     try {
       const html: string = renderCapturedDeepReadTemplateHtml(this.snapshot.title, this.snapshot.output, options);
-      this.pdfHtml = html.replace('</head>', PRINT_CSS + '</head>');
+      this.pdfHtml = html.replace('</head>', PRINT_CSS
+        + (getProductKind() === 'deepread' ? '<style>img,figure{display:none!important;}</style>' : '') + '</head>');
       this.note = resolveDeepReadArticleTemplate(this.snapshot.output).message;
     } catch (error) {
       this.errorMessage = `PDF 版式加载失败:${error instanceof Error ? error.message : String(error)}`;
@@ -268,31 +284,37 @@ export struct DeepReadExportPanel {
     }
   }
 
+  private contentTransition(): TransitionEffect {
+    if (getProductKind() !== 'deepread' || this.appBackgrounded) return TransitionEffect.IDENTITY;
+    return TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: this.reduceMotion ? 0 : 12 }))
+      .animation({ duration: this.reduceMotion ? 120 : 180, curve: Curve.EaseOut });
+  }
+
   @Builder
   Action(label: string, action: string): void {
-    Button(label).fontSize(15).fontColor(INK).backgroundColor(SURFACE)
+    Button(label).fontSize(15).fontColor(getProductKind() === 'deepread' ? D.ink : INK).backgroundColor(getProductKind() === 'deepread' ? D.card : SURFACE)
       .width('100%').height(48).borderRadius(12)
       .enabled(this.ready && !this.busy)
       .onClick((): void => { this.perform(action); })
   }
 
   @Builder
-  Menu(): void {
+  HostMenu(): void {
     Scroll() {
       Column({ space: 12 }) {
         Text(this.complete ? '导出内容取自打开面板时已保存的文章。' : '当前为部分稿，文本和 Markdown 包含已经保存的章节；补全文章后可导出 PDF。')
-          .fontSize(13).fontColor(INK3).width('100%')
+          .fontSize(13).fontColor(getProductKind() === 'deepread' ? D.muted : INK3).width('100%')
         this.Action('保存 TXT 文件', 'text-save')
         this.Action('分享 TXT 文件', 'text-share')
         this.Action('保存 Markdown 文件', 'markdown-save')
         this.Action('分享 Markdown 文件', 'markdown-share')
-        Button('PDF 预览与导出').fontSize(15).fontColor(INK).backgroundColor(SURFACE)
+        Button('PDF 预览与导出').fontSize(15).fontColor(getProductKind() === 'deepread' ? D.ink : INK).backgroundColor(getProductKind() === 'deepread' ? D.card : SURFACE)
           .width('100%').height(48).borderRadius(12)
           .enabled(this.ready && this.complete && !this.busy && isDeepReadPdfSupported())
           .onClick((): void => { this.openPdfPreview(); })
         if (!isDeepReadPdfSupported()) {
           Text('当前系统不支持 PDF 导出(API 14+),可使用文本或 Markdown。')
-            .fontSize(13).fontColor(INK3).width('100%')
+            .fontSize(13).fontColor(getProductKind() === 'deepread' ? D.muted : INK3).width('100%')
         }
       }
       .width('100%').alignItems(HorizontalAlign.Start).justifyContent(FlexAlign.Start)
@@ -301,16 +323,58 @@ export struct DeepReadExportPanel {
   }
 
   @Builder
+  ExportRow(label: string, icon: string, action: string, separator: boolean = true): void {
+    Row({ space: 12 }) {
+      Icon({ name: icon, iconSize: 19, color: D.accent })
+      Text(label).fontSize(16).fontColor(D.ink).layoutWeight(1)
+      Icon({ name: 'chevron_right', iconSize: 13, color: D.muted })
+    }.width('100%').constraintSize({ minHeight: 50 }).padding({ left: 16, right: 16, top: 10, bottom: 10 })
+      .border({ width: { bottom: separator ? 0.5 : 0 }, color: D.rule })
+      .enabled(this.ready && !this.busy && (action !== 'pdf' || (this.complete && isDeepReadPdfSupported())))
+      .opacity(action === 'pdf' && (!this.complete || !isDeepReadPdfSupported()) ? 0.4 : 1)
+      .onClick((): void => { if (action === 'pdf') this.openPdfPreview(); else this.perform(action); })
+  }
+
+  @Builder
+  Menu(): void {
+    if (getProductKind() !== 'deepread') {
+      this.HostMenu()
+    } else {
+      Scroll() {
+        Column({ space: 18 }) {
+          Column() {
+            this.ExportRow('文本', 'doc', 'text-share')
+            this.ExportRow('Markdown', 'edit', 'markdown-share')
+            this.ExportRow('PDF', 'doc', 'pdf', false)
+          }.width('100%').backgroundColor(D.card).borderRadius(18).border({ width: 0.6, color: D.rule })
+          Text('保存到文件').fontSize(13).fontColor(D.muted).width('100%')
+          Column() {
+            this.ExportRow('保存 TXT 文件', 'save', 'text-save')
+            this.ExportRow('保存 Markdown 文件', 'save', 'markdown-save', false)
+          }.width('100%').backgroundColor(D.card).borderRadius(18).border({ width: 0.6, color: D.rule })
+          Text(this.complete ? '导出已保存的文章；PDF 可预览后保存或分享。'
+            : '部分稿可导出文本与 Markdown。补全章节后可导出 PDF。')
+            .fontSize(13).fontColor(D.muted).lineHeight(20).width('100%')
+          if (!isDeepReadPdfSupported()) {
+            Text('当前系统不支持 PDF 导出，可使用文本或 Markdown。').fontSize(13).fontColor(D.muted).lineHeight(20).width('100%')
+          }
+        }.width('100%').constraintSize({ maxWidth: 760 }).alignItems(HorizontalAlign.Start)
+          .padding({ left: 18, right: 18, top: 18, bottom: 28 })
+      }.align(Alignment.TopStart).width('100%').layoutWeight(1).transition(this.contentTransition())
+    }
+  }
+
+  @Builder
   PdfPreview(previewId: number, epoch: number): void {
     Column() {
       Row() {
-        Text('A4 导出预览').fontSize(14).fontColor(INK).layoutWeight(1)
-        Button('返回菜单').fontSize(13).fontColor(INK)
+        Text('A4 导出预览').fontSize(14).fontColor(getProductKind() === 'deepread' ? D.ink : INK).layoutWeight(1)
+        Button('返回菜单').fontSize(13).fontColor(getProductKind() === 'deepread' ? D.ink : INK)
           .backgroundColor(Color.Transparent).constraintSize({ minWidth: 80, minHeight: 44 })
           .enabled(!this.busy).onClick((): void => { this.closePdfPreview(); })
       }.width('100%').padding({ left: GUTTER, right: GUTTER })
       Web({ src: 'about:blank', controller: this.controller })
-        .width('100%').layoutWeight(1).backgroundColor(BG)
+        .width('100%').layoutWeight(1).backgroundColor(getProductKind() === 'deepread' ? D.paper : BG)
         .javaScriptAccess(false).fileAccess(false).domStorageAccess(false).multiWindowAccess(false)
         .onControllerAttached((): void => {
           this.onPdfAttached(previewId, epoch);
@@ -321,17 +385,17 @@ export struct DeepReadExportPanel {
         })
         .onOverrideUrlLoading((request: WebResourceRequest): boolean => this.handleNavigation(request))
       if (!this.pdfReady && this.errorMessage.length === 0) {
-        Text('正在加载完整文章预览…').fontSize(12).fontColor(INK3).padding(8)
+        Text('正在加载完整文章预览…').fontSize(12).fontColor(getProductKind() === 'deepread' ? D.muted : INK3).padding(8)
       }
       Row({ space: 12 }) {
-        Button('保存 PDF').fontSize(15).fontColor(INK).backgroundColor(SURFACE)
+        Button('保存 PDF').fontSize(15).fontColor(getProductKind() === 'deepread' ? D.ink : INK).backgroundColor(getProductKind() === 'deepread' ? D.card : SURFACE)
           .height(48).layoutWeight(1).enabled(this.pdfReady && !this.busy)
           .onClick((): void => { this.exportPdf(false); })
-        Button('分享 PDF').fontSize(15).fontColor(INK).backgroundColor(SURFACE)
+        Button('分享 PDF').fontSize(15).fontColor(getProductKind() === 'deepread' ? D.ink : INK).backgroundColor(getProductKind() === 'deepread' ? D.card : SURFACE)
           .height(48).layoutWeight(1).enabled(this.pdfReady && !this.busy)
           .onClick((): void => { this.exportPdf(true); })
       }.width('100%').padding({ left: GUTTER, right: GUTTER, top: 12, bottom: 12 })
-    }.width('100%').layoutWeight(1)
+    }.width('100%').layoutWeight(1).transition(this.contentTransition())
   }
 
   build(): void {
@@ -339,17 +403,17 @@ export struct DeepReadExportPanel {
       ForEach([this.themeEpoch], (_epoch: number): void => {
         Row({ space: 12 }) {
           Column({ space: 4 }) {
-            Text('导出深度阅读').fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
-            Text(this.articleTitle).fontSize(13).fontColor(INK3).maxLines(3)
+            Text(getProductKind() === 'deepread' ? '分享文章' : '导出深度阅读').fontSize(20).fontWeight(FontWeight.Bold).fontColor(getProductKind() === 'deepread' ? D.ink : INK)
+            Text(this.articleTitle).fontSize(13).fontColor(getProductKind() === 'deepread' ? D.muted : INK3).maxLines(3)
               .textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-          Button('关闭').fontSize(14).fontColor(INK)
+          Button('关闭').fontSize(14).fontColor(getProductKind() === 'deepread' ? D.ink : INK)
             .backgroundColor(Color.Transparent).constraintSize({ minWidth: 64, minHeight: 44 })
             .onClick((): void => { this.alive = false; this.onClose(); })
         }.width('100%').padding({ left: GUTTER, right: GUTTER, top: this.statusBarHeight + 8, bottom: 12 })
-        Row().width('100%').height(0.5).backgroundColor(LINE)
+        Row().width('100%').height(0.5).backgroundColor(getProductKind() === 'deepread' ? D.rule : LINE)
         if (this.loading) {
-          Text('正在读取已保存文章…').fontSize(14).fontColor(INK3).padding(24)
+          Text('正在读取已保存文章…').fontSize(14).fontColor(getProductKind() === 'deepread' ? D.muted : INK3).padding(24)
           Blank().layoutWeight(1)
         } else if (this.pdfPreview) {
           this.PdfPreview(this.pdfPreviewId, _epoch)
@@ -357,17 +421,17 @@ export struct DeepReadExportPanel {
           this.Menu()
         }
         if (this.busy) {
-          Text('正在准备导出…').fontSize(13).fontColor(INK3).padding(8)
+          Text('正在准备导出…').fontSize(13).fontColor(getProductKind() === 'deepread' ? D.muted : INK3).padding(8)
         }
         if (this.errorMessage.length > 0) {
-          Text(this.errorMessage).fontSize(13).fontColor(ERROR).width('100%')
+          Text(this.errorMessage).fontSize(13).fontColor(getProductKind() === 'deepread' ? D.danger : ERROR).width('100%')
             .padding({ left: GUTTER, right: GUTTER, top: 8, bottom: 12 })
         }
         if (this.note.length > 0) {
-          Text(this.note).fontSize(13).fontColor(INK3).width('100%')
+          Text(this.note).fontSize(13).fontColor(getProductKind() === 'deepread' ? D.muted : INK3).width('100%')
             .padding({ left: GUTTER, right: GUTTER, top: 8, bottom: 12 })
         }
       }, (epoch: number): string => `deepread-export-${epoch}`)
-    }.width('100%').height('100%').backgroundColor(BG).padding({ bottom: this.navBarHeight })
+    }.width('100%').height('100%').backgroundColor(getProductKind() === 'deepread' ? D.paper : BG).padding({ bottom: this.navBarHeight })
   }
 }

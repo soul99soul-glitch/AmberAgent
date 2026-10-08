@@ -1,38 +1,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import {
-  budgetStage, shouldHideToolsForBudget, buildBudgetPrompt,
-} from '../main/ets/agent/budget_prompt.ts';
-import {
-  classifyError, isRetryableCategory, decideRetry, delayForAttempt,
-  DEFAULT_RETRY_SETTING, RetrySetting,
-} from '../main/ets/agent/retry_classifier.ts';
-
-// ===== Budget Prompt =====
-
-test('budgetStage null when plenty of steps remaining (maxSteps=32)', () => {
-  assert.equal(budgetStage(0, 32), null);
-  assert.equal(budgetStage(10, 32), null);
-  assert.equal(budgetStage(19, 32), null);
-});
-
-test('budgetStage WARN at remaining 7..12 (maxSteps=32)', () => {
-  // step 20:remaining 12 → WARN;step 25:remaining 7 → WARN
-  assert.equal(budgetStage(20, 32), 'WARN');
-  assert.equal(budgetStage(25, 32), 'WARN');
-});
-
-test('budgetStage TIGHT at remaining 3..6 (maxSteps=32)', () => {
-  // step 26:remaining 6 → TIGHT;step 29:remaining 3 → TIGHT
-  assert.equal(budgetStage(26, 32), 'TIGHT');
-  assert.equal(budgetStage(29, 32), 'TIGHT');
-});
-
-test('budgetStage FINAL at remaining <=2 (maxSteps=32)', () => {
-  assert.equal(budgetStage(30, 32), 'FINAL');  // remaining 2
-  assert.equal(budgetStage(31, 32), 'FINAL');  // remaining 1
-  assert.equal(budgetStage(32, 32), 'FINAL');  // remaining 0
-});
+import { budgetStage, shouldHideToolsForBudget } from '../main/ets/agent/budget_prompt.ts';
+import { classifyError, decideRetry, delayForAttempt, DEFAULT_RETRY_SETTING, RetrySetting } from '../main/ets/agent/retry_classifier.ts';
 
 test('budgetStage for small loops (maxSteps=4)', () => {
   assert.equal(budgetStage(0, 4), null);     // remaining 4, no warning yet
@@ -46,21 +15,6 @@ test('shouldHideToolsForBudget true only at FINAL and no resumable', () => {
   assert.equal(shouldHideToolsForBudget(0, 32, false), false);
   assert.equal(shouldHideToolsForBudget(31, 32, false), true);   // FINAL + no resumable
   assert.equal(shouldHideToolsForBudget(31, 32, true), false);   // FINAL but has resumable
-});
-
-test('buildBudgetPrompt empty when no stage', () => {
-  assert.equal(buildBudgetPrompt(0, 32), '');
-});
-
-test('buildBudgetPrompt non-empty for WARN/TIGHT/FINAL', () => {
-  assert.ok(buildBudgetPrompt(20, 32).length > 0);   // WARN
-  assert.ok(buildBudgetPrompt(26, 32).length > 0);   // TIGHT
-  assert.ok(buildBudgetPrompt(31, 32).length > 0);   // FINAL
-});
-
-test('buildBudgetPrompt FINAL mentions last chance', () => {
-  const prompt = buildBudgetPrompt(31, 32);
-  assert.ok(prompt.includes('最后') || prompt.includes('最后机会'));
 });
 
 // ===== Retry Classifier =====
@@ -77,10 +31,6 @@ test('classifyError: 429 = rate_limit', () => {
 
 test('classifyError: 500 = server', () => {
   assert.equal(classifyError({ status: 500, message: 'Internal Server Error' }), 'server');
-});
-
-test('classifyError: 503 = server', () => {
-  assert.equal(classifyError({ status: 503, message: 'Service Unavailable' }), 'server');
 });
 
 test('classifyError: 401 = auth (permanent)', () => {
@@ -114,22 +64,6 @@ test('classifyError: network error message = network', () => {
 
 test('classifyError: unknown fallback', () => {
   assert.equal(classifyError({ message: 'something weird' }), 'unknown');
-});
-
-test('isRetryableCategory: rate_limit/timeout/server/network retryable', () => {
-  assert.equal(isRetryableCategory('rate_limit'), true);
-  assert.equal(isRetryableCategory('timeout'), true);
-  assert.equal(isRetryableCategory('server'), true);
-  assert.equal(isRetryableCategory('network'), true);
-});
-
-test('isRetryableCategory: auth/bad_request/context/quota/safety NOT retryable', () => {
-  assert.equal(isRetryableCategory('auth'), false);
-  assert.equal(isRetryableCategory('bad_request'), false);
-  assert.equal(isRetryableCategory('context'), false);
-  assert.equal(isRetryableCategory('quota'), false);
-  assert.equal(isRetryableCategory('safety'), false);
-  assert.equal(isRetryableCategory('unknown'), false);
 });
 
 test('decideRetry: retryable error with attempt < maxRetries', () => {

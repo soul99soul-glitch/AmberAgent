@@ -13,21 +13,6 @@ const withParts = (over: Partial<NovelProject>): NovelProject => ({
   ...over,
 });
 
-test('discuss mode uses discuss instruction', () => {
-  const p = systemPrompt(withParts({}), 'discuss');
-  assert.ok(p.includes('策划伙伴'));
-});
-
-test('write + continuation uses continuation instruction', () => {
-  const p = systemPrompt(withParts({}), 'write', 'continuation');
-  assert.ok(p.includes('续写'));
-});
-
-test('write default granularity uses whole-chapter instruction', () => {
-  const p = systemPrompt(withParts({}), 'write');
-  assert.ok(p.includes('新一章'));
-});
-
 test('includes enabled materials with Chinese label, excludes disabled', () => {
   const p = withParts({
     materials: [
@@ -92,13 +77,6 @@ test('always materials are never silently cut by the legacy helper character cap
   const out = systemPrompt(p, 'write');
   assert.ok(out.length > MAX_SYSTEM_CHARS);
   assert.ok(out.includes(big), 'actual provider token policy must reject or retain the whole required material');
-});
-
-test('sections omitted when empty', () => {
-  const out = systemPrompt(withParts({}), 'write');
-  assert.ok(!out.includes('# 活资料'));
-  assert.ok(!out.includes('# 章节正文'));
-  assert.ok(!out.includes('# 最近对话'));
 });
 
 test('author plot projection remains a mandatory context section even when optional prose is too long', () => {

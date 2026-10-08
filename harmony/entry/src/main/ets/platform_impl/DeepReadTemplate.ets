@@ -2,22 +2,31 @@
 import type { DeepReadOutput, DeepReadTemplateSnapshot, Storage } from '@amber/deepread-domain';
 import {
   makeEmptyDeepReadOutput, ReadingLink, DeepReadDiagram, IMAGE_CONFIDENCE,
-  displayHeroImageUrl, displayHeroCaption,
+  displayHeroImageUrl, displayHeroCaption, DEEPREAD_SYNTHESIS_TEMPLATES,
 } from '@amber/deepread-domain';
 import {
   deepReadMarkdownHtml, escapeDeepReadHtml, safeDeepReadLink, safeDeepReadImage,
 } from './DeepReadMarkdownHtml.ets';
 
+import { readerCanvas, readerStyleCss, readerLayoutCss, readerSectionOrder } from './DeepReadAppearance.ets';
+import { renderDeepReadSynthesisBody, DEEPREAD_SYNTHESIS_CSS } from './DeepReadSynthesisHtml.ets';
+
 export const DEEPREAD_TEMPLATE_NONE: string = 'none';
 export const DEEPREAD_TEMPLATE_EDITORIAL_SLANT: string = 'editorial_slant';
 export interface DeepReadTemplateDef { id: string; name: string; description: string; }
 export const BUILTIN_TEMPLATES: DeepReadTemplateDef[] = [
-  { id: DEEPREAD_TEMPLATE_NONE, name: '默认排版', description: '原生列表排版' },
-  { id: DEEPREAD_TEMPLATE_EDITORIAL_SLANT, name: '杂志 · 立场', description: '衬线标题与完整章节(WebView 渲染)' },
+  DEEPREAD_SYNTHESIS_TEMPLATES[0],
+  { id: DEEPREAD_TEMPLATE_NONE, name: '默认杂志', description: '纯文字杂志长文：时间轴、脉络、分析与延伸阅读。' },
+  { id: DEEPREAD_TEMPLATE_EDITORIAL_SLANT, name: '斜切图文', description: '头图与文中配图的图文版。' },
+  ...DEEPREAD_SYNTHESIS_TEMPLATES.slice(1),
 ];
-export const isTemplateSelectable = (id: string): boolean => id === DEEPREAD_TEMPLATE_EDITORIAL_SLANT;
+export const isTemplateSelectable = (id: string): boolean => id === DEEPREAD_TEMPLATE_EDITORIAL_SLANT
+  || DEEPREAD_SYNTHESIS_TEMPLATES.some((template): boolean => template.id === id);
 
 export interface DeepReadRenderOptions {
+  readerLayout?: string;
+  readerStyle?: string;
+  dark?: boolean;
   fontScale?: number;
   fontSerif?: boolean;
   background?: string;
@@ -33,9 +42,9 @@ const CSS_ARTICLE: string = `
 body { margin:0; padding:24px 20px 40px; background:var(--dr-bg); color:var(--dr-ink);
   font-size:calc(15.5px * var(--ds)); font-family:var(--dr-font); line-height:1.75; overflow-wrap:anywhere; }
 h1,h2,h3,h4,h5,h6 { color:var(--dr-ink); line-height:1.35; }
-h1.title { font-size:calc(30px * var(--ds)); margin:0 0 10px; }
-h2.sec { font-size:calc(20px * var(--ds)); margin:28px 0 12px; }
-h2.sec::before { content:''; display:inline-block; width:22px; height:3px;
+.title { font-size:calc(30px * var(--ds)); margin:0 0 10px; }
+.sec { font-size:calc(20px * var(--ds)); margin:28px 0 12px; }
+.sec::before { content:''; display:inline-block; width:22px; height:3px;
   background:var(--dr-accent); margin-right:10px; vertical-align:middle; }
 p { margin:0 0 14px; } a { color:var(--dr-accent); }
 .kicker,.date,.holder { font-size:calc(12px * var(--ds)); font-weight:600; }
@@ -44,7 +53,20 @@ p { margin:0 0 14px; } a { color:var(--dr-accent); }
 .kicker { letter-spacing:2px; margin-bottom:8px; }
 .meta,.cap,.by,.src { color:var(--dr-muted); font-size:calc(12px * var(--ds)); }
 .meta { margin-bottom:18px; } .cap { margin-top:6px; } .by { display:block; margin-top:8px; }
-.summary { font-size:calc(17px * var(--ds)); border-left:3px solid var(--dr-accent); padding-left:14px; }
+.bottom-line { font-size:calc(19px * var(--ds)); font-weight:700; line-height:1.55; margin:14px 0; }
+.summary { font-size:calc(16px * var(--ds)); color:var(--dr-muted); }
+.point h3 { font-size:calc(20px * var(--ds)); line-height:1.45; margin:0 0 8px; }
+.cite { white-space:nowrap; font-size:calc(11px * var(--ds)); margin-left:5px; }
+.cite a { text-decoration:none; margin-right:3px; }
+.timeline-why,.interest { color:var(--dr-muted); font-size:calc(13px * var(--ds)); }
+.impacts { list-style:none; margin:0; padding:0; }
+.impacts li { border-bottom:1px solid var(--dr-border); padding:12px 0; }
+.impact-target { font-weight:700; margin-bottom:5px; }
+.impact-target small,.claim-status { display:inline-block; color:var(--dr-muted); font-size:calc(11px * var(--ds));
+  background:var(--dr-surface); border:1px solid var(--dr-border); padding:2px 7px; border-radius:5px; margin-left:8px; }
+.claim-status { margin-left:0; margin-right:8px; } .watch { margin-top:18px; }
+.uncertain li { margin:10px 0; } .src-no { margin-right:8px; }
+.reading [id] { scroll-margin-top:20px; }
 .entities { list-style:none; padding:0; margin:16px 0; }
 .entities li { display:inline-block; background:var(--dr-surface); border:1px solid var(--dr-border);
   border-radius:14px; padding:4px 12px; font-size:calc(13px * var(--ds)); margin:0 6px 8px 0; }
@@ -67,6 +89,20 @@ hr { border:0; border-top:1px solid var(--dr-border); margin:24px 0; }
 const CSP: string = "default-src 'none'; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; style-src 'unsafe-inline'; img-src https: http: data:; font-src 'none'";
 const esc = escapeDeepReadHtml;
 const md = deepReadMarkdownHtml;
+const inlineMarkdown = (raw: string): string => md(raw).replace(/^<p>/, '').replace(/<\/p>$/, '');
+const hasNewHierarchy = (o: DeepReadOutput): boolean => (o.bottomLine ?? '').trim().length > 0
+  || (o.sources ?? []).length > 0 || (o.impacts ?? []).length > 0 || (o.watch ?? []).length > 0
+  || (o.uncertainties ?? []).length > 0 || (o.corePoints ?? []).some((p): boolean => (p.sources ?? []).length > 0)
+  || (o.timeline ?? []).some((e): boolean => (e.why ?? '').trim().length > 0)
+  || o.analysis.perspectives.some((p): boolean => (p.interest ?? '').trim().length > 0
+    || (p.quote ?? '').trim().length > 0 || (p.quoteBy ?? '').trim().length > 0 || (p.sources ?? []).length > 0);
+const citations = (ids: number[] | undefined, o: DeepReadOutput): string => {
+  const count: number = (o.sources ?? []).length;
+  const valid: number[] = [];
+  for (const id of ids ?? []) if (Number.isInteger(id) && id > 0 && id <= count && !valid.includes(id)) valid.push(id);
+  return valid.length > 0 ? '<sup class="cite">' + valid.map((id: number): string =>
+    `<a href="#dr-source-${id}" aria-label="来源 ${id}">[${id}]</a>`).join('') + '</sup>' : '';
+};
 const color = (raw: string | undefined, fallback: string): string =>
   raw !== undefined && /^#[0-9a-fA-F]{6}$/.test(raw.trim()) ? raw.trim() : fallback;
 const scale = (raw: number | undefined): string =>
@@ -90,7 +126,7 @@ const image = (url: string | null, caption: string | null, hero: boolean = false
 };
 const renderOverview = (o: DeepReadOutput): string => {
   let html: string = o.summary.trim().length > 0 ? `<div class="summary">${md(o.summary)}</div>` : '';
-  if (o.keyEntities.length > 0) {
+  if (!hasNewHierarchy(o) && o.keyEntities.length > 0) {
     html += '<ul class="entities">';
     for (const entity of o.keyEntities) html += `<li>${esc(entity)}</li>`;
     html += '</ul>';
@@ -99,18 +135,21 @@ const renderOverview = (o: DeepReadOutput): string => {
 };
 const renderNarrative = (o: DeepReadOutput): string => {
   if (o.timeline === null || o.timeline.length === 0) return '';
-  let html: string = '<section><h2 class="sec">时间线</h2><div class="timeline">';
+  let html: string = '<section><h2 class="sec">时间轴</h2><div class="timeline">';
   for (const ev of o.timeline) {
     html += `<div class="ev"><div class="date">${esc(ev.date)}${ev.isHighlight ? ' · 关键节点' : ''}</div>`
-      + md(ev.event) + image(ev.imageUrl, ev.imageCaption) + '</div>';
+      + md(ev.event)
+      + (ev.isHighlight && (ev.why ?? '').trim().length > 0
+        ? `<p class="timeline-why">转折：${inlineMarkdown(ev.why ?? '')}</p>` : '')
+      + image(ev.imageUrl, ev.imageCaption) + '</div>';
   }
   return html + '</div></section>';
 };
 const renderCorePoints = (o: DeepReadOutput): string => {
   if (o.corePoints === null || o.corePoints.length === 0) return '';
-  let html: string = '<section><h2 class="sec">核心要点</h2>';
+  let html: string = '<section><h2 class="sec">关键判断</h2>';
   for (const point of o.corePoints) {
-    html += '<div class="point">' + md(point.point)
+    html += '<div class="point"><h3>' + inlineMarkdown(point.point) + citations(point.sources, o) + '</h3>'
       + (point.supporting !== null ? md(point.supporting) : '') + image(point.imageUrl, point.imageCaption) + '</div>';
   }
   return html + '</section>';
@@ -120,11 +159,15 @@ const renderAnalysis = (o: DeepReadOutput): string => {
   let html: string = '';
   if (a.coreDispute !== null && a.coreDispute.trim().length > 0) html += `<div class="dispute">${md(a.coreDispute)}</div>`;
   for (const p of a.perspectives) {
-    html += `<div class="persp"><div class="holder">${esc(p.holder ?? '')}</div>${md(p.viewpoint)}</div>`;
+    html += `<div class="persp"><div class="holder">${esc(p.holder ?? '')}</div>`
+      + ((p.interest ?? '').trim().length > 0 ? `<p class="interest">诉求：${inlineMarkdown(p.interest ?? '')}</p>` : '')
+      + md(p.viewpoint) + citations(p.sources, o)
+      + ((p.quote ?? '').trim().length > 0 ? `<blockquote>${esc(p.quote ?? '')}`
+        + ((p.quoteBy ?? '').trim().length > 0 ? `<span class="by">—— ${esc(p.quoteBy ?? '')}</span>` : '') + '</blockquote>' : '')
+      + '</div>';
   }
   for (const q of a.quotes) html += `<blockquote>${md(q.text)}<span class="by">${esc(q.attribution ?? '')}</span></blockquote>`;
-  if (a.implications !== null && a.implications.trim().length > 0) html += `<div class="implication">${md(a.implications)}</div>`;
-  return html.length > 0 ? '<section><h2 class="sec">深度分析</h2>' + html + '</section>' : '';
+  return html.length > 0 ? '<section><h2 class="sec">各方立场</h2>' + html + '</section>' : '';
 };
 const renderLinks = (heading: string, links: ReadingLink[]): string => {
   let html: string = '';
@@ -135,7 +178,71 @@ const renderLinks = (heading: string, links: ReadingLink[]): string => {
     html += url.length > 0 ? `<a href="${esc(url)}">${label}<span class="src">${esc(meta)}</span></a>`
       : `<div>${label}<span class="src">${esc(meta)}</span></div>`;
   }
-  return html.length > 0 ? `<section><h2 class="sec">${heading}</h2><div class="reading">${html}</div></section>` : '';
+  return html.length > 0 ? '<section>' + (heading.length > 0 ? `<h2 class="sec">${esc(heading)}</h2>` : '')
+    + `<div class="reading">${html}</div></section>` : '';
+};
+const renderOutlook = (o: DeepReadOutput): string => {
+  let html: string = '';
+  const impacts = (o.impacts ?? []).filter((item): boolean => item.effect.trim().length > 0);
+  if (impacts.length > 0) {
+    html += '<ul class="impacts">';
+    for (const item of impacts) {
+      const horizon: string = item.horizon === 'short' ? '短期' : item.horizon === 'long' ? '长期' : '';
+      html += `<li><p class="impact-target">${esc(item.target)}`
+        + (horizon.length > 0 ? `<small>${horizon}</small>` : '') + '</p>' + md(item.effect) + '</li>';
+    }
+    html += '</ul>';
+  }
+  if (o.analysis.implications !== null && o.analysis.implications.trim().length > 0) {
+    html += `<div class="implication">${md(o.analysis.implications)}</div>`;
+  }
+  const watch: string[] = (o.watch ?? []).map((text: string): string => text.trim()).filter((text: string): boolean => text.length > 0);
+  if (watch.length > 0) html += '<div class="watch"><div class="holder">接下来关注</div><ul>'
+    + watch.map((text: string): string => `<li>${inlineMarkdown(text)}</li>`).join('') + '</ul></div>';
+  return html.length > 0 ? '<section><h2 class="sec">影响与走向</h2>' + html + '</section>' : '';
+};
+const renderUncertainties = (o: DeepReadOutput): string => {
+  let html: string = '';
+  for (const item of o.uncertainties ?? []) {
+    const claim: string = item instanceof Object ? item.claim : item;
+    const status: string = item instanceof Object ? item.status : '';
+    if (claim.trim().length === 0) continue;
+    const label: string = status === 'single_source' ? '单一来源' : status === 'conflicting' ? '来源矛盾'
+      : status === 'pending_official' ? '待官方确认' : '';
+    html += '<li>' + (label.length > 0 ? `<span class="claim-status">${label}</span>` : '') + inlineMarkdown(claim.trim()) + '</li>';
+  }
+  return html.length > 0 ? '<section class="uncertain"><h2 class="sec">待核实</h2><ul>' + html + '</ul></section>' : '';
+};
+const renderSources = (o: DeepReadOutput): string => {
+  const sources: ReadingLink[] = o.sources ?? [];
+  if (sources.length === 0) return renderLinks('参考来源', o.references);
+  let html: string = '';
+  const cited: Set<number> = new Set<number>();
+  for (const point of o.corePoints ?? []) for (const id of point.sources ?? []) cited.add(id);
+  for (const party of o.analysis.perspectives) for (const id of party.sources ?? []) cited.add(id);
+  const seen: Set<string> = new Set<string>();
+  for (let index: number = 0; index < sources.length; index++) {
+    const link: ReadingLink = sources[index];
+    const number: number = index + 1;
+    const url: string = safeDeepReadLink(link.url);
+    seen.add(link.url.length > 0 ? link.url : link.title);
+    const label: string = esc(link.title.length > 0 ? link.title : link.source ?? `来源 ${number}`);
+    const meta: string = [link.source ?? '', link.publishedAt ?? '', cited.has(number) ? '本文引用' : '']
+      .filter((text: string): boolean => text.length > 0).join(' · ');
+    const inner: string = `<span class="src-no">[${number}]</span>${label}<span class="src">${esc(meta)}</span>`;
+    html += url.length > 0 ? `<a id="dr-source-${number}" href="${esc(url)}">${inner}</a>`
+      : `<div id="dr-source-${number}">${inner}</div>`;
+  }
+  // Mixed old/new outputs retain legacy reading material without changing generation citation numbers.
+  const extra: ReadingLink[] = [];
+  for (const link of o.references.concat(o.extendedReading)) {
+    const key: string = link.url.length > 0 ? link.url : link.title;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    extra.push(link);
+  }
+  if (extra.length > 0) html += '<div class="legacy-sources"><div class="holder">补充来源</div>' + renderLinks('', extra) + '</div>';
+  return '<section><h2 class="sec">来源</h2><div class="reading">' + html + '</div></section>';
 };
 const renderDiagram = (d: DeepReadDiagram | null): string => {
   if (d === null) return '';
@@ -173,28 +280,66 @@ const renderGallery = (o: DeepReadOutput): string => {
   return html.length > 0 ? '<section><h2 class="sec">相关图片</h2>' + html + '</section>' : '';
 };
 interface ArticleChapter { key: string; html: string; }
-const chapters = (o: DeepReadOutput | null): ArticleChapter[] => o === null ? [] : [
-  { key: 'topic', html: `<div class="meta">${esc(o.topicType)}</div>` },
-  { key: 'hero', html: image(displayHeroImageUrl(o), displayHeroCaption(o), true) },
-  { key: 'summary', html: renderOverview(o) },
-  { key: 'timeline', html: renderNarrative(o) },
-  { key: 'core_points', html: renderCorePoints(o) },
-  { key: 'analysis', html: renderAnalysis(o) },
-  { key: 'diagram', html: renderDiagram(o.diagram) },
-  { key: 'images', html: renderGallery(o) },
-  { key: 'reading', html: renderLinks('扩展阅读', o.extendedReading) },
-  { key: 'references', html: renderLinks('参考来源', o.references) },
-];
+const sectionOrder = (topic: string): string[] => {
+  if (topic === 'opinion') return ['core_points', 'analysis', 'outlook', 'uncertainties', 'timeline', 'diagram', 'images', 'reading', 'references'];
+  if (topic === 'product') return ['core_points', 'diagram', 'analysis', 'outlook', 'uncertainties', 'timeline', 'images', 'reading', 'references'];
+  if (topic === 'person') return ['core_points', 'timeline', 'analysis', 'uncertainties', 'outlook', 'diagram', 'images', 'reading', 'references'];
+  return ['core_points', 'timeline', 'diagram', 'analysis', 'uncertainties', 'outlook', 'images', 'reading', 'references'];
+};
+const chapters = (o: DeepReadOutput | null, layout: string = 'classic'): ArticleChapter[] => {
+  if (o === null) return [];
+  const article: ArticleChapter[] = [
+    { key: 'topic', html: `<div class="meta">${esc(o.topicType)}</div>` },
+    { key: 'bottom_line', html: (o.bottomLine ?? '').trim().length > 0
+      ? `<p class="bottom-line">${inlineMarkdown(o.bottomLine ?? '')}</p>` : '' },
+    { key: 'summary', html: renderOverview(o) },
+    { key: 'hero', html: image(displayHeroImageUrl(o), displayHeroCaption(o), true) },
+  ];
+  const sections: ArticleChapter[] = [
+    { key: 'timeline', html: renderNarrative(o) },
+    { key: 'core_points', html: renderCorePoints(o) },
+    { key: 'analysis', html: renderAnalysis(o) },
+    { key: 'outlook', html: renderOutlook(o) },
+    { key: 'uncertainties', html: renderUncertainties(o) },
+    { key: 'diagram', html: renderDiagram(o.diagram) },
+    { key: 'images', html: renderGallery(o) },
+    { key: 'reading', html: (o.sources ?? []).length > 0 ? '' : renderLinks('扩展阅读', o.extendedReading) },
+    { key: 'references', html: renderSources(o) },
+  ];
+  const order: string[] = layout === 'classic' ? sectionOrder(o.topicType)
+    : readerSectionOrder(o.topicType, layout).map((key: string): string => key === 'core' ? 'core_points' : key).concat(['images', 'reading', 'references']);
+  for (const key of order) {
+    const chapter: ArticleChapter | undefined = sections.find((item: ArticleChapter): boolean => item.key === key);
+    if (chapter !== undefined) article.push(chapter);
+  }
+  return article;
+};
+// Built-in articles share the same canvas and style. Only magazine articles can reorder chapters.
+const appearanceStyle = (opts: DeepReadRenderOptions | undefined, applyLayout: boolean): string => {
+  const canvas = readerCanvas(opts?.readerStyle ?? 'classic', opts?.dark ?? false);
+  return `:root{--dr-bg:${canvas.background};--dr-ink:${canvas.foreground};--dr-muted:${canvas.muted};`
+    + `--dr-surface:${canvas.surface};--dr-border:${canvas.border};--dr-sans:'HarmonyOS Sans SC',sans-serif}`
+    + (applyLayout ? readerLayoutCss(opts?.readerLayout ?? 'classic') : '')
+    + readerStyleCss(opts?.readerStyle ?? 'classic');
+};
 export const renderEditorialSlantHtml = (title: string, o: DeepReadOutput | null, opts?: DeepReadRenderOptions): string => {
-  let body: string = '<div class="kicker">DEEP READ · 深度阅读</div>' + `<h1 class="title">${esc(title)}</h1>`;
-  for (const chapter of chapters(o)) body += chapter.html;
-  return `<!DOCTYPE html><html><head>${head(opts)}</head><body>${body}</body></html>`;
+  const article: ArticleChapter[] = chapters(o, opts?.readerLayout ?? 'classic');
+  let body: string = '<header class="headline"><div class="kicker">DEEP READ · 深度阅读</div>'
+    + `<h1 class="title">${esc(title)}</h1>`;
+  for (const chapter of article) {
+    if (chapter.key === 'topic' || chapter.key === 'bottom_line' || chapter.key === 'summary') body += chapter.html;
+  }
+  body += '</header>';
+  for (const chapter of article) {
+    if (chapter.key !== 'topic' && chapter.key !== 'bottom_line' && chapter.key !== 'summary') body += chapter.html;
+  }
+  return `<!DOCTYPE html><html><head>${head(opts)}<style>${appearanceStyle(opts, true)}</style></head><body>${body}</body></html>`;
 };
 
-export interface CustomTemplateDef { id: string; name: string; html: string; createdAt: number; updatedAt?: number; }
+export interface CustomTemplateDef { id: string; name: string; description?: string; html: string; createdAt: number; updatedAt?: number; }
 const CUSTOM_TEMPLATES_KEY: string = 'deepread_custom_templates';
 export const MAX_TEMPLATE_BYTES: number = 96 * 1024;
-interface CustomTemplateDoc { id?: string; name?: string; html?: string; createdAt?: number; updatedAt?: number; }
+interface CustomTemplateDoc { id?: string; name?: string; description?: string; html?: string; createdAt?: number; updatedAt?: number; }
 export const loadCustomTemplates = async (storage: Storage): Promise<CustomTemplateDef[]> => {
   const raw: string = await storage.get<string>(CUSTOM_TEMPLATES_KEY, '[]');
   const docs = JSON.parse(raw) as CustomTemplateDoc[];
@@ -202,7 +347,8 @@ export const loadCustomTemplates = async (storage: Storage): Promise<CustomTempl
   const out: CustomTemplateDef[] = [];
   for (const d of docs) {
     if (d.id === undefined || d.name === undefined || d.html === undefined) throw new Error('模板存储缺少字段');
-    out.push({ id: d.id, name: d.name, html: d.html, createdAt: d.createdAt ?? 0, updatedAt: d.updatedAt });
+    out.push({ id: d.id, name: d.name, description: d.description ?? '', html: d.html,
+      createdAt: d.createdAt ?? 0, updatedAt: d.updatedAt });
   }
   return out;
 };
@@ -240,7 +386,7 @@ export const sanitizeTemplateHtml = (raw: string): string => {
   return out.trim();
 };
 export const hasTemplatePlaceholders = (raw: string): boolean =>
-  /\{\{\s*(title|kicker|topic|summary|timeline|core_points|analysis|reading|references|hero|images|diagram|content)\s*\}\}/.test(raw);
+  /\{\{\s*(title|kicker|topic|bottom_line|summary|timeline|core_points|analysis|outlook|uncertainties|reading|references|sources|hero|images|diagram|content)\s*\}\}/.test(raw);
 const utf8Bytes = (raw: string): number => {
   let bytes: number = 0;
   for (let i: number = 0; i < raw.length; i++) {
@@ -266,6 +412,10 @@ export const starterTemplateHtml = (): string =>
 export const captureDeepReadTemplate = async (
   storage: Storage, id: string, now: number = Date.now(),
 ): Promise<DeepReadTemplateSnapshot> => {
+  const synthesis = DEEPREAD_SYNTHESIS_TEMPLATES.find((template): boolean => template.id === id);
+  if (synthesis !== undefined) {
+    return { id: id, name: synthesis.name, kind: 'synthesis', html: null, capturedAt: now };
+  }
   if (id === DEEPREAD_TEMPLATE_NONE) {
     return { id: id, name: '默认排版', kind: 'native', html: null, capturedAt: now };
   }
@@ -288,10 +438,16 @@ export interface DeepReadArticleTemplateResolution {
 export const resolveDeepReadArticleTemplate = (output: DeepReadOutput | null): DeepReadArticleTemplateResolution => {
   const snapshot: DeepReadTemplateSnapshot | undefined = output?.templateSnapshot;
   if (snapshot !== undefined && (snapshot.kind === 'native' || snapshot.kind === 'editorial'
+    || (snapshot.kind === 'synthesis' && DEEPREAD_SYNTHESIS_TEMPLATES.some((template): boolean => template.id === snapshot.id))
     || (snapshot.kind === 'custom' && snapshot.html !== null && validateTemplateHtml(snapshot.html).length === 0))) {
     return { template: snapshot, fallback: null, message: '' };
   }
   const id: string | undefined = output?.templateId;
+  const synthesis = DEEPREAD_SYNTHESIS_TEMPLATES.find((template): boolean => template.id === id);
+  if (snapshot === undefined && synthesis !== undefined) {
+    return { template: { id: synthesis.id, name: synthesis.name, kind: 'synthesis', html: null, capturedAt: 0 },
+      fallback: 'legacy', message: '' };
+  }
   if (snapshot === undefined && id === DEEPREAD_TEMPLATE_EDITORIAL_SLANT) {
     return { template: { id: id, name: '杂志 · 立场', kind: 'editorial', html: null, capturedAt: 0 },
       fallback: 'legacy', message: '旧文章未保存模板快照，使用原内置模板。' };
@@ -305,6 +461,9 @@ export const resolveDeepReadArticleTemplate = (output: DeepReadOutput | null): D
 export const renderCapturedDeepReadTemplateHtml = (
   title: string, output: DeepReadOutput | null, opts?: DeepReadRenderOptions,
 ): string => {
+  if (output?.templateArticle !== undefined) {
+    return `<!DOCTYPE html><html><head>${head(opts)}<style>${DEEPREAD_SYNTHESIS_CSS}\n${appearanceStyle(opts, false)}</style></head><body>${renderDeepReadSynthesisBody(output.templateArticle)}</body></html>`;
+  }
   const template: DeepReadTemplateSnapshot = resolveDeepReadArticleTemplate(output).template;
   return template.kind === 'custom' && template.html !== null
     ? renderCustomTemplateHtml(template.html, title, output, opts) : renderEditorialSlantHtml(title, output, opts);
@@ -321,13 +480,14 @@ export const renderCustomTemplateHtml = (
   for (const chapter of article) all += chapter.html;
   // One replacement pass prevents generated article text from becoming another template slot.
   const slots: string[] = [];
-  out = out.replace(/\{\{\s*(title|kicker|topic|summary|timeline|core_points|analysis|reading|references|hero|images|diagram|content)\s*\}\}/g,
+  out = out.replace(/\{\{\s*(title|kicker|topic|bottom_line|summary|timeline|core_points|analysis|outlook|uncertainties|reading|references|sources|hero|images|diagram|content)\s*\}\}/g,
     (_match: string, key: string): string => {
-      slots.push(key);
+      const chapterKey: string = key === 'sources' ? 'references' : key;
+      slots.push(chapterKey);
       if (key === 'title') return esc(title);
       if (key === 'kicker') return 'DEEP READ · 深度阅读';
       if (key === 'content') return all;
-      const chapter = article.find((c: ArticleChapter): boolean => c.key === key);
+      const chapter = article.find((c: ArticleChapter): boolean => c.key === chapterKey);
       return chapter !== undefined ? chapter.html : '';
     });
   if (!hasContent) for (const chapter of article) if (!slots.includes(chapter.key)) missing += chapter.html;
@@ -341,15 +501,22 @@ export const renderCustomTemplateHtml = (
 };
 export const buildSampleTemplateOutput = (): DeepReadOutput => {
   const o: DeepReadOutput = makeEmptyDeepReadOutput();
+  o.bottomLine = '模板让关键判断、证据和后续影响各有清晰位置。';
+  o.topicType = 'event';
   o.summary = '这是一段示例导语。**重要信息**会保留 Markdown 排版,各章节都可以在模板中阅读。';
   o.keyEntities = ['Amber', '深度阅读', '模板'];
-  o.timeline = [{ date: '2026-09-30', event: '示例事件:模板系统上线', isHighlight: true, imageUrl: null, imageCaption: null }];
-  o.corePoints = [{ point: '核心要点', supporting: '模板中的所有内容均可阅读。', imageUrl: null, imageCaption: null }];
-  o.analysis = { coreDispute: '示例核心争议', perspectives: [{ holder: '读者', viewpoint: '文字和资料需要完整呈现。' }],
-    quotes: [{ text: '模板是内容的骨架。', attribution: '示例引语' }], implications: '版式选择不应改变内容。' };
+  o.timeline = [{ date: '2026-09-30', event: '示例事件：模板系统上线', isHighlight: true,
+    why: '读者可以在不同版式中核查同一组判断与资料。', imageUrl: null, imageCaption: null }];
+  o.corePoints = [{ point: '版式应帮助读者理解判断并核查依据', supporting: '模板中的所有内容均可阅读。',
+    sources: [1], imageUrl: null, imageCaption: null }];
+  o.analysis = { coreDispute: '示例核心争议', perspectives: [{ holder: '读者', viewpoint: '文字和资料需要完整呈现。',
+    interest: '减少查找关键信息和核对来源的成本。', quote: '模板是内容的骨架。', quoteBy: '示例引语', sources: [1] }],
+    quotes: [], implications: null };
+  o.impacts = [{ target: '读者', horizon: 'short', effect: '更快定位判断与对应证据。' }];
+  o.watch = ['继续检查不同字体与屏幕尺寸下的阅读效果。'];
+  o.uncertainties = [{ claim: '新排版对长文阅读效率的改善幅度。', status: 'single_source' }];
   o.diagram = { type: 'flow', title: '阅读流程', reason: null, nodes: [{ id: 'a', label: '资料', note: '保留来源', group: null },
     { id: 'b', label: '文章', note: null, group: null }], edges: [{ from: 'a', to: 'b', label: '整理' }], caption: '示例关系图解' };
-  o.extendedReading = [{ title: '示例延伸阅读', url: 'https://example.com', source: 'example.com', publishedAt: null }];
-  o.references = [{ title: '示例参考来源', url: 'https://example.com/source', source: 'example.com', publishedAt: '2026-09-30' }];
+  o.sources = [{ title: '示例参考资料', url: 'https://example.com/source', source: 'example.com', publishedAt: '2026-09-30' }];
   return o;
 };

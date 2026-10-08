@@ -14,6 +14,8 @@ import { ACCENT, BODY, ERROR, INK, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY,
 import { type WorkspaceFileInfo, extOf, formatFileSize } from './WorkspaceFileVM.ets';
 import { MarkdownText } from './MarkdownText.ets';
 import { Icon } from './ui/Icon.ets';
+import { messageArchiveSource } from '@amber/chat-domain';
+import type { ChatMessageArchiveSource } from '@amber/chat-domain';
 
 // 预览内容类别(对齐 Android sealed PreviewContent)
 type PreviewKind = 'markdown' | 'plaintext' | 'image' | 'pdf' | 'unsupported';
@@ -61,6 +63,17 @@ export struct WorkspaceFilePreview {
   // 图片资源 URI(父页读盘转 data-uri 或 workspace 路径后注入)
   @Prop imageUri: string = '';
   onDismiss: () => void = (): void => {};
+  onOpenSource: (source: ChatMessageArchiveSource) => void = (_source: ChatMessageArchiveSource): void => {};
+
+  private openMessageSource(): void {
+    const source: ChatMessageArchiveSource | null = messageArchiveSource(this.textContent);
+    if (source !== null) this.onOpenSource(source);
+  }
+
+  private previewMarkdown(): string {
+    return messageArchiveSource(this.textContent) === null ? this.textContent
+      : this.textContent.substring(this.textContent.indexOf('\n') + 1).trimStart();
+  }
 
   private currentKind(): PreviewKind {
     if (this.file === null) return 'unsupported';
@@ -91,6 +104,7 @@ export struct WorkspaceFilePreview {
         .fontColor(INK)
         .layoutWeight(1)
         .maxLines(1)
+        .wordBreak(WordBreak.BREAK_ALL)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
       Text('✕')
         .fontSize(16)
@@ -116,6 +130,12 @@ export struct WorkspaceFilePreview {
         .fontSize(LABEL)
         .fontColor(INK3)
         .margin({ left: 8 })
+      if (messageArchiveSource(this.textContent) !== null) {
+        Blank()
+        Text('查看原消息').fontSize(LABEL).fontColor(ACCENT)
+          .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+          .onClick((): void => { this.openMessageSource(); })
+      }
     }
     .width('100%')
     .padding({ left: 12, right: 12, bottom: 8 })
@@ -124,7 +144,7 @@ export struct WorkspaceFilePreview {
   @Builder
   MarkdownBody(): void {
     Scroll() {
-      MarkdownText({ content: this.textContent, fontSize: 13, fontColor: INK2 })
+      MarkdownText({ content: this.previewMarkdown(), fontSize: 13, fontColor: INK2 })
     }
         .align(Alignment.TopStart)
     .layoutWeight(1)

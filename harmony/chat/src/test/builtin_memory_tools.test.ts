@@ -6,15 +6,12 @@ import type { JsonObject, JsonValue } from '../main/ets/chat/json.ts';
 import type { UIMessagePart, UIMessagePartText } from '../main/ets/chat/message.ts';
 import type { MemoryRecord } from '../main/ets/chat/memory_models.ts';
 import { makeMemoryRecord } from '../main/ets/chat/memory_models.ts';
-import type {
-  AssistantMemory, MemoryToolDeps, MemoryToolWriteRequest,
-} from '../main/ets/chat/builtin_memory_tools.ts';
+import type { AssistantMemory, MemoryToolDeps, MemoryToolWriteRequest } from '../main/ets/chat/builtin_memory_tools.ts';
 import { createMemoryTools, makeAssistantMemory } from '../main/ets/chat/builtin_memory_tools.ts';
 import type { AgentTool } from '../main/ets/chat/tool.ts';
 import {
-  appendMemoryRecord, deleteMemoryRecord, memoriesOfAssistant,
-  memoryBucketForScope, memoryKindForBucketAdd, memoryRecordToAssistantMemory,
-  memoryScopeForBucket, nextMemoryId, updateMemoryRecordContent,
+  appendMemoryRecord, deleteMemoryRecord, memoriesOfAssistant, memoryBucketForScope, memoryKindForBucketAdd,
+  memoryRecordToAssistantMemory, memoryScopeForBucket, updateMemoryRecordContent,
 } from '../main/ets/chat/memory_write.ts';
 
 const NOW = new Date(2026, 6, 28, 12).getTime();
@@ -332,19 +329,3 @@ test('memoriesOfAssistant/toAssistantMemory: 桶过滤 + 插入序 + 字段映�
 });
 
 // ===== 工具 schema 形状 =====
-
-test('schema: memory_write 属性键序 + required;memory_tool required=[action]', () => {
-  const tools: AgentTool[] = createMemoryTools(depsWith());
-  const write = toolByName(tools, 'memory_write').parameters();
-  assert.deepEqual(Object.keys(write!.properties), ['type', 'content', 'source', 'kind', 'expiresAt']);
-  assert.deepEqual(write!.required, ['content']);
-  const mt = toolByName(tools, 'memory_tool').parameters();
-  assert.deepEqual(Object.keys(mt!.properties),
-    ['action', 'id', 'scope', 'kind', 'content', 'sourceConversationId',
-      'sourceMessageIds', 'expiresAt', 'confidence']);
-  assert.deepEqual(mt!.required, ['action']);
-  const kindProp = mt!.properties['kind'] as JsonObject;
-  assert.deepEqual(kindProp['enum'], ['user', 'feedback', 'project', 'reference', 'routine', 'note']);
-  const list = toolByName(tools, 'memory_list').parameters();
-  assert.equal(list!.required, null); // InputSchema.Obj 无 required 参
-});

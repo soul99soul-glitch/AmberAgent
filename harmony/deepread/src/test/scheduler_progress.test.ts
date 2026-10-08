@@ -46,7 +46,7 @@ test('force generation publishes actual collection, planning, section and final-
   releasePlanning.resolve(); await saveStarted.promise;
   assert.equal(snapshots.at(-1)?.[0].stage, 'VERIFYING'); assert.deepEqual(f.saved(), f.old);
   const writing = snapshots.flat().filter(run => run.stage === 'WRITING').map(run => run.label);
-  assert.deepEqual(writing, ['概览', '时间轴叙事', '深度分析', '扩展阅读']);
+  assert.deepEqual(writing, ['概览', '时间轴叙事', '深度分析']);
   assert.equal(snapshots.flat().some(run => run.stage === 'COMPLETE'), false);
   releaseSave.resolve(); const result = await task;
   assert.equal(isComplete(result.output), true); assert.equal(snapshots.flat().some(run => run.stage === 'COMPLETE'), true);

@@ -1,0 +1,26 @@
+{
+  "runtimeFiles": 976,
+  "generatedBrandingDifferences": [
+    "entry/src/main/module.json5",
+    "entry/src/main/resources/base/element/string.json",
+    "entry/src/main/resources/base/media/deepread_app_icon.png"
+  ],
+  "hapBytes": 62483646,
+  "hapSha256": "16bea4096b977e9b9f8a1fef0f7ca5a59b57743fb1e4dddd6e0c0d98278620bf",
+  "bundle": "app.amber.deepread.reader",
+  "testPass": 4784,
+  "testFail": 0,
+  "localMockStages": {
+    "plan": 1,
+    "overview": 1,
+    "narrative": 1,
+    "analysis": 1,
+    "extension": 1
+  },
+  "localFixture": "IOS-Replica-Final-20261005",
+  "localFixturePersistedState": "COMPLETE",
+  "providerSelectionRestored": "follow-current",
+  "localMockServerStopped": true,
+  "ownedHdcReverseRemoved": true,
+  "generatedIconMatchesProductAsset": true
+}

@@ -35,6 +35,7 @@ export struct ChatInput {
   @Prop disabled: boolean = false;
   @Prop editing: boolean = false;
   @Prop hasImages: boolean = false;
+  @Prop queueCount: number = 0;
   @Prop placeholder: string = '输入消息…';
   @Prop showAttachments: boolean = true;
   @Prop showCoreSlashCommands: boolean = true;
@@ -56,6 +57,8 @@ export struct ChatInput {
   onSend: () => void = (): void => {};
   onStop: () => void = (): void => {};
   onSendWithoutAnswer: () => void = (): void => {};
+  onQueueSend: (mode: string) => void = (_mode: string): void => {};
+  onOpenQueue: () => void = (): void => {};
   onPickImage: () => void = (): void => {};
   onTakePhoto: () => void = (): void => {};
   onPickFile: () => void = (): void => {};
@@ -72,6 +75,10 @@ export struct ChatInput {
   // D0-7:全屏编辑(AmberTextArea.FullScreenEditor 同款 sheet 模式)
   @State fullScreenOpen: boolean = false;
   @State fullScreenText: string = '';
+  @State queueMode: string = 'FOLLOWUP';
+  @State selectionStart: number = 0;
+  @State selectionEnd: number = 0;
+  private inputController: TextAreaController = new TextAreaController();
 
   private pressTouch(which: boolean, e: TouchEvent): void {
     const down: boolean = e.type === TouchType.Down;
@@ -108,12 +115,12 @@ export struct ChatInput {
       cmd.title.toLowerCase().startsWith(query));
   }
 
-  // D0-8:@提及上下文(光标近似 = 文本末尾,覆盖正向输入 @query 场景;
-  //   slash 面板优先,二者不并存)
+  // 文本选区非空时不弹候选；按 TextArea 实际光标检测，保留光标后文本。
   private mentionContext(): MentionContext | null {
     if (this.disabled || this.editing || this.mentionRoles.length === 0) return null;
     if (this.isSlashVisible()) return null;
-    return detectMentionContext(this.text, this.text.length);
+    if (this.selectionStart !== this.selectionEnd) return null;
+    return detectMentionContext(this.text, this.selectionEnd);
   }
 
   private mentionMatches(): MentionRoleItem[] {
@@ -171,11 +178,30 @@ export struct ChatInput {
             const ctx: MentionContext | null = this.mentionContext();
             if (ctx === null) return;
             this.onTextChange(replaceMention(this.text, ctx, roleId));
+            const cursor: number = ctx.atIndex + roleId.length + 2;
+            this.selectionStart = cursor;
+            this.selectionEnd = cursor;
+            // 等待父组件回写 text 后，再把光标落在新提及后而非文本末尾。
+            setTimeout((): void => { this.inputController.caretPosition(cursor); }, 0);
           },
         })
           .padding({ left: 20, right: 20 })
           .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 8 }))
             .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+      }
+
+      if ((this.sending && this.hasDraft()) || this.queueCount > 0) {
+        this.QueueControls()
+      }
+
+      // 候选面板参与根 Column 测量，使用与 @ 提及相同的输入区上方布局。
+      if (this.isSlashVisible()) {
+        SlashCommandPanel({
+          commands: this.getSlashCommands(),
+          visible: true,
+          onSelect: (cmd: SlashCommand): void => { this.handleSlashCommand(cmd); },
+        })
+          .padding({ left: 20, right: 20 })
       }
 
       // Composer 沉浸式(原型验收规格):无底盘底色、无顶部分隔线,
@@ -224,12 +250,16 @@ export struct ChatInput {
               .accessibilityText('选择文件')
 
               // D0-9:联网搜索开关(与设置页同一状态源;开 = accent 浅底 + accent 图标)
-              Row() {
-                Icon({ name: 'hi_global', iconSize: 23,
+              Column({ space: 1 }) {
+                Icon({ name: 'hi_global', iconSize: 18,
                   color: this.webSearchOn ? this.accentColorStore : INK2 })
+                Text(this.webSearchOn ? '联网已开' : '联网已关')
+                  .fontSize(10).fontFamily(FONT_SANS)
+                  .fontColor(this.webSearchOn ? this.accentColorStore : INK3)
               }
               .width(44).height(44).borderRadius(999)
               .justifyContent(FlexAlign.Center)
+              .alignItems(HorizontalAlign.Center)
               .backgroundColor(this.webSearchOn ? accentSoftBg(this.accentColorStore) : Color.Transparent)
               .onClick((): void => { this.onToggleWebSearch(); })
               .accessibilityText(this.webSearchOn ? '关闭联网搜索' : '开启联网搜索')
@@ -240,8 +270,8 @@ export struct ChatInput {
             .alignItems(VerticalAlign.Center)
             .animation({ duration: 220, curve: Curve.EaseOut })
           }
-          .height(44)
-          .padding({ left: 2, right: 2 })
+          .width(this.attachExpanded ? 226 : 44).height(44)
+          .animation({ duration: 220, curve: Curve.EaseOut })
           .borderRadius(999)
           .backgroundColor(SURFACE)
           .border({ width: 1, color: LINE })
@@ -249,12 +279,14 @@ export struct ChatInput {
           .opacity(this.sending ? 0.4 : 1)
           .scale({ x: this.attachScale, y: this.attachScale })
           .onTouch((e: TouchEvent): void => { this.pressTouch(true, e); })
+          .enabled(!this.disabled)
           .margin({ right: 8 })
         }
 
         // Center pill:flex 1, radius 26, min-height 48, bg SURFACE2, border 1px LINE
         Row() {
           TextArea({ text: this.text,
+            controller: this.inputController,
             placeholder: this.editing ? '编辑消息,发送将重发…' : this.placeholder })
             .layoutWeight(1)
             .fontSize(BODY).fontColor(INK)
@@ -269,10 +301,16 @@ export struct ChatInput {
             .lineHeight(lineHeightForSize(BODY))
             .enabled(!this.disabled)
             .onChange((v: string): void => { if (!this.disabled) this.onTextChange(v); })
+            .onTextSelectionChange((start: number, end: number): void => {
+              this.selectionStart = start;
+              this.selectionEnd = end;
+            })
             // 回车发送:enterKeyType=Send 时 onSubmit 才触发(NEW_LINE 不触发,API 11+)
             .enterKeyType(this.sendOnEnter ? EnterKeyType.Send : EnterKeyType.NEW_LINE)
             .onSubmit((enterKey: EnterKeyType): void => {
-              if (enterKey === EnterKeyType.Send && this.sendOnEnter && this.canSend()) this.onSend();
+              if (enterKey === EnterKeyType.Send && this.sendOnEnter && this.canSend()) {
+                if (this.sending) this.onQueueSend(this.queueMode); else this.onSend();
+              }
             })
             // 长文本粘贴为文件:超阈值拦截系统默认粘贴,转附件(Android pasteLongTextAsFile)
             .onPaste((value: string, event: PasteEvent): void => {
@@ -316,7 +354,7 @@ export struct ChatInput {
           .alignItems(VerticalAlign.Center)
           .scale({ x: this.sendScale, y: this.sendScale })
           .onTouch((e: TouchEvent): void => { this.pressTouch(false, e); })
-          .onClick((): void => { if (!this.disabled) this.onStop(); })
+          .onClick((): void => { this.onStop(); })
           .accessibilityText('停止生成')
         } else {
           Row() {
@@ -348,17 +386,11 @@ export struct ChatInput {
         }
         }
         .width('100%')
-        .enabled(!this.disabled)
+        .enabled(!this.disabled || this.sending)
         .opacity(this.disabled ? 0.55 : 1)
         .padding({ left: 20, right: 20, top: 10, bottom: 14 })
         .alignItems(VerticalAlign.Center)
 
-        // Slash panel overlays the composer and follows its actual height.
-        SlashCommandPanel({
-          commands: this.getSlashCommands(),
-          visible: this.isSlashVisible(),
-          onSelect: (cmd: SlashCommand): void => { this.handleSlashCommand(cmd); },
-        })
       }
     }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
@@ -367,6 +399,78 @@ export struct ChatInput {
       height: SheetSize.LARGE,
       onDisappear: (): void => { this.fullScreenOpen = false; },
     })
+  }
+
+  @Builder private QueueControls(): void {
+    Column() {
+      Row({ space: 8 }) {
+        if (this.sending && this.hasDraft()) {
+          Row() {
+            this.QueueModeButton('FOLLOWUP', '排队')
+            this.QueueModeButton('STEER', '插话')
+            this.QueueModeButton('COLLECT', '合并')
+          }
+          .layoutWeight(1)
+          .borderRadius(22)
+          .backgroundColor(SURFACE2)
+          .border({ width: 1, color: LINE })
+          .enabled(!this.disabled)
+        } else {
+          Blank()
+        }
+        if (this.queueCount > 0) {
+          Text(`队列 ${this.queueCount}`)
+            .fontSize(META).fontFamily(FONT_SANS).fontColor(INK2)
+            .height(44).constraintSize({ minWidth: 60 })
+            .textAlign(TextAlign.Center)
+            .onClick((): void => { this.onOpenQueue(); })
+            .accessibilityText(`管理待发消息，共 ${this.queueCount} 条`)
+        }
+        if (this.sending && this.hasDraft()) {
+          Row() {
+            Icon({ name: 'arrow_up', iconSize: 19,
+              color: this.canSend() ? ACCENT_INK : INK3 })
+          }
+          .width(44).height(44).borderRadius(22)
+          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+          .backgroundColor(this.canSend() ? this.accentColorStore : SURFACE2)
+          .border({ width: 1, color: this.canSend() ? this.accentColorStore : LINE })
+          .enabled(this.canSend())
+          .onClick((): void => { this.onQueueSend(this.queueMode); })
+          .accessibilityText(this.queueSendLabel())
+        }
+      }
+      .width('100%')
+      if (this.sending && this.hasDraft()) {
+        Text(this.queueModeDescription())
+          .fontSize(LABEL).fontFamily(FONT_SANS).fontColor(INK3)
+          .width('100%').margin({ top: 3 })
+      }
+    }
+    .width('100%').padding({ left: 20, right: 20, top: 4 })
+  }
+
+  @Builder private QueueModeButton(mode: string, title: string): void {
+    Text(title)
+      .fontSize(META).fontFamily(FONT_SANS)
+      .fontColor(this.queueMode === mode ? this.accentColorStore : INK3)
+      .height(44).layoutWeight(1).textAlign(TextAlign.Center)
+      .borderRadius(22)
+      .backgroundColor(this.queueMode === mode ? accentSoftBg(this.accentColorStore) : Color.Transparent)
+      .onClick((): void => { this.queueMode = mode; })
+      .accessibilityText(`${title}${this.queueMode === mode ? '，已选中' : ''}`)
+  }
+
+  private queueModeDescription(): string {
+    if (this.queueMode === 'STEER') return '插话：在下一次可插入的步骤补充';
+    if (this.queueMode === 'COLLECT') return '合并：连续补充合成一条后发送';
+    return '排队：本轮完成后发送';
+  }
+
+  private queueSendLabel(): string {
+    if (this.queueMode === 'STEER') return '发送插话';
+    if (this.queueMode === 'COLLECT') return '加入合并队列';
+    return '加入待发队列';
   }
 
   // D0-7:全屏编辑器(AmberTextArea.FullScreenEditor 同款:取消/保存 + 通栏 TextArea)
@@ -402,8 +506,12 @@ export struct ChatInput {
     .backgroundColor(SURFACE2)
   }
 
+  private hasDraft(): boolean {
+    return this.text.trim().length > 0 || this.hasImages;
+  }
+
   private canSend(): boolean {
-    return !this.disabled && (this.text.trim().length > 0 || this.hasImages);
+    return !this.disabled && this.hasDraft();
   }
 
   // accent 35% 透明阴影色(发送键可发态浮起)

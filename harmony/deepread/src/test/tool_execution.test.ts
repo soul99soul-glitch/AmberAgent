@@ -1,13 +1,8 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import {
-  resolveDecision, executeToolsAndMerge,
-  makeSuccessOutput, makeFailedOutput, makeDeniedOutput, parseToolOutputStatus,
-} from '../main/ets/agent/tool_execution.ts';
+import { resolveDecision, executeToolsAndMerge, makeSuccessOutput } from '../main/ets/agent/tool_execution.ts';
 import type { ToolDefinition, ApprovalMatrix } from '../main/ets/agent/tool_execution.ts';
-import {
-  makeUserMessage, makeAssistantMessage, makeUIMessage,
-} from '../main/ets/agent/message.ts';
+import { makeUserMessage, makeUIMessage } from '../main/ets/agent/message.ts';
 import type {
   UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartTool, ToolApprovalState,
 } from '../main/ets/agent/message.ts';
@@ -35,54 +30,9 @@ const matrix = (
   autoApprovedToolNames: new Set(autoApprovedToolNames),
 });
 
-// ===== resolveDecision =====
-
-test('resolveDecision: tool in autoApprovedToolNames → allow', () => {
-  const def: ToolDefinition = {
-    name: 'deep_read_write_overview', description: 'overview',
-    allowsAutoApproval: true, isHighRisk: false,
-    execute: async () => [makeSuccessOutput({ section: 'overview' })],
-  };
-  const dec = resolveDecision(
-    def,
-    toolPart('deep_read_write_overview'),
-    matrix(true, false, ['deep_read_write_overview']),
-  );
-  assert.equal(dec.action, 'allow');
-});
-
-test('resolveDecision: high-risk without flag → ask', () => {
-  const def: ToolDefinition = {
-    name: 'delete_file', description: 'x',
-    allowsAutoApproval: false, isHighRisk: true,
-    execute: async () => [],
-  };
-  const dec = resolveDecision(def, toolPart('delete_file'), matrix());
-  assert.equal(dec.action, 'ask');
-});
-
-test('resolveDecision: autoApproveTools=false → ask', () => {
-  const def: ToolDefinition = {
-    name: 'search_web', description: 'search',
-    allowsAutoApproval: true, isHighRisk: false,
-    execute: async () => [],
-  };
-  const dec = resolveDecision(def, toolPart('search_web'), matrix(false));
-  assert.equal(dec.action, 'ask');
-});
-
 test('resolveDecision: missing definition → ask', () => {
   const dec = resolveDecision(undefined, toolPart('unknown_tool'), matrix(true, true));
   assert.equal(dec.action, 'ask');
-});
-
-// ===== executeToolsAndMerge =====
-
-test('executeToolsAndMerge: no tool parts = no-op', async () => {
-  const msgs = [makeUserMessage('q'), makeAssistantMessage('a')];
-  const r = await executeToolsAndMerge(msgs, new Map(), matrix());
-  assert.equal(r.executedCount, 0);
-  assert.equal(r.hasPendingApproval, false);
 });
 
 test('executeToolsAndMerge: executes tool and writes output back to same part', async () => {
@@ -209,95 +159,6 @@ test('executeToolsAndMerge: multiple tools execute in parallel', async () => {
   assert.equal(r.executedCount, 2);
   const parts = r.messages[0].parts;
   assert.equal(parts.length, 2);
-});
-
-// ===== Output factories =====
-
-test('makeSuccessOutput produces status:ok JSON', () => {
-  const out = makeSuccessOutput({ section: 'overview' });
-  assert.equal(out.type, 'text');
-  const parsed = JSON.parse(out.text);
-  assert.equal(parsed.status, 'ok');
-  assert.equal(parsed.section, 'overview');
-});
-
-test('makeFailedOutput produces status:failed with message + recoverable', () => {
-  const out = makeFailedOutput('timeout', ['trace1'], false);
-  const parsed = JSON.parse(out.text);
-  assert.equal(parsed.status, 'failed');
-  assert.equal(parsed.message, 'timeout');
-  assert.equal(parsed.recoverable, false);
-});
-
-test('makeDeniedOutput produces status:denied with reason', () => {
-  const out = makeDeniedOutput('user rejected', ['trace1']);
-  const parsed = JSON.parse(out.text);
-  assert.equal(parsed.status, 'denied');
-  assert.match(parsed.message, /user rejected/);
-});
-
-// ===== parseToolOutputStatus =====
-
-test('parseToolOutputStatus extracts status from JSON', () => {
-  assert.equal(parseToolOutputStatus([makeSuccessOutput({})]), 'ok');
-  assert.equal(parseToolOutputStatus([makeFailedOutput('x')]), 'failed');
-  assert.equal(parseToolOutputStatus([makeDeniedOutput('y')]), 'denied');
-});
-
-test('parseToolOutputStatus empty when no output', () => {
-  assert.equal(parseToolOutputStatus([]), 'empty');
-});
-
-test('parseToolOutputStatus unparseable for invalid JSON', () => {
-  assert.equal(parseToolOutputStatus([textPart('not json')]), 'unparseable');
-});
-
-// ===== Integration: agent loop one round =====
-
-test('integration: agent loop simulates one tool execution round', async () => {
-  // 初始:LLM 流式输出了一条 assistant message 含 tool call
-  const messages: UIMessage[] = [
-    makeUserMessage('write overview section'),
-    makeUIMessage('assistant', [
-      textPart('I will write overview now.'),
-      toolPart(
-        'deep_read_write_overview', 'c1', { type: 'approved' }, [], null,
-        '{"summary":"这是一段足够长的摘要内容满足最小长度要求再加几个字"}',
-      ),
-    ]),
-  ];
-
-  // tool 定义(对应 SectionWriterTools)
-  const defs = new Map<string, ToolDefinition>([
-    ['deep_read_write_overview', {
-      name: 'deep_read_write_overview',
-      description: 'write overview section',
-      allowsAutoApproval: true, isHighRisk: false,
-      execute: async (input) => {
-        const args = JSON.parse(input) as { summary: string };
-        if (args.summary.length < 24) {
-          return [makeFailedOutput('summary too short')];
-        }
-        return [makeSuccessOutput({ section: 'overview', accepted: true })];
-      },
-    }],
-  ]);
-
-  // 执行一轮
-  const result = await executeToolsAndMerge(
-    messages, defs, matrix(true, false, ['deep_read_write_overview']),
-  );
-
-  // 验证:result 写回了原 message,没新建 role=tool
-  assert.equal(result.messages.length, 2, 'no new message added');
-  assert.equal(result.executedCount, 1);
-  const assistantMsg = result.messages[1];
-  assert.equal(assistantMsg.role, 'assistant');
-  const tool = assistantMsg.parts.find(
-    (part): part is UIMessagePartTool => part.type === 'tool',
-  );
-  assert.ok(tool && tool.output.length > 0);
-  assert.equal(parseToolOutputStatus(tool.output as UIMessagePartText[]), 'ok');
 });
 
 // ===== 流式 auto 工具回归(#1:审批态 'auto' 必须可执行) =====

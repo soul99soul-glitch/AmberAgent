@@ -382,19 +382,18 @@ const runToolLoopCore = async (
           ? 0
           : (deps.contextMessageSize ?? 0),
       });
-      // 发送边界兜底 fit(chat_turn 同语义;工具 prompt 也是后置 system 块)
-      const assembled: UIMessage[] = deps.finalTokenBudget !== undefined
-        ? fitMessagesToTokenBudget(assembledBase, deps.finalTokenBudget)
-        : assembledBase;
-      const internalMessages: UIMessage[] = await applyInputTransformers(
-        assembled, deps.inputTransformers, ctx);
-      // D-071a:视觉兜底重建闭包(逐步构建 — assembled 每步不同,
-      //   chat_turn 同语义,GenerationHandler.kt:613/:648)
+      // 工具 prompt 和物化后的文档/OCR/模板一起进入最终预算。
+      const prepareInternalMessages = async (forceImageToText: boolean = false): Promise<UIMessage[]> => {
+        const transformed: UIMessage[] = await applyInputTransformers(
+          assembledBase, deps.inputTransformers, forceImageToText ? { ...ctx, forceImageToText: true } : ctx);
+        return deps.finalTokenBudget !== undefined
+          ? fitMessagesToTokenBudget(transformed, deps.finalTokenBudget) : transformed;
+      };
+      const internalMessages: UIMessage[] = await prepareInternalMessages();
       const visionFallback: VisionFallbackHook | undefined =
         deps.modelSupportsImageInput === undefined ? undefined : {
           modelSupportsImageInput: deps.modelSupportsImageInput,
-          rebuildInternalMessages: (): Promise<UIMessage[]> => applyInputTransformers(
-            assembled, deps.inputTransformers, { ...ctx, forceImageToText: true }),
+          rebuildInternalMessages: (): Promise<UIMessage[]> => prepareInternalMessages(true),
         };
       const stepProvider: ChatStreamProvider = loop.makeProviderForStep(
         stepTools.map((t: AgentTool): ChatToolDefinition => toChatToolDefinition(t)));
@@ -447,7 +446,9 @@ const runToolLoopCore = async (
       // 审批决策(:287-339):ASK → 置 Pending + permission_trace
       let hasPendingApproval: boolean = false;
       let changed: boolean = false;
-      const updatedTools: UIMessagePartTool[] = recipeBatch ? tools : tools.map((tool: UIMessagePartTool): UIMessagePartTool => {
+      const updatedTools: UIMessagePartTool[] = [];
+      for (const tool of tools) {
+        if (recipeBatch) { updatedTools.push(tool); continue; }
         let invocation: UIMessagePartTool = tool;
         if (loop.captureInvocationMetadata !== undefined && tool.approvalState.type === 'auto') {
           const captured: JsonObject | null = loop.captureInvocationMetadata(tool);
@@ -457,22 +458,21 @@ const runToolLoopCore = async (
           }
         }
         const toolDef: AgentTool | null = stepDefsMap.get(tool.toolName) ?? null;
-        const decision: PermissionDecision = dispatcher.resolveDecision(
+        const decision: PermissionDecision = await dispatcher.resolveReviewedDecision(
           toolDef, invocation, autoApproveTools, autoApproveHighRiskTools,
-          autoApprovedToolNames, invocationContext);
+          autoApprovedToolNames, invocationContext, deps.abortSignal);
         if (decision.action === 'ask') {
           hasPendingApproval = true;
           changed = true;
           const metadata: JsonObject = invocation.metadata !== null ? { ...invocation.metadata } : {};
           metadata['permission_trace'] = permissionDecisionTraceToJson(decision.trace);
-          return { ...invocation, approvalState: { type: 'pending' }, metadata };
+          updatedTools.push({ ...invocation, approvalState: { type: 'pending' }, metadata });
+          continue;
         }
-        if (tool.approvalState.type === 'pending') {
-          hasPendingApproval = true;
-          return invocation;
-        }
-        return invocation;
-      });
+        if (tool.approvalState.type === 'pending') hasPendingApproval = true;
+        updatedTools.push(invocation);
+      }
+      if (deps.abortSignal?.aborted) break;
 
       if (changed) {
         // approval 写回同样按输入身份:tools[i] 是消息里的原 part,updatedTools[i]

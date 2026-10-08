@@ -1,0 +1,3626 @@
+[
+  {
+    "path": "harmony/AppScope/app.json5",
+    "sha256": "8c0ebef1053ce8e59bd6c3599ede9fc15402ff4c5f738b12c1a26fe414487f13"
+  },
+  {
+    "path": "harmony/build-profile.json5",
+    "sha256": "621400c8029911efbb653e0060debc2ddaff9fc7c875d9d891ccb12393ee974e"
+  },
+  {
+    "path": "harmony/chat/build-profile.json5",
+    "sha256": "b84e39253e561bb174461551514969628aea7f9e18a79c14928742ccab5573f3"
+  },
+  {
+    "path": "harmony/chat/oh-package.json5",
+    "sha256": "6d075ed5c22b10b72344e20efaa0b108f6eb429821a0a62cf82dc02af3902dd2"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/agent_cron.ts",
+    "sha256": "a604fee0f8574868fab7cb9ca674aec0215d33b5bb4d86477d4f31045dc5270d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/agent_cron_run_executor.ts",
+    "sha256": "fbcc1466fd499e085d31e04aac3400e73e4c3bb9fc7a34dadbadefc5e106e7f2"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/agent_loop_budget.ts",
+    "sha256": "7b820e9711638f9c45da6fc2c2262d44cdd6ad69285ec8eab7aca94816bf9b27"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/agent_prompt_config.ts",
+    "sha256": "edb06831d3a4addf87ee2af568203cc813eb310c0b23d454001ebf0bd06aa2ef"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/agent_soul_prompt.ts",
+    "sha256": "e15f00fa8243a4ab044720c3e396f3c73c0935ea4167a599fef4bc726fb3ce05"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/agent_task.ts",
+    "sha256": "99ae535db2c95f941cc3edc483a59d2b7c2ad5b7f58815045a9f8be5871837eb"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/agent_task_scheduler.ts",
+    "sha256": "cd2868d47ec2611bb35aa894f2f5758cb7707e677481ed9240707cefaf26de9e"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/agent_task_tools.ts",
+    "sha256": "3bc759d0e97550836246f7e279287bd930f0186ed8c113fa7351f65751403c24"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/ask_user_questions.ts",
+    "sha256": "c6d1a2dcc69bf2abb5466f82c6b18c6c1331edf650fb3261ec67c8409b6485da"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/assistant.ts",
+    "sha256": "883b041eedb1062c03a59bbb6af786268c00a6b17f3db303f438a31f120e4322"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/assistant_serialize.ts",
+    "sha256": "f59ebb29f41d87f61408491e767ac97c9e920911d3b640781c09504be20101da"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/auto_title.ts",
+    "sha256": "88ec26dd2f87bd71fec5673b109b09cbbeb0f57da25d0c339fe74211f6d4e525"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/base64_image_transformer.ts",
+    "sha256": "7018a7c8747b2b6257aeb78bd5f84a61383be830752e68412512a03968af6b24"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/builtin_ask_user_tool.ts",
+    "sha256": "0b1d3bbb0667b435159402ab053eaf546b7d4311e054f19cb75c19687d2ed692"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/builtin_conversation_tools.ts",
+    "sha256": "9522be0072a5c206e4cc5f41718d3e0f03b467ecb3f0838965422f68d00a008c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/builtin_deepread_playbook_tools.ts",
+    "sha256": "21d0981a1fd047986de3cc90ce99303e61f38a73b1712f737913a8ef550917a2"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/builtin_introspection_tools.ts",
+    "sha256": "b8e6fb6a52ff6f7e057ca896480193875e55d375580876e00dd24c52b0861d08"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/builtin_local_tools.ts",
+    "sha256": "8fdc57611dc4fe7b64037d7c64e2ba3feb898b59242dd00fe8c7c0a5d23e1c97"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/builtin_memory_tools.ts",
+    "sha256": "bdd887c0ccf02462afe4654d8cb41df24c6fba6b15725a3ef233a725b967b4c6"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/builtin_queue_tools.ts",
+    "sha256": "9dcb887c44408340ffcb5b2e16c7a5bebdbfd77a0fa5a0f8846f5d99f9e44bcc"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/builtin_session_tools.ts",
+    "sha256": "a92c7424d5b6c210d56390e011494218d538e6af5794e6600a472aa550ae80db"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/builtin_time_tool.ts",
+    "sha256": "56d4b51161f3a41eaecd9542558091163ed39aae92d51af202032624be55f0ea"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/chat_kernel_host.ts",
+    "sha256": "cc6085851480d551f1c72438a84430091bf02b932307be7b75261601113530ef"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/chat_turn.ts",
+    "sha256": "a9da98733aafac403270d4bf117d8145da777b7fc178c5b24b7f3e0bd7613e52"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/claude_chat_api.ts",
+    "sha256": "b3421d4f92384aea85a38e7e974d1a635fa6f530d4c379f1868cc76f4a6c5c89"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/claude_parse.ts",
+    "sha256": "f6fd8dc4fcb26fed313873ca2771c33017aee09d47e962295c75f437a251f7dd"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/claude_request.ts",
+    "sha256": "7f6d41fc3cbfc08aa382dc8dcde71beeff5894b586490ff4032b15493c35c647"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/code_highlight.ts",
+    "sha256": "8375de0d5e97f4e7d928ef18c0407769aaca317bd10df65ea8a9fbc34c00cae7"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/context_assembly.ts",
+    "sha256": "3af96566ef86eace635b2f6309836c12ec05e7ca277d8739122c528a9133b07a"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/context_compact.ts",
+    "sha256": "106abf1e6a6f75e0a3e665edd42245c514501eaa352b03feb38f90df2621ef94"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/context_engine.ts",
+    "sha256": "3fb8d2d0e0c21bfd67121cc01bcdae4eeecf5277923e42bdd1ff8fde2434f361"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/continue_candidate.ts",
+    "sha256": "d5d6a00b919b1e06cc6611e0c72082d576ded060c189e654a1c1747312497976"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/conversation.ts",
+    "sha256": "d5841381fe25a78b3877399e460a222ef683cf61e12862838141f9611834a41a"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/conversation_export.ts",
+    "sha256": "09e534b92c0f94764e4cc51752a9fb91d9d3b140eebc5b3f2367e0c7415a9462"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/conversation_recap.ts",
+    "sha256": "20bb33806f42c5a04b9ee438d3be523d5b3a9fc3b06d7576a2b6efeac356bce8"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/council_display.ts",
+    "sha256": "07208b711b9afc6f722b0c4391191054c004822bd9b17b914419e007b8862cdf"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/council_tools.ts",
+    "sha256": "3b04b1c18f911a4e64c6969baf38096b6fcd1ef22384920cf2919dc817154cb4"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/deepread_ai_client.ts",
+    "sha256": "ed2f74291d7d784c5551326a8b0a488ded47955029776282e5946017566574f4"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/delete_message.ts",
+    "sha256": "62ac3bb426efec917d3cc04d0148d063b23b4ee78a9f165c2c27b68fe77a70db"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/display_setting.ts",
+    "sha256": "735a5c43da2c2c4efa35728d539d247f1522a09815654d7e9e0d3ebb67b44388"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/document_transformer.ts",
+    "sha256": "8cb3cb969c008d191015d9ba3a90d1a11b5c679a2b5d0b0466e3267775be08da"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/docx_parser.ts",
+    "sha256": "bf6a25442bf5e24b36c3e3226c41f40db7cb964e8fc124a31bcb2020d4b18576"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/edit_message.ts",
+    "sha256": "b198933f328ef21ae37998016c84f23776fd00d4e70390801e1a79fdfaa265a7"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/epub_parser.ts",
+    "sha256": "81b419cc15271e260050883952b391748388fc1e2971c24e384024c52b8eef5f"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/feishu_docs_client.ts",
+    "sha256": "01094bcc2f103d2d778feefebbe035075b2b85f84b761bf064fe9dd07948411e"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/fork.ts",
+    "sha256": "0b2c71343d4341b27dba4e3a24942b023c76ce1e5b57baa79b977b4b4944d2d0"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/format_number.ts",
+    "sha256": "524cb0e75627e98198c9ad00c8a4416fe9aff7bf73c27b8d77732c1ebae745ef"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/generation_retry.ts",
+    "sha256": "4f327589e46886b00ee3c4aa067331e67be66f48dec24364c7ec82539729d14b"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/generation_retry_wait.ts",
+    "sha256": "f2b068fc053126e7d119ebe73ab91853a2cdc37212bc194dd06f32e4fd888797"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/generative_widget.ts",
+    "sha256": "b9aea0ac287872e463f137d7f230742e0b9c804f8da5c964f522a5fe7ed1e227"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/generative_widget_specs.ts",
+    "sha256": "fbdba1d90924a2882f0a9f3cab3e8a3db06d990ce3be736bad3270c92c2c53d4"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/google_auth.ts",
+    "sha256": "d2b33d835e855d8924fb3a49efba3f3e80ff4428e08bbe7f7c0d9b005de66540"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/google_chat_api.ts",
+    "sha256": "b1011c1f83fe538da66f5e96a1fe6260ce5f888e0b89270e7aedf9c313d6ae07"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/google_oauth_contracts.ts",
+    "sha256": "d2ad9ebea93944f52eed9eeefcd063ac1d05f4ba231f4fc8cf18668976ef466f"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/google_parse.ts",
+    "sha256": "4e9e1fd2b038ce440e7b338876a2b3b6f8a56c10615084bcd1db254f3b31eb73"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/google_request.ts",
+    "sha256": "2388e64c062ffb0234119f2288c3934c2feb4ce1dff613433cadcdbeb9472725"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/grok_oauth.ts",
+    "sha256": "6502ee86e0a70a1b5c1bfa1bee5ca830a1c2ea5e1814a989da38916165ad8a2d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/health_summary.ts",
+    "sha256": "aa542a0646c674158e1d5d101fd187533a6015be015eb750a691925cbd4ba98f"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/ids.ts",
+    "sha256": "a900bc09666f6099fc7136c8a89e03658692e357373b7d544f67fbe4b2db971e"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/image_attachment_guard.ts",
+    "sha256": "f062ee2ffde296f0b3aebcbff61f8eb891006b5adc32912dcb9bb047a4f05811"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/image_compress.ts",
+    "sha256": "68d9fb06b48d21d51cefd357541ada6a93ffaa0875fd4eb88547ff215b05cbf0"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/image_export_pages.ts",
+    "sha256": "ea3c3b13ea8232cd7ec3a9196df6fe553023c9e3b47314b2fc185987c204c1a1"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/interactive_turn_runtime.ts",
+    "sha256": "f51bf2773442262cf1079069762907b449e08531837d8858a4608e340b91eca7"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/jev_approval.ts",
+    "sha256": "ffabecdd049b45c02f00debae08225452f9753bc9a00b7afaf5a71dfec0aa579"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/jev_client.ts",
+    "sha256": "47569dfdbfa2e60a23d868e5f184b81049135de51664c03622354493cca3d72e"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/jev_models.ts",
+    "sha256": "f40ff8be626d51e396476df5a96867d76bd49efd2e9bb704d7aa1638b6d528b5"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/jev_web.ts",
+    "sha256": "b4ea426215ac1aba4e7708fad4b50d5bbd38c25f43be40157b5c5f1ffceee465"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/json.ts",
+    "sha256": "f2feee12bf8f2fa34e32366d02ffd46801b3afba7870b7bd60e6991dc0729565"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/kv_store.ts",
+    "sha256": "ad019e613408dfe4657050c690882c9a4964f121c06f8429b2aa6798095477da"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/managed_files.ts",
+    "sha256": "fe11e0cc4827045d57ef4be2d4fd394195d195956c4e25068c94aa8260214bb1"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/markdown_blocks.ts",
+    "sha256": "3bec4bc7b082a71c0cdb4913d12ce7f99a28a14fe8c78f6465c9905ffb1f0da8"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/markdown_cache.ts",
+    "sha256": "b7c03d5e8a956f88724a7a62210e343906cca8dc2fcdb1bc7f6297513d9df0a4"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/markdown_html.ts",
+    "sha256": "b81ff8fedcbb0fb9f989f1983c04a181161dbf450922473df7b8e8f7d90e238e"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/math_compose.ts",
+    "sha256": "dcbef67a090185f599a1ca591cac3c738de84f8bb8045da327f2c8bc6f479347"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mcp_config.ts",
+    "sha256": "0236e82021c8f08d7ed5f7db89070f0d642e4cee4ab6e8c582feb1c4dd45c721"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mcp_config_serialize.ts",
+    "sha256": "5b3ae2ee61ed9ec37f912889ed4e2992105b32a5747c48427040f167553592ac"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mcp_import.ts",
+    "sha256": "172841ad09765789497e05aa252d1e920c4d109a1b51dbc56a92d98addc7e457"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mcp_manager.ts",
+    "sha256": "7754dcc2d414bfbd56ad4781c1e00b4e2bffdfb46a333d3075b8324c29ec6385"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mcp_protocol.ts",
+    "sha256": "237f0e7e300daef4d2062071a5b2c65abbf5c04b5187a814c6be37197230f9d3"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mcp_tools.ts",
+    "sha256": "203108996ee688ef79f5ae297d626d2452b085e5b490e4a9e68d7ff821c7d8cb"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mcp_transports.ts",
+    "sha256": "a20640ee563cf83f218b615e3f7c38f9893e83f19ba8aa777564600df82e4927"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_candidate_filter.ts",
+    "sha256": "e0681e180e8f28a898ad17ecba716c9feb61f82641a1b3b8c62eb551fda60a23"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_documents.ts",
+    "sha256": "10b59785256b741d6173139c15696b037df97fc73ce34e8415b2ebdf9bfca245"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_dream.ts",
+    "sha256": "0f2f624eda6878a25436a9dcdbfa4dfa7866bac7204f8ce3d8cb570d427239b9"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_dream_ops.ts",
+    "sha256": "43d6782cac13cf0f223f3151110d7e0e65e6c9a5e251f0cd220b37dcf31e8805"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_dream_plan_store.ts",
+    "sha256": "c1534b774d1eb59da2506a04f051bff95dbbc2efe3b1b725f0e3a2badb67cda1"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_dream_prompt.ts",
+    "sha256": "220dd9b7382f8fb7819a5066c42cc4720e8d2c6bc6b673b76a2474cda16bb5cc"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_dream_run.ts",
+    "sha256": "e96cd4fe7146fefe71ac15cd4a95b560b4647eee29c74603b40091e4d681129d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_extraction_prompt.ts",
+    "sha256": "42ac24ccfd35447146cb68a2112eececbc31f62ed32ff6bdd3b6352e346f5025"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_extractor.ts",
+    "sha256": "6531780ab91e054c41af2432e63f20fef03574472818527cd5eb5c5f9ac0d1a8"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_frontmatter.ts",
+    "sha256": "b933e584840dae9c43ed7035235b47603c71ec528418e68d1a56286d2e1a8e37"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_import_export.ts",
+    "sha256": "718c786423c8a3d548becfae91f73147202c24bd8ac9c7b4bb073e72b6a7df6a"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_models.ts",
+    "sha256": "ff0e58cc82a9d591834930889e921ece2b6e5bf9f319c926d8e0effad487b6a7"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_prompt_builder.ts",
+    "sha256": "82eb534fa5f2d25716405d40bb4fd509c9144418544897bed48d52e3b751e0ab"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_recall.ts",
+    "sha256": "25821f841b4c1419ecb837dc824eaf526945e23e720ee5b520cfd5ceddd7ce3e"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_recall_store.ts",
+    "sha256": "626ee2e4bc06ab12df7ec1c9b8e58d2b5650616242429545b2a25ef29007d374"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_summary.ts",
+    "sha256": "1c400d4311fa54f880ceca1901f26c14cf95184df4b0365ec2c0e6777d5b19b1"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_time_anchor.ts",
+    "sha256": "429c873ff8a6f7a3ed5366e1fb6efccfb876f841009c224898d89f055b6a2b6f"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_topics.ts",
+    "sha256": "9b2decca472388b60a7c19af1a24fe825a9384949cc870718311240f2a2bb0cb"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/memory_write.ts",
+    "sha256": "62fe54e58a88bc67431b66e3e1f00d040876a9f399458f9354e8160295d05f86"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mention_roles.ts",
+    "sha256": "81632ea8a8af9311bc6836c5c2052691bb827389ffd41c45157d82f3c6abaf9b"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/message.ts",
+    "sha256": "43dfc7a42b4f98609e24822877630b7ec6c7476c1b02b5ad4db37e8787cf0683"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/message_copy.ts",
+    "sha256": "85691c3a17d54c96473ef57cbba91b20ac766a80c882b3f7273efae85af7e0df"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/message_grouping.ts",
+    "sha256": "bc8cc6ccbef7d556b79f0f70c9d3a01c20876b71a67c1116b4f0ede36f4595a7"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_bridge_js.ts",
+    "sha256": "0b4ac69bad0cdd3d774790124a17cb899a1ff5504c82bf89b6353ec46cfc88b9"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_html_validator.ts",
+    "sha256": "5120da714c2f51b517910db93d27de4700793dc1f7106a9818c291767138aabc"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_models.ts",
+    "sha256": "25369c80a99d798778ea05cc432120dee6c2b3cb6d3b9f3f51928b53d470e005"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_network_policy.ts",
+    "sha256": "69ef111432736d10370ae4e94aa75f87b1f7aa6d759a0018fd7a26976647b676"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_output_parser.ts",
+    "sha256": "fc6190edf218f3cf2f549ad24babfc66d14127f35d8d3360e3a74d2f683477ca"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_output_transformer.ts",
+    "sha256": "950bff94595689f4494f9eda733ded3aab79e5f24a95a93085cbd3f1712fea25"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_prompt_transformer.ts",
+    "sha256": "088b28959bc80efeb6146bbbd3ce0fd8733f45846ed3cd7668ee2698f85a208c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_repository.ts",
+    "sha256": "73e74e064c7393c362eb695d29c9d1cb065b84902296ccbe674661c276dfa383"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_runtime.ts",
+    "sha256": "9b776aa093925247c38293fea6915f8cbb87c62e11f98ca51d250768e8b992db"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_sandbox.ts",
+    "sha256": "1844e158848f42bc9e6b24ed4151728262077329a364e741c2cbd2ba60245761"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_setting.ts",
+    "sha256": "cfb5c2b017ef00dd05653e3617f1f583c0e6e73e22ece8017bc95cdbf7325667"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_shell.ts",
+    "sha256": "32cf3b202782fa5601e6df0d7dc82a095af0abf6d3d4f19828dda5d3cc0a3196"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_storage.ts",
+    "sha256": "f0875568391d72af7f78ff15b38a80b9df575ea7e296b32501c22f46d89c2bfc"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_url_guard.ts",
+    "sha256": "670021c29e077af6e60a9bd91e052c8d950c3f35a57ee08359f3ac79be621112"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mosh/bootstrap.ts",
+    "sha256": "4f2ffa51d3fe23a6391f225902f312594081b528a0357d2922e8b0486852b3eb"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mosh/models.ts",
+    "sha256": "505586026deb84253deaad569962ac24ae16ee8e0c9f875e3f0d08cce0f899a9"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mosh/ports.ts",
+    "sha256": "acf11b328055ae7dddfc0027a87b3ec8997b1941d1ad3a8b61179674ac1f284b"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mosh/runtime.ts",
+    "sha256": "d051b01664bf29cd1a28a80d9a117064a0925d356d4cd8171e5e78b41b36adc2"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mosh/stream.ts",
+    "sha256": "ede9a7ffe98975a55b3140fec465be493fe1936bb00622daef5e366e6241cbff"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/mosh/tools.ts",
+    "sha256": "b732ed78c0162941b5dde6bd72dde1dbf410338d8c65eb477c85a39b67c6b9b8"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/native_context_tokens.ts",
+    "sha256": "3f1b7e94ec17c10e84af65916c6dccad9e9446bcee7ff57c92d6b59b0329fc38"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/native_timeline_motion.ts",
+    "sha256": "e7380d0d09a5927a46db95811045c7652901284d3836f0e692d6911e70e9195d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/novel_context_policy.ts",
+    "sha256": "79e52181233e66e16c4df82337f4048aeecba0b48e6f6cf15580fb127a03513a"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/novel_interactive_adapter.ts",
+    "sha256": "499fdb85c98e9ca49694454d422028180f9aa8813e8816a05269452d93dfc5f2"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/novel_request_config.ts",
+    "sha256": "1820372bf1f4940c2d57d35d6bbaf0631a28f1cd9ee84fed0d200683a0f19709"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/novel_workspace_tools.ts",
+    "sha256": "ce5ddabd78651953563ef03c96004f07be4a4dbfb0ffe24ed56733a0fbab1f2b"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/ocr_transformer.ts",
+    "sha256": "91af89f0cbd08766bc6dd422c7a810a97c3ecb0cf09125cddc0b899ec1f8748e"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/openai_chat_api.ts",
+    "sha256": "5d09a35ee7bec24bdabc047b49283c290e955f4bc2737d064b5617441c21c840"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/openai_normalize.ts",
+    "sha256": "478ed53e7fc8a1fc98b58b483f3e26e6324fbde15c9630ec99b5efd5c239acf2"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/openai_parse.ts",
+    "sha256": "98b63d324e37a75973350ea19b52fc16171abdc2e90f96b4dea9521985dd5f86"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/openai_request.ts",
+    "sha256": "2c893b9bd60aa2bff5977e6456a652130e14cf1b86fb61b399d16546fc8c0f94"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/openai_responses_api.ts",
+    "sha256": "bed52b8313f5c286a762a638beba8bae41988bef732a26251f40d1b70ffec3cb"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/openai_responses_parse.ts",
+    "sha256": "cfabbcb2b4fc63b04cde9d727dedd759faade8cc0a2eb771ac3ebb8869204943"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/openai_responses_request.ts",
+    "sha256": "5e70241f2b025bacaad1f46b2b7ba6b107e9ad3196a93255c469acc404e3018a"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/openai_responses_resume_store.ts",
+    "sha256": "f1fa76a99e786a246f0c860b88a28a0cefe4926c850f51964301958ac6c9b01d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/pending_queue.ts",
+    "sha256": "bc250d570bb9de29d23675998e07c95733708e6e6671c6b46d9af6954dd68221"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/pending_queue_store.ts",
+    "sha256": "5e1372407a5d886e0270e7a08868aaeb1ce2109472c01f1563eb52d4cb71cae8"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/permission_status.ts",
+    "sha256": "12c3ed9910c853e3a95527f4e038a9cb6991267644a887ff0a467733a82595eb"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/persistence.ts",
+    "sha256": "8157cace0751333a48856705d413a67b56facb877a5c790617ad27b3a255ebe4"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/placeholder_transformer.ts",
+    "sha256": "2e8724a4c309569b14a1dd31d0733759cf79445eca0a969bc20f9b3311503c55"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/plugins/broker.ts",
+    "sha256": "e93e8ec83feac2ca7c02f97c28647ba62c4e09c5a550a7a90aa7fc4b8027339d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/plugins/json_schema.ts",
+    "sha256": "b04deb127aa686193452aa4a777d7c006e6c0478f8feede6aa6564fbb1a88fe6"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/plugins/models.ts",
+    "sha256": "b327a7005e1efa8b6c49f56a8b06e567a85bbb5382cd1fbd54fe04aa30f0e571"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/plugins/ports.ts",
+    "sha256": "91751e4af5b5c76cab70f81f79191e2af36341570194d42d575c10ff3fcfa91b"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/plugins/runner.ts",
+    "sha256": "2b9af3c0e4f6fd60b056bb9632aaf0d19d2db01322f112d32324bdda16d8b3f1"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/plugins/tools.ts",
+    "sha256": "e584e88f040f17209322dd93d804e96ff164b73dba731695da12595be88b9fa0"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/plugins/validation.ts",
+    "sha256": "512d8ff46603b4cf55f9ef6fe161655c85a2d78c1608a44c4bd918549d039015"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/pptx_parser.ts",
+    "sha256": "a2f40b659bd999eab58e4a6c06389f3a06e921ed2a40d25465f440efca416b29"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/provider_balance.ts",
+    "sha256": "6d6a416c7454581afc56fea5b97feee612a9ad2e3582656d2de4f4245b64a108"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/provider_import.ts",
+    "sha256": "aa65b8a693b33ca6558b03a8a83b6c505bd40b0a1df1284074c38f9870973c1c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/provider_model.ts",
+    "sha256": "c69eaa500b2e3462e3fd4fe0b82b17ebb55d9f799f8607c76689c73dff18aaf9"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/provider_runtime.ts",
+    "sha256": "40ef5fc3d00ee8294c3eb5cf05a0dc9d2b649fd4a77ac078cbb360f379c2cdf7"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/provider_settings.ts",
+    "sha256": "fc316fc8e2093da8aabfdd1ecb3020145f8c88de94c9a48c5c1837631a83f416"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/provider_settings_serialize.ts",
+    "sha256": "a14dfd1a89ed1a99b0728017a67a243517fbc72b8023bbf40905251c793f6d77"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/python/control.ts",
+    "sha256": "daf7e0dab8447fb52402d894a201939885a24e9b5c9f495cb97f19fd6e4bacef"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/python/models.ts",
+    "sha256": "1fb8428fede6d4e5dd4f387c1ce7bf6470fe513ee9f5cae9d40f0a5b790006bf"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/python/ports.ts",
+    "sha256": "34b84e12061db805c04eabb7fa50164c69a013c0b8e90da4f9c9be0cecb632f9"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/python/runtime.ts",
+    "sha256": "344cac943d00feb8cbd3ac516b93790da66ac8afc7352a641bac9701b9147ee1"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/python/tools.ts",
+    "sha256": "4e4930b79b3043c528206fc9ff3676a6000512ca17c5776b16af350964807ec7"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/reasoning_display.ts",
+    "sha256": "3cf5f89b9a316d59e769abf067ee6d78aa69924b0ee5892dea25671037fcb042"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/reasoning_family.ts",
+    "sha256": "3dacb01bffbcb9b3761fdfcbb536f529346eadeaf8363ca4a159b66821e81724"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/reasoning_level_metadata.ts",
+    "sha256": "cc8f261c7f2c15d2bece64dd9cc31bd3f47bf103cdf2328d76bcdbf5d62b22ec"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/reasoning_levels.ts",
+    "sha256": "c2a2a1bddb473e00a081503dcd0c3a88ee3a74b574ce121e07b823791a47d06a"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/recap_request.ts",
+    "sha256": "13922f1979ace773d9de58f5b3c4641998199b0024370675957b2c3671333fd3"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/recent_chats_prompt.ts",
+    "sha256": "77831f55f8d2626b4ad219e8f4fa4fde98bd195818981a12e2e25a944ef1568f"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/recipe_loop.ts",
+    "sha256": "078e3fb6d9734f991d12b6554183fa76451f9167734c58d9b07cd731ff5ac14a"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/recipes/models.ts",
+    "sha256": "30e9afe9d22a1d874c35c9a36019b70ccb3555f39d261c87eb9d34fdc07f8986"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/recipes/ports.ts",
+    "sha256": "fb2b388bac64421f6cb25ce8659520206ebe843cddaaf1142bf6a81ded0fadc1"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/recipes/runner.ts",
+    "sha256": "4ad9da1315b598fdda8aa878ddf55d491d3c84dab09dbd7351f0a2cba261cae2"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/recipes/tools.ts",
+    "sha256": "f30abe328742e6c4defdd01f633cc3840c0cf7ad372a46a063d1b8238953a72d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/recipes/validation.ts",
+    "sha256": "8c57eabeda0fa68c8d6a70ab9ad71f4af4caccc30dd42e2a4ae9b536f5d02d05"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/regenerate.ts",
+    "sha256": "ca5bce4827cfed436ad5918e0a182b8fe1125c64712bd994b4822c59a12722fc"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/serialize.ts",
+    "sha256": "a42ec5edf78a4202ce937e05964a9c397e9226903c5a9824c58208d31900f7b8"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/session_grant_store.ts",
+    "sha256": "ebfd50ea80df45e677c832d4edec68c57823ec8c79f6aec4e89612a5d420c5f8"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/settings_backup.ts",
+    "sha256": "ede3d3b1f051a0e624a712191ed350aa76cebe8c351956951d4a43707de7c09c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/skills.ts",
+    "sha256": "4fd78b13e1f0b1d3fe48991f7e6eb96e7949b70075f45ff611dc37572fd0977a"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/speculative_tool_runner.ts",
+    "sha256": "7922ab4cd886dc308c7a4fc8ccc633d5e14adf5ccfad15b3858c301385128a20"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/stop_generation.ts",
+    "sha256": "ab3d9ce0406588e47fe5010567d10c44e3348abcdab9c375903e806751fb5d64"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/stream_accumulator.ts",
+    "sha256": "d784c793f18955d49b050a6381a3aa8b15e8f591fceae76c06cd16430f07b522"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/stream_checkpoint.ts",
+    "sha256": "d7a41c9446482f8b29c2a7d1bac6444264c21aab75fc978fa6aaa390a02086d8"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/stream_snapshot_gate.ts",
+    "sha256": "6851316a82184f3a29a0381354162149a5fe2546f76b6e02ea26e0f032ec33e7"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/streaming_display.ts",
+    "sha256": "6f17098fc2c4cc84188380efdb41aa8b82c8ed8e5b42d9a853d6ea69037ab9bc"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/subagent_display.ts",
+    "sha256": "ec2cb882c810d1f1672a205df9d306a1deca5af708eed07495f2587180d7ba05"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/subagent_manager.ts",
+    "sha256": "977848d7a1290a0ffc70a6c303e6f19e62cb3bb6d898fd0e09d069757ef8bc09"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/subagent_models.ts",
+    "sha256": "79719be68f000b69cb7105afbed117abda324f7a33985c540f15d51aee22b5d0"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/subagent_report_tool.ts",
+    "sha256": "8fa2cb703dd7f99f2fd08a3dbb5b92272bc92ea43f4e0aac41088b23d3fc8b11"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/subagent_runner.ts",
+    "sha256": "4c1046f88ad21a7ef05dafabba2c3df5d7e78cc814fbac1de0f66d867c8ef6cb"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/subagent_tool_scope.ts",
+    "sha256": "24ab2414d289e0e4b5a0cd47a7fb4fe91957e0118ccc81b1a5b9d4497f442a35"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/subagent_tools.ts",
+    "sha256": "0426cabbd4100dfaa842a4c5f90d03d1d500aab5f43ff62e4e087069fe24b118"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/subagent_transcript.ts",
+    "sha256": "bd78888c13303a1e94c56b2ef1d22636122b0f64bf11310029527d9e869ee157"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/subagent_validator.ts",
+    "sha256": "cc20a602d5a3c5d79b9f6f57102ccbef7f2abb530655a83c1288d274af4b6084"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/suggestion.ts",
+    "sha256": "985f5d0b9aa651377ce2696b6e23811144118cf4286e69825536a0627914fdde"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/sync_snapshot.ts",
+    "sha256": "444195b73bc3275e78a572ebe43d55cf78b07b0dbe90bcc5b9a4530a69b57bde"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/sync_webdav.ts",
+    "sha256": "27c7e8848466c95dce9ea294c38b01a9ff55bfb4e49519f9fe22fde999214e44"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/task_model.ts",
+    "sha256": "f9e6ac2d0c5999d1a159a2d639e0f96dcae3476298b787dddf97083aaf2d3abe"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/task_model_reference.ts",
+    "sha256": "a80a08db0ceefeb941257eacdbdf626f4372151845f62ce5c2ba9f7032d3c9cd"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal/control.ts",
+    "sha256": "f9af3fcacc1ed7ed3696fd798ce608bcf5d1cd33336521f1c48b7ef2f407e595"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal/credential_codec.ts",
+    "sha256": "dde9a22eac9b0f2bec4c47d91254dc8202cdcadce86e7a1071248368fdb83102"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal/job_runtime.ts",
+    "sha256": "e7e4690d09b147aba261f293f5040105dd9b1fd281ed156644517cd3da7ef22c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal/models.ts",
+    "sha256": "92bf89fe6cc31fae98bf161a17c8f9d20fb375f21bc02daa2b789effb8e8f565"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal/ports.ts",
+    "sha256": "c278034b23e54b781bb3ab90ccdb6fdf1670e83de1db61901f53f2cdf89485ce"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal/profile_store.ts",
+    "sha256": "f895f2554fbb70198a2f8baa943745a142e513aae49de2ba6351d2f209ad3c1c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal/runtime.ts",
+    "sha256": "90a56bd90ee3b4a01041d4fea4be79bae94bb0708483b62ccba0abdc2ae7cf0e"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal/session_runtime.ts",
+    "sha256": "a296082a2783e41d3246f413a51e087a650475d93f2902485f44820d19d0b882"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal/stream.ts",
+    "sha256": "17bd349ff3b3e5fd2574e605a2df044acf1a525471cde8e6a5b38242f120f326"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal/target_resolver.ts",
+    "sha256": "6399528e20d4f53b67fe40256e7e25eeaddfd62822afa5d5c75b79eb56f3a345"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal/tools.ts",
+    "sha256": "6517ae6bcbe6a8cf5274be64e2e03611096602af5764c780bda708c4fbf79e6a"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal/utf8.ts",
+    "sha256": "c12132de530248e98230e22aee8ba6d697a81a189f1cd917b005a55c78189b2f"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/terminal_approval.ts",
+    "sha256": "be04717305de8ff65b4a87b90b411f2b112988350b29da5893a3818993a39ecf"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/time_reminder_transformer.ts",
+    "sha256": "c5aca98fe6b09eb91b5da969557a70fa6fcd16ef3d67af46b500909c09f32068"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/timeline_follow.ts",
+    "sha256": "3f37ead8ff11c85a4854bf2a0b6ce0fd57cba2fb46efb497cd6f47adf929b92d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/timeline_load.ts",
+    "sha256": "1a7f20dfee7635190780aac5e99509d5db596541037c29a75e2e720892e2057b"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/timeline_rows.ts",
+    "sha256": "b3c5d7f72901ba41d5b8c76b465ec77591cafda486e25bb7594c3dedb33e7a26"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/tool.ts",
+    "sha256": "f89ab3456dfef1497625aa985d8ce64b5cb1bd16712f7e99633a741fbbff4a8d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/tool_activity.ts",
+    "sha256": "a1460ba4fa8fd739c957d54569534c127bc160ba28f679f05fcee6b916f12a9e"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/tool_approval.ts",
+    "sha256": "b302a0b285da72c57fc9965f783af6a9bb56278645ecab05ffdc33c89ad783c8"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/tool_dispatcher.ts",
+    "sha256": "070ea16875ce74975e74f15d7154e0f3247a6367072748507f97ecd449a3d9ab"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/tool_exposure.ts",
+    "sha256": "b5209d684beeec50535cc7646f399f338c55d4f06dabc127590d84680e323ca5"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/tool_loop.ts",
+    "sha256": "8267a1e631183d9fb01649159d6f3f6f5df02c8edccb1707fc1f89e75d1b618b"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/tool_merge.ts",
+    "sha256": "2a498c7bec664aff147aaa2c19fecbe7b38f18e0146b7f8d3c7031cf2ddde583"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/tool_permission.ts",
+    "sha256": "e46269f3cbc5e3d1ec6b222ab55dff1a434e4ad8f84e100c487d63c2d5f74d8d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/tool_policy.ts",
+    "sha256": "a5a2c8cb3622da6a8507053595e01a060ad02964ef06665b6b14b62d9219828c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/tool_profile_filter.ts",
+    "sha256": "fb3620f355b751136772ceaf044b4c875281f384450d03d7d8cd4c132de00afe"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/tool_registry.ts",
+    "sha256": "e891067d9bce15809ca694d6a2590d2884112b65924f203b65763cba8b52d878"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/top_model_menu.ts",
+    "sha256": "d7fe26fc95996c87bbab30734a3e9bb19abfa50faabb9c0a42bb3baf1516a43c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/transformer_pipeline.ts",
+    "sha256": "37ef4dd0aa942b0b0330a597a430d8fb9fa67031480b89c22c69828cbe7a93e6"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/transformers.ts",
+    "sha256": "c31118020e0de0d2910189f4b7bba9e49745d950f1a54d090d0d7e8200c4248c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/usage.ts",
+    "sha256": "681ea3ed2f8702ae5d46edf7fdbf41d0ed70a8161e29ce11162b7c4f8fc1c249"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/user_input.ts",
+    "sha256": "07c4b0225fc539289852cc12ca6426b4ce2a930efcb1d99320b7b3bca6a0338f"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/vision_cache.ts",
+    "sha256": "23b943b977b13473b9d9df1a17983c0e2e14199a90c9b101d3ddb5d8dc534af1"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/vision_fallback.ts",
+    "sha256": "727beeda947ee23d0f21b4d40e5b0d2e5709808a2efc00d5367290028143ff2b"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/vision_health.ts",
+    "sha256": "13fc8d64ebd50742d97486ea2dbc5d30353ba22d0b11ded8479b7fb07252b622"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/webmount/goal.ts",
+    "sha256": "bf63dfe1aa022743516033deddee15c31549b680cd3d9ef4641c30fc135c39b8"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/webmount/har.ts",
+    "sha256": "fa070a5a1d23ff2304cb975984db0ac7576cdad0d64749cdb11f2ca9248babb7"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/webmount/models.ts",
+    "sha256": "d5d40925e689dd0bf73ce3aba397fef28585e9b5d8a6ac8fedd0dd6d3c559037"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/webmount/oauth.ts",
+    "sha256": "bc802a870f0d32ea027d584e0eb18441bfe3c5453b20620b168a8c891e8b736b"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/webmount/profiles.ts",
+    "sha256": "0fe71de9bcfb1dd7a825a0757771b9d24e17ec6548a3f387ef41e258f5ff9fea"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/webmount/url.ts",
+    "sha256": "30d7a6a6531ccf27a7fb08e1866b12c92f0f9f1f6ddf1a0c22336fb46bff4ee7"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/webmount_oauth.ts",
+    "sha256": "529439be5d5dd539ffd49f3923129044c2c903960fd83c40e70348f674f4feb1"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/webmount_request.ts",
+    "sha256": "3de0a3a0c7cec60aad48889af357211bab3c9e84695bfe305b329b0bf13e38dc"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/webmount_wait.ts",
+    "sha256": "f88a6f3f75b39a0b5d40d53c2fe08ddf4f5364ba682761e1ad65c2648f60e803"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/workspace.ts",
+    "sha256": "a60ed11a179f320665f4c34a617036cba024f8be279bed702125465c2ab706f2"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/workspace_artifacts.ts",
+    "sha256": "beb2ed4acf23a1530b16ee60676ba3f4f96b4d6a22467adb800b54285cff0889"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/xml_pull.ts",
+    "sha256": "9a0daf501142cfd6b25ef178183bcb1be4b6ff5e4b4d1e1e2cb77fe21d4fdf9d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/zip_archive.ts",
+    "sha256": "d4b7fe1b4b93a251f669765cf0fd3a0e62d6203c6a4b9c950a642da5f643a3a6"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/index.ts",
+    "sha256": "712dffc3a0a5d2b3b53af18eeca3fe1ae845edd970c004e9447afd6a79c3be7c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/amberagent_service.ts",
+    "sha256": "ff098881f175fb8b8e83301f6a30fd19c9a10f5f63dd33c49d1fced666b1d0e4"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/bing_service.ts",
+    "sha256": "b68f59c8b6b22538bcc1dfaaa4dd176731542fd51dd526659092986b69592fa5"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/bocha_service.ts",
+    "sha256": "40431930345af8aef66324b4e8cb494a6559cd5f559a69423211286f30337967"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/brave_service.ts",
+    "sha256": "8604508e594b47043b337cf8b98c617a5e069e97cd08cfac1d553eb885751618"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/duckduckgo_service.ts",
+    "sha256": "922abca850546927c54717462b669b1db8847bbbe7b944f14191f292ff89eb93"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/exa_service.ts",
+    "sha256": "51158d3790d51cc031f37eb859b9425f670b5e2e7cade9030f2af688729241b8"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/firecrawl_service.ts",
+    "sha256": "b448bae68ee01d2c97ae01c1479eb7723bfbd6d5d2bcf665dc1769a1835964ae"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/free_web_engines.ts",
+    "sha256": "77cd13afb00df454c0945ec59352f53f436a5c8d8c34637fc73bf43bf82eab1a"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/grok_service.ts",
+    "sha256": "6855274221f9c2721ed2de3fcd1a3e0f67c3020ff6e8835fc5cda07424e1c445"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/hackernews_service.ts",
+    "sha256": "3e1299b23e400d09f1878e82ebb1b355c5d122f43bbb799f2f630494843f12ce"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/html_dom.ts",
+    "sha256": "edbc51824cc5dfc6b09f117b31a8e38561440ed843be9d8bc2243a8288bfbd9d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/jina_service.ts",
+    "sha256": "21ba5faae57c3c92c85a0c3ac28125ed55b428713e536837b669846f303bb870"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/json_pick.ts",
+    "sha256": "502b19cfdb4d8b8079a7898bb2ec5c3baec4c847f1a0bdfd3d07299203e5df37"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/linkup_service.ts",
+    "sha256": "a00fdaa27a36301dba9edc5466dd6aebe1a230e9bb4326f52bdd16ec7c0eff4e"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/metaso_service.ts",
+    "sha256": "fac83dc08e245a0cdcdc568fc4997c4da77113cb24d046e146ae72e6bb6eec86"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/ollama_service.ts",
+    "sha256": "658d647eeab2fb3aec3bc1ac0a3ee8e370afaf36b0301606c1779e5e76e5e870"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/perplexity_service.ts",
+    "sha256": "ea70a5ceb3d8a634ffe0f8430e75535fdfa9603ce77db22143691ec834c5e28c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/search_aggregator.ts",
+    "sha256": "dd4807edae53cbdb7a1a7c11f327651416ada8854276364689614b8d5cbdc70c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/search_orchestrator.ts",
+    "sha256": "dd20460234dd242eec30c8d26fdd963ebcbb403cb1acb7d5e7e4a2862e14fbe1"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/search_prefs.ts",
+    "sha256": "a3675c0c8f2841a17ba6412ff462619d45dd2d086a2766a1084324dece476f4d"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/search_service.ts",
+    "sha256": "48cd65fef987439b831b8a947c747c1e70347cba5d7ab345641cbb6d276855cc"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/search_tools.ts",
+    "sha256": "e89223805f0c5c2469a4f78eee6b11ec6486ddef661056eaf330589ba412065e"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/searxng_service.ts",
+    "sha256": "372971b338b052719677414d745cc76f53af678570b0772eac35b943866ac90e"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/serpapi_service.ts",
+    "sha256": "532ffc1adbf51eed6f2807225faee35a6c7b62e6f0b6569abe71603df2359dbd"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/serper_service.ts",
+    "sha256": "842af6a9bb1ff66db7b07165a203827977e1c5d59e390b9cf5a165997779e4e0"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/service_registry.ts",
+    "sha256": "8ff77f6ff365b4f9a6d7a051db0a13f9498429c4ce9575d275f6fc668d9c26de"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/tavily_service.ts",
+    "sha256": "3815ae8289fe2ca2ca1a03f379011900c9be873a8b7eebb2e9f4fb0a59253fd9"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/url_codec.ts",
+    "sha256": "059485f8895dd9b7999cfe954973e23aa5e76e728464e5155f9671b44f6b3d07"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/wikipedia_service.ts",
+    "sha256": "1a15f0628e966fecd30cef343145d2dd8e1d5586094780f2e7c2f90223d13440"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/zhipu_service.ts",
+    "sha256": "f6923921efbd7af076517bca591f2180753b3381af921b90a42fd8df58e08e44"
+  },
+  {
+    "path": "harmony/chat/src/main/module.json5",
+    "sha256": "f28972b2df51a720414a835558ae8bbe42ef9f78804e5b2e0ff0b30b179f0834"
+  },
+  {
+    "path": "harmony/chat/src/test/council_tools.test.ts",
+    "sha256": "b5b84fe8f1e16772688bbef3b388a30eed635b1bc0a9b6e285bd6a2fb9ece153"
+  },
+  {
+    "path": "harmony/chat/src/test/memory_topic_store.test.cjs",
+    "sha256": "bdc89a99de498a09c9c380bbf434402f0f8cc70117e27e889f9a8ac8856191f9"
+  },
+  {
+    "path": "harmony/chat/src/test/oauth_provider_sync_entry.test.cjs",
+    "sha256": "c3726c1254891d5d194a0560844a1122384428dee75ec688adc93fc6a682164e"
+  },
+  {
+    "path": "harmony/chat/src/test/provider_auxiliary_auth_entry.test.cjs",
+    "sha256": "8d8faf0af28e40be27127f3a3f02d6802e44bf2a1e2077d3b0c6008384fcbc81"
+  },
+  {
+    "path": "harmony/chat/src/test/rdb_repository.test.cjs",
+    "sha256": "6bed581d5787ce7553cc4765a2fd07404568d0c12478305380329df2b8823314"
+  },
+  {
+    "path": "harmony/chat/src/test/review_phase2_chat.test.ts",
+    "sha256": "68a5d6522f3dfa0e71ccf304e4151bce48b6f1fb23c222b9e15887aa99afe74c"
+  },
+  {
+    "path": "harmony/chat/src/test/search_cancellation.test.ts",
+    "sha256": "0996c61f10a289b97f0d249c47821fd64c9db8c1ea17edfb04f089b4a98abc3d"
+  },
+  {
+    "path": "harmony/chat/src/test/skill_catalog_refresh_entry.test.cjs",
+    "sha256": "9f3242adb63d9b16cc155a1da96c71bebcd101e0c8f544e7db3645c0d162c9b4"
+  },
+  {
+    "path": "harmony/chat/src/test/subagent_runner.test.ts",
+    "sha256": "82b8dae444afa3aef19b0b8d286a86710442f13225db64a5ae5faeae1cd650e7"
+  },
+  {
+    "path": "harmony/chat/src/test/subagent_tools.test.ts",
+    "sha256": "d3578a909302f4f78a13f91f344086ad7c7872be5c4a2f7fbff6facbbb82b127"
+  },
+  {
+    "path": "harmony/chat/src/test/sync_webdav.test.ts",
+    "sha256": "98c80c582af6cd8118f7c51f1cc64a9548a04e44c3bc0974f5617c1a47364d03"
+  },
+  {
+    "path": "harmony/chat/src/test/task_model_consumers.test.cjs",
+    "sha256": "8f79f476ceecceff8dba79e68e6712cd7402dcaaa5620e5fe529be603d54ff3c"
+  },
+  {
+    "path": "harmony/code-linter.json5",
+    "sha256": "86b4a3fa1a166ca8de957675a01dc5df9c10c6c4310f84944eaed52a9aa0aae5"
+  },
+  {
+    "path": "harmony/deepread/build-profile.json5",
+    "sha256": "b84e39253e561bb174461551514969628aea7f9e18a79c14928742ccab5573f3"
+  },
+  {
+    "path": "harmony/deepread/hvigor/hvigor-config.json5",
+    "sha256": "56da7f3ee2d9aace28b5dd1b870338b83defc3d0a6ed8b5320c704ef161a5c4f"
+  },
+  {
+    "path": "harmony/deepread/oh-package.json5",
+    "sha256": "7c89c844bdece1504f5c3e4bb06ac6b1a9efb57e60b6f63c78201122892e28d2"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/agent_loop.ts",
+    "sha256": "c966e33349b9976c319b5af36f5effd31af25afe63d2d233d518f40e6f265adc"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/append_chunk.ts",
+    "sha256": "c496168e9d3f73a01322974f5e9ffe0295c968235e2e6a4b1e1ef43c834f6fca"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/budget_prompt.ts",
+    "sha256": "f16c4023ebc555696e00e2276be0bfd4aa4cd8a4affcf43bbd8d9d2fa99d58ae"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/ids.ts",
+    "sha256": "5d9c380832fa38ab42a05631bc51824c3fe030b66f25bbe36cdef13f30363c21"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/json.ts",
+    "sha256": "b6c48542986c5af0c919644cf7980db3405ca919dcc19de7c232f73cba8223c2"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/legacy_message.ts",
+    "sha256": "898c2b7025ec71bbbe2a32f1ef3b196830dddc3347ff11ec49a7d5246d9d2568"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/message.ts",
+    "sha256": "8cb8a894263e656bdbadff0372d30c7ed89de277a78f48a6bb3e1ac565827ca4"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/playbook.ts",
+    "sha256": "3f1eb6e72550de8ff42414fb963ad3a08d0b864d958bd816b5f6eb46e2aa84e4"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/retry_classifier.ts",
+    "sha256": "ff9d210be8aeae4854fb960bf0c95fb51b08c233e1c337830935562e65a65f97"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/run_manager.ts",
+    "sha256": "83f15db31dd6fb057d7a2e9a24c613400c92d4d677a861759c424ed49a8ae6db"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/scheduler.ts",
+    "sha256": "b8438354fbf0aff51a5794e3e8f9773ce67eb306dc92032942a00abec8f9826a"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/section_writer_tools.ts",
+    "sha256": "f694f8fc57c1d77be6a79b5569535c244fe73252c080fb7acfb2d53e0eb2cdff"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/supervisor_loop.ts",
+    "sha256": "d7f93e2e3127e433086cd4fb215f2de00d2416b7f61e2f6423093152916c1507"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/tool_execution.ts",
+    "sha256": "459d55e9cc6f3f20199d5f374452a6470b53e3238c13ce46c085a421e84a6f73"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/try_fallback.ts",
+    "sha256": "2c76df28dad603eb43b74e89853fa7eeea95a7d371866405b9c00e99ecabead2"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/usage.ts",
+    "sha256": "a76cf1166237bd4d98bdc712ba88e7c6331eec3b578c3f006dde3d9cdd576bc3"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/council/approval_wait.ts",
+    "sha256": "060d412cd6356c3a41b8acb52bd12a8b4021a00047103b2323b1876fc03dcd5c"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/council/archive.ts",
+    "sha256": "82269bbc2adab68c30abf395a3ab09cdd054ab2fe6576f02ea07945cb48ceef8"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/council/manager.ts",
+    "sha256": "ff4cb9b3b91d63019d49c0e4b90cb84527c3273f7c07b9acfb87628756fc9a0d"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/council/models.ts",
+    "sha256": "29315e9632586b1a9731fbda57d48a7be66257e7af522ecaa9d44bd3b6ed29f8"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/council/prompts.ts",
+    "sha256": "8f458b3e610e321c9dc7f36adda04b9c7b732a8ae6f94d4ee903578d96b69756"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/council/runner.ts",
+    "sha256": "5a9664843b8821ab7d58d194dc1d0741b1a2858c54a3c5203b4eae0d89e005d1"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/council/semaphore.ts",
+    "sha256": "1bd033f491ba4d056c489cd9412b9c57ef4de3e25a41c5e7a248f767bf497a46"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/council/validator.ts",
+    "sha256": "c66a5b49f7ca7a1adf3f33245af0e178a8af48e4bf7187f626bccd26489374f3"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/domain/enums.ts",
+    "sha256": "c24ed3589ecc4d1984764e9bac77d454c524b1e5e841f2746ae7745eff902269"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/domain/export.ts",
+    "sha256": "2e4a030fd1626b13f32eadf62981b440732f969c02968824eaae5db74b9df6de"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/domain/helpers.ts",
+    "sha256": "2bc5e32864d554a3a0afba600156de6b8478730a92c56c4eb0fe244c8783f2f6"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/domain/index.ts",
+    "sha256": "cc99c1071f99e8443b7b3faf26c59ba3521469ded07513d1c0a0af6fa4019181"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/domain/model_config.ts",
+    "sha256": "2194f418484d5291cea762dbad669cd131a7723cc9b99bf74f7e05c02a3f6684"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/domain/models.ts",
+    "sha256": "5f0debac6c5039393f4c79234511e7e3264ad569e695b7db37cb27136e593bf5"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/domain/topic_id.ts",
+    "sha256": "114ce8de6626f1fa89dd6cc858d4dfd9045c51adc098760ad69533874fc3b88e"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/index.ts",
+    "sha256": "36fb13c7a426f31ed46814c5f2a9e2daf47883f4b3d85b5a95519d72e8044c97"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/candidate_provenance.ts",
+    "sha256": "c2f25c4741b8aa9f3c358d0ecb657ff1b6a2c95e872a19ce93d1c0dbf91d0bd1"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/context_builder.ts",
+    "sha256": "34e9ef069a29281110a221f39dd1a55a1ce26980f0af9b625033a1072399c630"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/continuity_audit.ts",
+    "sha256": "556ff43d127735c23e595210dddae237e191e602b505a7aaee3b1570b241b6a5"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/creation.ts",
+    "sha256": "35dcd530785b5948dd0827dbec5b05f8acfa20ae18e866f46853b7549bb45bf5"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/discussion_archive.ts",
+    "sha256": "1bf2f31b1d6135d79731e44d2bbdebecda043e86618743ca5b507c54d9fa8a67"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/error.ts",
+    "sha256": "fc78d32c905fdcecb28ae5b0a4f04806eb553dce0b641581de78dcd800eabe86"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/ghostwrite.ts",
+    "sha256": "67f2f0ef1837150b1e9f4ea8d436e43ee5b122719b5c1289312b782a786234ef"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/ghostwrite_runner.ts",
+    "sha256": "4a7624131457f62b1b30c19325c62d93ee4250f33e78cbd4dd950f6ffb1f8e8e"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/ghostwrite_start_preview.ts",
+    "sha256": "cb558a58a0f29f963cd31bee52f94461d96ed3f587905c4bde0167c25dde2c4a"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/job_report.ts",
+    "sha256": "1de66fed086097623f590b1cabb517b8989f63660bce33f36ec4d85fac7f9b3d"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/material_adoption.ts",
+    "sha256": "6f98421808c74c67d5a34d62b8dfff21380981f8d0044868f0cfd94d7b936566"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/model_running.ts",
+    "sha256": "fa901a5fd267fb475ffc51bb6b3198ee35cb56d731c67ff3fe29cc86a4822bd5"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/models.ts",
+    "sha256": "fce5ef2c740f5dec7360ca396a42eff586d7c959fdb6a5123c0174d4d346f952"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/mutations.ts",
+    "sha256": "f8eb2f60bc1ae14c4532736e7e845793d243bbb68f59e69b7b4fb7664b80a5fe"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/native_backup.ts",
+    "sha256": "76a1b3158066bccd36b4da0d712ad359be3ae31462d4b75f2b74d070f4446655"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/plot_projection.ts",
+    "sha256": "a064502709d5ec2f687bb74aeb3b6f2a19a7fbe5c236870b555053f691edb2cd"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/polish.ts",
+    "sha256": "5c17e46dd3536f01cf1d17b23ec4ec9686bd32cb738f399c05a3bd570ccf2b52"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/polish_runner.ts",
+    "sha256": "1fc4e3d3de56f1203ed0f9eaac245e97a7e392ceac61d04822a57595c327112c"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/prompt_catalog.ts",
+    "sha256": "2582a911967cb0b53b2b4c962bb886d109e42c192d1fc6c67a3c6c8d718cacaa"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/quick_start_proposals.ts",
+    "sha256": "6176434761d6949a6f4109301cbad862bf9ba7c9ee112ed839e1d14261135fe5"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/repository.ts",
+    "sha256": "fa8223f3547ec37b8e6adb3729e70bcb44d522b83c97014d263ab5e95d7e8a43"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/setting_proposal_parser.ts",
+    "sha256": "b0c8827c5934b4e28912b290aab8924f98002bc45fae2c1dc4217d09fc51863d"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/suggestion_engine.ts",
+    "sha256": "b67f113a24ecf662d45a93185fc7a3c1222e1974c8d6cad8ffafdf1147046325"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/transcript.ts",
+    "sha256": "5f5b1a54184b520b516d155e73988bca4c51ef123decbbd391af7ad4daf4ba37"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/workspace_book_export.ts",
+    "sha256": "9323a9fca96ffc78cccc8027061ecf37f8b06c73a13f9b23fcd0fbcf2c1fa07e"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/workspace_contract.ts",
+    "sha256": "eafc980fb18333ddc1819e40141bf5b1b47448b4549a9c2359d27d2a2ea82a14"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/workspace_exchange.ts",
+    "sha256": "19a6ba565f30e519ca0e6a72ecd0f464cdb1db317b20a3aae8708627c7da85f8"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/workspace_history.ts",
+    "sha256": "9eaf08151f7a8ba1e126d5801d4f0b3922895c65a42ccec4252ee9331f5280fe"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/workspace_interop.ts",
+    "sha256": "cc658df476ce032662eed1fb9f44449b9d5225099a9656803c70a7e925b76f84"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/workspace_storage.ts",
+    "sha256": "079623800b185e92ee53f582cb8322a8d79b4bf877b2a6df5d74242036fa0ff4"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/ai_client.ts",
+    "sha256": "be880d49cdc06a261694e755033c87fcb1627a8c345acd2f61d9e44d6f114088"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/arkts_shims.ts",
+    "sha256": "a64ef47201f5abe3b4b2aa74c8ccfdae24a493e2cb046a1caec1c4be06b08368"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/database.ts",
+    "sha256": "2ca0e0a0f2e7b6935152440a9326d38d2e54270163231a05c9ced264d717789e"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/deep_read_progress.ts",
+    "sha256": "897f21420c3ffff92837e1f9c6f44a52b6e9b07a9b9fe01f0bd01e34ae5a074b"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/files.ts",
+    "sha256": "d9f0cb9cd79190f7c94b02e759f1b7b34330fc7250098a94f89a2f7a91deb75a"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/http.ts",
+    "sha256": "9673f9939c976d32e3735269bde59727e6e838148cada16a6d4dc558d572b532"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/http_response_status.ts",
+    "sha256": "6dd54014ec8ae855968cb46386274dac10980f30a3046910c3a11b0ba7bb31cb"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/json_schema_validator.ts",
+    "sha256": "0ee6485e3019e55090898d44584db94eea0422a63b1bc42335ec7c3f8cecaf58"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/notifier.ts",
+    "sha256": "1a62095b9c19b5bf7a454908b98a147e1824f29b2fb2d0687b33c49752e120b7"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/observable.ts",
+    "sha256": "4a7f8b3b0e46a8d01378d6c9bc3c58f28fea2c4a17193ec1603fbfbaa7f91bd7"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/openai_stream.ts",
+    "sha256": "73eecd42f6b92cdb73e6104886ef84f74bd46ba72ee2cf11afab80bcb390afb8"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/repository.ts",
+    "sha256": "777f5b89671e132ffe0591db84283f536467f9f150d3e519dc9b4f8c5a43dd96"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/runtime_api.ts",
+    "sha256": "901c44d8f02b7a2ae723a4549ada43d2f7ac73b2ee0c3e04c1e7df951e1d47a4"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/search.ts",
+    "sha256": "253f3ce8734189955ed0bc2ced9c42df47e84a9f364ae5b797082e5c7a1b7ae6"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/sse_assembler.ts",
+    "sha256": "0f273805b3973ac5349c948fbad95f6989e0dd628a460c4ae45838892b24e931"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/platform/storage.ts",
+    "sha256": "b249a822a1f0098928b12a805c4f93b0400e867a1c557682e021743c1939e115"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/research/article_plan.ts",
+    "sha256": "837e87989b195b9044159f656d80bde9b3fedd18b5893f7cf2b7bb1bec9225ef"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/research/evidence_pack.ts",
+    "sha256": "798bc87a900933151624f44b766d3c403edb553950feb23781fb3b9524324fcd"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/research/image_scorer.ts",
+    "sha256": "8b2b8b55925131a046e0616a393e1dd76dd3ba084def96488b6106ca0080df0a"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/research/page_image_candidates.ts",
+    "sha256": "a0569fdb410d2c51f6015143a90e011477f19d9228add3fe0d639a89ff5a96e6"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/research/reader_extractor.ts",
+    "sha256": "4222c976b470cb92ad79d96b196c1dc6a2ae7d458bb3256f9b68d6c87ad486d1"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/research/search_merger.ts",
+    "sha256": "89706184580944b261a42dadcac13632a16b6961c4e56f825912ed344712e2ea"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/research/search_provider.ts",
+    "sha256": "c3fa731633cb835a75fd02d2131cc38a13e7090f72690913198d1ff5cf312023"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/research/source_prefetcher.ts",
+    "sha256": "d43d1b02df419a68273e0701b91cb88e5403300d47487cadec7b2136632da2e1"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/research/url_filter.ts",
+    "sha256": "9e84cfd4310a4e01319f993c8695bb948950f3d158e0c160c52df9a3562c4811"
+  },
+  {
+    "path": "harmony/deepread/src/main/module.json5",
+    "sha256": "9aef74bf6fbd4f85168b271a8f6ca81f615ac7d534a1d67efb2b53b2ef7be19d"
+  },
+  {
+    "path": "harmony/deepread/src/test/council_round_boundary.test.ts",
+    "sha256": "8334c6d78dd7e18222718194e176806cbd963fcdc3375cd098a4c21efeb1045f"
+  },
+  {
+    "path": "harmony/deepread/src/test/novel_audit_regressions.test.ts",
+    "sha256": "6b63f41fa8112e7abc9b8ba27190f9c53eed1915cf575f33d15234ea0ed65bf5"
+  },
+  {
+    "path": "harmony/deepread/src/test/novel_discussion_archive.test.ts",
+    "sha256": "3dc2f1aed3ea6f63b8bac6d19ecf3677198acff1f7753e622d16fe4cf305672d"
+  },
+  {
+    "path": "harmony/deepread/src/test/url_filter.test.ts",
+    "sha256": "6e0a5178b7014c28a2623e12354ac99cdf31bff0ce07267c176b68314974975a"
+  },
+  {
+    "path": "harmony/deepread/src/test/writer_tool_contract.test.ts",
+    "sha256": "fc4f49ca53e3f78ad189f2b25ebacafe99e75d7d82c58cebebe780b5db509fe7"
+  },
+  {
+    "path": "harmony/entry/build-profile.json5",
+    "sha256": "10d79992b23c6ce5e5f225978459ff1bc0591f5f5351abd761c36306d5fb8e7d"
+  },
+  {
+    "path": "harmony/entry/oh-package.json5",
+    "sha256": "8a79412493f622500988565801889ecea8817f8d9925582bd577af3faf484381"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/CMakeLists.txt",
+    "sha256": "886a1c9a5902a28069cec690b86a74ae149ae899840b71279b24ac643aabae78"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/google_loopback_core.cpp",
+    "sha256": "888dfac957ec627722f8b6bfa5b3d00e9cf7536e58f2027fcd3de4d8a68411f1"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/google_loopback_core.h",
+    "sha256": "dbf8d334d60957c8cfec0ed028add015f14b2083faebcab07409b667e1bd2b40"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/google_loopback_napi.cpp",
+    "sha256": "3eadd9707cad6a762cbaa33ac48af5df9cc140850070c04bf1c993dc3f7c1a9c"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/google_loopback_napi.h",
+    "sha256": "404a48142f0d47477e67740238b2250635976b7055548731e1aec5018a2f7202"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/mosh_core.cpp",
+    "sha256": "f9214c6bada7b8ea948daba4df25a448f59e247b3360506beac517ebe3d8e886"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/mosh_core.h",
+    "sha256": "ea72070253cfd823168174bfd4ff6d6081bf0214864f8417255a92d42fb2bf24"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/mosh_napi.cpp",
+    "sha256": "e3bead659c598e7f678f6cbc8d7c4fb5e1b583c0ddeb29ab42d2cb522c308e08"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/mosh_napi.h",
+    "sha256": "13dac0086bfd2eb55b158351ce78ba40bf9ded078fec45088a2a8fcfe230f1b4"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/napi_init.cpp",
+    "sha256": "eea103b5e860cf4112defe5476459b36c0bf8759434694774c7fd713cae8859c"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/plugin_js_core.cpp",
+    "sha256": "9a84b8f565496da0de4393f04cd0e25a036c30e844be776dae74aefd0643f9ad"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/plugin_js_core.h",
+    "sha256": "5271db51f58afea088498537dd1a36ae43f7aa8bcdcb370c34a5692e6c68c51e"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/plugin_js_napi.cpp",
+    "sha256": "527cfeecc205878b70e0e6e768dd8a07751c892b92726c8593713539a9e5626c"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/plugin_js_napi.h",
+    "sha256": "336f9b163d54ec8bd3b2956c87d910c11d6612af951f4f381a0d9fe7269d068c"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/python_core.cpp",
+    "sha256": "0e5061cedd58e039746a4413420769220da9b39b6a76a52fe1f5e0c847cff8a9"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/python_core.h",
+    "sha256": "af7145434e12b7ce376a71be2c279d1ce45755c26404dd73e6e871be7f88fdc0"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/python_napi.cpp",
+    "sha256": "a2a283e3dcdf685f9c41fa19f2d369cf43f194131b918a83498a33610580f632"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/python_napi.h",
+    "sha256": "2b1b21470fde0a5cd953ba8f5329b05d20ff5e98a0440801724b888ad37a35b7"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/ssh_core.cpp",
+    "sha256": "8e0f14786857d1f2b6c3167bfdfcb217faaa5b2c71d05a91126b142f84e6f30a"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/ssh_core.h",
+    "sha256": "6c602384dbec53c3ef63c0bf38af6ca871acecca90675dcca66fb38963cc9b2f"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/ssh_napi.cpp",
+    "sha256": "0787603415c0920768aef5576fc42c304ab6090c5c3ebc6da7514180a3e85146"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/ssh_napi.h",
+    "sha256": "3104ce709acb6fefcbe9054f39fc58266fb41653bfd4261f3265fda46db2d37e"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/stream_frame_rate.cpp",
+    "sha256": "8b71d60e79687786271eabe4fe9e58eb5821966b6c5c595bb14197c83222f328"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/stream_frame_rate.h",
+    "sha256": "91d040a75557b11c8c8d9e61bbbd8aaf4d56b0884b6467912556fa4997133116"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/types/libamber_native/index.d.ts",
+    "sha256": "a5db95b92cfe06a084e196933d097339fccbdfa1a0bd46612e90aab115292f4f"
+  },
+  {
+    "path": "harmony/entry/src/main/cpp/types/libamber_native/oh-package.json5",
+    "sha256": "40dcd81dab2723b0573fb72b8bc8ff837111d9146e2a7b7245e18103802293ee"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/AgentMessageActionsSheet.ets",
+    "sha256": "86bd9aa2ad4c7ccda494ef94b79b6984b44c7ce682078ad2476db4e83af49968"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/AgentMessageRow.ets",
+    "sha256": "40cdf42e67368158891dbf5b81313a45f26c68437e87fa8ae242040bbd43d74d"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/AgentToolCapsule.ets",
+    "sha256": "534400515dabd3e3402467eaad51adee5e6b04de80b08294dd87be307467f249"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ArticleRenderer.ets",
+    "sha256": "da549564d54120b7a4f2e667be03a244991e0bbfa61a281173ba847afe5ebde3"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatCouncilRunSheet.ets",
+    "sha256": "6533797d5bc42c7966d085db43074db8e425391e4be0fb7abd1d57b7c373bef1"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatDrawer.ets",
+    "sha256": "2c0e7b9ac86fa93da24830545ee5128d5b7ad7469b8382803e47e234f33df241"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatExportSheet.ets",
+    "sha256": "e5c7355d3c0a0d2757f1ab30e36e9d1dfbaba359a594c2cab6f0d2bc152d2aab"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatInput.ets",
+    "sha256": "2ddd86e7d36c4c9621ea05a0dfef2eaad9eb69b9aa1c80dfc358c15371d7f643"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatInputUsage.ets",
+    "sha256": "39e5a1e4434735ca2d8d7eb6ba60713734e062fde501b379017e00957025d591"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatListGrouped.ets",
+    "sha256": "7c75a6daa63585900ec5625654db98bc187e48937f4f81f8a54ed80d22e945f9"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatListIndicators.ets",
+    "sha256": "91465e83a6542ba1455a22375ad77dc303546b82ba77e7c88845558a45e59289"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatListSnackbar.ets",
+    "sha256": "9e6ff2e8b8d2f1b67bb06efbf004ee15da616c6771b13bf49db5df5c38dcb6b2"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageActionFooter.ets",
+    "sha256": "25a9c6960d9e1232dec10d37c2fc7b986614f8cfc145e7477936f170c09428f7"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageActions.ets",
+    "sha256": "fc9212be8a18710992de06a2bd3515da2618e6d17f49740013fcddd6a6c2af77"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageActionsSheet.ets",
+    "sha256": "325ce038a8ba69860244d509f9100a9151aabba2f26c87c894aa1fc8d816c9b4"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageAskUserStep.ets",
+    "sha256": "8edd52231ba10f9f4862ba9c4a167c560be824ceb3ff4d43838f2922bee746bf"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageAvatar.ets",
+    "sha256": "ef974b91510a06ab81407be2ae5b78bebffe8767919989cbfb255eaa79fe3162"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageBranch.ets",
+    "sha256": "0c311fd7e4d31b10afc891faa6a3ba8f3059b4cca86bbe638aca5dbc66ae1fd8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageCommon.ets",
+    "sha256": "09a30acfa3f91d07b352d934cdece368c038561a8d23ffa4e28e44c82dc3c970"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageCopySheet.ets",
+    "sha256": "a32758afdb6ac43529a95e120c8a24f30e99814d5065f6229f79b8774f77593d"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageCouncilStep.ets",
+    "sha256": "dd6f3ec2ca7b7f00145d24a278ee8ad79ebbcd2a614e9daee5d2e6740a064032"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageReasoning.ets",
+    "sha256": "9a85aa4c82743f2f2e3e2ca108943ede1a9cbd31bbb37b8a926ecdef51f7a43c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageSubAgentStep.ets",
+    "sha256": "90340bb348db800d6afbba81ffc4c4c5d1a69672855a50bbc0202150a491e4ad"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageToolPreviewSheet.ets",
+    "sha256": "0709fbc91315d5649072d4f0c8800452b914cfcd3e509fc459f7a99f7c9bccef"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatMessageTools.ets",
+    "sha256": "66769bd52f1886ccdb2ee92d8b52a76d89c2812e64158ecde4bd82fa3dc32306"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatPendingQueueSheet.ets",
+    "sha256": "a55c9856b0b64473171c6caa711698aa0ab22ee067db79a5e9cf03448163dc1f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatRecapPanel.ets",
+    "sha256": "7efc459bfa0756c122c37788494bfb0bd75b4e59448c70ffe6185fc16f2fccba"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatUserBubble.ets",
+    "sha256": "5a4195ec1d58038765800a7dcda9a5d89eb03123f2ef639abb45f78a8ccd829f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ChatWorkspacePanel.ets",
+    "sha256": "bd4bf99a34d465649e5af80a63acf67f093e25fa2c2c3ec6c5127db775c81443"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ContentAttachmentChip.ets",
+    "sha256": "6e2774d64dab046e9eb0dad24e5884e24ace8b5ddd08ecda7fd4d86bd4333573"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ContextRing.ets",
+    "sha256": "5e6f62775d5297f5332139d0a2494dce202c9f11917143f7cc871ca162fd5b15"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/CouncilSeatTools.ets",
+    "sha256": "8e90dfb97acb3c014fbcfefde506050d8fe55f1ed05fd853c3cf458fb3fb7199"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/CouncilToolModePicker.ets",
+    "sha256": "4f926a9a94f5a2b0a69c0367ede168b289d58de1a1f92d1aad1d3cf867da0382"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/DeepReadConfirmationDialog.ets",
+    "sha256": "665ed5cc5a50c1d31eb50fca9ac4102699918a9eeb58af71915c624286a53e78"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/DeepReadDiagram.ets",
+    "sha256": "ab13ecc3df8b4452d9666feb27d70340874d3f9c92979c0b1b16c461716028a0"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/DeepReadExportPanel.ets",
+    "sha256": "5950ffde178b860055c37a0ff29db683940b45470328fcb079472c772c24988b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/DeepReadNativeArticleBody.ets",
+    "sha256": "8ca89582ef633de82001f9a068ce69859b59617c55c7e94264af1c1d66c4469e"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/GeneratedImageCarousel.ets",
+    "sha256": "a29e1b7710cf487a10035dcb56629265ef9c7ad5ac855c9a9de384844215f7e9"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/GenerativeWidgetCard.ets",
+    "sha256": "b7b5154c0f0b362061faa702d6aaea40fb3bacd8e72a667c6c778a13d63dc490"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/GoogleSearchSuggestions.ets",
+    "sha256": "8677faa02e4016ca117fa59010e6a34196eba7975654fd339d59579f206be519"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/InteractiveMessageTimeline.ets",
+    "sha256": "2bf9e7f8b5d3141dcdecd5852da56c95334756f242cd5464eaf1b50c538c7bf1"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/JevApprovalFacts.ets",
+    "sha256": "0b8d30e9edb9162a3515e8d3407c1aaaa9cc38f02ffa33046c3d3196984e6a13"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/MarkdownBlockView.ets",
+    "sha256": "01ce78403d9103df6face68bb5b935682b0103b041212916dd85ec70dcc227c3"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/MarkdownRichText.ets",
+    "sha256": "d95f1cca7fdaa0fc7d292be9b0e7d223ec446bbc56d7f5eef35e12ccfddcee11"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/MarkdownText.ets",
+    "sha256": "ad333a1fdb47abc8e711fe0a35635fd071946b445c5a73f629cf1b83881d4424"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/MathRichBlock.ets",
+    "sha256": "99535f6a61ed9e905f9d94374a18d5a22e34ff07b1ad350a0b493ee1db003e13"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/McpPaperRows.ets",
+    "sha256": "e92eec356d9c1bed70be72ed3d22e8a7b95c764bc221de4b57d006f0507cbcfb"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/MermaidBlock.ets",
+    "sha256": "5a9310095d235eecec278dad162996e271c967963663baadd10e8e630cd80614"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/MiniAppChatCard.ets",
+    "sha256": "e8e9b9e7c08d6f621124d160bd5911ee23eaad2e186bfbe09654c4549b329c38"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ModelList.ets",
+    "sha256": "675f84cc367616c2d7a862cf49f20dd91188afead3071087d5f49b8555e60e77"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NativeMarkdownInline.ts",
+    "sha256": "6cb36590cfc1d094c8be364d570fdabca5c060ffa357e2f37cc18211c4370174"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NativeMarkdownText.ets",
+    "sha256": "8c1873539891e7154dd7dfdb581a42019fb4b272d0b44229e08dfdb1aacf8241"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NativeTimelineFollow.ets",
+    "sha256": "8f963265d2caa1e4b79e933d92b7e865e9010bc83bbde672acbd604328f6ce64"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelApprovalShell.ets",
+    "sha256": "37ad1be5475a36418e69728a2570f1ee70492022ce19c92edb03d0a1204ca931"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelAuditReportView.ets",
+    "sha256": "f28b07a1850ecff5c72cd1bbea6ee2fb71eea7ac0ddc202a412a30d4cce7f386"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelBatchPolishSheet.ets",
+    "sha256": "61ea8c1c4e6c330fb353afd2dabea85d10dcfc7161303ec8aec61cc0902f6073"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelBranchSheet.ets",
+    "sha256": "654c97190b83ff27cbdf74a076af2cd0833c6dfc7fa79f5eb0cc1464cda4d485"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelChapterPlanProposalCard.ets",
+    "sha256": "24af126684b72df53713dbfa570a089c9027ec6a3d6ca63d7bd141803d072d6a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelChapterVerdictCard.ets",
+    "sha256": "7dee7465cbcc1a2380fad02a20ecdaa48381f6d45973fd91543d5b0032f950a1"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelChapterVersionPreview.ets",
+    "sha256": "9496fa8c36d9735343505deff87f0dc269f5608b3e294040fb6f844534536086"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelDiscussionArchiveSheet.ets",
+    "sha256": "7cc72cdd31e41193722f10df9ed8665088fed5ec3f702ca0c9ace1ee9e21ed08"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelGhostwriteCard.ets",
+    "sha256": "80ca8ec39a52d3ab6df4eb8b19a54bf26c63f0ad1623be30ecf86c029d630809"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelGhostwriteReportCard.ets",
+    "sha256": "15128347091a9260b4ff290d77b03f94e127f38ed94525da8c104f579cd46791"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelGhostwriteStartSheet.ets",
+    "sha256": "ced3b1d75e21dbab6b8e0a0e3eb42179d5a8863a0e5df0c3fed1320d46e2bcb1"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelMaterialAdoptionSheet.ets",
+    "sha256": "db7a7f436e10408e3006fdf50aac96f16aecf78b8c4b6dd2ef051b057f3e2f01"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelPolishCreateSheet.ets",
+    "sha256": "1a1db22f5b2e1b6bef1c868e7a33f4af30a5d1bcdd3bc540e21002cdfbcbc477"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelPolishJobCard.ets",
+    "sha256": "9dc199028d3ca1792345ef787b207729cc1ae7c9b83587b609173fdf9c30dc7f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelSettingProposalCard.ets",
+    "sha256": "d8c4cb5c7a6040971f2fd06adcfd867f1361f57a3ab34083c3d62ce3053160cf"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/NovelSettingsPane.ets",
+    "sha256": "f3addbacb72812930a557a5e8192d6cee38d4c8b8b179d91c878efe410c9b43f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/PageTemplate.ets",
+    "sha256": "fe8a25aa7e6337ef7db5b99c2e6808589bfa51fbf3986333261e331c4e8a4f7b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/PluginApprovalSummary.ets",
+    "sha256": "ad53eaa48f390a571a7441de95fbf4c9d1e95ebb75aecdc4dfa02dc9721122c6"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/PluginJSONEditor.ets",
+    "sha256": "9022037888742577db4d3bdfeaabcb9b54b5a9ef165cffb18df029cf47d25201"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/PluginPageProjection.ets",
+    "sha256": "f7dc3d297a7bfab8103944c38c867121d738f4af507795c2e7995e7501fac05e"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ProviderCard.ets",
+    "sha256": "c229c17a4dec9be7820532ba0d29addf191fd6afaa468f7faf66317da1b5d5d8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ProviderConnectionTester.ets",
+    "sha256": "bb978bb6ad7813506738f1374ac654d988ee134557ecdd5f017633a4a1f88cb6"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ProviderTemplatePickerSheet.ets",
+    "sha256": "56002ffeb21d8563bf0de80b67e9c62c1b2f2275c62dd2a8214a21663af90a91"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ReasoningPicker.ets",
+    "sha256": "355bfcbe811d1f437629ecc974ca69dac217fb12d7ace887dcfae8dea45bf111"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/RecipeApprovalSummary.ets",
+    "sha256": "755fc265330bce58f6681c7c7ababda1e4cddbd9c250484d9bc1f557cb92aa6c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/SSHApprovalSummary.ets",
+    "sha256": "eccb7c7fd7d7d93ac0797a32e0356f0c89a7e321e7aae065ba86c285017625d1"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/SSHPageErrors.ets",
+    "sha256": "67fde08b5309b1da683b561a938063ea0d2086394ba07f205bd0e91931aef3e6"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/SSHUIColors.ets",
+    "sha256": "0fec812bb0cd3d7addf5583fad8c6fd3101e7863a1ab5031785cd80dbd642f8f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/SlashCommandPanel.ets",
+    "sha256": "e38b102a08926eb1e34d96fe79fcf91be1aa04ec640dba8261d0fc5875e45a66"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/StageProgressCard.ets",
+    "sha256": "92e5d7aaa12f853923eb743ffb70860d167ad0e2123e0598c8bb1d65a531a5c7"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/StreamingFrameRate.ets",
+    "sha256": "0f4ac16a83a65a26112510ad931d3f23bc35debe54d0f4eb23fdc68d98500ced"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/SubAgentActivityStrip.ets",
+    "sha256": "55f9272afe72eecb176f6b83f0f67be126511735e46f591859cd23a6646a8c69"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/SubAgentAvatar.ets",
+    "sha256": "84217ba4a3522eaf030d7e0c168b6a0759a9abf7a185d763aa3cdca91256df60"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/SubAgentResultCard.ets",
+    "sha256": "9519e51f32600a77f2ab9591330d885e05bf06bcef94a2056695db0ec4ad4297"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/SubAgentRunSheet.ets",
+    "sha256": "db46db5f02161a443648cae886f739c4e3e50aa87ca1fd676c68b3ee8af3b549"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/TerminalView.ets",
+    "sha256": "d6bd7d6b8834b02234142ebdddfd44241420ddc43f40949751ffec11ef02f9e4"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ToolResultPreview.ets",
+    "sha256": "9dcf829fe5cf95f478a22dfcaf51ab903645253245c565dfaf7746e16711d47f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/TopModelMenu.ets",
+    "sha256": "07010d73f84111f7f3d3fcb9eea2f15a34a5bb88faf3525044c3d046f1303d2e"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/UIAvatar.ets",
+    "sha256": "1a77363b06bdca5733f46f1c9ca7ee695aab3af64466806c8b9798a432fe5eb9"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/WidgetMessageContent.ets",
+    "sha256": "3a863cd0db3545db21b59022a76591aa49882a2d0e03178aca48324af8aad8ac"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/WorkspaceFilePreview.ets",
+    "sha256": "2d0868999ee8ed6f5c8a003aef00a29d0bf185561766e0a44f06d00aee7a4565"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/WorkspaceFileSheet.ets",
+    "sha256": "02d4dc1a504e7d2a72b89f3f36d584b489075bf50c975e455f0eb696f9e15ba3"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/WorkspaceFileVM.ets",
+    "sha256": "9714ccebdfdaebbe54911bb2f7e75362b89155429e6ea9dae3d5d03880338a7b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/AmberPrimitives.ets",
+    "sha256": "b0c44b2085f2fecd9f268338fadc36ba5d76f0e7e23140f024d7c2553edaa62d"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/AmberTextArea.ets",
+    "sha256": "3e59e78b6fef5588d3d94e7a29aed795d7aa077e89e8d9f753af0f1f94ad235b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/AmberWordmark.ets",
+    "sha256": "aaa1d67c98a4f4bca4d2f3b225943e224d4bf93869148e66ce89e9c67b3e80c9"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/AssistantPicker.ets",
+    "sha256": "72c374b5166e40b4a0f0ad96f78d224fe848eae6537eade642ba97adbeec8a4f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/BackupReminderCard.ets",
+    "sha256": "1eba95e9ca17e82698e44210313817741db80b6390f7a19cb2a03668468b4ab3"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/CardGroup.ets",
+    "sha256": "72a12670b9ba3210004a1fdccd4a1c46005907aa736a1afbd5eb4242c185bd51"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/ChainOfThought.ets",
+    "sha256": "ef6865fb3df0afe11eaf06e818c2feffc4cd783ce61bbc10b7e75aa3ceb04698"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/CompressContextDialog.ets",
+    "sha256": "ca34b587030fbded3407b99c8cd97c5b4eeb6306f83566cf0af623eae7b13b9a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/ConfirmDialog.ets",
+    "sha256": "d8c4d262968139a424a2f374c5e21e2d8b6268defc3a4982d648d6396541fdb4"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/DataTable.ets",
+    "sha256": "c5ea2c3ad647285ccf391b8affb9b5cfd1c28ea2e6159fb3bca4284832b33511"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/DotLoading.ets",
+    "sha256": "58d91a923c7fe5dbcb80c2c72fe5a9d16da400770000775b26755cc743a957bb"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/DotMatrix.ets",
+    "sha256": "bc0c62bb301cef84d15aee7c863a617b53556a19c809508bb9293543750b8015"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/DotRingLoading.ets",
+    "sha256": "b5354cab3871bbe4189a72dbfd6e3680fb8282834426b638d5733a9305f71c84"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/EmojiPicker.ets",
+    "sha256": "e393f559bf9f2f770bd441def275f6434513b0e9cb0de2e3d9054fc92b71090f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/ErrorCard.ets",
+    "sha256": "4182aeec810c1fe6818e40537bcfe81463f386bb1051361d74d7b2025e95d923"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/ExportDialog.ets",
+    "sha256": "3db5d39265ebbbf93aa85f02945ead60ad1722fbfce21a10751be797bfad9226"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/Favicon.ets",
+    "sha256": "725588a69825e6e3895df0e3945212fc68a6cccf3a0ef3d58b576d65aeb81630"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/FlatTextField.ets",
+    "sha256": "2f2dc7b720d6a602742ea84c0c9e8fe28303b174d92b58199f10d76ae626b2c4"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/Form.ets",
+    "sha256": "9033783d97a31b5c3f317e6e56421f4a7283405281c11460005d59f7a26d6a4a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/FullScreenTextEditor.ets",
+    "sha256": "98b031dd522a52b2e7a941ae3159204844cb137e1b6709d52cc0ea14c26784f8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/Greeting.ets",
+    "sha256": "eb5078919c766502f9051603177354b6c7b10f29203a6007ff701f7983028d29"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/Icon.ets",
+    "sha256": "d415f352e7bd82504a5a0f1a5991b41017686fd895005e776ceb23027eee9980"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/ImagePreviewDialog.ets",
+    "sha256": "39c52b98916f283b6862340c9f64bbeee1f93b9ad63b75da1a2f8578f53ed8eb"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/JsonTree.ets",
+    "sha256": "41f1e1a75ee4b16569cded6d8c7d9b61293514d5497ae5ce4dcb836d1511f225"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/McpPicker.ets",
+    "sha256": "0aecf9130977cc9c6f69ea42d37ffd90e239fa7008283cfe51f4fb4618dabf82"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/MentionPanel.ets",
+    "sha256": "351c74298462239529de29f3e1042abd968243b99641007b245f541052f9eb10"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/NotionListRow.ets",
+    "sha256": "219cb311e0226eb9505a79d008a272f4d16cf2c71b73edea01f2ce86445cf537"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/NotionSlider.ets",
+    "sha256": "393a3a5aaae97a623e062e129968c4d6ca504e1beb7b853fbd7eafedf92ad521"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/PressGlowButton.ets",
+    "sha256": "a34aa6b64823f6e0c382fbced4580bc3b6c7f38c453267ed01b2f7a9d9d747c4"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/ProviderBalanceText.ets",
+    "sha256": "b6ea4da3ef57c56a680663b6e13a56deeeb899478cbda1f2d61f17022d5ab004"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/ProviderPrimitives.ets",
+    "sha256": "b9dc2a7cdab9b535b4b0a1356b49fede537330b6e4472553fa13501c4bc1b2a2"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/RabbitLoading.ets",
+    "sha256": "1f73752c11075d36fdc0fe663780cebc686e50d8c62a79b3032e7ed91b02eaec"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/SearchField.ets",
+    "sha256": "5c528256ada3dd457b453ecf495dcd2785e1e536ff4cdaba059ce2f020fb86ac"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/SearchPicker.ets",
+    "sha256": "8325961f39347d99df65ae21302a0bf23d165ac9185acbe67eed4522b7d8e5f4"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/Select.ets",
+    "sha256": "9904e91c0b8baa9d48c4d6cb149fece7b1d6a2230d744d03866a553ac31f9a1b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/SelectableItem.ets",
+    "sha256": "8afc40c920f387dc4a16ef80c068963abbd1125199cbd3a9f91c0bba04eb0097"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/StickyHeader.ets",
+    "sha256": "e93f923f7f9a8c26292803eed35e9a6a6e2ebcc14d37655010d707fc637b2811"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/Switch.ets",
+    "sha256": "29530882bc8d4a1ae37ce9eeb357d52073c08f62f989747b2eb3497a6997d7b3"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/Tag.ets",
+    "sha256": "4272b5c5b83449dcd2e4c68c9b43f47690f046272275db6f5e11b47947efe502"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/TagsInput.ets",
+    "sha256": "a15fbed61fc22a481a19706cdf37b591cce5afba58f60e952d5d2b73885ba86b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/ToggleSurface.ets",
+    "sha256": "eaee96cfa24492f1ce9a53512096f67f475b1d4b2491892d2b0f3da51aa3164c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/Tooltip.ets",
+    "sha256": "a28f5fc4e6102e8c8e4c2248d0e48461e1bfe6bc47899a1b5bff5e56e5cce282"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/ViewText.ets",
+    "sha256": "269f7ecb6c8ef7db86041a327a87724e6b447d7c90a0b8f341d30980e0f73c02"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/WorkspaceSearchField.ets",
+    "sha256": "8ce6fef4d3c63a3ee38920f9763dbab96383dd57984c30f1e5db5061ce9b9fe8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/WorkspaceStyle.ets",
+    "sha256": "7e5e711b74b6c2d98a0c4f6d618ed700f3214df34e01937ed36a4d380577c696"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ui/phosphor_paths.ets",
+    "sha256": "b0b52d40d7b3f620c897eb6c90fa86829e9efc1192e6324e83d0d0029f5beeb1"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/design/DesignCanvasLayer.ets",
+    "sha256": "7ba84e4efc9ee7a7fbb6d60cb61c6b50f636cbf8c838c91c25475072ab82d7ff"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/design/components.ets",
+    "sha256": "195552d4a4519fdb4bd869f682410c37e7436b4363a25fccca20a4884083f9dd"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/design/fonts.ets",
+    "sha256": "50c7b2dcdaac02516b1a23e4d15f572367230f265c3dcbeeeb88a0f3017f2e87"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/design/mock_data.ets",
+    "sha256": "2c16cc39ad4150e27d50fc0615425a15e7755e169a7b3d3a59e64c9c01663399"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/design/theme_pack_import.ets",
+    "sha256": "c601f3817c7a6129aae03659d4261dd1f8d3f44ceaea8b6f3c9a78e2347a1d1d"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/design/theme_packs.ets",
+    "sha256": "62dd9a552c927215e6ce9a148fee40aa277f562fd8d17067cbd2a28d0bab7a6d"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/design/tokens.ets",
+    "sha256": "6510d8e67a8946f617356e1243cdbca22fc97a57263d0d4bded69313cd700746"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/di/AppContainer.ets",
+    "sha256": "ab0f07a3cc27f6b4b057df21a187dc464e35ff5c531ce301e8bbbccb6fd13025"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/di/ProviderDefaults.ets",
+    "sha256": "3b8c3657c9e0c00aaa8b1287130c809740ae250bb154f4f91a0176a8717ef2e0"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/entryability/EntryAbility.ets",
+    "sha256": "684dd9cd60df768983645671fb1050d15f458c92e55af68ab243a944804d8ddc"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/novel/NovelComposerDraftStore.ets",
+    "sha256": "fe7b0ec5f44726a6348ab8f06af6e3fa43702329fde50b985d5a8dbe62921d93"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/novel/NovelComposerState.ts",
+    "sha256": "bc41b413edf18ea27823bc834e585d2102d971f9c0d5252e3f27b3bfbdb69e21"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/BoardPage.ets",
+    "sha256": "883850a14be1a1b47cf0f877c5dac95e92efebefddcca50495112131fecf7e66"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatAgentPermissionsPage.ets",
+    "sha256": "dea78228487a142a11100bcdeda09807a046e7b99283168b74a610ab1ac7f053"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatListPage.ets",
+    "sha256": "fa259181b2c6c18181a80c7583c3d3e9af47838140d3fcec3c4fec5ad5b726ec"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatMcpSettingsPage.ets",
+    "sha256": "dd623c8c5b52c1e6e86df866f6170a34abeee0022a4df6b6a32f14100f47eaff"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatModelParamsPage.ets",
+    "sha256": "a7b6c0f0143154fae6f0181c7b80ee2ebded751841f1a7fff7da60418e959b55"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets",
+    "sha256": "81e0109c32f5e34e59f444bf5e3fc3b83142a33a36cbae0459ca7aafbb9050d0"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatPage.ets",
+    "sha256": "db289feac3bc24da6772d558a85e666871d0885832d4257e137fa12478c2751e"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets",
+    "sha256": "af1cc4cb699fd1b748c6a17e4f684a2e51e671a3ba3f4c7dd07f9c3801b59b03"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets",
+    "sha256": "a95f131b9e19ed9df0e06d501ab6efbe166283bb396b45fb97c307d2a520b927"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatSearchSettingsPage.ets",
+    "sha256": "a4029ffa9498d209ddfc2dec371586c3778c5b099c4160b94f7c43423465f1fc"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatTaskModelPickerPage.ets",
+    "sha256": "d31f83cc9a0a23507c9d66f71175e191c2ccb398464882b1403e9ad4210f0e1e"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatTaskModelsPage.ets",
+    "sha256": "db2953d225c9e3fce3d81893d3d75e50958a586f62029125d4626dba4c78f49a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/CouncilPage.ets",
+    "sha256": "0fe1019efdb3fb0c7f8e2780d76ef99ea19a175bcb037f076e3b3faf1957c2f4"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/CouncilRunPage.ets",
+    "sha256": "842b5a93ec368451026255e5f00f75ad49c14c13396b58308410c11e5bb4d5f6"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets",
+    "sha256": "de82344eaf032ef8110bb0428f1eb4965322f2baa054e5ad819fcc548fefefb7"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/DeepReadHistoryPage.ets",
+    "sha256": "eb6c15eb710f0f9cb8cefdad8c1b6fc3327a61a54fafd223e04a557a8961ef62"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/DeepReadTemplateSettingsPage.ets",
+    "sha256": "a14f844915bb8353b39ee14660e6c1ccb592bd2a47bc6104ba8df0ce11b921e2"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/DeepReadTemplateWorkbenchPage.ets",
+    "sha256": "a87bfb1b68c3afa9d946b5a47753ee3428291b3492a750472aeb6e41e7055611"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/FavoritePage.ets",
+    "sha256": "e149db65f4d7785c730e09d17dfdc4a6dc4e80555e514f93e56f86c58903486a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/GoogleProviderAuthPage.ets",
+    "sha256": "81ebc5d0a2291bc683bc27384aadb484bec856944ee762d1eee673edb3ea2083"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/HistoryPage.ets",
+    "sha256": "ed8d7f77cdb977652eec9512fb0cb31b8e4f8d596c98dd56ddad74eb8dae03a9"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/Index.ets",
+    "sha256": "4ddc843d1069dbdaf16c475cd0b765398c947ed8e693338eccc3317b36715ce7"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/MemoryDocumentPage.ets",
+    "sha256": "5429c540a0778f0d9272607e5da21235788b8c68aec5304e24d837c99214166b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/MemoryRecordPage.ets",
+    "sha256": "272aa3d49b721196bdf5939be36a629f9d4eb98a59cac577919b03d1e4b1f421"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/MemoryTopicDetailPage.ets",
+    "sha256": "644995fe588bc9f97992777b8b8e2ee8c0cd6fc13c147f6cfb488778d693d184"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/MemoryTopicsPage.ets",
+    "sha256": "1c2d2da906c5fedf46592b00db06b45252e0f21ad4399cbfd89197db1807a9ab"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/MiniAppListPage.ets",
+    "sha256": "2a3f1c29162604e21520b29a4da6ec24f4539d17b1a8fa6cd1b274e3fd840092"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets",
+    "sha256": "27120822c25685bf40e27e36435d7231a71c8713da6d2503fadbd7f2b14a71f8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/MiniAppSettingsPage.ets",
+    "sha256": "8dcf5f932192ac56a2ccb58992d0f71c23184da83950b19723e35bde2c08f311"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets",
+    "sha256": "452e1b5f6b6365720c1778f2d922b8096143a7a932d8372830a99b5b5b63d84f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/NovelProjectsPage.ets",
+    "sha256": "d95eed68336ba6f5e7050254e03c2aae793c0a8ca491c658eff2a14259136fb2"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets",
+    "sha256": "4ae47f25a9fb1f337a743bfb0e49412864a0c2dc71f01a25e2682d6314aebeb5"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/PluginsPage.ets",
+    "sha256": "bc9999f14972f60c745cccfc57a22bd90932832201e0c81432ab2a1b743f59c3"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ProfilePage.ets",
+    "sha256": "c6bad2df61176f18066a5d1e4228b5431be838ea038ff5ddc1eb91a1d6377105"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/PythonPage.ets",
+    "sha256": "6eb94d897fbfa9601f423df318bcde8bd27f15f970161f0a59aede3e11a22b01"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/QuickMessagesPage.ets",
+    "sha256": "bba00cee34d586a8ceda8d8057db7b00e44cc8eb4c6fd1f9585525002b25be48"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/RecipesPage.ets",
+    "sha256": "1ee8e717b0c99aec80ad57326d8e8aeec716e9c1682829d81ba9b81415623b8b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SearchPage.ets",
+    "sha256": "345247478cb23eba09f012702ff462b1f9d9b4493e7cac460642e105e2171d0b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingAboutPage.ets",
+    "sha256": "e327b72337b11908b83713c648b8b2e066b7226c5c5bdf627d6ae718fd11ec9a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingAgentExecutionPageFull.ets",
+    "sha256": "9fe1fc23e0a81565af30fb844efec9d3be3dc34d571ba4bcfe53f461af971551"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingAgentMemoryPageFull.ets",
+    "sha256": "a8e449759013c897b048f45b202618b9e736995e15bc3bc1a8faf630e0c5d76c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingAgentPermissionsPageFull.ets",
+    "sha256": "e73bb2f72c5a2a2e2e088af35ab204a7d955fc27c49d55df8d08f4f5b017b2cc"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingAppearancePage.ets",
+    "sha256": "e5df0b33bb7b9a06cc94f2641e158d5d371b1c4d61c243e8ee73ad54bffefbbb"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingBackupPage.ets",
+    "sha256": "25485c1f9d0a5c82596a803f2a552e7ec5df4534b6690ce12997156822bec041"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets",
+    "sha256": "32b088205c01495c795d086bad8e24063b69b545e485b0181a8e248b7f8722d7"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets",
+    "sha256": "f736aa8c7517188b3e53a179dae9fca984245c155ce54cb0479a95a7d3fe0e11"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingDisplayPage.ets",
+    "sha256": "201de38c6bf323fbcb91289b5b3f614d4a80a433be10bee97d27acac30eefbcc"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingExperimentalModelCouncilPageFull.ets",
+    "sha256": "a07b3c6373aa3979556ac09bbb415346da34fc26dbb7d15abab3d4b537239671"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingExperimentalSubAgentPageFull.ets",
+    "sha256": "0989fc37509ae56b3859e9a002088d4321e03b6cd447b0a7f9995046bf04fa7b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingExperimentalWebMountPage.ets",
+    "sha256": "5f9a734a9c9c7be403bea46be6f79819da8ffa5d23662582cc9321d96363f0f1"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingFilesPage.ets",
+    "sha256": "c6ebc4e90e25e0f53b07646bb06fb3820035ffd45406d456619132ea1ed06466"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingJevPage.ets",
+    "sha256": "11d63f4bd9d6884f6517a252bda3b0f667ce5e5488adc8f844107e091c8ec008"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingMacGatewayPage.ets",
+    "sha256": "e498937412e4c19278a7174fe614b601a384e89ef7c6d2551a3ab56d6f9d7627"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingMcpPageFull.ets",
+    "sha256": "07c8464edf08a17c7fe91d90b22d54e0617302c11701bcce4e867705d64aa39d"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets",
+    "sha256": "8f190e78baaba9820dc5ac428012b7998e4b5175d062712aa0296c0449366f12"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingModelPage.ets",
+    "sha256": "0ca274a274424be09dac22c68b0608ea7049cf199298849386af379149342414"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingPage.ets",
+    "sha256": "faaa11caa43ca9f725c34222ccffd49c0b29397171c0f0aaaaa8a984e9147fed"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingSSHProfilesPage.ets",
+    "sha256": "c991888eac681b05ab6eacc8a171bb168781555dabcda6685e4270d67b817e60"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingSandboxPage.ets",
+    "sha256": "696bd513cfcfb603181ef6ec25bc9c87c6f593cfd95e0c3ce5a1a56154a9d2b5"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingSearchListCards.ets",
+    "sha256": "5aa92ed25ebef166d36119a10a965e2ccf9be65116cf381573731fe1b588e824"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingSearchServiceEditorSheet.ets",
+    "sha256": "785b0d2c1153ab4539d481a147a9a946c42ed1cc210c431a15772b1bbafd2cca"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingSlidesFontPage.ets",
+    "sha256": "2cd4dd925b24e00295775b599af431371fe2d546398d8ae3cce64be9dc3dee4e"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets",
+    "sha256": "ed064fe34da3e36499869ad376eee4c502697c6cd8ac3f8e9b08778f02a08bea"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingSystemAccessPage.ets",
+    "sha256": "18d84850ec47a0796712d8004bb99e52d15ffbece88caef56d11cf642b36b152"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SkillDetailPage.ets",
+    "sha256": "1dd6747a47894f0b226a71a6ef0398fb3398b53c52be810391ea959fb54378e8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SkillsPage.ets",
+    "sha256": "74195f41cecfa29a13842c79898f182a7b04f10eca729d27708d7f0a1aa8db12"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/TerminalPage.ets",
+    "sha256": "838e7cc71a767f7e95de9370b339f74420935d0c8a6e7b0cf865dec4ee7e7486"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/AgentCronStore.ets",
+    "sha256": "35a2acbd5107b48a5526ab3c99eef8125c0bc1ff900541830234093552dc2f21"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/AgentRuntimePrefs.ets",
+    "sha256": "d81e3f65d4493037b4267d13dc8debfb8d5915c0a4444a1c52ac72f8fd99dd6f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ArtifactPorts.ets",
+    "sha256": "a889b28af490b032d9d1240842352a6f737a0abe6cde9f15738feccbf908d03b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/AssistantLocalPrimitives.ets",
+    "sha256": "8f1c2019c5c371e45878ad8d9ff9f664eded60c0e1cb25779ec50d49828a7183"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/AssistantMutation.ets",
+    "sha256": "6a407d02ab25d8e2bad18a9a23c8b4354e4c7064f2948f8368742cc451dbd359"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/AtomicJsonFile.ets",
+    "sha256": "19fab47737a45a760a0108d3cd30580e2097142fd84dceb5abf9d4ac374fa9b7"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/BackgroundGenerationKeepAlive.ets",
+    "sha256": "e07a6f3e46381d98f31e8166fd3c7d01832e48454b3d3478a4a930975bbfa166"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/BalanceSupport.ets",
+    "sha256": "c2ef242e0e162f0d69d2ac392576580e08694dded30f3ce0a050a4e861b14262"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/Base64ImageSupport.ets",
+    "sha256": "cf9ddf3ee6a4e3e41e7444ea2c4abceb8464d66a9500db3d21f0f566043a2483"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ChatDeepReadDraft.ets",
+    "sha256": "aacac326d8e4c90b733452bef7fee0dd3a3b67a8459dd92f093af4e31e753d22"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ChatExportFiles.ets",
+    "sha256": "389dcf79a530a2d4d959ede3507b2a34d5533238f312018c01350374624c63b4"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ChatKvStore.ets",
+    "sha256": "92738684d0340c7fb0dc6858bbba7af4c279277415ef2b7ffd41c024e009476a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ChatMessageArchive.ets",
+    "sha256": "c418d4e054aafe7c715fa3237292f1e5259d63015d47b800dbf7398da08704f8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ChatModelSelectionSupport.ets",
+    "sha256": "c7e1cb858d2363bca023f4ad36e232221ac9e53d07e757557a21c0f81a2ddfac"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets",
+    "sha256": "7c84bf0bbc5681b36ac353f9633c6acdd473ad8cb5b55f2d99fbb212fd43d645"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/CodexOAuthClient.ets",
+    "sha256": "a926df76cb6cf2fa9a872352aea11e2c9528a179647e65eac953a1c691c843b1"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ContextCompactionSupport.ets",
+    "sha256": "1f84627f67673b23d491110d4275b7345d4dc130b01c744f043db7cbad43c384"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ConversationBrowserGuard.ets",
+    "sha256": "52a2fa42d8d8af92cdf7803c0ffb656008bee4f1b1e980d7e86f01c0997f7945"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ConversationRecapSupport.ets",
+    "sha256": "84f31ea47e050e4fb49365f193c4e10996f87254fbbabb35e3c711234258e0d2"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunAuxiliary.ets",
+    "sha256": "e568d93e9fca90fa3e211886d779d9006601fce75dea54f37dad9df3102a7f90"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunDependencies.ets",
+    "sha256": "ee3d521dd476df862d6456de041f3fbe10f77d435933ccbbbd33843f7c9abf0c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunGuard.ets",
+    "sha256": "1c620178742e64f95ea09cd4f5127433d060061fbd5860b26b2aacfaa68219e3"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunService.ets",
+    "sha256": "7cd76b32deadf0114461af550cb33566d72ad8c19115e7a45b71dac52c157b26"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunTools.ets",
+    "sha256": "ab3d21c1c8e4ef72fec04b1b50d2599593b9f8d87d310a27def17d742844c248"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/CouncilAssembly.ets",
+    "sha256": "04a23a15d93d239c3b6c26493fadde0815c058a8df634af05baeb6afa60b118f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/CouncilChatSupport.ets",
+    "sha256": "f3c1670c148fa1661148acb4add7e15c86b748fcb1ae13b11fcf246d8e00e790"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/CouncilRunPreparation.ets",
+    "sha256": "7840d7a744e870f2ae2596c3c33374e3486bd13b008cbd32b7ced9501d670f11"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/CouncilSeatStore.ets",
+    "sha256": "1d417919dc03baa44eaeb9d0671947990e3d99e90cbe5c5ca1f2f5e2a0867bc0"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/CouncilToolRunner.ets",
+    "sha256": "67533e7e422d25d265449a7dd5ba35e222ea7639c74073286e65e79e8ead9ef8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/CouncilToolSources.ets",
+    "sha256": "88e763f2ac594d602a30ce110f74aa6e6460ec91969178e3f02aa44806c15ef8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/DeepReadArtifactStore.ets",
+    "sha256": "20b2436a8415abac02284c63b2ccbc75f106a9d2faab4c7cf2abba83797f80c3"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/DeepReadContinueSupport.ets",
+    "sha256": "b434349ac537e1e762230b42d0cc92ef5a5d1ad036628df22dd3b89ac9f090c2"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/DeepReadExportFiles.ets",
+    "sha256": "30e932688014703fd506a9cee636981fd345b23df82a5d833717c895b133fcfa"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/DeepReadGenerationActivity.ets",
+    "sha256": "5fc3e1d9f31d6a70db204d49aa0568ee377e50c167bca2dc6914f2574f256c44"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/DeepReadMarkdownHtml.ets",
+    "sha256": "e787c65b41937dbcf7360c61b032eb7b21a8e639e3ca8589c039e5a24dc3131e"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/DeepReadModelSelection.ets",
+    "sha256": "639840b103337e7ed9e8f7a133cd72a5b6e6bb24895097491ad9e3a7ebae8782"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/DeepReadRunConfig.ets",
+    "sha256": "3369ee9aa318773e3c4eadd058868d18ef0d954693d140ac8237d1e8281bcc7c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/DeepReadRunRepository.ets",
+    "sha256": "e1dd9fbbce0f396b754cde4757fdf9bc97256a7cacc0d51592d5c0fc224aaa63"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/DeepReadTemplate.ets",
+    "sha256": "1e4429baf0467e0fd75f25d0978d494250aa747b5045e9a7f1fe522727859948"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/DocumentAttachmentSupport.ets",
+    "sha256": "9454be43763b76e382dabc08635f29ffb91bf8b467b834e377defc3182df8183"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/DocumentSupport.ets",
+    "sha256": "f3bdecd4a3dbb956e6a7fef729b7e96ba9ad8ac6a9314c884b992d710fecd321"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/EntryAbortController.ets",
+    "sha256": "5fe1a1c85a0fa52f04745c32533e3ca231f89c40e09567a13dd8ea6596bdb5da"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/EntryCompactStore.ets",
+    "sha256": "3a5e5ef76c97f5e37447de3554f591344dc62f091d0d2b9731b038c1ff7a0bd2"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/EntryDocumentParser.ets",
+    "sha256": "5a05f379c7a6c5df3f2e4a446328be774b75298d246ec962d2a6736722a98ba1"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/EntryImageEncoder.ets",
+    "sha256": "95fa556eaba7995e73466156124b7939192a3ec03ca3ccd9d3afd190a84e495b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/EntryLocalToolPorts.ets",
+    "sha256": "9454e08345e070ee08d7343e134dbd740053e602816a37d2dc80f666e030e602"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/EntryPluginRuntime.ets",
+    "sha256": "a2183114b8cc61f5d7d41e83a2330eac0f1afbe8d4a49126fe7bddeb4e0c9a28"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/FavoriteStore.ets",
+    "sha256": "262e971bc1034d55c8b27fcc819daad5c246bc069c141e87b149de5f261a3c55"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/FeishuDocsTools.ets",
+    "sha256": "2caf432e15a2459036294f7f2c3aaf4025c85a0133f2ba2c4840d15169f305d8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/FileStore.ets",
+    "sha256": "24cb5527d4414d5ad3c75d38d8836d34dfaf3bcad010b4afe9e599f495de8ff7"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/GenerationProgressTracker.ets",
+    "sha256": "5cb0c2869ff5520aaa392831ef13e2b6b0f0967b0e95292ed27a18e74a3d1dcb"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/GoogleAuthHttp.ets",
+    "sha256": "d7cf8b8ff1de1425705c31362f04683271268ca7e23c6c2c48a5bea9a25b332c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/GoogleAuthSupport.ets",
+    "sha256": "2fdafe6771a95ae3a9aa4518b0b706717a5ea0249f1001abb050a41bcde7fb1e"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/GoogleOAuthCallback.ets",
+    "sha256": "982fb9e7d9e9b4225f736fb014526fe767680e34be43ed25de104eb3cfffb085"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/GoogleOAuthClient.ets",
+    "sha256": "c33061f57af9e5d084c66cb7f6b18167a627647d08ff6085e52cb6bf77e09c80"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/GoogleProviderConfigSupport.ets",
+    "sha256": "130581c48f7065960ae21c03fb098ae7c8bf2dfca7e22ebc9deef6eb32b2acbf"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/GoogleRS256Signer.ets",
+    "sha256": "420d4a55394728e30b9e7dce9693ccb8699867f00c9c34eaa97c0504394d67bf"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/GoogleSecureStore.ets",
+    "sha256": "62b4e752e4d6b452c05a37ef5d3ebd46c012c295effda3701626e09c248b1645"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/GoogleServiceAccountToken.ets",
+    "sha256": "95a97d64d4d618511429b1cc0ca979ff615cf8289d481b1f18a9be237c14609a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/GrokOAuthClient.ets",
+    "sha256": "5547255a98c03b5900421c1dc46d2d65a895f80ed8925665b693b30c6acf29b3"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/HealthReadPort.ets",
+    "sha256": "47008c78e1bd23513e3ae5e63d9014f5fc1a4c8646a0d627757a2aa287621568"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/HotListAggregator.ets",
+    "sha256": "91a4b1d6d3e84ce9af3492156c73afe2d2d3857cfce7929119fbc14cee832ce7"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/HotListRss.ets",
+    "sha256": "4713ed0df676d64e26c7219851e1f6dc6e01996f5e6277d260d4100cad48787b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/HotListState.ets",
+    "sha256": "70f038e9ad6327eb6f5c7203456d2d0f478b22f4d074e1ccd2479df69c794b25"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/HotListTitleTranslator.ets",
+    "sha256": "fcf3169331909c3ec2e43ebc115a57c9ab0c64ec6b41cf320b79ee1a059b314f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ImageCompress.ets",
+    "sha256": "3205c3a1d5438bf979b52761c53eba9a51428e9ab428f11ec2ea6210f403342e"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ImageGenTool.ets",
+    "sha256": "97400634fe62a2e62d195127f053154776fb469f7bbdee6f0e64c7f34f9c477d"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ImageSaveSupport.ets",
+    "sha256": "ba226725ee7fc83fb241e553af4a868afc05329b0e8b065d00846ad848b2c379"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ImageShareSupport.ets",
+    "sha256": "6f2a79d4989d87bbc01c474765dca570a9252a1869e7e1bbd4c7478e4164a07c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ImageSourceSupport.ets",
+    "sha256": "863bd9e72ac3c0450a3d0ae63fddaa3cc79ad924dff4062c8b71623e04d62d0c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/JevApprovalTriage.ets",
+    "sha256": "08b32417f818581649db23f82f00b844ff70093e2c9a314c9867d4bf6322ea10"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/JevSupport.ets",
+    "sha256": "08d5dfd3a782fb72882b02c16516c8e0e6000d1ab5e617adaadf0dc38898ae79"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/JevTriageHost.ets",
+    "sha256": "e57ae78a95f7aa6110af14d0645b0d929fa41ec21752044c80ebe8e9e7a63de2"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/JevWebDecision.ets",
+    "sha256": "4bf37a61a7aadbc60cd43ee229c8f239cf2b73e304ea67da5c5fcff47fafb892"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/JsSandboxTool.ets",
+    "sha256": "ba5e8c6ed0eeaabf936d47d8b6eaa484f884f3283d20faf94d2843a720ae2379"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/KeyRouletteSupport.ets",
+    "sha256": "f65eda28556eae619f85a137466b74c440677ef09422e2e50867ae4c63427de7"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/MacGatewayClient.ets",
+    "sha256": "00ce659636aed6888030e356543f6e6e7d01f20f40ab67cefecdb48a0409425d"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ManagedFileStore.ets",
+    "sha256": "f95a6b4215feccf442bed28969e4b1ed05b985fb118808a6933a3d2bf8be90ed"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/McpFilesStore.ets",
+    "sha256": "4af56549d56474fbb4d45bd270fb49fc2c9a89a7365c885e9836862c4c168b6a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/McpHttpPortImpl.ets",
+    "sha256": "de3013abb42882e05be6b9ac0049929d9f703839590bf2593b0baadec8045983"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/McpSettingsStore.ets",
+    "sha256": "0c0b131edac69942e773f6d23795c327371e97d804060df62f1db43f0c7fe1ae"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/MemoryDocumentStore.ets",
+    "sha256": "891b34ffafad4464d21d27337ee3973676e9456f10a5183bdba9428d07327338"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/MemoryDreamOps.ets",
+    "sha256": "4683e37353964530ca6092e696be18c3b8dc49f1b4e3891c8de26d0852fd657c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/MemoryStore.ets",
+    "sha256": "6f1b1c4984bf18130178f7ecd2a619b4508a46ddca128a398ad6f75f86c8ad49"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/MemoryTopicOps.ets",
+    "sha256": "16779cc1120ae102c2be723c3e990d312f928f7fdbce0f212d614aad9b1cb770"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/MiniAppBridgeImpl.ets",
+    "sha256": "2c8b3ae06522f418fa205d6bb2f47784063f80c22b721080a4b5d16e259b52b2"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/MiniAppFiles.ets",
+    "sha256": "62f9b17029152c9cd5860450bd0d5151a035cb030822d442c00ab0084373846e"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/MiniAppPlatform.ets",
+    "sha256": "0fbc41ba6f66d8ce68464b740fec50e49ccb7cbc841fa1978baf9638f9f7e6bf"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ModelCouncilRunner.ets",
+    "sha256": "835f3896dcfa2b56b7dceaf66d9e2c0106076bb4a1b76db267c7ae9137a4485c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NativeMoshTransport.ets",
+    "sha256": "21a6140c368bdfbbe88e738c2056b29f7f4ee7121358d5446f0b21cdc73daeac"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NativePluginJsTransport.ets",
+    "sha256": "cca08dfcfb7217e0509555f3939d4ceb3e3d8b2314ea5829ae59c07a6a5a391a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NativePythonTransport.ets",
+    "sha256": "ae027036fcf5600f693c414c0524d16fb3507be3a7410c8cbb7420de37a70b97"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NativeSSHTransport.ets",
+    "sha256": "0ce965da9d0d416e93dca46a9f5ec34b75761f19ff2e5aa8f903f7b1fddf3070"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NativeTokenCounter.ets",
+    "sha256": "5c36b9c39d433dce55d89af53864184d8149fe4878ffb791c70cb62662b1287d"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NativeTokenCounterFixture.ets",
+    "sha256": "9cda340a87705321ee2a10875f07f3ade2d878ee5e89bf605badc4cf7967f3f8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NewsNowProvider.ets",
+    "sha256": "93f78d12ba6191217a46905c1c76b3f22c4d743eb3752e16695e3d61aca83d00"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NotificationNotifier.ets",
+    "sha256": "44c58a27522e007062c155cf65fa3770801b04853f07b38e9f90ca9593a012be"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NovelChatRunAdapter.ets",
+    "sha256": "aa2488d23393a9a3f652e93a9c2eb5ae88e06d71091093d9f536d9ed45ab72f5"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NovelPlanProposalProjection.ets",
+    "sha256": "2b746fbdb20ed045d57dea2ace68c548288d6db67672943d7339d4322236cf9a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NovelPolishWorkScheduler.ets",
+    "sha256": "166737651f5ffa0fceeea98ddf07cd973eb8e258d25e09f21256af3b4c64bafa"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NovelWorkspaceArchiveCodec.ets",
+    "sha256": "994d35a715146cc69091f656adff814d81d5d8ce039bf55d8676da866aa32d63"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/NovelWorkspaceService.ets",
+    "sha256": "a1d97bbc90b54972886231c8680a6fabea3cf1358d809a291a0675eb219d37c9"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/OcrSupport.ets",
+    "sha256": "98e801f1fa5407c47974cc1e6cab0f0d148115d40e3aad6042f15aa74649fe99"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/OpenAiCompatibleAiClient.ets",
+    "sha256": "263aff46424dfbe2e4461bd781dcc9901d987651f6281111ab864feacb6e857a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/PdfDocumentParser.ets",
+    "sha256": "db97a563f3e26a3fa3d13eb9f8d568f2ffe75e8cae3cd11d142fcd988f80091b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/PermissionStatusPortImpl.ets",
+    "sha256": "515f233aa4a1f9ad62f08960acf9fd1214b072ffeaec0981b21855a9914b3e66"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/PlaceholderSupport.ets",
+    "sha256": "e693986f153f298b40662fed09da35a52a108fd47a357b5a7a866bbb1004ca56"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/PluginArchive.ets",
+    "sha256": "38cb36e44af15271f008bae08e8a486d680714a3697ce0d1b5b24718dc31305f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/PluginHttpPort.ets",
+    "sha256": "156668973380f94dee065bedc0a5f0545ba9675adac9d6433f038456d8605f14"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/PluginPageLaunch.ets",
+    "sha256": "e781c7ba06d3e2ec36c9fa8c01bda38a5f09e0331a6869b36742fe20f90ee427"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/PluginStore.ets",
+    "sha256": "e0bca93a4efeff29e89619effdeb54b72b3c0b760dc127e66d0f1f3e68c90e5d"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/PluginWebMountGate.ets",
+    "sha256": "da51e80a7400b49665bb0e566561a685e168c2a3e71a838d232442d5bf32f872"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets",
+    "sha256": "f2bf505531f941b1717437b91baaa4dfa6ed9b950f1c7be53009e75d41af7c11"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/PromptConfigStore.ets",
+    "sha256": "a76e767b36228432213da6b29c0fc721b40beb67267d5a10b02d9abaa7cf0d7a"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/RcpHttpClient.ets",
+    "sha256": "b4995598c06cc886057b5728a0831490274d265d94d7baf94086f18e695758fd"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/RdbRepository.ets",
+    "sha256": "50d49195340a32be880e8e7fe4ad11d3a342b881eb932056dc5460898818b5a8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/RecipePageLaunch.ets",
+    "sha256": "6dff67aeec5ad1b7bfbe7a707a3bc47f8d151977f5596d2f03fc527c720f747b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/RecipeStore.ets",
+    "sha256": "3217fbda55dae4fb530e45308ae3b9fb9917a3fa904e9f8ce2b3a80b112b5658"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/RunToolCatalog.ets",
+    "sha256": "44876654c2abdb65996092b6d5cd4cc2a509992546f6a4f292304c74acd1ddd1"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/RuntimeE3Fixture.ets",
+    "sha256": "48a64482ee7d4bee59435812ae2bb856c7dd973be25c89ea509ee899171865b1"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/SSHCredentialStore.ets",
+    "sha256": "3025fca55a022107dab5144c5aba489b0552597368c8337e78a3c1dbeebe66c5"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/SSHRuntimeFixture.ets",
+    "sha256": "596439706a1f81ada81e0df982d11b6232e48bb322c462b68755361e64bc8b8c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ScopedRecipeLoop.ets",
+    "sha256": "f6c6a35333a1f79c7d4c577528e74028ca8db4ba27f4e1fe96cc49092a82c086"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/SearchRegistry.ets",
+    "sha256": "867f2a4e4cd3f6e28663653eeee9dc47d3e8860b79a37556c5af03bd988b2f40"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/SearchSdkInit.ets",
+    "sha256": "d44d31cea1d96d6c84e87f31fe078a6769f8e6f0385c37f2666625ccca475dc0"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/SkillStore.ets",
+    "sha256": "b10cb81065dffbb157878e5012a70b45cfbff67484948aa945bd8590ca8041b9"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/SoulTools.ets",
+    "sha256": "818b51aa42405eba953ffda9281dd589b5f1b48a448f586bc61224baad2c3351"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/SubAgentRunDisplaySupport.ets",
+    "sha256": "f939b5dab128f9b8ccbce2637a4bef4e1edc957e4c547f4828ec6a01313bec7c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/SubAgentStore.ets",
+    "sha256": "d1a608ddfba1d0b8818263b7e0b64c17048baa5b50b1f48df549f9e098abe3ef"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets",
+    "sha256": "04173e5ac3c19811da3833d647df761a52cd738170781d50b4906ccddc2024be"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/TaskModelSelectionSupport.ets",
+    "sha256": "d70239cb4e766fe4be2017aaf22535b2695daa491684f0031d29c66d7b43990e"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/TerminalLogPort.ets",
+    "sha256": "1353f64c64f07503d13c886cbea3954ee998bce389530dcaa766dab4a89300a0"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/WebDavTransport.ets",
+    "sha256": "c49feffb62e3a9a85e1f9f893706296530e413578bd3f4fc0c5a2b7986b18885"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/WebMountAdvancedTools.ets",
+    "sha256": "de8f472cfdf8b2a24c1524d8607a41add2584f61827cce3a83b6568d2d82a208"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/WebMountOAuthRuntime.ets",
+    "sha256": "900bc188741992befe69d930b8e391313609705675882af1195ddf71c1d1f56d"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/WebMountOAuthSupport.ets",
+    "sha256": "aad632b47f77ad33911c1216c3e71f39a2e6c0920c3f9b62c2b363547c6d870b"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/WebMountRestrictedHttp.ets",
+    "sha256": "b9f788ebe1049093467e62211f7dd11c2ccc886afd7205ca1200c498a9663cca"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/WebMountSecureStore.ets",
+    "sha256": "2fc2eeb2d6824705e6eb2a270cea525b8e80de0c592e2e879c08b7353b9bacee"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/WebMountSession.ets",
+    "sha256": "37fbc34345dc789cf6eb9457b2a31f5c68703ad7db95466e929ac19f51e7d190"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/WebMountSites.ets",
+    "sha256": "744908c4c7c4c0d9b320adc15a6b67d1e61e29589b99b92107b591fb22c5eebf"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/WebMountTemplateSupport.ets",
+    "sha256": "2ec141e41ce6eb8049fff762c46c9205c492a5f6c971fc0858e00f70af98de7f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/WebMountTools.ets",
+    "sha256": "802e9f2f5610e1f13074ef86a0c83be9372cb5dde2327d8b6d685b2b1c0c5491"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/WorkspaceStore.ets",
+    "sha256": "7eb3658e68f8cd39de17097101139db50e8900f653ece5fd0fa08d5773c6d0bb"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/works/NovelPolishWorkAbility.ets",
+    "sha256": "ea3af8f3102b7e033c407d6f5ff7d92f0773a366aaed5260556230328f42a330"
+  },
+  {
+    "path": "harmony/entry/src/main/module.json5",
+    "sha256": "a40ab49e5196f195e9add2e4e845a0907e2d9466dc933c866025ab6824e4ea3f"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/base/element/color.json",
+    "sha256": "469d66e15fd152877d8ccddd7843e4900f46e01733ac9dce20f017e3fcf13fb0"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/base/element/string.json",
+    "sha256": "099a89d62eb50a7ff8f04c1a232f29c873e9f02c22a281198cbbb032e5283c5d"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/base/media/app_icon.png",
+    "sha256": "a92eb172e95d23e7a5c085a603935d2b4664fc846d83480135d860c55b1f5ce7"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/base/media/glow_disc.png",
+    "sha256": "89a4a0f2b4ac9d6b96e00f36910811b02bd51e51efc7b2bf0e23a14ddaf5064d"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/base/media/start_icon.svg",
+    "sha256": "570ff89d03497573227849c7c1dcf010b7fa4122818a741c2fb5c8d2921653ce"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/base/profile/main_pages.json",
+    "sha256": "75195f96c03de495d74f992e040ec6bec64e4b615aa08d5538615378a264a0c8"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/base/profile/network_config.json",
+    "sha256": "272ed4e4e9dc4ea7cf489ee18b1548edaa2d967426d74da65af1b3015f7d2aba"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/dark/element/color.json",
+    "sha256": "55c9d337a7dc345d7b976120a74b4398ca6c6c0ef27b9fcd34eac3779ac37e02"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/dark/media/start_icon.svg",
+    "sha256": "4ce361d888e79dd436d56903f16a4349ddce6468925d120bfa97ee2d9090f5d6"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/phone/media/app_icon.png",
+    "sha256": "a92eb172e95d23e7a5c085a603935d2b4664fc846d83480135d860c55b1f5ce7"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/builtin-skills/deep-read-fact-check/SKILL.md",
+    "sha256": "abf4615a17b4a65eb2d791af409cdaec71cf37984731c0f22a243bb252b1cff3"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/builtin-skills/skill-creator/SKILL.md",
+    "sha256": "988b3132b8d16b7d61c3fa9b4f417c39a6e38826a3a5036c96cc96e4af8d6cf5"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/builtin-skills/会议准备/SKILL.md",
+    "sha256": "838719d1506ea192d98e550846ba2cf7b85e1bb291a73852dfaf44065b83cad4"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/builtin-skills/监控文档/SKILL.md",
+    "sha256": "03d7bde74b5ea0076e067077055f68900c79482148cf11441c48288fbf0d9ba5"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/deepread/deep_read_playbook.md",
+    "sha256": "7733ee8239563df3ee5ade3a4c8089fa3629c6ef61d56792806470eb996cb3f0"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/fonts/AmberSans-Bold.ttf",
+    "sha256": "c9095c7526fdd2d301f0a074c74cceee447356d4cadc33aac945515060e8d8a2"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/fonts/AmberSans-Medium.ttf",
+    "sha256": "099a2e0b4ed2eb5cd1d058133bb14c0bc248be26ba9f45932ceef65c5155b760"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/fonts/AmberSans-SemiBold.ttf",
+    "sha256": "66f85b50d12f79a2594bc4ec03bd2ee0a58c6757b7229739e9423a6b8df764f2"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/fonts/AmberSans.ttf",
+    "sha256": "f71024cb8032ec1b6ee3fb1bb59fb990d088d5862c77d534453fc1fc9575e0a3"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/fonts/JetBrainsMono-Bold.ttf",
+    "sha256": "5590990c82e097397517f275f430af4546e1c45cff408bde4255dad142479dcb"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/fonts/JetBrainsMono-Medium.ttf",
+    "sha256": "1f8d238f9563f514c64db6cfef12de9edbae9f6de2c4eeeb27d158bdf291722d"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/fonts/JetBrainsMono-Regular.ttf",
+    "sha256": "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/fonts/JetBrainsMono-SemiBold.ttf",
+    "sha256": "440f2aefb3a9da7a11330b92b7e8e2c334d39ff7f1593c5bf32551d42c2057c7"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/fonts/NotoSerifSC.otf",
+    "sha256": "51af66522331959dce2689b39c9ff65e27505dd38110412e07c0ae7f11e3ec5a"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/LICENSE",
+    "sha256": "766ccc1f306c885aa45542a9846bbd0a505b27a0374f146778171c2254ce18e3"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_AMS-Regular.ttf",
+    "sha256": "68534840bcfdd2bffb6f0e8deb48684dd01e7f04ea2813267577afb906de1d13"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_AMS-Regular.woff",
+    "sha256": "30da91e84c893f875e252689faebdc590b2871145e8adc7f9a9d4dbd8ce0b251"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_AMS-Regular.woff2",
+    "sha256": "0cdd387c9590a1a9f9794560022dbb59654a7d86f187aa0c81495ad42d3a7308"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Caligraphic-Bold.ttf",
+    "sha256": "07d8e303ce4fc12b4bb54f1004170dd190a1f3db45d400fe68060df3e0897268"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Caligraphic-Bold.woff",
+    "sha256": "1ae6bd7475590e97e7f145a89e09ccde322f7a6bc0b91607b1c8b8ee28290fed"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Caligraphic-Bold.woff2",
+    "sha256": "de7701e42cf1f4cf0b766c03fb27977207eee2f4fd5d76fa82188406da43ea4c"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Caligraphic-Regular.ttf",
+    "sha256": "ed0b74372feefcbb9c0666b2e210da37b7e49fa7fbbf3eeb11db5f693dacfbb7"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Caligraphic-Regular.woff",
+    "sha256": "3398dd02302557a793f2863f88e02d96ce10df2abffa07c8e9fa90775116e65c"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Caligraphic-Regular.woff2",
+    "sha256": "5d53e70ad607c2352162dec9e0923fb54ecdafaccbf604cd8dcf7d00facb989b"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Fraktur-Bold.ttf",
+    "sha256": "9163df9c7122432e6495b4229fa9071cf9ae86a758ae5efc4924ec2e1a6dbce1"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Fraktur-Bold.woff",
+    "sha256": "9be7ceb88004ab8ad124082246fbfcca4091e36385d4ec6ed1df67375dad50fb"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Fraktur-Bold.woff2",
+    "sha256": "74444efd593c005e3f4573b44524704c0af0a937fe911cca9e94068d0d140d3f"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Fraktur-Regular.ttf",
+    "sha256": "1e6f9579e90e2cac37f8f60a597c436e075c114385652b7cbeb0dec0421291b3"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Fraktur-Regular.woff",
+    "sha256": "5e28753be717dac97f559f49bc10be9cf3c124ddcabda6659d11cb68febc6463"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Fraktur-Regular.woff2",
+    "sha256": "51814d270d06ff0255dba0799994fa4d8c84d11f09951d47595f4abb1f3602dc"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Main-Bold.ttf",
+    "sha256": "138ac28d1663b3037e9c5f52371fa5c63d8324f4a38d22cd573e6ea3a3fd0cf8"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Main-Bold.woff",
+    "sha256": "c76c5d696297d51b9cb1639c7da4334f0e7dec81b42b11213b5e25ef671bb822"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Main-Bold.woff2",
+    "sha256": "0f60d1b897938ec918c8ce073092411baf9438f6739465693ff18b0f9d20b021"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Main-BoldItalic.ttf",
+    "sha256": "70ee1f64a20f2048c21940ef46d0144fd215baa953ca69afd1e31e98544f708f"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Main-BoldItalic.woff",
+    "sha256": "a6f7ec0d846ac7ad975adb8959c37ed49b94acbc4ae436db9ce9e20287e4a64c"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Main-BoldItalic.woff2",
+    "sha256": "99cd42a3c072d918f2f44984a807cf7aa16e13545fd0875fc07c6c65f99e715b"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Main-Italic.ttf",
+    "sha256": "0d85ae7cc30f23790a7f1a58c4a112fdca8aae769b6ba11429af1d98b1b6cb3a"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Main-Italic.woff",
+    "sha256": "f1d6ef86f3b11a528bd5185199bd2443ecb2b0dead96d88674b5a2c12be24bdf"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Main-Italic.woff2",
+    "sha256": "97479ca6cce906abc961ecac96faa5f9ca2e61b8e7670d475826bcdee9a7c267"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Main-Regular.ttf",
+    "sha256": "d0332f52868370fd83ae7fa46470f90c8f2eab2fcf12bc4f88080b340c95a830"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Main-Regular.woff",
+    "sha256": "c6368d87e8a1a3a5d337623d83d8dc4b868f242a9ad476237d6f8d1e0f168cdc"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Main-Regular.woff2",
+    "sha256": "c2342cd8b869e01752a9321dc17213fc40d4d04c79688c1d43f2cf316abd7866"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Math-BoldItalic.ttf",
+    "sha256": "f9377ab0271cda59af24bcffbd46a4d0c8a3572ffafdbb38de2ad5ea7b0d5ee5"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Math-BoldItalic.woff",
+    "sha256": "850c0af5c2238497febaf5e461d880bf458c341f42f4f330f1b1ab5698b1998e"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Math-BoldItalic.woff2",
+    "sha256": "dc47344dbb6cb5b655c8460d561f4df5f501b90c804ad3c6cec65fe322351ab1"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Math-Italic.ttf",
+    "sha256": "08ce98e51b04d58945a301e639e02b6998af29fdfd61a7b8afdd07bbfc479d4a"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Math-Italic.woff",
+    "sha256": "8a8d244581371912b8f3f5a23e2437cb2a59cd9bcaebb0346e722c05737a2571"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Math-Italic.woff2",
+    "sha256": "7af58c5ec8f132a2ddde9027c6d7814decce4d3b822a11192a42a20e2e973264"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_SansSerif-Bold.ttf",
+    "sha256": "1ece03f79f95277d57dc7f6b435a74e1379b0d46104a8530286b60ff49369ea0"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_SansSerif-Bold.woff",
+    "sha256": "ece03cfd83e22c212cdef66feb8442d25a083beb988db3f1883f3f9738d750ba"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_SansSerif-Bold.woff2",
+    "sha256": "e99ae51144bf1232efcc1bfe5add36262c6866b0faab24fa75740e1b98577a62"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_SansSerif-Italic.ttf",
+    "sha256": "3931dd81faed86ba021bb2bbdc36f5bed9a38d6b4f4077aca59b265aa1b02083"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_SansSerif-Italic.woff",
+    "sha256": "91ee67500cc0129aa0ace3ac5c61ff1692102f0f31d02b69347fba35dcb75bf2"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_SansSerif-Italic.woff2",
+    "sha256": "00b26ac825e2095056396e0553b8ac26d3f8ad158c3826e28b4c45b385c4714a"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_SansSerif-Regular.ttf",
+    "sha256": "f36ea897e19f4a2e571d1e900e4e3710e438deb05a842486045ba0a3e616a4ad"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_SansSerif-Regular.woff",
+    "sha256": "11e4dc8a6471ff6d6ee561d53d10fde8f7489e798257ff449c5d37c197435605"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_SansSerif-Regular.woff2",
+    "sha256": "68e8c73ef42afd3ccec58bf0fba302cce448938e7fc020a5e31f8a952eee1342"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Script-Regular.ttf",
+    "sha256": "1c67f068fea8bb09bf099c088b1cf64bd27516a6e07f4684344873564bb66a67"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Script-Regular.woff",
+    "sha256": "d96cdf2b3bdd4d64a8fd5f74a4c467f123a8a73931cd435889f08ffaf9bf947a"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Script-Regular.woff2",
+    "sha256": "036d4e95149b69ff9bcc0cd55771efeb25ffa3947293e69acd78d5ac328c684b"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Size1-Regular.ttf",
+    "sha256": "95b6d2f1a50173bfedb8c63e1d1c99b10427d0a4df4201cb44513b226951a22b"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Size1-Regular.woff",
+    "sha256": "c943cc986384f59e86bea5fd7dc50a9c4dfe567a7c05eb40d6790720dead97c9"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Size1-Regular.woff2",
+    "sha256": "6b47c40166b6dbe21a5dfca7718413f2147fd2399be1ba605d8ad39cedf25dfe"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Size2-Regular.ttf",
+    "sha256": "a6b2099fb555c60e3a0db3a08842ebf1d732c6eb4e4bf44913613bed4fc4e39b"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Size2-Regular.woff",
+    "sha256": "2014c523c3210bcc166648c4d4cc57f05b747df07a24277bf71c51e67dc79e3d"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Size2-Regular.woff2",
+    "sha256": "d04c54219f9eaec6d4d4fd42dfb28785975a4794d6b2fc71e566b9cd6db842dd"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Size3-Regular.ttf",
+    "sha256": "500e04d54f0d51666332c9d2089aa803be22aa878eca539e59fa53c6e522b082"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Size3-Regular.woff",
+    "sha256": "6ab6b62e9b62dae2c00dd90f791bd10950be0ecc3490d7d6045f51c2e8fe0949"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Size3-Regular.woff2",
+    "sha256": "73d591271b1604960cb10bb90fee021670af7297017e0e98480b332d11f51995"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Size4-Regular.ttf",
+    "sha256": "c647367d1dd4e162468717d020e1fc0f1dc5c26ebfdffbe55261713bf88c5877"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Size4-Regular.woff",
+    "sha256": "99f9c6750b489c9462bf04900bd3f939df9b829339daaaaa99ef5495cdddea58"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Size4-Regular.woff2",
+    "sha256": "a4af7d414440a1c1790825cfb700cf9cf43b0f2c4b04f0ebc523011ad9853ec0"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Typewriter-Regular.ttf",
+    "sha256": "f01f3e87d9c6a61c0c081ceb577abd864eb00a612f7ac1620dd6915fad2ef5aa"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Typewriter-Regular.woff",
+    "sha256": "e14fed02b1aba7ce9f5afd5844b5d0321b22351febc720e0de8b8723527609f7"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/fonts/KaTeX_Typewriter-Regular.woff2",
+    "sha256": "71d517d67827787cfabdf186914cc3358eda539e37931941f2b2fd4a21f68c0b"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/host.css",
+    "sha256": "122f649d8ba5fcfad75a1364516346e98a4fcd0694266445a7135eb6e9eff488"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/host.html",
+    "sha256": "47d50b98c086e475654c660289323b7bfc41ea29f43c1195a5cbd8562c290926"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/host.js",
+    "sha256": "26fc4a46acef1dde9bd9aa4476d41db7ab5d02e106c5dfb64bdb8e52069ca634"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/katex.min.css",
+    "sha256": "383e7b8d45a3003d6ca1f862b324854a548da7d62b4aab69104c44e7d10022af"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/katex.min.js",
+    "sha256": "5e4f3b03c66a3360fe5c070da797900dd74437f58f23957443f4cbd26149f74e"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/math/vendor-manifest.json",
+    "sha256": "8dbb01b800c1f6f6e04097a1cac68db5173039caae35968162d3e6b04b870940"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/mermaid.min.js",
+    "sha256": "581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/mermaid_host.html",
+    "sha256": "e18c471b40678ea5355dd8eff75e6b05ebda9c4e600433fbd1b12071c4d0c3d4"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/python/amber_python.py",
+    "sha256": "5530c0f96dacea244f4a944cc841513a8cb73bee850fbdc6782e26e40c8a146e"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/python/python314.zip",
+    "sha256": "8a56ec952002aaa9e584268b54b888ae1945f21e7b90d8ef462497b56c0f0343"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/terminal/LICENSE-addon-fit.txt",
+    "sha256": "e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/terminal/LICENSE-xterm.txt",
+    "sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/terminal/addon-fit.js",
+    "sha256": "bdaefa370b1bfc42ee88d46fe6072400902a4d4b2d45cd93438dda9b23c97089"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/terminal/host.css",
+    "sha256": "fbad9edc20592b1182c220d340417750e668313b8f150800554a33ab2cae1e05"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/terminal/host.html",
+    "sha256": "89e3b499619483616254082fa30c6cf83b36426202240d8c7e2378b137d3d599"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/terminal/host.js",
+    "sha256": "9850010a4dfa5c39da26475b8a39e41756ebba24dc3e50d14ff88fbbf4dc7929"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/terminal/vendor-manifest.json",
+    "sha256": "f5cdd797f43a86c2f89174f5283aa7e708a0523f4cdf61179cdce735b0644ed2"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/terminal/xterm.css",
+    "sha256": "ba8e6985669488981ccf40c0cefe3aba80722cb6c92de7ad628b0bd717faf2b6"
+  },
+  {
+    "path": "harmony/entry/src/main/resources/rawfile/terminal/xterm.js",
+    "sha256": "1f991ac3b4b283ebf96e60ae23a00a52765dd3a2e46fa6fdda9f1aab032f7495"
+  },
+  {
+    "path": "harmony/entry/src/test/backup_io.test.cjs",
+    "sha256": "6ea69e855fa54c7c1075f4461265666c03a2d3d3585f2086dee88990a6c726fa"
+  },
+  {
+    "path": "harmony/entry/src/test/provider_field_binding.test.cjs",
+    "sha256": "5af7df707e58cbd1822317d969358bc54c583ac769d8c4a71dfc1c2264326eef"
+  },
+  {
+    "path": "harmony/entry/src/test/provider_template_entry.test.cjs",
+    "sha256": "64a33f867290fcf5e8af6cf2297530120c1ec3ec4660e34a3179a0d12324a642"
+  },
+  {
+    "path": "harmony/entry/src/test/ui_send_provider_lifecycle.test.cjs",
+    "sha256": "36c02fc152ed313c59159bd735fbc83db83f60b653c54f7f266c49b5e2cd1e58"
+  },
+  {
+    "path": "harmony/entry/src/test/webdav_transport.test.cjs",
+    "sha256": "eeeec3548f0aae96f885212713952c4b8fe0e8cab304cc940d434a6172778293"
+  },
+  {
+    "path": "harmony/hvigor/hvigor-config.json5",
+    "sha256": "f109b28cab9be7b10885f92ebfc755128cf1deff2d7c0f8801af7bef1dd19106"
+  },
+  {
+    "path": "harmony/native/mosh/tests/host_addon.cpp",
+    "sha256": "031604ecaabbbf12b95d21af4f3587735204e7ec1cab8c0dbb553a5a60e25256"
+  },
+  {
+    "path": "harmony/native/python/tests/host_addon.cpp",
+    "sha256": "e78bfd7dfe4577020aed49fb2336e0c63643903e335131e150994066800db4b9"
+  },
+  {
+    "path": "harmony/native/rust-napi/include/amber_native.h",
+    "sha256": "d7be8ecd4895b8166b53fe9f1965655565590d1b63115ba75dcbfc79570c0c78"
+  },
+  {
+    "path": "harmony/native/ssh/tests/core_lifetime.cpp",
+    "sha256": "9c4dcd1d3d82c3034b346a609d3360091a731bc61690a6237e1cea848eafc45e"
+  },
+  {
+    "path": "harmony/native/ssh/tests/host_addon.cpp",
+    "sha256": "4f7f8f0e640b4887a8861486a77cd2d82cefa43f10303c3839615a9240a11e4c"
+  },
+  {
+    "path": "harmony/oh-package.json5",
+    "sha256": "e8dd25420b820dcad120d4f9ecce27c91fa36dc02beedcbf6dd93e31b80f1f0c"
+  },
+  {
+    "path": "harmony/tests/chat-overlay-lifecycle.test.cjs",
+    "sha256": "1db630d628a97679cd2fe3951edaa2de80e3c7cb07225a8687905e8bdd6b9ba7"
+  },
+  {
+    "path": "harmony/tests/novel-editor-lifecycle.test.cjs",
+    "sha256": "9ddcfea8be14ee3e79fe4f2b23d8229b94900d45724f1064e439181190e06608"
+  }
+]

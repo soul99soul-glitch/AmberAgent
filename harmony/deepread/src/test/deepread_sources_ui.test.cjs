@@ -8,13 +8,14 @@ const filename = path.resolve(__dirname, '../../../entry/src/main/ets/pages/Deep
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 function fixture() {
   const source = fs.readFileSync(filename, 'utf8');
-  const fields = source.slice(source.indexOf('  @StorageProp('), source.indexOf('\n  build():')).replace(/@(?:StorageProp\([^)]*\)|State)\s*/g, '');
+  const fields = source.slice(source.indexOf('  @Prop topicId'), source.indexOf('\n  build():')).replace(/@(?:StorageProp\([^)]*\)|State|Prop)\s*/g, '');
   const calls = [], subscriptions = [], reads = [];
   let topicId = 'topic-a', start = async () => {}, context = { startAbility: want => { calls.push(want); return start(want); } };
   const exports = {};
   vm.runInNewContext(ts.transpileModule('class SourcesFixture {' + fields + '}\nexports.Page = SourcesFixture;', {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
-  }).outputText, { exports, Error, Promise, String, url: { URL: { parseURL: value => new URL(value) } },
+  }).outputText, { exports, Error, Promise, String, Curve: { EaseOut: 'ease-out' }, getProductKind: () => 'deepread',
+    url: { URL: { parseURL: value => new URL(value) } },
     router: { getParams: () => ({ topicId }) }, AppStorage: { get: () => context },
     getRepository: () => ({ observe: () => ({ subscribe: fn => { const item = { fn, closed: false }; subscriptions.push(item); return () => { item.closed = true; }; } }),
       get: id => { const d = deferred(); reads.push({ id, ...d }); return d.promise; } }),
@@ -74,4 +75,44 @@ test('a newer source observation wins over the older initial repository read in 
   f.reads[0].resolve(stale); await Promise.resolve(); await Promise.resolve();
   assert.equal(f.page.sources[0].status, 'ready'); assert.equal(f.page.sources[0].content, '正文');
   assert.equal(f.page.inputText, 'ready');
+});
+
+test('embedded sources read the article topic, and closing during exit invalidates callbacks and actions', async () => {
+  const f = fixture(); f.page.topicId = 'embedded-topic';
+  let active = true, closes = 0;
+  f.page.isActive = () => active; f.page.onClose = () => closes++;
+  f.page.aboutToAppear();
+  assert.equal(f.reads[0].id, 'embedded-topic', 'the parent article ID wins over router params');
+  active = false;
+  f.subscriptions[0].fn(entry('departing'));
+  f.reads[0].resolve(entry('departing')); await Promise.resolve();
+  await f.page.openSource(source('https://example.com/departing'));
+  f.page.toggleSource('departing'); f.page.finish();
+  assert.equal(f.page.inputText, ''); assert.equal(f.calls.length, 0);
+  assert.equal(f.page.expanded, ''); assert.equal(closes, 0);
+  active = true; f.page.finish();
+  assert.equal(closes, 1); assert.equal(f.subscriptions[0].closed, true);
+  f.page.finish(); assert.equal(closes, 1, 'completion unsubscribes and dismisses exactly once');
+});
+
+test('source disclosure animates the real expansion and reduced motion reaches the same content directly', () => {
+  for (const reduced of [false, true]) {
+    const f = fixture(); f.page.aboutToAppear(); f.page.reduceMotion = reduced; const animations = [];
+    f.page.getUIContext = () => ({ animateTo: (options, update) => { animations.push(options); update(); } });
+    f.page.toggleSource('source-a'); assert.equal(f.page.expanded, 'source-a');
+    f.page.toggleSource('source-a'); assert.equal(f.page.expanded, '');
+    f.page.toggleSource('source-b'); assert.equal(f.page.expanded, 'source-b');
+    assert.equal(animations.length, reduced ? 0 : 3);
+    assert.ok(animations.every(options => options.duration === 200));
+    f.page.appBackgrounded = true; f.page.toggleSource('source-c'); assert.equal(f.page.expanded, 'source-c');
+    assert.equal(animations.length, reduced ? 0 : 3);
+  }
+});
+
+test('a stale disclosure animation callback cannot change a departed and reopened source page', () => {
+  const f = fixture(); f.page.aboutToAppear(); let update;
+  f.page.getUIContext = () => ({ animateTo: (_options, callback) => { update = callback; } });
+  f.page.toggleSource('old-source'); f.page.aboutToDisappear(); f.page.aboutToAppear();
+  update(); assert.equal(f.page.expanded, '');
+  f.page.aboutToDisappear(); f.page.toggleSource('departed'); assert.equal(f.page.expanded, '');
 });

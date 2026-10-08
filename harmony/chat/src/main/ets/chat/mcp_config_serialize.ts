@@ -13,6 +13,7 @@
 
 import type { JsonObject, JsonValue } from './json.ts';
 import type { InputSchemaObj } from './tool.ts';
+import { toolParametersToJson } from './tool.ts';
 import type { McpCommonOptions, McpServerConfig, McpTool } from './mcp_config.ts';
 import {
   makeMcpCommonOptions, makeMcpSseServer, makeMcpStreamableHttpServer, makeMcpTool,
@@ -35,11 +36,7 @@ const boolOr = (o: JsonObject, k: string, dflt: boolean): boolean =>
 // ===== InputSchema(Tool.kt:28-36) =====
 
 const serializeInputSchema = (s: InputSchemaObj): string =>
-  `{"type":"object","properties":${JSON.stringify(s.properties)}` +
-  (s.required !== null
-    ? `,"required":[${s.required.map(esc).join(',')}]`
-    : '') +
-  '}';
+  JSON.stringify(toolParametersToJson(s));
 
 const parseInputSchema = (v: JsonValue | undefined): InputSchemaObj | null => {
   if (!isObj(v)) return null;
@@ -49,7 +46,10 @@ const parseInputSchema = (v: JsonValue | undefined): InputSchemaObj | null => {
     ? null
     : requiredRaw.filter((x: JsonValue): boolean => typeof x === 'string')
       .map((x: JsonValue): string => x as string);
-  return { type: 'object', properties, required };
+  const schema: InputSchemaObj = { type: 'object', properties, required };
+  if (Object.keys(v).some((key: string): boolean =>
+    key !== 'type' && key !== 'properties' && key !== 'required')) schema.jsonSchema = v;
+  return schema;
 };
 
 // ===== McpTool(McpConfig.kt:16-25) =====
@@ -58,6 +58,7 @@ const serializeMcpTool = (t: McpTool): string =>
   `{"enable":${t.enable},"name":${esc(t.name)}` +
   (t.description !== null ? `,"description":${esc(t.description)}` : '') +
   (t.inputSchema !== null ? `,"inputSchema":${serializeInputSchema(t.inputSchema)}` : '') +
+  (t.annotations !== undefined ? `,"annotations":${JSON.stringify(t.annotations)}` : '') +
   `,"needsApproval":${t.needsApproval}}`;
 
 const parseMcpTool = (v: JsonValue): McpTool => {
@@ -67,6 +68,7 @@ const parseMcpTool = (v: JsonValue): McpTool => {
     name: strOr(o, 'name', ''),
     description: typeof o['description'] === 'string' ? o['description'] as string : null,
     inputSchema: parseInputSchema(o['inputSchema']),
+    annotations: isObj(o['annotations']) ? o['annotations'] : undefined,
     needsApproval: boolOr(o, 'needsApproval', true),
   });
 };

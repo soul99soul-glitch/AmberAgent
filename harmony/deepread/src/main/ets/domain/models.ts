@@ -1,6 +1,7 @@
 // Deep Read output data model — HarmonyOS port of Android DeepReadModels.kt
 // ArkTS: interface + factory functions, no runtime mutation
 
+import type { DeepReadTemplateArticle } from './synthesis_article.ts';
 import type { DeepReadInputSource } from './input_sources.ts';
 import type { DeepReadSectionStatus, DeepReadGenerationPhase } from './enums.ts';
 
@@ -8,12 +9,14 @@ export interface TimelineEvent {
   date: string;
   event: string;
   isHighlight: boolean;
+  why?: string | null;
   imageUrl: string | null;
   imageCaption: string | null;
 }
 
 export interface CorePoint {
   point: string;
+  sources?: number[];
   supporting: string | null;
   imageUrl: string | null;
   imageCaption: string | null;
@@ -22,6 +25,8 @@ export interface CorePoint {
 // ReadingLink: Android 只有 title/url/source; publishedAt 是鸿蒙扩展
 // (prefetcher 从 OG meta 标签提取发布时间,Android 忽略此字段)
 export interface ReadingLink {
+  /** Stable research/input identity for numbered generation sources. */
+  sourceId?: string;
   title: string;
   url: string;
   source: string | null;
@@ -30,7 +35,22 @@ export interface ReadingLink {
 
 export interface Perspective {
   holder: string | null;
+  interest?: string | null;
+  quote?: string | null;
+  quoteBy?: string | null;
+  sources?: number[];
   viewpoint: string;
+}
+
+export interface DeepReadImpact {
+  target: string;
+  horizon: 'short' | 'long';
+  effect: string;
+}
+
+export interface DeepReadUncertainty {
+  claim: string;
+  status: 'single_source' | 'conflicting' | 'pending_official' | '';
 }
 
 export interface Quote {
@@ -113,12 +133,13 @@ export interface DeepReadSectionState {
 export interface DeepReadTemplateSnapshot {
   id: string;
   name: string;
-  kind: 'native' | 'editorial' | 'custom';
+  kind: 'native' | 'editorial' | 'custom' | 'synthesis';
   html: string | null;
   capturedAt: number;
 }
 
 export interface DeepReadOutput {
+  templateArticle?: DeepReadTemplateArticle;
   templateId?: string;
   templateSnapshot?: DeepReadTemplateSnapshot;
   /** Original topic sources, stored with the draft so history can retry every source. */
@@ -131,6 +152,12 @@ export interface DeepReadOutput {
   generationComplete: boolean;
   generationPhase: DeepReadGenerationPhase;
   summary: string;
+  bottomLine?: string;
+  impacts?: DeepReadImpact[];
+  watch?: string[];
+  /** Stable 1-based generation order, including text/file sources with no URL. */
+  sources?: ReadingLink[];
+  uncertainties?: (string | DeepReadUncertainty)[];
   keyEntities: string[];
   timeline: TimelineEvent[] | null;
   corePoints: CorePoint[] | null;
@@ -153,6 +180,11 @@ export const makeEmptyDeepReadOutput = (): DeepReadOutput => ({
   generationComplete: false,
   generationPhase: 'IDLE',
   summary: '',
+  bottomLine: '',
+  impacts: [],
+  watch: [],
+  sources: [],
+  uncertainties: [],
   keyEntities: [],
   timeline: null,
   corePoints: null,

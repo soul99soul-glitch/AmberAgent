@@ -7,7 +7,8 @@ import {
   ACCENT, BG, ERROR, INK, INK3, INK4, LINE, MOTION_ENTER, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2,
   WARNING_FG,
 } from '../design/tokens.ets';
-import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
+import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { CenteredTitleBar } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { NovelPolishCreateSheet, NovelPolishCreateSheetChapter } from '../components/NovelPolishCreateSheet.ets';
@@ -217,12 +218,17 @@ struct NovelChapterReaderPage {
 
   private jumpTo(idx: number): void {
     const p: NovelProject | null = this.project;
-    if (this.busy || p === null || idx < 0 || idx >= p.chapters.length) return;
+    if (!this.pageAlive || !this.loaded || this.busy || p === null || idx < 0 || idx >= p.chapters.length) return;
+    const nextChapterId: string = p.chapters[idx].id;
+    if (nextChapterId === this.chapterId) return;
     animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => {
-      this.chapterId = p.chapters[idx].id;
+      this.chapterId = nextChapterId;
       this.notice = '';
       this.evidenceQuote = '';
+      this.evidenceFocused = false;
     });
+    // 正文重挂载，但 Scroll 保留原控制器；同步归顶避免下一章沿用旧章滚动位置。
+    this.readerScroller.scrollEdge(Edge.Top);
   }
 
   private versionKindLabel(kind: NovelChapterVersionKind): string {
@@ -635,6 +641,24 @@ struct NovelChapterReaderPage {
   }
 
   @Builder
+  private VersionPreviewSheet(version: NovelChapterVersion): void {
+    NovelChapterVersionPreview({
+      title: version.title, content: version.content,
+      metadata: `${this.versionKindLabel(version.kind)} · ${this.versionTime(version.createdAt)} · ${charCountOf(version.content)} 字`,
+      busy: this.busy, errorMessage: this.errorMsg, bottomPadding: Math.max(this.navBarHeight, 24),
+      forkName: this.versionForkName, forkAvailable: this.versionCheckpoint !== null,
+      forkDetail: this.versionForkDetail, busyLabel: this.versionForking ? '创建分支中…' : '恢复中…',
+      onForkName: (name: string): void => { this.versionForkName = name; },
+      onFork: (): void => { this.confirmVersionFork(); },
+      onBack: (): void => {
+        if (!this.busy) { this.versionPreview = null; this.errorMsg = ''; }
+      },
+      onClose: (): void => { this.closeVersions(); },
+      onRestore: (): void => { this.confirmRestoreVersion(); },
+    })
+  }
+
+  @Builder
   private VersionsSheet(): void {
     Column() {
       Blank().onClick((): void => { this.closeVersions(); })
@@ -841,20 +865,51 @@ struct NovelChapterReaderPage {
     return p !== null && idx >= 0 && idx < p.chapters.length - 1;
   }
 
+  @Builder
+  private NovelReaderTitleBar(): void {
+    Row({ space: 12 }) {
+      Row() {
+        Icon({ name: 'back', iconSize: 18, color: INK })
+      }.width(44).height(44).borderRadius(22).backgroundColor(SURFACE)
+        .border({ width: 0.5, color: LINE }).justifyContent(FlexAlign.Center)
+        .onClick((): void => { if (!this.onBackPress()) router.back(); })
+        .accessibilityText('返回')
+      Column({ space: 2 }) {
+        Text(this.chapterIndex() >= 0
+          ? `第 ${this.chapterOrdinal()} 章 · ${charCountOf(this.chapter()?.content ?? '')} 字` : '')
+          .fontSize(12).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM).maxLines(1)
+        Text((this.chapter()?.title ?? '').length > 0 ? this.chapter()?.title ?? '' : '未命名章节')
+          .fontSize(17).fontWeight(600).fontColor(INK).fontFamily(FONT_SANS_SEMIBOLD)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      Row() {
+        Text('⋯').fontSize(24).fontWeight(600).fontColor(INK3)
+      }.width(44).height(44).borderRadius(22).backgroundColor(SURFACE)
+        .border({ width: 0.5, color: LINE }).justifyContent(FlexAlign.Center)
+        .enabled(!this.busy).onClick((): void => { if (!this.busy) this.menuOpen = true; })
+        .accessibilityText('章节操作')
+    }.width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 10, bottom: 10 })
+      .backgroundColor(BG)
+  }
+
   build(): void {
     Stack() {
       // 主题纪元重挂载包括正文与浮层，确保全量重读颜色令牌。
       ForEach([this.themeEpoch], (_epoch: number): void => {
         Stack() {
           Column() {
-            CenteredTitleBar({
-              title: (this.chapter()?.title ?? '').length > 0 ? this.chapter()?.title ?? '' : '未命名章节',
-              subtitle: this.chapterIndex() >= 0
-                ? `第 ${this.chapterOrdinal()} 章 · ${charCountOf(this.chapter()?.content ?? '')} 字` : '',
-              actionIcon: 'more',
-              onAction: (): void => { if (!this.busy) this.menuOpen = true; },
-              onBack: (): void => { if (!this.onBackPress()) router.back(); },
-            })
+            if (getProductKind() === 'novel') {
+              this.NovelReaderTitleBar()
+            } else {
+              CenteredTitleBar({
+                title: (this.chapter()?.title ?? '').length > 0 ? this.chapter()?.title ?? '' : '未命名章节',
+                subtitle: this.chapterIndex() >= 0
+                  ? `第 ${this.chapterOrdinal()} 章 · ${charCountOf(this.chapter()?.content ?? '')} 字` : '',
+                actionIcon: 'more',
+                onAction: (): void => { if (!this.busy) this.menuOpen = true; },
+                onBack: (): void => { if (!this.onBackPress()) router.back(); },
+              })
+            }
             if (this.errorMsg.length > 0 && !this.editOpen && this.versionPreview === null) {
               Text(this.errorMsg).fontSize(12).fontColor(ERROR).lineHeight(18)
                 .width('100%').padding({ left: 20, right: 20, bottom: 8 })
@@ -922,20 +977,7 @@ struct NovelChapterReaderPage {
             if (this.versionPreview === null) {
               this.VersionsSheet()
             } else {
-              NovelChapterVersionPreview({
-                title: this.versionPreview.title, content: this.versionPreview.content,
-                metadata: `${this.versionKindLabel(this.versionPreview.kind)} · ${this.versionTime(this.versionPreview.createdAt)} · ${charCountOf(this.versionPreview.content)} 字`,
-                busy: this.busy, errorMessage: this.errorMsg, bottomPadding: Math.max(this.navBarHeight, 24),
-                forkName: this.versionForkName, forkAvailable: this.versionCheckpoint !== null,
-                forkDetail: this.versionForkDetail, busyLabel: this.versionForking ? '创建分支中…' : '恢复中…',
-                onForkName: (name: string): void => { this.versionForkName = name; },
-                onFork: (): void => { this.confirmVersionFork(); },
-                onBack: (): void => {
-                  if (!this.busy) { this.versionPreview = null; this.errorMsg = ''; }
-                },
-                onClose: (): void => { this.closeVersions(); },
-                onRestore: (): void => { this.confirmRestoreVersion(); },
-              })
+              this.VersionPreviewSheet(this.versionPreview)
             }
           }
           if (this.editOpen) {

@@ -1,0 +1,14 @@
+/var/folders/2c/0pbv0ybx6h1crqbxq9zft5780000gn/T/amber-native-vsync-ycTIMg/test.cpp:96:18: warning: variable 'frames' set but not used [-Wunused-but-set-variable]
+   96 |         uint64_t frames = 0;
+      |                  ^
+1 warning generated.
+✔ streaming request deduplicates snapshots and skips devices before API20 (43.932208ms)
+✔ real native worker handles duplicate start, stop during wait, late callback and failures (731.152875ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 954.603209

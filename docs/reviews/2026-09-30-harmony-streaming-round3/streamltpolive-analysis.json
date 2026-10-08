@@ -1,0 +1,98 @@
+{
+  "clock_sync": {
+    "trace_monotonic_s": 170943.87054,
+    "realtime_ms": 1790789589443
+  },
+  "list_motion_wall_time": [
+    "2026-10-01T01:32:30.037",
+    "2026-10-01T01:32:37.471"
+  ],
+  "one_second_samples_fully_inside_motion": [
+    {
+      "time": "2026-10-01T01:32:31.153",
+      "fps": 92,
+      "refresh_hz": 60
+    },
+    {
+      "time": "2026-10-01T01:32:32.153",
+      "fps": 59,
+      "refresh_hz": 60
+    },
+    {
+      "time": "2026-10-01T01:32:33.153",
+      "fps": 57,
+      "refresh_hz": 60
+    },
+    {
+      "time": "2026-10-01T01:32:34.153",
+      "fps": 56,
+      "refresh_hz": 60
+    },
+    {
+      "time": "2026-10-01T01:32:35.201",
+      "fps": 55,
+      "refresh_hz": 60
+    },
+    {
+      "time": "2026-10-01T01:32:36.153",
+      "fps": 53,
+      "refresh_hz": 60
+    },
+    {
+      "time": "2026-10-01T01:32:37.153",
+      "fps": 54,
+      "refresh_hz": 60
+    }
+  ],
+  "motion_fps_mean": 60.857142857142854,
+  "motion_intervals": {
+    "count": 419,
+    "median_ms": 16.664843,
+    "p95_ms": 33.31875,
+    "max_ms": 33.386719,
+    "intervals_over25ms": 28
+  },
+  "early_app_sample_fps": [
+    106,
+    115,
+    92
+  ],
+  "early_sample_caveat": "Application frames during generation start and refresh transition; no full isolated120Hz automatic-scroll second in trace",
+  "first_system_60hz_vote": {
+    "trace_seconds": 0.8019429999985732,
+    "line": 55625
+  },
+  "list_scroll": {
+    "count": 466,
+    "p50": 9.882221,
+    "p95": 22.813864,
+    "max": 32.994339
+  },
+  "scroll_to_edge_calls": [],
+  "capture_ui_actions": "No input injected by this task; user started generation",
+  "tail_sample_caveat": "Samples43,32,24fps occur after measured List motion; excluded from automatic-scroll result",
+  "trace_path": "/tmp/streamltpolive.trace",
+  "pid": 52886,
+  "touch_idle": [
+    {
+      "line": 55449,
+      "text": "OS_FFRT_5_4361-55617   (   1812) [001] .... 170904.657634: tracing_mark_write: B|1812|H:StateMachine state change: TouchUp -> TouchIdle|M0538"
+    }
+  ],
+  "steady_60hz_motion": {
+    "fps": [
+      59,
+      57,
+      56,
+      55,
+      53,
+      54
+    ],
+    "mean_fps": 55.666666666666664,
+    "frame_intervals": 328,
+    "intervals_over25ms": 25,
+    "median_ms": 16.666875,
+    "p95_ms": 33.322813,
+    "max_ms": 33.386719
+  }
+}

@@ -15,6 +15,8 @@
 import {
   applyTheme, setAccentColor, applyPaperPalette, applyAmoledBlack, BG,
 } from './tokens.ets';
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
+import { NOVEL_THEMES } from './novel_themes.ets';
 import type { KeyValueStore } from '@amber/chat-domain';
 
 // D0-11:AMOLED 纯黑(深色模式画布纯黑;持久化 KV theme_amoled_black)
@@ -72,6 +74,7 @@ export interface ThemePack {
   canvasScope?: string;
   // 源文件带 design.dark(Android 规则:自定义深色色板时关闭 AMOLED 纯黑覆写)
   designDark?: boolean;
+  fixedColorMode?: string; // 小说沉浸纸色固定明暗，保留外观偏好。
   builtin: boolean;
 }
 
@@ -143,6 +146,7 @@ export const BUILTIN_PACKS: ThemePack[] = [
 
 // 先跑 applyTheme 拿状态色/玻璃/HOME alpha 默认,再覆写 pack 纸色(pack 只管纸色组)
 export const applyThemePack = (pack: ThemePack, dark: boolean): void => {
+  dark = resolveThemeDark(pack, dark);
   applyTheme(dark);
   const p: ThemePalette = dark ? pack.dark : pack.light;
   applyPaperPalette({
@@ -157,7 +161,7 @@ export const applyThemePack = (pack: ThemePack, dark: boolean): void => {
     borderSoft: p.borderSoft,
     border: p.border,
     userBg: p.ink,
-    userInk: dark ? pack.light.ink : pack.dark.ink,
+    userInk: pack.fixedColorMode !== undefined ? p.bg : (dark ? pack.light.ink : pack.dark.ink),
     codeBg: p.surface2,
     bgFadeStart: `#00${p.bg.substring(1)}`,
     bgFadeEnd: p.bg,
@@ -166,7 +170,7 @@ export const applyThemePack = (pack: ThemePack, dark: boolean): void => {
   setAccentColor(pack.accent, pack.accentInk);
   // D0-11:AMOLED 纯黑覆写(仅深色;画布/渐隐/玻璃改纯黑,卡片面保持原色分层)。
   //   源文件带自定义 design.dark 的包跳过(Android 同规则:让作者的深色色板/渐变生效)
-  if (dark && amoledBlack && pack.designDark !== true) {
+  if (dark && amoledBlack && pack.designDark !== true && pack.fixedColorMode === undefined) {
     applyAmoledBlack();
   }
 };
@@ -334,6 +338,7 @@ class ThemePackStore {
   async hydrate(kv: KeyValueStore): Promise<void> {
     if (this.hydrated) return;
     this.hydrated = true;
+    if (getProductKind() === 'novel') this.currentPack = NOVEL_THEMES[0];
     try {
       const rawCustom: string | null = await kv.get(THEME_CUSTOM_PACKS_KEY);
       if (rawCustom !== null) {
@@ -369,7 +374,8 @@ class ThemePackStore {
   }
 
   all(): ThemePack[] {
-    return [...BUILTIN_PACKS, ...this.imported];
+    return getProductKind() === 'novel'
+      ? [...NOVEL_THEMES, ...BUILTIN_PACKS, ...this.imported] : [...BUILTIN_PACKS, ...this.imported];
   }
 
   importedPacks(): ThemePack[] {
@@ -377,8 +383,13 @@ class ThemePackStore {
   }
 
   async select(kv: KeyValueStore, pack: ThemePack): Promise<void> {
-    this.currentPack = pack;
+    if (getProductKind() !== 'novel') {
+      this.currentPack = pack;
+      await kv.put(THEME_PACK_ID_KEY, pack.id);
+      return;
+    }
     await kv.put(THEME_PACK_ID_KEY, pack.id);
+    this.currentPack = pack;
   }
 
   async addImported(kv: KeyValueStore, pack: ThemePack): Promise<void> {
@@ -389,7 +400,7 @@ class ThemePackStore {
   async removeImported(kv: KeyValueStore, id: string): Promise<void> {
     this.imported = this.imported.filter((p: ThemePack): boolean => p.id !== id);
     if (this.currentPack.id === id) {
-      this.currentPack = BUILTIN_PACKS[0];
+      this.currentPack = getProductKind() === 'novel' ? NOVEL_THEMES[0] : BUILTIN_PACKS[0];
       await kv.put(THEME_PACK_ID_KEY, this.currentPack.id);
     }
     await this.saveImported(kv);
@@ -403,6 +414,10 @@ class ThemePackStore {
 }
 
 export const themePackStore = new ThemePackStore();
+
+export const resolveThemeDark = (pack: ThemePack, preferredDark: boolean): boolean => {
+  return pack.fixedColorMode === 'dark' || (pack.fixedColorMode !== 'light' && preferredDark);
+};
 
 // 全局主题应用入口(模式切换/系统深浅变化时替代裸 applyTheme;pack 由 store 提供)
 export const applyCurrentTheme = (dark: boolean): void => {

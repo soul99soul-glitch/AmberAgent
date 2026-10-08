@@ -1,0 +1,39 @@
+✔ layout requests coalesce, sample after layout and move in bounded native frames (57.589541ms)
+✔ touch/cancel prevents a queued old frame from moving the list (7.683333ms)
+✔ growing geometry retargets the active spring; late terminal layout starts another frame (7.5855ms)
+✔ new structural row outside measured range anchors once without a frame loop (4.699583ms)
+✔ busy layout frames advance scrolling without waiting for onIdle (4.79875ms)
+✔ active native follow prefers120Hz with LTPO headroom and releases its request at rest (9.28175ms)
+✔ API12 uses its known current refresh rate and cancellation releases the vote (10.149792ms)
+✔ LTPO ceiling uses supported modes without assuming120Hz on lower-refresh screens (16.212959ms)
+✔ API12 can request its already-known120Hz rate without reading newer display properties (4.201125ms)
+✔ LTPO120→90→60Hz changes retain bounded native motion without restarting the clock (3.221708ms)
+✔ a dropped frame does not repay lost display time with a large catch-up step (3.001375ms)
+✖ system animation owns intermediate positions; unchanged geometry does not restart it (6.086875ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 11
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 479.977792
+
+✖ failing tests:
+
+test at harmony/chat/src/test/native_timeline_follow.test.cjs:192:1
+✖ system animation owns intermediate positions; unchanged geometry does not restart it (6.086875ms)
+  AssertionError [ERR_ASSERTION]: a native scrollTo animation must be issued
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:194:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

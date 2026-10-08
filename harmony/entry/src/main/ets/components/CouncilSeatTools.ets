@@ -2,7 +2,7 @@ import type { CouncilApprovalRequest, CouncilToolSnapshot, CouncilToolVerdict, C
 import type { UIMessage, UIMessagePart, UIMessagePartTool, AskUserQuestion } from '@amber/chat-domain';
 import { ASK_USER_TOOL_NAME, parseAskUserQuestions, buildAskUserAnswerPayload } from '@amber/chat-domain';
 import { common } from '@kit.AbilityKit';
-import { ACCENT, LABEL, META } from '../design/tokens.ets';
+import { ACCENT, LABEL, META, SURFACE } from '../design/tokens.ets';
 import { ChatMessageTools } from './ChatMessageTools.ets';
 import { ChatMessageAskUserStep } from './ChatMessageAskUserStep.ets';
 import { ChatMessageToolPreviewSheet } from './ChatMessageToolPreviewSheet.ets';
@@ -77,7 +77,7 @@ struct CouncilToolCard {
     }
       .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').margin({ bottom: 10 })
       .bindSheet(this.previewOpen, this.Preview(), {
-        height: SheetSize.LARGE, onDisappear: (): void => { this.previewOpen = false; },
+        height: SheetSize.LARGE, showClose: false, backgroundColor: SURFACE, onDisappear: (): void => { this.previewOpen = false; },
       })
   }
 }

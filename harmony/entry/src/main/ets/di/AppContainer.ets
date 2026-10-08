@@ -39,6 +39,7 @@ import {
 } from '../platform_impl/DeepReadGenerationActivity.ets';
 import { createTavilyAndFallbackRegistry } from '../platform_impl/SearchRegistry.ets';
 import { captureDeepReadTemplate } from '../platform_impl/DeepReadTemplate.ets';
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
 import { searchDeepReadGoogle } from '../platform_impl/DeepReadGoogleSearch.ets';
 import { createNotificationNotifier, notifyCronRunning, notifyCronCompleted, notifyCronFailed } from '../platform_impl/NotificationNotifier.ets';
 import { createFileStore } from '../platform_impl/FileStore.ets';
@@ -322,7 +323,7 @@ export const getDeepReadScheduler = (): Promise<DeepReadScheduler> => {
         prefetcher,
         aiClient,
         model,
-        writerMode: runtime.model.abilities.includes('tool') ? 'tools' : 'structured',
+        writerMode: getProductKind() === 'deepread' || !runtime.model.abilities.includes('tool') ? 'structured' : 'tools',
         templateSnapshot,
         playbookMarkdown,
         collectRun,

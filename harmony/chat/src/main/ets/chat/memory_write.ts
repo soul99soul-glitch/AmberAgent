@@ -52,6 +52,10 @@ export interface MemoryAddParams {
   expiresAt?: number | null;
   confidence?: number;            // 默认 1(:111),coerce 0-1(:125)
   pinned?: boolean;
+  evidence?: string | null;
+  reinforcementCount?: number;
+  lastReinforcedAt?: number | null;
+  lastReinforcementSource?: string | null;
 }
 
 export interface MemoryWriteResult {
@@ -92,6 +96,10 @@ export const appendMemoryRecord = (
     expiresAt: params.expiresAt ?? null,
     confidence: coerce01(params.confidence ?? 1),
     pinned: params.pinned ?? false,
+    evidence: params.evidence ?? null,
+    reinforcementCount: params.reinforcementCount ?? 0,
+    lastReinforcedAt: params.lastReinforcedAt ?? null,
+    lastReinforcementSource: params.lastReinforcementSource ?? null,
     archived: false,
     createdAt: now,
     updatedAt: now,
@@ -176,6 +184,11 @@ export const upsertMemoryRecord = (
     createdAt: record.createdAt > 0 ? record.createdAt : now,
     updatedAt: now,
     lastUsedAt: record.lastUsedAt,
+    evidence: record.evidence ?? null,
+    reinforcementCount: record.reinforcementCount ?? 0,
+    lastReinforcedAt: record.lastReinforcedAt ?? null,
+    lastReinforcementSource: record.lastReinforcementSource ?? null,
+    invalidatedAt: record.invalidatedAt ?? null,
     topicTitle: record.topicTitle ?? null,
     memberIds: record.memberIds ?? [],
   });
@@ -192,7 +205,8 @@ export const upsertMemoryRecord = (
   next[index] = mapped;
   const changedSource: boolean = original !== undefined && (
     original.content !== mapped.content || original.kind !== mapped.kind || original.scope !== mapped.scope
-    || original.archived !== mapped.archived || original.expiresAt !== mapped.expiresAt);
+    || original.archived !== mapped.archived || original.expiresAt !== mapped.expiresAt
+    || original.invalidatedAt !== mapped.invalidatedAt);
   return { records: pruneMemoryTopics(changedSource
     ? invalidateMemoryTopicsForSource(next, record.id, now) : next, now).records, record: mapped };
 };

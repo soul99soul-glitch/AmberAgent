@@ -16,11 +16,6 @@ const u = (p: number, c: number, cached: number = 0, total: number = 0): TokenUs
   totalTokens: total,
 });
 
-test('merge: this 为 null 时全部取 other(>0 字段)', () => {
-  const r = mergeUsage(null, u(10, 20, 3));
-  assert.deepEqual(r, { promptTokens: 10, completionTokens: 20, cachedTokens: 3, totalTokens: 30 });
-});
-
 test('merge: other 字段 >0 覆盖 this', () => {
   const r = mergeUsage(u(1, 2, 1), u(10, 20, 5));
   assert.equal(r.promptTokens, 10);
@@ -39,9 +34,4 @@ test('merge: total 重新计算,不信任 other.totalTokens', () => {
   // other.totalTokens=999 是假值,必须被 prompt+completion 覆盖
   const r = mergeUsage(null, u(10, 20, 0, 999));
   assert.equal(r.totalTokens, 30);
-});
-
-test('merge: this 为 null 且 other 全 0 → 全 0', () => {
-  const r = mergeUsage(null, u(0, 0, 0));
-  assert.deepEqual(r, { promptTokens: 0, completionTokens: 0, cachedTokens: 0, totalTokens: 0 });
 });

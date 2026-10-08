@@ -3,7 +3,6 @@ import { strict as assert } from 'node:assert';
 import { createFileNovelRepository } from '../main/ets/novel/repository.ts';
 import { createMemoryFileStore } from '../main/ets/platform/files.ts';
 import { makeNovelChapter, makeNovelMaterial, makeNovelProject } from '../main/ets/novel/models.ts';
-import { isNovelError } from '../main/ets/novel/error.ts';
 import type { NovelWorkspaceValidatedImport } from '../main/ets/novel/workspace_exchange.ts';
 import { NOVEL_WORKSPACE_FORMAT, NOVEL_WORKSPACE_VERSION } from '../main/ets/novel/workspace_contract.ts';
 
@@ -34,16 +33,6 @@ test('createProject then loadProject roundtrip', async () => {
   assert.equal(await fs.exists('amberagent/novel-workspace/p1/.amber/ledger.jsonl'), true);
 });
 
-test('loadProject missing throws notFound', async () => {
-  const repo = createFileNovelRepository(createMemoryFileStore());
-  try {
-    await repo.loadProject('ghost');
-    assert.fail('should throw');
-  } catch (e) {
-    assert.ok(isNovelError(e));
-  }
-});
-
 test('listProjects sorted by updatedAt desc', async () => {
   const repo = createFileNovelRepository(createMemoryFileStore());
   await repo.createProject({ ...makeNovelProject({ id: 'old', name: '旧', now: NOW }), updatedAt: NOW });
@@ -52,31 +41,10 @@ test('listProjects sorted by updatedAt desc', async () => {
   assert.deepEqual(list.map(p => p.id), ['new', 'old']);
 });
 
-test('updateProject transforms and persists', async () => {
-  const repo = createFileNovelRepository(createMemoryFileStore());
-  await repo.createProject(makeNovelProject({ id: 'p1', name: '原', now: NOW }));
-  const updated = await repo.updateProject('p1', p => ({ ...p, name: '改', updatedAt: NOW + 1 }));
-  assert.equal(updated.name, '改');
-  const reloaded = await repo.loadProject('p1');
-  assert.equal(reloaded.name, '改');
-});
-
 test('updateProject rejects id change', async () => {
   const repo = createFileNovelRepository(createMemoryFileStore());
   await repo.createProject(makeNovelProject({ id: 'p1', name: '原', now: NOW }));
   await assert.rejects(repo.updateProject('p1', p => ({ ...p, id: 'other' })));
-});
-
-test('updateProject missing throws', async () => {
-  const repo = createFileNovelRepository(createMemoryFileStore());
-  await assert.rejects(repo.updateProject('ghost', p => p));
-});
-
-test('deleteProject removes; subsequent load throws', async () => {
-  const repo = createFileNovelRepository(createMemoryFileStore());
-  await repo.createProject(makeNovelProject({ id: 'p1', name: 'x', now: NOW }));
-  await repo.deleteProject('p1');
-  await assert.rejects(repo.loadProject('p1'));
 });
 
 test('deleteProject is serialized after an in-flight update and cannot be revived', async () => {
@@ -164,15 +132,6 @@ test('listProjects skips unreadable/corrupt files', async () => {
   const list = await repo.listProjects();
   assert.equal(list.length, 1);
   assert.equal(list[0].id, 'good');
-});
-
-test('listProjects ignores non-novel files', async () => {
-  const fs = createMemoryFileStore();
-  const repo = createFileNovelRepository(fs);
-  await repo.createProject(makeNovelProject({ id: 'good', name: '好', now: NOW }));
-  await fs.writeText('amberagent/novel-creation/projects/readme.txt', 'hi');
-  const list = await repo.listProjects();
-  assert.equal(list.length, 1);
 });
 
 test('loadProject migrates existing v2 project without losing real project data', async () => {

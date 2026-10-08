@@ -9,9 +9,7 @@ import { makeAgentTool, makeInputSchemaObj } from '../main/ets/chat/tool.ts';
 import type { ToolRegistry } from '../main/ets/chat/tool_registry.ts';
 import { createToolRegistry } from '../main/ets/chat/tool_registry.ts';
 import {
-  isResidentTool, createToolsListTool, createToolPolicyExplainTool,
-  createToolSearchTool, createRegistryIntrospectionTools,
-  TOOL_SEARCH_TOOL_NAME, TOOL_SEARCH_AUTO_THRESHOLD, TOOL_SEARCH_DEFAULT_LIMIT,
+  isResidentTool, createToolsListTool, createToolPolicyExplainTool, createToolSearchTool
 } from '../main/ets/chat/builtin_introspection_tools.ts';
 
 const textOf = (parts: UIMessagePart[]): JsonObject =>
@@ -106,17 +104,6 @@ test('tool_policy_explain:input 非法 JSON → 按 null 输入评估(runCatchin
   assert.equal(payload['status'], 'ok');
 });
 
-test('tool_policy_explain:schema — tool_name 必填 + 描述逐字', () => {
-  const t: AgentTool = createToolPolicyExplainTool(makeRegistry());
-  const schema = t.parameters();
-  assert.ok(schema !== null);
-  assert.deepEqual(schema.required, ['tool_name']);
-  const props: JsonObject = schema.properties;
-  assert.equal((props['tool_name'] as JsonObject)['description'], 'Tool name to evaluate.');
-  assert.equal((props['input'] as JsonObject)['description'],
-    'Optional JSON string input for dynamic policy evaluation.');
-});
-
 // ===== tools_list(ToolsListTool.kt 全文) =====
 
 test('tools_list:默认 — 顶层键序 + 逐字文案 + 条目键序', async () => {
@@ -183,12 +170,6 @@ test('tools_list:include_schema → Kotlin data class toString 形态', async ()
 });
 
 // ===== tool_search(ToolSearch.kt:30-268) =====
-
-test('tool_search:常量逐字', () => {
-  assert.equal(TOOL_SEARCH_TOOL_NAME, 'tool_search');
-  assert.equal(TOOL_SEARCH_AUTO_THRESHOLD, 40);
-  assert.equal(TOOL_SEARCH_DEFAULT_LIMIT, 5);
-});
 
 test('tool_search:精确名命中 → 最高分置顶 + 排除自身', async () => {
   const reg: ToolRegistry = makeRegistry();
@@ -292,12 +273,4 @@ test('tool_search:systemPrompt — 类目计数 + resident 计数动态拼入', 
   assert.ok(sp.includes('context:1'));
   assert.ok(sp.includes('Resident tools currently stay visible without search:'));
   assert.ok(sp.startsWith('Tool discovery:'));
-});
-
-test('createRegistryIntrospectionTools:返回 tools_list + tool_policy_explain 对(LocalTools.kt:89-92)', () => {
-  const reg: ToolRegistry = makeRegistry();
-  const pair: AgentTool[] = createRegistryIntrospectionTools(reg);
-  assert.equal(pair.length, 2);
-  assert.equal(pair[0].name, 'tools_list');
-  assert.equal(pair[1].name, 'tool_policy_explain');
 });

@@ -22,6 +22,24 @@ const PID_A: string = 'prov-a';
 const PID_B: string = 'prov-b';
 const PID_C: string = 'prov-c';
 
+for (const mode of ['zhipu_coding_plan', 'kimi_coding_plan', 'mimo_coding_plan', 'minimax_token_plan'] as const) {
+  test(`${mode}: enabled provider with a saved key and chat model remains selectable beside DeepSeek`, () => {
+    const deepseek = makeProviderSettingOpenAIVariant({
+      id: PID_A, name: 'DeepSeek', apiKey: 'test-key',
+      models: [makeProviderModel({ modelId: 'deepseek-chat' })],
+    });
+    const plan = makeProviderSettingOpenAIVariant({
+      id: PID_B, name: mode, authMode: mode, apiKey: 'test-plan-key',
+      models: [makeProviderModel({ modelId: 'plan-model' })],
+    });
+    const groups = buildTopModelMenuGroups([deepseek, plan], 'chat', PID_B, 'plan-model');
+    assert.deepEqual(groups.map(group => group.providerId), [PID_A, PID_B]);
+    assert.equal(groups[1].models[0].selected, true);
+    assert.deepEqual(buildTopModelMenuGroups([{ ...plan, enabled: false }], 'chat', '', ''), []);
+    assert.deepEqual(buildTopModelMenuGroups([{ ...plan, apiKey: '  ' }], 'chat', '', ''), []);
+  });
+}
+
 test('空 providers(null) → []', () => {
   assert.deepEqual(buildTopModelMenuGroups(null, 'chat', '', ''), []);
 });

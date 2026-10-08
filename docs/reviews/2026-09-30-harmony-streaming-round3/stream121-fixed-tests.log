@@ -1,0 +1,18 @@
+✔ layout requests coalesce, sample after layout and move in bounded native frames (175.896542ms)
+✔ touch/cancel prevents a queued old frame from moving the list (22.302083ms)
+✔ growing geometry retargets the active spring; late terminal layout starts another frame (24.665208ms)
+✔ new structural row outside measured range anchors once without a frame loop (13.690916ms)
+✔ busy layout frames advance scrolling without waiting for onIdle (7.550291ms)
+✔ active native follow requests display frames above the default 30fps vote and releases them at rest (12.172125ms)
+✔ API12 uses its known current refresh rate and cancellation releases the vote (8.1165ms)
+✔ native follow converges monotonically at 60/120Hz without overshoot (0.65125ms)
+✔ a growing target preserves momentum and converges independently of frame rate (0.15875ms)
+✔ zero delta is inert; a shrinking layout does not retain upward overshoot (0.367334ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1757.212625

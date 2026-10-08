@@ -59,6 +59,7 @@ import {
 } from './mcp_config.ts';
 import type { McpServerConfig, McpTool, McpStatus } from './mcp_config.ts';
 import type { UIMessagePartText, UIMessagePartImage } from './message.ts';
+import type { InputSchemaObj } from './tool.ts';
 
 export type McpMessagePart = UIMessagePartText | UIMessagePartImage;
 
@@ -458,9 +459,17 @@ export class McpManager {
     // 写回前必须确认仍是当前 client(防旧 server 工具表污染设置)
     this.setStatus(config, MCP_STATUS_CONNECTING);
 
-    if (!client.hasTransport) await client.connect(this.getTransport(config));
-    if (this.clients.get(config.id)?.client !== client) return;
-    const serverTools: McpServerTool[] = await client.listTools();
+    let serverTools: McpServerTool[];
+    try {
+      if (!client.hasTransport) await client.connect(this.getTransport(config));
+      if (this.clients.get(config.id)?.client !== client) return;
+      serverTools = await client.listTools();
+    } catch (error) {
+      if (this.clients.get(config.id)?.client === client) {
+        this.setStatus(config, mcpStatusError(error instanceof Error ? error.message : String(error)));
+      }
+      throw error;
+    }
     if (this.clients.get(config.id)?.client !== client) return;
     this.deps.log(`sync: tools: ${JSON.stringify(serverTools)}`);
     this.settings.updateMcpServers((old: McpServerConfig[]): McpServerConfig[] =>
@@ -474,11 +483,12 @@ export class McpManager {
           const existing: McpTool | undefined = tools.find(
             (t: McpTool): boolean => t.name === serverTool.name);
           // ToolSchema.toSchema(:511-513)→ InputSchemaObj(type 'object')
-          const schema = {
+          const schema: InputSchemaObj = {
             type: 'object' as const,
             properties: serverTool.inputSchema.properties,
             required: serverTool.inputSchema.required,
           };
+          if (serverTool.inputSchema.jsonSchema !== undefined) schema.jsonSchema = serverTool.inputSchema.jsonSchema;
           if (existing === undefined) {
             tools.push(makeMcpTool({
               serverId: config.id,
@@ -486,6 +496,7 @@ export class McpManager {
               description: serverTool.description,
               enable: true,
               inputSchema: schema,
+              annotations: serverTool.annotations,
             }));
           } else {
             const index: number = tools.indexOf(existing);
@@ -496,6 +507,7 @@ export class McpManager {
               enable: existing.enable, // copy 仅改 description+inputSchema(:329-332)
               needsApproval: existing.needsApproval,
               inputSchema: schema,
+              annotations: serverTool.annotations,
             });
           }
         }

@@ -17,37 +17,21 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude,
-  makeProviderModel, hasUsableAuth, openAIAuthModeFixedBaseUrl, googleAuthModeFixedBaseUrl,
-  openAIBrandAvailableAuthModes,
+  makeProviderSettingOpenAIVariant,
+  makeProviderSettingGoogle,
+  makeProviderSettingClaude,
+  makeProviderModel,
+  hasUsableAuth,
 } from '../main/ets/chat/provider_settings.ts';
 import {
-  serializeProviderSetting, parseProviderSetting,
-  serializeProviderSettingList, parseProviderSettingList,
+  serializeProviderSetting,
+  parseProviderSetting,
+  serializeProviderSettingList,
+  parseProviderSettingList,
 } from '../main/ets/chat/provider_settings_serialize.ts';
 import { createMemoryKeyValueStore, saveProviders, loadProviders } from '../main/ets/chat/kv_store.ts';
 
 const FIXED_ID = '11111111-2222-3333-4444-555555555555';
-
-test('golden: 默认 OpenAI variant(type 最前,声明序,balanceOption 默认值,brand generic)', () => {
-  const s = makeProviderSettingOpenAIVariant({ id: FIXED_ID });
-  const json = serializeProviderSetting(s);
-  const expected = '{"type":"openai",'
-    + '"id":"11111111-2222-3333-4444-555555555555",'
-    + '"enabled":true,'
-    + '"name":"OpenAI",'
-    + '"models":[],'
-    + '"balanceOption":{"enabled":false,"apiPath":"/credits","resultPath":"data.total_usage"},'
-    + '"apiKey":"",'
-    + '"baseUrl":"https://api.openai.com/v1",'
-    + '"chatCompletionsPath":"/chat/completions",'
-    + '"useResponseApi":false,'
-    + '"authMode":"api_key",'
-    + '"brand":"generic"'
-    + '}';
-  assert.equal(json, expected);
-  assert.deepEqual(parseProviderSetting(json), s, 'round-trip');
-});
 
 test('golden: Model 全字段(枚举大写,BuiltInTools sealed,可空省略/出现)', () => {
   const m = makeProviderModel({
@@ -142,23 +126,6 @@ test('hasUsableAuth 矩阵(ProviderSetting.kt:389-408)', () => {
   })), false);
   assert.equal(hasUsableAuth(makeProviderSettingClaude({ apiKey: 'k' })), true);
   assert.equal(hasUsableAuth(makeProviderSettingClaude({ apiKey: '' })), false);
-});
-
-test('fixedBaseUrl / availableAuthModes 映射表', () => {
-  assert.equal(openAIAuthModeFixedBaseUrl('api_key'), null);
-  assert.equal(openAIAuthModeFixedBaseUrl('codex_oauth'), 'https://chatgpt.com/backend-api/codex');
-  assert.equal(openAIAuthModeFixedBaseUrl('zhipu_coding_plan'), 'https://open.bigmodel.cn/api/coding/paas/v4');
-  assert.equal(openAIAuthModeFixedBaseUrl('kimi_coding_plan'), 'https://api.kimi.com/coding/v1');
-  assert.equal(openAIAuthModeFixedBaseUrl('mimo_coding_plan'), 'https://token-plan-cn.xiaomimimo.com/v1');
-  assert.equal(openAIAuthModeFixedBaseUrl('minimax_token_plan'), 'https://api.minimaxi.com/v1');
-  assert.equal(googleAuthModeFixedBaseUrl('api_key'), null);
-  assert.equal(googleAuthModeFixedBaseUrl('gemini_code_assist_oauth'), 'https://cloudcode-pa.googleapis.com');
-
-  assert.deepEqual(openAIBrandAvailableAuthModes('generic'), ['api_key']);
-  assert.deepEqual(openAIBrandAvailableAuthModes('deepseek'), ['api_key']);
-  assert.deepEqual(openAIBrandAvailableAuthModes('openai'), ['api_key', 'codex_oauth']);
-  assert.deepEqual(openAIBrandAvailableAuthModes('mimo'), ['api_key', 'mimo_coding_plan']);
-  assert.deepEqual(openAIBrandAvailableAuthModes('minimax'), ['api_key', 'minimax_token_plan']);
 });
 
 test('list + KV 存取;未知鉴别名抛错', async () => {

@@ -1,0 +1,16 @@
+✔ thinking text preserves raw line breaks and Markdown symbols, matching the iOS plain text view (245.59975ms)
+✔ only overflow animates and repeated geometry does not restart the glide (79.034417ms)
+✔ a growing target retargets from the visible offset and large catch-up is speed-limited (11.4965ms)
+✔ content measuring before a still-growing card viewport does not start a false overflow glide (17.307375ms)
+✔ touch cancels native motion; an upward browse pauses until the user returns to bottom (90.557417ms)
+✔ stop is idempotent and a detached thinking scroll cannot restart (21.999333ms)
+✔ reasoning preserves completed native lines and blank lines while only the active line changes (9.6535ms)
+✔ the 6000-character stream window keeps absolute line identities when its prefix crosses a newline (9.43625ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3157.721958

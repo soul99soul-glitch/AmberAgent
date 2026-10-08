@@ -1,0 +1,207 @@
+{
+  "pid": 41130,
+  "origin": 169449.176392,
+  "list_scroll": {
+    "count": 427,
+    "p50": 11.401024,
+    "p95": 35.683086,
+    "max": 140.230484
+  },
+  "largest_list_moves": [
+    {
+      "t": 0.829512,
+      "offset": -140.230484,
+      "tag": "List",
+      "line": 12975
+    },
+    {
+      "t": 4.43345,
+      "offset": -100.536736,
+      "tag": "List",
+      "line": 223842
+    },
+    {
+      "t": 4.450025,
+      "offset": -94.990379,
+      "tag": "List",
+      "line": 224713
+    },
+    {
+      "t": 4.466824,
+      "offset": -75.889168,
+      "tag": "List",
+      "line": 225314
+    },
+    {
+      "t": 1.588158,
+      "offset": -74.236366,
+      "tag": "List",
+      "line": 48850
+    },
+    {
+      "t": 1.604789,
+      "offset": -64.539558,
+      "tag": "List",
+      "line": 50110
+    },
+    {
+      "t": 1.571497,
+      "offset": -62.68346,
+      "tag": "List",
+      "line": 47635
+    },
+    {
+      "t": 4.416804,
+      "offset": -61.827934,
+      "tag": "List",
+      "line": 223304
+    },
+    {
+      "t": 4.483549,
+      "offset": -55.804844,
+      "tag": "List",
+      "line": 225972
+    },
+    {
+      "t": 0.846786,
+      "offset": -52.665859,
+      "tag": "List",
+      "line": 14016
+    },
+    {
+      "t": 1.113243,
+      "offset": -52.37389,
+      "tag": "List",
+      "line": 24557
+    },
+    {
+      "t": 0.81474,
+      "offset": -52.143566,
+      "tag": "List",
+      "line": 12196
+    },
+    {
+      "t": 1.129932,
+      "offset": -50.709629,
+      "tag": "List",
+      "line": 25200
+    },
+    {
+      "t": 1.621562,
+      "offset": -49.615108,
+      "tag": "List",
+      "line": 51365
+    },
+    {
+      "t": 1.146506,
+      "offset": -40.944733,
+      "tag": "List",
+      "line": 25843
+    }
+  ],
+  "edge_calls": [
+    {
+      "t": 0.73982,
+      "name": "H:ScrollToEdge scrollEdgeType:1, id:617, tag:List",
+      "line": 7002
+    }
+  ],
+  "ui_frame": {
+    "count": 2070,
+    "p50": 0.002,
+    "p95": 7.514,
+    "max": 22.556
+  },
+  "longest_ui_frames": [
+    {
+      "t": 8.735425,
+      "ms": 22.556,
+      "line": 382892
+    },
+    {
+      "t": 9.502695,
+      "ms": 19.771,
+      "line": 401390
+    },
+    {
+      "t": 6.500786,
+      "ms": 17.961,
+      "line": 300435
+    },
+    {
+      "t": 4.383264,
+      "ms": 15.559,
+      "line": 221761
+    },
+    {
+      "t": 4.983445,
+      "ms": 15.276,
+      "line": 245305
+    }
+  ],
+  "text_updates": 29,
+  "list_move_span": [
+    0.781601,
+    8.901661
+  ],
+  "fps": [
+    {
+      "fps": "36",
+      "refresh": "120",
+      "timestamp": "1790788096106"
+    },
+    {
+      "fps": "100",
+      "refresh": "120",
+      "timestamp": "1790788097106"
+    },
+    {
+      "fps": "120",
+      "refresh": "120",
+      "timestamp": "1790788098115"
+    },
+    {
+      "fps": "90",
+      "refresh": "60",
+      "timestamp": "1790788099107"
+    },
+    {
+      "fps": "53",
+      "refresh": "60",
+      "timestamp": "1790788100107"
+    },
+    {
+      "fps": "57",
+      "refresh": "60",
+      "timestamp": "1790788101106"
+    },
+    {
+      "fps": "56",
+      "refresh": "60",
+      "timestamp": "1790788102106"
+    },
+    {
+      "fps": "55",
+      "refresh": "60",
+      "timestamp": "1790788103107"
+    },
+    {
+      "fps": "56",
+      "refresh": "60",
+      "timestamp": "1790788104107"
+    },
+    {
+      "fps": "7",
+      "refresh": "60",
+      "timestamp": "1790788105111"
+    }
+  ],
+  "mid_generation_largest_move": {
+    "offset_trace_units": 100.536736,
+    "time_seconds": 4.43345,
+    "line": 223842,
+    "frame_interval_ms": 16.646,
+    "trigger": "Three new Text nodes1887/1891/1899 filled from0 to122/69/244px after attachment"
+  },
+  "frame_statistics_note": "raw UIVsyncTask samples include nested/internal task markers; not a deduplicated UI frame-duration report"
+}

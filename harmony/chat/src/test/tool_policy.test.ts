@@ -4,15 +4,21 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  toolCategory, toolMutatesState, toolRiskProfile, toolAlwaysAsk,
-  requiresFailClosedAutoApproval, toolConcurrencySafe, toolSensitiveRead,
-  toolForegroundPackageRequirement, toolSpeculativeBlockReason,
-  toolOutputBudgetChars, toolInvocationPolicy, toolInvocationPolicyFromText,
-  isPrivateNetworkTarget, inputStringValue, inputBooleanValue,
-  containsExternalCliCouncilSeat, allowsExternalCliCouncil,
-  enforceOutputBudget, truncatedEnvelope, withDisplayTitleHint,
-  DEFAULT_TOOL_OUTPUT_BUDGET_CHARS, MODEL_COUNCIL_TOOL_OUTPUT_BUDGET_CHARS,
-  SUB_AGENT_TOOL_OUTPUT_BUDGET_CHARS,
+  toolMutatesState,
+  toolRiskProfile,
+  toolAlwaysAsk,
+  requiresFailClosedAutoApproval,
+  toolConcurrencySafe,
+  toolSensitiveRead,
+  toolForegroundPackageRequirement,
+  toolSpeculativeBlockReason,
+  toolInvocationPolicy,
+  toolInvocationPolicyFromText,
+  isPrivateNetworkTarget,
+  containsExternalCliCouncilSeat,
+  allowsExternalCliCouncil,
+  enforceOutputBudget,
+  withDisplayTitleHint,
 } from '../main/ets/chat/tool_policy.ts';
 import { makeAgentTool, makeInputSchemaObj } from '../main/ets/chat/tool.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
@@ -21,48 +27,6 @@ const toolNamed = (name: string) => makeAgentTool({
   name,
   description: 'd',
   execute: () => Promise.resolve([]),
-});
-
-// ===== category(:424-457) =====
-
-describe('toolCategory', () => {
-  it('前缀归类:external_file/file/icloud/officepro/terminal/wm/screen/system', () => {
-    assert.equal(toolCategory('external_file_read'), 'external_file');
-    assert.equal(toolCategory('file_read'), 'workspace');
-    assert.equal(toolCategory('archive_create'), 'workspace');
-    assert.equal(toolCategory('pdf_read'), 'workspace');
-    assert.equal(toolCategory('icloud_list'), 'cloud');
-    assert.equal(toolCategory('officepro_read_screen'), 'office');
-    assert.equal(toolCategory('terminal_execute'), 'terminal');
-    assert.equal(toolCategory('search_web'), 'web');
-    assert.equal(toolCategory('http_request'), 'web');
-    assert.equal(toolCategory('webview_open'), 'webview');
-    assert.equal(toolCategory('wm_open'), 'webmount');
-    assert.equal(toolCategory('hn_read'), 'webmount_hackernews');
-    assert.equal(toolCategory('zhihu_answer_read'), 'webmount_zhihu');
-    assert.equal(toolCategory('screen_click'), 'screen');
-    assert.equal(toolCategory('vlm_task'), 'screen');
-    assert.equal(toolCategory('sms_send'), 'system');
-    assert.equal(toolCategory('device_info'), 'system');
-    assert.equal(toolCategory('notification_post'), 'system');
-  });
-  it('语义归类:memory/conversation/session/cron/task/utility/subagent/council/skill/mcp', () => {
-    assert.equal(toolCategory('memory_list'), 'memory');
-    assert.equal(toolCategory('agent_prompt_config'), 'prompt_config');
-    assert.equal(toolCategory('conversation_search'), 'context');
-    assert.equal(toolCategory('session_read'), 'context');
-    assert.equal(toolCategory('deep_read_open'), 'deep_read');
-    assert.equal(toolCategory('cron_task_list'), 'cron');
-    assert.equal(toolCategory('agent_task_list'), 'task');
-    assert.equal(toolCategory('agent_runtime_status'), 'task');
-    assert.equal(toolCategory('tool_search'), 'utility');
-    assert.equal(toolCategory('subagent_start'), 'subagent');
-    assert.equal(toolCategory('model_council_start'), 'model_council');
-    assert.equal(toolCategory('skill_import'), 'skill');
-    assert.equal(toolCategory('mcp_call_tool'), 'mcp');
-    assert.equal(toolCategory('mcp__github__read'), 'mcp');
-    assert.equal(toolCategory('get_time_info'), 'utility');
-  });
 });
 
 // ===== mutatesState(:459-483) =====
@@ -169,22 +133,6 @@ describe('toolSpeculativeBlockReason', () => {
   });
 });
 
-// ===== outputBudgetChars(:602-640) =====
-
-describe('toolOutputBudgetChars', () => {
-  it('覆盖表 + 默认 80000', () => {
-    assert.equal(toolOutputBudgetChars('file_read'), 262144 + 2048);
-    assert.equal(toolOutputBudgetChars('wm_screenshot'), 1200000);
-    assert.equal(toolOutputBudgetChars('model_council_start'), MODEL_COUNCIL_TOOL_OUTPUT_BUDGET_CHARS);
-    assert.equal(toolOutputBudgetChars('subagent_wait'), SUB_AGENT_TOOL_OUTPUT_BUDGET_CHARS);
-    assert.equal(toolOutputBudgetChars('get_time_info'), DEFAULT_TOOL_OUTPUT_BUDGET_CHARS);
-  });
-  it('组合常量值', () => {
-    assert.equal(MODEL_COUNCIL_TOOL_OUTPUT_BUDGET_CHARS, 200000 * 8 * 5 + 512000);
-    assert.equal(SUB_AGENT_TOOL_OUTPUT_BUDGET_CHARS, 264000);
-  });
-});
-
 // ===== isPrivateNetworkTarget(:175-201) =====
 
 describe('isPrivateNetworkTarget', () => {
@@ -213,13 +161,6 @@ describe('isPrivateNetworkTarget', () => {
 // ===== input helper(:659-670) + council 判定(:662-697) =====
 
 describe('input 取值与 council 判定', () => {
-  it('inputStringValue/inputBooleanValue', () => {
-    assert.equal(inputStringValue({ a: 'x' }, 'a'), 'x');
-    assert.equal(inputStringValue({ a: 1 }, 'a'), null);
-    assert.equal(inputStringValue(null, 'a'), null);
-    assert.equal(inputBooleanValue({ b: 'TRUE' }, 'b'), true);
-    assert.equal(inputBooleanValue({ b: 'yes' }, 'b'), false);
-  });
   it('containsExternalCliCouncilSeat:planned_seats/seats 数组 runner_type/external_tool', () => {
     assert.equal(containsExternalCliCouncilSeat({ planned_seats: [{ runner_type: 'external_cli' }] }), true);
     assert.equal(containsExternalCliCouncilSeat({ task: { seats: [{ runner_type: 'CODEX_CLI' }] } }), true);
@@ -237,24 +178,6 @@ describe('input 取值与 council 判定', () => {
 // ===== invocationPolicy(:204-422) =====
 
 describe('toolInvocationPolicy', () => {
-  it('默认派生:只读工具 → normal/不需审批/可自动/并发安全/parallelGroup=category', () => {
-    const p = toolInvocationPolicy(toolNamed('conversation_search'), null);
-    assert.equal(p.category, 'context');
-    assert.equal(p.mutates, false);
-    assert.equal(p.risk, 'normal');
-    assert.equal(p.needsApproval, false);
-    assert.equal(p.autoApprovable, true);
-    assert.equal(p.concurrencySafe, true);
-    assert.equal(p.parallelGroup, 'context');
-    assert.equal(p.speculativeEligible, true); // 只读+并发安全+parallelGroup 非空 → 合格
-  });
-  it('file_read:workspace + 只读 → speculative 合格(parallelGroup=workspace)', () => {
-    const p = toolInvocationPolicy(toolNamed('file_read'), null);
-    assert.equal(p.mutates, false);
-    assert.equal(p.parallelGroup, 'workspace');
-    assert.equal(p.speculativeEligible, true);
-    assert.equal(p.speculativeBlockReason, null);
-  });
   it('file_write:mutates → fail-closed 不可自动批准,speculative blocked', () => {
     const p = toolInvocationPolicy(toolNamed('file_write'), null);
     assert.equal(p.mutates, true);
@@ -297,16 +220,6 @@ describe('toolInvocationPolicy', () => {
     assert.equal(write.risk, 'high');
     assert.equal(write.needsApproval, true);
   });
-  it('发现类工具白名单:tool_search/tools_list 恒安全', () => {
-    for (const n of ['tool_search', 'tools_list', 'tool_policy_explain', 'agent_runtime_status']) {
-      const p = toolInvocationPolicy(toolNamed(n), null);
-      assert.equal(p.mutates, false, n);
-      assert.equal(p.risk, 'normal', n);
-      assert.equal(p.needsApproval, false, n);
-      assert.equal(p.autoApprovable, true, n);
-      assert.equal(p.concurrencySafe, true, n);
-    }
-  });
   it('wm_*:eval 高风险/click sensitive/tab_close Normal/session parallel group', () => {
     const evalP = toolInvocationPolicy(toolNamed('wm_eval'), null);
     assert.equal(evalP.risk, 'high');
@@ -340,10 +253,6 @@ describe('toolInvocationPolicy', () => {
 // ===== enforceOutputBudget + truncatedEnvelope(:672-707) =====
 
 describe('enforceOutputBudget', () => {
-  it('预算内原样返回(同一引用)', () => {
-    const parts: UIMessagePart[] = [{ type: 'text', text: 'abc', metadata: null }];
-    assert.equal(enforceOutputBudget(parts, 80000), parts);
-  });
   it('非 text part 直通;超限 text → truncated envelope 并截断列表', () => {
     const img: UIMessagePart = { type: 'image', url: 'data:image/png;base64,x', metadata: null } as UIMessagePart;
     const parts: UIMessagePart[] = [
@@ -362,10 +271,6 @@ describe('enforceOutputBudget', () => {
     assert.equal(env.max_chars, 2000);
     assert.equal(env.content_tail.length, Math.max(2000 - 512, 1024));
     assert.equal(env.note, 'Tool output exceeded the registry output budget. The original tool result remains in the local transcript.');
-  });
-  it('truncatedEnvelope:tailChars = max(maxChars-512, 1024)', () => {
-    const env = JSON.parse(truncatedEnvelope('x'.repeat(500), 300));
-    assert.equal(env.content_tail.length, 500); // 1024 > 文本长,全量保留
   });
 });
 

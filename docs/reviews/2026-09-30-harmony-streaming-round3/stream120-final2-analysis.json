@@ -1,0 +1,1132 @@
+{
+  "trace": "/tmp/stream120final2.trace",
+  "csv": "/tmp/stream120final2.csv",
+  "pid": 56835,
+  "hap_sha256": "d0b262a6020916c19a1a6610f648beae3f8e198e48d0de951446c51f10e3fff5",
+  "trace_origin_monotonic": 165247.665642,
+  "capture_duration_seconds": 40.000998,
+  "clock_alignment": {
+    "end_sync_monotonic": 165287.654872,
+    "end_sync_unix_ms": 1790783933240,
+    "derived_origin_unix_ms": 1790783893250.77
+  },
+  "phase_boundaries": {
+    "assistant_row_created_seconds": 1.002,
+    "reasoning_first_update_seconds": 1.569,
+    "reasoning_last_text_update_seconds": 2.388,
+    "body_markdown_created_seconds": 2.39,
+    "completion_state_change_seconds_approx": 9.743,
+    "residual_ui_until_seconds": 11.048
+  },
+  "phases": {
+    "short_reasoning": {
+      "window_seconds": [
+        1.6,
+        2.28
+      ],
+      "ui_vsync_elapsed": {
+        "count": 81,
+        "p50_ms": 0.616,
+        "p95_ms": 5.406,
+        "max_ms": 7.035,
+        "over_8_333ms_count": 0,
+        "over_16_667ms_count": 0,
+        "over_8_333ms_percent": 0.0
+      },
+      "max_ui_event": {
+        "relative_seconds": 1.949615,
+        "line": 59955
+      },
+      "layout": {
+        "count": 81,
+        "p50_ms": 0.107,
+        "p95_ms": 1.672,
+        "max_ms": 3.236,
+        "over_8_333ms_count": 0,
+        "over_16_667ms_count": 0,
+        "over_8_333ms_percent": 0.0
+      },
+      "sp": "Insufficient steady reasoning duration: approximately 0.8s; no pure full CSV window."
+    },
+    "reasoning_to_body": {
+      "window_seconds": [
+        2.28,
+        2.75
+      ],
+      "ui_vsync_elapsed": {
+        "count": 57,
+        "p50_ms": 1.661,
+        "p95_ms": 6.456,
+        "max_ms": 11.074,
+        "over_8_333ms_count": 2,
+        "over_16_667ms_count": 0,
+        "over_8_333ms_percent": 3.51
+      },
+      "max_ui_event": {
+        "relative_seconds": 2.599571,
+        "line": 104908
+      },
+      "layout": {
+        "count": 59,
+        "p50_ms": 0.168,
+        "p95_ms": 1.843,
+        "max_ms": 4.272,
+        "over_8_333ms_count": 0,
+        "over_16_667ms_count": 0,
+        "over_8_333ms_percent": 0.0
+      }
+    },
+    "early_body_120Hz": {
+      "window_seconds": [
+        2.65,
+        3.68
+      ],
+      "ui_vsync_elapsed": {
+        "count": 123,
+        "p50_ms": 2.222,
+        "p95_ms": 7.437,
+        "max_ms": 9.825,
+        "over_8_333ms_count": 3,
+        "over_16_667ms_count": 0,
+        "over_8_333ms_percent": 2.44
+      },
+      "max_ui_event": {
+        "relative_seconds": 3.616416,
+        "line": 176722
+      },
+      "layout": {
+        "count": 126,
+        "p50_ms": 0.144,
+        "p95_ms": 2.873,
+        "max_ms": 4.796,
+        "over_8_333ms_count": 0,
+        "over_16_667ms_count": 0,
+        "over_8_333ms_percent": 0.0
+      },
+      "sp_rows": [
+        {
+          "row": 4,
+          "timestamp": 1790783896942,
+          "end_relative_seconds": 3.69123,
+          "fps": 120,
+          "refresh_rate": 120,
+          "max_gap_ms": 8.427
+        }
+      ]
+    },
+    "late_body_60Hz": {
+      "window_seconds": [
+        5.65,
+        9.5
+      ],
+      "ui_vsync_elapsed": {
+        "count": 226,
+        "p50_ms": 5.746,
+        "p95_ms": 11.147,
+        "max_ms": 23.916,
+        "over_8_333ms_count": 43,
+        "over_16_667ms_count": 2,
+        "over_8_333ms_percent": 19.03
+      },
+      "max_ui_event": {
+        "relative_seconds": 8.535371,
+        "line": 368649
+      },
+      "layout": {
+        "count": 229,
+        "p50_ms": 0.328,
+        "p95_ms": 4.566,
+        "max_ms": 9.176,
+        "over_8_333ms_count": 2,
+        "over_16_667ms_count": 0,
+        "over_8_333ms_percent": 0.87
+      },
+      "sp_rows": [
+        {
+          "row": 7,
+          "timestamp": 1790783899890,
+          "end_relative_seconds": 6.63923,
+          "fps": 60,
+          "refresh_rate": 60,
+          "max_gap_ms": 16.7
+        },
+        {
+          "row": 8,
+          "timestamp": 1790783900901,
+          "end_relative_seconds": 7.65023,
+          "fps": 60,
+          "refresh_rate": 60,
+          "max_gap_ms": 16.752
+        },
+        {
+          "row": 9,
+          "timestamp": 1790783901906,
+          "end_relative_seconds": 8.65523,
+          "fps": 60,
+          "refresh_rate": 60,
+          "max_gap_ms": 16.809
+        },
+        {
+          "row": 10,
+          "timestamp": 1790783902896,
+          "end_relative_seconds": 9.64523,
+          "fps": 60,
+          "refresh_rate": 60,
+          "max_gap_ms": 16.787
+        }
+      ]
+    },
+    "completion": {
+      "window_seconds": [
+        9.7,
+        10.3
+      ],
+      "ui_vsync_elapsed": {
+        "count": 34,
+        "p50_ms": 3.026,
+        "p95_ms": 11.517,
+        "max_ms": 18.951,
+        "over_8_333ms_count": 3,
+        "over_16_667ms_count": 1,
+        "over_8_333ms_percent": 8.82
+      },
+      "max_ui_event": {
+        "relative_seconds": 9.735944,
+        "line": 417103
+      },
+      "layout": {
+        "count": 36,
+        "p50_ms": 0.002,
+        "p95_ms": 2.909,
+        "max_ms": 4.76,
+        "over_8_333ms_count": 0,
+        "over_16_667ms_count": 0,
+        "over_8_333ms_percent": 0.0
+      }
+    }
+  },
+  "csv_active_and_settling_samples": [
+    {
+      "row": 1,
+      "timestamp": 1790783893887,
+      "end_relative_seconds": 0.63623,
+      "fps": 2,
+      "refresh_rate": 120,
+      "max_gap_ms": 533.66
+    },
+    {
+      "row": 2,
+      "timestamp": 1790783894890,
+      "end_relative_seconds": 1.63923,
+      "fps": 54,
+      "refresh_rate": 120,
+      "max_gap_ms": 41.685
+    },
+    {
+      "row": 3,
+      "timestamp": 1790783895896,
+      "end_relative_seconds": 2.64523,
+      "fps": 97,
+      "refresh_rate": 120,
+      "max_gap_ms": 33.357
+    },
+    {
+      "row": 4,
+      "timestamp": 1790783896942,
+      "end_relative_seconds": 3.69123,
+      "fps": 120,
+      "refresh_rate": 120,
+      "max_gap_ms": 8.427
+    },
+    {
+      "row": 5,
+      "timestamp": 1790783897902,
+      "end_relative_seconds": 4.65123,
+      "fps": 69,
+      "refresh_rate": 60,
+      "max_gap_ms": 50.019
+    },
+    {
+      "row": 6,
+      "timestamp": 1790783898890,
+      "end_relative_seconds": 5.63923,
+      "fps": 49,
+      "refresh_rate": 60,
+      "max_gap_ms": 33.399
+    },
+    {
+      "row": 7,
+      "timestamp": 1790783899890,
+      "end_relative_seconds": 6.63923,
+      "fps": 60,
+      "refresh_rate": 60,
+      "max_gap_ms": 16.7
+    },
+    {
+      "row": 8,
+      "timestamp": 1790783900901,
+      "end_relative_seconds": 7.65023,
+      "fps": 60,
+      "refresh_rate": 60,
+      "max_gap_ms": 16.752
+    },
+    {
+      "row": 9,
+      "timestamp": 1790783901906,
+      "end_relative_seconds": 8.65523,
+      "fps": 60,
+      "refresh_rate": 60,
+      "max_gap_ms": 16.809
+    },
+    {
+      "row": 10,
+      "timestamp": 1790783902896,
+      "end_relative_seconds": 9.64523,
+      "fps": 60,
+      "refresh_rate": 60,
+      "max_gap_ms": 16.787
+    },
+    {
+      "row": 11,
+      "timestamp": 1790783903916,
+      "end_relative_seconds": 10.66523,
+      "fps": 60,
+      "refresh_rate": 60,
+      "max_gap_ms": 16.773
+    },
+    {
+      "row": 12,
+      "timestamp": 1790783904890,
+      "end_relative_seconds": 11.63923,
+      "fps": 43,
+      "refresh_rate": 60,
+      "max_gap_ms": 16.701
+    }
+  ],
+  "component_creation_events": [
+    {
+      "relative_seconds": 0.833831,
+      "name": "H:CustomNode:BuildItem [AgentMessageRow][self:3190][parent:3188][frameRound:0][reuseId:-1][parentCustomNode:-1]",
+      "line": 10337
+    },
+    {
+      "relative_seconds": 0.835867,
+      "name": "H:CustomNode:BuildItem [MarkdownText][self:3209][parent:3208][frameRound:0][reuseId:-1][parentCustomNode:-1]",
+      "line": 10509
+    },
+    {
+      "relative_seconds": 1.001955,
+      "name": "H:CustomNode:BuildItem [AgentMessageRow][self:3231][parent:3229][frameRound:0][reuseId:-1][parentCustomNode:-1]",
+      "line": 19090
+    },
+    {
+      "relative_seconds": 1.495233,
+      "name": "H:CustomNode:BuildItem [ReasoningLineText][self:3270][parent:3269][frameRound:0][reuseId:-1][parentCustomNode:-1]",
+      "line": 36952
+    },
+    {
+      "relative_seconds": 2.293518,
+      "name": "H:CustomNode:BuildItem [ReasoningLineText][self:3274][parent:3273][frameRound:0][reuseId:-1][parentCustomNode:-1]",
+      "line": 82906
+    },
+    {
+      "relative_seconds": 2.390491,
+      "name": "H:CustomNode:BuildItem [MarkdownText][self:3287][parent:3286][frameRound:0][reuseId:-1][parentCustomNode:-1]",
+      "line": 89515
+    }
+  ],
+  "component_update_lifetimes": {
+    "AgentMessageRow:3231": {
+      "count": 151,
+      "first_seconds": 1.491719,
+      "last_seconds": 11.045296,
+      "times": [
+        1.491719,
+        1.567706,
+        1.608905,
+        1.658203,
+        1.852852,
+        1.900455,
+        1.951185,
+        2.001001,
+        2.044766,
+        2.094266,
+        2.142315,
+        2.192681,
+        2.242189,
+        2.291985,
+        2.336221,
+        2.385548,
+        2.434502,
+        2.484405,
+        2.534303,
+        2.584677,
+        2.634251,
+        2.676451,
+        2.687439,
+        2.726255,
+        2.776406,
+        2.827215,
+        2.876497,
+        2.92726,
+        2.979105,
+        3.027679,
+        3.068372,
+        3.118921,
+        3.168571,
+        3.218543,
+        3.268424,
+        3.318549,
+        3.368647,
+        3.419311,
+        3.461526,
+        3.51041,
+        3.561032,
+        3.610306,
+        3.76537,
+        3.810253,
+        3.868994,
+        3.907229,
+        3.95878,
+        4.019807,
+        4.069032,
+        4.120393,
+        4.16915,
+        4.219127,
+        4.269702,
+        4.319316,
+        4.369105,
+        4.920495,
+        4.935848,
+        4.985408,
+        5.036333,
+        5.085587,
+        5.124294,
+        5.17187,
+        5.220797,
+        5.268876,
+        5.320445,
+        5.369498,
+        5.420685,
+        5.469462,
+        5.519564,
+        5.586249,
+        5.636056,
+        5.685952,
+        5.735658,
+        5.785742,
+        5.836523,
+        5.871458,
+        5.92129,
+        5.971351,
+        6.019625,
+        6.069551,
+        6.119523,
+        6.168977,
+        6.219634,
+        6.269509,
+        6.319633,
+        6.369628,
+        6.419604,
+        6.469713,
+        6.519909,
+        6.569737,
+        6.608272,
+        6.657211,
+        6.707038,
+        6.752891,
+        6.802553,
+        6.855416,
+        6.903157,
+        6.953103,
+        7.003219,
+        7.053163,
+        7.108725,
+        7.12165,
+        7.152879,
+        7.203442,
+        7.253373,
+        7.298859,
+        7.353466,
+        7.403259,
+        7.453758,
+        7.503879,
+        7.676082,
+        7.703155,
+        7.754527,
+        7.803949,
+        7.854401,
+        7.904234,
+        8.092629,
+        8.120282,
+        8.174541,
+        8.220959,
+        8.274694,
+        8.320706,
+        8.371564,
+        8.420787,
+        8.470848,
+        8.52123,
+        8.561913,
+        8.620306,
+        8.670425,
+        8.720015,
+        8.792023,
+        8.824422,
+        9.096842,
+        9.121755,
+        9.170487,
+        9.220779,
+        9.270109,
+        9.312184,
+        9.356717,
+        9.406716,
+        9.421827,
+        9.459171,
+        9.513538,
+        9.554321,
+        9.604104,
+        9.656533,
+        9.703364,
+        9.722235,
+        9.743943,
+        10.442756,
+        11.045296
+      ]
+    },
+    "ReasoningLineText:3270": {
+      "count": 13,
+      "first_seconds": 1.569538,
+      "last_seconds": 2.293291,
+      "times": [
+        1.569538,
+        1.610028,
+        1.65906,
+        1.85338,
+        1.901471,
+        1.952894,
+        2.002805,
+        2.046512,
+        2.096493,
+        2.143706,
+        2.194277,
+        2.243404,
+        2.293291
+      ]
+    },
+    "ReasoningLineText:3274": {
+      "count": 2,
+      "first_seconds": 2.337838,
+      "last_seconds": 2.388456,
+      "times": [
+        2.337838,
+        2.388456
+      ]
+    },
+    "MarkdownText:3287": {
+      "count": 24,
+      "first_seconds": 2.442002,
+      "last_seconds": 9.76162,
+      "times": [
+        2.442002,
+        3.033739,
+        3.617132,
+        3.88704,
+        4.950503,
+        5.001114,
+        5.234419,
+        5.752691,
+        6.134676,
+        6.234766,
+        6.28696,
+        6.768216,
+        7.268668,
+        7.468878,
+        7.519105,
+        8.135954,
+        8.536203,
+        8.63597,
+        8.685788,
+        9.135821,
+        9.469142,
+        9.669355,
+        9.720148,
+        9.76162
+      ]
+    },
+    "MarkdownBlockView:3309": {
+      "count": 13,
+      "first_seconds": 2.492177,
+      "last_seconds": 9.765512,
+      "times": [
+        2.492177,
+        2.541802,
+        2.59181,
+        2.642679,
+        2.683421,
+        2.733327,
+        2.783434,
+        2.833595,
+        2.883873,
+        2.933741,
+        2.984198,
+        3.035923,
+        9.765512
+      ]
+    },
+    "MarkdownBlockView:3455": {
+      "count": 13,
+      "first_seconds": 3.075744,
+      "last_seconds": 9.764824,
+      "times": [
+        3.075744,
+        3.125986,
+        3.176006,
+        3.225919,
+        3.275848,
+        3.325835,
+        3.376091,
+        3.42722,
+        3.467532,
+        3.51757,
+        3.567544,
+        3.619255,
+        9.764824
+      ]
+    },
+    "MarkdownBlockView:3597": {
+      "count": 4,
+      "first_seconds": 3.769293,
+      "last_seconds": 9.766822,
+      "times": [
+        3.769293,
+        3.816837,
+        3.895956,
+        9.766822
+      ]
+    },
+    "MarkdownBlockView:3640": {
+      "count": 13,
+      "first_seconds": 3.917294,
+      "last_seconds": 9.767602,
+      "times": [
+        3.917294,
+        3.962025,
+        4.034093,
+        4.084178,
+        4.134122,
+        4.184119,
+        4.225482,
+        4.284166,
+        4.334234,
+        4.386406,
+        4.935153,
+        4.951582,
+        9.767602
+      ]
+    },
+    "MarkdownBlockView:3783": {
+      "count": 2,
+      "first_seconds": 5.002768,
+      "last_seconds": 9.767851,
+      "times": [
+        5.002768,
+        9.767851
+      ]
+    },
+    "MarkdownBlockView:3815": {
+      "count": 6,
+      "first_seconds": 5.051094,
+      "last_seconds": 9.768877,
+      "times": [
+        5.051094,
+        5.100828,
+        5.134429,
+        5.184501,
+        5.237633,
+        9.768877
+      ]
+    },
+    "MarkdownBlockView:3864": {
+      "count": 11,
+      "first_seconds": 5.285525,
+      "last_seconds": 9.768604,
+      "times": [
+        5.285525,
+        5.33453,
+        5.384473,
+        5.434524,
+        5.484548,
+        5.536633,
+        5.601412,
+        5.651374,
+        5.701281,
+        5.754677,
+        9.768604
+      ]
+    },
+    "MarkdownBlockView:3980": {
+      "count": 9,
+      "first_seconds": 5.801235,
+      "last_seconds": 9.769116,
+      "times": [
+        5.801235,
+        5.853105,
+        5.884524,
+        5.934874,
+        5.984578,
+        6.034617,
+        6.084643,
+        6.13671,
+        9.769116
+      ]
+    },
+    "MarkdownBlockView:4063": {
+      "count": 3,
+      "first_seconds": 6.184755,
+      "last_seconds": 9.76937,
+      "times": [
+        6.184755,
+        6.236899,
+        9.76937
+      ]
+    },
+    "MarkdownBlockView:4091": {
+      "count": 2,
+      "first_seconds": 6.288919,
+      "last_seconds": 9.769604,
+      "times": [
+        6.288919,
+        9.769604
+      ]
+    },
+    "MarkdownBlockView:4111": {
+      "count": 11,
+      "first_seconds": 6.33477,
+      "last_seconds": 9.769837,
+      "times": [
+        6.33477,
+        6.384742,
+        6.434873,
+        6.484802,
+        6.534782,
+        6.584656,
+        6.618174,
+        6.668232,
+        6.717904,
+        6.770331,
+        9.769837
+      ]
+    },
+    "MarkdownBlockView:4213": {
+      "count": 11,
+      "first_seconds": 6.818107,
+      "last_seconds": 9.76629,
+      "times": [
+        6.818107,
+        6.868194,
+        6.91821,
+        6.968422,
+        7.018163,
+        7.068329,
+        7.120812,
+        7.158923,
+        7.218349,
+        7.270855,
+        9.76629
+      ]
+    },
+    "MarkdownBlockView:4320": {
+      "count": 4,
+      "first_seconds": 7.305137,
+      "last_seconds": 9.770091,
+      "times": [
+        7.305137,
+        7.368391,
+        7.418401,
+        9.770091
+      ]
+    },
+    "MarkdownBlockView:4364": {
+      "count": 2,
+      "first_seconds": 7.520971,
+      "last_seconds": 9.770352,
+      "times": [
+        7.520971,
+        9.770352
+      ]
+    },
+    "MarkdownBlockView:4378": {
+      "count": 9,
+      "first_seconds": 7.685946,
+      "last_seconds": 9.770589,
+      "times": [
+        7.685946,
+        7.719041,
+        7.76913,
+        7.820958,
+        7.869391,
+        7.919535,
+        8.104418,
+        8.137531,
+        9.770589
+      ]
+    },
+    "MarkdownBlockView:4469": {
+      "count": 9,
+      "first_seconds": 8.185922,
+      "last_seconds": 9.765224,
+      "times": [
+        8.185922,
+        8.236426,
+        8.285768,
+        8.336157,
+        8.386071,
+        8.436174,
+        8.487521,
+        8.545378,
+        9.765224
+      ]
+    },
+    "MarkdownBlockView:4573": {
+      "count": 3,
+      "first_seconds": 8.569528,
+      "last_seconds": 9.763829,
+      "times": [
+        8.569528,
+        8.637916,
+        9.763829
+      ]
+    },
+    "MarkdownBlockView:4606": {
+      "count": 2,
+      "first_seconds": 8.687397,
+      "last_seconds": 9.764223,
+      "times": [
+        8.687397,
+        9.764223
+      ]
+    },
+    "MarkdownBlockView:4626": {
+      "count": 6,
+      "first_seconds": 8.73577,
+      "last_seconds": 9.770845,
+      "times": [
+        8.73577,
+        8.802135,
+        8.836099,
+        9.102081,
+        9.137085,
+        9.770845
+      ]
+    },
+    "MarkdownBlockView:4671": {
+      "count": 8,
+      "first_seconds": 9.185641,
+      "last_seconds": 9.768342,
+      "times": [
+        9.185641,
+        9.241995,
+        9.286015,
+        9.323179,
+        9.3693,
+        9.420829,
+        9.471225,
+        9.768342
+      ]
+    },
+    "MarkdownBlockView:4740": {
+      "count": 5,
+      "first_seconds": 9.521085,
+      "last_seconds": 9.765787,
+      "times": [
+        9.521085,
+        9.569061,
+        9.619283,
+        9.671661,
+        9.765787
+      ]
+    },
+    "MarkdownBlockView:4780": {
+      "count": 2,
+      "first_seconds": 9.721521,
+      "last_seconds": 9.766557,
+      "times": [
+        9.721521,
+        9.766557
+      ]
+    },
+    "AgentMessageRow:3190": {
+      "count": 3,
+      "first_seconds": 9.74307,
+      "last_seconds": 11.043856,
+      "times": [
+        9.74307,
+        10.44133,
+        11.043856
+      ]
+    },
+    "MarkdownBlockView:3307": {
+      "count": 1,
+      "first_seconds": 9.764513,
+      "last_seconds": 9.764513,
+      "times": [
+        9.764513
+      ]
+    },
+    "MarkdownBlockView:3293": {
+      "count": 1,
+      "first_seconds": 9.766043,
+      "last_seconds": 9.766043,
+      "times": [
+        9.766043
+      ]
+    },
+    "MarkdownBlockView:4802": {
+      "count": 1,
+      "first_seconds": 9.7671,
+      "last_seconds": 9.7671,
+      "times": [
+        9.7671
+      ]
+    },
+    "MarkdownBlockView:3638": {
+      "count": 1,
+      "first_seconds": 9.767363,
+      "last_seconds": 9.767363,
+      "times": [
+        9.767363
+      ]
+    },
+    "MarkdownBlockView:3862": {
+      "count": 1,
+      "first_seconds": 9.768112,
+      "last_seconds": 9.768112,
+      "times": [
+        9.768112
+      ]
+    }
+  },
+  "energy_assurance_votes": [
+    {
+      "relative_seconds": 3.802746,
+      "name": "H:SetEnergyConsumptionRateRange rateType:UI_ANIMATION_ENERGY_ASSURANCE",
+      "line": 189875
+    },
+    {
+      "relative_seconds": 3.80277,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 189878
+    },
+    {
+      "relative_seconds": 3.809381,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 190283
+    },
+    {
+      "relative_seconds": 3.818283,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 191239
+    },
+    {
+      "relative_seconds": 3.829903,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 191852
+    },
+    {
+      "relative_seconds": 3.850496,
+      "name": "H:SetEnergyConsumptionRateRange rateType:UI_ANIMATION_ENERGY_ASSURANCE",
+      "line": 192675
+    },
+    {
+      "relative_seconds": 3.850522,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 192682
+    },
+    {
+      "relative_seconds": 3.867593,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 193316
+    },
+    {
+      "relative_seconds": 3.870483,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 193434
+    },
+    {
+      "relative_seconds": 4.935778,
+      "name": "H:SetEnergyConsumptionRateRange rateType:UI_ANIMATION_ENERGY_ASSURANCE",
+      "line": 228062
+    },
+    {
+      "relative_seconds": 4.935838,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 228065
+    },
+    {
+      "relative_seconds": 4.951723,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 228760
+    },
+    {
+      "relative_seconds": 4.956423,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 229000
+    },
+    {
+      "relative_seconds": 4.984534,
+      "name": "H:SetEnergyConsumptionRateRange rateType:UI_ANIMATION_ENERGY_ASSURANCE",
+      "line": 230122
+    },
+    {
+      "relative_seconds": 4.98457,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 230129
+    },
+    {
+      "relative_seconds": 5.00194,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 230736
+    },
+    {
+      "relative_seconds": 5.004795,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 230976
+    },
+    {
+      "relative_seconds": 8.170116,
+      "name": "H:SetEnergyConsumptionRateRange rateType:UI_ANIMATION_ENERGY_ASSURANCE",
+      "line": 354323
+    },
+    {
+      "relative_seconds": 8.170171,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 354326
+    },
+    {
+      "relative_seconds": 8.187045,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 355084
+    },
+    {
+      "relative_seconds": 8.190076,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 355458
+    },
+    {
+      "relative_seconds": 9.102918,
+      "name": "H:SetEnergyConsumptionRateRange rateType:UI_ANIMATION_ENERGY_ASSURANCE",
+      "line": 391317
+    },
+    {
+      "relative_seconds": 9.102965,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 391322
+    },
+    {
+      "relative_seconds": 9.136153,
+      "name": "H:SetEnergyConsumptionRateRange rateType:UI_ANIMATION_ENERGY_ASSURANCE",
+      "line": 392653
+    },
+    {
+      "relative_seconds": 9.136188,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 392658
+    },
+    {
+      "relative_seconds": 9.169946,
+      "name": "H:SetEnergyConsumptionRateRange rateType:UI_ANIMATION_ENERGY_ASSURANCE",
+      "line": 394235
+    },
+    {
+      "relative_seconds": 9.169985,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 394243
+    },
+    {
+      "relative_seconds": 9.185812,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 394935
+    },
+    {
+      "relative_seconds": 9.190112,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 395388
+    },
+    {
+      "relative_seconds": 9.786484,
+      "name": "H:SetEnergyConsumptionRateRange rateType:DISPLAY_SYNC_ENERGY_ASSURANCE",
+      "line": 419700
+    },
+    {
+      "relative_seconds": 9.786524,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:DISPLAY_SYNC_ENERGY_ASSURANCE), status:1, value:[60-60]",
+      "line": 419711
+    }
+  ],
+  "completion_list_geometry": [
+    {
+      "relative_seconds": 9.62045,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -3949.463135",
+      "line": 412244
+    },
+    {
+      "relative_seconds": 9.672659,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -3975.441895",
+      "line": 414141
+    },
+    {
+      "relative_seconds": 9.6882,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -3989.307861",
+      "line": 414837
+    },
+    {
+      "relative_seconds": 9.72472,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -4007.059570",
+      "line": 416493
+    },
+    {
+      "relative_seconds": 9.740227,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -4023.790527",
+      "line": 417415
+    },
+    {
+      "relative_seconds": 9.74808,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -4040.685791",
+      "line": 417819
+    },
+    {
+      "relative_seconds": 9.786653,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -4086.087158",
+      "line": 419733
+    }
+  ],
+  "max_scroll_by_all": {
+    "relative_seconds": 5.000658,
+    "name": "H:ScrollBy, offset:-63.330673, id:1914, tag:List",
+    "line": 230574,
+    "offset": -63.330673
+  },
+  "max_scroll_by_completion": {
+    "relative_seconds": 9.77302,
+    "name": "H:ScrollBy, offset:-23.777399, id:1914, tag:List",
+    "line": 419046,
+    "offset": -23.777399
+  },
+  "scroll_over200_count": 0,
+  "conclusions": [
+    "Assistant AgentMessageRow3231 and body MarkdownText3287 are created once, retain identity across completion; no terminal replacement subtree observed.",
+    "Final ReasoningLineText3270 and3274 retain identities across 13 and2 updates respectively.",
+    "Stable120 fps is not achieved for the whole stream. The pure early-body CSV row is120fps; the four pure late-body rows are60fps, with an explicit UI_ANIMATION_ENERGY_ASSURANCE60 vote.",
+    "No recurrence of thousand-pixel ScrollBy or the prior completion List-item coordinate reset is observed."
+  ],
+  "limitations": [
+    "UI OnVsyncEvent durations are elapsed main-thread event durations, not isolated CPU samples or actual presentation intervals.",
+    "CSV rows are approximately1s sampling windows; phase mapping uses trace realtime synchronization and previous sample timestamp; windows at phase boundaries are mixed and excluded from pure phase comparisons.",
+    "CSV rows11-12 include completion and residual motion;13-40 are idle0fps, excluded from generationFPS.",
+    "This run has only about0.8s of reasoning; it cannot establish sustained long-reasoning FPS.",
+    "Same prompt can yield different reasoning length, output/chunk cadence, and workload; cross-run p95 differences are descriptive and are not controlled causal improvement/regression percentages.",
+    "The first final capture has no usable SP data; its UI timing and identity evidence is independently retained in /tmp/stream120-final-analysis.json.",
+    "No device, simulator, setting, or production source was touched by this analysis."
+  ]
+}

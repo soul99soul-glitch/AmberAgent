@@ -1,0 +1,30 @@
+{
+  "phase": "rereview-fix",
+  "source": {
+    "harmony/entry/src/main/ets/pages/BoardPage.ets": "541d5cc0d20a23cc58ed192e232cf56f37726b835216863a3e4a9486b7f49b38",
+    "harmony/entry/src/main/ets/pages/NovelProjectsPage.ets": "b8c77ae38458ce4e7a54a8d7cf934040a9cc5e4d6598e0b1ca941867b53e907d",
+    "harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets": "caec591020071b4709b66be6e96697a2ec35386872afcebe4df559d69fb0f67f",
+    "harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets": "94c894173bac2d7dfc56b9d129f6e5647e8df87b9e8398041a3efd2c5349c1db",
+    "harmony/entry/src/main/ets/components/studio/StudioButton.ets": "0993797fec30f88dcc80d2633a7e299dedd034c19581b55260e38afcd122682f",
+    "harmony/entry/src/main/ets/components/studio/StudioNewsroom.ets": "bd05be4c6900ee36d27898b377cffab9322c7f0e4d5697de3a657751d3868db3",
+    "harmony/entry/src/main/ets/components/studio/StudioInkStamp.ets": "b78951d549c2af949fdb3739d2278d536313ff2e890e206a635b5391b0384253",
+    "harmony/entry/src/main/ets/components/studio/StudioTabs.ets": "44bfff1bec451c8fe401dcc78994d7a7c334a68fea2170215c26288613f34ee7",
+    "harmony/entry/src/main/ets/components/studio/StudioHero.ets": "b7a0c4c1e826910b720974213807794764858a118cb8dd59087447df9d89511e",
+    "harmony/entry/src/main/ets/components/studio/StudioEmblem.ets": "a03d35f706d4b5246634dcfa0413bc73e15cb56c4a81920053db72aca08c41b5"
+  },
+  "products": {
+    "novel": {
+      "real_hap_sha256": "8a13f89c829437f19124491bae2b2277f2cb310548a514c7f4eafeff52f7507f",
+      "emulator_hap_sha256": "4a2aef1208b46e3757d3b4ac61880442009e5bf9fba398c3720354364c9ba783",
+      "real_install": "pending: USB Offline",
+      "real_hap_path": "/Users/arquiel/Downloads/AI/amber-harmony-preview/build/standalone-editorial-motion-20261003/amber-novel.hap"
+    },
+    "deepread": {
+      "real_hap_sha256": "a4c7fc364171d035fb36015a142e1266ee568e9c55fa2be8c4b73f948d7f5ab1",
+      "emulator_hap_sha256": "61a1684078aaf76c1b8e6646184aeca93a731d5fd65947e0f65f8e172f3c02c2",
+      "real_install": "pending: USB Offline",
+      "real_hap_path": "/Users/arquiel/Downloads/AI/amber-harmony-preview/build/standalone-editorial-motion-20261003/amber-deepread.hap"
+    }
+  },
+  "candidate_source": "/tmp/amber-standalone-publish-pjzjsvlh/checkout"
+}

@@ -1,0 +1,18 @@
+{
+  "date": "2026-10-01",
+  "method": "API20 NativeVSync expected range60/120/120 with continuous RequestFrame on dedicated native worker",
+  "reference": "https://github.com/AlkaidLab/moonlight-harmony/pull/145",
+  "device": "6HK0226627000384",
+  "candidateHap": "/tmp/amber-stream120-native-vsync.hap",
+  "candidateSha256": "7c981d2d4db58f912a357fbd0102684ad8b7c5f400f0db3407e684fa64f28c22",
+  "buildSuccess": true,
+  "agcSigned": true,
+  "installed": true,
+  "launched": false,
+  "testsPassed": 19,
+  "lintErrors": 0,
+  "lintWarnings": 3,
+  "simulatorStarted": false,
+  "measurement": "Pending device unlock; no effectiveness claim yet",
+  "backup": "/tmp/streamnativevsync-baseline"
+}

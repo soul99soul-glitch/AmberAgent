@@ -1,7 +1,7 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { conversationHasPendingOrUnexecutedTools, currentMessages, makeTextGenerationParams,
   makeUserMessage, memoryWorkerModelReferences, patchConversation, recapEligible, runAutoTitle, runMemoryExtraction,
-  runSuggestion, toChatModel, toText } from '@amber/chat-domain';
+  runSuggestion, toChatModel, toText, readMemoryCitationIds } from '@amber/chat-domain';
 import type { AutoTitleDeps, Conversation, ConversationStore, MemoryExtractionDeps,
   MemoryWorkerModelResolution, MessageChunk, OpenAIChatApi, ReasoningLevel, SuggestionDeps, UIMessage } from '@amber/chat-domain';
 import { prepareProviderApi, readTaskModelReference, TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY,
@@ -11,7 +11,8 @@ import type { ChatProviderChoice, TaskPrompts } from '../di/AppContainer.ets';
 import type { DetachedConversationContext } from './ConversationRunService.ets';
 import { systemLanguage } from './AgentRuntimePrefs.ets';
 import { beginConversationRun } from './ConversationRunGuard.ets';
-import { getMemoryExtractionStoreOps } from './MemoryStore.ets';
+import { getMemoryExtractionStoreOps, getMemoryReadRepository } from './MemoryStore.ets';
+import { canCommitMemoryExtraction } from './MemoryExtractionCommitGuard.ets';
 import { notifyGenerationDone } from './NotificationNotifier.ets';
 import { getConversationRecapService } from './ConversationRecapSupport.ets';
 
@@ -128,6 +129,10 @@ const maybeMemoryExtraction = (ctx: DetachedConversationContext, finalized: Conv
     getAllActiveRecords: ops.getAllActiveRecords, addCandidates: ops.addCandidates,
     addCandidate: ops.addCandidate, addMemory: ops.addMemory, addEvent: ops.addEvent,
     countEventsSince: ops.countEventsSince,
+    canApply: (): Promise<boolean> => canCommitMemoryExtraction(finalized),
+    applyActions: (actions, now) => ops.applyActions(actions, now, async (): Promise<void> => {
+      if (!await canCommitMemoryExtraction(finalized)) throw new Error('提炼来源或自动记忆设置已改变，结果未写入');
+    }),
   };
   runMemoryExtraction(finalized, deps).catch((error: Error): void => {
     hilog.error(HILOG_DOMAIN, HILOG_TAG, 'memory extraction failed: %{public}s', error.message);
@@ -137,6 +142,16 @@ const maybeMemoryExtraction = (ctx: DetachedConversationContext, finalized: Conv
 export const completeConversationAuxiliary = (
   ctx: DetachedConversationContext, finalized: Conversation, manualToolCallId: string,
 ): void => {
+  const reinforce = getMemoryReadRepository().reinforceMemories;
+  if (reinforce !== undefined && ctx.recalledMemoryIds.length > 0) {
+    for (const message of currentMessages(finalized)) {
+      const ids: number[] = readMemoryCitationIds(message, ctx.runId, ctx.recalledMemoryIds);
+      if (ids.length === 0) continue;
+      reinforce(ids, message.id).catch((error: Error): void => {
+        hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'memory reinforcement failed: %{public}s', error.message);
+      });
+    }
+  }
   if (manualToolCallId.length === 0) {
     maybeAutoTitle(ctx, finalized);
     maybeSuggestions(ctx, finalized);

@@ -181,6 +181,7 @@ export const acceptMemoryCandidate = async (
     sourceMessageIds: candidate.sourceMessageIds,
     expiresAt: candidate.expiresAt,
     confidence: candidate.confidence,
+    evidence: candidate.evidence ?? null,
   });
   await deps.updateCandidate({ ...candidate, status: 'accepted' });
   return record;

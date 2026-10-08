@@ -12,7 +12,7 @@ import { CouncilSeatTools } from '../components/CouncilSeatTools.ets';
 import { CouncilToolModePicker } from '../components/CouncilToolModePicker.ets';
 import {
   CORE_SEATS, LENS_PRESETS, SYNTHESIZER_SEAT_KEY, isRunningStatus, makeRuntimeSetting, makeSeat,
-  resolveCouncilDynamicSeats,
+  resolveCouncilDynamicSeats, readCouncilArchive,
 } from '@amber/deepread-domain';
 import type {
   CouncilApprovalRequest, CouncilDynamicSeatSelection, CouncilTaskInput, CouncilToolMode, CouncilToolSnapshot,
@@ -20,7 +20,7 @@ import type {
   ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelCouncilTurn,
 } from '@amber/deepread-domain';
 import {
-  getAgentPromptSettingsPort, getCouncilManager, getCouncilRunner, getModelRegistry, prepareCouncilManager,
+  getAgentPromptSettingsPort, getCouncilManager, getCouncilRunner, getModelRegistry, prepareCouncilManager, getFileStore,
 } from '../di/AppContainer.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 
@@ -318,28 +318,25 @@ struct CouncilRunPage {
   private attachRun(runId: string): void {
     this.detachRun();
     const mgr: ModelCouncilManager | null = getCouncilManager();
-    if (mgr === null) {
-      this.errorMsg = '议会运行宿主不可用，运行已中断。本页不会自动恢复工具执行。';
-      this.finished = true;
-      return;
-    }
-    const snap: ModelCouncilRun | null = mgr.snapshot(runId);
-    if (snap === null) {
-      this.errorMsg = '运行不存在或已随进程结束';
-      this.finished = true;
+    const snap: ModelCouncilRun | null = mgr?.snapshot(runId) ?? null;
+    if (mgr === null || snap === null) {
+      this.runId = runId;
+      const token: number = this.loadToken;
+      readCouncilArchive(getFileStore(), runId).then((stored: ModelCouncilRun | null): void => {
+        if (!this.pageAlive || token !== this.loadToken || this.runId !== runId) return;
+        this.manager = null;
+        if (stored === null) this.errorMsg = '没有可读取的议会记录';
+        else this.applyRunSnapshot(stored);
+        this.finished = true;
+      }).catch((error: Error): void => {
+        if (this.pageAlive && token === this.loadToken && this.runId === runId) {
+          this.errorMsg = error.message; this.finished = true;
+        }
+      });
       return;
     }
     this.manager = mgr;
-    this.runId = runId;
-    this.runObjective = snap.task.objective;
-    this.mode = snap.mode;
-    this.toolMode = snap.task.toolMode ?? 'off';
-    this.seats = snap.seats;
-    this.turns = snap.turns;
-    this.statusText = statusVerb(snap.status);
-    this.progressText = this.deriveProgress(snap);
-    this.finished = !isRunningStatus(snap.status);
-    this.syncResult(snap);
+    this.applyRunSnapshot(snap);
 
     const keys: string[] = [SYNTHESIZER_SEAT_KEY];
     for (let i = 0; i < snap.seats.length; i++) keys.push(snap.seats[i].seatId);
@@ -363,6 +360,19 @@ struct CouncilRunPage {
     this.unsubs = subs;
 
     if (!this.finished) this.startPolling();
+  }
+
+  private applyRunSnapshot(snap: ModelCouncilRun): void {
+    this.runId = snap.runId;
+    this.runObjective = snap.task.objective;
+    this.mode = snap.mode;
+    this.toolMode = snap.task.toolMode ?? 'off';
+    this.seats = snap.seats;
+    this.turns = snap.turns;
+    this.statusText = statusVerb(snap.status);
+    this.progressText = this.deriveProgress(snap);
+    this.finished = !isRunningStatus(snap.status);
+    this.syncResult(snap);
   }
 
   private detachRun(): void {

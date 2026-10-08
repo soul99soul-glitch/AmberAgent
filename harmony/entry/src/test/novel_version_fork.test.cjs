@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('../../../chat/node_modules/typescript');
+const { actualPage } = require('../../../deepread/src/test/deepread_ui_fixture.cjs');
 const source = fs.readFileSync(path.join(__dirname, '../main/ets/pages/NovelChapterReaderPage.ets'), 'utf8');
 
 function method(name) {
@@ -30,6 +31,37 @@ function readerFor(creation) {
 const cas = { branchId: 'main', head: 'latest', treeDigest: 'digest' };
 const version = { id: 'version-id', title: '历史稿', createdAt: 123 };
 const checkpoint = { commitId: 'associated-checkpoint' };
+
+test('a closing preview renders its captured version after the parent selection is cleared', () => {
+  let rendered;
+  const reader = actualPage('pages/NovelChapterReaderPage.ets', ['VersionPreviewSheet'], {
+    NovelChapterVersionPreview: props => { rendered = props; }, charCountOf: text => text.length,
+  });
+  const selected = { ...version, content: 'original content', kind: 'manual' };
+  Object.assign(reader, { versionPreview: selected, busy: false, navBarHeight: 0,
+    versionKindLabel: () => 'manual', versionTime: () => 'time', versionCheckpoint: null,
+  });
+  reader.VersionPreviewSheet(selected); rendered.onBack();
+  assert.equal(reader.versionPreview, null);
+  reader.VersionPreviewSheet(selected);
+  assert.equal(rendered.title, '历史稿'); assert.equal(rendered.content, 'original content');
+  reader.busy = true; reader.VersionPreviewSheet(selected); assert.equal(rendered.busy, true);
+});
+
+test('a closing ghostwrite confirmation retains the frozen author plan after selection is cleared', () => {
+  let rendered;
+  const page = actualPage('pages/NovelWorkspacePage.ets', ['GhostwriteStartPreviewSheet'], {
+    NovelGhostwriteStartSheet: props => { rendered = props; },
+  });
+  const preview = { branchName: 'main', targetChapterCount: 3, planContent: 'frozen author plan' };
+  Object.assign(page, { ghostwritePreview: preview, ghostwriteBusy: false, navBarHeight: 0,
+    ghostwriteAuthorPlanPreview: value => value.planContent,
+  });
+  page.GhostwriteStartPreviewSheet(preview); rendered.onClose(); assert.equal(page.ghostwritePreview, null);
+  page.GhostwriteStartPreviewSheet(preview);
+  assert.equal(rendered.branchName, 'main'); assert.equal(rendered.chapterCount, 3);
+  assert.equal(rendered.planContent, 'frozen author plan');
+});
 
 test('version preview resolves an exact version checkpoint using the frozen snapshot CAS', async () => {
   const calls = [];

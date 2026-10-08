@@ -1,0 +1,38 @@
+✔ native motion after250ms attribution expiry is not classified as user scroll (0.575666ms)
+✔ an idle callback from retargeting does not turn the next native frame into a user scroll (0.192875ms)
+✔ real drag and fling stop native motion before the user position is reconciled (0.211459ms)
+✔ native animation source does not cancel itself; touch and ordinary user movement still reconcile (0.277ms)
+✖ jump to top pauses and releases native follow before changing position (4.305ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 293.653667
+
+✖ failing tests:
+
+test at harmony/chat/src/test/native_timeline_scroll_attribution.test.cjs:58:1
+✖ jump to top pauses and releases native follow before changing position (4.305ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at Object.scrollEdge (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_scroll_attribution.test.cjs:70:14)
+      at exports.run (evalmachine.<anonymous>:3:19)
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_scroll_attribution.test.cjs:72:15)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

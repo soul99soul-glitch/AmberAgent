@@ -1,3 +1,5 @@
+import { getNovelPlanDraftStore } from '../novel/NovelPlanDraftStore.ets';
+import { NovelPlanDraftStore, NovelControlPlanDraft, sameControlPlanDraft } from '../novel/NovelPlanDraftState';
 // NovelWorkspacePage — 小说工作区:三页签(聊天写作 / 章节正文 / 活资料)
 // 单文件承载三个 pane(@Builder)与对话框(Stack 叠层),状态集中于本页 @State。
 import {
@@ -7,12 +9,16 @@ import {
 import { FONT_MONO, FONT_SANS_BOLD, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { Seg, CardGroup, CardRow } from '../components/PageTemplate.ets';
+import { StudioTabs } from '../components/studio/StudioTabs.ets';
+import { StudioInkStamp } from '../components/studio/StudioInkStamp.ets';
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
 import { ChatInput } from '../components/ChatInput.ets';
 import {
   AgentMessageRow, NO_AGENT_MESSAGE_ROW_CAPABILITIES,
 } from '../components/AgentMessageRow.ets';
 import type { AgentMessageRowHostCapabilities } from '../components/AgentMessageRow.ets';
 import { InteractiveMessageTimeline } from '../components/InteractiveMessageTimeline.ets';
+import { NativeTimelineFollow } from '../components/NativeTimelineFollow.ets';
 import { NovelDiscussionArchiveSheet } from '../components/NovelDiscussionArchiveSheet.ets';
 import { NovelDiscussionArchiveCard } from '../components/NovelDiscussionArchiveCard.ets';
 import { NovelRunRecoveryCard } from '../components/NovelRunRecoveryCard.ets';
@@ -40,21 +46,22 @@ import { fileIo, picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import {
-  getNovelCreation, getNovelWorkspaceService, loadNovelModelOptions,
+  getNovelCreation, getNovelWorkspaceService, loadNovelModelOptions, describeChatModel,
 } from '../di/AppContainer.ets';
 import type { NovelModelOption } from '../di/AppContainer.ets';
 import type { NovelBookExportBundle } from '../platform_impl/NovelWorkspaceService.ets';
 import { shareNovelFile, NovelShareFormat } from '../platform_impl/NovelShareSupport.ets';
 import { MATERIAL_KIND_LABELS } from '@amber/deepread-domain';
 import {
-  NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion, NovelBranch,
+  NovelProject, NovelMessage, makeNovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion, NovelBranch,
   NovelMaterialFields, NovelWorkspaceCas, NovelWorkspaceSnapshot, makeNovelMaterial, materialOrigin, NovelInjectionOverrides, novelComposerRunKind,
   NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget,
   NovelRunKind, NovelRun, NovelActiveRun, NovelRunEvent, NovelOrdinaryRun, NovelOrdinaryRunView, latestAssistantText, ordinaryRunMessages, ordinaryRunHistoryCount,
   NovelSettingProposal, NovelForeshadow, NovelConfirmedDecision, NovelDiscussionArchive, NovelSuggestionRefreshResult, canCloneCollectedMessage,
   NovelWorkspaceStatus, StreamTransportState, UIMessage, makeUIMessage, toText,
   UIMessagePart, novelMessageUi, novelMessageText, NovelToolContinuationVerdict,
-  NovelModelPolicy, NovelModelTarget, NovelBranchSettings, NovelConsistencyReport,
+  NovelModelPolicy, NovelModelTarget, NovelModelDefaults, defaultNovelModelDefaults, resolveNovelDefaultTarget,
+  NovelBranchSettings, NovelConsistencyReport,
   emptyNovelBranchSettings, eligibleNovelDiscussion, NovelDiscussionArchiveDraft,
   NovelMaterialAdoption, buildSuggestionAdoption, buildSettingProposalAdoption, materialAdoptionTargetDigest,
   NovelAuditIssue, NovelAuditReference, verifyAuditCanonicalReferences, NovelAuditReport, NovelAuditController, NovelAuditProgress, NovelAuditBlock, defaultGhostwriteDigest, DEFAULT_GHOSTWRITE_CHAPTER_COUNT,
@@ -73,6 +80,7 @@ import {
 } from '../novel/NovelComposerState';
 import type { NovelComposeMode, NovelComposerDraft, CollectionLocation } from '../novel/NovelComposerState';
 import { getNovelComposerDraftStore } from '../novel/NovelComposerDraftStore.ets';
+import { loadNovelModelDefaults } from '../platform_impl/NovelStandaloneDefaults.ets';
 
 
 const NOVEL_AGENT_MESSAGE_CAPABILITIES: AgentMessageRowHostCapabilities = {
@@ -109,6 +117,7 @@ interface KindFilterLabels {
 interface ExportMenuResult {
   index: number;
 }
+type ControlPlanDraft = NovelControlPlanDraft;
 interface WorkspaceReturnParams { novelContextOverrides?: string; }
 interface NovelContextOverrideReturn {
   projectId: string;
@@ -135,7 +144,7 @@ const filterLabel = (f: MaterialFilter): string => {
 @Entry
 @Component
 struct NovelWorkspacePage {
-  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
+  @StorageProp('themeEpoch') @Watch('clearStudioFeedback') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State project: NovelProject | null = null;
   @State workspaceStatus: NovelWorkspaceStatus | null = null;
@@ -147,11 +156,36 @@ struct NovelWorkspacePage {
   @State planFuture: string = '';
   @State planPreferences: string = '';
   @State controlNotice: string = '';
+  @State controlPlanReady: boolean = false;
+  @State controlPlanLoading: boolean = false;
+  @State controlPlanError: string = '';
+  private controlPlanSession: number = 0;
+  private controlPlanWriteRevision: number = 0;
+  private planDraftStore: NovelPlanDraftStore = getNovelPlanDraftStore();
+  private controlPlanOwner: string = '';
+  private controlPlanBaseline: ControlPlanDraft = { thisChapterPlan: '', futurePlan: '', preferences: '' };
+  private controlPlanDrafts: Map<string, ControlPlanDraft> = new Map();
+  @State composerModelSheetOpen: boolean = false;
+  @State composerModelSession: number = 0;
+  @State composerModelError: string = '';
+  @State novelModelDefaults: NovelModelDefaults = defaultNovelModelDefaults();
+  @State chatModelLabel: string = '';
+  @State modelOptionsReady: boolean = false;
+  @State modelOptionsLoading: boolean = false;
+  @State modelOptionsError: string = '';
+  private modelOptionsLoadToken: number = 0;
   @State contextOverrides: NovelInjectionOverrides | null = null;
   private lastContextReceiptToken: string = '';
+  @StorageProp('appBackgrounded') @Watch('studioBackgroundChanged') private studioBackgrounded: boolean = false;
+  @StorageProp('reduceMotion') private reduceMotion: boolean = false;
+  @State private studioPageVisible: boolean = true;
+  @State private collectionStamp: number = 0;
+  @State private studioTabDirection: number = 1;
+  private studioVisibleCycle: number = 0;
   @State tab: number = 0;
   // 设定 tab 分类(iOS Compendium segmented):0 角色 / 1 世界观 / 2 剧情 / 3 更多
   @State settingTab: number = 0;
+  @State private projectModelsVisible: boolean = false;
   @State fsTitle: string = '';
   @State fsContent: string = '';
   @State decTitle: string = '';
@@ -312,6 +346,8 @@ struct NovelWorkspacePage {
   @State singlePolishChapterId: string = '';
   @State polishStartError: string = '';
   @State activeQuickStart: boolean = false;
+  @State private activeRunKind: NovelRunKind | null = null;
+  @State private completedPreview: UIMessage[] = [];
   @State failedQuickStart: boolean = false;
   @State ghostwriteModelAvailable: boolean = false;
   @State ghostwriteModelIssue: string = '正在检查模型配置…';
@@ -323,6 +359,10 @@ struct NovelWorkspacePage {
   private reloadToken: number = 0;
   private initialScrollArmed: boolean = false;
   private novelScrollToken: number = 0;
+  private nativeFollow: NativeTimelineFollow | null = null;
+  private novelViewportHeight: number = 0;
+  private novelLastVisibleIndex: number = -1;
+  private novelUserScrolling: boolean = false;
   private userTouchActive: boolean = false;
   private recoveryAttemptedToolCalls: Set<string> = new Set();
   private ghostwritePollToken: number = 0;
@@ -352,6 +392,7 @@ struct NovelWorkspacePage {
   aboutToAppear(): void {
     this.enableKeyboardAvoidance();
     this.pageAlive = true;
+    this.studioPageVisible = true;
     const params = router.getParams() as Record<string, string>;
     this.projectId = params ? (params['projectId'] ?? '') : '';
     this.requestedBranchId = params ? (params['branchId'] ?? '') : '';
@@ -381,6 +422,11 @@ struct NovelWorkspacePage {
   private pageHiddenOnce: boolean = false;
 
   onPageHide(): void {
+    this.closeControlSheet();
+    this.studioPageVisible = false;
+    if (this.composerModelSheetOpen) this.closeComposerModelSheet(this.composerModelSession, true);
+    this.modelOptionsLoadToken++;
+    this.clearStudioFeedback();
     this.ghostwriteBriefOpenToken++;
     this.auditRepairToken++;
     if (this.auditRepairBusy) this.cancelAuditRepair();
@@ -392,14 +438,21 @@ struct NovelWorkspacePage {
   }
 
   onPageShow(): void {
+    this.studioPageVisible = true;
     this.enableKeyboardAvoidance();
     if (this.pageHiddenOnce) {
       this.pageHiddenOnce = false;
+      this.loadProjectModelOptions();
       this.reload().then((): void => { if (this.pageAlive) this.consumeContextOverrides(); });
     }
   }
 
   aboutToDisappear(): void {
+    this.closeControlSheet();
+    this.studioPageVisible = false;
+    if (this.composerModelSheetOpen) this.closeComposerModelSheet(this.composerModelSession, true);
+    this.modelOptionsLoadToken++;
+    this.clearStudioFeedback();
     this.ghostwriteBriefOpenToken++;
     this.auditRepairToken++;
     if (this.auditRepairBusy) this.cancelAuditRepair();
@@ -411,6 +464,7 @@ struct NovelWorkspacePage {
     this.auditController = null;
     this.reloadToken++;
     this.novelScrollToken++;
+    this.nativeFollow?.cancel();
     this.ghostwritePollToken++;
     this.polishPollToken++;
     if (this.currentUnsub !== null) {
@@ -418,6 +472,47 @@ struct NovelWorkspacePage {
       this.currentUnsub = null;
       unsub(); // 终结即退订,emitter 不再持有页面闭包
     }
+  }
+
+  // The impression belongs to the visible collection action, never to an AI run event.
+  private clearStudioFeedback(): void {
+    this.studioVisibleCycle++;
+    this.collectionStamp = 0;
+  }
+
+  private studioBackgroundChanged(): void {
+    if (this.studioBackgrounded) {
+      this.retainControlPlanDraft();
+      this.clearStudioFeedback();
+      if (this.composerModelSheetOpen) this.closeComposerModelSheet(this.composerModelSession, true);
+    }
+  }
+
+  private showCollectionStamp(projectId: string, branchId: string, visibleCycle: number): void {
+    if (getProductKind() !== 'novel' || !this.pageAlive || !this.studioPageVisible || this.studioBackgrounded ||
+      this.studioVisibleCycle !== visibleCycle || this.projectId !== projectId ||
+      this.workspaceStatus?.activeBranchId !== branchId || this.tab !== 1) return;
+    this.collectionStamp++;
+  }
+
+  private selectStudioTab(idx: number): void {
+    if (idx === this.tab) return;
+    this.studioTabDirection = idx > this.tab ? 1 : -1;
+    if (idx !== 1) this.clearStudioFeedback();
+    animateTo({ duration: this.studioPaneDuration(), curve: Curve.EaseInOut }, (): void => { this.tab = idx; });
+  }
+
+  private studioPaneDuration(): number {
+    if (!this.studioPageVisible || this.studioBackgrounded) return 0;
+    return this.reduceMotion ? 100 : 180;
+  }
+
+  private workspacePaneTransition(): TransitionEffect {
+    if (getProductKind() !== 'novel') {
+      return TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 10 }))
+        .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut });
+    }
+    return TransitionEffect.OPACITY.animation({ duration: this.studioPaneDuration(), curve: Curve.EaseInOut });
   }
 
   private enableKeyboardAvoidance(): void {
@@ -455,12 +550,16 @@ struct NovelWorkspacePage {
       this.cancelArchive();
       return true;
     }
+    if (this.composerModelSheetOpen) {
+      this.closeComposerModelSheet(this.composerModelSession);
+      return true;
+    }
     if (this.ghostwriteBriefOpen) {
       this.ghostwriteBriefCloseRequest++;
       return true;
     }
     if (this.controlSheetOpen) {
-      this.controlSheetOpen = false;
+      this.closeControlSheet();
       return true;
     }
     if (this.ghostwritePreview !== null) {
@@ -573,8 +672,12 @@ struct NovelWorkspacePage {
           this.expandedArchiveIds = [];
           this.collectionFeedback = '';
           this.collectionFeedbackToken++;
+          this.clearStudioFeedback();
         }
+        const workspaceChanged: boolean = this.project === null ||
+          this.workspaceStatus?.activeBranchId !== status.activeBranchId;
         this.project = project;
+        this.completedPreview = [];
         this.workspaceStatus = status;
         this.ordinaryRecovery = recovery.record?.branchId === status.activeBranchId ? recovery : null;
         if (this.contextOverrides !== null && this.contextOverrides.branchId !== status.activeBranchId) this.contextOverrides = null;
@@ -582,17 +685,17 @@ struct NovelWorkspacePage {
         this.ghostwriteJob = ghostwrite;
         this.ghostwriteReport = ghostwriteReport;
         this.polishJob = polish;
-        if (ghostwrite !== null) this.settingTab = 3;
+        if (ghostwrite !== null && getProductKind() !== 'novel') this.settingTab = 3;
         this.ghostwriteModelAvailable = modelAvailable;
         this.ghostwriteModelIssue = modelIssue;
         // 等 List 收到新 rows 的可见范围回调再落底；Promise 返回后的
         // setTimeout 仍可能早于 ArkUI 完成 ForEach 布局。
-        this.initialScrollArmed = project.messages.length > 0 || activeRun !== null;
+        if (workspaceChanged) this.initialScrollArmed = project.messages.length > 0 || activeRun !== null;
         if (activeRun !== null &&
           (this.activeRunId !== activeRun.run.id || this.currentUnsub === null)) {
           this.attachNovelRun(
             activeRun.run, activeRun.historyCount, activeRun.userText,
-            activeRun.startedAt, '正在继续离页前的生成…', activeRun.runKind === 'quick_start');
+            activeRun.startedAt, '正在继续离页前的生成…', activeRun.runKind === 'quick_start', activeRun.runKind ?? null);
         } else if (activeRun === null && this.currentUnsub === null && this.activeRunId.length > 0) {
           this.clearNovelRunUi();
         }
@@ -635,7 +738,7 @@ struct NovelWorkspacePage {
       if (next === null && previous !== null) {
         this.ghostwriteReport = await getNovelCreation().latestGhostwriteReport(this.projectId);
       }
-      if (next !== null) this.settingTab = 3;
+      if (next !== null && getProductKind() !== 'novel') this.settingTab = 3;
       const previousProgress: number = previous?.progress.length ?? 0;
       const nextProgress: number = next?.progress.length ?? 0;
       if (previousProgress !== nextProgress || (previous !== null && next === null)) {
@@ -722,9 +825,16 @@ struct NovelWorkspacePage {
   }
 
   private async loadProjectModelOptions(): Promise<void> {
+    const token: number = ++this.modelOptionsLoadToken;
+    this.modelOptionsLoading = true;
+    this.modelOptionsReady = false;
+    this.modelOptionsError = '';
     try {
       const options: NovelModelOption[] = await loadNovelModelOptions();
-      if (!this.pageAlive) return;
+      const defaults: NovelModelDefaults = getProductKind() === 'novel'
+        ? await loadNovelModelDefaults() : defaultNovelModelDefaults();
+      const chatLabel: string = getProductKind() === 'novel' ? await describeChatModel() : '';
+      if (!this.pageAlive || token !== this.modelOptionsLoadToken) return;
       this.modelOptions = options.map((option: NovelModelOption): NovelModelOptionView => ({
         providerId: option.providerId,
         modelId: option.modelId,
@@ -732,8 +842,16 @@ struct NovelWorkspacePage {
         providerLabel: option.providerLabel,
         available: option.available,
       }));
+      this.novelModelDefaults = defaults;
+      this.chatModelLabel = chatLabel;
+      this.modelOptionsReady = true;
     } catch (error) {
-      if (this.pageAlive) this.errorMsg = `模型列表加载失败：${String(error)}`;
+      if (this.pageAlive && token === this.modelOptionsLoadToken) {
+        this.modelOptionsError = `模型列表加载失败：${String(error)}`;
+        this.errorMsg = this.modelOptionsError;
+      }
+    } finally {
+      if (this.pageAlive && token === this.modelOptionsLoadToken) this.modelOptionsLoading = false;
     }
   }
 
@@ -777,8 +895,8 @@ struct NovelWorkspacePage {
     finally { this.ghostwriteBusy = false; }
   }
 
-  private ghostwriteAuthorPlanPreview(): string {
-    const content: string = this.ghostwritePreview?.planContent ?? '';
+  private ghostwriteAuthorPlanPreview(preview: NovelGhostwriteStartPreview | null = this.ghostwritePreview): string {
+    const content: string = preview?.planContent ?? '';
     const settings: NovelBranchSettings | undefined = this.project?.branchSettings;
     const contract: NovelChapterContract | undefined = settings?.chapterContract;
     if (settings !== undefined && contract !== undefined && contract.status === 'confirmed' && content === confirmedChapterPlanText(settings)) {
@@ -796,7 +914,7 @@ struct NovelWorkspacePage {
     try {
       this.ghostwriteJob = await getNovelCreation().startGhostwrite(this.projectId, targetChapterCount, preview);
       this.ghostwritePreview = null;
-      this.settingTab = 3;
+      if (getProductKind() !== 'novel') this.settingTab = 3;
       this.errorMsg = '';
       this.scheduleGhostwritePoll();
     } catch (error) {
@@ -861,7 +979,7 @@ struct NovelWorkspacePage {
     this.ghostwriteBusy = true;
     try {
       this.ghostwriteJob = await getNovelCreation().resumeGhostwrite(this.projectId, job.jobId);
-      this.settingTab = 3;
+      if (getProductKind() !== 'novel') this.settingTab = 3;
       this.errorMsg = '';
       this.scheduleGhostwritePoll();
     } catch (error) {
@@ -877,7 +995,7 @@ struct NovelWorkspacePage {
     this.ghostwriteBusy = true;
     try {
       this.ghostwriteJob = await getNovelCreation().retryGhostwrite(this.projectId, job.jobId);
-      this.settingTab = 3;
+      if (getProductKind() !== 'novel') this.settingTab = 3;
       this.errorMsg = '';
       this.scheduleGhostwritePoll();
     } catch (error) {
@@ -1105,7 +1223,8 @@ struct NovelWorkspacePage {
     const historyCount: number = kind === 'resume' || record.originalRequest.operation.kind === 'tool_continuation'
       ? ordinaryRunHistoryCount(record) : this.project?.messages.length ?? 0;
     this.attachNovelRun(run, historyCount, '', Date.now(),
-      kind === 'retry' ? '正在按原请求重试…' : '正在继续原任务…', record.runKind === 'quick_start');
+      kind === 'retry' ? '正在按原请求重试…' : '正在继续原任务…', record.runKind === 'quick_start',
+      record.runKind ?? (record.mode === 'discuss' ? 'discussion' : 'prose_whole_chapter'));
   }
 
   private copyOrdinaryPartial(recordId: string, text: string): void {
@@ -1457,11 +1576,60 @@ struct NovelWorkspacePage {
       if (!this.pageAlive || token !== this.novelScrollToken || this.userTouchActive) return;
       this.atBottomApprox = true;
       this.jumpButtonVisible = false;
+      this.nativeFollow?.cancel();
       this.chatScroller.scrollEdge(Edge.Bottom);
     }, 0);
   }
 
+  private novelTimelineItemCount(): number {
+    let count: number = 0;
+    const project: NovelProject | null = this.project;
+    if (project !== null) {
+      if (this.ordinaryRecoveryRecord() !== null && this.activeRunId.length === 0) count++;
+      if (this.ghostwriteJob !== null) count++;
+      if (project.messages.length === 0 && this.activeRunId.length === 0) count++;
+      if (this.ghostwriteJob === null && this.ghostwriteReport !== null) count++;
+      const messages: NovelMessage[] = this.novelTimelineMessages();
+      const expandedArchives: string[] = this.expandedArchiveIds;
+      for (const message of messages) {
+        if (discussionArchiveAtMessage(project.discussionArchives, message) !== null) count++;
+        if (discussionMessageVisible(project.discussionArchives, expandedArchives, message)) count++;
+        count += this.settingProposalsAt(message).length;
+      }
+      count += orphanSettingProposals(project.settingProposals, project.messages).length;
+    }
+    if (this.pendingUserText.length > 0 && this.activeMessages.length === 0) count++;
+    if (this.activeRunId.length === 0) count += this.failedMessages.length + this.completedPreview.length;
+    else {
+      const activeCount: number = this.activeRunTimelineMessages().length;
+      if (this.activeQuickStart) count += 1 + activeCount;
+      else if (activeCount === 0) count++;
+    }
+    return count;
+  }
+
+  private measuredNovelBottomTarget(): number | null {
+    const current: number = this.chatScroller.currentOffset().yOffset;
+    if (this.chatScroller.isAtEnd()) return current;
+    const lastIndex: number = this.novelTimelineItemCount() - 1;
+    if (lastIndex < 0) return current;
+    if (this.novelLastVisibleIndex < lastIndex || this.novelViewportHeight <= 0) return null;
+    const rect: RectResult = this.chatScroller.getItemRect(lastIndex);
+    return current + Math.max(0, rect.y + rect.height - this.novelViewportHeight);
+  }
+
+  private requestNovelNativeFollow(): void {
+    if (this.nativeFollow === null) {
+      this.nativeFollow = new NativeTimelineFollow(this.getUIContext(), this.chatScroller,
+        (): boolean => this.pageAlive && this.studioPageVisible && !this.studioBackgrounded && this.tab === 0 &&
+          !this.userTouchActive && shouldScrollOnStreamUpdate(this.followMode, this.atBottomApprox),
+        (): number | null => this.measuredNovelBottomTarget(), (): void => {});
+    }
+    this.nativeFollow.request();
+  }
+
   private beginNovelGenerationFollow(): void {
+    this.novelUserScrolling = false;
     this.followMode = transitionOnJumpToBottom(true);
     this.atBottomApprox = true;
     this.jumpButtonVisible = false;
@@ -1472,7 +1640,7 @@ struct NovelWorkspacePage {
     this.followMode = transitionOnStreamUpdate(this.followMode, this.atBottomApprox);
     this.jumpButtonVisible = this.followMode === 'paused';
     if (shouldScrollOnStreamUpdate(this.followMode, this.atBottomApprox)) {
-      this.scheduleNovelScrollToBottom();
+      this.requestNovelNativeFollow();
     }
   }
 
@@ -1480,11 +1648,12 @@ struct NovelWorkspacePage {
     const wasPaused: boolean = this.followMode === 'paused';
     this.followMode = transitionOnGenerateEnd(this.followMode);
     this.jumpButtonVisible = wasPaused;
-    if (!wasPaused) this.scheduleNovelScrollToBottom();
+    if (!wasPaused) this.requestNovelNativeFollow();
   }
 
   private reconcileNovelUserScroll(): void {
     this.novelScrollToken++;
+    this.nativeFollow?.cancel();
     let atEnd: boolean = false;
     try {
       atEnd = this.chatScroller.isAtEnd();
@@ -1498,6 +1667,7 @@ struct NovelWorkspacePage {
   }
 
   private jumpNovelToBottom(): void {
+    this.novelUserScrolling = false;
     this.followMode = transitionOnJumpToBottom(this.activeRunId.length > 0);
     this.scheduleNovelScrollToBottom();
   }
@@ -1625,7 +1795,7 @@ struct NovelWorkspacePage {
       if (!this.pageAlive || this.composerDraftOwner !== owner) return;
       this.failedInput = '';
       this.attachNovelRun(
-        run, this.project.messages.length, text, Date.now(), '正在连接模型并组织正文…', runKind === 'quick_start');
+        run, this.project.messages.length, text, Date.now(), '正在连接模型并组织正文…', runKind === 'quick_start', runKind);
     } catch (error) {
       if (this.pageAlive && this.composerDraftOwner === owner) {
         if (clearedRevision >= 0 && canRestoreFailedInput(
@@ -1743,6 +1913,7 @@ struct NovelWorkspacePage {
   private async submitCollect(): Promise<void> {
     if (this.collectMessageId.length === 0 || this.collectDisabled()) return;
     const messageId: string = this.collectMessageId;
+    const visibleCycle: number = this.studioVisibleCycle;
     this.collectDraftController.stopEditing();
     this.collectTitleController.stopEditing();
     await new Promise<void>((resolve: () => void): void => { setTimeout(resolve, 0); });
@@ -1755,8 +1926,6 @@ struct NovelWorkspacePage {
     try {
       const projectId: string = this.projectId;
       const branchId: string = this.workspaceStatus?.activeBranchId ?? '';
-      const source: NovelMessage | undefined = this.project?.messages.find((message: NovelMessage): boolean => message.id === messageId);
-      const offerArchive: boolean = this.collectMode === 0 && source?.granularity === 'whole_chapter';
       const collected = await getNovelCreation().collectMessage(projectId, this.collectMessageId, target,
         this.collectDraft.trim());
       if (!this.pageAlive || this.pageHiddenOnce || this.projectId !== projectId ||
@@ -1765,21 +1934,14 @@ struct NovelWorkspacePage {
       this.collectionFeedback = '正文已收录，剧情同步点已保存。正在分析本章资料建议…';
       void collected.analysisFinished.then(
         (result: NovelSuggestionRefreshResult): Promise<void> => this.refreshCollectedAnalysis(projectId, branchId, feedbackToken, result),
-        (error: Error): Promise<void> => this.refreshCollectedAnalysis(projectId, branchId, feedbackToken, null, String(error)),
+        (): Promise<void> => this.refreshCollectedAnalysis(projectId, branchId, feedbackToken, null),
       ).catch((): void => {});
       this.collectMessageId = '';
       this.errorMsg = '';
       await this.reload();
+      this.studioTabDirection = this.tab < 1 ? 1 : -1;
       this.tab = 1;
-      // 新开整章后 offer 讨论归档；替换与并入不改变此作者流程。
-      if (offerArchive && this.pageAlive && this.workspaceStatus?.activeBranchId === branchId) {
-        AlertDialog.show({
-          title: '正文已收进章节',
-          message: '要整理尚未归档的讨论吗？你可以编辑摘要并逐项确认创作决定，确认后才用于下一轮创作。',
-          primaryButton: { value: '不了', action: (): void => {} },
-          secondaryButton: { value: '整理讨论', action: (): void => { this.archiveDiscussion(); } },
-        });
-      }
+      this.showCollectionStamp(projectId, branchId, visibleCycle);
     } catch (e) {
       this.errorMsg = String(e);
     } finally {
@@ -1787,13 +1949,20 @@ struct NovelWorkspacePage {
     }
   }
 
+  private materialAnalysisFailureText(error: string): string {
+    if (error.includes('资料建议解析失败')) {
+      return '模型返回的资料建议格式不完整，请重新分析此章。';
+    }
+    return error.replace(/^(NovelError|Error):\s*/, '');
+  }
+
   private async refreshCollectedAnalysis(projectId: string, branchId: string, token: number,
-    result: NovelSuggestionRefreshResult | null, error: string = ''): Promise<void> {
+    result: NovelSuggestionRefreshResult | null): Promise<void> {
     if (!this.pageAlive || this.projectId !== projectId ||
       this.workspaceStatus?.activeBranchId !== branchId || token !== this.collectionFeedbackToken) return;
     this.collectionFeedback = result !== null
       ? `正文已收录，剧情同步点已保存。${result.warning ?? `资料分析完成，新增 ${result.count} 条建议。`}`
-      : `正文已收录，剧情同步点已保存。资料分析未完成：${error}`;
+      : '正文已收录，剧情同步点已保存。资料分析未完成，可在「设定」中重新分析此章。';
     await this.reload();
   }
 
@@ -1811,8 +1980,10 @@ struct NovelWorkspacePage {
     const run: NovelRun = getNovelCreation().continueTool(this.projectId, resolvedId, verdict);
     const historyCount: number = (this.project?.messages ?? []).findIndex((message: NovelMessage): boolean =>
       novelMessageUi(message).parts.some((part: UIMessagePart): boolean => part.type === 'tool' && part.toolCallId === resolvedId));
+    const sourceMessage: NovelMessage | undefined = this.project?.messages[historyCount];
     this.attachNovelRun(
-      run, historyCount, '', Date.now(), '正在继续同一轮任务…');
+      run, historyCount, '', Date.now(), '正在继续同一轮任务…', false,
+      sourceMessage?.runKind ?? (sourceMessage?.mode === 'discuss' ? 'discussion' : 'prose_whole_chapter'));
   }
 
   // R08:locator(messageId+partIndex)优先精确定位到目标工具 part 的 toolCallId;
@@ -1850,6 +2021,7 @@ struct NovelWorkspacePage {
   private clearNovelRunUi(): void {
     this.activeRunId = '';
     this.activeQuickStart = false;
+    this.activeRunKind = null;
     this.activeRunCreatedAt = 0;
     this.pendingUserText = '';
     this.activeMessages = [];
@@ -1862,7 +2034,7 @@ struct NovelWorkspacePage {
 
   private attachNovelRun(
     run: NovelRun, historyCount: number, pendingUserText: string,
-    startedAt: number, statusText: string, quickStart: boolean = false,
+    startedAt: number, statusText: string, quickStart: boolean = false, runKind: NovelRunKind | null = null,
   ): void {
     if (this.currentUnsub !== null) {
       const previous: () => void = this.currentUnsub;
@@ -1882,9 +2054,13 @@ struct NovelWorkspacePage {
     this.errorMsg = '';
     this.failedMessages = [];
     this.failedQuickStart = false;
+    this.completedPreview = [];
     const owner: string = this.composerDraftOwner;
     const inputMode: NovelComposeMode = this.composeMode;
+    this.activeRunKind = runKind ?? (quickStart ? 'quick_start' :
+      (inputMode === 'discuss' ? 'discussion' : 'prose_whole_chapter'));
     this.beginNovelGenerationFollow();
+    let terminalSeen: boolean = false;
     const unsub: () => void = run.subscribe((event: NovelRunEvent): void => {
       if (this.activeRunId !== run.id) return;
       if (event.kind === 'status') {
@@ -1897,6 +2073,7 @@ struct NovelWorkspacePage {
         this.followNovelStreamingUpdate();
       } else if (event.kind === 'completed' || event.kind === 'waiting_user' ||
         event.kind === 'interrupted' || event.kind === 'failed') {
+        terminalSeen = true;
         if (event.kind === 'failed' && event.unsavedMessages !== undefined) {
           this.failedMessages = event.unsavedMessages.slice();
           this.failedQuickStart = this.activeQuickStart;
@@ -1906,15 +2083,30 @@ struct NovelWorkspacePage {
           this.failedInputMode = inputMode;
           this.failedInputRunKind = this.activeQuickStart ? 'quick_start' : null;
         }
-        this.finishNovelGenerationFollow();
-        this.clearNovelRunUi();
         if (event.kind === 'failed') this.errorMsg = event.message;
         this.currentUnsub = null;
-        this.reload();
+        void this.settleNovelRunUi(run.id);
       }
     });
-    if (this.activeRunId === run.id) this.currentUnsub = unsub;
+    if (!terminalSeen && this.activeRunId === run.id) this.currentUnsub = unsub;
     else unsub();
+  }
+
+  private async settleNovelRunUi(runId: string): Promise<void> {
+    const reloadToken: number = this.reloadToken + 1;
+    // Keep the live body until reload atomically publishes the saved transcript.
+    await this.reload();
+    if (!this.pageAlive || reloadToken !== this.reloadToken ||
+      (this.activeRunId.length > 0 && this.activeRunId !== runId)) return;
+    if (this.activeRunId === runId) {
+      // A read failure must neither hide the last body nor keep an ended run locked.
+      if (this.failedMessages.length === 0) {
+        this.completedPreview = this.activeRunTimelineMessages().map((message: UIMessage): UIMessage =>
+          this.activeRunMessage(message));
+      }
+      this.clearNovelRunUi();
+    }
+    this.finishNovelGenerationFollow();
   }
 
   private async resolveSettingProposal(proposal: NovelSettingProposal, accept: boolean): Promise<void> {
@@ -1955,7 +2147,7 @@ struct NovelWorkspacePage {
 
   private attachChapterRun(run: NovelRun, statusText: string): void {
     this.attachNovelRun(
-      run, this.project?.messages.length ?? 0, '', Date.now(), statusText);
+      run, this.project?.messages.length ?? 0, '', Date.now(), statusText, false, 'regenerate');
   }
 
   async regenerateChapter(chapterId: string): Promise<void> {
@@ -2129,10 +2321,20 @@ struct NovelWorkspacePage {
       (s: NovelMaterialSuggestion): boolean => s.status === 'pending' && kinds.indexOf(s.kind) >= 0);
   }
 
+  private pendingSettingProposalsIn(kinds: NovelMaterialKind[]): NovelSettingProposal[] {
+    const p: NovelProject | null = this.project;
+    if (p === null) return [];
+    return p.settingProposals.filter(
+      (proposal: NovelSettingProposal): boolean => proposal.status === 'pending' && kinds.indexOf(proposal.kind) >= 0);
+  }
+
   private branchSettingsWith(foreshadows: NovelForeshadow[], decisions: NovelConfirmedDecision[]): NovelBranchSettings {
     const p: NovelProject | null = this.project;
     if (p === null) return emptyNovelBranchSettings();
     return {
+      chapterContract: p.branchSettings.chapterContract,
+      upcomingArc: p.branchSettings.upcomingArc,
+      suggestedChapterCount: p.branchSettings.suggestedChapterCount,
       thisChapterPlan: p.branchSettings.thisChapterPlan,
       futurePlan: p.branchSettings.futurePlan,
       preferences: p.branchSettings.preferences,
@@ -2348,6 +2550,9 @@ struct NovelWorkspacePage {
     const p: NovelProject | null = this.project;
     if (this.busy || this.hasBlockingNovelRun() || p === null || p.chapters.length === 0) return;
     this.busy = true;
+    this.errorMsg = '';
+    this.collectionFeedback = '';
+    this.collectionFeedbackToken++;
     try {
       const chapter: NovelChapter | undefined = chapterId.length > 0
         ? p.chapters.find((item: NovelChapter): boolean => item.id === chapterId) : p.chapters[p.chapters.length - 1];
@@ -2357,7 +2562,7 @@ struct NovelWorkspacePage {
     } catch (e) {
       // 失败信息已由 domain 持久化到章上，重读后保留本次错误。
       await this.reload();
-      if (this.pageAlive) this.errorMsg = String(e);
+      if (this.pageAlive) this.errorMsg = this.materialAnalysisFailureText(String(e));
     } finally {
       this.busy = false;
     }
@@ -2451,6 +2656,7 @@ struct NovelWorkspacePage {
       Text(this.assistantLabel(message))
         .fontSize(12)
         .fontColor(INK3)
+        .height(18)
         .margin({ bottom: 4 })
     }
     if (message.clonedFromMessageId !== undefined) {
@@ -2474,7 +2680,7 @@ struct NovelWorkspacePage {
           .fontSize(12).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
           .fontColor(ACCENT_INK).margin({ left: 6 })
       }
-      .constraintSize({ minHeight: 44 })
+      .height(44)
       .padding({ left: 16, right: 16 })
       .borderRadius(22)
       .backgroundColor(ACCENT)
@@ -2500,22 +2706,89 @@ struct NovelWorkspacePage {
   @Builder
   activeRunHeader(show: boolean = true): void {
     if (show) {
-      Text(this.activeMessages.length > 0 ? '正在写' : '正在思考')
-        .fontSize(12)
-        .fontColor(ACCENT)
-        .margin({ bottom: 4 })
-      if (this.activeFrameSeen) {
-        Text(this.activeTransport === 'live' ? '实时' :
-          (this.activeTransport === 'buffered' ? '缓冲' : '非流式'))
-          .fontSize(10)
-          .fontColor(INK3)
-          .margin({ left: 8, bottom: 4 })
-      }
+      Row() {
+        Text(this.activeMessages.length > 0 ? '正在写' : '正在思考')
+          .fontSize(12)
+          .fontColor(ACCENT)
+        if (this.activeFrameSeen) {
+          Text(this.activeTransport === 'live' ? '实时' :
+            (this.activeTransport === 'buffered' ? '缓冲' : '非流式'))
+            .fontSize(10)
+            .fontColor(INK3)
+            .margin({ left: 8 })
+        }
+      }.height(18).alignItems(VerticalAlign.Center).margin({ bottom: 4 })
+    }
+  }
+
+  @Builder
+  private activeRunFooter(message: UIMessage): void {
+    if (message.role === 'assistant' && this.activeRunKind !== 'discussion' && !this.activeQuickStart &&
+      toText(message).trim().length > 0) {
+      // The saved collection button is44vp plus6vp margin; reserve it while writing.
+      Column() {}.height(50)
     }
   }
 
   @Builder
   emptyAgentRowSlot(): void {}
+
+  // ForEach retains its first item; read the current immutable snapshot as Amber does.
+  private activeRunMessage(seed: UIMessage): UIMessage {
+    const current: UIMessage = this.activeMessages.find((message: UIMessage): boolean => message.id === seed.id) ?? seed;
+    if (!this.activeQuickStart) return current;
+    // Quick start generates structured JSON. Show its live thinking, then the saved overview.
+    return makeUIMessage(current.role, current.parts.filter((part: UIMessagePart): boolean => part.type === 'reasoning'), {
+      id: current.id, createdAt: current.createdAt, finishedAt: current.finishedAt, modelId: current.modelId,
+    });
+  }
+
+  private activeRunTimelineMessages(): UIMessage[] {
+    if (!this.activeQuickStart) return this.activeMessages;
+    return this.activeMessages.filter((message: UIMessage): boolean => message.role === 'assistant' &&
+      message.parts.some((part: UIMessagePart): boolean => part.type === 'reasoning'));
+  }
+
+  private novelTimelineMessages(): NovelMessage[] {
+    if (this.project === null) return [];
+    if (this.activeRunId.length === 0) return this.project.messages;
+    const messages: NovelMessage[] = this.project.messages.slice(0, this.activeHistoryCount);
+    if (!this.activeQuickStart) {
+      for (const message of this.activeRunTimelineMessages()) {
+        if (message.role !== 'user' && message.role !== 'assistant') continue;
+        messages.push(makeNovelMessage({ id: message.id, role: message.role,
+          mode: this.activeRunKind === 'discussion' ? 'discuss' : 'write', uiMessage: message,
+          createdAt: this.activeRunCreatedAt, runKind: this.activeRunKind }));
+      }
+    }
+    return messages;
+  }
+
+  private novelTimelineMessageLive(message: NovelMessage): boolean {
+    return this.activeRunId.length > 0 && !this.activeQuickStart &&
+      this.activeMessages.some((current: UIMessage): boolean => current.id === message.uiMessage.id);
+  }
+
+  private savedTimelineMessage(seed: NovelMessage): NovelMessage {
+    return this.project?.messages.find((message: NovelMessage): boolean => message.id === seed.id) ?? seed;
+  }
+
+  private novelTimelineMessageUi(message: NovelMessage): UIMessage {
+    return this.novelTimelineMessageLive(message) ? this.activeRunMessage(message.uiMessage) :
+      this.projectMessageUi(this.savedTimelineMessage(message));
+  }
+
+  @Builder
+  private novelTimelineMessageHeader(message: NovelMessage): void {
+    if (this.novelTimelineMessageLive(message)) this.activeRunHeader(message.role === 'assistant');
+    else this.novelMessageHeader(this.savedTimelineMessage(message));
+  }
+
+  @Builder
+  private novelTimelineMessageFooter(message: NovelMessage): void {
+    if (this.novelTimelineMessageLive(message)) this.activeRunFooter(this.novelTimelineMessageUi(message));
+    else this.novelMessageFooter(this.savedTimelineMessage(message));
+  }
 
   @Builder
   novelTimelineRows(): void {
@@ -2574,9 +2847,7 @@ struct NovelWorkspacePage {
       if (this.ghostwriteJob === null && this.ghostwriteReport !== null) {
         ListItem() { NovelGhostwriteReportCard({ report: this.ghostwriteReport }) }
       }
-      ForEach(this.activeRunId.length > 0
-        ? this.project.messages.slice(0, this.activeHistoryCount)
-        : this.project.messages, (message: NovelMessage): void => {
+      ForEach(this.novelTimelineMessages(), (message: NovelMessage): void => {
         if (discussionArchiveAtMessage(this.project?.discussionArchives ?? [], message) !== null) {
           ListItem() {
             NovelDiscussionArchiveCard({
@@ -2589,11 +2860,19 @@ struct NovelWorkspacePage {
         if (discussionMessageVisible(this.project?.discussionArchives ?? [], this.expandedArchiveIds, message)) {
           ListItem() {
             AgentMessageRow({
-              message: this.projectMessageUi(message),
+              message: this.novelTimelineMessageUi(message),
               capabilities: NOVEL_AGENT_MESSAGE_CAPABILITIES,
-              hostHeader: (): void => { this.novelMessageHeader(message); },
-              hostFooter: (): void => { this.novelMessageFooter(message); },
-              streaming: false,
+              hostHeader: (): void => { this.novelTimelineMessageHeader(message); },
+              hostFooter: (): void => { this.novelTimelineMessageFooter(message); },
+              streaming: this.novelTimelineMessageLive(message),
+              textDeltasLive: this.activeTextDeltasLive,
+              isLastAssistant: this.novelTimelineMessageLive(message) &&
+                message.uiMessage.id === this.activeRunTimelineMessages()[this.activeRunTimelineMessages().length - 1]?.id,
+              animateEntrance: false,
+              onTextGrow: (): void => {
+                if (this.novelTimelineMessageLive(message)) this.followNovelStreamingUpdate();
+                else this.requestNovelNativeFollow();
+              },
               onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void => {
                 this.continueNovelTool(toolCallId, { kind: 'approved' }, locator);
               },
@@ -2649,7 +2928,17 @@ struct NovelWorkspacePage {
 
   @Builder
   novelTimelineActiveTail(): void {
-    ForEach(this.failedMessages, (message: UIMessage): void => {
+    ForEach(this.completedPreview, (message: UIMessage): void => {
+      ListItem() {
+        AgentMessageRow({ message,
+          capabilities: NO_AGENT_MESSAGE_ROW_CAPABILITIES,
+          hostHeader: (): void => { this.completedPreviewHeader(); },
+          hostFooter: (): void => { this.completedPreviewFooter(); },
+          streaming: false, animateEntrance: false,
+        })
+      }
+    }, (message: UIMessage): string => `completed-preview-${message.id}`)
+    ForEach(this.activeRunId.length > 0 ? [] : this.failedMessages, (message: UIMessage): void => {
       ListItem() {
         AgentMessageRow({
           message: this.unsavedDisplayMessage(message),
@@ -2666,17 +2955,18 @@ struct NovelWorkspacePage {
           Text('正在整理角色、设定与开篇方向；完成后可逐项确认。')
             .fontSize(14).fontColor(INK3).lineHeight(21).width('100%').padding(16)
         }
-      } else if (this.activeMessages.length > 0) {
-        ForEach(this.activeMessages, (message: UIMessage, index: number): void => {
+      }
+      if (this.activeRunTimelineMessages().length > 0) {
+        ForEach(this.activeQuickStart ? this.activeRunTimelineMessages() : [], (message: UIMessage, index: number): void => {
           ListItem() {
             AgentMessageRow({
-              message,
+              message: this.activeRunMessage(message),
               capabilities: NOVEL_AGENT_MESSAGE_CAPABILITIES,
-              hostHeader: (): void => { this.activeRunHeader(index === 0); },
-              hostFooter: (): void => { this.emptyAgentRowSlot(); },
+              hostHeader: (): void => { this.activeRunHeader(message.role === 'assistant'); },
+              hostFooter: (): void => { this.activeRunFooter(this.activeRunMessage(message)); },
               streaming: true,
               textDeltasLive: this.activeTextDeltasLive,
-              isLastAssistant: index === this.activeMessages.length - 1,
+              isLastAssistant: index === this.activeRunTimelineMessages().length - 1,
               onTextGrow: (): void => { this.followNovelStreamingUpdate(); },
               onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void => {
                 this.continueNovelTool(toolCallId, { kind: 'approved' }, locator);
@@ -2691,7 +2981,7 @@ struct NovelWorkspacePage {
             })
           }
         }, (message: UIMessage): string => message.id)
-      } else {
+      } else if (!this.activeQuickStart) {
         ListItem() {
           AgentMessageRow({
             message: this.activeStatusUi(),
@@ -2706,6 +2996,18 @@ struct NovelWorkspacePage {
         }
       }
     }
+  }
+
+  @Builder
+  private completedPreviewHeader(): void {
+    Text('生成内容 · 项目尚未刷新').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+  }
+
+  @Builder
+  private completedPreviewFooter(): void {
+    Text('重新加载项目').fontSize(12).fontColor(ACCENT).constraintSize({ minHeight: 44 })
+      .enabled(!this.busy && !this.hasBlockingNovelRun())
+      .onClick((): void => { this.reload(); })
   }
 
   @Builder
@@ -2742,12 +3044,74 @@ struct NovelWorkspacePage {
 
   private writingModelLabel(): string {
     const p: NovelProject | null = this.project;
-    if (p === null) return '跟随全局';
+    if (p === null) return getProductKind() === 'novel' ? '选择模型' : '跟随全局';
     const writing: NovelModelTarget = p.modelPolicy.writing;
+    if (getProductKind() === 'novel') {
+      if (!this.modelOptionsReady) return this.modelOptionsLoading ? '读取模型…' : '模型配置读取失败';
+      const effective: NovelModelTarget = resolveNovelDefaultTarget(p.modelPolicy, this.novelModelDefaults, 'writing');
+      const label: string = this.writingTargetLabel(effective);
+      return writing.kind === 'global' ? `小说默认 · ${label}` : label;
+    }
     if (writing.kind === 'global') return '跟随全局';
     const option: NovelModelOptionView | undefined = this.modelOptions.find(
       (o: NovelModelOptionView): boolean => o.providerId === writing.providerId && o.modelId === writing.modelId);
     return option !== undefined ? option.label : writing.modelId;
+  }
+
+  private writingTargetLabel(target: NovelModelTarget): string {
+    if (target.kind === 'global') return this.chatModelLabel.length > 0 ? this.chatModelLabel : '未配置可用模型';
+    const option: NovelModelOptionView | undefined = this.modelOptions.find(
+      (item: NovelModelOptionView): boolean => item.providerId === target.providerId && item.modelId === target.modelId);
+    if (option === undefined) return `模型已移除 · ${target.modelId}`;
+    return `${option.label}${option.available ? '' : '（当前不可用）'}`;
+  }
+
+  private defaultWritingModelLabel(): string {
+    return this.modelOptionsReady ? this.writingTargetLabel(this.novelModelDefaults.writing) : '读取模型配置后选择';
+  }
+
+  private openComposerModelSheet(): void {
+    if (getProductKind() !== 'novel') { this.openControlSheet(); return; }
+    if (this.project === null || this.busy || !this.pageAlive || !this.studioPageVisible || this.studioBackgrounded) return;
+    this.composerModelSession++;
+    this.composerModelError = '';
+    this.composerModelSheetOpen = true;
+    this.loadProjectModelOptions();
+  }
+
+  private composerModelSessionActive(session: number): boolean {
+    return this.pageAlive && this.studioPageVisible && !this.studioBackgrounded &&
+      this.composerModelSheetOpen && this.composerModelSession === session;
+  }
+
+  private closeComposerModelSheet(session: number, force: boolean = false): void {
+    if (session !== this.composerModelSession || (this.busy && !force)) return;
+    this.composerModelSheetOpen = false;
+    this.composerModelSession++;
+    this.composerModelError = '';
+  }
+
+  private async chooseComposerModel(target: NovelModelTarget, session: number): Promise<void> {
+    const p: NovelProject | null = this.project;
+    if (p === null || this.busy || !this.modelOptionsReady || this.modelOptionsLoading ||
+      !this.composerModelSessionActive(session)) return;
+    if (target.kind === 'fixed' && !this.modelOptions.some((option: NovelModelOptionView): boolean =>
+      option.available && option.providerId === target.providerId && option.modelId === target.modelId)) return;
+    this.composerModelError = '';
+    await this.saveNovelModelPolicy({ writing: target, review: p.modelPolicy.review, stateSync: p.modelPolicy.stateSync });
+    if (!this.composerModelSessionActive(session)) return;
+    if (this.errorMsg.length > 0) this.composerModelError = this.errorMsg;
+    else this.closeComposerModelSheet(session);
+  }
+
+  private composerModelTransition(card: boolean): TransitionEffect {
+    if (this.studioBackgrounded || !this.studioPageVisible) return TransitionEffect.IDENTITY;
+    if (!card || this.reduceMotion) return TransitionEffect.OPACITY.animation({ duration: 160 });
+    return TransitionEffect.asymmetric(
+      TransitionEffect.move(TransitionEdge.BOTTOM).combine(TransitionEffect.OPACITY)
+        .animation({ duration: 320, curve: Curve.EaseOut }),
+      TransitionEffect.move(TransitionEdge.BOTTOM).combine(TransitionEffect.OPACITY)
+        .animation({ duration: 250, curve: Curve.EaseIn }));
   }
 
   private workspaceSubtitle(): string {
@@ -2776,18 +3140,116 @@ struct NovelWorkspacePage {
     }).catch((): void => {});
   }
 
-  private openControlSheet(): void {
+  private async openControlSheet(): Promise<void> {
     const p: NovelProject | null = this.project;
     if (p === null || this.busy) return;
-    this.planThisChapter = p.branchSettings.thisChapterPlan;
-    this.planFuture = p.branchSettings.futurePlan;
-    this.planPreferences = p.branchSettings.preferences;
+    this.retainControlPlanDraft();
+    const session: number = ++this.controlPlanSession;
+    const owner: string = composerOwner(this.projectId, this.workspaceStatus?.activeBranchId ?? '');
+    this.controlPlanOwner = owner;
+    this.controlPlanBaseline = {
+      thisChapterPlan: p.branchSettings.thisChapterPlan, futurePlan: p.branchSettings.futurePlan,
+      preferences: p.branchSettings.preferences,
+    };
     this.controlTab = this.ghostwriteJob !== null ? 1 : 0;
     this.controlNotice = '';
+    this.controlPlanError = '';
+    this.controlPlanReady = false;
     this.controlSheetOpen = true;
+    const retained: ControlPlanDraft | undefined = this.controlPlanDrafts.get(owner);
+    if (retained !== undefined) {
+      this.showControlPlanDraft(retained, !sameControlPlanDraft(retained, this.controlPlanBaseline));
+      // 缓存可能来自失败的自动保存；重开时再落盘，不能用内存恢复提示掩盖失败。
+      this.persistControlPlanDraft(owner, sameControlPlanDraft(retained, this.controlPlanBaseline) ? null : retained);
+      return;
+    }
+    this.showControlPlanDraft(this.controlPlanBaseline, false);
+    this.controlPlanReady = false;
+    this.controlPlanLoading = true;
+    try {
+      const saved: ControlPlanDraft | null = await this.planDraftStore.load(owner);
+      if (!this.pageAlive || !this.controlSheetOpen || session !== this.controlPlanSession) return;
+      const restored: boolean = saved !== null && !sameControlPlanDraft(saved, this.controlPlanBaseline);
+      if (restored && saved !== null) this.controlPlanDrafts.set(owner, saved);
+      this.showControlPlanDraft(restored && saved !== null ? saved : this.controlPlanBaseline, restored);
+    } catch (error) {
+      if (this.pageAlive && session === this.controlPlanSession) {
+        this.controlPlanError = '读取计划草稿失败：' + String(error);
+      }
+    } finally {
+      if (this.pageAlive && session === this.controlPlanSession) this.controlPlanLoading = false;
+    }
+  }
+
+  private showControlPlanDraft(plan: ControlPlanDraft, restored: boolean): void {
+    this.planThisChapter = plan.thisChapterPlan;
+    this.planFuture = plan.futurePlan;
+    this.planPreferences = plan.preferences;
+    this.controlPlanReady = true;
+    this.controlPlanLoading = false;
+    this.controlNotice = restored ? '已恢复未保存的计划草稿，请核对后保存。' : '';
+  }
+
+  private closeControlSheet(): void {
+    if (!this.controlSheetOpen) return;
+    this.retainControlPlanDraft();
+    this.controlPlanSession++;
+    this.controlSheetOpen = false;
+    this.controlPlanLoading = false;
+  }
+
+  private changeControlPlan(field: string, value: string): void {
+    if (!this.controlPlanReady || this.busy) return;
+    if (field === 'chapter') this.planThisChapter = value;
+    else if (field === 'future') this.planFuture = value;
+    else this.planPreferences = value;
+    this.retainControlPlanDraft();
+  }
+
+  private retainControlPlanDraft(): void {
+    if (this.controlPlanOwner.length === 0 || !this.controlPlanReady) return;
+    const owner: string = this.controlPlanOwner;
+    const plan: ControlPlanDraft = {
+      thisChapterPlan: this.planThisChapter, futurePlan: this.planFuture, preferences: this.planPreferences,
+    };
+    const previous: ControlPlanDraft | undefined = this.controlPlanDrafts.get(owner);
+    const clean: boolean = sameControlPlanDraft(plan, this.controlPlanBaseline);
+    if (clean && previous === undefined) return;
+    if (!clean && previous !== undefined && sameControlPlanDraft(plan, previous)) return;
+    // 清理落盘成功前保留撤回后的基线，失败重开时不能复活旧磁盘草稿。
+    this.controlPlanDrafts.set(owner, plan);
+    this.persistControlPlanDraft(owner, clean ? null : plan);
+  }
+
+  private persistControlPlanDraft(owner: string, plan: ControlPlanDraft | null): void {
+    const revision: number = ++this.controlPlanWriteRevision;
+    const clearing: ControlPlanDraft | undefined = this.controlPlanDrafts.get(owner);
+    this.planDraftStore.save(owner, plan).then((): void => {
+      if (plan === null && this.controlPlanDrafts.get(owner) === clearing) this.controlPlanDrafts.delete(owner);
+      if (this.pageAlive && this.controlPlanOwner === owner && revision === this.controlPlanWriteRevision) {
+        this.controlPlanError = '';
+        this.controlNotice = plan === null ? '' : '草稿已保存，尚未应用到当前分支。';
+      }
+    }).catch((error: Object): void => {
+      if (this.pageAlive && this.controlPlanOwner === owner && revision === this.controlPlanWriteRevision) {
+        this.controlPlanError = '计划草稿保存失败，当前输入仍保留：' + String(error);
+      }
+    });
+  }
+
+  private retryControlPlanDraft(): void {
+    if (!this.controlPlanReady || this.busy) return;
+    const plan: ControlPlanDraft = {
+      thisChapterPlan: this.planThisChapter, futurePlan: this.planFuture, preferences: this.planPreferences,
+    };
+    this.persistControlPlanDraft(this.controlPlanOwner, sameControlPlanDraft(plan, this.controlPlanBaseline) ? null : plan);
   }
 
   private selectWritingTarget(target: NovelModelTarget): void {
+    if (this.composerModelSheetOpen) {
+      this.chooseComposerModel(target, this.composerModelSession);
+      return;
+    }
     const p: NovelProject | null = this.project;
     if (p === null || this.busy) return;
     this.saveNovelModelPolicy({
@@ -2806,22 +3268,42 @@ struct NovelWorkspacePage {
 
   private async savePlanPrefs(): Promise<void> {
     const p: NovelProject | null = this.project;
-    if (p === null || this.busy) return;
+    if (p === null || this.busy || !this.controlPlanReady) return;
+    const owner: string = this.controlPlanOwner;
     const s: NovelBranchSettings = p.branchSettings;
-    await this.saveNovelBranchSettings({
-      thisChapterPlan: this.planThisChapter,
-      futurePlan: this.planFuture,
-      preferences: this.planPreferences,
-      foreshadows: s.foreshadows,
-      confirmedDecisions: s.confirmedDecisions,
-    });
-    if (this.errorMsg.length === 0) this.controlNotice = '已保存到当前分支';
+    const savedPlan: ControlPlanDraft = {
+      thisChapterPlan: this.planThisChapter, futurePlan: this.planFuture, preferences: this.planPreferences,
+    };
+    const settings: NovelBranchSettings = this.branchSettingsWith(s.foreshadows, s.confirmedDecisions);
+    settings.thisChapterPlan = savedPlan.thisChapterPlan;
+    settings.futurePlan = savedPlan.futurePlan;
+    settings.preferences = savedPlan.preferences;
+    await this.saveNovelBranchSettings(settings);
+    if (this.errorMsg.length === 0) {
+      this.controlPlanDrafts.set(owner, savedPlan);
+      if (this.controlPlanOwner === owner) {
+        this.controlPlanBaseline = savedPlan;
+        this.controlNotice = '已保存到当前分支';
+      }
+      this.busy = true;
+      try {
+        await this.planDraftStore.save(owner, null);
+        if (this.controlPlanDrafts.get(owner) === savedPlan) this.controlPlanDrafts.delete(owner);
+        if (this.pageAlive && this.controlPlanOwner === owner) this.controlPlanError = '';
+      } catch (error) {
+        if (this.pageAlive && this.controlPlanOwner === owner) {
+          this.controlPlanError = '正式计划已保存，但清理草稿失败：' + String(error);
+        }
+      } finally {
+        this.busy = false;
+      }
+    }
   }
 
   // 写作模型选项行(跟随全局 + 固定模型;iOS ComposerModelSheet 的「跟随小说默认」)
   @Builder
   private ModelRow(label: string, detail: string, selected: boolean, available: boolean, isLast: boolean,
-    target: NovelModelTarget): void {
+    target: NovelModelTarget, session: number = 0): void {
     Column() {
       Row() {
         Column({ space: 2 }) {
@@ -2838,8 +3320,12 @@ struct NovelWorkspacePage {
       .width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
       .padding({ left: 14, right: 14, top: 10, bottom: 10 })
       .opacity(available ? 1 : 0.55)
-      .enabled(available && !this.busy)
-      .onClick((): void => { this.selectWritingTarget(target); })
+      .enabled(available && !this.busy && (!this.composerModelSheetOpen ||
+        (this.modelOptionsReady && !this.modelOptionsLoading)))
+      .onClick((): void => {
+        if (session > 0) this.chooseComposerModel(target, session);
+        else this.selectWritingTarget(target);
+      })
       if (!isLast) {
         Row() {
           Row().width('100%').height(1).backgroundColor(LINE)
@@ -2849,15 +3335,54 @@ struct NovelWorkspacePage {
   }
 
   @Builder
-  private ModelRows(): void {
-    this.ModelRow('跟随聊天全局模型', '写作使用应用聊天当前模型', this.writingTargetSelected(null), true,
-      this.modelOptions.length === 0, { kind: 'global' })
+  private ModelRows(session: number = 0): void {
+    this.ModelRow(getProductKind() === 'novel' ? '跟随小说默认' : '跟随聊天全局模型',
+      getProductKind() === 'novel' ? this.defaultWritingModelLabel() : '写作使用应用聊天当前模型',
+      this.writingTargetSelected(null), true,
+      this.modelOptions.length === 0, { kind: 'global' }, session)
     ForEach(this.modelOptions, (option: NovelModelOptionView, idx: number): void => {
       this.ModelRow(option.label,
         option.available ? option.providerLabel : `${option.providerLabel} · 当前不可用`,
         this.writingTargetSelected(option), option.available, idx === this.modelOptions.length - 1,
-        { kind: 'fixed', providerId: option.providerId, modelId: option.modelId })
+        { kind: 'fixed', providerId: option.providerId, modelId: option.modelId }, session)
     }, (option: NovelModelOptionView): string => `${option.providerId}-${option.modelId}`)
+  }
+
+  @Builder
+  private ComposerModelSheet(session: number): void {
+    Column() {
+      Blank().onClick((): void => { this.closeComposerModelSheet(session); })
+      Column() {
+        Row() {
+          Text('创作模型').fontSize(18).fontWeight(FontWeight.Medium).fontColor(INK).layoutWeight(1)
+          Text('完成').fontSize(15).fontColor(ACCENT).constraintSize({ minWidth: 48, minHeight: 44 })
+            .textAlign(TextAlign.End).enabled(!this.busy)
+            .onClick((): void => { this.closeComposerModelSheet(session); })
+        }.width('100%').padding({ left: 20, right: 20, top: 10, bottom: 4 })
+        Scroll() {
+          Column() {
+            if (this.modelOptionsLoading) {
+              Text('正在读取模型…').fontSize(13).fontColor(INK3).padding(20)
+            } else if (this.modelOptionsError.length > 0) {
+              Text(this.modelOptionsError).fontSize(13).fontColor(ERROR).width('100%').padding(20)
+              Text('重试').fontSize(15).fontColor(ACCENT).constraintSize({ minHeight: 44 })
+                .onClick((): void => { if (this.composerModelSessionActive(session)) this.loadProjectModelOptions(); })
+            } else {
+              this.ModelRows(session)
+              if (this.modelOptions.length === 0) {
+                Text('暂无模型，请先添加模型服务。').fontSize(13).fontColor(INK3).width('100%').padding(20)
+              }
+            }
+            if (this.composerModelError.length > 0) {
+              Text(this.composerModelError).fontSize(13).fontColor(ERROR).width('100%').padding(20)
+            }
+            if (this.busy) { Text('保存中…').fontSize(13).fontColor(INK3).padding(12) }
+          }.width('100%').alignItems(HorizontalAlign.Start)
+        }.constraintSize({ maxHeight: 420 }).scrollBar(BarState.Auto)
+      }.width('100%').backgroundColor(SURFACE).borderRadius({ topLeft: 20, topRight: 20 })
+        .padding({ bottom: Math.max(16, this.navBarHeight) }).transition(this.composerModelTransition(true))
+    }.width('100%').height('100%').backgroundColor(OVERLAY)
+      .justifyContent(FlexAlign.End).transition(this.composerModelTransition(false))
   }
 
   private consumeContextOverrides(): void {
@@ -2887,6 +3412,17 @@ struct NovelWorkspacePage {
       forceIncludeMaterialIds: JSON.stringify(this.contextOverrides?.forceIncludeMaterialIds ?? []),
       forceExcludeMaterialIds: JSON.stringify(this.contextOverrides?.forceExcludeMaterialIds ?? []),
     } }).catch((error: Error): void => { if (this.pageAlive) this.errorMsg = String(error); });
+  }
+
+  @Builder
+  private GhostwriteStartPreviewSheet(preview: NovelGhostwriteStartPreview): void {
+    NovelGhostwriteStartSheet({
+      planContent: this.ghostwriteAuthorPlanPreview(preview), branchName: preview.branchName,
+      chapterCount: preview.targetChapterCount, busy: this.ghostwriteBusy,
+      errorMessage: this.ghostwritePreviewError, bottomPadding: Math.max(this.navBarHeight, 12),
+      onConfirm: (): void => { this.confirmGhostwriteStart(); },
+      onClose: (): void => { if (!this.ghostwriteBusy) this.ghostwritePreview = null; },
+    })
   }
 
   @Builder
@@ -2944,7 +3480,7 @@ struct NovelWorkspacePage {
   @Builder
   private ControlSheet(): void {
     Column() {
-      Blank().onClick((): void => { this.controlSheetOpen = false; })
+      Blank().onClick((): void => { this.closeControlSheet(); })
       Column() {
         Row() {
           Column({ space: 2 }) {
@@ -2954,7 +3490,7 @@ struct NovelWorkspacePage {
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
           Text('完成').fontSize(15).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
             .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.End)
-            .onClick((): void => { this.controlSheetOpen = false; })
+            .onClick((): void => { this.closeControlSheet(); })
         }.width('100%').alignItems(VerticalAlign.Center).padding({ bottom: 10 })
         Scroll() {
           Column() {
@@ -2999,31 +3535,43 @@ struct NovelWorkspacePage {
 
             Column() {}.height(16)
             this.SheetLabel('本章计划')
+            Text('编辑内容自动保存为草稿，点击保存才应用到当前分支。').fontSize(12).fontColor(INK3)
+              .width('100%').margin({ bottom: 8 })
+            if (this.controlPlanLoading) { Text('正在读取计划草稿…').fontSize(12).fontColor(INK3).padding(8) }
+            if (this.controlNotice.length > 0) { Text(this.controlNotice).fontSize(12).fontColor(INK3).width('100%').margin({ bottom: 8 }) }
+            if (this.controlPlanError.length > 0) {
+              Text(this.controlPlanError).fontSize(12).fontColor(ERROR).width('100%').margin({ bottom: 8 })
+              Text(this.controlPlanReady ? '重试保存草稿' : '重试读取草稿').fontSize(13).fontColor(ACCENT).height(44)
+                .onClick((): void => {
+                  if (this.controlPlanReady) this.retryControlPlanDraft();
+                  else this.openControlSheet();
+                })
+            }
             TextArea({ text: this.planThisChapter, placeholder: '本章的位置、目标冲突、必须发生与不能发生…' })
               .width('100%').height(100).fontSize(13).fontColor(INK).placeholderColor(INK4)
               .backgroundColor(SURFACE2).borderRadius(12).padding(12)
-              .enabled(!this.busy)
-              .onChange((v: string): void => { this.planThisChapter = v; })
+              .enabled(!this.busy && this.controlPlanReady)
+              .onChange((v: string): void => { this.changeControlPlan('chapter', v); })
             Column() {}.height(12)
             this.SheetLabel('往后计划')
             TextArea({ text: this.planFuture, placeholder: '接下来几章的方向…' })
               .width('100%').height(80).fontSize(13).fontColor(INK).placeholderColor(INK4)
               .backgroundColor(SURFACE2).borderRadius(12).padding(12)
-              .enabled(!this.busy)
-              .onChange((v: string): void => { this.planFuture = v; })
+              .enabled(!this.busy && this.controlPlanReady)
+              .onChange((v: string): void => { this.changeControlPlan('future', v); })
             Column() {}.height(12)
             this.SheetLabel('写作偏好')
             TextArea({ text: this.planPreferences, placeholder: '文风、视角、节奏偏好…' })
               .width('100%').height(80).fontSize(13).fontColor(INK).placeholderColor(INK4)
               .backgroundColor(SURFACE2).borderRadius(12).padding(12)
-              .enabled(!this.busy)
-              .onChange((v: string): void => { this.planPreferences = v; })
+              .enabled(!this.busy && this.controlPlanReady)
+              .onChange((v: string): void => { this.changeControlPlan('preferences', v); })
             Row() {
-              Text(this.controlNotice).fontSize(12).fontColor(INK3).layoutWeight(1)
+              Blank()
               Text(this.busy ? '保存中…' : '保存').fontSize(14).fontWeight(FontWeight.Medium)
                 .fontFamily(FONT_SANS_MEDIUM).fontColor(this.busy ? INK4 : ACCENT)
                 .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.End)
-                .enabled(!this.busy)
+                .enabled(!this.busy && this.controlPlanReady)
                 .onClick((): void => { this.savePlanPrefs(); })
             }.width('100%').margin({ top: 6 })
 
@@ -3040,12 +3588,13 @@ struct NovelWorkspacePage {
       .padding({ left: 18, right: 18, top: 16, bottom: 14 + this.navBarHeight })
       .backgroundColor(SURFACE).borderRadius({ topLeft: 20, topRight: 20 })
       .onClick((): void => {})
-      .transition(TransitionEffect.translate({ y: 160 })
-        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+      .transition(getProductKind() === 'novel' ? this.composerModelTransition(true) :
+        TransitionEffect.translate({ y: 160 }).animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
     }
     .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.End)
-    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+    .transition(getProductKind() === 'novel' ? this.composerModelTransition(false) :
+      TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
   @Builder
@@ -3055,6 +3604,7 @@ struct NovelWorkspacePage {
   chatPane(): void {
     Column() {
     Column() {
+      Stack({ alignContent: Alignment.BottomEnd }) {
       // Chat 与 Novel 共享同一 Timeline/AgentMessageRow；Timeline 独占 16vp 水平 gutter。
       InteractiveMessageTimeline({
         scroller: this.chatScroller,
@@ -3064,6 +3614,7 @@ struct NovelWorkspacePage {
         cachedItems: 5,
         showOlderLoader: false,
         showDivider: false,
+        showScrollBar: false,
         rows: (): void => { this.novelTimelineRows(); },
         activeTail: (): void => { this.novelTimelineActiveTail(); },
         hostTail: (): void => { this.emptyTimelineSlot(); },
@@ -3073,7 +3624,12 @@ struct NovelWorkspacePage {
             this.scheduleNovelScrollToBottom();
           }
         },
+        onViewportHeightChange: (height: number): void => {
+          this.novelViewportHeight = height;
+          if (!this.initialScrollArmed) this.requestNovelNativeFollow();
+        },
         onVisibleRangeChange: (_start: number, _end: number): void => {
+          this.novelLastVisibleIndex = _end;
           if (this.initialScrollArmed) {
             this.initialScrollArmed = false;
             this.scheduleNovelScrollToBottom();
@@ -3083,23 +3639,40 @@ struct NovelWorkspacePage {
           if (event.type === TouchType.Down) {
             this.userTouchActive = true;
             this.novelScrollToken++;
+            this.nativeFollow?.cancel();
           }
           if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
             this.userTouchActive = false;
-            this.reconcileNovelUserScroll();
+            if (this.novelUserScrolling) this.reconcileNovelUserScroll();
+            else this.requestNovelNativeFollow();
+          }
+        },
+        onTimelineWillScroll: (offset: number, _state: ScrollState, source: ScrollSource): void => {
+          if (offset !== 0 && (source === ScrollSource.DRAG || source === ScrollSource.FLING)) {
+            this.novelUserScrolling = true;
+            this.nativeFollow?.cancel();
           }
         },
         onTimelineScroll: (_offset: number, state: ScrollState): void => {
-          if (this.userTouchActive &&
+          if (this.novelUserScrolling &&
             (state === ScrollState.Scroll || state === ScrollState.Fling)) {
             this.reconcileNovelUserScroll();
           }
         },
-        onTimelineScrollStop: (): void => { this.reconcileNovelUserScroll(); },
+        onTimelineScrollStop: (): void => {
+          if (this.novelUserScrolling) {
+            this.novelUserScrolling = false;
+            this.reconcileNovelUserScroll();
+          }
+        },
       })
-      .overlay(this.novelJumpButton(), { align: Alignment.BottomEnd })
-      .layoutWeight(1)
+      .width('100%')
+      .height('100%')
       .clip(true)
+      this.novelJumpButton()
+      }
+      .layoutWeight(1)
+      .width('100%')
 
       // 输入器(复用聊天页 ChatInput;meta 行 = 模型 chip + 创作方式 menu,iOS 同款)
       Column() {
@@ -3111,8 +3684,8 @@ struct NovelWorkspacePage {
             .padding({ left: 10, right: 10 })
             .backgroundColor(SURFACE2).borderRadius(12)
             .enabled(this.project !== null && !this.busy)
-            .onClick((): void => { this.openControlSheet(); })
-            .accessibilityText('写作模型，打开项目控制')
+            .onClick((): void => { this.openComposerModelSheet(); })
+            .accessibilityText(getProductKind() === 'novel' ? '创作模型，选择模型' : '写作模型，打开项目控制')
           Blank()
           Text(`${this.composeModeLabel()} ▾`)
             .fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(INK2)
@@ -3207,6 +3780,11 @@ struct NovelWorkspacePage {
           Text(`共 ${this.project.chapters.length} 章`).fontSize(12).fontColor(INK3)
             .margin({ left: 8 })
         }
+        if (getProductKind() === 'novel') {
+          StudioInkStamp({ word: '收稿', trigger: this.collectionStamp, stampSize: 32,
+            active: this.studioPageVisible && !this.studioBackgrounded && this.tab === 1 })
+            .margin({ left: 12, right: 8 })
+        }
         Blank()
         Text('更多 ▾').fontSize(12).fontColor(INK3)
           .constraintSize({ minWidth: 44 }).height(44)
@@ -3254,7 +3832,7 @@ struct NovelWorkspacePage {
                       .fontSize(15).fontColor(c.discarded ? INK4 : INK).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                     Text(`${this.charCount(c.content)} 字`).fontSize(11).fontColor(INK3).margin({ top: 4 })
                     if (c.suggestionWarning !== undefined && c.suggestionWarning !== null && c.suggestionWarning.length > 0) {
-                      Text('正文已保存 · 资料分析失败').fontSize(11).fontColor(ERROR).lineHeight(16).margin({ top: 4 })
+                      Text('正文已保存 · 资料分析未完成').fontSize(11).fontColor(ERROR).lineHeight(16).margin({ top: 4 })
                     }
                   }
                   .alignItems(HorizontalAlign.Start).layoutWeight(1)
@@ -3311,6 +3889,27 @@ struct NovelWorkspacePage {
       onRestore: (material: NovelMaterial): void => { this.confirmRestoreMaterialInheritance(material); } })
   }
 
+  @Builder
+  private PendingMaterialSuggestions(kinds: NovelMaterialKind[]): void {
+    if (this.pendingSuggestionsIn(kinds).length > 0 || this.pendingSettingProposalsIn(kinds).length > 0) {
+      Text('待确认').fontSize(13).fontFamily(FONT_SANS_MEDIUM).fontColor(INK2).margin({ bottom: 8 })
+      Text('建议采用后才会写入资料库。')
+        .fontSize(11).fontColor(INK3).margin({ bottom: 10 })
+      ForEach(this.pendingSettingProposalsIn(kinds), (proposal: NovelSettingProposal): void => {
+        NovelSettingProposalCard({
+          title: proposal.title, content: proposal.content, kindLabel: MATERIAL_KIND_LABELS[proposal.kind],
+          onResolve: (accept: boolean): void => { this.resolveSettingProposal(proposal, accept); },
+        })
+      }, (proposal: NovelSettingProposal): string => `setting:${proposal.id}`)
+      ForEach(this.pendingSuggestionsIn(kinds), (s: NovelMaterialSuggestion): void => {
+        NovelSettingProposalCard({
+          title: s.title, content: s.content, kindLabel: MATERIAL_KIND_LABELS[s.kind],
+          onResolve: (accept: boolean): void => { this.resolveSuggestion(s.id, accept); },
+        })
+      }, (s: NovelMaterialSuggestion): string => s.id)
+    }
+  }
+
   // 资料分区页(iOS Compendium 角色/世界观):待确认建议 + 资料列表 + 新增
   @Builder
   private MaterialKindPane(kinds: NovelMaterialKind[], addLabel: string, addKind: NovelMaterialKind,
@@ -3335,8 +3934,8 @@ struct NovelWorkspacePage {
             chapter.suggestionWarning !== undefined && chapter.suggestionWarning !== null && chapter.suggestionWarning.length > 0),
           (chapter: NovelChapter): void => {
             Column({ space: 6 }) {
-              Text(`「${chapter.title}」正文已保存，资料分析失败`).fontSize(12).fontColor(ERROR).lineHeight(18)
-              Text(chapter.suggestionWarning ?? '').fontSize(11).fontColor(INK3).lineHeight(16)
+              Text(`「${chapter.title}」正文已保存，资料分析未完成`).fontSize(12).fontColor(ERROR).lineHeight(18)
+              Text(this.materialAnalysisFailureText(chapter.suggestionWarning ?? '')).fontSize(11).fontColor(INK3).lineHeight(16)
               Text('重新分析此章').fontSize(12).fontColor(ACCENT).height(44).textAlign(TextAlign.Center)
                 .enabled(!this.busy && !this.hasBlockingNovelRun())
                 .onClick((): void => { this.reanalyze(chapter.id); })
@@ -3345,19 +3944,7 @@ struct NovelWorkspacePage {
             .backgroundColor(SURFACE2).borderRadius(10).margin({ bottom: 10 })
           }, (chapter: NovelChapter): string => chapter.id)
         }
-        if (this.pendingSuggestionsIn(kinds).length > 0) {
-          Text('待确认').fontSize(13).fontFamily(FONT_SANS_MEDIUM).fontColor(INK2).margin({ bottom: 8 })
-          Text('Amber 从正文中发现了资料变化，采用后才会写入资料库。')
-            .fontSize(11).fontColor(INK3).margin({ bottom: 10 })
-          ForEach(this.pendingSuggestionsIn(kinds), (s: NovelMaterialSuggestion): void => {
-            NovelSettingProposalCard({
-              title: s.title,
-              content: s.content,
-              kindLabel: MATERIAL_KIND_LABELS[s.kind],
-              onResolve: (accept: boolean): void => { this.resolveSuggestion(s.id, accept); },
-            })
-          }, (s: NovelMaterialSuggestion): string => s.id)
-        }
+        this.PendingMaterialSuggestions(kinds)
 
         if (this.materialsIn(kinds).length === 0) {
           Text('暂无资料。').fontSize(13).fontColor(INK3)
@@ -3400,6 +3987,7 @@ struct NovelWorkspacePage {
   private StoryPane(): void {
     Scroll() {
       Column() {
+        this.PendingMaterialSuggestions(['outline'])
         Row() {
           Text('总纲').fontSize(12).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
           Blank()
@@ -3533,7 +4121,7 @@ struct NovelWorkspacePage {
 
   // 更多分区:审稿/内部职责模型(NovelSettingsPane 的计划/伏笔/决定段已各归其位)
   @Builder
-  private MorePane(): void {
+  private ProjectModelRolesPane(): void {
     if (this.project !== null) {
       NovelSettingsPane({
         project: this.project,
@@ -3556,50 +4144,85 @@ struct NovelWorkspacePage {
   }
 
   @Builder
+  private MorePane(): void {
+    if (getProductKind() !== 'novel') {
+      this.ProjectModelRolesPane()
+    } else {
+      Column() {
+        Row() {
+          Text(this.projectModelsVisible ? '项目模型职责' : '其他资料').fontSize(13).fontColor(INK3)
+          Blank()
+          Text(this.projectModelsVisible ? '返回其他资料' : '项目模型职责').fontSize(13).fontColor(ACCENT)
+            .constraintSize({ minHeight: 44 }).padding({ left: 8, right: 8 })
+            .onClick((): void => {
+              animateTo({ duration: this.studioPaneDuration(), curve: Curve.EaseInOut }, (): void => {
+                this.projectModelsVisible = !this.projectModelsVisible;
+              });
+            })
+        }.width('100%').padding({ left: 20, right: 12 })
+        Stack({ alignContent: Alignment.TopStart }) {
+          if (this.projectModelsVisible) {
+            Column() { this.ProjectModelRolesPane() }.width('100%').height('100%').transition(this.workspacePaneTransition())
+          } else {
+            Column() { this.MaterialKindPane(['requirement', 'other'], '新增资料', 'other', false) }
+              .width('100%').height('100%').transition(this.workspacePaneTransition())
+          }
+        }.width('100%').layoutWeight(1)
+      }.width('100%').height('100%')
+    }
+  }
+
+  @Builder
   settingsPane(): void {
     Column() {
       // 设定分类(iOS Compendium segmented:角色/世界观/剧情/更多)
-      Seg({ options: ['角色', '世界观', '剧情', '更多'], selected: this.settingTab,
-        onSelect: (idx: number): void => {
-          if (idx === this.settingTab) return;
-          animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => { this.settingTab = idx; });
-        } })
-        .margin({ left: 16, right: 16, top: 2, bottom: 8 })
-      if (this.project === null) {
-        Column() {}.layoutWeight(1)
-      } else if (this.settingTab === 0) {
-        Column() {
-          this.MaterialKindPane(['character', 'relationship'], '新增角色', 'character', false)
-        }
-        .width('100%').layoutWeight(1)
-        .transition(TransitionEffect.OPACITY
-          .combine(TransitionEffect.translate({ y: 10 }))
-          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
-      } else if (this.settingTab === 1) {
-        Column() {
-          this.MaterialKindPane(['world', 'requirement', 'other'], '新增资料', 'world', true)
-        }
-        .width('100%').layoutWeight(1)
-        .transition(TransitionEffect.OPACITY
-          .combine(TransitionEffect.translate({ y: 10 }))
-          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
-      } else if (this.settingTab === 2) {
-        Column() {
-          this.StoryPane()
-        }
-        .width('100%').layoutWeight(1)
-        .transition(TransitionEffect.OPACITY
-          .combine(TransitionEffect.translate({ y: 10 }))
-          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
+      if (getProductKind() === 'novel') {
+        StudioTabs({ options: ['角色', '世界观', '剧情', '更多'], selected: this.settingTab,
+          active: this.studioPageVisible && !this.studioBackgrounded,
+          onSelect: (idx: number): void => {
+            if (idx === this.settingTab) return;
+            animateTo({ duration: this.studioPaneDuration(), curve: Curve.EaseInOut }, (): void => { this.settingTab = idx; });
+          } })
+          .margin({ left: 16, right: 16, top: 2, bottom: 8 })
       } else {
-        Column() {
-          this.MorePane()
-        }
-        .width('100%').layoutWeight(1)
-        .transition(TransitionEffect.OPACITY
-          .combine(TransitionEffect.translate({ y: 10 }))
-          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
+        Seg({ options: ['角色', '世界观', '剧情', '更多'], selected: this.settingTab,
+          onSelect: (idx: number): void => {
+            if (idx === this.settingTab) return;
+            animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => { this.settingTab = idx; });
+          } })
+          .margin({ left: 16, right: 16, top: 2, bottom: 8 })
       }
+      // Keep outgoing and incoming panes in the same bounds during the fade.
+      Stack({ alignContent: Alignment.TopStart }) {
+        if (this.project === null) {
+          Column() {}.height('100%')
+        } else if (this.settingTab === 0) {
+          Column() {
+            this.MaterialKindPane(['character', 'relationship'], '新增角色', 'character', false)
+          }
+          .width('100%').height('100%')
+          .transition(this.workspacePaneTransition())
+        } else if (this.settingTab === 1) {
+          Column() {
+            this.MaterialKindPane(getProductKind() === 'novel' ? ['world'] : ['world', 'requirement', 'other'],
+              '新增资料', 'world', true)
+          }
+          .width('100%').height('100%')
+          .transition(this.workspacePaneTransition())
+        } else if (this.settingTab === 2) {
+          Column() {
+            this.StoryPane()
+          }
+          .width('100%').height('100%')
+          .transition(this.workspacePaneTransition())
+        } else {
+          Column() {
+            this.MorePane()
+          }
+          .width('100%').height('100%')
+          .transition(this.workspacePaneTransition())
+        }
+      }.width('100%').layoutWeight(1)
     }
     .width('100%').height('100%')
   }
@@ -3610,7 +4233,7 @@ struct NovelWorkspacePage {
       ForEach([this.themeEpoch], (_e: number): void => {
         Column() {
           // 顶栏(iOS NovelProjectWorkspaceView):返回玻璃圆 + 居中 principal
-          // (项目名 + 模式·分支·模型,点开「项目控制」)+ 右侧导出玻璃圆。
+          // (项目名 + 模式·分支·模型,点开「项目控制」)+ 右侧设置玻璃圆（宿主保留导出入口）。
           // Stack 点击拦截坑:整宽按钮行先声明(下层),可点胶囊后声明(上层)且内容宽
           Stack({ alignContent: Alignment.Center }) {
             Row() {
@@ -3624,14 +4247,17 @@ struct NovelWorkspacePage {
               .accessibilityText('返回')
               Blank()
               Row() {
-                Icon({ name: 'share', iconSize: 17, color: INK2 })
+                Icon({ name: getProductKind() === 'novel' ? 'gear' : 'share', iconSize: 17, color: INK2 })
               }
               .width(44).height(44).borderRadius(22).backgroundColor(SURFACE)
               .border({ width: 0.5, color: LINE })
               .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
               .enabled(!this.busy && this.project !== null)
-              .onClick((): void => { this.showExportMenu(); })
-              .accessibilityText('导出')
+              .onClick((): void => {
+                if (getProductKind() === 'novel') router.pushUrl({ url: 'pages/NovelStandaloneSettingsPage' });
+                else this.showExportMenu();
+              })
+              .accessibilityText(getProductKind() === 'novel' ? '设置' : '导出')
             }
             .width('100%')
             Column() {
@@ -3654,12 +4280,19 @@ struct NovelWorkspacePage {
           .backgroundColor(BG)
 
           // 页签(iOS segmented:灰轨 + 白 pill)
-          Seg({ options: ['创作', '正文', '设定'], selected: this.tab,
-            onSelect: (idx: number): void => {
-              if (idx === this.tab) return;
-              animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => { this.tab = idx; });
-            } })
-            .margin({ left: 16, right: 16, top: 2, bottom: 8 })
+          if (getProductKind() === 'novel') {
+            StudioTabs({ options: ['创作', '正文', '设定'], selected: this.tab,
+              active: this.studioPageVisible && !this.studioBackgrounded,
+              onSelect: (idx: number): void => { this.selectStudioTab(idx); } })
+              .margin({ left: 16, right: 16, top: 2, bottom: 8 })
+          } else {
+            Seg({ options: ['创作', '正文', '设定'], selected: this.tab,
+              onSelect: (idx: number): void => {
+                if (idx === this.tab) return;
+                animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => { this.tab = idx; });
+              } })
+              .margin({ left: 16, right: 16, top: 2, bottom: 8 })
+          }
 
           if (this.errorMsg.length > 0 && !this.chapterEditorOpen && !this.materialEditorOpen) {
             Text(this.errorMsg).fontSize(12).fontColor(ERROR).lineHeight(18)
@@ -3675,36 +4308,32 @@ struct NovelWorkspacePage {
             }.width('100%').padding({ left: 20, right: 20, bottom: 8 })
           }
 
-          if (this.project === null) {
-            Column() {
-              Text('项目无法打开').fontSize(15).fontColor(INK3)
+          Stack({ alignContent: Alignment.TopStart }) {
+            if (this.project === null) {
+              Column() {
+                Text('项目无法打开').fontSize(15).fontColor(INK3)
+              }
+              .width('100%').height('100%').justifyContent(FlexAlign.Center)
+            } else if (this.tab === 0) {
+              Column() {
+                this.chatPane()
+              }
+              .width('100%').height('100%')
+              .transition(this.workspacePaneTransition())
+            } else if (this.tab === 1) {
+              Column() {
+                this.chapterPane()
+              }
+              .width('100%').height('100%')
+              .transition(this.workspacePaneTransition())
+            } else {
+              Column() {
+                this.settingsPane()
+              }
+              .width('100%').height('100%')
+              .transition(this.workspacePaneTransition())
             }
-            .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-          } else if (this.tab === 0) {
-            Column() {
-              this.chatPane()
-            }
-            .width('100%').layoutWeight(1)
-            .transition(TransitionEffect.OPACITY
-              .combine(TransitionEffect.translate({ y: 10 }))
-              .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
-          } else if (this.tab === 1) {
-            Column() {
-              this.chapterPane()
-            }
-            .width('100%').layoutWeight(1)
-            .transition(TransitionEffect.OPACITY
-              .combine(TransitionEffect.translate({ y: 10 }))
-              .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
-          } else {
-            Column() {
-              this.settingsPane()
-            }
-            .width('100%').layoutWeight(1)
-            .transition(TransitionEffect.OPACITY
-              .combine(TransitionEffect.translate({ y: 10 }))
-              .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
-          }
+          }.width('100%').layoutWeight(1)
         }
         .width('100%').height('100%').backgroundColor(BG)
 
@@ -3768,13 +4397,7 @@ struct NovelWorkspacePage {
           })
         }
         if (this.ghostwritePreview !== null) {
-          NovelGhostwriteStartSheet({
-            planContent: this.ghostwriteAuthorPlanPreview(), branchName: this.ghostwritePreview.branchName,
-            chapterCount: this.ghostwritePreview.targetChapterCount, busy: this.ghostwriteBusy,
-            errorMessage: this.ghostwritePreviewError, bottomPadding: Math.max(this.navBarHeight, 12),
-            onConfirm: (): void => { this.confirmGhostwriteStart(); },
-            onClose: (): void => { if (!this.ghostwriteBusy) this.ghostwritePreview = null; },
-          })
+          this.GhostwriteStartPreviewSheet(this.ghostwritePreview)
         }
         if (this.ghostwriteBriefOpen) {
           NovelRevisionBriefSheet({ draftKey: this.ghostwriteBriefKey, closeRequest: this.ghostwriteBriefCloseRequest,
@@ -3787,6 +4410,9 @@ struct NovelWorkspacePage {
         // 项目控制 sheet(顶栏 principal 触发,渲染最上层)
         if (this.controlSheetOpen) {
           this.ControlSheet()
+        }
+        if (this.composerModelSheetOpen) {
+          this.ComposerModelSheet(this.composerModelSession)
         }
         if (this.archiveOpen) {
           NovelDiscussionArchiveSheet({

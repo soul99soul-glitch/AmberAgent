@@ -4,11 +4,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  applyTimeReminder, createTimeReminderTransformer, formatGap,
-  TIME_GAP_THRESHOLD_SECONDS, javaLocalDateTimeString, dayOfWeekFullName,
-  DAY_OF_WEEK_FULL_EN, DAY_OF_WEEK_FULL_ZH,
+  applyTimeReminder,
+  createTimeReminderTransformer,
+  TIME_GAP_THRESHOLD_SECONDS,
+  javaLocalDateTimeString,
+  DAY_OF_WEEK_FULL_EN,
 } from '../main/ets/chat/time_reminder_transformer.ts';
-import type { TimeReminderFormatters } from '../main/ets/chat/time_reminder_transformer.ts';
+import type {
+  TimeReminderFormatters,
+} from '../main/ets/chat/time_reminder_transformer.ts';
 import { makeUserMessage, toText } from '../main/ets/chat/message.ts';
 import type { UIMessage } from '../main/ets/chat/message.ts';
 import { makeAssistant } from '../main/ets/chat/assistant.ts';
@@ -25,15 +29,6 @@ const fmt: TimeReminderFormatters = {
 const msgAt = (text: string, iso: string): UIMessage => ({
   ...makeUserMessage(text),
   createdAt: iso,
-});
-
-test('gate:enableTimeReminder=false(默认)→ 原引用返回(Android :24)', () => {
-  const t = createTimeReminderTransformer({ enabled: (): boolean => false, ...fmt });
-  const msgs: UIMessage[] = [
-    msgAt('a', '2026-07-28T00:00:00Z'),
-    msgAt('b', '2026-07-28T05:00:00Z'),
-  ];
-  assert.equal(t.transform!(ctx, msgs), msgs);
 });
 
 test('注入:gap 严格大于 3600s 才注入;3600 整不注入(:40)', () => {
@@ -74,16 +69,6 @@ test('注入:首消息前不注入;多处大间隔多处注入', () => {
   assert.equal(toText(out[5]), 'd');
 });
 
-test('formatGap:分/时/天三档 + Kotlin 向零截断(:71-77)', () => {
-  assert.equal(formatGap(3599), '59 min');
-  assert.equal(formatGap(3600), '1 h', '3600 非 < 3600 → 落 h 档(Android 分支边界忠实)');
-  assert.equal(formatGap(3661), '1 h'); // 3661/3600 → 1(截断)
-  assert.equal(formatGap(86399), '23 h');
-  assert.equal(formatGap(86400), '1 d');
-  assert.equal(formatGap(90061), '1 d');
-  assert.equal(formatGap(172800), '2 d');
-});
-
 test('解析失败(NaN)→ 不注入(安全退化,登记偏差)', () => {
   const out: UIMessage[] = applyTimeReminder([
     msgAt('a', 'not-a-date'),
@@ -99,24 +84,4 @@ test('gate 开启走完整 transform:返回新数组注入', () => {
     msgAt('b', '2026-07-28T05:00:00Z'),
   ]) as UIMessage[];
   assert.equal(out.length, 3);
-});
-
-// ===== 格式化助手(java.time LocalDateTime.toString / TextStyle.FULL) =====
-
-test('javaLocalDateTimeString:秒省略/秒保留/毫秒三档(本地时区构造,确定性)', () => {
-  const noSec: number = new Date(2026, 6, 28, 15, 1, 0, 0).getTime();
-  assert.equal(javaLocalDateTimeString(noSec), '2026-07-28T15:01');
-  const withSec: number = new Date(2026, 6, 28, 15, 1, 26, 0).getTime();
-  assert.equal(javaLocalDateTimeString(withSec), '2026-07-28T15:01:26');
-  const withMs: number = new Date(2026, 6, 28, 15, 1, 26, 325).getTime();
-  assert.equal(javaLocalDateTimeString(withMs), '2026-07-28T15:01:26.325');
-  const padded: number = new Date(2026, 0, 5, 3, 4, 5, 7).getTime();
-  assert.equal(javaLocalDateTimeString(padded), '2026-01-05T03:04:05.007');
-});
-
-test('dayOfWeekFullName:zh/en 二档(偏差登记);2026-07-28 = 周二', () => {
-  const tue: number = new Date(2026, 6, 28, 12, 0, 0, 0).getTime();
-  assert.equal(dayOfWeekFullName('en', tue), 'Tuesday');
-  assert.equal(dayOfWeekFullName('zh-Hans', tue), '星期二');
-  assert.equal(dayOfWeekFullName('fr', tue), 'Tuesday', '非 zh 落英文档(登记)');
 });

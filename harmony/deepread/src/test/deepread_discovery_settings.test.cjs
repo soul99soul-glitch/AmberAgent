@@ -29,9 +29,10 @@ const harness = (values = {}, hooks = {}) => {
       return Object.hasOwn(values, key) ? values[key] : fallback; },
     async set(key, value) { if (hooks.set) await hooks.set(key, value); values[key] = value; writes.push([key, value]); },
   };
-  const context = { module: { exports: {} }, ...catalog, getAppContainer: () => ({ storage }) };
+  const context = { module: { exports: {} }, ...catalog, getAppContainer: () => ({ storage }),
+    getProductKind: () => 'agent' };
   vm.runInNewContext(compile(`module.exports = class SettingsFixture {
-    ${['loadSettings', 'saveSettings', 'changeSource', 'sourceGroup', 'aboutToDisappear'].map(method).join('\n')}
+    ${['loadSettings', 'saveSettings', 'changeSource', 'persistPreference', 'sourceGroup', 'aboutToDisappear'].map(method).join('\n')}
   }`), context);
   const page = new context.module.exports();
   Object.assign(page, { sources: [], focusKeywords: '', focusModeIndex: 0, refreshMinutes: 60,

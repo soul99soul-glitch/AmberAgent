@@ -1,0 +1,32 @@
+✔ native follow converges monotonically at 60/90/120Hz without overshoot (1.781833ms)
+✔ a growing target preserves momentum and converges independently of frame rate (0.504709ms)
+✔ zero delta is inert; a shrinking layout does not retain upward overshoot (1.532959ms)
+✖ a multi-paragraph layout burst cannot fast-forward several text lines in one frame (2.680541ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 280.202709
+
+✖ failing tests:
+
+test at harmony/chat/src/test/native_timeline_motion.test.ts:1:1358
+✖ a multi-paragraph layout burst cannot fast-forward several text lines in one frame (2.680541ms)
+  AssertionError [ERR_ASSERTION]: 60Hz frame 12: 17.289224777859722vp jumped in one frame
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_motion.test.ts:45:14)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

@@ -1,8 +1,10 @@
-import { ACCENT, ACCENT_INK, ERROR, INK, INK3, INK4, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
+import { ACCENT, ACCENT_INK, ERROR, INK, INK3, INK4, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
 import { MarkdownText } from './MarkdownText.ets';
 
 @Component
 export struct NovelChapterVersionPreview {
+  @StorageProp('reduceMotion') private reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') private appBackgrounded: boolean = false;
   @Prop title: string = '';
   @Prop content: string = '';
   @Prop metadata: string = '';
@@ -75,6 +77,10 @@ export struct NovelChapterVersionPreview {
         .borderRadius({ topLeft: 20, topRight: 20 })
         .padding({ left: 18, right: 18, top: 12, bottom: 14 + this.bottomPadding })
         .onClick((): void => {})
+        .transition(TransitionEffect.translate({ y: this.reduceMotion || this.appBackgrounded ? 0 : 160 })
+          .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
     }.width('100%').height('100%')
+      .transition(TransitionEffect.OPACITY
+        .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 }

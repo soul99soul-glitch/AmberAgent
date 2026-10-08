@@ -4,7 +4,7 @@
 //   鸿蒙保留 fork/edit 入口(能力差异登记),同样图标化:
 //   copy=square_on_square / fork=share / edit=square_and_pencil / retry=arrow_clockwise
 //   (原型 tts 朗读随语音服务下线一并移除)
-import { INK3, BG } from '../design/tokens.ets';
+import { INK3, BG, ACCENT } from '../design/tokens.ets';
 import { Icon } from './ui/Icon.ets';
 
 @Component
@@ -18,6 +18,7 @@ export struct ChatMessageActions {
   @Prop canEdit: boolean = true;
   @Prop canRegenerate: boolean = true;
   @Prop canFavorite: boolean = true;
+  @Prop isFavorite: boolean = false;
   onFork: () => void = (): void => {};
   onEdit: () => void = (): void => {};
   onRegenerate: () => void = (): void => {};
@@ -71,11 +72,11 @@ export struct ChatMessageActions {
       }
       if (!this.isUser && this.canFavorite) {
         // 收藏(真实 FavoriteStore 落盘)
-        Row() { Icon({ name: 'star', iconSize: 17, color: INK3 }) }
+        Row() { Icon({ name: 'star', iconSize: 17, color: this.isFavorite ? ACCENT : INK3 }) }
           .width(44).height(44)
           .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
           .margin({ left: 4 })
-          .accessibilityText('收藏消息')
+          .accessibilityText(this.isFavorite ? '取消收藏消息' : '收藏消息')
           .onClick((): void => this.onFavorite())
       }
     }

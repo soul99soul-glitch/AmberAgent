@@ -1,0 +1,67 @@
+{
+  "date": "2026-10-01",
+  "scope": "User-authorized fixed120Hz trial on current native scrollTo implementation",
+  "single_runtime_change": "DisplaySync min=rate instead of min(60,rate), retaining max/expected=highest known supported <=120Hz",
+  "tests": {
+    "passed": 17,
+    "failed": 0,
+    "red": "3 fixed-range assertions failed before runtime change",
+    "lint": "No defects found"
+  },
+  "control_hap": "/tmp/amber-stream120-native-control.hap",
+  "control_sha256": "a0ef199c2252fdc87e06e925030a7e7ff2d24e67137f783dd0ce6d1e7b46b858",
+  "baseline_backup": "/tmp/streamfixed120-native-baseline",
+  "source_sha256": {
+    "harmony/entry/src/main/ets/components/NativeTimelineFollow.ets": "7d3348f40a04fe9e92a37791bb03d42e7894308617c2ee4a0e7cc88ba0e3d4aa",
+    "harmony/chat/src/test/native_timeline_follow.test.cjs": "8d1f33fb1619331fb388842428411cb5a9cfd59e88330bef5ed03fc2f548e08e"
+  },
+  "candidate_build": {
+    "success": true,
+    "duration": "15 s 472 ms ",
+    "hap": "/tmp/amber-stream120-native-fixed.hap",
+    "sha256": "726cfe65999a40a072a9712f9b6d6e40f217145fba0bb65b859104ee8fa6de0d",
+    "bytes": 59691549,
+    "agc_signed": true
+  },
+  "installed": true,
+  "device_fps_verified": true,
+  "pending": null,
+  "device_settings_changed": false,
+  "simulator_started": false,
+  "candidate_source_backup": "/tmp/streamfixed120-native-candidate",
+  "working_source": "Original 60-120 range restored while awaiting unlock; fixed candidate HAP, source and patch retained",
+  "device_window_released": true,
+  "installation": {
+    "device": "6HK0226627000384",
+    "bundle": "app.amber.deepread",
+    "result": "install bundle successfully",
+    "launched": true,
+    "pid": 59941,
+    "ui": "Chat list and existing test conversation opened; composer prompt verified before send"
+  },
+  "fixed120_effective": false,
+  "result": "Fixed request verified but system still caps60 afterTouchIdle; native List continues moving under cap",
+  "restored": {
+    "success": true,
+    "hap": "/tmp/amber-stream120-native-control.hap",
+    "sha256": "a0ef199c2252fdc87e06e925030a7e7ff2d24e67137f783dd0ce6d1e7b46b858",
+    "install_result": "install bundle successfully",
+    "launched": true,
+    "pid": 62667,
+    "visible_ui": "ChatList with existing test conversation and new conversation button"
+  },
+  "analysis": "streamfixed120-analysis.json",
+  "final_ui": "STREAM-END, heading/bold/italic visible; screenshot reviewed before restoring",
+  "current_device_package": "control60-120 native animation",
+  "touch_injection_research": {
+    "official_api": "OH_WindowManager_InjectTouchEvent",
+    "since_api": 20,
+    "scope": "Same-process window only; events delivered directly toArkUI without window focus/layer/drag changes",
+    "reference": "https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/native-window-event-filter",
+    "observed_source_path": "WindowSessionImpl::InjectTouchEvent -> UIContentImpl::ProcessPointerEvent -> AceViewOhos::DispatchTouchEvent",
+    "refresh_effect": "Not verified; availability of event injection does not prove systemTouchIdle reset or120Hz uplift",
+    "implemented": false,
+    "added_periodic_injected_touches": false,
+    "potential_trial": "Bounded same-process inert target outside List; measure TouchIdle transitions and actual refresh, stop on real user interaction/page exit/end"
+  }
+}

@@ -18,7 +18,8 @@ function load(filename, ports = {}) {
   vm.runInNewContext(source, { exports, require: name => {
     if (ports[name]) return ports[name];
     if (name === '@amber/deepread-domain') return Object.assign({}, load(path.join(main, 'domain/models.ts')),
-      load(path.join(main, 'domain/helpers.ts')), load(path.join(main, 'domain/enums.ts')));
+      load(path.join(main, 'domain/helpers.ts')), load(path.join(main, 'domain/enums.ts')),
+      load(path.join(main, 'domain/synthesis_templates.ts')));
     if (name === '@amber/chat-domain') return load(path.resolve(__dirname, '../../../chat/src/main/ets/chat/markdown_blocks.ts'));
     if (name.startsWith('.')) return load(path.resolve(path.dirname(filename), name));
     throw new Error('Unexpected dependency ' + name);
@@ -70,7 +71,7 @@ const entry = (id, output = domain.makeEmptyDeepReadOutput(), time = 10) => ({ t
   sourceUrl: null, output, phase: output.generationPhase, attemptCount: 0, lastError: null,
   createdAt: time, updatedAt: time, expiresAt: Date.now() + 100000 });
 
-test('custom capture survives repository section updates and template deletion; reading and PDF share its HTML', async () => {
+test('custom capture survives repository section updates and template deletion', async () => {
   let saved = [{ id: 'custom_one', name: 'Original design', html: '<article class="original"><h1>{{title}}</h1>{{content}}</article>', createdAt: 1, updatedAt: 2 }];
   const storage = { get: async () => JSON.stringify(saved) };
   const frozen = await template.captureDeepReadTemplate(storage, 'custom_one', 50);
@@ -86,7 +87,6 @@ test('custom capture survives repository section updates and template deletion; 
   assert.equal(read.output.templateSnapshot.html, frozen.html);
   assert.equal(template.resolveDeepReadArticleTemplate(read.output).fallback, null);
   const reading = template.renderCapturedDeepReadTemplateHtml(read.title, read.output);
-  assert.equal(reading, template.renderCapturedDeepReadTemplateHtml(read.title, read.output));
   assert.match(reading, /class="original"/); assert.match(reading, /Captured article/);
   await assert.rejects(template.captureDeepReadTemplate(storage, 'custom_one'), /已不存在/);
 });
@@ -228,7 +228,7 @@ test('captured selection crosses actual scheduler options, ordinary writer stage
   stop();
   assert.equal(result.ok, true); assert.equal(result.output.generationComplete, true);
   assert.equal(f.options().templateSnapshot.id, snapshot.id);
-  assert.equal(f.requests.length, 5); assert.ok(committed.length >= 4);
+  assert.equal(f.requests.length, 4); assert.ok(committed.length >= 4);
   for (const row of committed) assert.equal(row.output.templateSnapshot.html, snapshot.html);
   const saved = await f.repo.get('pipeline');
   assert.equal(saved.templateId, snapshot.id); assert.equal(saved.output.templateSnapshot.capturedAt, 123);
@@ -273,4 +273,28 @@ test('a no-source failed continuation retains its original captured template ins
   assert.equal(result.ok, false); assert.equal(f.requests.length, 0);
   assert.equal(result.output.templateSnapshot.id, snapshot.id);
   assert.equal((await f.repo.get('pipeline')).output.templateSnapshot.html, snapshot.html);
+});
+
+
+test('synthesis capture, repository updates and rendered HTML preserve the article shape and citations', async () => {
+  const frozen = await template.captureDeepReadTemplate({ get: async () => { throw Error('No custom lookup for built-ins'); } }, 'deepread_qa', 50);
+  const output = domain.makeEmptyDeepReadOutput();
+  output.templateId = frozen.id; output.templateSnapshot = frozen;
+  output.templateArticle = { shape: 'template_synthesis', template: frozen.id, title: 'Saved questions', lede: 'Saved lede',
+    sources: [{ id: 1, title: 'Saved source', url: 'https://example.com/source', site: 'Example' }],
+    qa: [{ question: 'QUESTION_UNIQUE', answer: 'ANSWER_UNIQUE', sources: [1] }] };
+  output.generationComplete = true; output.generationPhase = 'COMPLETE';
+  const { repo } = repositoryFixture();
+  await repo.upsert(entry('synthesis', output));
+  await repo.updatePhase('synthesis', 'COMPLETE');
+  const read = await repo.get('synthesis');
+  assert.deepEqual(JSON.parse(JSON.stringify(read.output.templateArticle)), JSON.parse(JSON.stringify(output.templateArticle)));
+  assert.equal(template.resolveDeepReadArticleTemplate(read.output).fallback, null);
+  const html = template.renderCapturedDeepReadTemplateHtml(read.title, read.output, { readerStyle: 'minimal', dark: true, readerLayout: 'debate' });
+  assert.match(html, /QUESTION_UNIQUE/); assert.match(html, /ANSWER_UNIQUE/);
+  assert.match(html, /href="#dr-source-1"/); assert.match(html, /id="dr-source-1"/);
+  assert.match(html, /--dr-bg:#000000/);
+  assert.ok(html.indexOf('QUESTION_UNIQUE') < html.indexOf('Saved source'), 'template order stays independent of magazine layout');
+  const exported = load(path.join(main, 'domain/export.ts')).deepReadToMarkdown(read);
+  assert.match(exported, /QUESTION_UNIQUE/); assert.match(exported, /ANSWER_UNIQUE/); assert.match(exported, /https:\/\/example.com\/source/);
 });

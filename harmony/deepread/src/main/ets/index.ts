@@ -9,7 +9,7 @@
 // deriveTopicId 在 src/test/topic_id_node.ts(仅 node 测试,import 'crypto'),ArkTS 不引用。
 export { createTopicIdWithRuntime, normalizeTitle, normalizeUrlArkTs } from './domain/topic_id.ts';
 export type { TopicIdRuntime } from './domain/topic_id.ts';
-export type { DeepReadOutput, TimelineEvent, CorePoint, ReadingLink, Perspective, Quote, DeepAnalysis, DeepReadImageAsset, DiagramNode, DiagramEdge, DeepReadDiagram, DeepReadSectionState } from './domain/models.ts';
+export type { DeepReadOutput, TimelineEvent, CorePoint, ReadingLink, Perspective, Quote, DeepAnalysis, DeepReadImageAsset, DiagramNode, DiagramEdge, DeepReadDiagram, DeepReadSectionState, DeepReadImpact, DeepReadUncertainty } from './domain/models.ts';
 export { makeEmptyDeepReadOutput } from './domain/models.ts';
 export type { DeepReadTemplateSnapshot } from './domain/models.ts';
 export * from './domain/discovery.ts';
@@ -18,7 +18,7 @@ export { observeDeepReadLibrary, queryDeepReadLibraryRows } from './domain/libra
 export type { DeepReadLibrarySnapshot, DeepReadLibraryRow } from './domain/library.ts';
 export type { DeepReadGenerationStage, DeepReadGenerationPhase, DeepReadSectionStatus } from './domain/enums.ts';
 export { STAGE_ORDER, STAGE_LABELS, IMAGE_CONFIDENCE, WRITER_TOOL_NAMES } from './domain/enums.ts';
-export { statusOf, sectionsReady, isComplete, firstFailureMessage, firstFailedStage, displayHeroImageUrl, displayHeroCaption, hasReadableArticle, hasDisplayableDeepReadOutput } from './domain/helpers.ts';
+export { statusOf, sectionsReady, isComplete, firstFailureMessage, firstFailedStage, displayHeroImageUrl, displayHeroCaption, hasReadableArticle, hasDisplayableDeepReadOutput, normalizedDeepReadUncertainties } from './domain/helpers.ts';
 export type { ModelConfig, ModelRegistry, ModelConfigInit, ModelRegistryOptions } from './domain/model_config.ts';
 export { makeModelConfig, newModelId, createStorageModelRegistry, MODEL_CONFIGS_STORAGE_KEY } from './domain/model_config.ts';
 
@@ -346,3 +346,6 @@ export type { NovelStructuredStateView } from './novel/creation.ts';
 export type { PolishChapterOutcome, PolishChapterResult } from './novel/polish.ts';
 export { projectPolishOutcomes, recordPolishChapterResult } from './novel/polish.ts';
 export type { NovelPolishStartPreview } from './novel/polish_context.ts';
+
+export { DEEPREAD_SYNTHESIS_TEMPLATES, synthesisTemplate, parseSynthesisPick, synthesisPickPrompt, synthesisPrompt as templateSynthesisPrompt, parseSynthesisArticle, hasSynthesisBody, synthesisArticleMarkdown } from './domain/synthesis_templates.ts';
+export type { DeepReadSynthesisTemplateId, DeepReadSynthesisTemplate, DeepReadTemplateArticle, DeepReadTemplateSource, DeepReadTemplateBrief, DeepReadTemplateAnswer, DeepReadTemplateCamp, DeepReadTemplateDebate, DeepReadTemplateEvent, DeepReadTemplateTurn, DeepReadTemplateTimeline, DeepReadTemplateReviewView, DeepReadTemplateReviewSplit, DeepReadTemplateReviewSpec, DeepReadTemplateReviewScore, DeepReadTemplateReview } from './domain/synthesis_templates.ts';

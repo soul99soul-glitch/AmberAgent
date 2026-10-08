@@ -1,0 +1,12 @@
+memory-related tests: 226 passed, 0 failed
+chat domain full suite: 2727 passed, 0 failed
+TypeScript noEmit: exit 0
+scoped ArkTS lint: 0 errors, 1390 warnings
+last guard scoped lint: 0 errors, 162 warnings
+release build: BUILD SUCCESSFUL in 35 s 626 ms
+sign-hap: Digest verify true; Verify success
+simulator: 127.0.0.1:5555 project-signed install successful; EntryAbility launch successful
+temporary acceptance data: restore done; visible active count restored to 0
+temporary acceptance code: removed; EntryAbility diff empty
+physical installation: not performed
+real-provider memory-quality acceptance: not performed

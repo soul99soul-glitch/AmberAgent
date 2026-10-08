@@ -1,0 +1,14 @@
+✔ one new line follows its measured growth without the composer navigation inset (0.472792ms)
+✔ measured target settles through the spring instead of hitting the native boundary early (4.222084ms)
+✔ an already settled list and an unmeasured tail retain their existing semantics (0.09575ms)
+✔ normal text growth keeps a measurable target when only the suggestion spacer leaves the viewport (0.501916ms)
+✔ a visible suggestion spacer uses its measured rectangle without adding its height twice (0.077166ms)
+✔ unmeasured structural messages and missing viewport geometry preserve the existing null result (0.097708ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 323.237459

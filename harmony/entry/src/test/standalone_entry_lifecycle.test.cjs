@@ -17,22 +17,23 @@ function method(source, name) {
 }
 const tick = async () => { for (let i = 0; i < 25; i++) await Promise.resolve(); };
 
-test('returning from provider settings refreshes models and retains unsaved polish context defaults', async () => {
+test('returning from provider settings refreshes models and rereads persisted polish context defaults', async () => {
   const source = fs.readFileSync(path.join(root, 'pages/NovelStandaloneSettingsPage.ets'), 'utf8');
+  let persistedContext = { includePlot: false, includeForeshadows: false, includeCharacters: true, includeDecisions: true };
   const env = {
     loadNovelModelDefaults: async () => ({ writing: { kind: 'fixed', providerId: 'new-provider', modelId: 'new-default' }, review: { kind: 'global' }, stateSync: { kind: 'global' } }),
     loadNovelModelOptions: async () => [{ providerId: 'new-provider', modelId: 'new-model', available: true }],
-    loadNovelPolishContext: async () => ({ includePlot: true, includeForeshadows: true, includeCharacters: true, includeDecisions: true }),
+    loadNovelPolishContext: async () => persistedContext,
     loadNovelPolishPreference: async () => { throw Error('unconsumed global field must not be loaded'); },
     describeChatModel: async () => 'new current model',
     loadNovelResearchEnabled: async () => false,
     getChatKvStore: () => ({}),
   };
-  const code = ts.transpileModule('class Page {\n' + ['reload', 'onPageShow'].map(n => method(source, n)).join('\n')
+  const code = ts.transpileModule('class Page {\n' + ['reload', 'onPageShow', 'applyContext'].map(n => method(source, n)).join('\n')
     + '\n}\nreturn Page;', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   const page = new (new Function(...Object.keys(env), code)(...Object.values(env)))();
-  Object.assign(page, { alive: true, loading: false, loadToken: 0, enableKeyboardAvoidance() {},
-    defaults: { writing: { kind: 'global' } }, includePlot: false, includeForeshadows: false,
+  Object.assign(page, { alive: true, loading: false, ready: true, saving: false, loadToken: 0, enableKeyboardAvoidance() {},
+    defaults: { writing: { kind: 'global' } }, includePlot: true, includeForeshadows: true,
     includeCharacters: true, includeDecisions: true, options: [], error: '' });
   page.onPageShow(); await tick();
   assert.equal(page.options[0].modelId, 'new-model');
@@ -40,6 +41,8 @@ test('returning from provider settings refreshes models and retains unsaved poli
   assert.equal(page.defaults.writing.modelId, 'new-default');
   assert.equal(page.includePlot, false);
   assert.equal(page.includeForeshadows, false);
+  assert.equal(page.ready, true);
+  persistedContext = { includePlot: true, includeForeshadows: true, includeCharacters: true, includeDecisions: true };
   await page.reload();
   assert.equal(page.error, '', 'cold default read does not depend on unconsumed global polish text');
   assert.equal(page.includePlot, true);
@@ -47,19 +50,19 @@ test('returning from provider settings refreshes models and retains unsaved poli
 
 test('settings polish save writes only the actual four context defaults and reports the same scope', async () => {
   const source = fs.readFileSync(path.join(root, 'pages/NovelStandaloneSettingsPage.ets'), 'utf8');
-  const code = ts.transpileModule('class Page {\n' + method(source, 'savePolish') + '\n}\nreturn Page;',
+  const code = ts.transpileModule('class Page {\n' + ['changeContext', 'contextDraft', 'applyContext'].map(n => method(source, n)).join('\n') + '\n}\nreturn Page;',
     { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   const contexts = []; let globalWrites = 0;
   const Page = new Function('saveNovelPolishContext', 'saveNovelPolishPreference', code)(
     async context => contexts.push(context), async () => { globalWrites++; });
   const page = new Page();
-  Object.assign(page, { alive: true, saving: false, loading: false, includePlot: false,
+  Object.assign(page, { alive: true, saving: false, ready: true, loading: false, saveToken: 0, loadToken: 0, includePlot: true,
     includeForeshadows: true, includeCharacters: false, includeDecisions: true, error: 'old error' });
-  await page.savePolish();
+  await page.changeContext('plot', false);
   assert.deepEqual(contexts, [{ includePlot: false, includeForeshadows: true,
     includeCharacters: false, includeDecisions: true }]);
   assert.equal(globalWrites, 0);
-  assert.equal(page.savedMessage, '润色上下文默认项已保存');
+  assert.equal(page.savedMessage, '润色上下文已保存');
   assert.equal(page.error, ''); assert.equal(page.saving, false);
 });
 

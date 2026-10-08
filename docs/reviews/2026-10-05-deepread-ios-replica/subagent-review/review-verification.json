@@ -1,0 +1,26 @@
+{
+  "confirmedFindings": {
+    "Standards": {
+      "P2": 1
+    },
+    "SpecAndCallChain": {
+      "P2": 7,
+      "P3": 1
+    },
+    "UI": {
+      "P3": 2
+    }
+  },
+  "previewSettledFrames": {
+    "30-preview-first-3s.jpeg": "b1b2e190bae86f0808086219d29198a164a9b2837bf0b23001fc012496421e5e",
+    "31-preview-first-11s.jpeg": "b1b2e190bae86f0808086219d29198a164a9b2837bf0b23001fc012496421e5e",
+    "32-preview-second-3s.jpeg": "b1b2e190bae86f0808086219d29198a164a9b2837bf0b23001fc012496421e5e",
+    "33-preview-second-11s.jpeg": "b1b2e190bae86f0808086219d29198a164a9b2837bf0b23001fc012496421e5e"
+  },
+  "previewReopenFailureConfirmed": false,
+  "productionModified": false,
+  "gitStatusChanged": false,
+  "iosAppearanceRestored": "light",
+  "iosMcpSessionDefaultsRestored": true,
+  "keyboardBottomActionsFullyVerified": false
+}

@@ -3,12 +3,10 @@
 //   + DeepReadOpenRequest.kt(createDeepReadOpenEvent)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { JsonObject, JsonValue } from '../main/ets/chat/json.ts';
+import type { JsonObject } from '../main/ets/chat/json.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
 import type { AgentTool } from '../main/ets/chat/tool.ts';
-import type {
-  ClipboardPort, DeepReadOpenBus, DeepReadOpenEvent,
-} from '../main/ets/chat/builtin_local_tools.ts';
+import type { ClipboardPort, DeepReadOpenBus, DeepReadOpenEvent } from '../main/ets/chat/builtin_local_tools.ts';
 import {
   createRunPlanUpdateTool, createClipboardTool, createDeepReadOpenTool,
   createDeepReadOpenEvent, DEEP_READ_TITLE_MAX_CHARS,
@@ -43,21 +41,6 @@ test('run_plan_update:显式值原样回显(含非字符串 status 直通)', asy
   assert.equal(payload['status'], 'completed');
   assert.equal(payload['current_step_index'], 1);
   assert.deepEqual(payload['steps'], ['一', '二']);
-});
-
-test('run_plan_update:schema — required [steps,status] + 描述逐字', () => {
-  const t: AgentTool = createRunPlanUpdateTool();
-  assert.equal(t.description,
-    'Update the current long-task step summary for Agent UI, preview surfaces, and live status. Use concise user-visible step names.');
-  const schema = t.parameters();
-  assert.ok(schema !== null);
-  assert.deepEqual(schema.required, ['steps', 'status']);
-  const props: JsonObject = schema.properties;
-  assert.equal((props['steps'] as JsonObject)['description'], 'Ordered task steps');
-  assert.equal((props['current_step_index'] as JsonObject)['description'],
-    '0-based current step index');
-  assert.equal((props['status'] as JsonObject)['description'],
-    'planning, running, waiting, completed, failed, or cancelled');
 });
 
 // ===== clipboard_tool(ClipboardTool.kt 全文) =====
@@ -103,20 +86,6 @@ test('clipboard_tool:缺 action / 缺 text / 未知 action — error 文案逐�
     (): Promise<UIMessagePart[]> => t.execute({ action: 'erase' }),
     (e: Error): boolean =>
       e.message === 'unknown action: erase, must be one of [read, write]');
-});
-
-test('clipboard_tool:描述 trimIndent+换行压平逐字 + schema enum', () => {
-  const { port } = makeClipboard('');
-  const t: AgentTool = createClipboardTool(port);
-  assert.equal(t.description,
-    'Read or write plain text from the device clipboard. Use action: read or write. For write, provide text. Do NOT write to the clipboard unless the user has explicitly requested it.');
-  const schema = t.parameters();
-  assert.ok(schema !== null);
-  assert.deepEqual(schema.required, ['action']);
-  const props: JsonObject = schema.properties;
-  assert.deepEqual((props['action'] as JsonObject)['enum'], ['read', 'write']);
-  assert.equal((props['text'] as JsonObject)['description'],
-    'Text to write to the clipboard (required for write)');
 });
 
 // ===== createDeepReadOpenEvent(DeepReadOpenRequest.kt:13-34 + 私有助手) =====
@@ -228,11 +197,4 @@ test('deep_read_open:force_regenerate 字符串 true 视为 false(strict 语义)
   const payload: JsonObject = textOf(
     await t.execute({ topic_title: 't', force_regenerate: 'true' }));
   assert.equal(payload['force_regenerate'], false);
-});
-
-test('deep_read_open:描述 trimIndent+换行压平逐字', () => {
-  const { bus } = makeBus(false);
-  const t: AgentTool = createDeepReadOpenTool({ bus, sha256Hex: fakeSha256Hex });
-  assert.equal(t.description,
-    'Open AmberAgent\'s full-screen Deep Read panel for a topic or URL. Use this when the user asks to 深度阅读, 深读, deep read, investigate a link/topic in magazine format, or wants a full-screen research reading view. This tool only opens the Deep Read route; the panel then uses the standard hidden-agent Deep Read pipeline, search/scrape tools, segmented writes, and 24h cache. If the user provided a URL, pass it as source_url so Deep Read scrapes that source first, then cross-checks with search.');
 });

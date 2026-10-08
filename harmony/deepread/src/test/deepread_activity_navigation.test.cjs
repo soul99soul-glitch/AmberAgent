@@ -36,6 +36,9 @@ test(`single DeepRead activity retains its ${title.length}-character title throu
       SlotType: { LIVE_VIEW: 4 }, ContentType: { NOTIFICATION_CONTENT_SYSTEM_LIVE_VIEW: 5 },
     } },
     '@kit.PerformanceAnalysisKit': { hilog: log },
+    '../platform_impl/DeepReadMotionPreferences.ets': { DeepReadMotionPreferences: class {
+      start() {} refresh() {} stop() {}
+    } },
   };
   const load = (relative, extra = '') => {
     const exports = {};
@@ -71,13 +74,16 @@ test(`single DeepRead activity retains its ${title.length}-character title throu
 
   const source = fs.readFileSync(path.join(ENTRY, 'pages/DeepReadArticlePage.ets'), 'utf8');
   const method = block(source, source.indexOf('  aboutToAppear(): void {'));
+  const clearMotion = block(source, source.indexOf('  private clearEditorialMotion(): void {'));
   const exports = {};
-  vm.runInNewContext(transpile(`class Page { ${method} }\nexports.Page = Page;`), {
+  vm.runInNewContext(transpile(`class Page { ${method} ${clearMotion} }\nexports.Page = Page;`), {
     exports, router: { getParams: () => routes[0].params }, hilog: log, DOMAIN: 0, TAG: 'test',
+    getProductKind: identity.getProductKind,
   });
   let articleLoads = 0;
   const page = new exports.Page();
   Object.assign(page, { pageToken: 0, webSession: 0, workspaceRequest: 0,
+    motionCycle: 0, completionStamp: 0,
     loadArticle: async () => { articleLoads++; } });
   page.aboutToAppear();
   assert.equal(articleLoads, 1, `article entry rejected the activity Want: ${page.errorMsg}`);
@@ -95,6 +101,9 @@ test('display titles reject nonstrings while stable topic IDs retain their lengt
   const filename = path.join(ENTRY, 'entryability/EntryAbility.ets');
   vm.runInNewContext(transpile(fs.readFileSync(filename, 'utf8')), {
     exports, require: name => name === '@kit.AbilityKit' ? { UIAbility: class {} }
+      : name === '../platform_impl/DeepReadMotionPreferences.ets' ? { DeepReadMotionPreferences: class {
+        start() {} refresh() {} stop() {}
+      } }
       : name === '@kit.PerformanceAnalysisKit' ? { hilog: { info() {}, warn() {}, error() {} } } : {},
     AppStorage: { get: key => storage.get(key), setOrCreate: (key, value) => storage.set(key, value) },
     Promise, Error,

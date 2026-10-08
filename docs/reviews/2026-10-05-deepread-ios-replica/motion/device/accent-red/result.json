@@ -1,0 +1,65 @@
+{
+  "changed": 5.114,
+  "intermediate_frames": [
+    2,
+    3
+  ],
+  "frames": [
+    {
+      "index": 0,
+      "ms": 98,
+      "remote": "/data/local/tmp/amber-motion-0.jpeg",
+      "from_before": 0.0,
+      "from_after": 5.114
+    },
+    {
+      "index": 1,
+      "ms": 205,
+      "remote": "/data/local/tmp/amber-motion-1.jpeg",
+      "from_before": 0.0,
+      "from_after": 5.114
+    },
+    {
+      "index": 2,
+      "ms": 337,
+      "remote": "/data/local/tmp/amber-motion-2.jpeg",
+      "from_before": 11.43,
+      "from_after": 12.329
+    },
+    {
+      "index": 3,
+      "ms": 518,
+      "remote": "/data/local/tmp/amber-motion-3.jpeg",
+      "from_before": 9.577,
+      "from_after": 7.242
+    },
+    {
+      "index": 4,
+      "ms": 655,
+      "remote": "/data/local/tmp/amber-motion-4.jpeg",
+      "from_before": 5.042,
+      "from_after": 0.142
+    },
+    {
+      "index": 5,
+      "ms": 797,
+      "remote": "/data/local/tmp/amber-motion-5.jpeg",
+      "from_before": 5.114,
+      "from_after": 0.006
+    },
+    {
+      "index": 6,
+      "ms": 952,
+      "remote": "/data/local/tmp/amber-motion-6.jpeg",
+      "from_before": 5.27,
+      "from_after": 0.282
+    },
+    {
+      "index": 7,
+      "ms": 1042,
+      "remote": "/data/local/tmp/amber-motion-7.jpeg",
+      "from_before": 5.114,
+      "from_after": 0.0
+    }
+  ]
+}

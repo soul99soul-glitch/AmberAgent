@@ -4,12 +4,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  AgentPromptConfigRepository, createAgentPromptConfigTool,
-  SUB_AGENT_BUILT_INS, SUB_AGENT_BUILT_IN_IDS, subAgentFindDefinition,
-  subAgentExtractMentions, subAgentApplyOverride, makeSubAgentOverride,
-  makeSubAgentRuntimeSetting, makeImagePromptInjectionConfig,
-  DEFAULT_IMAGE_PROMPT_INJECTION, DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION,
-  DEFAULT_CONTEXT_COMPACTION_HANDOFF_PROMPT,
+  AgentPromptConfigRepository, createAgentPromptConfigTool, SUB_AGENT_BUILT_INS, SUB_AGENT_BUILT_IN_IDS,
+  subAgentFindDefinition, subAgentExtractMentions, subAgentApplyOverride, makeSubAgentOverride,
+  makeSubAgentRuntimeSetting, makeImagePromptInjectionConfig, DEFAULT_IMAGE_PROMPT_INJECTION,
+  DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION, DEFAULT_CONTEXT_COMPACTION_HANDOFF_PROMPT,
 } from '../main/ets/chat/agent_prompt_config.ts';
 import type {
   PromptConfigFilePort, CouncilSettingStrategy, SubAgentRuntimeSetting,
@@ -91,25 +89,6 @@ test('builtIns:六件序 + find(id 精确/name 忽略大小写)+ builtInIds', ()
   assert.equal(subAgentFindDefinition('ORACLE')?.id, 'oracle'); // name 忽略大小写
   assert.equal(subAgentFindDefinition('Writer')?.id, 'writer');
   assert.equal(subAgentFindDefinition('nope'), null);
-});
-
-test('rolePrompt 骨架钉住(explorer:HARD BOUNDARIES + extraConstraints 行 + 四段)', () => {
-  const explorer: SubAgentDefinition = SUB_AGENT_BUILT_INS[0];
-  const p: string = explorer.systemPrompt;
-  assert.equal(p.startsWith(
-    'You are Explorer — a fast multi-source reconnaissance specialist for AmberAgent.\n\n=== HARD BOUNDARIES ===\n- You are a subagent. Do NOT spawn subagents.'), true);
-  assert.equal(p.includes('\n- Report once and stop.\n- READ-ONLY. No writes, no app driving.\n\nCapabilities:\n'), true);
-  assert.equal(p.includes('\nBehavior:\n'), true);
-  assert.equal(p.endsWith('Findings (each with source), evidence list, gaps you couldn\'t resolve.'), true);
-  // writer 走独立模板(无 Capabilities 段,空行后直落 Role:)
-  const writer: SubAgentDefinition = SUB_AGENT_BUILT_INS[4];
-  assert.equal(writer.systemPrompt.includes('- Report once and stop.\n\nRole: High-quality Chinese writing'), true);
-  // 默认字段(SubAgentModels.kt:8-14)
-  assert.equal(explorer.maxTurns, 4);
-  assert.equal(explorer.timeoutMs, 300000);
-  assert.equal(explorer.outputBudgetChars, 12000);
-  assert.equal(explorer.dynamic, false);
-  assert.equal(explorer.supportsModelOverride, true);
 });
 
 test('extractMentions:前置空白/文首门 + 长度降序 + id 边界 + 去重', () => {

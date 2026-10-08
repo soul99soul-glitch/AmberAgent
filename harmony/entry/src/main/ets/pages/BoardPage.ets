@@ -20,8 +20,18 @@ import { translateHotListTitles } from '../platform_impl/HotListTitleTranslator.
 import { createEntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import type { AbortControllerLike, DeepReadInputSource, DeepReadHotspot, DeepReadActiveRun, DeepReadScheduler } from '@amber/deepread-domain';
 import { discoveryHotspotInputs, discoveryArticleParams } from '@amber/deepread-domain';
-import { getAppContainer, getDeepReadScheduler } from '../di/AppContainer.ets';
+import { getAppContainer, getDeepReadScheduler, getRepository } from '../di/AppContainer.ets';
 import { DeepReadNewsroomCard } from '../components/DeepReadNewsroomCard.ets';
+import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
+import { DeepReadTabBar } from '../components/deepread/DeepReadTabBar.ets';
+import { DeepReadDockScroll } from '../components/deepread/DeepReadDockScroll.ets';
+import { DeepReadPaperBackground } from '../components/deepread/DeepReadPaperBackground.ets';
+import { DeepReadComposerSheet } from '../components/deepread/DeepReadComposerSheet.ets';
+import { DeepReadDiscoveryHeader, DeepReadDiscoveryMasthead } from '../components/deepread/DeepReadDiscoveryHeader.ets';
+import { DeepReadDiscoveryTopicCard, DeepReadDiscoverySourceCard, DeepReadDiscoverySectionHeader } from '../components/deepread/DeepReadDiscoveryCards.ets';
+import { DeepReadDiscoveryEmptyGlyph } from '../components/deepread/DeepReadDiscoverySymbol.ets';
+import { DeepReadDiscoveryNotice, DeepReadDiscoveryPlaceholder } from '../components/deepread/DeepReadDiscoveryMotion.ets';
+import { DeepReadDiscoveryShake } from '../components/deepread/DeepReadDiscoveryShake.ets';
 
 import {
   BG, SURFACE2, INK, INK2, INK3, INK4, ACCENT, ERROR, MOTION_ENTER, MOTION_OVERLAY, MOTION_STAGGER,
@@ -30,7 +40,7 @@ import {
 import { FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { PlainSection, CardGroup, PageSpacer, PaperSeparator } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { router, promptAction } from '@kit.ArkUI';
+import { router, promptAction, curves } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import type { common } from '@kit.AbilityKit';
 import { connection } from '@kit.NetworkKit';
@@ -40,6 +50,62 @@ const HOTLIST_CACHE_KEY: string = 'deepread_hotlist_cache';
 interface BoardHotActionItem extends HotItem {
   seedUrls: string[];
   inputSources: DeepReadInputSource[];
+}
+
+// 局部触感与一次刷新旋转；加载状态仍由真实请求结束控制。
+@Component
+struct BoardIconAction {
+  @StorageProp('reduceMotion') @Watch('settleMotion') reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') @Watch('settleMotion') appBackgrounded: boolean = false;
+  @Prop iconName: string = '';
+  @Prop label: string = '';
+  @Prop filled: boolean = true;
+  @Prop standalone: boolean = false;
+  @Prop @Watch('onBusyChanged') busy: boolean = false;
+  onTap: () => void = (): void => {};
+  @State private scaleValue: number = 1;
+  @State private angle: number = 0;
+
+  aboutToAppear(): void {
+    this.onBusyChanged();
+  }
+
+  private onBusyChanged(): void {
+    if (!this.busy || (this.standalone && (this.reduceMotion || this.appBackgrounded))) return;
+    animateTo({ duration: 620, curve: Curve.EaseOut }, (): void => {
+      this.angle += 360;
+    });
+  }
+
+  aboutToDisappear(): void { this.scaleValue = 1; }
+
+  private settleMotion(): void {
+    if (this.standalone && (this.reduceMotion || this.appBackgrounded)) { this.scaleValue = 1; this.angle = 0; }
+  }
+
+  build(): void {
+    Row() {
+      Icon({ name: this.iconName, iconSize: this.filled ? 18 : 15, color: this.standalone ? D.muted : this.busy ? ACCENT : INK })
+        .rotate({ angle: this.angle })
+    }
+    .width(44).height(44).borderRadius(22)
+    .backgroundColor(this.filled ? (this.standalone ? D.card : SURFACE) : Color.Transparent)
+    .border({ width: this.filled ? 0.5 : 0, color: this.standalone ? D.rule : LINE })
+    .justifyContent(FlexAlign.Center)
+    .scale({ x: this.scaleValue, y: this.scaleValue })
+    .opacity(this.busy ? 0.55 : 1)
+    .enabled(!this.busy)
+    .accessibilityText(this.busy ? '刷新中' : this.label)
+    .onTouch((event: TouchEvent): void => {
+      if (this.standalone && (this.reduceMotion || this.appBackgrounded)) return;
+      if (event.type !== TouchType.Down && event.type !== TouchType.Up && event.type !== TouchType.Cancel) return;
+      const down: boolean = event.type === TouchType.Down;
+      animateTo({ duration: 260, curve: curves.springCurve(0, 1, 220, 24) }, (): void => {
+        this.scaleValue = down ? 0.9 : 1;
+      });
+    })
+    .onClick((): void => { if (!this.busy) this.onTap(); })
+  }
 }
 
 @Component
@@ -62,7 +128,7 @@ struct BoardHotItemRow {
           .fontWeight(500)
           .lineHeight(TEXT_STYLES.meta.lineHeight)
           .fontFamily(FONT_MONO_MEDIUM)
-          .fontColor(INK4)
+          .fontColor(getProductKind() === 'deepread' && this.idx < 3 && this.rankText.length > 0 ? ACCENT : INK4)
           .width(28)
         Text(this.title)
           .fontSize(TEXT_STYLES.body.size)
@@ -86,9 +152,18 @@ struct BoardHotItemRow {
       .width('100%')
       .padding({ left: 16, right: 16, top: 11, bottom: 11 })
       .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
+      .scale({ x: getProductKind() === 'deepread' && this.pressed ? 0.985 : 1,
+        y: getProductKind() === 'deepread' && this.pressed ? 0.985 : 1 })
       .onTouch((event: TouchEvent): void => {
-        if (event.type === TouchType.Down) this.pressed = true;
-        else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressed = false;
+        if (event.type !== TouchType.Down && event.type !== TouchType.Up && event.type !== TouchType.Cancel) return;
+        const down: boolean = event.type === TouchType.Down;
+        if (getProductKind() === 'deepread') {
+          animateTo({ duration: 260, curve: curves.springCurve(0, 1, 220, 24) }, (): void => {
+            this.pressed = down;
+          });
+        } else {
+          this.pressed = down;
+        }
       })
       .onClick((): void => { this.onRowClick(); })
       if (!this.isLast) {
@@ -104,11 +179,28 @@ struct BoardHotItemRow {
   }
 }
 
-@Entry
 @Component
-struct BoardPage {
+export struct BoardPageContent {
+  onBackHandler: (handler: () => boolean) => void = (_handler: () => boolean): void => {};
+  @Prop embeddedRoot: boolean = false;
+  @Prop @Watch('rootVisibilityChanged') rootVisible: boolean = false;
+  @Prop @Watch('rootCreateChanged') rootCreate: number = 0;
+
+  private rootVisibilityChanged(): void {
+    if (this.rootVisible) this.onPageShow(); else this.onPageHide();
+  }
+
+  private rootCreateChanged(): void {
+    if (!this.embeddedRoot || !this.rootVisible) return;
+    this.composeOpen = true;
+  }
+
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
+  @StorageProp('reduceMotion') @Watch('settleArrival') reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') @Watch('settleArrival') appBackgrounded: boolean = false;
+  @StorageProp('deepreadActiveTab') @Watch('settleArrival') deepreadActiveTab: number = 0;
   @State sections: SourceSection[] = [];
   @State topics: HotTopic[] = [];
   @State lastUpdatedAt: number = 0;
@@ -120,6 +212,19 @@ struct BoardPage {
   @State focusMode: string = 'all';
   @State activeRuns: DeepReadActiveRun[] = [];
   @State activityError: string = '';
+  @State private pressedTopicId: string = '';
+  @State private issue: number = 0;
+  @State private arrivalOffset: number = 0;
+  @State private composeOpen: boolean = false;
+  @State private shuffleTrigger: number = 0;
+  @State private luckyHeight: number = 0;
+  @State private pageVisible: boolean = false;
+  private firstArrival: boolean = true;
+  private arrivalTimer: number = -1;
+  private allowListEntrance: boolean = !(AppStorage.get<boolean>('deepreadDiscoveryListShown') ?? false);
+  private discoveryScroller: Scroller = new Scroller();
+  private dockScroll: DeepReadDockScroll = new DeepReadDockScroll();
+  private restoreDiscoveryOffset: boolean = true;
   // 条目操作 sheet(Android HotListActionSheet:深度阅读/重新生成/原文/分享)
   @State sheetItem: BoardHotActionItem | null = null;
   @State sheetForce: boolean = false;
@@ -130,38 +235,47 @@ struct BoardPage {
   private translateTitles: boolean = false;
   private cacheLoaded: boolean = false;
   private firstShowDone: boolean = false;
-  private pageVisible: boolean = false;
   private refreshToken: number = 0;
   private requestController: AbortControllerLike | null = null;
   private runObservationToken: number = 0;
   private unsubscribeRuns: (() => void) | null = null;
 
   aboutToAppear(): void {
-    this.pageVisible = true;
-    this.loadHotlist(false);
+    this.onBackHandler((): boolean => { return this.onBackPress(); });
+    this.pageVisible = !this.embeddedRoot || this.rootVisible;
+    if (this.pageVisible) this.loadHotlist(false);
+    if (this.rootVisible) this.onPageShow();
   }
 
   onPageShow(): void {
     this.pageVisible = true;
     if (getProductKind() === 'deepread') {
-      markWantRoutingReady(this.getUIContext().getRouter());
+      this.dockScroll.reset();
+      if (!this.embeddedRoot) markWantRoutingReady(this.getUIContext().getRouter());
       this.observeRuns();
+      this.loadIssue();
+      if (!this.embeddedRoot) this.arrive();
     }
     if (this.firstShowDone) this.loadHotlist(false);
     else this.firstShowDone = true;
   }
 
   onPageHide(): void {
+    if (getProductKind() === 'deepread') { this.saveDiscoveryScroll(); this.dockScroll.reset(); }
+    this.pressedTopicId = '';
     this.stopRefresh();
+    this.settleArrival();
   }
 
   aboutToDisappear(): void {
+    this.pressedTopicId = '';
     this.stopRefresh();
+    this.settleArrival();
   }
 
   onBackPress(): boolean {
     if (this.sheetItem === null) return false;
-    animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
+    animateTo({ duration: this.topicSheetDuration(200), curve: Curve.EaseIn }, (): void => {
       this.sheetItem = null;
     });
     return true;
@@ -259,12 +373,26 @@ struct BoardPage {
     this.lastUpdatedAt = latestHotListUpdate(this.rawSections, this.enabledSourceIds);
   }
 
+  private topicSheetDuration(defaultDuration: number): number {
+    if (getProductKind() !== 'deepread') return defaultDuration;
+    return this.appBackgrounded ? 0 : this.reduceMotion ? 120 : defaultDuration;
+  }
+
+  private topicSheetTransition(card: boolean): TransitionEffect {
+    if (getProductKind() === 'deepread') {
+      if (this.appBackgrounded) return TransitionEffect.IDENTITY;
+      if (this.reduceMotion) return TransitionEffect.OPACITY.animation({ duration: 120, curve: Curve.EaseOut });
+    }
+    const effect: TransitionEffect = card ? TransitionEffect.translate({ y: 160 }) : TransitionEffect.OPACITY;
+    return effect.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut });
+  }
+
   private showTopicActions(item: HotItem, urls: string[], inputs: DeepReadInputSource[]): void {
     const snapshot: BoardHotActionItem = {
       rank: item.rank, title: item.title, url: item.url, heat: item.heat,
       displayTitle: item.displayTitle, seedUrls: urls.slice(), inputSources: inputs.slice(),
     };
-    animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+    animateTo({ duration: this.topicSheetDuration(MOTION_OVERLAY), curve: Curve.EaseOut }, (): void => {
       this.sheetItem = snapshot;
     });
   }
@@ -290,7 +418,7 @@ struct BoardPage {
           .fontWeight(isLead ? FontWeight.Bold : FontWeight.Medium)
           .lineHeight(isLead ? 28 : TEXT_STYLES.meta.lineHeight)
           .fontFamily(FONT_MONO_MEDIUM)
-          .fontColor(isLead ? ACCENT : INK4)
+          .fontColor(getProductKind() === 'deepread' ? (idx < 3 ? ACCENT : INK4) : (isLead ? ACCENT : INK4))
           .width(isLead ? 36 : 28)
         Column() {
           // 标题宽度交给外层 Column 的 layoutWeight;此处禁 layoutWeight(竖向 Column 里会吃满剩余高)
@@ -324,6 +452,17 @@ struct BoardPage {
       .alignItems(VerticalAlign.Center)
       .constraintSize({ minHeight: isLead ? 72 : 0 })
       .padding({ left: 16, right: 16, top: isLead ? 14 : 11, bottom: isLead ? 14 : 11 })
+      .backgroundColor(getProductKind() === 'deepread' && this.pressedTopicId === tp.id ? SURFACE2 : Color.Transparent)
+      .scale({ x: getProductKind() === 'deepread' && this.pressedTopicId === tp.id ? 0.985 : 1,
+        y: getProductKind() === 'deepread' && this.pressedTopicId === tp.id ? 0.985 : 1 })
+      .onTouch((event: TouchEvent): void => {
+        if (getProductKind() !== 'deepread') return;
+        if (event.type !== TouchType.Down && event.type !== TouchType.Up && event.type !== TouchType.Cancel) return;
+        const down: boolean = event.type === TouchType.Down;
+        animateTo({ duration: 260, curve: curves.springCurve(0, 1, 220, 24) }, (): void => {
+          this.pressedTopicId = down ? tp.id : '';
+        });
+      })
       .onClick((): void => {
         // 第一项可能没有链接；从聚合中保留所有有效链接并用首个作为既有身份。
         const seeds: string[] = hotTopicSeedUrls(tp);
@@ -492,7 +631,6 @@ struct BoardPage {
     }
   }
 
-  // iOS BoardView 顶栏:返回 / 居中标题 / 历史 + 设置圆钮
   @Builder
   BoardHeader(): void {
     Stack({ alignContent: Alignment.Center }) {
@@ -579,100 +717,233 @@ struct BoardPage {
     }
   }
 
-  build(): void {
-    Stack() {
-      // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
-      ForEach([this.themeEpoch], (_e: number): void => {
-      Column() {
-      this.BoardHeader()
+  private async loadIssue(): Promise<void> {
+    const token: number = this.runObservationToken;
+    try {
+      const entries = await getRepository().listHistory(0);
+      if (this.pageVisible && token === this.runObservationToken) this.issue = entries.length + 1;
+    } catch (_error) {
+      if (this.pageVisible && token === this.runObservationToken) this.issue = 0;
+    }
+  }
 
-      // 综合热榜组标 + 右侧刷新(iOS hotTopicSection)
+  private arrive(): void {
+    AppStorage.setOrCreate<number>('deepreadActiveTab', 0);
+    if (!this.firstArrival) return;
+    this.firstArrival = false;
+    const direction: number = AppStorage.get<number>('deepreadTabDirection') ?? 0;
+    if (direction === 0 || this.reduceMotion || this.appBackgrounded) return;
+    this.arrivalOffset = direction * 30;
+    this.arrivalTimer = setTimeout((): void => {
+      if (this.arrivalTimer < 0) return;
+      this.arrivalTimer = -1;
+      if (!this.pageVisible || this.reduceMotion || this.appBackgrounded || this.deepreadActiveTab !== 0) {
+        this.arrivalOffset = 0;
+        return;
+      }
+      this.getUIContext().animateTo({ duration: 260, curve: curves.springCurve(0, 1, 240, 30) }, (): void => {
+        this.arrivalOffset = 0;
+      });
+    }, 16);
+  }
+
+  private settleArrival(): void {
+    if (this.pageVisible && !this.reduceMotion && !this.appBackgrounded && this.deepreadActiveTab === 0) return;
+    if (this.arrivalTimer >= 0) clearTimeout(this.arrivalTimer);
+    this.arrivalTimer = -1;
+    this.arrivalOffset = 0;
+  }
+
+  private saveDiscoveryScroll(): void {
+    AppStorage.setOrCreate<number>('deepreadDiscoveryScroll', this.discoveryScroller.currentOffset().yOffset);
+  }
+
+  private restoreDiscoveryScroll(): void {
+    if (!this.restoreDiscoveryOffset || (this.topics.length === 0 && this.sections.length === 0)) return;
+    this.restoreDiscoveryOffset = false;
+    this.allowListEntrance = false;
+    AppStorage.setOrCreate<boolean>('deepreadDiscoveryListShown', true);
+    const offset: number = AppStorage.get<number>('deepreadDiscoveryScroll') ?? 0;
+    if (offset > 0) this.discoveryScroller.scrollTo({ xOffset: 0, yOffset: offset, animation: false });
+  }
+
+  private openDiscoveryPage(url: string): void {
+    router.pushUrl({ url: url }).catch((error: Error): void => {
+      if (this.pageVisible) this.activityError = '无法打开页面：' + error.message;
+    });
+  }
+
+  private topicActionItem(tp: HotTopic): BoardHotActionItem {
+    const seeds: string[] = hotTopicSeedUrls(tp);
+    const hotspots: DeepReadHotspot[] = tp.sources.map((source: HotTopicSource): DeepReadHotspot => ({
+      title: source.title, source: source.providerName, rank: source.rank,
+      url: /^https?:\/\//i.test(source.url) ? source.url : null, summary: source.summary,
+    }));
+    return { title: tp.title, displayTitle: tp.displayTitle, rank: tp.bestRank,
+      url: seeds[0] ?? '', heat: tp.sources[0]?.heat ?? '', seedUrls: seeds,
+      inputSources: discoveryHotspotInputs(hotspots) };
+  }
+
+  private sourceActionItem(item: HotItem, section: SourceSection): BoardHotActionItem {
+    const hotspot: DeepReadHotspot = { title: item.title, source: section.sourceName,
+      rank: item.rank, url: /^https?:\/\//i.test(item.url) ? item.url : null, summary: item.summary };
+    return { title: item.title, displayTitle: item.displayTitle, rank: item.rank,
+      url: item.url, heat: item.heat, seedUrls: hotspot.url !== null ? [hotspot.url] : [],
+      inputSources: discoveryHotspotInputs([hotspot]) };
+  }
+
+  private openTopicActions(item: BoardHotActionItem): void {
+    this.showTopicActions(item, item.seedUrls, item.inputSources);
+  }
+
+  @Builder
+  ComposerSheet(): void {
+    DeepReadComposerSheet({ embedded: true,
+      onDismiss: (): void => { this.composeOpen = false; },
+      onCreated: async (topicId: string, title: string): Promise<void> => {
+        await router.pushUrl({ url: 'pages/DeepReadArticlePage', params: { topicId: topicId, title: title } });
+        this.composeOpen = false;
+      } })
+  }
+
+  @Builder
+  DiscoveryNotices(): void {
+    if (this.hotlistError.length > 0 && !this.loading) {
+      DeepReadDiscoveryNotice({ message: this.hotlistError, active: this.pageVisible })
+    }
+    if (this.hotlistNote.length > 0) {
+      DeepReadDiscoveryNotice({ message: this.hotlistNote, danger: false, active: this.pageVisible })
+    }
+    if (this.activityError.length > 0) {
+      DeepReadDiscoveryNotice({ message: this.activityError, active: this.pageVisible })
+    }
+  }
+
+  @Builder
+  DiscoveryContent(): void {
+    Stack({ alignContent: Alignment.Bottom }) {
+      DeepReadPaperBackground({ nightReading: true })
+      Column() {
+        if (this.embeddedRoot) {
+          Stack() { Text('深度阅读').fontSize(16).fontWeight(FontWeight.Medium).fontFamily(D.sans).fontColor(D.ink) }
+            .width('100%').height(this.statusBarHeight + 58).padding({ top: this.statusBarHeight }).backgroundColor(D.paper)
+        } else {
+          DeepReadDiscoveryHeader({ statusBarHeight: this.statusBarHeight,
+            onSources: (): void => { this.openDiscoveryPage('pages/DeepReadDiscoverySettingsPage'); },
+            onCreate: (): void => { this.composeOpen = true; } })
+        }
+        Refresh({ refreshing: $$this.refreshing }) {
+          Scroll(this.discoveryScroller) {
+            Column({ space: 10 }) {
+              DeepReadDiscoveryMasthead({ issue: this.issue, active: this.pageVisible && this.deepreadActiveTab === 0,
+                playEntrance: this.allowListEntrance })
+              this.DiscoveryNotices()
+              ForEach(this.activeRuns, (run: DeepReadActiveRun): void => {
+                DeepReadNewsroomCard({ run: run, onOpen: (): void => { this.openRun(run); } })
+              }, (run: DeepReadActiveRun): string => this.runKey(run))
+              if (this.loading && this.topics.length === 0 && this.sections.length === 0 && this.activeRuns.length === 0) {
+                ForEach([0, 1, 2], (_index: number): void => {
+                  DeepReadDiscoveryPlaceholder({ active: this.pageVisible })
+                }, (index: number): string => 'placeholder-' + index)
+              } else if (this.topics.length === 0 && this.sections.length === 0) {
+                Column({ space: 12 }) {
+                  DeepReadDiscoveryEmptyGlyph({ active: this.pageVisible && this.deepreadActiveTab === 0,
+                    playEntrance: this.allowListEntrance })
+                  Text('暂无热点').fontSize(20).fontWeight(600).fontFamily(D.serif).fontColor(D.ink)
+                  Text(this.enabledSourceIds.length === 0 ? '在热点来源中启用榜单，或直接创建阅读。'
+                    : '下拉刷新，或从自己的主题开始阅读。').fontSize(14).lineHeight(21).fontColor(D.muted)
+                    .textAlign(TextAlign.Center)
+                }.width('100%').padding({ top: 30, bottom: 24 })
+              }
+              if (this.topics.length > 0) {
+                DeepReadDiscoverySectionHeader({ active: this.pageVisible && this.deepreadActiveTab === 0,
+                  playEntrance: this.allowListEntrance })
+                ForEach(this.topics, (tp: HotTopic, index: number): void => {
+                  DeepReadDiscoveryTopicCard({ topic: tp, index: index,
+                    active: this.pageVisible && this.deepreadActiveTab === 0, playEntrance: this.allowListEntrance,
+                    onOpen: (): void => { this.openArticle(this.topicActionItem(tp)); },
+                    onActions: (): void => { this.openTopicActions(this.topicActionItem(tp)); } })
+                }, (tp: HotTopic): string => tp.id)
+              }
+              ForEach(this.sections, (section: SourceSection, index: number): void => {
+                DeepReadDiscoverySourceCard({ section: section, index: this.topics.length + index + 1,
+                  active: this.pageVisible && this.deepreadActiveTab === 0, playEntrance: this.allowListEntrance,
+                  onOpen: (item: HotItem): void => { this.openArticle(this.sourceActionItem(item, section)); },
+                  onActions: (item: HotItem): void => { this.openTopicActions(this.sourceActionItem(item, section)); } })
+              }, (section: SourceSection): string => section.sourceId)
+              Row() {
+                Column({ space: 2 }) {
+                  Text('随机阅读').fontSize(14).fontColor(D.accent).fontFamily(D.sans)
+                  Text(this.randomItems().length > 0 ? '从当前热点中选一篇' : '暂无可阅读热点，刷新后再试')
+                    .fontSize(11).fontColor(D.muted)
+                }.alignItems(HorizontalAlign.Start).constraintSize({ minHeight: 44 }).layoutWeight(1)
+                  .enabled(this.randomItems().length > 0).onClick((): void => { this.shuffleTrigger++; })
+                if (this.lastUpdatedAt > 0) {
+                  Text(this.timeAgo(this.lastUpdatedAt)).fontSize(11).fontColor(D.muted)
+                }
+                BoardIconAction({ iconName: 'retry', label: '刷新热榜', filled: false, standalone: true, busy: this.loading,
+                  onTap: (): void => { this.loadHotlist(true); } })
+              }.width('100%').padding({ top: 4 })
+            }.width('100%').padding({ left: D.gutter, right: D.gutter,
+              bottom: 104 + this.navBarHeight + this.luckyHeight })
+              .alignItems(HorizontalAlign.Start)
+              .onAreaChange((): void => { this.restoreDiscoveryScroll(); })
+          }.width('100%').height('100%').align(Alignment.TopStart)
+            .onDidScroll((_x: number, y: number, state: ScrollState): void => {
+              if (this.pageVisible && this.deepreadActiveTab === 0) {
+                if (!this.embeddedRoot) this.dockScroll.update(y, this.discoveryScroller.currentOffset().yOffset, state !== ScrollState.Idle);
+              }
+            })
+            .onScrollStop((): void => { this.saveDiscoveryScroll(); })
+        }.width('100%').layoutWeight(1)
+          .onRefreshing((): void => { if (this.loading) this.refreshing = false; else this.loadHotlist(true); })
+      }.width('100%').height('100%').translate({ x: this.arrivalOffset })
+        .opacity(this.embeddedRoot || this.deepreadActiveTab === 0 ? 1 : 0).enabled(this.rootVisible || !this.embeddedRoot)
+      if (!this.embeddedRoot) { DeepReadTabBar({ selected: 0 }) }
+    }.width('100%').height('100%')
+  }
+
+  @Builder
+  HostBoardContent(): void {
+    Column() {
+      this.BoardHeader()
       Row() {
-        Text('综合热榜')
-          .fontSize(LABEL).fontWeight(600).lineHeight(TEXT_STYLES.meta.lineHeight)
+        Text('综合热榜').fontSize(LABEL).fontWeight(600).lineHeight(TEXT_STYLES.meta.lineHeight)
           .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK3).letterSpacing(0.4)
         Blank()
-        if (getProductKind() === 'deepread') {
-          Row() {
-            Icon({ name: 'gear', iconSize: 15, color: INK3 })
-          }
-          .width(44).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-          .accessibilityText('发现来源与关注设置')
-          .onClick((): void => { router.pushUrl({ url: 'pages/DeepReadDiscoverySettingsPage' }); })
-        }
         if (this.lastUpdatedAt > 0) {
-          Text(this.timeAgo(this.lastUpdatedAt))
-            .fontSize(META).fontColor(INK4).margin({ right: 4 })
+          Text(this.timeAgo(this.lastUpdatedAt)).fontSize(META).fontColor(INK4).margin({ right: 4 })
         }
-        Row() {
-          Icon({ name: 'retry', iconSize: 15, color: INK3 })
-        }
-        .width(44).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-        .opacity(this.loading ? 0.45 : 1)
-        .enabled(!this.loading)
-        .accessibilityText(this.loading ? '刷新中' : '刷新热榜')
-        .onClick((): void => { this.loadHotlist(true); })
-      }
-      .width('100%').padding({ left: 16, right: 4, top: 10, bottom: 2 })
-      .alignItems(VerticalAlign.Center)
-
-      if (getProductKind() === 'deepread') {
-        Row({ space: 12 }) {
-          Text('随机阅读').fontSize(META).fontColor(ACCENT).textAlign(TextAlign.Center)
-            .width(96).constraintSize({ minHeight: 44 }).backgroundColor(SURFACE2).borderRadius(10)
-            .enabled(this.randomItems().length > 0).opacity(this.randomItems().length > 0 ? 1 : 0.45)
-            .accessibilityText('从当前热点中随机选择并深度阅读')
-            .onClick((): void => { this.randomRead(); })
-          Text(this.randomItems().length > 0 ? '从当前热点中选一篇' : '暂无可阅读热点，刷新后再试')
-            .fontSize(META).fontColor(INK3).layoutWeight(1)
-      }.width('100%').padding({ left: 16, right: 16, bottom: 4 }).alignItems(VerticalAlign.Center)
-      }
-
+        Row() { Icon({ name: 'retry', iconSize: 15, color: INK3 }) }
+          .width(44).height(44).justifyContent(FlexAlign.Center).opacity(this.loading ? 0.45 : 1)
+          .enabled(!this.loading).accessibilityText(this.loading ? '刷新中' : '刷新热榜')
+          .onClick((): void => { this.loadHotlist(true); })
+      }.width('100%').padding({ left: 16, right: 4, top: 10, bottom: 2 })
       if (this.hotlistError.length > 0 && !this.loading) {
-        Text(this.hotlistError)
-          .fontSize(TEXT_STYLES.meta.size)
-          .fontWeight(TEXT_STYLES.meta.weight)
-          .lineHeight(TEXT_STYLES.meta.lineHeight)
-          .fontFamily(FONT_MONO_MEDIUM)
-          .fontColor(INK3)
-          .width('100%')
+        Text(this.hotlistError).fontSize(META).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3).width('100%')
           .padding({ left: 16, right: 16, top: 8, bottom: 4 })
       }
-
       if (this.hotlistNote.length > 0) {
         Text(this.hotlistNote).fontSize(META).fontColor(INK3).width('100%')
           .padding({ left: 16, right: 16, top: 8, bottom: 4 })
       }
-
       if (this.activityError.length > 0) {
         Text(this.activityError).fontSize(META).fontColor(ERROR).width('100%')
           .padding({ left: 16, right: 16, top: 8, bottom: 4 })
       }
-
       if (this.loading && this.topics.length === 0 && this.sections.length === 0 && this.activeRuns.length === 0) {
-        // 骨架屏(首载):标题条×6
         Column() {
-          ForEach([0, 1, 2, 3, 4, 5], (i: number): void => {
+          ForEach([0, 1, 2, 3, 4, 5], (index: number): void => {
             Row() {
               Column().width(24).height(16).borderRadius(4).backgroundColor(SURFACE2)
-              Column().layoutWeight(1).height(16).borderRadius(4).backgroundColor(SURFACE2)
-                .margin({ left: 12 })
-            }
-            .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 16 })
-          }, (i: number): string => `sk-${i}`)
-        }
-        .width('100%').margin({ top: 8 })
+              Column().layoutWeight(1).height(16).borderRadius(4).backgroundColor(SURFACE2).margin({ left: 12 })
+            }.width('100%').padding({ left: 16, right: 16, top: 16, bottom: 16 })
+          }, (index: number): string => 'sk-' + index)
+        }.width('100%').margin({ top: 8 })
       } else {
-        // 热榜内容量小,Scroll+Column 顶对齐;List 会把单条 ListItem 拉伸到视口高(大空隙根因)
         Refresh({ refreshing: $$this.refreshing }) {
           Scroll() {
             Column() {
-              if (getProductKind() === 'deepread') {
-                ForEach(this.activeRuns, (run: DeepReadActiveRun): void => {
-                  DeepReadNewsroomCard({ run: run, onOpen: (): void => { this.openRun(run); } })
-                    .margin({ left: 16, right: 16, bottom: 12 })
-              }, (run: DeepReadActiveRun): string => this.runKey(run))
-              }
               if (this.topics.length > 0) {
                 CardGroup({ radius: 18, stroke: true, content: (): void => { this.TopicsCardContent(); } })
                   .margin({ left: 16, right: 16 })
@@ -682,30 +953,37 @@ struct BoardPage {
                 CardGroup({ radius: 18, stroke: true, content: (): void => { this.SourceCardContent(sec); } })
                   .margin({ left: 16, right: 16 })
               }, (sec: SourceSection): string => sec.sourceId)
-            }
-            .width('100%').alignItems(HorizontalAlign.Start)
-          }
-          .width('100%').height('100%').align(Alignment.TopStart)
-        }
-        .width('100%').layoutWeight(1).padding({ top: 8 })
-        .onRefreshing((): void => {
-          if (this.loading) this.refreshing = false;
-          else this.loadHotlist(true);
-        })
+            }.width('100%').alignItems(HorizontalAlign.Start)
+          }.width('100%').height('100%').align(Alignment.TopStart)
+        }.width('100%').layoutWeight(1).padding({ top: 8 })
+          .onRefreshing((): void => { if (this.loading) this.refreshing = false; else this.loadHotlist(true); })
       }
       PageSpacer()
+    }.width('100%').height('100%').backgroundColor(BG)
+  }
+
+  build(): void {
+    Stack({ alignContent: Alignment.Bottom }) {
+      // Theme changes recreate the tree so every derived iOS palette value refreshes.
+      ForEach([this.themeEpoch], (_epoch: number): void => {
+        if (getProductKind() === 'deepread') this.DiscoveryContent()
+        else this.HostBoardContent()
+        if (this.sheetItem !== null) this.SheetOverlay(this.sheetItem)
+      }, (epoch: number): string => 'theme-' + epoch)
+      // Retain the sensor/lucky owner when the palette recreates visual content.
+      if (getProductKind() === 'deepread') {
+        DeepReadDiscoveryShake({ trigger: this.shuffleTrigger,
+          active: this.pageVisible && this.deepreadActiveTab === 0 && !this.composeOpen && this.sheetItem === null,
+          onHeightChanged: (height: number): void => { this.luckyHeight = height; },
+          getPicks: () => this.randomItems(), onRead: (pick: BoardHotActionItem): void => { this.openArticle(pick); } })
+          .margin({ bottom: 84 + this.navBarHeight })
       }
-      .width('100%').height('100%').backgroundColor(BG)
-      // 条目操作 sheet(半模态 overlay);item 走 @Builder 参数快照——
-      // 关闭动画把 sheetItem 置 null 的同一帧,树内不能再读 this.sheetItem.xxx(空指针崩溃根因)
-      if (this.sheetItem !== null) {
-        this.SheetOverlay(this.sheetItem)
-      }
-    
-      }, (e: number): string => `theme-${e}`)
-}
-      .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%').height('100%')
+    }.width('100%').height('100%')
+      // Keep the Composer owner outside theme-remounted content so its draft survives.
+      .bindSheet($$this.composeOpen, this.ComposerSheet(), {
+        height: '92%', showClose: false, backgroundColor: D.paper,
+        onDisappear: (): void => { this.composeOpen = false; },
+      })
   }
 
   @Builder
@@ -713,13 +991,13 @@ struct BoardPage {
     Column() {
       Blank()
         .onClick((): void => {
-          animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
+          animateTo({ duration: this.topicSheetDuration(200), curve: Curve.EaseIn }, (): void => {
             this.sheetItem = null;
           });
         })
       Column() {
         Text(item.displayTitle ?? item.title)
-          .fontSize(BODY2).fontWeight(FontWeight.Medium).fontColor(INK)
+          .fontSize(BODY2).fontWeight(FontWeight.Medium).fontColor(getProductKind() === 'deepread' ? D.ink : INK)
           .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%').padding({ left: 20, right: 20, top: 18, bottom: 10 })
         this.SheetAction('深度阅读', 'book', 'read')
@@ -734,17 +1012,15 @@ struct BoardPage {
       }
       .width('100%')
       .padding({ bottom: 12 })
-      .backgroundColor(SURFACE)
+      .backgroundColor(getProductKind() === 'deepread' ? D.card : SURFACE)
       .borderRadius({ topLeft: 20, topRight: 20 })
       .shadow({ radius: 20, color: SHADOW_OVERLAY, offsetY: -4 })
-      .transition(TransitionEffect.translate({ y: 160 })
-        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+      .transition(this.topicSheetTransition(true))
     }
     .width('100%').height('100%')
     .backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.End)
-    .transition(TransitionEffect.OPACITY
-      .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+    .transition(this.topicSheetTransition(false))
   }
 
   @Builder
@@ -756,8 +1032,8 @@ struct BoardPage {
   @Builder
   SheetAction(label: string, icon: string, action: string): void {
     Row() {
-      Icon({ name: icon, iconSize: 18, color: INK2 }).margin({ right: 14 })
-      Text(label).fontSize(BODY2).fontColor(INK)
+      Icon({ name: icon, iconSize: 18, color: getProductKind() === 'deepread' ? D.muted : INK2 }).margin({ right: 14 })
+      Text(label).fontSize(BODY2).fontColor(getProductKind() === 'deepread' ? D.ink : INK)
       Blank()
     }
     .width('100%')
@@ -765,7 +1041,7 @@ struct BoardPage {
     .padding({ left: 20, right: 20 })
     .onClick((): void => {
       const it: BoardHotActionItem | null = this.sheetItem;
-      animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
+      animateTo({ duration: this.topicSheetDuration(200), curve: Curve.EaseIn }, (): void => {
         this.sheetItem = null;
       });
       if (it === null) return;
@@ -774,5 +1050,35 @@ struct BoardPage {
       else if (action === 'original') this.openOriginal(it.url);
       else this.shareTopic(it);
     })
+  }
+}
+
+
+@Entry
+@Component
+struct BoardPage {
+  @State private visible: boolean = false;
+  private backHandler: () => boolean = (): boolean => false;
+  onBackPress(): boolean { return this.backHandler(); }
+  onPageShow(): void { this.visible = true; }
+  onPageHide(): void { this.visible = false; }
+
+  aboutToAppear(): void {
+    if (getProductKind() === 'deepread') {
+      const boundRouter = this.getUIContext().getRouter();
+      for (let index: number = 1; index <= parseInt(router.getLength(), 10); index++) {
+        const state: router.RouterState | undefined = boundRouter.getStateByIndex(index);
+        if (state?.name !== 'DeepReadRootPage' && state?.path !== 'pages/DeepReadRootPage') continue;
+        AppStorage.setOrCreate<number>('deepreadDesiredTab', 0);
+        boundRouter.back({ url: 'pages/DeepReadRootPage' });
+        return;
+      }
+      boundRouter.replaceUrl({ url: 'pages/DeepReadRootPage', params: { tab: 0 } }).then((): void => { boundRouter.clear(); });
+    }
+  }
+
+  build(): void {
+    if (getProductKind() !== 'deepread') { BoardPageContent({ rootVisible: this.visible, onBackHandler: (handler: () => boolean): void => { this.backHandler = handler; } }) }
+    else { Column().width('100%').height('100%').backgroundColor(D.paper) }
   }
 }

@@ -5,7 +5,7 @@ import type { NovelMaterialFieldsPayload } from './material_fields.ts';
 
 import { MATERIAL_KIND_LABELS, makeNovelSuggestion } from './models.ts';
 import type {
-  NovelProject, NovelChapter, NovelMaterialKind, NovelMaterialSuggestion, NovelModelTarget,
+  NovelProject, NovelChapter, NovelMaterialKind, NovelMaterialSuggestion, NovelModelTarget, NovelMaterialFields,
 } from './models.ts';
 import type { NovelModelRunning, NovelModelRequest, NovelModelEvent, NovelModelStream } from './model_running.ts';
 import { latestAssistantText } from '../agent/message.ts';
@@ -22,8 +22,9 @@ const CONTENT_CHARS = 20_000;
 
 export const SUGGESTION_SYSTEM_PROMPT =
   '你是小说资料整理助手。阅读刚收录的章节，结合已有资料，产出需要新建或更新的"活资料"。\n'
-  + '只输出严格 JSON，不要任何额外文字。格式：\n'
-  + '{"suggestions":[{"kind":"world|character|relationship|outline|requirement|other","title":"资料标题","content":"合并新事实后的完整最新资料","aliases":[],"tags":[],"customKind":"","injectionMode":"smart"}]}\n'
+  + '只输出一个完整 JSON 对象，不要代码围栏或额外文字。字符串中的换行必须写成 \\n，不要直接换行。格式示例：\n'
+  + '{"suggestions":[{"kind":"world","title":"资料标题","content":"合并新事实后的完整最新资料","aliases":[],"tags":[],"customKind":"","injectionMode":"smart"}]}\n'
+  + 'kind 每次只选一个：world、character、relationship、outline、requirement、other。最多 12 条建议，只整理本章已发生的事实。\n'
   + '若无需要更新，输出 {"suggestions":[]}。';
 
 const tail = (s: string, max: number): string =>
@@ -68,6 +69,13 @@ const validSuggestionKind = (raw: unknown): boolean => {
     'requirement', '写作要求', '要求', 'relationship', '关系', '人物关系', 'other', 'custom', '其他', '其它'].includes(value);
 };
 
+const suggestionMaterialFields = (item: RawSuggestion): NovelMaterialFields => {
+  try { return parseNovelMaterialFields(item); }
+  catch (error) {
+    throw invalidModelOutput(`资料建议解析失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+};
+
 // 合法空数组表示没有建议；缺 JSON、坏结构和坏条目都应明确报错。
 export const parseSuggestions = (
   text: string, sourceChapterId: string, now: number,
@@ -99,7 +107,7 @@ export const parseSuggestions = (
     out.push(makeNovelSuggestion({
       sourceChapterId: sourceChapterId,
       kind: mapSuggestionKind(it.kind),
-      ...parseNovelMaterialFields(it),
+      ...suggestionMaterialFields(it),
       title: title,
       content: content,
       now: now,
@@ -189,9 +197,24 @@ export const analyzeChapterSuggestions = async (
   };
   try {
     await modelRunning.validate(modelTarget, project.id);
+    const deadline: number = Date.now() + timeoutMs;
     const fullText: string = await collectModelText(modelRunning, request, timeoutMs);
+    let suggestions: NovelMaterialSuggestion[];
+    try {
+      suggestions = parseSuggestions(fullText, chapter.id, now);
+    } catch (error) {
+      // Only a completed but invalid result gets one correction; transport failures never retry.
+      if (!isNovelError(error) || error.code !== 'invalid_output') throw error;
+      const remaining: number = deadline - Date.now();
+      if (remaining <= 0) throw error;
+      const correction: NovelModelRequest = { ...request, runId: newSuggestionRunId(),
+        operation: { kind: 'turn', userPrompt: buildSuggestionUserPrompt(project, chapter)
+          + `\n\n上次资料建议格式不正确：${error.message}。请根据原章节修正，保持建议内容，不新增事实。`
+          + `\n只返回符合上述格式的完整 JSON 对象。上次输出：\n${fullText}` } };
+      suggestions = parseSuggestions(await collectModelText(modelRunning, correction, remaining), chapter.id, now);
+    }
     const sourceDigest: string = materialSuggestionChapterDigest(chapter);
-    return parseSuggestions(fullText, chapter.id, now).map(suggestion => ({ ...suggestion, sourceDigest }));
+    return suggestions.map(suggestion => ({ ...suggestion, sourceDigest }));
   } catch (error) {
     if (isNovelError(error)) throw error;
     throw providerError(error instanceof Error ? error.message : String(error));

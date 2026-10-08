@@ -12,6 +12,7 @@
 // 线格式在 mcp_config_serialize.ts。
 
 import type { InputSchemaObj } from './tool.ts';
+import type { JsonObject } from './json.ts';
 import { newId } from './ids.ts';
 
 // ===== McpCommonOptions(McpConfig.kt:9-14) =====
@@ -49,6 +50,7 @@ export interface McpTool {
   name: string;
   description: string | null;
   inputSchema: InputSchemaObj | null;
+  annotations?: JsonObject;
   needsApproval: boolean;
 }
 
@@ -58,6 +60,7 @@ export interface McpToolOpts {
   name?: string;
   description?: string | null;
   inputSchema?: InputSchemaObj | null;
+  annotations?: JsonObject;
   needsApproval?: boolean;
 }
 
@@ -67,6 +70,7 @@ export const makeMcpTool = (opts: McpToolOpts): McpTool => ({
   name: opts.name ?? '',
   description: opts.description ?? null,
   inputSchema: opts.inputSchema ?? null,
+  ...(opts.annotations === undefined ? {} : { annotations: opts.annotations }),
   needsApproval: opts.needsApproval ?? true,
 });
 

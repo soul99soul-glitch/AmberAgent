@@ -1,0 +1,126 @@
+{
+  "pid": 64109,
+  "span_seconds": 39.803,
+  "slices": {
+    "H:DispatchDisplaySync": {
+      "count": 694,
+      "total_ms": 20.362,
+      "p95_ms": 0.058,
+      "max_ms": 0.264
+    },
+    "H:FlushAnimation": {
+      "count": 694,
+      "total_ms": 1.135,
+      "p95_ms": 0.003,
+      "max_ms": 0.005
+    },
+    "H:CustomNodeUpdate name:ChatPage": {
+      "count": 198,
+      "total_ms": 234.653,
+      "p95_ms": 1.686,
+      "max_ms": 7.464
+    },
+    "H:FlushLayoutTask": {
+      "count": 729,
+      "total_ms": 586.65,
+      "p95_ms": 3.035,
+      "max_ms": 35.675
+    },
+    "H:CustomNodeUpdate name:ChatInput": {
+      "count": 5,
+      "total_ms": 46.706,
+      "p95_ms": 3.752,
+      "max_ms": 41.17
+    },
+    "H:TextLayoutAlgorithm::MeasureContent": {
+      "count": 336,
+      "total_ms": 231.652,
+      "p95_ms": 1.757,
+      "max_ms": 3.336
+    },
+    "List.Measure": {
+      "count": 226,
+      "total_ms": 6.971,
+      "p95_ms": 0.065,
+      "max_ms": 0.086
+    },
+    "List.Layout": {
+      "count": 226,
+      "total_ms": 23.914,
+      "p95_ms": 0.211,
+      "max_ms": 0.434
+    },
+    "H:ExecuteJS": {
+      "count": 1828,
+      "total_ms": 153.689,
+      "p95_ms": 0.269,
+      "max_ms": 6.226
+    },
+    "List.MeasureItem": {
+      "count": 224,
+      "total_ms": 358.755,
+      "p95_ms": 2.751,
+      "max_ms": 28.472
+    },
+    "H:CustomNodeUpdate name:ChatUserBubble": {
+      "count": 2,
+      "total_ms": 0.357,
+      "p95_ms": 0.107,
+      "max_ms": 0.25
+    },
+    "H:CustomNodeUpdate name:AgentMessageRow": {
+      "count": 191,
+      "total_ms": 308.261,
+      "p95_ms": 2.265,
+      "max_ms": 2.493
+    },
+    "H:CustomNodeUpdate name:ChatMessageAvatar": {
+      "count": 212,
+      "total_ms": 40.544,
+      "p95_ms": 0.301,
+      "max_ms": 0.463
+    },
+    "H:CustomNodeUpdate name:ChatMessageActionFooter": {
+      "count": 190,
+      "total_ms": 46.516,
+      "p95_ms": 0.327,
+      "max_ms": 2.819
+    },
+    "H:CustomNodeUpdate name:ChatMessageAnnotations": {
+      "count": 190,
+      "total_ms": 21.724,
+      "p95_ms": 0.194,
+      "max_ms": 0.308
+    },
+    "H:CustomNodeUpdate name:ChatMessageReasoning": {
+      "count": 190,
+      "total_ms": 28.64,
+      "p95_ms": 0.253,
+      "max_ms": 0.54
+    },
+    "H:CustomNodeUpdate name:WidgetMessageContent": {
+      "count": 170,
+      "total_ms": 169.154,
+      "p95_ms": 1.5,
+      "max_ms": 5.16
+    },
+    "H:CustomNodeUpdate name:MarkdownText": {
+      "count": 170,
+      "total_ms": 1025.533,
+      "p95_ms": 10.886,
+      "max_ms": 14.384
+    },
+    "H:CustomNodeUpdate name:NativeMarkdownText": {
+      "count": 28,
+      "total_ms": 9.967,
+      "p95_ms": 0.557,
+      "max_ms": 0.855
+    },
+    "Text.Measure": {
+      "count": 1,
+      "total_ms": 0.202,
+      "p95_ms": 0.202,
+      "max_ms": 0.202
+    }
+  }
+}

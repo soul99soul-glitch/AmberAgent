@@ -1,0 +1,31 @@
+共 9 个文件,分 1 批(每批最多 80)
+--- 批 1/1 (9 文件) ---
+[32mThe configuration file /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/code-linter.json5 is in use.[0m
+[32mWorking...[=>------------------------------------------------]2%[0m[32mWorking...[==>-----------------------------------------------]5%[0m[32mCurrently active product: default[0m                                     
+[32mWorking...[==>-----------------------------------------------]5%[0m[32mWorking...[====>---------------------------------------------]8%[0m[32mWorking...[=====>--------------------------------------------]11%[0m[32mWorking...[=======>------------------------------------------]15%[0m[32mWorking...[=========>----------------------------------------]18%[0m[32mWorking...[==========>---------------------------------------]21%[0m[32mWorking...[============>-------------------------------------]25%[0m[32mWorking...[==============>-----------------------------------]28%[0m[32mWorking...[===============>----------------------------------]31%[0m[32mWorking...[=================>--------------------------------]35%[0m[32mWorking...[===================>------------------------------]38%[0m[32mWorking...[====================>-----------------------------]41%[0m[32mWorking...[======================>---------------------------]44%[0m[32mWorking...[========================>-------------------------]48%[0m[32mWorking...[=========================>------------------------]51%[0m[32mWorking...[===========================>----------------------]55%[0m[32mWorking...[=============================>--------------------]58%[0m[32mWorking...[==============================>-------------------]61%[0m[32mWorking...[================================>-----------------]64%[0m[32mWorking...[=================================>----------------]68%[0m[32mWorking...[===================================>--------------]71%[0m[32mWorking...[====================================>-------------]74%[0m[32mWorking...[======================================>-----------]77%[0m[32mWorking...[=======================================>----------]80%[0m[32mWorking...[=========================================>--------]83%[0m[32mWorking...[==========================================>-------]85%[0m[32mWorking...[============================================>-----]88%[0m[32mWorking...[=============================================>----]92%[0m[32mWorking...[===============================================>--]95%[0m[32mWorking...[================================================>-]97%[0m[32mFinished...[==================================================]100%[0m
+[33mCodeLinter found some defects in your code.[0m
+/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/deepread/DeepReadLibraryFilters.ets(1)
+7:15        warn        Preferentially use the @Builder method instead of custom components.      @performance/avoid-overusing-custom-component-check
+/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/deepread/DeepReadSettingsForm.ets(4)
+81:34       warn        Prioritize structured clone for deep clone operations.                    @performance/bad-deep-clone-check
+94:34       warn        Prioritize structured clone for deep clone operations.                    @performance/bad-deep-clone-check
+104:34      warn        Prioritize structured clone for deep clone operations.                    @performance/bad-deep-clone-check
+117:38      warn        Prioritize structured clone for deep clone operations.                    @performance/bad-deep-clone-check
+/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/deepread/DeepReadSettingsVisual.ets(7)
+7:15        warn        Preferentially use the @Builder method instead of custom components.      @performance/avoid-overusing-custom-component-check
+45:15       warn        Preferentially use the @Builder method instead of custom components.      @performance/avoid-overusing-custom-component-check
+54:15       warn        Preferentially use the @Builder method instead of custom components.      @performance/avoid-overusing-custom-component-check
+63:15       warn        Preferentially use the @Builder method instead of custom components.      @performance/avoid-overusing-custom-component-check
+71:15       warn        Preferentially use the @Builder method instead of custom components.      @performance/avoid-overusing-custom-component-check
+99:15       warn        Preferentially use the @Builder method instead of custom components.      @performance/avoid-overusing-custom-component-check
+117:15      warn        Preferentially use the @Builder method instead of custom components.      @performance/avoid-overusing-custom-component-check
+/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ui/Icon.ets(1)
+87:15       warn        Preferentially use the @Builder method instead of custom components.      @performance/avoid-overusing-custom-component-check
+/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets(5)
+272:38      warn        Prioritize structured clone for deep clone operations.                    @performance/bad-deep-clone-check
+336:7       warn        Replace state variables with local variables for temporary calculation    @performance/hp-arkui-use-local-var-to-replace-state-var
+344:7       warn        Replace state variables with local variables for temporary calculation    @performance/hp-arkui-use-local-var-to-replace-state-var
+352:5       warn        Replace state variables with local variables for temporary calculation    @performance/hp-arkui-use-local-var-to-replace-state-var
+365:9       warn        Replace state variables with local variables for temporary calculation    @performance/hp-arkui-use-local-var-to-replace-state-var
+-Defects: 18; Errors: 0; Warns: 18; Suggestions: 0;
+

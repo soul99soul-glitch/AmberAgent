@@ -1,0 +1,760 @@
+09-30 21:13:32.814 22795 22795 I A00001/Amber.StreamReplay: frame ms=7941 chars=1184 offset=}f atEnd= following=false frames=
+09-30 21:13:32.969 22795 22795 I A00001/Amber.StreamReplay: frame ms=8096 chars=1208 offset=}f atEnd= following=false frames=
+09-30 21:13:33.127 22795 22795 I A00001/Amber.StreamReplay: frame ms=8254 chars=1232 offset=}f atEnd= following=false frames=
+09-30 21:13:33.294 22795 22795 I A00001/Amber.StreamReplay: frame ms=8421 chars=1264 offset=}f atEnd= following=false frames=
+09-30 21:13:33.447 22795 22795 I A00001/Amber.StreamReplay: frame ms=8574 chars=1288 offset=}f atEnd= following=false frames=
+09-30 21:13:33.646 22795 22795 I A00001/Amber.StreamReplay: frame ms=8773 chars=1320 offset=}f atEnd= following=false frames=
+09-30 21:13:33.802 22795 22795 I A00001/Amber.StreamReplay: frame ms=8929 chars=1344 offset=}f atEnd= following=false frames=
+09-30 21:13:33.959 22795 22795 I A00001/Amber.StreamReplay: frame ms=9086 chars=1368 offset=}f atEnd= following=false frames=
+09-30 21:13:34.124 22795 22795 I A00001/Amber.StreamReplay: frame ms=9251 chars=1392 offset=}f atEnd= following=false frames=
+09-30 21:13:34.279 22795 22795 I A00001/Amber.StreamReplay: frame ms=9406 chars=1416 offset=}f atEnd= following=false frames=
+09-30 21:13:34.448 22795 22795 I A00001/Amber.StreamReplay: frame ms=9575 chars=1448 offset=}f atEnd= following=false frames=
+09-30 21:13:34.600 22795 22795 I A00001/Amber.StreamReplay: frame ms=9727 chars=1472 offset=}f atEnd= following=false frames=
+09-30 21:13:34.759 22795 22795 I A00001/Amber.StreamReplay: frame ms=9886 chars=1496 offset=}f atEnd= following=false frames=
+09-30 21:13:34.921 22795 22795 I A00001/Amber.StreamReplay: frame ms=10048 chars=1520 offset=}f atEnd= following=false frames=
+09-30 21:13:36.192 22795 22795 I A00001/Amber.StreamReplay: frame ms=11319 chars=1568 offset=}f atEnd= following=false frames=
+09-30 21:13:36.350 22795 22795 I A00001/Amber.StreamReplay: frame ms=11477 chars=1584 offset=}f atEnd= following=false frames=
+09-30 21:13:36.507 22795 22795 I A00001/Amber.StreamReplay: frame ms=11634 chars=1608 offset=}f atEnd= following=false frames=
+09-30 21:13:36.664 22795 22795 I A00001/Amber.StreamReplay: frame ms=11791 chars=1632 offset=}f atEnd= following=false frames=
+09-30 21:13:36.835 22795 22795 I A00001/Amber.StreamReplay: frame ms=11962 chars=1664 offset=}f atEnd= following=false frames=
+09-30 21:13:36.997 22795 22795 I A00001/Amber.StreamReplay: frame ms=12124 chars=1688 offset=}f atEnd= following=false frames=
+09-30 21:13:37.162 22795 22795 I A00001/Amber.StreamReplay: frame ms=12289 chars=1712 offset=}f atEnd= following=false frames=
+09-30 21:13:37.320 22795 22795 I A00001/Amber.StreamReplay: frame ms=12447 chars=1736 offset=}f atEnd= following=false frames=
+09-30 21:13:37.495 22795 22795 I A00001/Amber.StreamReplay: frame ms=12622 chars=1768 offset=}f atEnd= following=false frames=
+09-30 21:13:37.655 22795 22795 I A00001/Amber.StreamReplay: frame ms=12782 chars=1792 offset=}f atEnd= following=false frames=
+09-30 21:13:37.817 22795 22795 I A00001/Amber.StreamReplay: frame ms=12944 chars=1816 offset=}f atEnd= following=false frames=
+09-30 21:13:37.989 22795 22795 I A00001/Amber.StreamReplay: frame ms=13116 chars=1848 offset=}f atEnd= following=false frames=
+09-30 21:13:38.141 22795 22795 I A00001/Amber.StreamReplay: frame ms=13268 chars=1872 offset=}f atEnd= following=false frames=
+09-30 21:13:38.295 22795 22795 I A00001/Amber.StreamReplay: frame ms=13422 chars=1896 offset=}f atEnd= following=false frames=
+09-30 21:13:38.458 22795 22795 I A00001/Amber.StreamReplay: frame ms=13585 chars=1920 offset=}f atEnd= following=false frames=
+09-30 21:13:38.622 22795 22795 I A00001/Amber.StreamReplay: frame ms=13749 chars=1952 offset=}f atEnd= following=false frames=
+09-30 21:13:38.782 22795 22795 I A00001/Amber.StreamReplay: frame ms=13909 chars=1976 offset=}f atEnd= following=false frames=
+09-30 21:13:38.936 22795 22795 I A00001/Amber.StreamReplay: frame ms=14063 chars=2000 offset=}f atEnd= following=false frames=
+09-30 21:13:39.088 22795 22795 I A00001/Amber.StreamReplay: frame ms=14215 chars=2024 offset=}f atEnd= following=false frames=
+09-30 21:13:39.240 22795 22795 I A00001/Amber.StreamReplay: frame ms=14367 chars=2048 offset=}f atEnd= following=false frames=
+09-30 21:13:39.399 22795 22795 I A00001/Amber.StreamReplay: frame ms=14526 chars=2072 offset=}f atEnd= following=false frames=
+09-30 21:13:39.603 22795 22795 I A00001/Amber.StreamReplay: frame ms=14729 chars=2104 offset=}f atEnd= following=false frames=
+09-30 21:13:39.754 22795 22795 I A00001/Amber.StreamReplay: frame ms=14881 chars=2128 offset=}f atEnd= following=false frames=
+09-30 21:13:39.912 22795 22795 I A00001/Amber.StreamReplay: frame ms=15039 chars=2152 offset=}f atEnd= following=false frames=
+09-30 21:13:40.072 22795 22795 I A00001/Amber.StreamReplay: frame ms=15199 chars=2176 offset=}f atEnd= following=false frames=
+09-30 21:13:40.243 22795 22795 I A00001/Amber.StreamReplay: frame ms=15370 chars=2208 offset=}f atEnd= following=false frames=
+09-30 21:13:40.407 22795 22795 I A00001/Amber.StreamReplay: frame ms=15534 chars=2232 offset=}f atEnd= following=false frames=
+09-30 21:13:40.574 22795 22795 I A00001/Amber.StreamReplay: frame ms=15701 chars=2256 offset=}f atEnd= following=false frames=
+09-30 21:13:40.727 22795 22795 I A00001/Amber.StreamReplay: frame ms=15854 chars=2280 offset=}f atEnd= following=false frames=
+09-30 21:13:40.890 22795 22795 I A00001/Amber.StreamReplay: frame ms=16017 chars=2304 offset=}f atEnd= following=false frames=
+09-30 21:13:41.047 22795 22795 I A00001/Amber.StreamReplay: frame ms=16174 chars=2328 offset=}f atEnd= following=false frames=
+09-30 21:13:41.229 22795 22795 I A00001/Amber.StreamReplay: frame ms=16356 chars=2360 offset=}f atEnd= following=false frames=
+09-30 21:13:41.383 22795 22795 I A00001/Amber.StreamReplay: frame ms=16510 chars=2384 offset=}f atEnd= following=false frames=
+09-30 21:13:41.543 22795 22795 I A00001/Amber.StreamReplay: frame ms=16670 chars=2408 offset=}f atEnd= following=false frames=
+09-30 21:13:41.711 22795 22795 I A00001/Amber.StreamReplay: frame ms=16838 chars=2440 offset=}f atEnd= following=false frames=
+09-30 21:13:41.920 22795 22795 I A00001/Amber.StreamReplay: frame ms=17047 chars=2472 offset=}f atEnd= following=false frames=
+09-30 21:13:42.084 22795 22795 I A00001/Amber.StreamReplay: frame ms=17211 chars=2496 offset=}f atEnd= following=false frames=
+09-30 21:13:42.249 22795 22795 I A00001/Amber.StreamReplay: frame ms=17376 chars=2520 offset=}f atEnd= following=false frames=
+09-30 21:13:42.416 22795 22795 I A00001/Amber.StreamReplay: frame ms=17543 chars=2544 offset=}f atEnd= following=false frames=
+09-30 21:13:42.567 22795 22795 I A00001/Amber.StreamReplay: frame ms=17694 chars=2568 offset=}f atEnd= following=false frames=
+09-30 21:13:42.767 22795 22795 I A00001/Amber.StreamReplay: frame ms=17894 chars=2600 offset=}f atEnd= following=false frames=
+09-30 21:13:42.931 22795 22795 I A00001/Amber.StreamReplay: frame ms=18058 chars=2624 offset=}f atEnd= following=false frames=
+09-30 21:13:43.100 22795 22795 I A00001/Amber.StreamReplay: frame ms=18227 chars=2656 offset=}f atEnd= following=false frames=
+09-30 21:13:43.252 22795 22795 I A00001/Amber.StreamReplay: frame ms=18379 chars=2680 offset=}f atEnd= following=false frames=
+09-30 21:13:43.415 22795 22795 I A00001/Amber.StreamReplay: frame ms=18542 chars=2704 offset=}f atEnd= following=false frames=
+09-30 21:13:43.584 22795 22795 I A00001/Amber.StreamReplay: frame ms=18711 chars=2728 offset=}f atEnd= following=false frames=
+09-30 21:13:43.742 22795 22795 I A00001/Amber.StreamReplay: frame ms=18869 chars=2760 offset=}f atEnd= following=false frames=
+09-30 21:13:43.894 22795 22795 I A00001/Amber.StreamReplay: frame ms=19021 chars=2784 offset=}f atEnd= following=false frames=
+09-30 21:13:44.048 22795 22795 I A00001/Amber.StreamReplay: frame ms=19175 chars=2808 offset=}f atEnd= following=false frames=
+09-30 21:13:44.207 22795 22795 I A00001/Amber.StreamReplay: frame ms=19334 chars=2832 offset=}f atEnd= following=false frames=
+09-30 21:13:44.360 22795 22795 I A00001/Amber.StreamReplay: frame ms=19487 chars=2856 offset=}f atEnd= following=false frames=
+09-30 21:13:44.514 22795 22795 I A00001/Amber.StreamReplay: frame ms=19641 chars=2880 offset=}f atEnd= following=false frames=
+09-30 21:13:44.673 22795 22795 I A00001/Amber.StreamReplay: frame ms=19800 chars=2904 offset=}f atEnd= following=false frames=
+09-30 21:13:44.831 22795 22795 I A00001/Amber.StreamReplay: frame ms=19958 chars=2928 offset=}f atEnd= following=false frames=
+09-30 21:13:44.983 22795 22795 I A00001/Amber.StreamReplay: frame ms=20110 chars=2952 offset=}f atEnd= following=false frames=
+09-30 21:13:45.145 22795 22795 I A00001/Amber.StreamReplay: frame ms=20272 chars=2976 offset=}f atEnd= following=false frames=
+09-30 21:13:45.303 22795 22795 I A00001/Amber.StreamReplay: frame ms=20430 chars=3000 offset=}f atEnd= following=false frames=
+09-30 21:13:45.470 22795 22795 I A00001/Amber.StreamReplay: frame ms=20597 chars=3032 offset=}f atEnd= following=false frames=
+09-30 21:13:45.623 22795 22795 I A00001/Amber.StreamReplay: frame ms=20750 chars=3056 offset=}f atEnd= following=false frames=
+09-30 21:13:45.775 22795 22795 I A00001/Amber.StreamReplay: frame ms=20902 chars=3080 offset=}f atEnd= following=false frames=
+09-30 21:13:45.931 22795 22795 I A00001/Amber.StreamReplay: frame ms=21058 chars=3104 offset=}f atEnd= following=false frames=
+09-30 21:13:46.087 22795 22795 I A00001/Amber.StreamReplay: frame ms=21214 chars=3128 offset=}f atEnd= following=false frames=
+09-30 21:13:46.252 22795 22795 I A00001/Amber.StreamReplay: frame ms=21379 chars=3152 offset=}f atEnd= following=false frames=
+09-30 21:13:46.408 22795 22795 I A00001/Amber.StreamReplay: frame ms=21535 chars=3176 offset=}f atEnd= following=false frames=
+09-30 21:13:46.565 22795 22795 I A00001/Amber.StreamReplay: frame ms=21692 chars=3200 offset=}f atEnd= following=false frames=
+09-30 21:13:46.718 22795 22795 I A00001/Amber.StreamReplay: frame ms=21845 chars=3224 offset=}f atEnd= following=false frames=
+09-30 21:13:47.006 22795 22795 I A00001/Amber.StreamReplay: frame ms=22133 chars=3272 offset=}f atEnd= following=false frames=
+09-30 21:13:47.179 22795 22795 I A00001/Amber.StreamReplay: frame ms=22306 chars=3296 offset=}f atEnd= following=false frames=
+09-30 21:13:47.560 22795 22795 I A00001/Amber.StreamReplay: frame ms=22687 chars=3352 offset=}f atEnd= following=false frames=
+09-30 21:13:47.720 22795 22795 I A00001/Amber.StreamReplay: frame ms=22847 chars=3376 offset=}f atEnd= following=false frames=
+09-30 21:13:47.882 22795 22795 I A00001/Amber.StreamReplay: frame ms=23009 chars=3400 offset=}f atEnd= following=false frames=
+09-30 21:13:48.051 22795 22795 I A00001/Amber.StreamReplay: frame ms=23178 chars=3432 offset=}f atEnd= following=false frames=
+09-30 21:13:48.212 22795 22795 I A00001/Amber.StreamReplay: frame ms=23339 chars=3456 offset=}f atEnd= following=false frames=
+09-30 21:13:48.382 22795 22795 I A00001/Amber.StreamReplay: frame ms=23509 chars=3480 offset=}f atEnd= following=false frames=
+09-30 21:13:48.548 22795 22795 I A00001/Amber.StreamReplay: frame ms=23675 chars=3504 offset=}f atEnd= following=false frames=
+09-30 21:13:48.723 22795 22795 I A00001/Amber.StreamReplay: frame ms=23850 chars=3536 offset=}f atEnd= following=false frames=
+09-30 21:13:48.888 22795 22795 I A00001/Amber.StreamReplay: frame ms=24015 chars=3546 offset=}f atEnd= following=false frames=
+09-30 21:13:49.813 22795 22795 I A00001/Amber.StreamReplay: terminal ms=24940 chars=3546 offset=}f atEnd= following=true frames=
+09-30 21:16:29.151 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3121,"chars":440,"offset":0,"atEnd":false,"following":true,"frames":1}
+09-30 21:16:29.167 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3137,"chars":440,"offset":1.5970637457711356,"atEnd":false,"following":true,"frames":2}
+09-30 21:16:29.218 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3188,"chars":448,"offset":4.4110903058733255,"atEnd":false,"following":true,"frames":3}
+09-30 21:16:29.239 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3209,"chars":448,"offset":12.357668195452009,"atEnd":false,"following":true,"frames":5}
+09-30 21:16:29.257 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3227,"chars":456,"offset":13.206602913992745,"atEnd":false,"following":true,"frames":6}
+09-30 21:16:29.271 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3241,"chars":456,"offset":15.99636949811663,"atEnd":false,"following":true,"frames":7}
+09-30 21:16:29.287 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3257,"chars":456,"offset":20.525865827287948,"atEnd":false,"following":true,"frames":8}
+09-30 21:16:29.305 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3275,"chars":464,"offset":24.878657749720983,"atEnd":false,"following":true,"frames":9}
+09-30 21:16:29.319 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3289,"chars":464,"offset":28.425044468470983,"atEnd":false,"following":true,"frames":10}
+09-30 21:16:29.335 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3305,"chars":464,"offset":31.08746119907924,"atEnd":false,"following":true,"frames":11}
+09-30 21:16:29.355 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3325,"chars":472,"offset":32.990182059151785,"atEnd":false,"following":true,"frames":12}
+09-30 21:16:29.369 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3338,"chars":472,"offset":34.30470929827009,"atEnd":false,"following":true,"frames":13}
+09-30 21:16:29.383 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3353,"chars":472,"offset":35.19378008161272,"atEnd":false,"following":true,"frames":14}
+09-30 21:16:29.405 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3375,"chars":480,"offset":35.78426252092634,"atEnd":false,"following":true,"frames":15}
+09-30 21:16:29.418 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3388,"chars":480,"offset":38.37672642299107,"atEnd":false,"following":true,"frames":16}
+09-30 21:16:29.434 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3404,"chars":480,"offset":42.76182338169643,"atEnd":false,"following":true,"frames":17}
+09-30 21:16:29.463 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3433,"chars":488,"offset":47.01906040736607,"atEnd":false,"following":true,"frames":18}
+09-30 21:16:29.490 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3460,"chars":496,"offset":50.499132428850444,"atEnd":false,"following":true,"frames":19}
+09-30 21:16:29.502 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3472,"chars":496,"offset":61.335135323660715,"atEnd":false,"following":true,"frames":20}
+09-30 21:16:29.513 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3483,"chars":496,"offset":66.74216570172992,"atEnd":false,"following":true,"frames":21}
+09-30 21:16:29.527 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3497,"chars":496,"offset":71.02042497907367,"atEnd":false,"following":true,"frames":22}
+09-30 21:16:29.554 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3524,"chars":504,"offset":74.17483956473214,"atEnd":false,"following":true,"frames":23}
+09-30 21:16:29.575 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3545,"chars":504,"offset":86.00003487723214,"atEnd":false,"following":true,"frames":25}
+09-30 21:16:29.597 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3567,"chars":512,"offset":92.25267682756696,"atEnd":false,"following":true,"frames":26}
+09-30 21:16:29.623 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3593,"chars":512,"offset":104.73652866908482,"atEnd":false,"following":true,"frames":28}
+09-30 21:16:29.645 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3615,"chars":520,"offset":109.81725202287946,"atEnd":false,"following":true,"frames":29}
+09-30 21:16:29.671 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3641,"chars":520,"offset":124.49284144810268,"atEnd":false,"following":true,"frames":31}
+09-30 21:16:29.689 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3659,"chars":528,"offset":131.61458914620536,"atEnd":false,"following":true,"frames":32}
+09-30 21:16:29.704 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3674,"chars":528,"offset":137.20938546316964,"atEnd":false,"following":true,"frames":33}
+09-30 21:16:29.721 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3691,"chars":528,"offset":141.32257952008928,"atEnd":false,"following":true,"frames":34}
+09-30 21:16:29.737 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3706,"chars":528,"offset":144.21885463169642,"atEnd":false,"following":true,"frames":35}
+09-30 21:16:29.755 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3725,"chars":536,"offset":146.20319475446428,"atEnd":false,"following":true,"frames":36}
+09-30 21:16:29.767 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3737,"chars":536,"offset":149.739990234375,"atEnd":false,"following":true,"frames":37}
+09-30 21:16:29.789 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3759,"chars":536,"offset":154.76756068638392,"atEnd":false,"following":true,"frames":38}
+09-30 21:16:29.801 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3771,"chars":544,"offset":159.41880580357142,"atEnd":false,"following":true,"frames":39}
+09-30 21:16:29.816 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3786,"chars":544,"offset":163.17967006138392,"atEnd":false,"following":true,"frames":40}
+09-30 21:16:29.834 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3804,"chars":544,"offset":165.98069545200892,"atEnd":false,"following":true,"frames":41}
+09-30 21:16:29.853 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3823,"chars":552,"offset":167.96974400111608,"atEnd":false,"following":true,"frames":42}
+09-30 21:16:29.868 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3838,"chars":552,"offset":169.34160505022322,"atEnd":false,"following":true,"frames":43}
+09-30 21:16:29.884 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3854,"chars":552,"offset":170.26914760044642,"atEnd":false,"following":true,"frames":44}
+09-30 21:16:29.901 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3871,"chars":560,"offset":170.88422502790178,"atEnd":false,"following":true,"frames":45}
+09-30 21:16:29.927 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3897,"chars":560,"offset":177.90567452566964,"atEnd":false,"following":true,"frames":47}
+09-30 21:16:29.953 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3923,"chars":568,"offset":182.17626953125,"atEnd":false,"following":true,"frames":48}
+09-30 21:16:29.977 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3947,"chars":568,"offset":188.28494698660714,"atEnd":false,"following":true,"frames":50}
+09-30 21:16:29.994 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3964,"chars":576,"offset":190.16401018415178,"atEnd":false,"following":true,"frames":51}
+09-30 21:16:30.007 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3977,"chars":576,"offset":191.46709333147322,"atEnd":false,"following":true,"frames":52}
+09-30 21:16:30.023 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":3993,"chars":576,"offset":192.34912109375,"atEnd":false,"following":true,"frames":53}
+09-30 21:16:30.041 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4011,"chars":584,"offset":192.93488420758928,"atEnd":false,"following":true,"frames":54}
+09-30 21:16:30.055 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4025,"chars":584,"offset":195.53391810825892,"atEnd":false,"following":true,"frames":55}
+09-30 21:16:30.071 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4041,"chars":584,"offset":199.929931640625,"atEnd":false,"following":true,"frames":56}
+09-30 21:16:30.097 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4067,"chars":592,"offset":204.19192940848214,"atEnd":false,"following":true,"frames":57}
+09-30 21:16:30.121 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4091,"chars":592,"offset":210.28562709263392,"atEnd":false,"following":true,"frames":59}
+09-30 21:16:30.134 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4104,"chars":592,"offset":212.16456821986608,"atEnd":false,"following":true,"frames":60}
+09-30 21:16:30.156 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4126,"chars":600,"offset":213.46833147321428,"atEnd":false,"following":true,"frames":61}
+09-30 21:16:30.171 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4141,"chars":600,"offset":216.55196707589286,"atEnd":false,"following":true,"frames":62}
+09-30 21:16:30.187 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4157,"chars":600,"offset":221.26914760044642,"atEnd":false,"following":true,"frames":63}
+09-30 21:16:30.207 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4177,"chars":608,"offset":225.75418526785714,"atEnd":false,"following":true,"frames":64}
+09-30 21:16:30.237 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4207,"chars":608,"offset":232.11247907366072,"atEnd":false,"following":true,"frames":66}
+09-30 21:16:30.254 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4224,"chars":616,"offset":234.05535016741072,"atEnd":false,"following":true,"frames":67}
+09-30 21:16:30.271 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4241,"chars":616,"offset":235.39798409598214,"atEnd":false,"following":true,"frames":68}
+09-30 21:16:30.284 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4254,"chars":616,"offset":236.30463518415178,"atEnd":false,"following":true,"frames":69}
+09-30 21:16:30.307 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4277,"chars":624,"offset":236.90633719308036,"atEnd":false,"following":true,"frames":70}
+09-30 21:16:30.321 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4291,"chars":624,"offset":239.5107421875,"atEnd":false,"following":true,"frames":71}
+09-30 21:16:30.334 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4304,"chars":624,"offset":243.90788922991072,"atEnd":false,"following":true,"frames":72}
+09-30 21:16:30.353 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4323,"chars":632,"offset":248.17070661272322,"atEnd":false,"following":true,"frames":73}
+09-30 21:16:30.397 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4367,"chars":640,"offset":251.658935546875,"atEnd":false,"following":true,"frames":74}
+09-30 21:16:30.408 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4378,"chars":640,"offset":256.4950648716518,"atEnd":false,"following":true,"frames":75}
+09-30 21:16:30.424 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4394,"chars":640,"offset":272.18709891183033,"atEnd":false,"following":true,"frames":76}
+09-30 21:16:30.441 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4411,"chars":648,"offset":275.3347865513393,"atEnd":false,"following":true,"frames":77}
+09-30 21:16:30.457 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4427,"chars":648,"offset":277.55765206473217,"atEnd":false,"following":true,"frames":78}
+09-30 21:16:30.474 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4444,"chars":648,"offset":279.081787109375,"atEnd":false,"following":true,"frames":79}
+09-30 21:16:30.494 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4464,"chars":656,"offset":280.1052943638393,"atEnd":false,"following":true,"frames":80}
+09-30 21:16:30.505 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4475,"chars":656,"offset":280.78138950892856,"atEnd":false,"following":true,"frames":81}
+09-30 21:16:30.521 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4491,"chars":656,"offset":281.22237723214283,"atEnd":false,"following":true,"frames":82}
+09-30 21:16:30.541 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4511,"chars":664,"offset":282,"atEnd":false,"following":true,"frames":83}
+09-30 21:16:30.553 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4523,"chars":664,"offset":284.36488560267856,"atEnd":false,"following":true,"frames":84}
+09-30 21:16:30.572 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4542,"chars":664,"offset":288.7108154296875,"atEnd":false,"following":true,"frames":85}
+09-30 21:16:30.594 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4563,"chars":672,"offset":292.7565220424107,"atEnd":false,"following":true,"frames":86}
+09-30 21:16:30.615 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4585,"chars":672,"offset":308.36680385044644,"atEnd":false,"following":true,"frames":88}
+09-30 21:16:30.631 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4601,"chars":672,"offset":316.50156947544644,"atEnd":false,"following":true,"frames":89}
+09-30 21:16:30.651 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4621,"chars":680,"offset":322.9778529575893,"atEnd":false,"following":true,"frames":90}
+09-30 21:16:30.671 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4640,"chars":680,"offset":330.5945521763393,"atEnd":false,"following":true,"frames":91}
+09-30 21:16:30.698 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4668,"chars":688,"offset":346.78292410714283,"atEnd":false,"following":true,"frames":93}
+09-30 21:16:30.719 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4689,"chars":688,"offset":352.6746303013393,"atEnd":false,"following":true,"frames":94}
+09-30 21:16:30.736 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4706,"chars":696,"offset":356.9635532924107,"atEnd":false,"following":true,"frames":95}
+09-30 21:16:30.751 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4721,"chars":696,"offset":362.80287388392856,"atEnd":false,"following":true,"frames":96}
+09-30 21:16:30.768 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4738,"chars":696,"offset":370.1428920200893,"atEnd":false,"following":true,"frames":97}
+09-30 21:16:30.799 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4769,"chars":704,"offset":381.971923828125,"atEnd":false,"following":true,"frames":99}
+09-30 21:16:30.823 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4793,"chars":704,"offset":407.02542550223217,"atEnd":false,"following":true,"frames":101}
+09-30 21:16:30.842 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4812,"chars":712,"offset":420.83604213169644,"atEnd":false,"following":true,"frames":102}
+09-30 21:16:30.855 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4825,"chars":712,"offset":431.94496372767856,"atEnd":false,"following":true,"frames":103}
+09-30 21:16:30.872 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4842,"chars":712,"offset":440.2233189174107,"atEnd":false,"following":true,"frames":104}
+09-30 21:16:30.890 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4860,"chars":720,"offset":446.11167689732144,"atEnd":false,"following":true,"frames":105}
+09-30 21:16:30.903 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4873,"chars":720,"offset":450.17054966517856,"atEnd":false,"following":true,"frames":106}
+09-30 21:16:30.919 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4889,"chars":720,"offset":452.9058314732143,"atEnd":false,"following":true,"frames":107}
+09-30 21:16:30.937 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4907,"chars":728,"offset":454.7179478236607,"atEnd":false,"following":true,"frames":108}
+09-30 21:16:30.951 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4921,"chars":728,"offset":457.71484375,"atEnd":false,"following":true,"frames":109}
+09-30 21:16:30.968 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4938,"chars":728,"offset":461.874755859375,"atEnd":false,"following":true,"frames":110}
+09-30 21:16:30.990 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4960,"chars":736,"offset":465.72080775669644,"atEnd":false,"following":true,"frames":111}
+09-30 21:16:31.001 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4971,"chars":736,"offset":468.7908412388393,"atEnd":false,"following":true,"frames":112}
+09-30 21:16:31.024 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":4994,"chars":744,"offset":471.0818568638393,"atEnd":false,"following":true,"frames":113}
+09-30 21:16:31.054 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5024,"chars":744,"offset":473.91015625,"atEnd":false,"following":true,"frames":115}
+09-30 21:16:31.067 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5037,"chars":744,"offset":474.71969168526783,"atEnd":false,"following":true,"frames":116}
+09-30 21:16:31.086 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5056,"chars":752,"offset":475.26698521205356,"atEnd":false,"following":true,"frames":117}
+09-30 21:16:31.101 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5071,"chars":752,"offset":478.44273158482144,"atEnd":false,"following":true,"frames":118}
+09-30 21:16:31.135 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5105,"chars":760,"offset":489.32826450892856,"atEnd":false,"following":true,"frames":120}
+09-30 21:16:31.160 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5130,"chars":760,"offset":497.0490025111607,"atEnd":false,"following":true,"frames":122}
+09-30 21:16:31.179 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5149,"chars":768,"offset":499.42965262276783,"atEnd":false,"following":true,"frames":123}
+09-30 21:16:31.191 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5161,"chars":768,"offset":503.29506138392856,"atEnd":false,"following":true,"frames":124}
+09-30 21:16:31.207 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5177,"chars":768,"offset":508.55897739955356,"atEnd":false,"following":true,"frames":125}
+09-30 21:16:31.233 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5203,"chars":776,"offset":513.4030064174107,"atEnd":false,"following":true,"frames":126}
+09-30 21:16:31.256 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5226,"chars":776,"offset":518.0801478794643,"atEnd":false,"following":true,"frames":128}
+09-30 21:16:31.279 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5249,"chars":784,"offset":519.1428571428571,"atEnd":false,"following":true,"frames":129}
+09-30 21:16:31.305 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5275,"chars":784,"offset":524.0234375,"atEnd":false,"following":true,"frames":131}
+09-30 21:16:31.337 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5307,"chars":792,"offset":526.9724469866071,"atEnd":false,"following":true,"frames":132}
+09-30 21:16:31.357 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5327,"chars":792,"offset":531.8147670200893,"atEnd":false,"following":true,"frames":133}
+09-30 21:16:31.372 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5342,"chars":792,"offset":544.0287039620536,"atEnd":false,"following":true,"frames":134}
+09-30 21:16:31.405 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5375,"chars":800,"offset":548.66796875,"atEnd":false,"following":true,"frames":135}
+09-30 21:16:31.418 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5388,"chars":800,"offset":552.0970284598214,"atEnd":false,"following":true,"frames":136}
+09-30 21:16:31.444 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5414,"chars":808,"offset":556.2071358816964,"atEnd":false,"following":true,"frames":137}
+09-30 21:16:31.464 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5434,"chars":808,"offset":569.978271484375,"atEnd":false,"following":true,"frames":139}
+09-30 21:16:31.488 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5458,"chars":816,"offset":578.1369977678571,"atEnd":false,"following":true,"frames":140}
+09-30 21:16:31.511 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5481,"chars":816,"offset":597.8646065848214,"atEnd":false,"following":true,"frames":142}
+09-30 21:16:31.531 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5501,"chars":824,"offset":606.6487165178571,"atEnd":false,"following":true,"frames":143}
+09-30 21:16:31.545 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5515,"chars":824,"offset":613.4203404017857,"atEnd":false,"following":true,"frames":144}
+09-30 21:16:31.559 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5529,"chars":824,"offset":618.3344029017857,"atEnd":false,"following":true,"frames":145}
+09-30 21:16:31.581 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5551,"chars":832,"offset":621.7785993303571,"atEnd":false,"following":true,"frames":146}
+09-30 21:16:31.607 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5577,"chars":832,"offset":625.6928013392857,"atEnd":false,"following":true,"frames":148}
+09-30 21:16:31.628 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5597,"chars":840,"offset":626.7242606026786,"atEnd":false,"following":true,"frames":149}
+09-30 21:16:31.639 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5609,"chars":840,"offset":629.6083286830357,"atEnd":false,"following":true,"frames":150}
+09-30 21:16:31.655 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5625,"chars":840,"offset":634.1869419642857,"atEnd":false,"following":true,"frames":151}
+09-30 21:16:31.673 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5643,"chars":840,"offset":638.5648018973214,"atEnd":false,"following":true,"frames":152}
+09-30 21:16:31.692 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5662,"chars":848,"offset":642.1224190848214,"atEnd":false,"following":true,"frames":153}
+09-30 21:16:31.706 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5676,"chars":848,"offset":644.7890625,"atEnd":false,"following":true,"frames":154}
+09-30 21:16:31.723 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5693,"chars":848,"offset":646.6929408482143,"atEnd":false,"following":true,"frames":155}
+09-30 21:16:31.746 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5716,"chars":856,"offset":648.0103236607143,"atEnd":false,"following":true,"frames":156}
+09-30 21:16:31.768 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5738,"chars":856,"offset":649.4912109375,"atEnd":false,"following":true,"frames":158}
+09-30 21:16:31.799 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5769,"chars":864,"offset":649.8801618303571,"atEnd":false,"following":true,"frames":159}
+09-30 21:16:31.822 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5792,"chars":864,"offset":652.3166852678571,"atEnd":false,"following":true,"frames":160}
+09-30 21:16:31.837 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5807,"chars":872,"offset":660.8069893973214,"atEnd":false,"following":true,"frames":161}
+09-30 21:16:31.852 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5822,"chars":872,"offset":664.2594168526786,"atEnd":false,"following":true,"frames":162}
+09-30 21:16:31.863 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5833,"chars":872,"offset":666.8641880580357,"atEnd":false,"following":true,"frames":163}
+09-30 21:16:31.887 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5857,"chars":880,"offset":668.7404436383929,"atEnd":false,"following":true,"frames":164}
+09-30 21:16:31.898 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5868,"chars":880,"offset":672.2566266741071,"atEnd":false,"following":true,"frames":165}
+09-30 21:16:31.914 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5884,"chars":880,"offset":677.28369140625,"atEnd":false,"following":true,"frames":166}
+09-30 21:16:31.939 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5909,"chars":888,"offset":681.9697265625,"atEnd":false,"following":true,"frames":167}
+09-30 21:16:31.960 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5930,"chars":888,"offset":685.7381417410714,"atEnd":false,"following":true,"frames":168}
+09-30 21:16:31.978 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5948,"chars":888,"offset":688.5280412946429,"atEnd":false,"following":true,"frames":169}
+09-30 21:16:31.998 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5968,"chars":896,"offset":691.9083426339286,"atEnd":false,"following":true,"frames":170}
+09-30 21:16:32.029 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":5999,"chars":896,"offset":693.4541015625,"atEnd":false,"following":true,"frames":172}
+09-30 21:16:32.063 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6033,"chars":904,"offset":693.8567243303571,"atEnd":false,"following":true,"frames":173}
+09-30 21:16:32.099 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6069,"chars":912,"offset":704.8427734375,"atEnd":false,"following":true,"frames":175}
+09-30 21:16:32.113 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6083,"chars":912,"offset":708.2898995535714,"atEnd":false,"following":true,"frames":176}
+09-30 21:16:32.125 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6095,"chars":912,"offset":710.8931361607143,"atEnd":false,"following":true,"frames":177}
+09-30 21:16:32.151 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6121,"chars":912,"offset":714.05419921875,"atEnd":false,"following":true,"frames":179}
+09-30 21:16:32.173 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6143,"chars":920,"offset":714.9302455357143,"atEnd":false,"following":true,"frames":180}
+09-30 21:16:32.199 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6169,"chars":920,"offset":722.2569754464286,"atEnd":false,"following":true,"frames":182}
+09-30 21:16:32.218 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6188,"chars":928,"offset":726.6067940848214,"atEnd":false,"following":true,"frames":183}
+09-30 21:16:32.231 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6201,"chars":928,"offset":730.1499720982143,"atEnd":false,"following":true,"frames":184}
+09-30 21:16:32.248 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6218,"chars":928,"offset":732.8093610491071,"atEnd":false,"following":true,"frames":185}
+09-30 21:16:32.270 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6240,"chars":936,"offset":734.7097516741071,"atEnd":false,"following":true,"frames":186}
+09-30 21:16:32.281 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6251,"chars":936,"offset":736.0223214285714,"atEnd":false,"following":true,"frames":187}
+09-30 21:16:32.295 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6265,"chars":936,"offset":736.9105050223214,"atEnd":false,"following":true,"frames":188}
+09-30 21:16:32.318 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6288,"chars":944,"offset":737.5001395089286,"atEnd":false,"following":true,"frames":189}
+09-30 21:16:32.346 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6316,"chars":944,"offset":744.4840959821429,"atEnd":false,"following":true,"frames":191}
+09-30 21:16:32.362 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6332,"chars":952,"offset":748.7407924107143,"atEnd":false,"following":true,"frames":192}
+09-30 21:16:32.379 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6349,"chars":952,"offset":752.2317243303571,"atEnd":false,"following":true,"frames":193}
+09-30 21:16:32.393 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6363,"chars":952,"offset":754.8523297991071,"atEnd":false,"following":true,"frames":194}
+09-30 21:16:32.416 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6386,"chars":960,"offset":756.7329799107143,"atEnd":false,"following":true,"frames":195}
+09-30 21:16:32.434 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6403,"chars":960,"offset":758.0316685267857,"atEnd":false,"following":true,"frames":196}
+09-30 21:16:32.471 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6441,"chars":968,"offset":759.5001395089286,"atEnd":false,"following":true,"frames":198}
+09-30 21:16:32.488 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6458,"chars":968,"offset":762.0906808035714,"atEnd":false,"following":true,"frames":199}
+09-30 21:16:32.506 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6476,"chars":976,"offset":770.7489536830357,"atEnd":false,"following":true,"frames":200}
+09-30 21:16:32.526 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6496,"chars":976,"offset":778.3820452008929,"atEnd":false,"following":true,"frames":201}
+09-30 21:16:32.554 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6524,"chars":984,"offset":798.27490234375,"atEnd":false,"following":true,"frames":203}
+09-30 21:16:32.567 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6537,"chars":984,"offset":808.73583984375,"atEnd":false,"following":true,"frames":204}
+09-30 21:16:32.587 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6557,"chars":984,"offset":819.6867327008929,"atEnd":false,"following":true,"frames":205}
+09-30 21:16:32.604 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6574,"chars":992,"offset":828.9019949776786,"atEnd":false,"following":true,"frames":206}
+09-30 21:16:32.615 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6585,"chars":992,"offset":835.9807477678571,"atEnd":false,"following":true,"frames":207}
+09-30 21:16:32.634 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6604,"chars":992,"offset":841.1095145089286,"atEnd":false,"following":true,"frames":208}
+09-30 21:16:32.654 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6624,"chars":1000,"offset":844.6795479910714,"atEnd":false,"following":true,"frames":209}
+09-30 21:16:32.679 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6649,"chars":1000,"offset":848.7379324776786,"atEnd":false,"following":true,"frames":211}
+09-30 21:16:32.698 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6668,"chars":1008,"offset":849.8060825892857,"atEnd":false,"following":true,"frames":212}
+09-30 21:16:32.716 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6685,"chars":1008,"offset":852.7152622767857,"atEnd":false,"following":true,"frames":213}
+09-30 21:16:32.727 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6697,"chars":1008,"offset":857.29541015625,"atEnd":false,"following":true,"frames":214}
+09-30 21:16:32.748 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6718,"chars":1016,"offset":861.6851981026786,"atEnd":false,"following":true,"frames":215}
+09-30 21:16:32.760 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6730,"chars":1016,"offset":865.2531389508929,"atEnd":false,"following":true,"frames":216}
+09-30 21:16:32.775 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6745,"chars":1016,"offset":867.9279436383929,"atEnd":false,"following":true,"frames":217}
+09-30 21:16:32.791 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6761,"chars":1016,"offset":869.8377511160714,"atEnd":false,"following":true,"frames":218}
+09-30 21:16:32.823 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6793,"chars":1024,"offset":871.15771484375,"atEnd":false,"following":true,"frames":219}
+09-30 21:16:32.839 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6809,"chars":1024,"offset":874.2306082589286,"atEnd":false,"following":true,"frames":220}
+09-30 21:16:32.858 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6828,"chars":1032,"offset":883.4626116071429,"atEnd":false,"following":true,"frames":221}
+09-30 21:16:32.871 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6841,"chars":1032,"offset":887.1049107142857,"atEnd":false,"following":true,"frames":222}
+09-30 21:16:32.894 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6864,"chars":1032,"offset":889.8298688616071,"atEnd":false,"following":true,"frames":223}
+09-30 21:16:32.910 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6880,"chars":1040,"offset":891.7640206473214,"atEnd":false,"following":true,"frames":224}
+09-30 21:16:32.935 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6905,"chars":1040,"offset":894.0182059151786,"atEnd":false,"following":true,"frames":226}
+09-30 21:16:32.958 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6928,"chars":1048,"offset":894.6208147321429,"atEnd":false,"following":true,"frames":227}
+09-30 21:16:32.983 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6953,"chars":1048,"offset":901.6328822544643,"atEnd":false,"following":true,"frames":229}
+09-30 21:16:33.005 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":6975,"chars":1056,"offset":905.8992745535714,"atEnd":false,"following":true,"frames":230}
+09-30 21:16:33.035 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7005,"chars":1056,"offset":912.0124860491071,"atEnd":false,"following":true,"frames":232}
+09-30 21:16:33.054 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7024,"chars":1064,"offset":913.8868582589286,"atEnd":false,"following":true,"frames":233}
+09-30 21:16:33.066 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7036,"chars":1064,"offset":917.3994838169643,"atEnd":false,"following":true,"frames":234}
+09-30 21:16:33.082 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7052,"chars":1064,"offset":922.4174107142857,"atEnd":false,"following":true,"frames":235}
+09-30 21:16:33.104 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7074,"chars":1072,"offset":927.0938197544643,"atEnd":false,"following":true,"frames":236}
+09-30 21:16:33.132 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7102,"chars":1072,"offset":933.6646902901786,"atEnd":false,"following":true,"frames":238}
+09-30 21:16:33.152 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7122,"chars":1080,"offset":935.6616908482143,"atEnd":false,"following":true,"frames":239}
+09-30 21:16:33.165 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7135,"chars":1080,"offset":937.0403180803571,"atEnd":false,"following":true,"frames":240}
+09-30 21:16:33.182 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7152,"chars":1080,"offset":937.9727957589286,"atEnd":false,"following":true,"frames":241}
+09-30 21:16:33.196 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7166,"chars":1088,"offset":938.5915178571429,"atEnd":false,"following":true,"frames":242}
+09-30 21:16:33.209 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7179,"chars":1088,"offset":941.2067522321429,"atEnd":false,"following":true,"frames":243}
+09-30 21:16:33.226 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7196,"chars":1088,"offset":945.6107700892857,"atEnd":false,"following":true,"frames":244}
+09-30 21:16:33.239 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7209,"chars":1088,"offset":949.8778599330357,"atEnd":false,"following":true,"frames":245}
+09-30 21:16:33.270 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7240,"chars":1096,"offset":953.3719308035714,"atEnd":false,"following":true,"frames":246}
+09-30 21:16:33.288 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7258,"chars":1096,"offset":955.99609375,"atEnd":false,"following":true,"frames":247}
+09-30 21:16:33.314 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7284,"chars":1104,"offset":959.1832449776786,"atEnd":false,"following":true,"frames":248}
+09-30 21:16:33.336 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7306,"chars":1104,"offset":960.6480189732143,"atEnd":false,"following":true,"frames":250}
+09-30 21:16:33.368 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7338,"chars":1112,"offset":961.0319475446429,"atEnd":false,"following":true,"frames":251}
+09-30 21:16:33.388 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7358,"chars":1112,"offset":963.4964425223214,"atEnd":false,"following":true,"frames":252}
+09-30 21:16:33.417 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7387,"chars":1120,"offset":972.0048130580357,"atEnd":false,"following":true,"frames":253}
+09-30 21:16:33.432 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7401,"chars":1120,"offset":975.4540318080357,"atEnd":false,"following":true,"frames":254}
+09-30 21:16:33.463 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7433,"chars":1128,"offset":979.9160853794643,"atEnd":false,"following":true,"frames":255}
+09-30 21:16:33.479 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7449,"chars":1128,"offset":983.4176199776786,"atEnd":false,"following":true,"frames":256}
+09-30 21:16:33.503 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7473,"chars":1136,"offset":993.1211635044643,"atEnd":false,"following":true,"frames":257}
+09-30 21:16:33.515 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7485,"chars":1136,"offset":999.7048688616071,"atEnd":false,"following":true,"frames":258}
+09-30 21:16:33.528 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7498,"chars":1136,"offset":1007.7628348214286,"atEnd":false,"following":true,"frames":259}
+09-30 21:16:33.548 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7518,"chars":1144,"offset":1014.9836774553571,"atEnd":false,"following":true,"frames":260}
+09-30 21:16:33.565 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7535,"chars":1144,"offset":1021.99462890625,"atEnd":false,"following":true,"frames":261}
+09-30 21:16:33.576 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7546,"chars":1144,"offset":1028.6284877232142,"atEnd":false,"following":true,"frames":262}
+09-30 21:16:33.591 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7561,"chars":1144,"offset":1034.0418526785713,"atEnd":false,"following":true,"frames":263}
+09-30 21:16:33.613 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7583,"chars":1152,"offset":1038.09619140625,"atEnd":false,"following":true,"frames":264}
+09-30 21:16:33.653 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7623,"chars":1160,"offset":1051.070521763393,"atEnd":false,"following":true,"frames":266}
+09-30 21:16:33.671 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7641,"chars":1160,"offset":1062.812220982143,"atEnd":false,"following":true,"frames":268}
+09-30 21:16:33.698 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7668,"chars":1168,"offset":1066.6671316964287,"atEnd":false,"following":true,"frames":269}
+09-30 21:16:33.720 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7690,"chars":1168,"offset":1077.584263392857,"atEnd":false,"following":true,"frames":271}
+09-30 21:16:33.737 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7707,"chars":1168,"offset":1082.953125,"atEnd":false,"following":true,"frames":272}
+09-30 21:16:33.757 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7727,"chars":1176,"offset":1087.174525669643,"atEnd":false,"following":true,"frames":273}
+09-30 21:16:33.773 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7743,"chars":1176,"offset":1090.2827845982142,"atEnd":false,"following":true,"frames":274}
+09-30 21:16:33.806 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7776,"chars":1184,"offset":1093.9757254464287,"atEnd":false,"following":true,"frames":276}
+09-30 21:16:33.831 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7801,"chars":1184,"offset":1095.654575892857,"atEnd":false,"following":true,"frames":278}
+09-30 21:16:33.855 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7825,"chars":1192,"offset":1096.0899135044642,"atEnd":false,"following":true,"frames":279}
+09-30 21:16:33.886 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7856,"chars":1192,"offset":1102.89990234375,"atEnd":false,"following":true,"frames":281}
+09-30 21:16:33.907 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7877,"chars":1200,"offset":1107.098842075893,"atEnd":false,"following":true,"frames":282}
+09-30 21:16:33.927 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7897,"chars":1200,"offset":1113.1689453125,"atEnd":false,"following":true,"frames":284}
+09-30 21:16:33.948 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7918,"chars":1208,"offset":1115.04052734375,"atEnd":false,"following":true,"frames":285}
+09-30 21:16:33.959 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7929,"chars":1208,"offset":1118.5521065848213,"atEnd":false,"following":true,"frames":286}
+09-30 21:16:33.975 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7945,"chars":1208,"offset":1123.5777064732142,"atEnd":false,"following":true,"frames":287}
+09-30 21:16:33.991 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7961,"chars":1208,"offset":1128.2630440848213,"atEnd":false,"following":true,"frames":288}
+09-30 21:16:34.012 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7982,"chars":1216,"offset":1132.029296875,"atEnd":false,"following":true,"frames":289}
+09-30 21:16:34.027 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":7997,"chars":1216,"offset":1134.8349609375,"atEnd":false,"following":true,"frames":290}
+09-30 21:16:34.040 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8010,"chars":1216,"offset":1136.824986049107,"atEnd":false,"following":true,"frames":291}
+09-30 21:16:34.063 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8033,"chars":1224,"offset":1138.20068359375,"atEnd":false,"following":true,"frames":292}
+09-30 21:16:34.087 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8057,"chars":1224,"offset":1139.741489955357,"atEnd":false,"following":true,"frames":294}
+09-30 21:16:34.107 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8077,"chars":1232,"offset":1140.1441824776787,"atEnd":false,"following":true,"frames":295}
+09-30 21:16:34.119 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8089,"chars":1232,"offset":1142.619349888393,"atEnd":false,"following":true,"frames":296}
+09-30 21:16:34.136 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8106,"chars":1232,"offset":1146.9342215401787,"atEnd":false,"following":true,"frames":297}
+09-30 21:16:34.155 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8125,"chars":1240,"offset":1151.142368861607,"atEnd":false,"following":true,"frames":298}
+09-30 21:16:34.167 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8137,"chars":1240,"offset":1154.59326171875,"atEnd":false,"following":true,"frames":299}
+09-30 21:16:34.184 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8154,"chars":1240,"offset":1157.1943359375,"atEnd":false,"following":true,"frames":300}
+09-30 21:16:34.205 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8175,"chars":1248,"offset":1159.0576171875,"atEnd":false,"following":true,"frames":301}
+09-30 21:16:34.232 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8202,"chars":1248,"offset":1161.2213309151787,"atEnd":false,"following":true,"frames":303}
+09-30 21:16:34.254 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8224,"chars":1256,"offset":1161.8014090401787,"atEnd":false,"following":true,"frames":304}
+09-30 21:16:34.265 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8235,"chars":1256,"offset":1164.394321986607,"atEnd":false,"following":true,"frames":305}
+09-30 21:16:34.282 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8252,"chars":1256,"offset":1168.7818777901787,"atEnd":false,"following":true,"frames":306}
+09-30 21:16:34.301 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8271,"chars":1264,"offset":1173.0345982142858,"atEnd":false,"following":true,"frames":307}
+09-30 21:16:34.332 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8301,"chars":1264,"offset":1179.1488560267858,"atEnd":false,"following":true,"frames":309}
+09-30 21:16:34.356 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8326,"chars":1272,"offset":1181.023158482143,"atEnd":false,"following":true,"frames":310}
+09-30 21:16:34.375 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8345,"chars":1272,"offset":1189.533482142857,"atEnd":false,"following":true,"frames":312}
+09-30 21:16:34.394 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8364,"chars":1272,"offset":1194.2267020089287,"atEnd":false,"following":true,"frames":313}
+09-30 21:16:34.412 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8382,"chars":1280,"offset":1197.9935825892858,"atEnd":false,"following":true,"frames":314}
+09-30 21:16:34.427 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8397,"chars":1280,"offset":1200.8091517857142,"atEnd":false,"following":true,"frames":315}
+09-30 21:16:34.439 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8409,"chars":1280,"offset":1202.8065011160713,"atEnd":false,"following":true,"frames":316}
+09-30 21:16:34.471 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8441,"chars":1288,"offset":1204.189174107143,"atEnd":false,"following":true,"frames":317}
+09-30 21:16:34.487 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8457,"chars":1288,"offset":1205.1177455357142,"atEnd":false,"following":true,"frames":318}
+09-30 21:16:34.507 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8477,"chars":1296,"offset":1206.140904017857,"atEnd":false,"following":true,"frames":319}
+09-30 21:16:34.526 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8496,"chars":1296,"offset":1208.6173270089287,"atEnd":false,"following":true,"frames":320}
+09-30 21:16:34.555 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8525,"chars":1304,"offset":1217.1156529017858,"atEnd":false,"following":true,"frames":322}
+09-30 21:16:34.567 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8537,"chars":1304,"offset":1224.7162388392858,"atEnd":false,"following":true,"frames":323}
+09-30 21:16:34.583 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8553,"chars":1304,"offset":1235.0804966517858,"atEnd":false,"following":true,"frames":324}
+09-30 21:16:34.607 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8577,"chars":1312,"offset":1244.6199776785713,"atEnd":false,"following":true,"frames":325}
+09-30 21:16:34.631 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8601,"chars":1312,"offset":1265.994419642857,"atEnd":false,"following":true,"frames":327}
+09-30 21:16:34.651 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8621,"chars":1320,"offset":1275.2325613839287,"atEnd":false,"following":true,"frames":328}
+09-30 21:16:34.666 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8636,"chars":1320,"offset":1282.3048270089287,"atEnd":false,"following":true,"frames":329}
+09-30 21:16:34.682 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8652,"chars":1320,"offset":1287.416294642857,"atEnd":false,"following":true,"frames":330}
+09-30 21:16:34.698 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8668,"chars":1320,"offset":1290.9813058035713,"atEnd":false,"following":true,"frames":331}
+09-30 21:16:34.720 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8690,"chars":1328,"offset":1293.4068080357142,"atEnd":false,"following":true,"frames":332}
+09-30 21:16:34.732 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8701,"chars":1328,"offset":1295.0238560267858,"atEnd":false,"following":true,"frames":333}
+09-30 21:16:34.748 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8718,"chars":1328,"offset":1296.088169642857,"atEnd":false,"following":true,"frames":334}
+09-30 21:16:34.762 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8732,"chars":1336,"offset":1296.780552455357,"atEnd":false,"following":true,"frames":335}
+09-30 21:16:34.775 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8745,"chars":1336,"offset":1299.444056919643,"atEnd":false,"following":true,"frames":336}
+09-30 21:16:34.795 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8765,"chars":1336,"offset":1303.878627232143,"atEnd":false,"following":true,"frames":337}
+09-30 21:16:34.818 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8788,"chars":1344,"offset":1308.1476004464287,"atEnd":false,"following":true,"frames":338}
+09-30 21:16:34.843 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8813,"chars":1344,"offset":1314.267578125,"atEnd":false,"following":true,"frames":340}
+09-30 21:16:34.864 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8834,"chars":1352,"offset":1316.1538783482142,"atEnd":false,"following":true,"frames":341}
+09-30 21:16:34.887 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8857,"chars":1352,"offset":1324.703125,"atEnd":false,"following":true,"frames":343}
+09-30 21:16:34.906 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8876,"chars":1360,"offset":1329.3939732142858,"atEnd":false,"following":true,"frames":344}
+09-30 21:16:34.919 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8889,"chars":1360,"offset":1333.1642020089287,"atEnd":false,"following":true,"frames":345}
+09-30 21:16:34.937 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8907,"chars":1360,"offset":1335.97265625,"atEnd":false,"following":true,"frames":346}
+09-30 21:16:34.957 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8927,"chars":1368,"offset":1337.9673549107142,"atEnd":false,"following":true,"frames":347}
+09-30 21:16:34.983 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8953,"chars":1368,"offset":1340.2716238839287,"atEnd":false,"following":true,"frames":349}
+09-30 21:16:35.004 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8974,"chars":1376,"offset":1340.886439732143,"atEnd":false,"following":true,"frames":350}
+09-30 21:16:35.015 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":8985,"chars":1376,"offset":1343.5029296875,"atEnd":false,"following":true,"frames":351}
+09-30 21:16:35.031 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9001,"chars":1376,"offset":1347.909458705357,"atEnd":false,"following":true,"frames":352}
+09-30 21:16:35.055 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9025,"chars":1384,"offset":1352.1788504464287,"atEnd":false,"following":true,"frames":353}
+09-30 21:16:35.066 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9036,"chars":1384,"offset":1355.6668526785713,"atEnd":false,"following":true,"frames":354}
+09-30 21:16:35.086 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9056,"chars":1384,"offset":1358.287388392857,"atEnd":false,"following":true,"frames":355}
+09-30 21:16:35.105 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9075,"chars":1392,"offset":1360.1587611607142,"atEnd":false,"following":true,"frames":356}
+09-30 21:16:35.135 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9105,"chars":1392,"offset":1362.3427734375,"atEnd":false,"following":true,"frames":358}
+09-30 21:16:35.163 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9133,"chars":1400,"offset":1363.3150111607142,"atEnd":false,"following":true,"frames":360}
+09-30 21:16:35.181 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9151,"chars":1400,"offset":1365.7802734375,"atEnd":false,"following":true,"frames":361}
+09-30 21:16:35.213 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9183,"chars":1408,"offset":1374.2765066964287,"atEnd":false,"following":true,"frames":363}
+09-30 21:16:35.232 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9202,"chars":1408,"offset":1377.7280970982142,"atEnd":false,"following":true,"frames":364}
+09-30 21:16:35.247 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9217,"chars":1408,"offset":1380.3246372767858,"atEnd":false,"following":true,"frames":365}
+09-30 21:16:35.260 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9230,"chars":1416,"offset":1382.1895926339287,"atEnd":false,"following":true,"frames":366}
+09-30 21:16:35.276 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9246,"chars":1416,"offset":1385.6993582589287,"atEnd":false,"following":true,"frames":367}
+09-30 21:16:35.287 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9257,"chars":1416,"offset":1390.7099609375,"atEnd":false,"following":true,"frames":368}
+09-30 21:16:35.306 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9276,"chars":1424,"offset":1395.396763392857,"atEnd":false,"following":true,"frames":369}
+09-30 21:16:35.319 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9289,"chars":1424,"offset":1399.1651785714287,"atEnd":false,"following":true,"frames":370}
+09-30 21:16:35.336 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9306,"chars":1424,"offset":1401.9727957589287,"atEnd":false,"following":true,"frames":371}
+09-30 21:16:35.372 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9342,"chars":1432,"offset":1403.969029017857,"atEnd":false,"following":true,"frames":372}
+09-30 21:16:35.383 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9353,"chars":1432,"offset":1405.3447265625,"atEnd":false,"following":true,"frames":373}
+09-30 21:16:35.406 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9376,"chars":1440,"offset":1406.8868582589287,"atEnd":false,"following":true,"frames":374}
+09-30 21:16:35.431 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9401,"chars":1440,"offset":1413.9105747767858,"atEnd":false,"following":true,"frames":376}
+09-30 21:16:35.447 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9417,"chars":1440,"offset":1418.1796875,"atEnd":false,"following":true,"frames":377}
+09-30 21:16:35.470 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9440,"chars":1448,"offset":1421.6697823660713,"atEnd":false,"following":true,"frames":378}
+09-30 21:16:35.481 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9451,"chars":1448,"offset":1424.2931082589287,"atEnd":false,"following":true,"frames":379}
+09-30 21:16:35.503 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9473,"chars":1456,"offset":1426.169224330357,"atEnd":false,"following":true,"frames":380}
+09-30 21:16:35.515 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9485,"chars":1456,"offset":1427.4676339285713,"atEnd":false,"following":true,"frames":381}
+09-30 21:16:35.536 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9506,"chars":1456,"offset":1428.346958705357,"atEnd":false,"following":true,"frames":382}
+09-30 21:16:35.551 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9520,"chars":1456,"offset":1428.9295479910713,"atEnd":false,"following":true,"frames":383}
+09-30 21:16:35.570 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9540,"chars":1464,"offset":1429.3145926339287,"atEnd":false,"following":true,"frames":384}
+09-30 21:16:35.600 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9570,"chars":1464,"offset":1436.080775669643,"atEnd":false,"following":true,"frames":386}
+09-30 21:16:35.690 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9660,"chars":1480,"offset":1440.2783203125,"atEnd":false,"following":true,"frames":387}
+09-30 21:16:35.710 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9680,"chars":1480,"offset":1449.9564732142858,"atEnd":false,"following":true,"frames":388}
+09-30 21:16:35.824 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9794,"chars":1504,"offset":1506.3067801339287,"atEnd":false,"following":true,"frames":389}
+09-30 21:16:35.868 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9838,"chars":1504,"offset":1518.2509765625,"atEnd":false,"following":true,"frames":390}
+09-30 21:16:35.895 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9865,"chars":1512,"offset":1598.996791294643,"atEnd":false,"following":true,"frames":391}
+09-30 21:16:35.911 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9881,"chars":1512,"offset":1604.162806919643,"atEnd":false,"following":true,"frames":392}
+09-30 21:16:35.936 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9905,"chars":1520,"offset":1605.2713448660713,"atEnd":false,"following":true,"frames":393}
+09-30 21:16:35.960 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9930,"chars":1520,"offset":1610.9217354910713,"atEnd":false,"following":true,"frames":395}
+09-30 21:16:35.981 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9951,"chars":1528,"offset":1614.3861607142858,"atEnd":false,"following":true,"frames":396}
+09-30 21:16:36.007 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9977,"chars":1528,"offset":1619.357700892857,"atEnd":false,"following":true,"frames":398}
+09-30 21:16:36.029 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":9999,"chars":1536,"offset":1620.8861607142858,"atEnd":false,"following":true,"frames":399}
+09-30 21:16:36.056 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10026,"chars":1536,"offset":1622.7427455357142,"atEnd":false,"following":true,"frames":401}
+09-30 21:16:36.079 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10049,"chars":1544,"offset":1623.2710658482142,"atEnd":false,"following":true,"frames":402}
+09-30 21:16:36.144 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10114,"chars":1552,"offset":1624.2857142857142,"atEnd":false,"following":true,"frames":404}
+09-30 21:16:36.176 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10146,"chars":1552,"offset":1632.8267299107142,"atEnd":false,"following":true,"frames":406}
+09-30 21:16:36.188 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10158,"chars":1560,"offset":1637.9510323660713,"atEnd":false,"following":true,"frames":407}
+09-30 21:16:36.199 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10169,"chars":1560,"offset":1644.3976004464287,"atEnd":false,"following":true,"frames":408}
+09-30 21:16:36.215 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10185,"chars":1560,"offset":1651.7296316964287,"atEnd":false,"following":true,"frames":409}
+09-30 21:16:36.238 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10208,"chars":1568,"offset":1658.1104910714287,"atEnd":false,"following":true,"frames":410}
+09-30 21:16:36.285 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10255,"chars":1576,"offset":1658.857142857143,"atEnd":false,"following":true,"frames":411}
+09-30 21:16:36.296 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10266,"chars":1576,"offset":1661.4677734375,"atEnd":false,"following":true,"frames":412}
+09-30 21:16:36.312 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10282,"chars":1576,"offset":1666.2652064732142,"atEnd":false,"following":true,"frames":413}
+09-30 21:16:36.338 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10308,"chars":1584,"offset":1670.7407924107142,"atEnd":false,"following":true,"frames":414}
+09-30 21:16:36.360 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10330,"chars":1584,"offset":1677.1580636160713,"atEnd":false,"following":true,"frames":416}
+09-30 21:16:36.384 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10354,"chars":1592,"offset":1679.1283482142858,"atEnd":false,"following":true,"frames":417}
+09-30 21:16:36.413 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10383,"chars":1592,"offset":1688.4366629464287,"atEnd":false,"following":true,"frames":419}
+09-30 21:16:36.424 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10394,"chars":1592,"offset":1693.5552455357142,"atEnd":false,"following":true,"frames":420}
+09-30 21:16:36.448 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10418,"chars":1600,"offset":1697.6964285714287,"atEnd":false,"following":true,"frames":421}
+09-30 21:16:36.480 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10450,"chars":1600,"offset":1702.9734933035713,"atEnd":false,"following":true,"frames":423}
+09-30 21:16:36.491 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10461,"chars":1608,"offset":1704.4835379464287,"atEnd":false,"following":true,"frames":424}
+09-30 21:16:36.507 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10477,"chars":1608,"offset":1709.6547154017858,"atEnd":false,"following":true,"frames":425}
+09-30 21:16:36.520 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10490,"chars":1608,"offset":1718.059291294643,"atEnd":false,"following":true,"frames":426}
+09-30 21:16:36.541 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10511,"chars":1616,"offset":1726.1817801339287,"atEnd":false,"following":true,"frames":427}
+09-30 21:16:36.552 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10522,"chars":1616,"offset":1735.6259765625,"atEnd":false,"following":true,"frames":428}
+09-30 21:16:36.571 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10541,"chars":1616,"offset":1745.8807198660713,"atEnd":false,"following":true,"frames":429}
+09-30 21:16:36.588 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10558,"chars":1624,"offset":1754.6261160714287,"atEnd":false,"following":true,"frames":430}
+09-30 21:16:36.599 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10569,"chars":1624,"offset":1761.403041294643,"atEnd":false,"following":true,"frames":431}
+09-30 21:16:36.615 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10585,"chars":1624,"offset":1766.328822544643,"atEnd":false,"following":true,"frames":432}
+09-30 21:16:36.636 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10606,"chars":1632,"offset":1769.775111607143,"atEnd":false,"following":true,"frames":433}
+09-30 21:16:36.647 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10617,"chars":1632,"offset":1774.337890625,"atEnd":false,"following":true,"frames":434}
+09-30 21:16:36.663 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10633,"chars":1632,"offset":1780.0545479910713,"atEnd":false,"following":true,"frames":435}
+09-30 21:16:36.686 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10656,"chars":1640,"offset":1785.1890345982142,"atEnd":false,"following":true,"frames":436}
+09-30 21:16:36.711 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10681,"chars":1640,"offset":1792.234654017857,"atEnd":false,"following":true,"frames":438}
+09-30 21:16:36.731 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10701,"chars":1648,"offset":1794.3470982142858,"atEnd":false,"following":true,"frames":439}
+09-30 21:16:36.745 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10715,"chars":1648,"offset":1795.796177455357,"atEnd":false,"following":true,"frames":440}
+09-30 21:16:36.759 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10729,"chars":1648,"offset":1796.767578125,"atEnd":false,"following":true,"frames":441}
+09-30 21:16:36.775 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10745,"chars":1648,"offset":1797.4111328125,"atEnd":false,"following":true,"frames":442}
+09-30 21:16:36.799 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10769,"chars":1656,"offset":1797.8309151785713,"atEnd":false,"following":true,"frames":443}
+09-30 21:16:36.828 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10798,"chars":1656,"offset":1804.616908482143,"atEnd":false,"following":true,"frames":445}
+09-30 21:16:36.849 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10819,"chars":1664,"offset":1808.8113839285713,"atEnd":false,"following":true,"frames":446}
+09-30 21:16:36.861 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10831,"chars":1664,"offset":1812.2638113839287,"atEnd":false,"following":true,"frames":447}
+09-30 21:16:36.876 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10846,"chars":1664,"offset":1814.8636997767858,"atEnd":false,"following":true,"frames":448}
+09-30 21:16:36.897 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10867,"chars":1672,"offset":1816.7333984375,"atEnd":false,"following":true,"frames":449}
+09-30 21:16:36.919 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10889,"chars":1672,"offset":1818.9171316964287,"atEnd":false,"following":true,"frames":451}
+09-30 21:16:36.947 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10917,"chars":1680,"offset":1819.503627232143,"atEnd":false,"following":true,"frames":452}
+09-30 21:16:36.959 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10929,"chars":1680,"offset":1822.0870535714287,"atEnd":false,"following":true,"frames":453}
+09-30 21:16:36.987 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10957,"chars":1688,"offset":1830.740234375,"atEnd":false,"following":true,"frames":455}
+09-30 21:16:36.999 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10969,"chars":1688,"offset":1834.232142857143,"atEnd":false,"following":true,"frames":456}
+09-30 21:16:37.015 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":10985,"chars":1688,"offset":1836.8599330357142,"atEnd":false,"following":true,"frames":457}
+09-30 21:16:37.035 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11005,"chars":1696,"offset":1838.7407924107142,"atEnd":false,"following":true,"frames":458}
+09-30 21:16:37.047 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11017,"chars":1696,"offset":1842.2582310267858,"atEnd":false,"following":true,"frames":459}
+09-30 21:16:37.063 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11033,"chars":1696,"offset":1847.287109375,"atEnd":false,"following":true,"frames":460}
+09-30 21:16:37.084 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11053,"chars":1704,"offset":1851.9741908482142,"atEnd":false,"following":true,"frames":461}
+09-30 21:16:37.095 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11065,"chars":1704,"offset":1855.741489955357,"atEnd":false,"following":true,"frames":462}
+09-30 21:16:37.112 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11082,"chars":1704,"offset":1858.5478515625,"atEnd":false,"following":true,"frames":463}
+09-30 21:16:37.133 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11103,"chars":1712,"offset":1860.542271205357,"atEnd":false,"following":true,"frames":464}
+09-30 21:16:37.162 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11132,"chars":1712,"offset":1862.844447544643,"atEnd":false,"following":true,"frames":466}
+09-30 21:16:37.188 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11158,"chars":1720,"offset":1863.458705357143,"atEnd":false,"following":true,"frames":467}
+09-30 21:16:37.207 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11177,"chars":1720,"offset":1870.466796875,"atEnd":false,"following":true,"frames":469}
+09-30 21:16:37.225 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11195,"chars":1720,"offset":1874.7377232142858,"atEnd":false,"following":true,"frames":470}
+09-30 21:16:37.244 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11214,"chars":1728,"offset":1878.226283482143,"atEnd":false,"following":true,"frames":471}
+09-30 21:16:37.258 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11228,"chars":1728,"offset":1880.8533761160713,"atEnd":false,"following":true,"frames":472}
+09-30 21:16:37.278 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11248,"chars":1728,"offset":1882.7320033482142,"atEnd":false,"following":true,"frames":473}
+09-30 21:16:37.298 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11268,"chars":1736,"offset":1884.0298549107142,"atEnd":false,"following":true,"frames":474}
+09-30 21:16:37.326 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11296,"chars":1736,"offset":1885.4998604910713,"atEnd":false,"following":true,"frames":476}
+09-30 21:16:37.348 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11318,"chars":1744,"offset":1885.8842075892858,"atEnd":false,"following":true,"frames":477}
+09-30 21:16:37.359 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11329,"chars":1744,"offset":1888.345005580357,"atEnd":false,"following":true,"frames":478}
+09-30 21:16:37.387 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11357,"chars":1752,"offset":1896.8546316964287,"atEnd":false,"following":true,"frames":480}
+09-30 21:16:37.401 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11371,"chars":1752,"offset":1900.306361607143,"atEnd":false,"following":true,"frames":481}
+09-30 21:16:37.415 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11385,"chars":1752,"offset":1902.9034598214287,"atEnd":false,"following":true,"frames":482}
+09-30 21:16:37.437 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11407,"chars":1760,"offset":1904.7684151785713,"atEnd":false,"following":true,"frames":483}
+09-30 21:16:37.463 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11433,"chars":1760,"offset":1913.2978515625,"atEnd":false,"following":true,"frames":485}
+09-30 21:16:37.485 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11455,"chars":1768,"offset":1917.9810267857142,"atEnd":false,"following":true,"frames":486}
+09-30 21:16:37.496 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11466,"chars":1768,"offset":1924.5595703125,"atEnd":false,"following":true,"frames":487}
+09-30 21:16:37.511 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11481,"chars":1768,"offset":1932.636439732143,"atEnd":false,"following":true,"frames":488}
+09-30 21:16:37.531 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11501,"chars":1776,"offset":1939.854771205357,"atEnd":false,"following":true,"frames":489}
+09-30 21:16:37.543 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11513,"chars":1776,"offset":1946.8628627232142,"atEnd":false,"following":true,"frames":490}
+09-30 21:16:37.559 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11529,"chars":1776,"offset":1953.5255301339287,"atEnd":false,"following":true,"frames":491}
+09-30 21:16:37.579 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11549,"chars":1776,"offset":1958.9281529017858,"atEnd":false,"following":true,"frames":492}
+09-30 21:16:37.606 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11576,"chars":1784,"offset":1962.9610770089287,"atEnd":false,"following":true,"frames":493}
+09-30 21:16:37.629 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11599,"chars":1784,"offset":1968.616908482143,"atEnd":false,"following":true,"frames":494}
+09-30 21:16:37.650 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11620,"chars":1792,"offset":1982.4376395089287,"atEnd":false,"following":true,"frames":495}
+09-30 21:16:37.677 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11647,"chars":1792,"offset":1991.5103236607142,"atEnd":false,"following":true,"frames":497}
+09-30 21:16:37.690 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11660,"chars":1800,"offset":1994.235630580357,"atEnd":false,"following":true,"frames":498}
+09-30 21:16:37.703 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11673,"chars":1800,"offset":1998.3289620535713,"atEnd":false,"following":true,"frames":499}
+09-30 21:16:37.726 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11696,"chars":1800,"offset":2003.7393973214287,"atEnd":false,"following":true,"frames":500}
+09-30 21:16:37.739 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11709,"chars":1808,"offset":2008.6580636160713,"atEnd":false,"following":true,"frames":501}
+09-30 21:16:37.751 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11721,"chars":1808,"offset":2012.5913783482142,"atEnd":false,"following":true,"frames":502}
+09-30 21:16:37.770 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11740,"chars":1808,"offset":2015.5048828125,"atEnd":false,"following":true,"frames":503}
+09-30 21:16:37.787 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11757,"chars":1816,"offset":2017.5640345982142,"atEnd":false,"following":true,"frames":504}
+09-30 21:16:37.800 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11770,"chars":1816,"offset":2018.9849330357142,"atEnd":false,"following":true,"frames":505}
+09-30 21:16:37.815 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11785,"chars":1816,"offset":2019.9400111607142,"atEnd":false,"following":true,"frames":506}
+09-30 21:16:37.852 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11822,"chars":1824,"offset":2020.572265625,"atEnd":false,"following":true,"frames":507}
+09-30 21:16:37.863 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11833,"chars":1824,"offset":2027.605747767857,"atEnd":false,"following":true,"frames":508}
+09-30 21:16:37.882 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11852,"chars":1832,"offset":2031.880580357143,"atEnd":false,"following":true,"frames":509}
+09-30 21:16:37.895 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11865,"chars":1832,"offset":2035.3755580357142,"atEnd":false,"following":true,"frames":510}
+09-30 21:16:37.911 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11881,"chars":1832,"offset":2038.004185267857,"atEnd":false,"following":true,"frames":511}
+09-30 21:16:37.928 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11898,"chars":1832,"offset":2039.885044642857,"atEnd":false,"following":true,"frames":512}
+09-30 21:16:37.947 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11917,"chars":1840,"offset":2041.1854073660713,"atEnd":false,"following":true,"frames":513}
+09-30 21:16:37.961 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11931,"chars":1840,"offset":2044.280970982143,"atEnd":false,"following":true,"frames":514}
+09-30 21:16:37.976 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11946,"chars":1840,"offset":2049.002511160714,"atEnd":false,"following":true,"frames":515}
+09-30 21:16:37.995 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11965,"chars":1848,"offset":2053.4860491071427,"atEnd":false,"following":true,"frames":516}
+09-30 21:16:38.007 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11977,"chars":1848,"offset":2057.121651785714,"atEnd":false,"following":true,"frames":517}
+09-30 21:16:38.023 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":11993,"chars":1848,"offset":2059.8420758928573,"atEnd":false,"following":true,"frames":518}
+09-30 21:16:38.043 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12013,"chars":1856,"offset":2061.7822265625,"atEnd":false,"following":true,"frames":519}
+09-30 21:16:38.055 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12025,"chars":1856,"offset":2063.1220703125,"atEnd":false,"following":true,"frames":520}
+09-30 21:16:38.071 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12041,"chars":1856,"offset":2064.0263671875,"atEnd":false,"following":true,"frames":521}
+09-30 21:16:38.090 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12060,"chars":1864,"offset":2064.6261160714284,"atEnd":false,"following":true,"frames":522}
+09-30 21:16:38.103 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12073,"chars":1864,"offset":2067.2331194196427,"atEnd":false,"following":true,"frames":523}
+09-30 21:16:38.119 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12089,"chars":1864,"offset":2071.6346261160716,"atEnd":false,"following":true,"frames":524}
+09-30 21:16:38.138 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12108,"chars":1872,"offset":2075.8995535714284,"atEnd":false,"following":true,"frames":525}
+09-30 21:16:38.151 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12121,"chars":1872,"offset":2079.3875558035716,"atEnd":false,"following":true,"frames":526}
+09-30 21:16:38.167 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12137,"chars":1872,"offset":2082.0115792410716,"atEnd":false,"following":true,"frames":527}
+09-30 21:16:38.187 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12157,"chars":1880,"offset":2083.8895089285716,"atEnd":false,"following":true,"frames":528}
+09-30 21:16:38.199 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12169,"chars":1880,"offset":2085.1895926339284,"atEnd":false,"following":true,"frames":529}
+09-30 21:16:38.215 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12185,"chars":1880,"offset":2086.0684988839284,"atEnd":false,"following":true,"frames":530}
+09-30 21:16:38.235 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12205,"chars":1888,"offset":2086.65234375,"atEnd":false,"following":true,"frames":531}
+09-30 21:16:38.247 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12217,"chars":1888,"offset":2089.2487444196427,"atEnd":false,"following":true,"frames":532}
+09-30 21:16:38.263 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12233,"chars":1888,"offset":2093.6432756696427,"atEnd":false,"following":true,"frames":533}
+09-30 21:16:38.283 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12253,"chars":1896,"offset":2097.903878348214,"atEnd":false,"following":true,"frames":534}
+09-30 21:16:38.296 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12266,"chars":1896,"offset":2101.3895089285716,"atEnd":false,"following":true,"frames":535}
+09-30 21:16:38.312 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12281,"chars":1896,"offset":2104.011160714286,"atEnd":false,"following":true,"frames":536}
+09-30 21:16:38.327 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12297,"chars":1896,"offset":2105.8888113839284,"atEnd":false,"following":true,"frames":537}
+09-30 21:16:38.349 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12319,"chars":1904,"offset":2107.188895089286,"atEnd":false,"following":true,"frames":538}
+09-30 21:16:38.376 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12346,"chars":1904,"offset":2115.0118582589284,"atEnd":false,"following":true,"frames":540}
+09-30 21:16:38.399 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12369,"chars":1912,"offset":2119.4958147321427,"atEnd":false,"following":true,"frames":541}
+09-30 21:16:38.424 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12394,"chars":1912,"offset":2125.845703125,"atEnd":false,"following":true,"frames":543}
+09-30 21:16:38.446 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12416,"chars":1920,"offset":2127.7841796875,"atEnd":false,"following":true,"frames":544}
+09-30 21:16:38.476 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12446,"chars":1920,"offset":2130.0255301339284,"atEnd":false,"following":true,"frames":546}
+09-30 21:16:38.498 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12468,"chars":1928,"offset":2130.6231863839284,"atEnd":false,"following":true,"frames":547}
+09-30 21:16:38.509 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12479,"chars":1928,"offset":2133.209542410714,"atEnd":false,"following":true,"frames":548}
+09-30 21:16:38.526 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12496,"chars":1928,"offset":2137.5818917410716,"atEnd":false,"following":true,"frames":549}
+09-30 21:16:38.549 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12519,"chars":1936,"offset":2141.8282645089284,"atEnd":false,"following":true,"frames":550}
+09-30 21:16:38.568 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12538,"chars":1936,"offset":2159.7998046875,"atEnd":false,"following":true,"frames":552}
+09-30 21:16:38.588 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12558,"chars":1944,"offset":2169.364676339286,"atEnd":false,"following":true,"frames":553}
+09-30 21:16:38.599 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12569,"chars":1944,"offset":2179.8376116071427,"atEnd":false,"following":true,"frames":554}
+09-30 21:16:38.615 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12585,"chars":1944,"offset":2190.800362723214,"atEnd":false,"following":true,"frames":555}
+09-30 21:16:38.636 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12606,"chars":1952,"offset":2200.055245535714,"atEnd":false,"following":true,"frames":556}
+09-30 21:16:38.647 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12617,"chars":1952,"offset":2207.1389508928573,"atEnd":false,"following":true,"frames":557}
+09-30 21:16:38.663 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12633,"chars":1952,"offset":2212.2639508928573,"atEnd":false,"following":true,"frames":558}
+09-30 21:16:38.686 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12656,"chars":1960,"offset":2215.8385881696427,"atEnd":false,"following":true,"frames":559}
+09-30 21:16:38.712 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12682,"chars":1960,"offset":2219.888671875,"atEnd":false,"following":true,"frames":561}
+09-30 21:16:38.732 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12702,"chars":1968,"offset":2220.9538225446427,"atEnd":false,"following":true,"frames":562}
+09-30 21:16:38.743 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12713,"chars":1968,"offset":2223.8567243303573,"atEnd":false,"following":true,"frames":563}
+09-30 21:16:38.761 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12731,"chars":1968,"offset":2228.4475446428573,"atEnd":false,"following":true,"frames":564}
+09-30 21:16:38.776 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12746,"chars":1968,"offset":2232.8264508928573,"atEnd":false,"following":true,"frames":565}
+09-30 21:16:38.799 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12769,"chars":1976,"offset":2236.392020089286,"atEnd":false,"following":true,"frames":566}
+09-30 21:16:38.830 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12800,"chars":1984,"offset":2240.970703125,"atEnd":false,"following":true,"frames":568}
+09-30 21:16:38.859 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12829,"chars":1984,"offset":2243.1845703125,"atEnd":false,"following":true,"frames":570}
+09-30 21:16:38.880 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12850,"chars":1992,"offset":2243.7765066964284,"atEnd":false,"following":true,"frames":571}
+09-30 21:16:38.903 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12873,"chars":1992,"offset":2250.7444196428573,"atEnd":false,"following":true,"frames":573}
+09-30 21:16:38.926 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12896,"chars":1992,"offset":2255.013253348214,"atEnd":false,"following":true,"frames":574}
+09-30 21:16:38.943 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12913,"chars":2000,"offset":2258.486328125,"atEnd":false,"following":true,"frames":575}
+09-30 21:16:38.959 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12929,"chars":2000,"offset":2261.119559151786,"atEnd":false,"following":true,"frames":576}
+09-30 21:16:38.988 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12958,"chars":2008,"offset":2264.3076171875,"atEnd":false,"following":true,"frames":578}
+09-30 21:16:38.999 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12969,"chars":2008,"offset":2267.4104352678573,"atEnd":false,"following":true,"frames":579}
+09-30 21:16:39.015 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":12985,"chars":2008,"offset":2272.1485770089284,"atEnd":false,"following":true,"frames":580}
+09-30 21:16:39.038 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13008,"chars":2016,"offset":2276.637276785714,"atEnd":false,"following":true,"frames":581}
+09-30 21:16:39.063 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13033,"chars":2016,"offset":2282.990792410714,"atEnd":false,"following":true,"frames":583}
+09-30 21:16:39.087 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13057,"chars":2024,"offset":2284.9294084821427,"atEnd":false,"following":true,"frames":584}
+09-30 21:16:39.112 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13082,"chars":2024,"offset":2287.1708984375,"atEnd":false,"following":true,"frames":586}
+09-30 21:16:39.127 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13097,"chars":2024,"offset":2287.7696707589284,"atEnd":false,"following":true,"frames":587}
+09-30 21:16:39.149 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13119,"chars":2032,"offset":2288.1618303571427,"atEnd":false,"following":true,"frames":588}
+09-30 21:16:39.184 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13154,"chars":2040,"offset":2294.9404296875,"atEnd":false,"following":true,"frames":590}
+09-30 21:16:39.211 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13181,"chars":2040,"offset":2302.5830078125,"atEnd":false,"following":true,"frames":592}
+09-30 21:16:39.226 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13196,"chars":2040,"offset":2305.177176339286,"atEnd":false,"following":true,"frames":593}
+09-30 21:16:39.247 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13217,"chars":2048,"offset":2307.0411551339284,"atEnd":false,"following":true,"frames":594}
+09-30 21:16:39.261 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13231,"chars":2048,"offset":2310.5362723214284,"atEnd":false,"following":true,"frames":595}
+09-30 21:16:39.272 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13242,"chars":2048,"offset":2315.5302734375,"atEnd":false,"following":true,"frames":596}
+09-30 21:16:39.298 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13268,"chars":2056,"offset":2320.2156808035716,"atEnd":false,"following":true,"frames":597}
+09-30 21:16:39.309 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13279,"chars":2056,"offset":2323.9814453125,"atEnd":false,"following":true,"frames":598}
+09-30 21:16:39.320 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13290,"chars":2056,"offset":2326.7971540178573,"atEnd":false,"following":true,"frames":599}
+09-30 21:16:39.339 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13309,"chars":2064,"offset":2328.802734375,"atEnd":false,"following":true,"frames":600}
+09-30 21:16:39.359 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13329,"chars":2064,"offset":2330.1866629464284,"atEnd":false,"following":true,"frames":601}
+09-30 21:16:39.388 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13357,"chars":2072,"offset":2331.7354910714284,"atEnd":false,"following":true,"frames":603}
+09-30 21:16:39.401 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13371,"chars":2072,"offset":2334.355887276786,"atEnd":false,"following":true,"frames":604}
+09-30 21:16:39.415 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13385,"chars":2072,"offset":2338.7578125,"atEnd":false,"following":true,"frames":605}
+09-30 21:16:39.436 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13405,"chars":2080,"offset":2343.0295758928573,"atEnd":false,"following":true,"frames":606}
+09-30 21:16:39.447 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13417,"chars":2080,"offset":2346.5226004464284,"atEnd":false,"following":true,"frames":607}
+09-30 21:16:39.463 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13433,"chars":2080,"offset":2349.149832589286,"atEnd":false,"following":true,"frames":608}
+09-30 21:16:39.485 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13455,"chars":2088,"offset":2351.029296875,"atEnd":false,"following":true,"frames":609}
+09-30 21:16:39.496 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13466,"chars":2088,"offset":2352.330078125,"atEnd":false,"following":true,"frames":610}
+09-30 21:16:39.511 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13481,"chars":2088,"offset":2353.2101004464284,"atEnd":false,"following":true,"frames":611}
+09-30 21:16:39.533 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13503,"chars":2096,"offset":2353.7946428571427,"atEnd":false,"following":true,"frames":612}
+09-30 21:16:39.545 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13515,"chars":2096,"offset":2356.3889508928573,"atEnd":false,"following":true,"frames":613}
+09-30 21:16:39.559 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13529,"chars":2096,"offset":2360.7751116071427,"atEnd":false,"following":true,"frames":614}
+09-30 21:16:39.576 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13546,"chars":2096,"offset":2365.037667410714,"atEnd":false,"following":true,"frames":615}
+09-30 21:16:39.598 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13568,"chars":2104,"offset":2368.523995535714,"atEnd":false,"following":true,"frames":616}
+09-30 21:16:39.634 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13604,"chars":2112,"offset":2384.9143415178573,"atEnd":false,"following":true,"frames":618}
+09-30 21:16:39.658 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13628,"chars":2112,"offset":2409.1032366071427,"atEnd":false,"following":true,"frames":620}
+09-30 21:16:39.672 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13641,"chars":2112,"offset":2419.684151785714,"atEnd":false,"following":true,"frames":621}
+09-30 21:16:39.691 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13661,"chars":2120,"offset":2427.835379464286,"atEnd":false,"following":true,"frames":622}
+09-30 21:16:39.706 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13676,"chars":2120,"offset":2433.748604910714,"atEnd":false,"following":true,"frames":623}
+09-30 21:16:39.724 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13694,"chars":2120,"offset":2437.8683035714284,"atEnd":false,"following":true,"frames":624}
+09-30 21:16:39.746 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13716,"chars":2128,"offset":2440.669363839286,"atEnd":false,"following":true,"frames":625}
+09-30 21:16:39.768 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13738,"chars":2128,"offset":2443.7862723214284,"atEnd":false,"following":true,"frames":627}
+09-30 21:16:39.789 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13759,"chars":2136,"offset":2444.5901227678573,"atEnd":false,"following":true,"frames":628}
+09-30 21:16:39.815 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13785,"chars":2136,"offset":2451.7999441964284,"atEnd":false,"following":true,"frames":630}
+09-30 21:16:39.838 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13808,"chars":2144,"offset":2456.112723214286,"atEnd":false,"following":true,"frames":631}
+09-30 21:16:39.849 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13819,"chars":2144,"offset":2459.6300223214284,"atEnd":false,"following":true,"frames":632}
+09-30 21:16:39.863 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13833,"chars":2144,"offset":2462.2678571428573,"atEnd":false,"following":true,"frames":633}
+09-30 21:16:39.893 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13863,"chars":2152,"offset":2464.1573660714284,"atEnd":false,"following":true,"frames":634}
+09-30 21:16:39.917 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13887,"chars":2152,"offset":2472.70703125,"atEnd":false,"following":true,"frames":636}
+09-30 21:16:39.947 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13917,"chars":2160,"offset":2477.3761160714284,"atEnd":false,"following":true,"frames":637}
+09-30 21:16:39.965 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13935,"chars":2160,"offset":2481.137276785714,"atEnd":false,"following":true,"frames":638}
+09-30 21:16:39.985 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13954,"chars":2160,"offset":2485.9489397321427,"atEnd":false,"following":true,"frames":639}
+09-30 21:16:40.015 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":13985,"chars":2168,"offset":2487.330078125,"atEnd":false,"following":true,"frames":640}
+09-30 21:16:40.063 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14033,"chars":2176,"offset":2489.284598214286,"atEnd":false,"following":true,"frames":642}
+09-30 21:16:40.078 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14048,"chars":2176,"offset":2491.7508370535716,"atEnd":false,"following":true,"frames":643}
+09-30 21:16:40.112 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14082,"chars":2184,"offset":2500.255859375,"atEnd":false,"following":true,"frames":644}
+09-30 21:16:40.132 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14102,"chars":2184,"offset":2503.7145647321427,"atEnd":false,"following":true,"frames":645}
+09-30 21:16:40.227 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14197,"chars":2200,"offset":2508.186104910714,"atEnd":false,"following":true,"frames":646}
+09-30 21:16:40.257 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14227,"chars":2200,"offset":2531.3376116071427,"atEnd":false,"following":true,"frames":648}
+09-30 21:16:40.271 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14241,"chars":2208,"offset":2532.265625,"atEnd":false,"following":true,"frames":649}
+09-30 21:16:40.295 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14265,"chars":2208,"offset":2533.2854352678573,"atEnd":false,"following":true,"frames":651}
+09-30 21:16:40.321 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14291,"chars":2216,"offset":2534,"atEnd":false,"following":true,"frames":652}
+09-30 21:16:40.344 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14314,"chars":2216,"offset":2540.7109375,"atEnd":false,"following":true,"frames":654}
+09-30 21:16:40.372 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14342,"chars":2224,"offset":2544.7692522321427,"atEnd":false,"following":true,"frames":655}
+09-30 21:16:40.393 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14363,"chars":2224,"offset":2550.581473214286,"atEnd":false,"following":true,"frames":657}
+09-30 21:16:40.415 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14385,"chars":2224,"offset":2552.3641183035716,"atEnd":false,"following":true,"frames":658}
+09-30 21:16:40.437 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14407,"chars":2232,"offset":2553.5945870535716,"atEnd":false,"following":true,"frames":659}
+09-30 21:16:40.464 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14434,"chars":2232,"offset":2554.9880022321427,"atEnd":false,"following":true,"frames":661}
+09-30 21:16:40.491 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14461,"chars":2240,"offset":2555.3507254464284,"atEnd":false,"following":true,"frames":662}
+09-30 21:16:40.940 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14910,"chars":2264,"offset":2557.7977120535716,"atEnd":false,"following":true,"frames":663}
+09-30 21:16:40.961 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":14931,"chars":2272,"offset":2580.7248883928573,"atEnd":false,"following":true,"frames":664}
+09-30 21:16:41.057 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15027,"chars":2288,"offset":2662,"atEnd":false,"following":true,"frames":665}
+09-30 21:16:41.082 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15052,"chars":2288,"offset":2670.541015625,"atEnd":false,"following":true,"frames":667}
+09-30 21:16:41.099 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15069,"chars":2288,"offset":2675.696707589286,"atEnd":false,"following":true,"frames":668}
+09-30 21:16:41.128 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15098,"chars":2296,"offset":2679.9104352678573,"atEnd":false,"following":true,"frames":669}
+09-30 21:16:41.162 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15132,"chars":2304,"offset":2683.0828683035716,"atEnd":false,"following":true,"frames":670}
+09-30 21:16:41.177 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15147,"chars":2304,"offset":2705.414620535714,"atEnd":false,"following":true,"frames":671}
+09-30 21:16:41.193 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15163,"chars":2304,"offset":2728.9718191964284,"atEnd":false,"following":true,"frames":672}
+09-30 21:16:41.288 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15258,"chars":2320,"offset":2736.880859375,"atEnd":false,"following":true,"frames":673}
+09-30 21:16:41.368 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15338,"chars":2336,"offset":2744.345703125,"atEnd":false,"following":true,"frames":674}
+09-30 21:16:41.386 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15356,"chars":2336,"offset":2769.3875558035716,"atEnd":false,"following":true,"frames":675}
+09-30 21:16:41.791 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15761,"chars":2376,"offset":2772.285714285714,"atEnd":false,"following":true,"frames":676}
+09-30 21:16:41.802 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15772,"chars":2376,"offset":2778.6124441964284,"atEnd":false,"following":true,"frames":677}
+09-30 21:16:41.875 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15845,"chars":2392,"offset":2831.1428571428573,"atEnd":false,"following":true,"frames":678}
+09-30 21:16:41.887 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15857,"chars":2392,"offset":2833.753348214286,"atEnd":false,"following":true,"frames":679}
+09-30 21:16:41.906 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15875,"chars":2392,"offset":2838.55078125,"atEnd":false,"following":true,"frames":680}
+09-30 21:16:41.924 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15894,"chars":2400,"offset":2843.0237165178573,"atEnd":false,"following":true,"frames":681}
+09-30 21:16:41.948 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15918,"chars":2400,"offset":2857.5334821428573,"atEnd":false,"following":true,"frames":683}
+09-30 21:16:41.970 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15940,"chars":2408,"offset":2864.7165178571427,"atEnd":false,"following":true,"frames":684}
+09-30 21:16:41.992 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15962,"chars":2408,"offset":2878.343191964286,"atEnd":false,"following":true,"frames":686}
+09-30 21:16:42.019 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":15989,"chars":2416,"offset":2883.7516741071427,"atEnd":false,"following":true,"frames":687}
+09-30 21:16:42.044 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16014,"chars":2416,"offset":2898.774832589286,"atEnd":false,"following":true,"frames":689}
+09-30 21:16:42.062 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16032,"chars":2416,"offset":2905.9921875,"atEnd":false,"following":true,"frames":690}
+09-30 21:16:42.091 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16061,"chars":2424,"offset":2911.6506696428573,"atEnd":false,"following":true,"frames":691}
+09-30 21:16:42.165 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16135,"chars":2432,"offset":2915.8102678571427,"atEnd":false,"following":true,"frames":692}
+09-30 21:16:42.204 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16174,"chars":2440,"offset":2942.162667410714,"atEnd":false,"following":true,"frames":694}
+09-30 21:16:42.215 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16185,"chars":2440,"offset":2943.6780133928573,"atEnd":false,"following":true,"frames":695}
+09-30 21:16:42.235 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16205,"chars":2440,"offset":2945.3643973214284,"atEnd":false,"following":true,"frames":696}
+09-30 21:16:42.261 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16231,"chars":2448,"offset":2945.80078125,"atEnd":false,"following":true,"frames":697}
+09-30 21:16:42.307 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16277,"chars":2456,"offset":2946.5714285714284,"atEnd":false,"following":true,"frames":698}
+09-30 21:16:42.318 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16288,"chars":2456,"offset":2948.9363839285716,"atEnd":false,"following":true,"frames":699}
+09-30 21:16:42.338 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16307,"chars":2456,"offset":2953.2823660714284,"atEnd":false,"following":true,"frames":700}
+09-30 21:16:42.362 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16332,"chars":2464,"offset":2957.3200334821427,"atEnd":false,"following":true,"frames":701}
+09-30 21:16:42.379 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16349,"chars":2464,"offset":2960.6422991071427,"atEnd":false,"following":true,"frames":702}
+09-30 21:16:42.393 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16363,"chars":2464,"offset":2964.925223214286,"atEnd":false,"following":true,"frames":703}
+09-30 21:16:42.418 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16388,"chars":2472,"offset":2966.1632254464284,"atEnd":false,"following":true,"frames":704}
+09-30 21:16:42.453 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16423,"chars":2472,"offset":2967.5574776785716,"atEnd":false,"following":true,"frames":706}
+09-30 21:16:42.469 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16439,"chars":2480,"offset":2967.9221540178573,"atEnd":false,"following":true,"frames":707}
+09-30 21:16:42.488 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16458,"chars":2480,"offset":2974.6749441964284,"atEnd":false,"following":true,"frames":709}
+09-30 21:16:42.504 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16474,"chars":2480,"offset":2978.874441964286,"atEnd":false,"following":true,"frames":710}
+09-30 21:16:42.545 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16515,"chars":2488,"offset":2982.3200334821427,"atEnd":false,"following":true,"frames":711}
+09-30 21:16:42.561 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16531,"chars":2488,"offset":2984.916573660714,"atEnd":false,"following":true,"frames":712}
+09-30 21:16:42.596 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16566,"chars":2496,"offset":2988.056640625,"atEnd":false,"following":true,"frames":713}
+09-30 21:16:42.637 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16607,"chars":2504,"offset":3000.360770089286,"atEnd":false,"following":true,"frames":715}
+09-30 21:16:42.651 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16621,"chars":2504,"offset":3003.9921875,"atEnd":false,"following":true,"frames":716}
+09-30 21:16:42.722 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16692,"chars":2512,"offset":3008.6409040178573,"atEnd":false,"following":true,"frames":717}
+09-30 21:16:42.735 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16705,"chars":2512,"offset":3009.974051339286,"atEnd":false,"following":true,"frames":718}
+09-30 21:16:42.761 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16731,"chars":2520,"offset":3012.5714285714284,"atEnd":false,"following":true,"frames":719}
+09-30 21:16:42.786 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16756,"chars":2520,"offset":3014.9363839285716,"atEnd":false,"following":true,"frames":720}
+09-30 21:16:42.811 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16781,"chars":2528,"offset":3019.0973772321427,"atEnd":false,"following":true,"frames":721}
+09-30 21:16:42.871 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16841,"chars":2536,"offset":3023.1799665178573,"atEnd":false,"following":true,"frames":722}
+09-30 21:16:42.887 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16857,"chars":2536,"offset":3029.053292410714,"atEnd":false,"following":true,"frames":723}
+09-30 21:16:42.926 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16896,"chars":2544,"offset":3033.541573660714,"atEnd":false,"following":true,"frames":724}
+09-30 21:16:42.937 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16907,"chars":2544,"offset":3036.1183035714284,"atEnd":false,"following":true,"frames":725}
+09-30 21:16:42.974 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16944,"chars":2552,"offset":3044.76171875,"atEnd":false,"following":true,"frames":726}
+09-30 21:16:42.985 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16955,"chars":2552,"offset":3048.246651785714,"atEnd":false,"following":true,"frames":727}
+09-30 21:16:43.009 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":16979,"chars":2560,"offset":3052.7449776785716,"atEnd":false,"following":true,"frames":728}
+09-30 21:16:43.035 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17005,"chars":2560,"offset":3061.2795758928573,"atEnd":false,"following":true,"frames":730}
+09-30 21:16:43.048 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17018,"chars":2560,"offset":3065.954520089286,"atEnd":false,"following":true,"frames":731}
+09-30 21:16:43.086 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17056,"chars":2568,"offset":3069.724609375,"atEnd":false,"following":true,"frames":732}
+09-30 21:16:43.099 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17069,"chars":2568,"offset":3075.2965959821427,"atEnd":false,"following":true,"frames":733}
+09-30 21:16:43.119 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17089,"chars":2576,"offset":3089.1690848214284,"atEnd":false,"following":true,"frames":734}
+09-30 21:16:43.170 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17140,"chars":2584,"offset":3102.1051897321427,"atEnd":false,"following":true,"frames":736}
+09-30 21:16:43.192 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17162,"chars":2584,"offset":3127.3038504464284,"atEnd":false,"following":true,"frames":738}
+09-30 21:16:43.210 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17180,"chars":2584,"offset":3133.5574776785716,"atEnd":false,"following":true,"frames":739}
+09-30 21:16:43.234 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17204,"chars":2592,"offset":3138.123604910714,"atEnd":false,"following":true,"frames":740}
+09-30 21:16:43.259 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17229,"chars":2592,"offset":3143.5256696428573,"atEnd":false,"following":true,"frames":742}
+09-30 21:16:43.288 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17258,"chars":2600,"offset":3144.997488839286,"atEnd":false,"following":true,"frames":743}
+09-30 21:16:43.316 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17286,"chars":2608,"offset":3148.1785714285716,"atEnd":false,"following":true,"frames":744}
+09-30 21:16:43.344 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17314,"chars":2608,"offset":3161.106026785714,"atEnd":false,"following":true,"frames":746}
+09-30 21:16:43.385 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17355,"chars":2616,"offset":3165.775948660714,"atEnd":false,"following":true,"frames":748}
+09-30 21:16:43.399 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17369,"chars":2616,"offset":3167.115792410714,"atEnd":false,"following":true,"frames":749}
+09-30 21:16:43.426 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17396,"chars":2624,"offset":3168.6233258928573,"atEnd":false,"following":true,"frames":750}
+09-30 21:16:43.447 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17417,"chars":2624,"offset":3175.6356026785716,"atEnd":false,"following":true,"frames":752}
+09-30 21:16:43.464 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17434,"chars":2624,"offset":3179.9012276785716,"atEnd":false,"following":true,"frames":753}
+09-30 21:16:43.490 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17460,"chars":2632,"offset":3183.3895089285716,"atEnd":false,"following":true,"frames":754}
+09-30 21:16:43.511 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17481,"chars":2632,"offset":3187.891183035714,"atEnd":false,"following":true,"frames":756}
+09-30 21:16:43.534 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17504,"chars":2640,"offset":3189.1911272321427,"atEnd":false,"following":true,"frames":757}
+09-30 21:16:43.562 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17532,"chars":2640,"offset":3197.0128348214284,"atEnd":false,"following":true,"frames":759}
+09-30 21:16:43.593 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17563,"chars":2648,"offset":3201.4846540178573,"atEnd":false,"following":true,"frames":760}
+09-30 21:16:43.609 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17579,"chars":2648,"offset":3205.091238839286,"atEnd":false,"following":true,"frames":761}
+09-30 21:16:43.630 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17600,"chars":2656,"offset":3209.763671875,"atEnd":false,"following":true,"frames":762}
+09-30 21:16:43.655 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17625,"chars":2656,"offset":3211.109375,"atEnd":false,"following":true,"frames":763}
+09-30 21:16:43.680 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17650,"chars":2664,"offset":3212.0145089285716,"atEnd":false,"following":true,"frames":764}
+09-30 21:16:43.693 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17663,"chars":2664,"offset":3219.3671875,"atEnd":false,"following":true,"frames":765}
+09-30 21:16:43.724 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17694,"chars":2672,"offset":3227.271484375,"atEnd":false,"following":true,"frames":767}
+09-30 21:16:43.735 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17705,"chars":2672,"offset":3229.9377790178573,"atEnd":false,"following":true,"frames":768}
+09-30 21:16:43.751 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17721,"chars":2672,"offset":3231.843191964286,"atEnd":false,"following":true,"frames":769}
+09-30 21:16:43.778 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17748,"chars":2680,"offset":3233.160714285714,"atEnd":false,"following":true,"frames":770}
+09-30 21:16:43.800 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17770,"chars":2680,"offset":3234.6409040178573,"atEnd":false,"following":true,"frames":772}
+09-30 21:16:43.827 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17797,"chars":2688,"offset":3235.0276227678573,"atEnd":false,"following":true,"frames":773}
+09-30 21:16:43.847 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17817,"chars":2688,"offset":3241.7946428571427,"atEnd":false,"following":true,"frames":775}
+09-30 21:16:43.869 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17839,"chars":2696,"offset":3246.0002790178573,"atEnd":false,"following":true,"frames":776}
+09-30 21:16:43.880 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17850,"chars":2696,"offset":3249.4508928571427,"atEnd":false,"following":true,"frames":777}
+09-30 21:16:43.896 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17866,"chars":2696,"offset":3252.051339285714,"atEnd":false,"following":true,"frames":778}
+09-30 21:16:43.911 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17881,"chars":2696,"offset":3253.914620535714,"atEnd":false,"following":true,"frames":779}
+09-30 21:16:43.938 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17908,"chars":2704,"offset":3255.2053571428573,"atEnd":false,"following":true,"frames":780}
+09-30 21:16:43.961 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17931,"chars":2704,"offset":3263.020089285714,"atEnd":false,"following":true,"frames":782}
+09-30 21:16:43.988 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17958,"chars":2712,"offset":3267.4938616071427,"atEnd":false,"following":true,"frames":783}
+09-30 21:16:44.007 25058 25058 I A00001/Amber.StreamReplay: {"stage":"frame","ms":17977,"chars":2712,"offset":3273.8292410714284,"atEnd":false,"following":true,"frames":785}
+09-30 21:16:44.022 25058 25058 I A00001/Amber.StreamReplay: {"stage":"touch","ms":17992,"chars":2720,"offset":3273.8292410714284,"atEnd":false,"following":false,"frames":785}
+09-30 21:16:50.516 25058 25058 I A00001/Amber.StreamReplay: {"stage":"terminal","ms":24486,"chars":3546,"offset":3766.3445870535716,"atEnd":false,"following":false,"frames":785}
+09-30 21:18:19.948 25058 25058 I A00001/Amber.StreamReplay: {"stage":"toggle","ms":113918,"chars":3546,"offset":3766.3445870535716,"atEnd":false,"following":true,"frames":785}

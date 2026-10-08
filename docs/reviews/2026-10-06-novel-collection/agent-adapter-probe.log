@@ -1,0 +1,12 @@
+Actual analyzeChapterSuggestions -> NovelInteractiveAdapter -> ChatTurn provider messages:
+[
+  {
+    "role": "system",
+    "text": "你是小说资料整理助手。阅读刚收录的章节，结合已有资料，产出需要新建或更新的\"活资料\"。\n只输出严格 JSON，不要任何额外文字。格式：\n{\"suggestions\":[{\"kind\":\"world|character|relationship|outline|requirement|other\",\"title\":\"资料标题\",\"content\":\"合并新事实后的完整最新资料\",\"aliases\":[],\"tags\":[],\"customKind\":\"\",\"injectionMode\":\"smart\"}]}\n若无需要更新，输出 {\"suggestions\":[]}。"
+  },
+  {
+    "role": "user",
+    "text": "项目：qa\n已有资料：\n\n\n刚收录的章节《第一章》：\n城门关闭"
+  }
+]
+No global system/preset/template/memory/skill contamination.

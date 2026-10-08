@@ -17,7 +17,7 @@ const loadPureModule = filename => {
   cache.set(filename, exports);
   const requireModule = specifier => {
     if (specifier === '@amber/deepread-domain') return Object.assign({},
-      ...['models.ts', 'helpers.ts', 'enums.ts', 'export.ts'].map(name => loadPureModule(path.join(domainRoot, name))));
+      ...['models.ts', 'helpers.ts', 'enums.ts', 'export.ts', 'synthesis_templates.ts'].map(name => loadPureModule(path.join(domainRoot, name))));
     if (specifier === '@amber/chat-domain') return loadPureModule(markdownFile);
     if (specifier.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filename), specifier);
@@ -81,7 +81,7 @@ const loadPanel = (entry = savedEntry()) => {
     + `\nclass ExportPanelFixture { ${fields}\n${source.slice(methodsStart, methodsEnd)} }`
     + '\nexports.ExportPanelFixture = ExportPanelFixture;';
   const state = {
-    entry, getEntry: null, repositoryCalls: [], pdfSupported: true,
+    entry, getEntry: null, repositoryCalls: [], pdfSupported: true, productKind: 'agent',
     platformCalls: [], handlers: {}, loadCalls: [], pdfCalls: [],
     loadError: null, createPdf: null, currentUrl: '', getUrlError: null, getUrlCalls: 0,
     context: { cacheDir: '/cache' },
@@ -116,6 +116,8 @@ const loadPanel = (entry = savedEntry()) => {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText, { exports, ...platform, Error, String, Number, Math, Date, Promise, Uint8Array,
     ACCENT: '#B8623A', BG: '#FFFFFF', INK: '#1B1A17', INK3: '#57544C', SURFACE: '#FFFFFF', LINE: '#D6D1C4', webview: { WebviewController },
+    getProductKind: () => state.productKind,
+    D: { paper: '#FBF7F1', ink: '#2A2320', muted: '#6E6254', card: '#FFFDF9', rule: '#E4D9CB', accent: '#C8402F' },
     AppStorage: { get: () => state.context },
     getRepository: () => ({ get: async topicId => {
       state.repositoryCalls.push(topicId);
@@ -691,4 +693,18 @@ test('legacy missing custom snapshot uses the explicit same default fallback as 
   assert.equal(page.pdfPreview, true); assert.ok(page.pdfHtml.includes('SAVED_SUMMARY'));
   assert.equal(page.pdfHtml.includes('UNRELATED_GLOBAL'), false);
   assert.match(page.note, /快照缺失.*默认排版/);
+});
+
+test('standalone PDF uses iOS paper and hides figures for printing while the host keeps its existing image policy', async () => {
+  const standalone = await loadReady(loadPanel(savedEntry()));
+  standalone.state.productKind = 'deepread';
+  standalone.page.openPdfPreview();
+  assert.equal(standalone.page.pdfPreview, true);
+  assert.match(standalone.page.pdfHtml, /--dr-bg:#FBF7F1/);
+  assert.match(standalone.page.pdfHtml, /--dr-accent:#C8402F/);
+  assert.match(standalone.page.pdfHtml, /img,figure\{display:none!important;\}/);
+  const host = await loadReady(loadPanel(savedEntry()));
+  host.page.openPdfPreview();
+  assert.match(host.page.pdfHtml, /--dr-bg:#FFFFFF/);
+  assert.equal(host.page.pdfHtml.includes('img,figure{display:none!important;}'), false);
 });

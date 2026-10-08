@@ -1,0 +1,447 @@
+{
+  "trace_file": "/tmp/stream3after.trace",
+  "csv_file": "/tmp/stream3after.csv",
+  "pid": 64109,
+  "trace_origin_seconds": 160844.787254,
+  "conclusion": "Primary sustained 30 fps limit is an explicit ArkUI/app frame-rate vote and 33.33 ms VSync delivery. The body still has occasional work exceeding a 16.67 ms budget. Completion separately destroys the streaming List item, rebuilds the history item, and resets List item geometry, producing a large catch-up scroll.",
+  "frame_rate_evidence": {
+    "app_vote_transitions": [
+      {
+        "relative_seconds": 1.103688,
+        "line": 9771,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 0 frameRateType = 20480 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 1.1075,
+        "line": 10045,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 30 frameRateType = 16384 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.271417,
+        "line": 54531,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 20544 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.27415,
+        "line": 54699,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 16448 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.314012,
+        "line": 57106,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 20544 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.316128,
+        "line": 57453,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 16448 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.363052,
+        "line": 60664,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 20544 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.366062,
+        "line": 60980,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 16448 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.410901,
+        "line": 63880,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 20544 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.415405,
+        "line": 64240,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 16448 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.463015,
+        "line": 67446,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 20544 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.465611,
+        "line": 67744,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 16448 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.511588,
+        "line": 70754,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 20544 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.515267,
+        "line": 71081,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 16448 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.604117,
+        "line": 77056,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 20544 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.606567,
+        "line": 77326,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 16448 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.723497,
+        "line": 84552,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 20544 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.727091,
+        "line": 84865,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 120 frameRateType = 16448 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 2.861214,
+        "line": 94773,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 30 frameRateType = 16384 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      },
+      {
+        "relative_seconds": 13.428847,
+        "line": 368922,
+        "pid": 64109,
+        "name": "H:FlushFrameRate Expected frameRate = 0 frameRateType = 0 currAnimatorExpectedFrameRate = -1, lastAnimatorExpectedFrameRate = -1"
+      }
+    ],
+    "rate_switch": [
+      {
+        "relative_seconds": 4.084998,
+        "line": 180648,
+        "pid": 1812,
+        "name": "H:CollectFrameRateChange rsFrameRate: 120, finalRange = (120, 120, 120)"
+      },
+      {
+        "relative_seconds": 4.085008,
+        "line": 180652,
+        "pid": 1812,
+        "name": "H:HgmSoftVSyncManager::UniProcessData multiAppFrameRate: pid = 64109, linkerId = 275346058379264, appFrameRate = 0, appRange = (0, 144, 30)"
+      },
+      {
+        "relative_seconds": 4.085216,
+        "line": 180686,
+        "pid": 1812,
+        "name": "H:CollectFrameRateChange rsFrameRate: 60, finalRange = (60, 60, 60)"
+      },
+      {
+        "relative_seconds": 4.085225,
+        "line": 180688,
+        "pid": 1812,
+        "name": "H:HgmSoftVSyncManager::UniProcessData multiAppFrameRate: pid = 64109, linkerId = 275346058379264, appFrameRate = 30, appRange = (0, 144, 30)"
+      },
+      {
+        "relative_seconds": 4.089821,
+        "line": 181102,
+        "pid": 1812,
+        "name": "H:CollectFrameRateChange rsFrameRate: 60, finalRange = (60, 60, 60)"
+      },
+      {
+        "relative_seconds": 4.089828,
+        "line": 181106,
+        "pid": 1812,
+        "name": "H:HgmSoftVSyncManager::UniProcessData multiAppFrameRate: pid = 64109, linkerId = 275346058379264, appFrameRate = 30, appRange = (0, 144, 30)"
+      },
+      {
+        "relative_seconds": 4.105626,
+        "line": 181624,
+        "pid": 1812,
+        "name": "H:CollectFrameRateChange rsFrameRate: 60, finalRange = (60, 60, 60)"
+      },
+      {
+        "relative_seconds": 4.105635,
+        "line": 181627,
+        "pid": 1812,
+        "name": "H:HgmSoftVSyncManager::UniProcessData multiAppFrameRate: pid = 64109, linkerId = 275346058379264, appFrameRate = 30, appRange = (0, 144, 30)"
+      }
+    ],
+    "native_scroll_preferred_rate": [
+      {
+        "relative_seconds": 2.271085,
+        "line": 54466,
+        "pid": 64109,
+        "name": "H:GetPreferredFps: scene: scrollable_multi_task_scene, speed: 0.000000, rate: 120"
+      }
+    ],
+    "system_scroll_scene_votes": [
+      {
+        "relative_seconds": 2.274884,
+        "line": 54772,
+        "pid": 1812,
+        "name": "H:ProcessLtpoVote: isDragScene_: [1], refreshRate: [120], lastLTPORefreshRate_: [120], desc: [[20544] SCROLLABLE_MULTI_TASK;ANIMATION_STATE_FIRST_FRAME;UI_ANIMATION;]"
+      },
+      {
+        "relative_seconds": 2.282926,
+        "line": 55292,
+        "pid": 1812,
+        "name": "H:ProcessLtpoVote: isDragScene_: [1], refreshRate: [120], lastLTPORefreshRate_: [120], desc: [[16448] SCROLLABLE_MULTI_TASK;UI_ANIMATION;]"
+      },
+      {
+        "relative_seconds": 2.865112,
+        "line": 95076,
+        "pid": 1812,
+        "name": "H:ProcessLtpoVote: isDragScene_: [0], refreshRate: [30], lastLTPORefreshRate_: [120], desc: [[16384] UI_ANIMATION;]"
+      }
+    ],
+    "stable_body_relative_window": [
+      4.15,
+      13.3
+    ],
+    "stable_body_vsync_advertised_period_ms": {
+      "count": 273,
+      "total_ms": 9101.531,
+      "p50_ms": 33.337,
+      "p95_ms": 33.366,
+      "max_ms": 33.368,
+      "over_16_667ms": 273,
+      "over_33_333ms": 152
+    },
+    "stable_body_main_thread_slices": {
+      "on_vsync_event": {
+        "count": 273,
+        "total_ms": 2701.84,
+        "p50_ms": 9.232,
+        "p95_ms": 18.658,
+        "max_ms": 21.621,
+        "over_16_667ms": 36,
+        "over_33_333ms": 0
+      },
+      "flush_dirty_node_update": {
+        "count": 285,
+        "total_ms": 1631.375,
+        "p50_ms": 5.097,
+        "p95_ms": 13.598,
+        "max_ms": 15.201,
+        "over_16_667ms": 0,
+        "over_33_333ms": 0
+      },
+      "markdown_update": {
+        "count": 143,
+        "total_ms": 947.688,
+        "p50_ms": 6.177,
+        "p95_ms": 10.904,
+        "max_ms": 14.384,
+        "over_16_667ms": 0,
+        "over_33_333ms": 0
+      },
+      "layout": {
+        "count": 280,
+        "total_ms": 403.019,
+        "p50_ms": 1.451,
+        "p95_ms": 3.476,
+        "max_ms": 5.122,
+        "over_16_667ms": 0,
+        "over_33_333ms": 0
+      },
+      "chat_page": {
+        "count": 146,
+        "total_ms": 164.246,
+        "p50_ms": 1.136,
+        "p95_ms": 1.581,
+        "max_ms": 2.035,
+        "over_16_667ms": 0,
+        "over_33_333ms": 0
+      },
+      "reasoning_update": {
+        "count": 145,
+        "total_ms": 19.741,
+        "p50_ms": 0.135,
+        "p95_ms": 0.194,
+        "max_ms": 0.253,
+        "over_16_667ms": 0,
+        "over_33_333ms": 0
+      },
+      "draw_modifier": {
+        "count": 1558,
+        "total_ms": 304.842,
+        "p50_ms": 0.056,
+        "p95_ms": 0.748,
+        "max_ms": 1.359,
+        "over_16_667ms": 0,
+        "over_33_333ms": 0
+      }
+    },
+    "sp_csv_rows_1_based": [
+      6,
+      14
+    ],
+    "sp_fps": [
+      30,
+      30,
+      29,
+      31,
+      30,
+      30,
+      30,
+      28,
+      30
+    ],
+    "sp_mean_fps": 29.778,
+    "sp_median_fps": 30,
+    "phase_warning": "Body Markdown updates start at 2.756 s. The 118 fps CSV second already overlaps body generation; it is not a pure reasoning-only sample."
+  },
+  "completion_jump_evidence": {
+    "history_tail_for_each_swap": [
+      {
+        "relative_seconds": 13.359229,
+        "line": 366584,
+        "pid": 64109,
+        "name": "H:ForEachNode::Update Id[363] preIds[1] newIds[2] tempOldIdsSet[0] additionalChildComps[1]"
+      },
+      {
+        "relative_seconds": 13.36032,
+        "line": 366600,
+        "pid": 64109,
+        "name": "H:ForEachNode::Update Id[364] preIds[1] newIds[0] tempOldIdsSet[1] additionalChildComps[0]"
+      }
+    ],
+    "row_and_markdown_recreation": [
+      {
+        "relative_seconds": 13.376875,
+        "line": 366729,
+        "pid": 64109,
+        "name": "H:CustomNode:BuildItem [AgentMessageRow][self:2929][parent:2910][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+      },
+      {
+        "relative_seconds": 13.384334,
+        "line": 366797,
+        "pid": 64109,
+        "name": "H:CustomNode:BuildItem [MarkdownText][self:2974][parent:2973][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+      },
+      {
+        "relative_seconds": 13.393689,
+        "line": 366828,
+        "pid": 64109,
+        "name": "H:ForEachNode::Update Id[2978] preIds[0] newIds[27] tempOldIdsSet[0] additionalChildComps[27]"
+      }
+    ],
+    "new_native_markdown_blocks": 27,
+    "new_native_markdown_blocks_first_last": [
+      {
+        "relative_seconds": 13.393894,
+        "line": 366841,
+        "pid": 64109,
+        "name": "H:CustomNode:BuildItem [NativeMarkdownText][self:2983][parent:2982][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+      },
+      {
+        "relative_seconds": 13.40126,
+        "line": 367257,
+        "pid": 64109,
+        "name": "H:CustomNode:BuildItem [NativeMarkdownText][self:3139][parent:3138][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+      }
+    ],
+    "same_list_index_geometry_reset": [
+      {
+        "relative_seconds": 13.375012,
+        "line": 366716,
+        "pid": 64109,
+        "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -5649.643555"
+      },
+      {
+        "relative_seconds": 13.419054,
+        "line": 368478,
+        "pid": 64109,
+        "name": "H:ListLayoutAlgorithm::MeasureListItem:1, 294.000000"
+      }
+    ],
+    "large_scroll_by_offsets": [
+      {
+        "relative_seconds": 13.440944,
+        "line": 369023,
+        "pid": 64109,
+        "name": "H:ScrollBy, offset:-655.180054, id:358, tag:List"
+      },
+      {
+        "relative_seconds": 13.458611,
+        "line": 369387,
+        "pid": 64109,
+        "name": "H:ScrollBy, offset:-1195.596069, id:358, tag:List"
+      },
+      {
+        "relative_seconds": 13.46567,
+        "line": 370221,
+        "pid": 64109,
+        "name": "H:ScrollBy, offset:-605.639038, id:358, tag:List"
+      },
+      {
+        "relative_seconds": 13.473772,
+        "line": 370788,
+        "pid": 64109,
+        "name": "H:ScrollBy, offset:-561.579468, id:358, tag:List"
+      },
+      {
+        "relative_seconds": 13.481879,
+        "line": 371343,
+        "pid": 64109,
+        "name": "H:ScrollBy, offset:-503.258057, id:358, tag:List"
+      },
+      {
+        "relative_seconds": 13.490607,
+        "line": 371861,
+        "pid": 64109,
+        "name": "H:ScrollBy, offset:-440.159424, id:358, tag:List"
+      },
+      {
+        "relative_seconds": 13.498836,
+        "line": 372428,
+        "pid": 64109,
+        "name": "H:ScrollBy, offset:-378.056427, id:358, tag:List"
+      },
+      {
+        "relative_seconds": 13.507018,
+        "line": 372942,
+        "pid": 64109,
+        "name": "H:ScrollBy, offset:-318.884735, id:358, tag:List"
+      },
+      {
+        "relative_seconds": 13.515463,
+        "line": 373488,
+        "pid": 64109,
+        "name": "H:ScrollBy, offset:-268.362244, id:358, tag:List"
+      },
+      {
+        "relative_seconds": 13.524067,
+        "line": 374062,
+        "pid": 64109,
+        "name": "H:ScrollBy, offset:-222.695343, id:358, tag:List"
+      }
+    ],
+    "source_explanation": [
+      "ChatPage.ets chatTimelineRows uses ForEach(this.rows) and nodeId/displayRevision keys.",
+      "ChatPage.ets chatTimelineActiveTail uses a separate ForEach(this.streamingTail) with tail-messageId keys.",
+      "applyConversationRunSnapshot assigns completed rows and empties streamingTail, so item identity cannot persist between these ForEach parents.",
+      "MarkdownText.updateDisplay returns early when content equals lastParsedText; onStreamingChanged alone does not trigger this reconstruction.",
+      "The old reasoning Scroll already ended at 3.014 s. Final new reasoning is collapsed by default when autoCloseThinking is enabled. This is not a 5900-unit reasoning height expansion.",
+      "No additional list item index appears during the jump window: history grows 1 to 2 and tail shrinks 1 to 0. Action footer is rebuilt within the same new row. A suggestions tail cannot explain the observed item-top reset from -5649.64 to +294."
+    ]
+  },
+  "limitations": [
+    "No sched trace category was captured, so OnVsync durations are elapsed slice times, not isolated CPU execution times.",
+    "App FrameCallback is not individually marked. ArkUI delivered VSync/DispatchDisplaySync frequency and scrollBy calls are observable, but callback internals cannot be directly attributed.",
+    "Trace labels UI_ANIMATION but does not identify which exact component produced the generic 30 fps vote. Native scroll explicitly produced scrollable_multi_task_scene preferred rate 120.",
+    "Trace captures geometry and reconstruction, not pixels. Visual flash and exact perceived jump require screen recording/screenshot confirmation.",
+    "Engine scroll offsets are retained as raw trace values; no unsupported physical-pixel/vp conversion was applied."
+  ]
+}

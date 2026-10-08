@@ -1,22 +1,9 @@
-// markdown_cache — Markdown 增量解析缓存(纯逻辑,零 SDK 依赖,可 node:test)
+// markdown_cache — 有界 Markdown 缓存(纯逻辑,零 SDK 依赖)
 //
-// Android 基准:
-//   MessageRenderCache.markdownParseResult(MarkdownParseCache: 按内容精确缓存 +
-//     128 条目 / 1.2M 字符上限)
-//   StreamingMarkdownParseCache(streaming: stable 前缀块 + 尾部增量解析)
-//   MarkdownPrewarmMaxTexts=32(ChatList.kt:121 预取规模语义)
-//
-// 裁剪(保持抽象小,ArkTS API 12):
-//   - 单 Map 同时承担「精确内容缓存」与「前缀/增量缓存」:
-//       key = `${messageId}\u0000${offset}`(计划 §4.4 语义)
-//       entry = { content, blocks, prefixSafe }
-//   - 前缀命中: 新内容以某条已缓存 content 为真前缀,且该前缀结束于安全块边界
-//     (非代码围栏内部 / 非表格延续 / 非列表·引用·段落续行)时,只解析尾部增量,
-//     复用前缀 blocks —— 语义与整段 parseMarkdown 一致。
-//   - 安全回退: 代码围栏/表格边界使前缀复用不安全时 → 整段全量重解析。
-//   - 容量: 条目数 ≤ 32 + 总字符预算,LRU 淘汰;同一 message 的旧 offset 视为失效
-//     (offset 递增失效),存储新条目时回收同 message 更早的 offset 条目。
-// 零 UI/零 IO,可单测;parse 可注入(测试用计数伪解析器)。
+// 精确内容命中不解析；流式追加保留已闭合前缀块，只解析新闭合片段和
+// 活动尾。围栏、展示公式内部的空行不是 checkpoint，列表/表格/引用等
+// 延续块等到空行再固定。替换/截短失效，LRU 同时受条目和字符预算约束。
+// parse 可注入；parseCalls 记录每次实际解析(推进 checkpoint 最多两次)。
 
 import type { MarkdownBlock } from './markdown_blocks.ts';
 import { parseMarkdown } from './markdown_blocks.ts';
@@ -37,6 +24,10 @@ export interface MarkdownCacheEntry {
   blocks: MarkdownBlock[];
   /** 该内容是否结束于安全块边界(可被更长内容前缀复用) */
   prefixSafe: boolean;
+  /** 原始内容中最后一个已闭合块边界；其后仍会随流式追加变化。 */
+  stableLength: number;
+  /** blocks 中可直接复用的稳定前缀块数。 */
+  stableBlockCount: number;
 }
 
 /** getOrParse 的结果 */
@@ -60,63 +51,122 @@ export interface MarkdownCacheStats {
 
 // ===== 纯函数:块边界安全性 =====
 
-const isFenceLine = (line: string): boolean => line.startsWith('```');
+interface ProtectedMarkdownRange {
+  start: number;
+  end: number;
+}
 
-/** 内容是否结束在未闭合代码围栏内部(奇数次 ``` → 仍处于围栏内) */
-const endsInsideCodeFence = (text: string): boolean => {
-  let inFence: boolean = false;
-  const lines: string[] = text.split('\n');
-  for (const line of lines) {
-    if (isFenceLine(line)) inFence = !inFence;
-  }
-  return inFence;
+const escapedAt = (text: string, index: number): boolean => {
+  let count: number = 0;
+  for (let i: number = index - 1; i >= 0 && text[i] === '\\'; i--) count++;
+  return count % 2 !== 0;
 };
-
-const lastNonEmptyLine = (text: string): string | null => {
-  const lines: string[] = text.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (lines[i].trim().length > 0) return lines[i];
-  }
-  return null;
-};
-
-const isListLine = (line: string): boolean => /^\s*[-*]\s+/.test(line) || /^\s*\d+\.\s+/.test(line);
-const isBlockquoteLine = (line: string): boolean => line.startsWith('>');
-const isHeadingLine = (line: string): boolean => /^#{1,6}\s+/.test(line);
-const isHrLine = (line: string): boolean => /^(-{3,}|\*{3,}|_{3,})\s*$/.test(line);
-// 保守:含未转义 | 的行都视为「可能处于表格延续」→ 前缀复用不安全
-const isTableRowLike = (line: string): boolean => line.includes('|');
 
 /**
- * 前缀内容是否结束于「安全块边界」——若在该位置追加后缀,
- * parse(prefix) + parse(tail) 与 parse(prefix+tail) 结果一致。
- *
- * 安全情形:
- *   - 空内容;
- *   - 末尾空行(块间空行分隔)且不在未闭合代码围栏内;
- *   - 末行为标题 / 水平线 / 已闭合代码围栏结束 ```(块级结构不可被续行吸收)。
- *
- * 不安全情形(回退全量解析):
- *   - 结束在未闭合代码围栏内;
- *   - 末行为列表项 / 引用 / 表格行(后缀可续行合并进同一块);
- *   - 末行为普通文本(段落续行);内容不以换行结尾(行中间截断)。
+ * 只保存解析器已经闭合的边界。围栏匹配与 parseMarkdown 的全局 regex
+ * 一致(同时支持其归一化的 CRLF/CR)；展示公式的空行也不能拆开。
+ * 普通段落/列表/引用/表格等到空行后
+ * 才固定下来，避免流式中的半行被当作完成块。
+ * 返回 -1 表示当前 parser 的嵌入围栏占位语义要求整段解析。
  */
-export const markdownPrefixReuseSafe = (text: string): boolean => {
-  if (text.length === 0) return true;
-  if (endsInsideCodeFence(text)) return false;
-  if (text.endsWith('\n\n')) return true;
-  if (!text.endsWith('\n')) return false;
-  const lastLine: string | null = lastNonEmptyLine(text);
-  if (lastLine === null) return true;
-  if (isListLine(lastLine) || isBlockquoteLine(lastLine) || isTableRowLike(lastLine)) {
-    return false;
+const stablePrefixLength = (text: string): number => {
+  const protectedRanges: ProtectedMarkdownRange[] = [];
+  const fenceRanges: ProtectedMarkdownRange[] = [];
+  const fenceRe: RegExp = /```([^\r\n]*)(?:\r\n|\r|\n)([\s\S]*?)(?:```|$)/g;
+  let match: RegExpExecArray | null;
+  while ((match = fenceRe.exec(text)) !== null) {
+    const end: number = match.index + match[0].length;
+    const closed: boolean = match[0].endsWith('```');
+    // The current parser replaces fences globally. An embedded fence leaks a
+    // placeholder into its surrounding paragraph; splitting could change that
+    // placeholder's index or separate the paragraph. Keep that input together.
+    if ((match.index > 0 && text[match.index - 1] !== '\n' && text[match.index - 1] !== '\r') ||
+      (closed && ((end < text.length && text[end] !== '\n' && text[end] !== '\r') ||
+      (end - 3 > 0 && text[end - 4] !== '\n' && text[end - 4] !== '\r')))) return -1;
+    const range: ProtectedMarkdownRange = { start: match.index, end };
+    protectedRanges.push(range);
+    fenceRanges.push(range);
   }
-  if (isHeadingLine(lastLine) || isHrLine(lastLine) || isFenceLine(lastLine)) {
-    return true;
+  // parseInline gives inline code priority over math, including literal $$ / \[.
+  const inlineCodeRanges: ProtectedMarkdownRange[] = [];
+  const inlineCodeRe: RegExp = /`([^`]+)`/g;
+  while ((match = inlineCodeRe.exec(text)) !== null) {
+    inlineCodeRanges.push({ start: match.index, end: match.index + match[0].length });
   }
-  // 末行为普通文本:后缀非空行会并入同一段落
-  return false;
+  let fenceIndex: number = 0;
+  let codeIndex: number = 0;
+  for (let pos: number = 0; pos < text.length; pos++) {
+    while (fenceIndex < fenceRanges.length && pos >= fenceRanges[fenceIndex].end) fenceIndex++;
+    if (fenceIndex < fenceRanges.length && pos >= fenceRanges[fenceIndex].start) {
+      pos = fenceRanges[fenceIndex].end - 1;
+      continue;
+    }
+    while (codeIndex < inlineCodeRanges.length && pos >= inlineCodeRanges[codeIndex].end) codeIndex++;
+    if (codeIndex < inlineCodeRanges.length && pos >= inlineCodeRanges[codeIndex].start) {
+      pos = inlineCodeRanges[codeIndex].end - 1;
+      continue;
+    }
+    if (escapedAt(text, pos)) continue;
+    let opening: string = '';
+    let closing: string = '';
+    let display: boolean = false;
+    if (text.startsWith('$$', pos)) {
+      opening = '$$'; closing = '$$'; display = true;
+    } else if (text.startsWith('\\[', pos)) {
+      opening = '\\['; closing = '\\]'; display = true;
+    } else if (text.startsWith('\\(', pos)) {
+      opening = '\\('; closing = '\\)';
+    } else if (text[pos] === '$' && (pos === 0 || text[pos - 1] !== '$')) {
+      opening = '$'; closing = '$';
+    }
+    if (opening.length === 0) continue;
+    let end: number = pos + opening.length;
+    let mathFenceIndex: number = fenceIndex;
+    while (end < text.length) {
+      while (mathFenceIndex < fenceRanges.length && end >= fenceRanges[mathFenceIndex].end) mathFenceIndex++;
+      if (mathFenceIndex < fenceRanges.length && end >= fenceRanges[mathFenceIndex].start) {
+        end = fenceRanges[mathFenceIndex].end;
+        continue;
+      }
+      if (!display && (text[end] === '\n' || text[end] === '\r')) break;
+      if (text.startsWith(closing, end) && !escapedAt(text, end) &&
+        !(closing === '$' && (text[end + 1] === '$' || text[end - 1] === '$'))) break;
+      end++;
+    }
+    if (display) {
+      protectedRanges.push({ start: pos, end: end < text.length ? end + closing.length : text.length });
+    }
+    if (end < text.length && text.startsWith(closing, end) && end > pos + opening.length) {
+      pos = end + closing.length - 1;
+    } else {
+      pos += opening.length - 1;
+    }
+  }
+  protectedRanges.sort((a: ProtectedMarkdownRange, b: ProtectedMarkdownRange): number => a.start - b.start);
+  const newlineRe: RegExp = /\r\n|\r|\n/g;
+  let lineStart: number = 0;
+  let stable: number = 0;
+  let rangeIndex: number = 0;
+  while ((match = newlineRe.exec(text)) !== null) {
+    const line: string = text.substring(lineStart, match.index);
+    const end: number = match.index + match[0].length;
+    while (rangeIndex < protectedRanges.length && match.index >= protectedRanges[rangeIndex].end) rangeIndex++;
+    const inside: boolean = rangeIndex < protectedRanges.length &&
+      match.index >= protectedRanges[rangeIndex].start;
+    // An empty line separates every supported block. Heading/hr and a plain
+    // closing fence can also finish at a single newline without absorbing text.
+    if (!inside && (line.trim().length === 0 || /^#{1,6}\s+.+$/.test(line) ||
+      /^(-{3,}|\*{3,}|_{3,})\s*$/.test(line) || line === '```')) {
+      stable = end;
+    }
+    lineStart = end;
+  }
+  return stable;
 };
+
+/** 是否整个内容都已闭合；流式缓存也能复用其中的部分稳定前缀。 */
+export const markdownPrefixReuseSafe = (text: string): boolean =>
+  text.length === 0 || stablePrefixLength(text) === text.length;
 
 // ===== 缓存 =====
 
@@ -124,7 +174,7 @@ export const markdownPrefixReuseSafe = (text: string): boolean => {
 export const markdownCacheKey = (messageId: string, offset: number): string =>
   `${messageId}${KEY_SEP}${offset}`;
 
-/** 有界 Markdown 解析缓存(精确 + 前缀增量,LRA/字符双预算) */
+/** 有界 Markdown 解析缓存(精确 + 前缀增量,LRU/字符双预算) */
 export class MarkdownCache {
   private entries: Map<string, MarkdownCacheEntry> = new Map();
   private totalChars: number = 0;
@@ -201,45 +251,51 @@ export class MarkdownCache {
       return { blocks: cached.blocks, exact: true, incremental: false };
     }
 
-    // 前缀候选:同 message 中 content 为真前缀的最长条目(其结束于安全边界)
+    // 同一个 offset 也可能连续收流；内容必须是追加关系，替换/截短会失效。
     const messagePrefix: string = `${messageId}${KEY_SEP}`;
     let candidate: MarkdownCacheEntry | undefined;
-    let candidateKey: string = '';
     this.entries.forEach((entry: MarkdownCacheEntry, k: string): void => {
-      if (k.startsWith(messagePrefix) && k !== key && entry.prefixSafe &&
-        entry.content.length > 0 && content.length > entry.content.length &&
-        content.startsWith(entry.content) &&
+      if (k.startsWith(messagePrefix) && entry.stableLength > 0 &&
+        content.length > entry.content.length && content.startsWith(entry.content) &&
         (candidate === undefined || entry.content.length > candidate.content.length)) {
         candidate = entry;
-        candidateKey = k;
       }
     });
 
-    if (candidate !== undefined) {
-      const tail: string = content.substring(candidate.content.length);
-      const tailBlocks: MarkdownBlock[] = this.parse(tail);
-      this.parseCalls++;
-      this.prefixHits++;
-      const blocks: MarkdownBlock[] = candidate.blocks.concat(tailBlocks);
-      const entry: MarkdownCacheEntry = {
-        content,
-        blocks,
-        prefixSafe: markdownPrefixReuseSafe(content),
-      };
-      this.store(key, entry);
-      this.touch(candidateKey);
-      return { blocks, exact: false, incremental: true };
+    let prefixLength: number = candidate === undefined ? 0 : candidate.stableLength;
+    let tail: string = content.substring(prefixLength);
+    let closedTailLength: number = stablePrefixLength(tail);
+    if (closedTailLength < 0) {
+      candidate = undefined;
+      prefixLength = 0;
+      tail = content;
+      closedTailLength = 0;
     }
-
-    const blocks: MarkdownBlock[] = this.parse(content);
-    this.parseCalls++;
-    this.fullParses++;
+    const prefixBlocks: MarkdownBlock[] = candidate === undefined ? []
+      : candidate.blocks.slice(0, candidate.stableBlockCount);
+    // 仅新闭合的片段和活动尾参与解析；既有稳定前缀永远不再进入 parser。
+    const closedBlocks: MarkdownBlock[] = closedTailLength > 0
+      ? this.parsePart(tail.substring(0, closedTailLength)) : [];
+    const activeBlocks: MarkdownBlock[] = closedTailLength < tail.length
+      ? this.parsePart(tail.substring(closedTailLength)) : [];
+    if (tail.length === 0) this.parsePart(tail);
+    const blocks: MarkdownBlock[] = prefixBlocks.concat(closedBlocks, activeBlocks);
+    const incremental: boolean = candidate !== undefined;
+    if (incremental) this.prefixHits++;
+    else this.fullParses++;
     this.store(key, {
       content,
       blocks,
-      prefixSafe: markdownPrefixReuseSafe(content),
+      prefixSafe: prefixLength + closedTailLength === content.length,
+      stableLength: prefixLength + closedTailLength,
+      stableBlockCount: prefixBlocks.length + closedBlocks.length,
     });
-    return { blocks, exact: false, incremental: false };
+    return { blocks, exact: false, incremental };
+  }
+
+  private parsePart(content: string): MarkdownBlock[] {
+    this.parseCalls++;
+    return this.parse(content);
   }
 
   /** 直接查询(不解析):命中返回已缓存块,否则 null */

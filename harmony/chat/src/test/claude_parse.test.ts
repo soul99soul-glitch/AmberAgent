@@ -27,16 +27,20 @@ test('parseClaudeMessage:text 块;空 text 跳过', () => {
   assert.equal(toText(msg), '你好\n世界', '两独立 text part(Android 同),toText 换行连接');
 });
 
-test('parseClaudeMessage:thinking + signature → reasoning part(metadata);redacted_thinking 跳过', () => {
+test('parseClaudeMessage:thinking signature 和 redacted 原块均保留且带原块索引', () => {
   const msg = parseClaudeMessage([
     { type: 'thinking', thinking: '推演', signature: 'sig-9' },
     { type: 'redacted_thinking', data: 'ENCRYPTED' },
   ]);
-  assert.equal(msg.parts.length, 1, 'redacted_thinking 不入 parts');
+  assert.equal(msg.parts.length, 2, 'redacted_thinking 入历史以便工具续轮回放');
   const r = msg.parts[0] as UIMessagePartReasoning;
   assert.equal(r.type, 'reasoning');
   assert.equal(r.reasoning, '推演');
-  assert.deepEqual(r.metadata, { signature: 'sig-9' });
+  assert.deepEqual(r.metadata, { signature: 'sig-9', claude_thinking_block_index: 0 });
+  assert.deepEqual(msg.parts[1].metadata, {
+    claude_redacted_thinking: { type: 'redacted_thinking', data: 'ENCRYPTED' },
+    claude_thinking_block_index: 1,
+  });
   assert.equal(r.finishedAt, null);
 });
 
@@ -126,7 +130,7 @@ test('parseClaudeStreamEvent:thinking_delta/signature_delta → reasoning part;m
     JSON.stringify({ index: 0, delta: { type: 'signature_delta', signature: 's-1' } }));
   const r2 = sig.chunk!.choices[0].delta!.parts[0] as UIMessagePartReasoning;
   assert.equal(r2.reasoning, '');
-  assert.deepEqual(r2.metadata, { signature: 's-1' });
+  assert.deepEqual(r2.metadata, { signature: 's-1', claude_thinking_block_index: 0 });
 
   const stop = parseClaudeStreamEvent('message_stop', undefined, '{}');
   assert.equal(stop.done, true);

@@ -1,0 +1,29 @@
+{
+  "template": {
+    "validation": "",
+    "unresolvedPlaceholders": [
+      "{{font_css}}",
+      "{{analysis_html}}",
+      "{{extended_reading_html}}"
+    ]
+  },
+  "invalidUrl": {
+    "entriesSaved": 1,
+    "articleCallback": 1,
+    "error": "",
+    "savedSource": {
+      "id": "input-1791193163355-qpmx46n9",
+      "kind": "web",
+      "title": "ftp://invalid.example",
+      "url": "ftp://invalid.example",
+      "content": "",
+      "status": "failed",
+      "error": "请输入有效的 HTTP 或 HTTPS 网页链接。",
+      "truncated": false,
+      "note": null
+    }
+  },
+  "deleteLastSearchService": {
+    "deleteWrites": 0
+  }
+}

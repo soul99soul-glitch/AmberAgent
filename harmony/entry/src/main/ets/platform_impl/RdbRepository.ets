@@ -161,6 +161,7 @@ const outputWithSectionState = (
     inputUrlsText: output.inputUrlsText,
     templateId: output.templateId,
     templateSnapshot: output.templateSnapshot,
+    templateArticle: output.templateArticle,
   };
 };
 

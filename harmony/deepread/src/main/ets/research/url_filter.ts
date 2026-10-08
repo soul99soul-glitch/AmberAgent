@@ -43,9 +43,10 @@ export const isPrivateUrl = (url: string): boolean => {
   if (host.length === 0) return false;
 
   // 去除 IPv6 方括号(对应 Android removePrefix("[").removeSuffix("]"))
-  const bare = host.startsWith('[') && host.endsWith(']')
+  const rawHost = host.startsWith('[') && host.endsWith(']')
     ? host.slice(1, -1)
     : host;
+  const bare = rawHost.endsWith('.') ? rawHost.slice(0, -1) : rawHost;
 
   // loopback / mDNS / internal TLD
   if (
@@ -58,22 +59,21 @@ export const isPrivateUrl = (url: string): boolean => {
     return true;
   }
 
-  // IPv4-mapped IPv6(::ffff:127.0.0.1 / ::ffff:7f00:1)— 提取内嵌 IPv4 再判
-  const lower: string = bare.toLowerCase();
-  if (lower.startsWith('::ffff:')) {
-    const tail: string = lower.substring('::ffff:'.length);
-    const mapped: number[] | null = parseIpv4MappedTail(tail);
-    if (mapped !== null) return isPrivateOctets(mapped);
-    // 非法 tail 按未知处理 → 私网语义(拒绝)
-    return true;
-  }
-
-  // IPv6(含 ':')::: / ::1 / fe80: (link-local) / fc / fd (ULA)
+  // IPv6 字面量先展开为八个 16-bit 分组，等价写法共享同一分类。
   if (bare.includes(':')) {
-    return bare === '::' || bare === '::1' ||
-      bare.startsWith('fe80:') ||
-      bare.startsWith('fc') ||
-      bare.startsWith('fd');
+    const groups = parseIpv6Text(bare);
+    if (groups === null) {
+      // 保留既有非法 mapped/私网前缀的拒绝语义。
+      return bare.startsWith('::ffff:') || bare.startsWith('fe80:')
+        || bare.startsWith('fc') || bare.startsWith('fd');
+    }
+    const zeroPrefix = groups.slice(0, 7).every(group => group === 0);
+    if (zeroPrefix && (groups[7] === 0 || groups[7] === 1)) return true;
+    if ((groups[0] & 0xffc0) === 0xfe80 || (groups[0] & 0xfe00) === 0xfc00) return true;
+    if (groups.slice(0, 5).every(group => group === 0) && groups[5] === 0xffff) {
+      return isPrivateOctets([groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff]);
+    }
+    return false;
   }
 
   // IPv4 全形态(inet_aton):整数/十六进制/八进制/短格式/混合进制
@@ -145,28 +145,34 @@ const parseIpv4Text = (s: string): number[] | null => {
   return out;
 };
 
-// IPv4-mapped 尾部:dotted 或 16 进制两段,失败 → null
-const parseIpv4MappedTail = (tail: string): number[] | null => {
-  const v4: number[] | null = parseIpv4Text(tail);
-  if (v4 !== null) return v4;
-  const parts: string[] = tail.split(':');
-  if (parts.length !== 2) return null;
-  const hi: string = parts[0];
-  const lo: string = parts[1];
-  if (hi.length > 4 || lo.length > 4) return null;
-  let allHex: boolean = true;
-  for (let i = 0; i < hi.length; i++) {
-    if (!isHexChar(hi[i])) allHex = false;
+// 与现有 IPv4 字面量解析同属本地分类，不进行 DNS/网络探测。
+const parseIpv6Text = (host: string): number[] | null => {
+  let text = host;
+  if (text.includes('.')) {
+    const colon = text.lastIndexOf(':');
+    const octets = parseIpv4Text(text.slice(colon + 1));
+    if (octets === null) return null;
+    text = text.slice(0, colon + 1) + ((octets[0] << 8) | octets[1]).toString(16)
+      + ':' + ((octets[2] << 8) | octets[3]).toString(16);
   }
-  for (let i = 0; i < lo.length; i++) {
-    if (!isHexChar(lo[i])) allHex = false;
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0].length > 0 ? halves[0].split(':') : [];
+  const right = halves.length === 2 && halves[1].length > 0 ? halves[1].split(':') : [];
+  const count = left.length + right.length;
+  if ((halves.length === 1 && count !== 8) || (halves.length === 2 && count >= 8)) return null;
+  const segments = [...left, ...Array<string>(8 - count).fill('0'), ...right];
+  const groups: number[] = [];
+  for (const segment of segments) {
+    if (segment.length === 0 || segment.length > 4) return null;
+    let value = 0;
+    for (let index = 0; index < segment.length; index++) {
+      if (!isHexChar(segment[index])) return null;
+      value = (value << 4) | hexValue(segment[index]);
+    }
+    groups.push(value);
   }
-  if (!allHex) return null;
-  let h: number = 0;
-  for (let i = 0; i < hi.length; i++) h = (h << 4) | hexValue(hi[i]);
-  let l: number = 0;
-  for (let i = 0; i < lo.length; i++) l = (l << 4) | hexValue(lo[i]);
-  return [(h >> 8) & 0xff, h & 0xff, (l >> 8) & 0xff, l & 0xff];
+  return groups;
 };
 
 const isPrivateOctets = (octets: number[]): boolean => {

@@ -19,6 +19,7 @@ import { currentMessages, nodeRole, toMessageNode } from './conversation.ts';
 import type { MessageChunk, UIMessage } from './message.ts';
 import { finishAssistantMessage, makeUIMessage } from './message.ts';
 import { MessageStreamAccumulator } from './stream_accumulator.ts';
+import { StreamSnapshotGate } from './stream_snapshot_gate.ts';
 import type { Assistant } from './assistant.ts';
 import { assembleInternalMessages } from './context_assembly.ts';
 import { fitMessagesToTokenBudget } from './context_compact.ts';
@@ -29,6 +30,7 @@ import { applyInputTransformers, applyOnGenerationFinish } from './transformer_p
 import type { ChatStreamProvider, ConversationStore, StreamOpts } from './chat_turn.ts';
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import { nowIso } from './ids.ts';
+import { waitForGenerationRetry } from './generation_retry_wait.ts';
 import {
   decideGenerationRetry, makeGenerationRetrySetting, RETRY_STATUS_TEMPLATE,
 } from './generation_retry.ts';
@@ -72,6 +74,8 @@ export interface RegenerateDeps {
   onUpdate?: (messages: UIMessage[]) => void;
   // raw accumulator 快照观察点(周期 checkpoint;与 ChatTurnDeps 同语义)
   onRawFlushSnapshot?: (messages: UIMessage[]) => void;
+  nowMs?: () => number;
+  flushIntervalMs?: number;
   // 停止生成(D-035 扩展):abort → 部分快照照常入列(分支追加/新节点),正常 resolve
   abortSignal?: AbortSignalLike;
   // 生成重试(D-050,chat_turn 同语义)
@@ -151,18 +155,18 @@ export const runRegenerateAt = async (
       ...(deps.extraSystemBlocks !== undefined ? await deps.extraSystemBlocks() : []),
     ],
   });
-  // 发送边界兜底 fit(chat_turn 同语义)
-  const assembled: UIMessage[] = deps.finalTokenBudget !== undefined
-    ? fitMessagesToTokenBudget(assembledBase, deps.finalTokenBudget)
-    : assembledBase;
-  const internalMessages: UIMessage[] = await applyInputTransformers(
-    assembled, deps.inputTransformers, ctx);
-  // D-071a:视觉兜底重建闭包(chat_turn 同语义,GenerationHandler.kt:613/:648)
+  // 文档/OCR/模板物化后再 fit，与普通发送使用同一预算位置。
+  const prepareInternalMessages = async (forceImageToText: boolean = false): Promise<UIMessage[]> => {
+    const transformed: UIMessage[] = await applyInputTransformers(
+      assembledBase, deps.inputTransformers, forceImageToText ? { ...ctx, forceImageToText: true } : ctx);
+    return deps.finalTokenBudget !== undefined
+      ? fitMessagesToTokenBudget(transformed, deps.finalTokenBudget) : transformed;
+  };
+  const internalMessages: UIMessage[] = await prepareInternalMessages();
   const visionFallback: VisionFallbackHook | undefined =
     deps.modelSupportsImageInput === undefined ? undefined : {
       modelSupportsImageInput: deps.modelSupportsImageInput,
-      rebuildInternalMessages: (): Promise<UIMessage[]> => applyInputTransformers(
-        assembled, deps.inputTransformers, { ...ctx, forceImageToText: true }),
+      rebuildInternalMessages: (): Promise<UIMessage[]> => prepareInternalMessages(true),
     };
 
   // 3. provider 流式(重试见下;不可重试错误直接传播 — 对齐 runChatTurn;
@@ -183,6 +187,8 @@ export const runRegenerateAt = async (
   // D-040:streamOutput=false 且 provider 支持 → 非流式单次补全(chat_turn 同语义)
   const useNonStream: boolean = deps.assistant.streamOutput === false
     && provider.generateText !== undefined;
+  const nowMs: () => number = deps.nowMs ?? ((): number => Date.now());
+  const flushIntervalMs: number = deps.flushIntervalMs ?? 48;
   // D-050 重试循环(chat_turn 同构,runProviderCallWithRetry:774-820 忠实):
   //   每次尝试全新 accumulator(失败尝试的部分输出丢弃);
   //   sawChunk 仅累计「最终存活尝试」的 chunk
@@ -213,26 +219,30 @@ export const runRegenerateAt = async (
           sawChunk = true;
         }
         accumulator.append(chunk);
-        if (deps.onRawFlushSnapshot !== undefined) {
-          deps.onRawFlushSnapshot(accumulator.snapshot());
-        }
-        if (deps.onUpdate !== undefined) {
-          deps.onUpdate(accumulator.snapshot());
+        if (deps.onRawFlushSnapshot !== undefined || deps.onUpdate !== undefined) {
+          const snapshot: UIMessage[] = accumulator.snapshot();
+          deps.onRawFlushSnapshot?.(snapshot);
+          deps.onUpdate?.(snapshot);
         }
       } else {
-        await provider.streamText(msgs, (chunk: MessageChunk): void => {
-          if (chunk.choices.length > 0
-            && (chunk.choices[0].delta !== null || chunk.choices[0].message !== null)) {
-            sawChunk = true;
-          }
-          accumulator.append(chunk);
-          if (deps.onRawFlushSnapshot !== undefined) {
-            deps.onRawFlushSnapshot(accumulator.snapshot());
-          }
-          if (deps.onUpdate !== undefined) {
-            deps.onUpdate(accumulator.snapshot());
-          }
-        }, streamOpts);
+        const gate: StreamSnapshotGate = new StreamSnapshotGate(flushIntervalMs, nowMs, (): void => {
+          const snapshot: UIMessage[] = accumulator.snapshot();
+          deps.onRawFlushSnapshot?.(snapshot);
+          deps.onUpdate?.(snapshot);
+        });
+        try {
+          await provider.streamText(msgs, (chunk: MessageChunk): void => {
+            if (chunk.choices.length > 0
+              && (chunk.choices[0].delta !== null || chunk.choices[0].message !== null)) {
+              sawChunk = true;
+            }
+            accumulator.append(chunk);
+            if (deps.onRawFlushSnapshot !== undefined || deps.onUpdate !== undefined) gate.changed();
+          }, streamOpts);
+        } finally {
+          const publishedTail: boolean = gate.finish();
+          if (!publishedTail) deps.onRawFlushSnapshot?.(accumulator.snapshot());
+        }
       }
     };
     try {
@@ -265,7 +275,7 @@ export const runRegenerateAt = async (
             .replace('%4$s', decision.reason),
         );
       }
-      await sleep(decision.delayMs);
+      await waitForGenerationRetry(decision.delayMs, sleep, deps.abortSignal);
       attempt++;
       // 重试等待中 abort:不发起新尝试,丢弃失败尝试的部分输出。
       if (isAborted()) {

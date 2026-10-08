@@ -1,0 +1,18 @@
+{
+  "payloadEntriesChecked": 109,
+  "changedEntries": [
+    "resources/base/media/app_icon.png",
+    "resources/phone/media/app_icon.png"
+  ],
+  "method": "Preserve the accepted HAP payload, replace only base/phone icon PNG entries, preserve code offsets and 4096-byte alignment, then run official HAP signing and verification.",
+  "unchangedCodeSha256": {
+    "ets/modules.abc": "634a06c5457d89da6576f7b9bbd889bea68772face0cd9323bb543dfe089762f",
+    "libs/arm64-v8a/libamber_native.so": "5a39f807f91f2818381eb4c84b296cb22498ca9f21d9ee79e529844dbed00a16",
+    "libs/arm64-v8a/libc++_shared.so": "f69947af100b652e349ae51e4a4888bcc7a327db9085272d318176ef1782bf0f"
+  },
+  "codeDataOffsets": {
+    "ets/modules.abc": 4096,
+    "libs/arm64-v8a/libamber_native.so": 9613312,
+    "libs/arm64-v8a/libc++_shared.so": 31076352
+  }
+}

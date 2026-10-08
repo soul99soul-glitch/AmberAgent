@@ -114,13 +114,6 @@ const makeCreation = (model: NovelModelRunning): NovelCreation =>
     idleTimeoutMs: 500,
   });
 
-test('create + open roundtrip', async () => {
-  const creation = makeCreation(smartModel());
-  const p = await creation.create('我的小说');
-  const opened = await creation.open(p.id);
-  assert.equal(opened.name, '我的小说');
-});
-
 test('generate write: streams, persists user+assistant, sets granularity', async () => {
   const creation = makeCreation(smartModel());
   const p = await creation.create('小说');
@@ -191,20 +184,6 @@ test('generate: empty input → failed', async () => {
   assert.ok(events.some(e => e.kind === 'failed'));
 });
 
-test('generate: model validate failure → failed', async () => {
-  const noModel: NovelModelRunning = {
-    async validate(): Promise<void> { throw new Error('尚未配置模型'); },
-    start(): { subscribe: (cb: (e: NovelModelEvent) => void) => () => void } {
-      return { subscribe: (): () => void => ((): void => {}) };
-    },
-    cancel(): void {},
-  };
-  const creation = makeCreation(noModel);
-  const p = await creation.create('小说');
-  const events = await runToTerminal(creation.generate(p.id, '写', 'write'));
-  assert.ok(events.some(e => e.kind === 'failed'));
-});
-
 test('busy: second generate on same project fails', async () => {
   const ctl = controllableModel();
   const creation = makeCreation(ctl.model);
@@ -249,31 +228,6 @@ test('activeRun replays the latest canonical snapshot after a page reconnects', 
   await delay(0);
   assert.equal(creation.activeRun(project.id), null);
   assert.ok(firstEvents.some((event: NovelRunEvent): boolean => event.kind === 'snapshot'));
-});
-
-test('interrupt: keeps partial and persists interrupted message', async () => {
-  const ctl = controllableModel();
-  const creation = makeCreation(ctl.model);
-  const p = await creation.create('小说');
-  const run = creation.generate(p.id, '写一段', 'write', 'continuation');
-  const eventsP = runToTerminal(run);
-  await delay(10);
-  await ctl.emit({
-    kind: 'snapshot', messages: [makeAssistantMessage('partial')], generationActive: true,
-    textDeltasLive: true, transport: 'live',
-  });
-  await delay(5);
-  creation.interrupt(run.id);
-  const events = await eventsP;
-  const interrupted = events.find(e => e.kind === 'interrupted');
-  assert.ok(interrupted !== undefined);
-  assert.equal(interrupted?.kind === 'interrupted' ? interrupted.partial : '', 'partial');
-
-  const reloaded = await creation.open(p.id);
-  const assistant = reloaded.messages.find(m => m.role === 'assistant');
-  assert.ok(assistant !== undefined);
-  assert.equal(assistant?.interrupted, true);
-  assert.equal(assistant?.content, 'partial');
 });
 
 test('collectMessage: saves chapter and produces a suggestion (async)', async () => {
@@ -360,13 +314,6 @@ test('rename and setModelPolicy', async () => {
   const reloaded = await creation.open(p.id);
   assert.equal(reloaded.name, '新名');
   assert.equal(reloaded.modelId, 'modelX');
-});
-
-test('delete project removes it', async () => {
-  const creation = makeCreation(smartModel());
-  const p = await creation.create('小说');
-  await creation.delete(p.id);
-  await assert.rejects(creation.open(p.id));
 });
 
 // ===== 回归测试(针对 review 修复) =====

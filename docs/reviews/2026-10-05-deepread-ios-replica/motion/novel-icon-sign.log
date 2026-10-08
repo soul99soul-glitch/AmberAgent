@@ -1,0 +1,35 @@
+── HarmonyOS HAP 本地签名 ──
+未签名 HAP : /Users/arquiel/Downloads/AI/amber-harmony-preview/.harmony-standalone/novel/entry/build/default/outputs/default/entry-default-unsigned.hap
+输出目录   : /Users/arquiel/Downloads/AI/amber-harmony-preview/.harmony-standalone/novel/entry/build/default/outputs/default/signed
+签名工具   : /Users/arquiel/Library/Huawei/commandline/command-line-tools/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar
+
+[1-3/8] CA 链已存在，跳过
+[4/8] 应用密钥已存在，跳过
+[5/8] 应用调试证书已存在，跳过
+[6/8] Profile 签名证书已存在，跳过
+[7/8] 签名 Profile (生成 .p7b)
+    bundle-name: app.amber.novel
+    device-ids : ["454d5504d4143041524d0217843a60e4f48a2b2a8bc32a83687d500000000000"]
+10-05 16:53:18.680  INFO - sign-profile success
+[8/8] 签名 HAP
+10-05 16:53:19.228  INFO - Create a sign info successfully.
+10-05 16:53:19.234  INFO - Create a sign info successfully.
+10-05 16:53:19.244  INFO - Create a sign info successfully.
+10-05 16:53:19.265  INFO - Create a sign info successfully.
+10-05 16:53:19.270  INFO - Sign successfully.
+10-05 16:53:19.337  INFO - Add sign data in sign info list success.
+10-05 16:53:19.340  INFO - Generate signing block success, begin write it to output file
+10-05 16:53:19.340  INFO - Sign Hap success!
+10-05 16:53:19.340  INFO - sign-app success
+
+── 验证 ──
+10-05 16:53:19.724  INFO - verify lib: libs/arm64-v8a/libc++_shared.so
+10-05 16:53:19.727  INFO - verify codesign success
+10-05 16:53:19.764  INFO - Digest verify result: true, DigestAlgorithm: SHA-256
+10-05 16:53:19.767  INFO - verify: Verify success
+10-05 16:53:19.768  INFO - verify-app success
+
+✓ 签名完成: /Users/arquiel/Downloads/AI/amber-harmony-preview/.harmony-standalone/novel/entry/build/default/outputs/default/signed/entry-default-signed.hap
+
+── 安装到设备 ──
+  hdc install "/Users/arquiel/Downloads/AI/amber-harmony-preview/.harmony-standalone/novel/entry/build/default/outputs/default/signed/entry-default-signed.hap"

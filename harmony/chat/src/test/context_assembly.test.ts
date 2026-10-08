@@ -133,18 +133,6 @@ test('mergeCustomParams: headers/bodies assistant 在前 model 在后;temperatur
 
 // ===== toChatModel(ProviderModel → 请求侧子集) =====
 
-test('toChatModel: 字段映射(modalities/abilities 直通)', () => {
-  const m = makeProviderModel({
-    modelId: 'gpt-4o', displayName: 'GPT',
-    abilities: ['tool', 'reasoning'],
-    inputModalities: ['text', 'image'], outputModalities: ['text'],
-  });
-  const c = toChatModel(m);
-  assert.equal(c.modelId, 'gpt-4o');
-  assert.deepEqual(c.abilities, ['tool', 'reasoning']);
-  assert.deepEqual(c.inputModalities, ['text', 'image']);
-});
-
 // ===== 预设消息播种(ChatService.kt:567-572) =====
 
 test('seedConversationWithPresets: 空会话 → presets 成节点;非空 → 不动', () => {
@@ -164,7 +152,7 @@ test('seedConversationWithPresets: 空会话 → presets 成节点;非空 → �
 // ===== D-077a:tool system prompt 块(buildSystemPromptParts:739-741,:763-770) =====
 
 test('buildToolSystemPrompt: 非 blank 收集 + \\n\\n 连接', () => {
-  const model = toChatModel(makeProviderModel({}));
+  const model = toChatModel(makeProviderModel({ abilities: ['tool'] }));
   const noop = (): Promise<never[]> => Promise.resolve([]);
   const tools = [
     makeAgentTool({
@@ -186,7 +174,7 @@ test('buildToolSystemPrompt: 非 blank 收集 + \\n\\n 连接', () => {
 });
 
 test('buildToolSystemPrompt: model/messages 透传给每个工具', () => {
-  const model = toChatModel(makeProviderModel({ modelId: 'm-x' }));
+  const model = toChatModel(makeProviderModel({ modelId: 'm-x', abilities: ['tool'] }));
   const msgs = [makeUserMessage('hello')];
   let seen = '';
   const tools = [

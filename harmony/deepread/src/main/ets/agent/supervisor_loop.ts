@@ -8,8 +8,9 @@
 
 import type { UIMessage } from './message.ts';
 import { makeUserMessage, latestAssistantText } from './message.ts';
-import { structuredStageSchema, structuredArticleBody, writeStructuredStage } from './structured_stage.ts';
+import { structuredStageSchema, structuredArticleBody, structuredStageFailureReason, writeStructuredStage } from './structured_stage.ts';
 import type { AbortControllerLike, AbortSignalLike } from '../platform/runtime_api.ts';
+import type { StructuredStageFailure } from './structured_stage.ts';
 import type { SectionWriterTools } from './section_writer_tools.ts';
 import type { ToolDefinition } from './tool_execution.ts';
 import type { DeepReadEvidencePack, EvidenceCard, DeepReadArticlePlan } from '../research/evidence_pack.ts';
@@ -66,7 +67,7 @@ export const buildPrompt = (p: BuildPromptParams): string => {
   lines.push('');
   appendArticlePlan(lines, p.articlePlan);
   lines.push('');
-  appendEvidenceCards(lines, p.stageEvidence, p.evidencePack, `本段证据包（全局共 ${p.evidencePack.allSources.length} 条，本轮只给最相关 ${p.stageEvidence.length} 条）`, STAGE_EXCERPT_LIMIT[p.stage]);
+  appendEvidenceCards(lines, p.stageEvidence, p.evidencePack, `本段证据包（全局共 ${p.evidencePack.allSources.length} 条，本轮只给最相关 ${p.stageEvidence.length} 条）`, STAGE_EXCERPT_LIMIT[p.stage], p.writerMode === 'structured');
   lines.push('');
   appendArticleContext(lines, p.existingOutput);
   lines.push('');
@@ -95,12 +96,30 @@ export const buildPrompt = (p: BuildPromptParams): string => {
   lines.push('');
   lines.push('## 段落要求');
   appendStageRequirement(lines, p.stage);
+  if (p.writerMode === 'structured') appendEditorialRequirement(lines, p.stage);
   lines.push('- 视觉：头图必须来自候选池且 confidence=hero；inline 候选只能作为正文图。不得提交任意 URL、站点 logo、favicon、媒体图标或头像。');
+  if (p.writerMode !== 'structured') {
   lines.push('- 图解：只提交 3-6 个短节点的 diagram spec，节点 label 控制在约 30 字内；流程/因果可保留少量关键跨节点关系，但避免网状交叉。禁止 raw SVG/HTML/JS/外链资源。不需要就隐藏。');
+  }
   lines.push('');
   lines.push(p.writerMode === 'structured' ? '只输出本段的 JSON 对象，系统会核验并合并当前段落。'
     : '正文输出不会被 UI 消费。不要输出完整 JSON，不要写 Markdown 长文作为最终答案。');
   return lines.join('\n');
+};
+
+const appendEditorialRequirement = (lines: string[], stage: DeepReadGenerationStage): void => {
+  if (stage === 'OVERVIEW') {
+    lines.push('- bottom_line 用不超过40字的一句话讲清发生了什么及最重要的意义；summary 不重复它。hero_image_url 只选候选池真实头图，没有可靠图片留空。');
+  } else if (stage === 'NARRATIVE') {
+    lines.push('- core_points 给3-5条消化来源后的关键判断：supporting 解释依据及为什么重要，sources 填来源标题的 [n] 一基编号，不要写来源清单或重复时间轴。');
+    lines.push('- timeline 给4-7条直接相关事件，覆盖早期背景、导火索、当前事件、后续影响；date 只写日期或时间，is_highlight 只标1-3个转折点，why 不超过60字说明转折原因，其他事件留空。');
+    lines.push('- diagram 只在非线性当事方关系、系统结构或多方对比无法用时间轴讲清时输出，type 取 stakeholder_map|system_structure|comparison_matrix，3-6个节点；线性因果和流程由时间轴承担，不需要则省略整个字段。');
+  } else if (stage === 'ANALYSIS') {
+    lines.push('- core_dispute 用问句点明争议。perspectives 给3-5个不同当事方，holder 不超过12字，interest 不超过30字，viewpoint 写立场和理由，sources 填 [n] 一基编号。');
+    lines.push('- quote 必须是来源中具名人物或机构的原话，文章标题、报道摘要及网友评论不算；quote_by 不超过20字写姓名或机构与身份，无可靠原话两项都留空。');
+    lines.push('- impacts 给2-4条影响，target 写受影响对象，horizon 只取 short 或 long，effect 不超过80字；watch 给1-3项观察节点或指标，写清看什么及为什么，每项不超过50字。');
+    lines.push('- uncertainties 给0-4条待确认说法，claim 不超过60字，status 取 single_source、conflicting 或 pending_official；都确认则留空数组。');
+  }
 };
 
 const appendStageRequirement = (lines: string[], stage: DeepReadGenerationStage): void => {
@@ -154,9 +173,10 @@ const appendArticlePlan = (lines: string[], plan: DeepReadArticlePlan): void => 
 const appendEvidenceCards = (
   lines: string[],
   cards: EvidenceCard[],
-  _pack: DeepReadEvidencePack,
+  pack: DeepReadEvidencePack,
   title: string,
   excerptLimit: number,
+  numbered: boolean = false,
 ): void => {
   lines.push(`## ${title}`);
   if (cards.length === 0) {
@@ -164,7 +184,8 @@ const appendEvidenceCards = (
     return;
   }
   for (const card of cards) {
-    lines.push(`### ${card.sourceId}. ${card.title}`);
+    const sourceNumber = pack.sourceNumbers?.[card.sourceId] ?? pack.allSources.findIndex(source => source.sourceId === card.sourceId) + 1;
+    lines.push(numbered ? `### [${sourceNumber}] ${card.sourceId}. ${card.title}` : `### ${card.sourceId}. ${card.title}`);
     if (card.url.trim().length > 0) lines.push(`- url: ${card.url}`);
     lines.push(`- source: ${card.source ?? '-'}`);
     lines.push(`- credibility: ${card.credibility}; freshness: ${card.freshness}`);
@@ -263,6 +284,7 @@ export const runStageSupervisorLoop = async (
   }))];
 
   const initialRequiredWrites = writer.requiredWriteCount;
+  let structuredFailure: StructuredStageFailure | null = null;
 
   try {
     for (let pass = 0; pass < MAX_SUPERVISOR_PASSES; pass++) {
@@ -289,7 +311,9 @@ export const runStageSupervisorLoop = async (
       }
       if (ctx.writerMode === 'structured') {
         if (ctx.signal?.aborted) { const error = new Error('aborted'); error.name = 'AbortError'; throw error; }
-        await writeStructuredStage(writer, stage, latestAssistantText(messages));
+        const text = latestAssistantText(messages);
+        const written = await writeStructuredStage(writer, stage, text);
+        structuredFailure = written ? null : structuredStageFailureReason(stage, text);
       }
       const stageReady = statusOf(writer.current(), stage) === 'READY';
       // 0.1: 无 coverageReport,supplementWritten 永远 true
@@ -300,14 +324,15 @@ export const runStageSupervisorLoop = async (
       // 该 pass 没新写入 → 加 reminder
       if (writer.requiredWriteCount === beforeWrites) {
         messages = [...messages, makeUserMessage(ctx.writerMode === 'structured'
-          ? `上一次没有合法且完整的本段 JSON。请只返回此 JSON 对象，不要解释：${structuredStageSchema(stage)}` : buildWriterReminder(stage, pass))];
+          ? `${structuredFailure?.retryInstruction ?? ''} 请只返回此 JSON 对象，不要解释：${structuredStageSchema(stage)}` : buildWriterReminder(stage, pass))];
       }
     }
     // 2 pass 都没成功
     if (statusOf(writer.current(), stage) !== 'READY') {
       const recovered = ctx.writerMode !== 'structured' && await ctx.tryFallback(stage, messages, stageSources, 'missing writer tool');
       if (recovered) return { stage, ready: true, outcome: 'fallback_recovered', finalOutput: writer.current() };
-      const failMsg = stageFailureMessage(stage, new Error(ctx.writerMode === 'structured' ? '未返回合法且完整的段落 JSON' : 'missing writer tool'), stageTimeoutMs);
+      const failMsg = stageFailureMessage(stage, new Error(ctx.writerMode === 'structured'
+        ? structuredFailure?.message ?? '模型没有返回本段的完整内容，请重试。' : 'missing writer tool'), stageTimeoutMs);
       writer.markFailed(stage, failMsg);
       return { stage, ready: false, outcome: 'failed', finalOutput: writer.current() };
     }

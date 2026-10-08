@@ -1,30 +1,36 @@
 // AgentMessageRow — chat/novel 共用的完整 agent 消息行。
 // host 通过静态 capabilities 决定可交互入口，并用具名 hostFooter slot 注入宿主尾部。
 
-import { MOTION_OVERLAY, INK, INK3, META, SURFACE2, USER_BG, USER_INK, ACCENT } from '../design/tokens.ets';
+import { MOTION_OVERLAY, INK, SURFACE2, USER_BG, USER_INK, ACCENT } from '../design/tokens.ets';
 import type {
-  AskUserQuestion, MessagePartBlock, ReasoningCardState, ThinkingStep, UIMessage,
+  AskUserQuestion, MessagePartBlock, ReasoningCardState, ThinkingStep, UIMessage, UIMessagePart,
   UIMessagePartDocument, UIMessagePartReasoning, UIMessagePartTool,
 } from '@amber/chat-domain';
 import {
   ASK_USER_TOOL_NAME, buildAskUserAnswerPayload, groupMessageParts,
-  onReasoningExpandedChange, parseAskUserQuestions, reasoningCardStateExpanded,
+  parseAskUserQuestions,
   streamToolIndex,
 } from '@amber/chat-domain';
 import type { ToolApprovalPartLocator } from '@amber/chat-domain';
 import { MarkdownText } from './MarkdownText.ets';
 import { ChatMessageReasoning } from './ChatMessageReasoning.ets';
 import { ChatMessageTools } from './ChatMessageTools.ets';
+import { NovelChapterPlanProposalCard } from './NovelChapterPlanProposalCard.ets';
+import { parseNovelChapterPlanProposal } from '../platform_impl/NovelPlanProposalProjection.ets';
+import { JevApprovalFacts } from './JevApprovalFacts.ets';
 import { ChatMessageAskUserStep } from './ChatMessageAskUserStep.ets';
 import { recipeAskUserPart } from './RecipeApprovalSummary.ets';
 import { pluginAskUserPart } from './PluginApprovalSummary.ets';
 import { ChatMessageAvatar } from './ChatMessageAvatar.ets';
 import { ChatMessageSubAgentStep } from './ChatMessageSubAgentStep.ets';
 import { ChatMessageCouncilStep } from './ChatMessageCouncilStep.ets';
+import { WidgetMessageContent } from './WidgetMessageContent.ets';
 import { ChatMessageActionFooter, resolveActionFooterMode } from './ChatMessageActionFooter.ets';
 import { ContentAttachmentChip, urlBasename } from './ContentAttachmentChip.ets';
 import { MiniAppChatCard } from './MiniAppChatCard.ets';
 import { UIAvatar } from './UIAvatar.ets';
+import { ChatUserBubble } from './ChatUserBubble.ets';
+import { ImagePreviewDialog } from './ui/ImagePreviewDialog.ets';
 
 export interface AgentMessageRowHostCapabilities {
   copy: boolean;
@@ -39,6 +45,7 @@ export interface AgentMessageRowHostCapabilities {
   answerTool: boolean;
   openToolPreview: boolean;
   openSubAgentRun: boolean;
+  openCouncilRun?: boolean;
   runMiniApp: boolean;
   modifyMiniApp: boolean;
   openMiniAppList: boolean;
@@ -69,7 +76,7 @@ export const NO_AGENT_MESSAGE_ROW_CAPABILITIES: AgentMessageRowHostCapabilities 
 export struct AgentMessageRow {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('darkMode') darkMode: boolean = false;
-  @Prop message: UIMessage;
+  @Prop @Watch('onMessageChanged') message: UIMessage;
   @Prop capabilities: AgentMessageRowHostCapabilities = NO_AGENT_MESSAGE_ROW_CAPABILITIES;
   @Prop branchCount: number = 1;
   @Prop selectIndex: number = 0;
@@ -98,6 +105,7 @@ export struct AgentMessageRow {
   @Prop chatFontFamily: string = 'DEFAULT';
   // LaTeX 渲染开关(DisplaySetting.enableLatexRendering,传递 MarkdownText)
   @Prop enableLatexRendering: boolean = true;
+  @Prop enableGenerativeWidgets: boolean = true;
   // 同一 message id 可同时出现在已提交行与工具续跑预览中；预览使用独立键命名空间。
   @Prop streamKeyTag: string = '';
   onSwitch: (idx: number) => void = (_idx: number): void => {};
@@ -115,7 +123,9 @@ export struct AgentMessageRow {
     (_id: string, _a: string, _loc?: ToolApprovalPartLocator): void => {};
   onOpenSubAgentRun: (runId: string, tools: UIMessagePartTool[]) => void =
     (_id: string, _t: UIMessagePartTool[]): void => {};
+  onSubAgentResultToggle: () => void = (): void => {};
   onCopy: () => void = (): void => {};
+  @Prop isFavorite: boolean = false;
   onFavorite: (text: string) => void = (_t: string): void => {};
   onOpenToolPreview: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator) => void =
     (_p: UIMessagePartTool, _l?: ToolApprovalPartLocator): void => {};
@@ -123,6 +133,9 @@ export struct AgentMessageRow {
     (_p: UIMessagePartTool, _l?: ToolApprovalPartLocator): string => '';
   // generate_image 修改回调(edit 流程,宿主 ChatPage 注入)
   onModifyGeneratedImage: (url: string) => void = (_url: string): void => {};
+  onWidgetAction: (prompt: string) => void = (_prompt: string): void => {};
+  onOpenCouncilRun: (runId: string, tools: UIMessagePartTool[]) => void =
+    (_runId: string, _tools: UIMessagePartTool[]): void => {};
   // F44:文档附件打开(宿主未提供路径时 capabilities.openDocument=false → 纯展示)
   onOpenDocument: (part: UIMessagePartDocument) => void = (_p: UIMessagePartDocument): void => {};
   // P3:可见文本增长回调(逐字 reveal / 终态 drain 推进时触发;冒泡到 ChatPage
@@ -137,7 +150,7 @@ export struct AgentMessageRow {
   @BuilderParam hostFooter: () => void;
   // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)
   @State reasoningStates: Record<string, string> = {};
-  @State thinkingExpandedStates: Record<string, boolean> = {};
+  private cachedBlocks: MessagePartBlock[] | null = null;
   // D-105:ask_user 草稿态(题 id → 文本/单选值;:102;题 id → 多选集;:104)
   @State askAnswers: Record<string, string> = {};
   @State askMultiAnswers: Record<string, string[]> = {};
@@ -145,11 +158,35 @@ export struct AgentMessageRow {
   //   流式结束后保持 Preview 不自动折叠)
   @State sawStream: boolean = false;
   // 1:1 原型 fadeRise .26s ease-out:行入场 opacity 0→1 + translateY 4→0
+  @Prop animateEntrance: boolean = true;
   @State enterOpacity: number = 0;
   @State enterY: number = 4;
+  @State imagePreviewOpen: boolean = false;
+  @State imagePreviewUrls: string[] = [];
+  @State imagePreviewIndex: number = 0;
+
+  private openImagePreview(url: string): void {
+    const urls: string[] = [];
+    for (const part of this.message.parts) {
+      if (part.type === 'image') urls.push(part.url);
+    }
+    this.imagePreviewUrls = urls;
+    this.imagePreviewIndex = Math.max(0, urls.indexOf(url));
+    this.imagePreviewOpen = true;
+  }
+
+  @Builder
+  private MessageImagePreview(): void {
+    ImagePreviewDialog({ images: this.imagePreviewUrls, initialIndex: this.imagePreviewIndex,
+      onDismiss: (): void => { this.imagePreviewOpen = false; } })
+  }
 
   aboutToAppear(): void {
     if (this.streaming) this.sawStream = true;
+  }
+
+  private onMessageChanged(): void {
+    this.cachedBlocks = null;
   }
 
   private onStreamingChange(_propName: string): void {
@@ -243,13 +280,12 @@ export struct AgentMessageRow {
   private reasoningStateAt(idx: string): ReasoningCardState {
     const s: string | undefined = this.reasoningStates[idx];
     if (s === 'collapsed' || s === 'preview' || s === 'expanded') return s as ReasoningCardState;
-    return (this.streaming || this.sawStream) ? 'preview' : 'collapsed';
+    return (this.streaming || !this.autoCloseThinking) ? 'expanded' : 'collapsed';
   }
 
-  private toggleReasoning(idx: string, loading: boolean): void {
+  private toggleReasoning(idx: string): void {
     const cur: ReasoningCardState = this.reasoningStateAt(idx);
-    const next: ReasoningCardState =
-      onReasoningExpandedChange(!reasoningCardStateExpanded(cur), loading);
+    const next: ReasoningCardState = cur === 'collapsed' ? 'expanded' : 'collapsed';
     const copy: Record<string, string> = {};
     const keys: string[] = Object.keys(this.reasoningStates);
     for (const k of keys) copy[k] = this.reasoningStates[k];
@@ -258,16 +294,33 @@ export struct AgentMessageRow {
   }
 
   private autoCollapseReasoning(idx: string): void {
-    if (this.streaming || this.reasoningStateAt(idx) !== 'expanded') return;
+    if (this.reasoningStates[idx] !== undefined || this.reasoningStateAt(idx) !== 'expanded') return;
     const copy: Record<string, string> = {};
     const keys: string[] = Object.keys(this.reasoningStates);
     for (const k of keys) copy[k] = this.reasoningStates[k];
-    copy[idx] = 'preview';
+    copy[idx] = 'collapsed';
     this.reasoningStates = copy;
   }
 
+  private thinkingStepsAt(bi: number): ThinkingStep[] {
+    const block: MessagePartBlock = this.getBlocks()[bi];
+    return (block as Record<string, Object>)['steps'] as ThinkingStep[];
+  }
+
+  private reasoningPartAt(bi: number, si: number): UIMessagePartReasoning {
+    return (this.thinkingStepsAt(bi)[si] as Record<string, Object>)['reasoning'] as UIMessagePartReasoning;
+  }
+
+  // 稳定 ForEach key 保留 builder；工具属性和交互读取当前快照。
+  private toolPartAt(bi: number, si: number): UIMessagePartTool {
+    return (this.thinkingStepsAt(bi)[si] as Record<string, Object>)['tool'] as UIMessagePartTool;
+  }
+
   private getBlocks(): MessagePartBlock[] {
-    return groupMessageParts(this.message.parts);
+    // Read on cache hits too: each existing Builder must retain its V1 dependency.
+    const parts: UIMessagePart[] = this.message.parts;
+    if (this.cachedBlocks === null) this.cachedBlocks = groupMessageParts(parts);
+    return this.cachedBlocks;
   }
 
   // F16:字号比例应用到消息正文(默认 1.0 → 15,与既有渲染一致)
@@ -284,51 +337,6 @@ export struct AgentMessageRow {
     return false;
   }
 
-  private thinkingExpanded(bi: number): boolean {
-    const v: boolean | undefined = this.thinkingExpandedStates[`${bi}`];
-    return v !== undefined ? v : true;
-  }
-
-  private toggleThinkingExpanded(bi: number): void {
-    if (this.hasPendingToolInBlock(bi)) return;
-    const key: string = `${bi}`;
-    const cur: boolean = this.thinkingExpanded(bi);
-    const copy: Record<string, boolean> = {};
-    const keys: string[] = Object.keys(this.thinkingExpandedStates);
-    for (const k of keys) copy[k] = this.thinkingExpandedStates[k];
-    copy[key] = !cur;
-    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
-      this.thinkingExpandedStates = copy;
-    });
-  }
-
-  private hasPendingToolInBlock(bi: number): boolean {
-    const blocks: MessagePartBlock[] = this.getBlocks();
-    if (bi >= blocks.length) return false;
-    const block: MessagePartBlock = blocks[bi];
-    if (block.kind !== 'thinking') return false;
-    const steps: ThinkingStep[] = (block as Record<string, Object>)['steps'] as ThinkingStep[];
-    for (const step of steps) {
-      if (step.kind === 'tool' && step.tool.approvalState.type === 'pending') return true;
-    }
-    return false;
-  }
-
-  private thinkingSummary(steps: ThinkingStep[]): string {
-    let reasoningCount: number = 0;
-    let toolCount: number = 0;
-    for (const step of steps) {
-      if (step.kind === 'reasoning') {
-        if (this.showThinkingContent) reasoningCount++;
-      }
-      else if (step.kind === 'tool') toolCount++;
-    }
-    if (reasoningCount > 0 && toolCount > 0) return `思考 ${reasoningCount} 段 · 工具 ${toolCount} 次`;
-    if (reasoningCount > 0) return `思考 ${reasoningCount} 段`;
-    if (toolCount > 0) return `工具 ${toolCount} 次`;
-    return '思考过程';
-  }
-
   // 思考内容开关关闭时:整块只剩 reasoning 则整块隐藏(工具步骤不受影响)
   private hasVisibleThinkingSteps(block: MessagePartBlock): boolean {
     if (this.showThinkingContent) return true;
@@ -339,121 +347,128 @@ export struct AgentMessageRow {
     return false;
   }
 
+  private contentTextAt(partIndex: number): string {
+    for (const block of this.getBlocks()) {
+      if (block.kind === 'content' && block.index === partIndex && block.part.type === 'text') {
+        return block.part.text;
+      }
+    }
+    return '';
+  }
+
+  @Builder
+  UserTextContent(partIndex: number): void {
+    MarkdownText({
+      content: this.contentTextAt(partIndex),
+      fontSize: this.bodyFontSize(),
+      fontColor: USER_INK,
+      fillWidth: false,
+      chatFontFamily: this.chatFontFamily,
+      enableLatexRendering: this.enableLatexRendering,
+      codeBlockAutoCollapse: this.codeBlockAutoCollapse,
+      showLineNumbers: this.showLineNumbers,
+      streamKey: `${this.streamKeyTag}${this.message.id}#${partIndex}`,
+    })
+  }
+
   @Builder
   private MessageBlocks(): void {
     ForEach(this.getBlocks(), (block: MessagePartBlock, bi: number): void => {
       if (block.kind === 'thinking' && this.hasVisibleThinkingSteps(block)) {
         Column() {
-          Row() {
-            Text('▸').fontSize(11).fontColor(INK3)
-              .rotate({ angle: this.thinkingExpanded(bi) ? 90 : 0 })
-              .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut })
-            Text(this.thinkingSummary(block.steps))
-              .fontSize(META).fontColor(INK3)
-              .margin({ left: 6 })
-              .layoutWeight(1)
-          }
-          .width('100%')
-          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-          .backgroundColor(SURFACE2)
-          .borderRadius(6)
-          .margin({ bottom: 2 })
-          .onClick((): void => { this.toggleThinkingExpanded(bi); })
-
-          if (this.thinkingExpanded(bi)) {
-            Column() {
-              ForEach(block.steps, (step: ThinkingStep, si: number): void => {
-                if (step.kind === 'reasoning') {
-                  if (this.showThinkingContent) {
-                    ChatMessageReasoning({
-                      part: step.reasoning,
-                      state: this.reasoningStateAt(`${bi}-${si}`),
-                      loading: this.reasoningLoading(step.reasoning),
-                      autoCloseThinking: this.autoCloseThinking,
-                      onToggle: (): void => {
-                        this.toggleReasoning(`${bi}-${si}`, this.reasoningLoading(step.reasoning));
-                      },
-                      onAutoCollapse: (): void => { this.autoCollapseReasoning(`${bi}-${si}`); },
-                    })
-                  }
-                } else if (step.kind === 'tool') {
-                  if (step.tool.toolName === ASK_USER_TOOL_NAME) {
-                    ChatMessageAskUserStep({
-                      part: step.tool,
-                      answers: this.askAnswers,
-                      multiAnswers: this.askMultiAnswers,
-                      interactive: this.capabilities.answerTool,
-                      onSubmit: (_a: Record<string, string>, _m: Record<string, string[]>): void => {
-                        this.submitAskAnswers(step.tool);
-                      },
-                      onAnswer: (qid: string, value: string): void => { this.setAskAnswer(qid, value); },
-                      onToggleMulti: (qid: string, opt: string): void => { this.toggleAskMulti(qid, opt); },
-                      onClear: (): void => { this.clearAskDrafts(); },
-                    })
-                  } else {
-                    ChatMessageTools({
-                      part: step.tool,
-                      jevSubjectHash: this.jevSubjectHashForPart(step.tool, this.locatorFor(step.tool)),
-                      canApprove: this.capabilities.approveTool && this.packageAskUserPart(step.tool) === null,
-                      canDeny: this.capabilities.denyTool,
-                      canOpenPreview: this.capabilities.openToolPreview,
-                      streaming: this.streaming,
-                      onModifyImage: (url: string): void => { this.onModifyGeneratedImage(url); },
-                      onApprove: (toolCallId: string): void => {
-                        this.onApproveTool(toolCallId, this.locatorFor(step.tool));
-                      },
-                      onDeny: (toolCallId: string): void => {
-                        this.onDenyTool(toolCallId, this.locatorFor(step.tool));
-                      },
-                      onOpenPreview: (): void => { this.onOpenToolPreview(step.tool, this.locatorFor(step.tool)); },
-                      deniedLabel: step.tool.approvalState.type === 'denied' ? this.deniedLabel(step.tool) : '',
-                    })
-                    if (this.packageAskUserPart(step.tool) !== null) {
-                      ChatMessageAskUserStep({
-                        part: this.packageAskUserPart(step.tool)!,
-                        answers: this.askAnswers,
-                        multiAnswers: this.askMultiAnswers,
-                        interactive: this.capabilities.answerTool,
-                        onSubmit: (_a: Record<string, string>, _m: Record<string, string[]>): void => {
-                          this.submitAskAnswers(step.tool);
-                        },
-                        onAnswer: (qid: string, value: string): void => { this.setAskAnswer(qid, value); },
-                        onToggleMulti: (qid: string, opt: string): void => { this.toggleAskMulti(qid, opt); },
-                        onClear: (): void => { this.clearAskDrafts(); },
-                      })
-                    }
-                  }
+          ForEach(this.thinkingStepsAt(bi), (step: ThinkingStep, si: number): void => {
+            if (step.kind === 'reasoning') {
+              if (this.showThinkingContent) {
+                ChatMessageReasoning({
+                  part: this.reasoningPartAt(bi, si),
+                  state: this.reasoningStateAt(`${bi}-${si}`),
+                  loading: this.reasoningLoading(this.reasoningPartAt(bi, si)),
+                  autoCloseThinking: this.autoCloseThinking,
+                  allowAutoCollapse: this.reasoningStates[`${bi}-${si}`] === undefined,
+                  onToggle: (): void => {
+                    this.toggleReasoning(`${bi}-${si}`);
+                  },
+                  onAutoCollapse: (): void => { this.autoCollapseReasoning(`${bi}-${si}`); },
+                })
+              }
+            } else if (step.kind === 'tool') {
+              if (this.toolPartAt(bi, si).toolName === ASK_USER_TOOL_NAME) {
+                ChatMessageAskUserStep({
+                  part: this.toolPartAt(bi, si),
+                  answers: this.askAnswers,
+                  multiAnswers: this.askMultiAnswers,
+                  interactive: this.capabilities.answerTool,
+                  onSubmit: (_a: Record<string, string>, _m: Record<string, string[]>): void => {
+                    this.submitAskAnswers(this.toolPartAt(bi, si));
+                  },
+                  onAnswer: (qid: string, value: string): void => { this.setAskAnswer(qid, value); },
+                  onToggleMulti: (qid: string, opt: string): void => { this.toggleAskMulti(qid, opt); },
+                  onClear: (): void => { this.clearAskDrafts(); },
+                })
+              } else if (parseNovelChapterPlanProposal(this.toolPartAt(bi, si)) !== null) {
+                NovelChapterPlanProposalCard({
+                  view: parseNovelChapterPlanProposal(this.toolPartAt(bi, si)),
+                  canApprove: this.capabilities.approveTool,
+                  canDeny: this.capabilities.denyTool,
+                  onApprove: (): void => {
+                    this.onApproveTool(this.toolPartAt(bi, si).toolCallId, this.locatorFor(this.toolPartAt(bi, si)));
+                  },
+                  onDeny: (): void => {
+                    this.onDenyTool(this.toolPartAt(bi, si).toolCallId, this.locatorFor(this.toolPartAt(bi, si)));
+                  },
+                })
+                JevApprovalFacts({
+                  part: this.toolPartAt(bi, si),
+                  subjectHash: this.jevSubjectHashForPart(this.toolPartAt(bi, si), this.locatorFor(this.toolPartAt(bi, si))),
+                })
+              } else {
+                ChatMessageTools({
+                  part: this.toolPartAt(bi, si),
+                  jevSubjectHash: this.jevSubjectHashForPart(this.toolPartAt(bi, si), this.locatorFor(this.toolPartAt(bi, si))),
+                  canApprove: this.capabilities.approveTool && this.packageAskUserPart(this.toolPartAt(bi, si)) === null,
+                  canDeny: this.capabilities.denyTool,
+                  canOpenPreview: this.capabilities.openToolPreview,
+                  streaming: this.streaming,
+                  onModifyImage: (url: string): void => { this.onModifyGeneratedImage(url); },
+                  onApprove: (toolCallId: string): void => {
+                    this.onApproveTool(toolCallId, this.locatorFor(this.toolPartAt(bi, si)));
+                  },
+                  onDeny: (toolCallId: string): void => {
+                    this.onDenyTool(toolCallId, this.locatorFor(this.toolPartAt(bi, si)));
+                  },
+                  onOpenPreview: (): void => { this.onOpenToolPreview(this.toolPartAt(bi, si), this.locatorFor(this.toolPartAt(bi, si))); },
+                  deniedLabel: this.toolPartAt(bi, si).approvalState.type === 'denied' ? this.deniedLabel(this.toolPartAt(bi, si)) : '',
+                })
+                if (this.packageAskUserPart(this.toolPartAt(bi, si)) !== null) {
+                  ChatMessageAskUserStep({
+                    part: this.packageAskUserPart(this.toolPartAt(bi, si))!,
+                    answers: this.askAnswers,
+                    multiAnswers: this.askMultiAnswers,
+                    interactive: this.capabilities.answerTool,
+                    onSubmit: (_a: Record<string, string>, _m: Record<string, string[]>): void => {
+                      this.submitAskAnswers(this.toolPartAt(bi, si));
+                    },
+                    onAnswer: (qid: string, value: string): void => { this.setAskAnswer(qid, value); },
+                    onToggleMulti: (qid: string, opt: string): void => { this.toggleAskMulti(qid, opt); },
+                    onClear: (): void => { this.clearAskDrafts(); },
+                  })
                 }
-              }, (step: ThinkingStep, si: number): string => `${bi}-${si}-${step.kind}`)
+              }
             }
-            .width('100%')
-            .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
-              .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
-          }
+          }, (step: ThinkingStep, si: number): string => `${bi}-${si}-${step.kind}`)
         }
         .width('100%')
+        .alignItems(HorizontalAlign.Start)
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         .clip(true)
       } else if (block.kind === 'content') {
         if (block.part.type === 'text') {
           if (this.message.role === 'user') {
             Row() {
-              Column() {
-                MarkdownText({
-                  content: block.part.text,
-                  fontSize: this.bodyFontSize(),
-                  fontColor: USER_INK,
-                  fillWidth: false,
-                  chatFontFamily: this.chatFontFamily,
-                  enableLatexRendering: this.enableLatexRendering,
-                  codeBlockAutoCollapse: this.codeBlockAutoCollapse,
-                  showLineNumbers: this.showLineNumbers,
-                  streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
-                })
-              }
-              .alignItems(HorizontalAlign.Start)
-              .padding({ left: 15, right: 15, top: 11, bottom: 11 })
-              .backgroundColor(USER_BG)
-              .borderRadius({ topLeft: 16, topRight: 16, bottomRight: 5, bottomLeft: 16 })
+              ChatUserBubble({
+                content: (): void => { this.UserTextContent(block.index); },
+              })
               .constraintSize({ maxWidth: this.showUserAvatar ? '74%' : '82%' })
               .margin({ bottom: 4 })
               if (this.showUserAvatar) {
@@ -471,8 +486,9 @@ export struct AgentMessageRow {
             .alignItems(VerticalAlign.Bottom)
           } else {
             Column() {
-              MarkdownText({
-                content: block.part.text,
+              if (this.enableGenerativeWidgets) {
+              WidgetMessageContent({
+                content: this.contentTextAt(block.index),
                 fontSize: this.bodyFontSize(),
                 fontColor: INK,
                 streaming: this.streaming && this.textDeltasLive &&
@@ -483,7 +499,18 @@ export struct AgentMessageRow {
                 showLineNumbers: this.showLineNumbers,
                 streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
                 onVisibleGrow: (): void => { this.onTextGrow(); },
+                onAction: (prompt: string): void => { this.onWidgetAction(prompt); },
               })
+              } else {
+                MarkdownText({
+                  content: this.contentTextAt(block.index), fontSize: this.bodyFontSize(), fontColor: INK,
+                  streaming: this.streaming && this.textDeltasLive && this.isLastTextBlock(this.getBlocks(), bi),
+                  chatFontFamily: this.chatFontFamily, enableLatexRendering: this.enableLatexRendering,
+                  codeBlockAutoCollapse: this.codeBlockAutoCollapse, showLineNumbers: this.showLineNumbers,
+                  streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
+                  onVisibleGrow: (): void => { this.onTextGrow(); },
+                })
+              }
             }
             .alignItems(HorizontalAlign.Start)
             .padding(this.showAssistantBubble ? { left: 12, right: 12, top: 8, bottom: 8 } : 0)
@@ -497,6 +524,7 @@ export struct AgentMessageRow {
             .objectFit(ImageFit.Cover)
             .borderRadius(8)
             .margin({ bottom: 4 })
+            .onClick((): void => { if (block.part.type === 'image') this.openImagePreview(block.part.url); })
         } else if (block.part.type === 'video') {
           ContentAttachmentChip({
             icon: '🎬',
@@ -539,14 +567,16 @@ export struct AgentMessageRow {
           runId: block.step.runId,
           canOpenRun: this.capabilities.openSubAgentRun,
           onOpenRun: (rid: string): void => { this.onOpenSubAgentRun(rid, block.step.tools); },
+          onResultToggle: (): void => { this.onSubAgentResultToggle(); },
         })
       } else if (block.kind === 'council') {
         ChatMessageCouncilStep({
           tools: block.step.tools,
           runId: block.step.runId,
           canOpenRun: this.capabilities.openToolPreview,
-          onOpenRun: (_rid: string): void => {
-            if (block.step.tools.length > 0) this.onOpenToolPreview(block.step.tools[0], this.locatorFor(block.step.tools[0]));
+          onOpenRun: (rid: string): void => {
+            if (this.capabilities.openCouncilRun === true) this.onOpenCouncilRun(rid, block.step.tools);
+            else if (block.step.tools.length > 0) this.onOpenToolPreview(block.step.tools[0], this.locatorFor(block.step.tools[0]));
           },
         })
       }
@@ -602,6 +632,7 @@ export struct AgentMessageRow {
         canEdit: this.capabilities.edit,
         canRegenerate: this.capabilities.regenerate,
         canFavorite: this.capabilities.favorite,
+        isFavorite: this.isFavorite,
         onCopy: (): void => { this.onCopy(); },
         onFork: (): void => { this.onFork(); },
         onEdit: (): void => { this.onEdit(); },
@@ -613,11 +644,18 @@ export struct AgentMessageRow {
     }
       .enabled(this.themeEpoch >= 0)
     .width('100%')
+    .onSizeChange((oldSize: SizeOptions, newSize: SizeOptions): void => {
+      if (Number(oldSize.height) !== Number(newSize.height)) this.onTextGrow();
+    })
     .alignItems(this.message.role === 'user' ? HorizontalAlign.End : HorizontalAlign.Start)
     .padding({ top: 8, bottom: 8 })
-    .opacity(this.enterOpacity)
-    .translate({ y: this.enterY })
+    .opacity(this.animateEntrance ? this.enterOpacity : 1)
+    .translate({ y: this.animateEntrance ? this.enterY : 0 })
+    .bindContentCover(this.imagePreviewOpen, this.MessageImagePreview(), {
+      onWillDismiss: (): void => { this.imagePreviewOpen = false; },
+    })
     .onAppear((): void => {
+      if (!this.animateEntrance) return;
       animateTo({ duration: 260, curve: Curve.EaseOut }, (): void => {
         this.enterOpacity = 1;
         this.enterY = 0;

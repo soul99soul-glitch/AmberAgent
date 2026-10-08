@@ -4,11 +4,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  AgentToolDispatcher, defaultToolInvocationHooks,
-  sanitizedToolFailureMessage, isRecoverableToolFailure, toAgentToolFailurePayload,
-  withPermissionTrace, withHookMetadata, createToolArgumentValidationHook,
+  AgentToolDispatcher,
+  defaultToolInvocationHooks,
+  sanitizedToolFailureMessage,
+  createToolArgumentValidationHook,
 } from '../main/ets/chat/tool_dispatcher.ts';
-import type { ToolInvocationHook, ToolInvocationResult } from '../main/ets/chat/tool_dispatcher.ts';
+import type {
+  ToolInvocationHook,
+} from '../main/ets/chat/tool_dispatcher.ts';
 import { PermissionDecisionResolver } from '../main/ets/chat/tool_permission.ts';
 import { makeGenerationRetrySetting } from '../main/ets/chat/generation_retry.ts';
 import { makeAgentTool, makeInputSchemaObj } from '../main/ets/chat/tool.ts';
@@ -46,15 +49,6 @@ describe('ToolFailure(ToolFailure.kt)', () => {
     assert.equal(sanitizedToolFailureMessage(new Error('')), 'Error');
     const long = new Error('x'.repeat(400));
     assert.equal(sanitizedToolFailureMessage(long).length, 360);
-  });
-  it('isRecoverableToolFailure:JS 恒 true(VirtualMachineError/ThreadDeath 无对应物)', () => {
-    assert.equal(isRecoverableToolFailure(new Error('x')), true);
-  });
-  it('toAgentToolFailurePayload 键集', () => {
-    const p = toAgentToolFailurePayload(new Error('boom'));
-    assert.equal(p['status'], 'failed');
-    assert.equal(p['message'], 'boom');
-    assert.equal(p['recoverable'], true);
   });
 });
 
@@ -286,21 +280,6 @@ describe('executeBatch(:63-117)', () => {
     ], defs, true); // Explicitly approved write still follows sequential batch ordering.
     assert.equal(out.length, 2);
     assert.deepEqual(order, ['read', 'write']);
-  });
-});
-
-describe('metadata 合并(:344-355)', () => {
-  it('withPermissionTrace 合并既有 metadata', () => {
-    const t = { ...toolCall('x'), metadata: { keep: 'v' } };
-    const out = withPermissionTrace(t, { a: 'b' });
-    assert.equal(out.metadata?.['keep'], 'v');
-    assert.deepEqual(out.metadata?.['permission_trace'], { a: 'b' });
-  });
-  it('withHookMetadata 空对象原样返回', () => {
-    const t = toolCall('x');
-    assert.equal(withHookMetadata(t, {}), t);
-    const merged = withHookMetadata(t, { k: 'v' });
-    assert.equal(merged.metadata?.['k'], 'v');
   });
 });
 

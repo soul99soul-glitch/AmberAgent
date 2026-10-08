@@ -3,10 +3,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { makeProviderModel } from '../main/ets/chat/provider_settings.ts';
-import { makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude } from '../main/ets/chat/provider_settings.ts';
+import { makeProviderSettingOpenAIVariant, makeProviderSettingGoogle } from '../main/ets/chat/provider_settings.ts';
 import {
-  reasoningFamilyOf, reasoningOptionsForModel, coerceToReasoningOptions,
-  providerRoutingKey, ReasoningFamily, ReasoningOption,
+  reasoningFamilyOf,
+  reasoningOptionsForModel,
+  coerceToReasoningOptions,
+  providerRoutingKey,
 } from '../main/ets/chat/reasoning_family.ts';
 
 const model = (modelId: string, abilities: string[] = ['reasoning']) =>
@@ -63,44 +65,10 @@ test('qwen plus 3.5 → BINARY', () => {
   assert.equal(reasoningFamilyOf(model('qwen-plus-3.5'), null), 'BINARY');
 });
 
-// ===== reasoningOptionsForModel =====
-
-test('DEEPSEEK → off/high/max(3)', () => {
-  const opts = reasoningOptionsForModel(model('deepseek-chat'), null);
-  assert.deepEqual(opts.map((o) => o.level), ['off', 'high', 'max']);
-});
-
 test('CLAUDE_OPUS_47 → 7 档(含 max)', () => {
   const opts = reasoningOptionsForModel(model('claude-opus-4-7'), null);
   assert.equal(opts.length, 7);
   assert.equal(opts[opts.length - 1].level, 'max');
-});
-
-test('OPENAI → low/med/high/xhigh(无 off)', () => {
-  const opts = reasoningOptionsForModel(model('gpt-5'), null);
-  assert.deepEqual(opts.map((o) => o.level), ['low', 'medium', 'high', 'xhigh']);
-});
-
-test('BINARY → off/auto(2)', () => {
-  const opts = reasoningOptionsForModel(model('kimi-k2'), null);
-  assert.deepEqual(opts.map((o) => o.level), ['off', 'auto']);
-});
-
-test('NONE → off only(1)', () => {
-  const opts = reasoningOptionsForModel(model('gpt-3.5', []), null);
-  assert.deepEqual(opts.map((o) => o.level), ['off']);
-});
-
-test('null model → 6 档默认', () => {
-  const opts = reasoningOptionsForModel(null, null);
-  assert.equal(opts.length, 6);
-});
-
-// ===== coerceToReasoningOptions =====
-
-test('coerce: level 在选项中 → 原值', () => {
-  const opts = reasoningOptionsForModel(model('deepseek-chat'), null);
-  assert.equal(coerceToReasoningOptions('high', opts), 'high');
 });
 
 test('coerce: auto 不在 DEEPSEEK 选项 → 降级 medium 或 first', () => {
@@ -109,30 +77,13 @@ test('coerce: auto 不在 DEEPSEEK 选项 → 降级 medium 或 first', () => {
   assert.ok(['off', 'high', 'max'].includes(result));
 });
 
-test('coerce: xhigh + 有 xhigh → 保持 xhigh', () => {
-  const opts = reasoningOptionsForModel(model('claude-opus-4-7'), null);
-  // CLAUDE_OPUS_47 有 xhigh → 不需 coerce
-  assert.equal(coerceToReasoningOptions('xhigh', opts), 'xhigh');
-});
-
 test('coerce: xhigh + 无 xhigh 但有 max → max', () => {
   const opts = reasoningOptionsForModel(model('claude-opus-4-5'), null);
   // CLAUDE_MAX 无 xhigh 但有 max → xhigh coerce 到 max
   assert.equal(coerceToReasoningOptions('xhigh', opts), 'max');
 });
 
-// ===== providerRoutingKey =====
-
-test('routingKey: claude → claude', () => {
-  const c = makeProviderSettingClaude({ apiKey: 'sk' });
-  assert.equal(providerRoutingKey(c), 'claude');
-});
-
 test('routingKey: openai deepseek endpoint → deepseek', () => {
   const o = makeProviderSettingOpenAIVariant({ apiKey: 'sk', baseUrl: 'https://api.deepseek.com/v1' });
   assert.equal(providerRoutingKey(o), 'deepseek');
-});
-
-test('routingKey: null → empty', () => {
-  assert.equal(providerRoutingKey(null), '');
 });

@@ -1,0 +1,73 @@
+✔ layout requests coalesce, sample after layout and move in bounded native frames (36.424833ms)
+✔ touch/cancel prevents a queued old frame from moving the list (6.8365ms)
+✔ growing geometry retargets the active spring; late terminal layout starts another frame (7.356583ms)
+✔ new structural row outside measured range anchors once without a frame loop (5.715333ms)
+✔ busy layout frames advance scrolling without waiting for onIdle (4.780334ms)
+✖ active native follow requests a steady supported90Hz motion range and releases it at rest (6.177708ms)
+✔ API12 uses its known current refresh rate and cancellation releases the vote (4.556ms)
+✖ 90Hz selection uses supported modes and does not request an absent intermediate mode (6.805542ms)
+✖ API12 high refresh fallback avoids guessing an unsupported90Hz mode (3.922416ms)
+✔ native follow converges monotonically at 60/120Hz without overshoot (0.570916ms)
+✔ a growing target preserves momentum and converges independently of frame rate (0.368917ms)
+✔ zero delta is inert; a shrinking layout does not retain upward overshoot (0.775208ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 9
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 578.008584
+
+✖ failing tests:
+
+test at src/test/native_timeline_follow.test.cjs:102:1
+✖ active native follow requests a steady supported90Hz motion range and releases it at rest (6.177708ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  120 !== 90
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:107:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 120,
+    expected: 90,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/test/native_timeline_follow.test.cjs:128:1
+✖ 90Hz selection uses supported modes and does not request an absent intermediate mode (6.805542ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  30 !== 90
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:132:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 30,
+    expected: 90,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/test/native_timeline_follow.test.cjs:139:1
+✖ API12 high refresh fallback avoids guessing an unsupported90Hz mode (3.922416ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  120 !== 60
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:142:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 120,
+    expected: 60,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

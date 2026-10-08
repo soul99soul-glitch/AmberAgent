@@ -1,0 +1,1004 @@
+{
+  "trace_file": "/tmp/stream3blocks.trace",
+  "csv_file": "/tmp/stream3blocks.csv",
+  "pid": 33474,
+  "trace_origin_seconds": 163412.008535,
+  "trace_span_seconds": 40.021897,
+  "clock_sync": {
+    "trace_seconds": 163452.030412,
+    "unix_ms": 1790782097616,
+    "line": 694537
+  },
+  "acceptance": {
+    "reasoning_bulk_node_creation_at_transition_removed_in_this_run": true,
+    "reasoning_to_body_under_16_667ms": false,
+    "reasoning_to_body_under_8_333ms": false,
+    "steady_body_under_8_333ms": false,
+    "stable120_presented_fps": false,
+    "long_reasoning_window_exercised": false,
+    "completion_component_identity_preserved": true,
+    "thousand_unit_scroll_removed": true
+  },
+  "conclusion": "Reasoning now has at most4 text blocks in this short-reasoning run and the switch keeps4 blocks instead of creating dozens. Transition max improves to25.352ms, not below8.333ms. Body becomes the dominant120fps budget blocker: late Markdown component update p95 is11.558ms and full UI p95 is15.149ms. This request did not produce enough reasoning to validate the6000-character window.",
+  "phase_markers": {
+    "H:CustomNodeUpdate name:AgentMessageRow,id:6068": {
+      "count": 312,
+      "first_relative_seconds": 2.363533,
+      "last_relative_seconds": 18.871018,
+      "first_unix_ms": 1790782059957.656
+    },
+    "H:CustomNodeUpdate name:ChatMessageReasoning,id:6095": {
+      "count": 313,
+      "first_relative_seconds": 2.371733,
+      "last_relative_seconds": 18.872719,
+      "first_unix_ms": 1790782059965.856
+    },
+    "H:CustomNodeUpdate name:WidgetMessageContent,id:6233": {
+      "count": 244,
+      "first_relative_seconds": 5.244181,
+      "last_relative_seconds": 17.88328,
+      "first_unix_ms": 1790782062838.304
+    },
+    "H:CustomNodeUpdate name:MarkdownText,id:6240": {
+      "count": 244,
+      "first_relative_seconds": 5.258743,
+      "last_relative_seconds": 17.889261,
+      "first_unix_ms": 1790782062852.866
+    },
+    "H:CustomNodeUpdate name:AgentMessageRow,id:6029": {
+      "count": 3,
+      "first_relative_seconds": 17.877867,
+      "last_relative_seconds": 18.870023,
+      "first_unix_ms": 1790782075471.99
+    }
+  },
+  "phase_statistics": {
+    "short_reasoning": {
+      "relative_window_seconds": [
+        2.5,
+        4.9
+      ],
+      "unix_window_ms": [
+        1790782060094.123,
+        1790782062494.123
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 237,
+          "total_ms": 577.072,
+          "p50_ms": 0.783,
+          "p95_ms": 10.505,
+          "max_ms": 14.051,
+          "over_8_333ms": 30,
+          "over_16_667ms": 0
+        },
+        "dirty_nodes": {
+          "count": 237,
+          "total_ms": 248.338,
+          "p50_ms": 0.032,
+          "p95_ms": 5.251,
+          "max_ms": 6.299,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "reasoning_component": {
+          "count": 53,
+          "total_ms": 46.552,
+          "p50_ms": 0.903,
+          "p95_ms": 1.172,
+          "max_ms": 2.555,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "markdown_component": {},
+        "layout": {
+          "count": 237,
+          "total_ms": 180.285,
+          "p50_ms": 0.189,
+          "p95_ms": 3.366,
+          "max_ms": 6.212,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "text_measure": {
+          "count": 54,
+          "total_ms": 101.526,
+          "p50_ms": 1.64,
+          "p95_ms": 3.965,
+          "max_ms": 4.639,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "execute_js": {
+          "count": 46,
+          "total_ms": 7.951,
+          "p50_ms": 0.179,
+          "p95_ms": 0.38,
+          "max_ms": 0.409,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "draw_modifier": {
+          "count": 540,
+          "total_ms": 16.07,
+          "p50_ms": 0.012,
+          "p95_ms": 0.099,
+          "max_ms": 0.272,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "8": 185,
+        "17": 52
+      }
+    },
+    "transition": {
+      "relative_window_seconds": [
+        5.05,
+        5.5
+      ],
+      "unix_window_ms": [
+        1790782062644.123,
+        1790782063094.123
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 27,
+          "total_ms": 152.495,
+          "p50_ms": 4.595,
+          "p95_ms": 10.384,
+          "max_ms": 25.352,
+          "over_8_333ms": 8,
+          "over_16_667ms": 1
+        },
+        "dirty_nodes": {
+          "count": 29,
+          "total_ms": 64.649,
+          "p50_ms": 0.188,
+          "p95_ms": 6.164,
+          "max_ms": 8.339,
+          "over_8_333ms": 1,
+          "over_16_667ms": 0
+        },
+        "reasoning_component": {
+          "count": 9,
+          "total_ms": 6.066,
+          "p50_ms": 0.494,
+          "p95_ms": 1.046,
+          "max_ms": 1.469,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "markdown_component": {
+          "count": 5,
+          "total_ms": 11.034,
+          "p50_ms": 1.947,
+          "p95_ms": 2.356,
+          "max_ms": 3.063,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "layout": {
+          "count": 28,
+          "total_ms": 39.564,
+          "p50_ms": 0.386,
+          "p95_ms": 2.89,
+          "max_ms": 14.844,
+          "over_8_333ms": 1,
+          "over_16_667ms": 0
+        },
+        "text_measure": {
+          "count": 13,
+          "total_ms": 12.82,
+          "p50_ms": 1.141,
+          "p95_ms": 1.789,
+          "max_ms": 2.117,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "execute_js": {
+          "count": 71,
+          "total_ms": 5.728,
+          "p50_ms": 0.044,
+          "p95_ms": 0.353,
+          "max_ms": 0.492,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "draw_modifier": {
+          "count": 153,
+          "total_ms": 17.522,
+          "p50_ms": 0.017,
+          "p95_ms": 0.476,
+          "max_ms": 0.85,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "17": 27
+      }
+    },
+    "early_body": {
+      "relative_window_seconds": [
+        6,
+        11
+      ],
+      "unix_window_ms": [
+        1790782063594.123,
+        1790782068594.123
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 300,
+          "total_ms": 2062.08,
+          "p50_ms": 7.824,
+          "p95_ms": 12.17,
+          "max_ms": 18.899,
+          "over_8_333ms": 104,
+          "over_16_667ms": 3
+        },
+        "dirty_nodes": {
+          "count": 304,
+          "total_ms": 1054.735,
+          "p50_ms": 4.407,
+          "p95_ms": 6.45,
+          "max_ms": 11.375,
+          "over_8_333ms": 4,
+          "over_16_667ms": 0
+        },
+        "reasoning_component": {
+          "count": 104,
+          "total_ms": 17.385,
+          "p50_ms": 0.167,
+          "p95_ms": 0.206,
+          "max_ms": 0.269,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "markdown_component": {
+          "count": 102,
+          "total_ms": 455.471,
+          "p50_ms": 4.461,
+          "p95_ms": 6.619,
+          "max_ms": 8.085,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "layout": {
+          "count": 302,
+          "total_ms": 341.909,
+          "p50_ms": 0.226,
+          "p95_ms": 3.675,
+          "max_ms": 5.49,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "text_measure": {
+          "count": 129,
+          "total_ms": 166.146,
+          "p50_ms": 1.152,
+          "p95_ms": 2.631,
+          "max_ms": 3.273,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "execute_js": {
+          "count": 966,
+          "total_ms": 103.745,
+          "p50_ms": 0.043,
+          "p95_ms": 0.481,
+          "max_ms": 2.518,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "draw_modifier": {
+          "count": 1310,
+          "total_ms": 324.881,
+          "p50_ms": 0.065,
+          "p95_ms": 0.796,
+          "max_ms": 3.087,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "17": 297,
+        "33": 3
+      }
+    },
+    "late_body": {
+      "relative_window_seconds": [
+        12,
+        17.5
+      ],
+      "unix_window_ms": [
+        1790782069594.123,
+        1790782075094.123
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 318,
+          "total_ms": 2139.31,
+          "p50_ms": 5.951,
+          "p95_ms": 15.149,
+          "max_ms": 21.777,
+          "over_8_333ms": 102,
+          "over_16_667ms": 9
+        },
+        "dirty_nodes": {
+          "count": 322,
+          "total_ms": 1246.783,
+          "p50_ms": 4.076,
+          "p95_ms": 9.659,
+          "max_ms": 13.981,
+          "over_8_333ms": 42,
+          "over_16_667ms": 0
+        },
+        "reasoning_component": {
+          "count": 101,
+          "total_ms": 14.524,
+          "p50_ms": 0.133,
+          "p95_ms": 0.195,
+          "max_ms": 1.023,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "markdown_component": {
+          "count": 100,
+          "total_ms": 768.232,
+          "p50_ms": 7.712,
+          "p95_ms": 11.558,
+          "max_ms": 13.743,
+          "over_8_333ms": 36,
+          "over_16_667ms": 0
+        },
+        "layout": {
+          "count": 321,
+          "total_ms": 320.042,
+          "p50_ms": 0.198,
+          "p95_ms": 3.356,
+          "max_ms": 6.635,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "text_measure": {
+          "count": 131,
+          "total_ms": 130.605,
+          "p50_ms": 0.889,
+          "p95_ms": 2.188,
+          "max_ms": 3.968,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "execute_js": {
+          "count": 1012,
+          "total_ms": 77.632,
+          "p50_ms": 0.04,
+          "p95_ms": 0.323,
+          "max_ms": 1.211,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "draw_modifier": {
+          "count": 1400,
+          "total_ms": 266.779,
+          "p50_ms": 0.051,
+          "p95_ms": 0.653,
+          "max_ms": 1.944,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "17": 303,
+        "33": 15
+      }
+    },
+    "completion": {
+      "relative_window_seconds": [
+        17.85,
+        18.5
+      ],
+      "unix_window_ms": [
+        1790782075444.123,
+        1790782076094.123
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 33,
+          "total_ms": 102.458,
+          "p50_ms": 2.342,
+          "p95_ms": 6.304,
+          "max_ms": 16.403,
+          "over_8_333ms": 2,
+          "over_16_667ms": 0
+        },
+        "dirty_nodes": {
+          "count": 37,
+          "total_ms": 22.042,
+          "p50_ms": 0.026,
+          "p95_ms": 0.725,
+          "max_ms": 11.691,
+          "over_8_333ms": 1,
+          "over_16_667ms": 0
+        },
+        "reasoning_component": {
+          "count": 2,
+          "total_ms": 0.141,
+          "p50_ms": 0.076,
+          "p95_ms": 0.065,
+          "max_ms": 0.076,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "markdown_component": {
+          "count": 2,
+          "total_ms": 15.551,
+          "p50_ms": 8.035,
+          "p95_ms": 7.516,
+          "max_ms": 8.035,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "layout": {
+          "count": 38,
+          "total_ms": 16.199,
+          "p50_ms": 0.002,
+          "p95_ms": 2.819,
+          "max_ms": 3.23,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "text_measure": {
+          "count": 11,
+          "total_ms": 3.547,
+          "p50_ms": 0.17,
+          "p95_ms": 0.665,
+          "max_ms": 1.432,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "execute_js": {
+          "count": 78,
+          "total_ms": 4.772,
+          "p50_ms": 0.052,
+          "p95_ms": 0.108,
+          "max_ms": 0.515,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        },
+        "draw_modifier": {
+          "count": 131,
+          "total_ms": 31.037,
+          "p50_ms": 0.024,
+          "p95_ms": 0.691,
+          "max_ms": 0.835,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "17": 33
+      }
+    }
+  },
+  "short_reasoning_csv_rows_4_to_5": {
+    "samples": [
+      {
+        "row_1_based": 4,
+        "timestamp_unix_ms": 1790782061289,
+        "fps": 92,
+        "refreshrate": 120,
+        "max_gap_ms": 41.638
+      },
+      {
+        "row_1_based": 5,
+        "timestamp_unix_ms": 1790782062294,
+        "fps": 100,
+        "refreshrate": 60,
+        "max_gap_ms": 33.314
+      }
+    ],
+    "mean_fps": 96,
+    "gaps_ms": {
+      "count": 190,
+      "total_ms": 1982.823,
+      "p50_ms": 8.333,
+      "p95_ms": 16.678,
+      "max_ms": 41.638,
+      "over_8_333ms": 92,
+      "over_16_667ms": 18
+    }
+  },
+  "early_body_csv_rows_8_to_12": {
+    "samples": [
+      {
+        "row_1_based": 8,
+        "timestamp_unix_ms": 1790782065296,
+        "fps": 59,
+        "refreshrate": 60,
+        "max_gap_ms": 16.738
+      },
+      {
+        "row_1_based": 9,
+        "timestamp_unix_ms": 1790782066290,
+        "fps": 60,
+        "refreshrate": 60,
+        "max_gap_ms": 16.86
+      },
+      {
+        "row_1_based": 10,
+        "timestamp_unix_ms": 1790782067290,
+        "fps": 59,
+        "refreshrate": 60,
+        "max_gap_ms": 33.332
+      },
+      {
+        "row_1_based": 11,
+        "timestamp_unix_ms": 1790782068296,
+        "fps": 59,
+        "refreshrate": 60,
+        "max_gap_ms": 33.355
+      },
+      {
+        "row_1_based": 12,
+        "timestamp_unix_ms": 1790782069290,
+        "fps": 59,
+        "refreshrate": 120,
+        "max_gap_ms": 33.334
+      }
+    ],
+    "mean_fps": 59.2,
+    "gaps_ms": {
+      "count": 291,
+      "total_ms": 4899.515,
+      "p50_ms": 16.665,
+      "p95_ms": 16.706,
+      "max_ms": 33.355,
+      "over_8_333ms": 291,
+      "over_16_667ms": 123
+    }
+  },
+  "late_body_csv_rows_14_to_19": {
+    "samples": [
+      {
+        "row_1_based": 14,
+        "timestamp_unix_ms": 1790782071290,
+        "fps": 54,
+        "refreshrate": 60,
+        "max_gap_ms": 33.337
+      },
+      {
+        "row_1_based": 15,
+        "timestamp_unix_ms": 1790782072294,
+        "fps": 56,
+        "refreshrate": 60,
+        "max_gap_ms": 33.336
+      },
+      {
+        "row_1_based": 16,
+        "timestamp_unix_ms": 1790782073302,
+        "fps": 49,
+        "refreshrate": 60,
+        "max_gap_ms": 49.999
+      },
+      {
+        "row_1_based": 17,
+        "timestamp_unix_ms": 1790782074292,
+        "fps": 55,
+        "refreshrate": 60,
+        "max_gap_ms": 33.334
+      },
+      {
+        "row_1_based": 18,
+        "timestamp_unix_ms": 1790782075290,
+        "fps": 55,
+        "refreshrate": 60,
+        "max_gap_ms": 33.327
+      },
+      {
+        "row_1_based": 19,
+        "timestamp_unix_ms": 1790782076291,
+        "fps": 55,
+        "refreshrate": 60,
+        "max_gap_ms": 33.338
+      }
+    ],
+    "mean_fps": 54,
+    "gaps_ms": {
+      "count": 318,
+      "total_ms": 5882.4,
+      "p50_ms": 16.665,
+      "p95_ms": 33.327,
+      "max_ms": 49.999,
+      "over_8_333ms": 318,
+      "over_16_667ms": 133
+    }
+  },
+  "reasoning_max_for_each_children": 4,
+  "reasoning_transition_for_each": [
+    {
+      "relative_seconds": 5.146537,
+      "unix_ms": 1790782062740.66,
+      "line": 200471,
+      "pid": 33474,
+      "name": "H:ForEachNode::Update Id[6105] preIds[4] newIds[4] tempOldIdsSet[1] additionalChildComps[1]"
+    },
+    {
+      "relative_seconds": 5.202483,
+      "unix_ms": 1790782062796.606,
+      "line": 202257,
+      "pid": 33474,
+      "name": "H:ForEachNode::Update Id[6105] preIds[4] newIds[4] tempOldIdsSet[1] additionalChildComps[1]"
+    },
+    {
+      "relative_seconds": 5.244961,
+      "unix_ms": 1790782062839.084,
+      "line": 204120,
+      "pid": 33474,
+      "name": "H:ForEachNode::Update Id[6105] preIds[4] newIds[4] tempOldIdsSet[0] additionalChildComps[0]"
+    }
+  ],
+  "transition_expensive_stack": [
+    {
+      "relative_seconds": 5.193733,
+      "duration_ms": 25.352,
+      "line": 202030,
+      "name": "H:OnVsyncEvent now:158275898959240"
+    },
+    {
+      "relative_seconds": 5.19374,
+      "duration_ms": 25.345,
+      "line": 202031,
+      "name": "H:UIVsyncTask[timestamp:158275898959240][vsyncID:474228][instanceID:100000]"
+    },
+    {
+      "relative_seconds": 5.202738,
+      "duration_ms": 15.887,
+      "line": 202271,
+      "name": "H:UITaskScheduler::FlushTask"
+    },
+    {
+      "relative_seconds": 5.202741,
+      "duration_ms": 14.844,
+      "line": 202272,
+      "name": "H:FlushLayoutTask"
+    },
+    {
+      "relative_seconds": 5.202809,
+      "duration_ms": 11.306,
+      "line": 202274,
+      "name": "H:CreateTaskMeasure[Column][self:5432][parent:5415][layoutConstraint:minSize: [[0.00 x 0.00]]maxSize: [[1264.00 x 1848.00]]percentReference: [[1264.00 x 1848.00]]parentIdealSize: [[1264.00 x 1848.00]]selfIdealSize: [[NA x NA]]][layoutPriority:0][pageId:12][depth:8]"
+    },
+    {
+      "relative_seconds": 5.202935,
+      "duration_ms": 11.171,
+      "line": 202290,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, 375.000000"
+    },
+    {
+      "relative_seconds": 5.194393,
+      "duration_ms": 8.339,
+      "line": 202065,
+      "name": "H:FlushDirtyNodeUpdate"
+    },
+    {
+      "relative_seconds": 5.19643,
+      "duration_ms": 4.254,
+      "line": 202100,
+      "name": "H:CustomNodeUpdate name:AgentMessageRow,id:6068"
+    },
+    {
+      "relative_seconds": 5.196434,
+      "duration_ms": 4.248,
+      "line": 202101,
+      "name": "H:JSView: ExecuteRerender"
+    },
+    {
+      "relative_seconds": 5.20903,
+      "duration_ms": 3.915,
+      "line": 202573,
+      "name": "H:CustomNode:BuildItem [MarkdownText][self:6240][parent:6239][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 5.205906,
+      "duration_ms": 2.519,
+      "line": 202428,
+      "name": "H:CustomNode:BuildItem [WidgetMessageContent][self:6233][parent:6232][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 5.194419,
+      "duration_ms": 2.007,
+      "line": 202067,
+      "name": "H:CustomNodeUpdate name:ChatPage,id:5413"
+    },
+    {
+      "relative_seconds": 5.194448,
+      "duration_ms": 1.975,
+      "line": 202068,
+      "name": "H:JSView: ExecuteRerender"
+    },
+    {
+      "relative_seconds": 5.20124,
+      "duration_ms": 1.469,
+      "line": 202230,
+      "name": "H:CustomNodeUpdate name:ChatMessageReasoning,id:6095"
+    },
+    {
+      "relative_seconds": 5.201242,
+      "duration_ms": 1.465,
+      "line": 202231,
+      "name": "H:JSView: ExecuteRerender"
+    },
+    {
+      "relative_seconds": 5.204304,
+      "duration_ms": 1.251,
+      "line": 202395,
+      "name": "H:TextLayoutAlgorithm::MeasureContent[id:6235][needReCreateParagraph:1][size:0]"
+    },
+    {
+      "relative_seconds": 5.203129,
+      "duration_ms": 1.037,
+      "line": 202313,
+      "name": "H:TextLayoutAlgorithm::MeasureContent[id:6100][needReCreateParagraph:1][size:0]"
+    },
+    {
+      "relative_seconds": 5.217592,
+      "duration_ms": 0.816,
+      "line": 202993,
+      "name": "H:FlushRenderTask 2"
+    },
+    {
+      "relative_seconds": 5.208455,
+      "duration_ms": 0.571,
+      "line": 202530,
+      "name": "H:CustomNode:OnAppear"
+    },
+    {
+      "relative_seconds": 5.208458,
+      "duration_ms": 0.553,
+      "line": 202531,
+      "name": "H:aboutToAppear"
+    }
+  ],
+  "late_body_expensive_stack": [
+    {
+      "relative_seconds": 17.131563,
+      "duration_ms": 21.862,
+      "line": 641685,
+      "name": "H:ReceiveVsync name:WM_33474 dataCount: 24bytes now:158287839196240 expectedEnd: 158287855861161 vsyncId:474971, fd:50"
+    },
+    {
+      "relative_seconds": 17.13159,
+      "duration_ms": 21.777,
+      "line": 641695,
+      "name": "H:OnVsyncEvent now:158287839196240"
+    },
+    {
+      "relative_seconds": 17.131593,
+      "duration_ms": 21.774,
+      "line": 641696,
+      "name": "H:UIVsyncTask[timestamp:158287839196240][vsyncID:474971][instanceID:100000]"
+    },
+    {
+      "relative_seconds": 17.132035,
+      "duration_ms": 13.981,
+      "line": 641742,
+      "name": "H:FlushDirtyNodeUpdate"
+    },
+    {
+      "relative_seconds": 17.132247,
+      "duration_ms": 13.743,
+      "line": 641753,
+      "name": "H:CustomNodeUpdate name:MarkdownText,id:6240"
+    },
+    {
+      "relative_seconds": 17.13225,
+      "duration_ms": 13.737,
+      "line": 641754,
+      "name": "H:JSView: ExecuteRerender"
+    },
+    {
+      "relative_seconds": 17.146023,
+      "duration_ms": 5.412,
+      "line": 642110,
+      "name": "H:UITaskScheduler::FlushTask"
+    },
+    {
+      "relative_seconds": 17.146026,
+      "duration_ms": 4.804,
+      "line": 642111,
+      "name": "H:FlushLayoutTask"
+    },
+    {
+      "relative_seconds": 17.146086,
+      "duration_ms": 3.918,
+      "line": 642112,
+      "name": "H:CreateTaskMeasure[Column][self:5432][parent:5415][layoutConstraint:minSize: [[0.00 x 0.00]]maxSize: [[1264.00 x 1848.00]]percentReference: [[1264.00 x 1848.00]]parentIdealSize: [[1264.00 x 1848.00]]selfIdealSize: [[NA x NA]]][layoutPriority:0][pageId:12][depth:8]"
+    },
+    {
+      "relative_seconds": 17.14618,
+      "duration_ms": 3.815,
+      "line": 642123,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -5696.862793"
+    },
+    {
+      "relative_seconds": 17.146693,
+      "duration_ms": 2.369,
+      "line": 642194,
+      "name": "H:TextLayoutAlgorithm::MeasureContent[id:8824][needReCreateParagraph:1][size:1]"
+    },
+    {
+      "relative_seconds": 17.151448,
+      "duration_ms": 1.725,
+      "line": 642347,
+      "name": "H:RSModifierManager Draw num:[4]"
+    },
+    {
+      "relative_seconds": 17.151651,
+      "duration_ms": 1.491,
+      "line": 642354,
+      "name": "H:RSModifier::Draw"
+    },
+    {
+      "relative_seconds": 17.151914,
+      "duration_ms": 1.211,
+      "line": 642357,
+      "name": "H:ExecuteJS"
+    }
+  ],
+  "component_creation_events": [
+    {
+      "relative_seconds": 0.986021,
+      "unix_ms": 1790782058580.144,
+      "line": 13576,
+      "pid": 33474,
+      "name": "H:CustomNode:BuildItem [AgentMessageRow][self:6029][parent:6027][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 0.989034,
+      "unix_ms": 1790782058583.157,
+      "line": 13689,
+      "pid": 33474,
+      "name": "H:CustomNode:BuildItem [MarkdownText][self:6048][parent:6047][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 1.337006,
+      "unix_ms": 1790782058931.129,
+      "line": 24842,
+      "pid": 33474,
+      "name": "H:CustomNode:BuildItem [AgentMessageRow][self:6068][parent:6066][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 5.20903,
+      "unix_ms": 1790782062803.153,
+      "line": 202573,
+      "pid": 33474,
+      "name": "H:CustomNode:BuildItem [MarkdownText][self:6240][parent:6239][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    }
+  ],
+  "completion_list_geometry": [
+    {
+      "relative_seconds": 17.859331,
+      "unix_ms": 1790782075453.454,
+      "line": 667347,
+      "pid": 33474,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -6061.069336"
+    },
+    {
+      "relative_seconds": 17.875406,
+      "unix_ms": 1790782075469.529,
+      "line": 668077,
+      "pid": 33474,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -6068.283691"
+    },
+    {
+      "relative_seconds": 17.88399,
+      "unix_ms": 1790782075478.113,
+      "line": 668508,
+      "pid": 33474,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -6075.051758"
+    },
+    {
+      "relative_seconds": 18.251522,
+      "unix_ms": 1790782075845.645,
+      "line": 680969,
+      "pid": 33474,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -6160.000000"
+    },
+    {
+      "relative_seconds": 18.38483,
+      "unix_ms": 1790782075978.953,
+      "line": 685327,
+      "pid": 33474,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -6160.000000"
+    }
+  ],
+  "max_scroll_by_all": {
+    "relative_seconds": 5.241611,
+    "line": 203938,
+    "offset": -69.273727,
+    "name": "H:ScrollBy, offset:-69.273727, id:5473, tag:List"
+  },
+  "max_scroll_by_completion": {
+    "relative_seconds": 17.898865,
+    "line": 669006,
+    "offset": -17.370207,
+    "name": "H:ScrollBy, offset:-17.370207, id:5473, tag:List"
+  },
+  "scroll_by_over200_count": 0,
+  "limitations": [
+    "This40.02s trace is complete and clock-aligned with CSV. Idle samples are excluded from fps windows.",
+    "Reasoning lasted only about3s and reached4 blocks. A late long-reasoning phase did not occur; same prompt does not guarantee equal model reasoning workload.",
+    "MarkdownText component trace includes rerender work but does not identify JS parse/cache/proxy/loop subcosts. A deeper CPU profile or targeted trace would be needed to separate those internal causes.",
+    "No sched category: synchronous slice durations are elapsed time, not isolated CPU execution. DrawModifier slices do not represent GPU execution time.",
+    "Even at observed60Hz scheduling, aboutone third of body UI frames exceed8.333ms. Changing frame-rate policy alone cannot establish stable120fps.",
+    "No device/emulator operations or source changes were made by this analysis."
+  ],
+  "transition_interpretation": {
+    "frame_relative_seconds": 5.193733,
+    "frame_ms": 25.352,
+    "top_level_costs": [
+      {
+        "name": "FlushLayoutTask",
+        "ms": 14.844,
+        "share_of_frame_percent": 58.5516,
+        "line": 202272
+      },
+      {
+        "name": "FlushDirtyNodeUpdate",
+        "ms": 8.339,
+        "share_of_frame_percent": 32.8929,
+        "line": 202065
+      }
+    ],
+    "layout_includes": [
+      {
+        "name": "new WidgetMessageContent BuildItem",
+        "ms": 2.519,
+        "line": 202428
+      },
+      {
+        "name": "new MarkdownText BuildItem",
+        "ms": 3.915,
+        "line": 202573
+      }
+    ],
+    "dirty_update_includes": [
+      {
+        "name": "AgentMessageRow",
+        "ms": 4.254,
+        "line": 202100
+      },
+      {
+        "name": "ChatPage",
+        "ms": 2.007,
+        "line": 202067
+      },
+      {
+        "name": "ChatMessageReasoning",
+        "ms": 1.469,
+        "line": 202230
+      }
+    ],
+    "overlap_warning": "Child timings are included in their parent slices and must not be summed with parent timings.",
+    "delayed_collapse": {
+      "animation_start_relative_seconds": 5.508617,
+      "line": 213824,
+      "reasoning_update_relative_seconds": 5.509369,
+      "reasoning_update_line": 213919,
+      "thinking_scroll_stop_relative_seconds": 5.510032,
+      "thinking_scroll_stop_line": 213936,
+      "window_relative_seconds": [
+        5.45,
+        5.8
+      ],
+      "max_ui_frame_ms": 10.649,
+      "max_ui_frame_relative_seconds": 5.491587
+    },
+    "height_change_limit": "Trace records generic unconstrained parent maxSize for Scroll, not the actual180/260vp output height. It cannot quantify the height-change contribution. The300ms collapse happens after the25ms frame and is not its cause.",
+    "recommendation": "Continue existing Markdown first-build/parent-update work before adding another independent state-machine change. The observed costs do not justify attributing the25ms frame primarily to delayed collapse."
+  }
+}

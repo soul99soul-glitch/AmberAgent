@@ -21,7 +21,7 @@ export interface MemoryTopicPruneResult {
 }
 
 export const isMemoryTopicSource = (record: MemoryRecord, now: number): boolean =>
-  record.kind !== 'topic' && record.scope !== 'core' && !record.archived
+  record.kind !== 'topic' && record.scope !== 'core' && !record.archived && record.invalidatedAt == null
   && (record.expiresAt === null || record.expiresAt > now);
 
 const titleKey = (title: string): string => title.replace(/\s/g, '').toLowerCase();
@@ -125,7 +125,8 @@ export const pruneMemoryTopics = (records: MemoryRecord[], now: number): MemoryT
 const sameSource = (live: MemoryRecord, baseline: MemoryRecord): boolean =>
   live.content === baseline.content && live.updatedAt === baseline.updatedAt
   && live.kind === baseline.kind && live.scope === baseline.scope
-  && live.archived === baseline.archived && live.expiresAt === baseline.expiresAt;
+  && live.archived === baseline.archived && live.expiresAt === baseline.expiresAt
+  && (live.invalidatedAt ?? null) === (baseline.invalidatedAt ?? null);
 
 export const applyMemoryTopicSuggestions = (
   live: MemoryRecord[], baseline: MemoryRecord[], suggestions: MemoryTopicSuggestion[], now: number,

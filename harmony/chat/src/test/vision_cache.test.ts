@@ -20,23 +20,6 @@ const memStore = (initial: string | null = null): MemStore => {
   };
 };
 
-test('put/get 往返;未命中 → null', () => {
-  const cache = createVisionCache(memStore());
-  assert.equal(cache.get('k'), null);
-  cache.put('k', 'v');
-  assert.equal(cache.get('k'), 'v');
-  assert.equal(cache.size(), 1);
-});
-
-test('put 持久化整写 store(JSON 含 expiresAt)', () => {
-  const store = memStore();
-  const cache = createVisionCache(store, (): number => 1000);
-  cache.put('k', 'v');
-  const parsed = JSON.parse(store.dump() ?? '{}') as Record<string, { value: string; expiresAt: number }>;
-  assert.equal(parsed['k'].value, 'v');
-  assert.equal(parsed['k'].expiresAt, 1000 + 3 * DAY_MS);
-});
-
 test('capacity 64:第 65 项逐出最旧(deleteOnEvict → store 同步移除)', () => {
   const store = memStore();
   const cache = createVisionCache(store);

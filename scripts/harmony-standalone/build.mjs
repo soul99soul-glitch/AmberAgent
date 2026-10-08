@@ -34,7 +34,8 @@ try {
     const harmonyDir = prepareProduct(product);
     console.log(`Building ${product} in ${harmonyDir}`);
     run(ohpm, ['install', '--all'], harmonyDir);
-    run(process.execPath, [path.join(repositoryRoot, 'scripts/harmony-inventory/build-harmony-app.mjs')],
+    const localBuilder = path.join(harmonyDir, 'scripts/build.mjs');
+    run(process.execPath, [fs.existsSync(localBuilder) ? localBuilder : path.join(repositoryRoot, 'scripts/harmony-inventory/build-harmony-app.mjs')],
       repositoryRoot, { ...process.env, AMBER_HARMONY_DIR: harmonyDir });
     if (sign) run('bash', [path.join(harmonyDir, 'scripts/sign-hap.sh')], harmonyDir);
     console.log(`${product} HAP output: ${path.join(harmonyDir, 'entry/build/default/outputs/default')}`);

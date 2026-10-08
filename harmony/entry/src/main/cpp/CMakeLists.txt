@@ -70,7 +70,7 @@ add_dependencies(amber_protobuf amber_mosh_build)
 
 add_library(amber_native SHARED napi_init.cpp ssh_core.cpp ssh_napi.cpp
     python_core.cpp python_napi.cpp mosh_core.cpp mosh_napi.cpp plugin_js_core.cpp plugin_js_napi.cpp
-    google_loopback_core.cpp google_loopback_napi.cpp)
+    google_loopback_core.cpp google_loopback_napi.cpp stream_frame_rate.cpp)
 target_compile_features(amber_native PRIVATE cxx_std_17)
 target_include_directories(amber_native PRIVATE "${AMBER_RUST_ROOT}/include" "${AMBER_SSH_INSTALL}/include")
 target_include_directories(amber_native SYSTEM PRIVATE "${AMBER_PYTHON_INSTALL}/include/python3.14"
@@ -83,4 +83,4 @@ target_compile_options(amber_native PRIVATE -Wall -Wextra -Werror -Wno-unused-co
 target_link_options(amber_native PRIVATE -Wl,--no-undefined -Wl,--exclude-libs,ALL -Wl,--as-needed)
 # Rust 1.96 OHOS --print=native-static-libs reports these two system libraries.
 target_link_libraries(amber_native PRIVATE amber_rust amber_ssh2 amber_python amber_mosh
-    amber_protobuf amber_crypto libace_napi.z.so libjsvm.so unwind z dl m c)
+    amber_protobuf amber_crypto libace_napi.z.so libjsvm.so libnative_vsync.so libhilog_ndk.z.so unwind z dl m c)

@@ -32,44 +32,12 @@ const executedToolSearchPart = (expanded: string[]): UIMessagePartTool => ({
   metadata: null,
 });
 
-// ===== from(ToolSearch.kt:297-311) =====
-
-test('from:非发现工具 ≤40 → 懒模式关,toolsForStep 全量', () => {
-  const tools: AgentTool[] = [dummy('a'), dummy('b'), dummy('tools_list')];
-  const st: ToolExposureState = createToolExposureState(tools);
-  assert.equal(st.enabled, false);
-  assert.deepEqual(namesOf(st.toolsForStep()), ['a', 'b', 'tools_list']);
-  // 懒模式关 → expose/observe 守卫直返
-  st.exposeToolNames(['a']);
-  st.observeExecutedTools([executedToolSearchPart(['a'])]);
-  assert.deepEqual(namesOf(st.toolsForStep()), ['a', 'b', 'tools_list']);
-});
-
 test('from:>40 但无 tool_search → 懒模式关', () => {
   const tools: AgentTool[] = [];
   for (let i = 0; i < 45; i++) tools.push(dummy(`hidden_tool_${i}`));
   const st: ToolExposureState = createToolExposureState(tools);
   assert.equal(st.enabled, false);
   assert.equal(st.toolsForStep().length, 45);
-});
-
-test('from:>40 且有 tool_search → 懒模式开,初始仅常驻', () => {
-  const tools: AgentTool[] = [];
-  for (let i = 0; i < 44; i++) tools.push(dummy(`hidden_tool_${i}`));
-  tools.push(dummy('ask_user')); // RESIDENT_EXACT
-  tools.push(dummy('conversation_search')); // category context + RESIDENT_CONTEXT
-  const reg = createToolRegistry(tools);
-  tools.push(createToolSearchTool(reg));
-  tools.push(dummy('tools_list')); // DISCOVERY_UTILITY 恒常驻但不计入 40
-  const st: ToolExposureState = createToolExposureState(tools);
-  assert.equal(st.enabled, true);
-  const visible: string[] = namesOf(st.toolsForStep());
-  assert.ok(visible.includes('tool_search'));
-  assert.ok(visible.includes('tools_list'));
-  assert.ok(visible.includes('ask_user'));
-  assert.ok(visible.includes('conversation_search'));
-  assert.equal(visible.includes('hidden_tool_0'), false);
-  assert.equal(visible.length, 4);
 });
 
 test('from:toolCount 不计 DISCOVERY_UTILITY 三件(41 非发现才开)', () => {

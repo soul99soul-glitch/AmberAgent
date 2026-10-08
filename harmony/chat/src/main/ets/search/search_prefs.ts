@@ -153,6 +153,19 @@ export const saveSearchPrefs = async (store: KeyValueStore, data: SearchSettings
   ]);
 };
 
+// Standalone DeepRead starts with its free aggregate enabled, matching iOS.
+// An existing catalog or enabled-ID list belongs to the user, including an empty list.
+export const initializeDeepReadSearchPrefs = async (store: KeyValueStore): Promise<void> => {
+  const [services, ids] = await Promise.all([
+    store.get(SEARCH_PREFS_KEYS.searchServices),
+    store.get(SEARCH_PREFS_KEYS.searchEnabledServiceIds),
+  ]);
+  if (services !== null || ids !== null) return;
+  const settings: SearchSettings = await loadSearchPrefs(store);
+  settings.searchEnabledServiceIds = settings.searchServices.map((service: SearchServiceOptions): string => service.id);
+  await saveSearchPrefs(store, settings);
+};
+
 // 按存储实例串行化 load→transform→save:快速连续改设置时并发快照
 // 会互相覆盖(丢一次修改);WeakMap 键 = store 身份,测试多实例不互扰
 const updateQueues: WeakMap<object, Promise<void>> = new WeakMap<object, Promise<void>>();

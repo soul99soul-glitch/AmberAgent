@@ -1,0 +1,169 @@
+{
+  "date": "2026-09-30",
+  "device": {
+    "serial": "6HK0226627000384",
+    "model": "HOP-AL00",
+    "api": 26
+  },
+  "latest_package": {
+    "path": "/tmp/amber-stream120-final.hap",
+    "sha256": "d0b262a6020916c19a1a6610f648beae3f8e198e48d0de951446c51f10e3fff5",
+    "bytes": 59540577,
+    "build": "BUILD SUCCESSFUL in23s919ms",
+    "build_log": "stream120-reasoning-build-final.log",
+    "signing": "AGC signed build output",
+    "install": "install -r succeeded; data preserved",
+    "launch": "EntryAbility succeeded; pid56835; normal ChatListPage",
+    "performance": "Two40s final traces completed. First long reasoning: UI p9512.264ms, stable Text slots verified. Second valid SP: early body120fps/120Hz for one full sample, late body four full samples60fps/60Hz; stable120fps not achieved. Both completedSTREAM-END and terminal identity retained."
+  },
+  "tests": {
+    "log": "stream120-reasoning-suite.log",
+    "tests": 235,
+    "suites": 30,
+    "pass": 235,
+    "fail": 0,
+    "new_regression_red": "stream3-blocks-red.log",
+    "new_regression_green": "stream3-blocks-green.log",
+    "arkts_lint": "amber-stream3-reasoning-slots-lint.log and markdown-block-view-lint-final.log; zero defects in changed components",
+    "diff_check": "passed for current changed source/test",
+    "block_isolation_tests": "6 tests, including30 real cache appends; frozen slots zero writes, active slot updated30 times",
+    "arkts_block_lint": "markdown-block-view-lint-final.log; zero defects",
+    "reasoning_slot_red": "amber-stream3-reasoning-slots-red.log",
+    "reasoning_slot_green": "amber-stream3-reasoning-slots-tests.log",
+    "arkts_reasoning_lint": "amber-stream3-reasoning-slots-lint.log; zero defects"
+  },
+  "source_sha256": {
+    "harmony/entry/src/main/ets/components/NativeTimelineFollow.ets": "bffb25c19a6c24740eaa9deab132c120860fb235d55e83648e314dfa54c22bd1",
+    "harmony/entry/src/main/ets/components/NativeMarkdownInline.ts": "af8d225bd90561672ebd97a063558d4068b74516f3cca9d87b85cb2743e58274",
+    "harmony/entry/src/main/ets/components/NativeMarkdownText.ets": "d206bd28251a57933983b57aeda201ca6ef8ff428bbe4646971c2f69ac6c55b4",
+    "harmony/entry/src/main/ets/components/ChatMessageReasoning.ets": "9a85aa4c82743f2f2e3e2ca108943ede1a9cbd31bbb37b8a926ecdef51f7a43c",
+    "harmony/entry/src/main/ets/pages/ChatPage.ets": "6a5536c5adceabdf0554a2e147ac159843a68e2961a3095adbb9712067e7bc46",
+    "harmony/chat/src/main/ets/chat/native_timeline_motion.ts": "ccda2080ebf23ed35e648b1a837e802ad027c70298310af9820ab73a8a5fac09",
+    "harmony/chat/src/test/reasoning_native_follow.test.cjs": "f043844dd86f6d2d0fe349e5e8a5669ca1970d599827ad897c5c43b77ef2b93f",
+    "harmony/chat/src/test/native_markdown_draw.test.cjs": "74f8953b197360bf2e3da958acf2a7ea4fc91750b6ee9ba28ed331fb5961ae0a",
+    "harmony/chat/src/test/native_timeline_follow.test.cjs": "725bc2ad181a4e4061cb2bffccc77869a1f53fc63e8d54a6f71d09ba8d8ff2b4",
+    "harmony/chat/src/test/native_timeline_bottom_target.test.cjs": "0c935fafdb4d3c16c2011e5e3153e521d236448d86d300c174abdd8806d2e9c2",
+    "harmony/chat/src/test/chat_timeline_identity.test.cjs": "7309e52e33cfaec65d3bc96607c4c85c6330e2a1908fcb43140482a71428a395",
+    "harmony/entry/src/main/ets/components/MarkdownText.ets": "ad333a1fdb47abc8e711fe0a35635fd071946b445c5a73f629cf1b83881d4424",
+    "harmony/entry/src/main/ets/components/MarkdownBlockView.ets": "01ce78403d9103df6face68bb5b935682b0103b041212916dd85ec70dcc227c3",
+    "harmony/chat/src/test/markdown_block_slots.test.cjs": "7f8f67c4bbc85fca73185225853a886f2d064a9a709bf4ba89470ca1a678358e"
+  },
+  "previous_device_evidence": {
+    "same_device_same_prompt": "3000-character city-after-rain prose; DeepSeek deepseek-flash; high reasoning",
+    "before": "stream3fullbefore: sustained 29-30fps during body",
+    "first_clock_fix": "stream3clock: body 57-64fps",
+    "stable_identity_and_reasoning_lines": "stream3final: thought54.5fps/body55.5fps; terminal node identities stable; transition44.755ms",
+    "preserve_subtree_only": "stream3delivery: early thought54fps/late40.2fps/body57fps; transition44.695ms. 153->217 nodes exposed range expansion and too many short-line Text nodes. Subsequent512-character grouping and preserved terminal window remove that expansion; final Text slot reuse verified separately.",
+    "manual_pause": "stream3pause.json and stream3pausedend.json: same STREAM-END bounds [55,870][1209,931] until generation completed",
+    "body_fade_visual": "stream3fade9.jpeg shows appended ranges fading with prior text opaque; stream3fade12.jpeg and stream3fade23.jpeg show complete FADE-END and intact bold/italic. This was package 7f345178..., before reasoning-only block aggregation."
+  },
+  "simulator": "User instructed no simulator. Own Amber Motion QA was stopped successfully. No further simulator operations; latest blocks package has only been installed on physical device.",
+  "limitations": [
+    "Stable120fps has not been achieved; phase-aligned actual presentation and8.333ms application budget are separate acceptance criteria.",
+    "System can cap display60Hz despite app120Hz motion vote; trace names policy, temperature/power causes not inferred.",
+    "Single natural lines longer than512 characters remain intact to preserve original layout; this patch targets observed excessive short-line nodes.",
+    "Raw trace files live in /tmp; hashes recorded in trace-manifest.json.",
+    "Dirty working tree has concurrent unrelated changes; no commit/push performed.",
+    "Final first trace SP invocation was invalid (-N40); no actual FPS claim from that run. Corrected second run uses -N 40 and has40CSV rows.",
+    "Same prompt has variable model reasoning/text/chunk cadence; p95 differences across runs are descriptive, not controlled performance percentages.",
+    "Final traces do not establish whether the6000-character reasoning clipping boundary was exercised; focused unit regression covers exact clipping text and stable edge identity."
+  ],
+  "current_target": "User requested90fps;90fps-request version installed and launched. Sustained actual90fps not yet measured.",
+  "previous_package": {
+    "path": "/tmp/amber-stream3-blocks.hap",
+    "sha256": "7b52127b43099f10a8ec7dc023b88f44fd56dd4f8f45edf44496217f028551aa",
+    "bytes": 59475389,
+    "build_log": "stream3-blocks-build.log",
+    "build": "BUILD SUCCESSFUL in 45 s 702 ms",
+    "signing": "AGC signed build output",
+    "install": "install -r succeeded; data preserved",
+    "launch": "EntryAbility succeeded; pid 33474; normal ChatListPage entry",
+    "performance": "stream3blocks trace40s PID33474; short reasoning, completedSTREAM-END verified; body UI p9512.170/15.149ms, not120fps. See stream3-blocks-analysis.json."
+  },
+  "refresh_rate_settings": {
+    "read_only": true,
+    "actual_selection": "High: maximum120Hz; selected before our inspection",
+    "evidence": [
+      "stream120rate.json",
+      "stream120rate.jpeg"
+    ],
+    "setting_changed": false,
+    "policy_files": "param1002 and XML permission denied; no bypass attempted",
+    "supported_screen_modes": "stream3-screen-modes.txt; active folded screen supports120/90/72/60/...; screen.activeMode alone does not prove idle clamp removed"
+  },
+  "previous_slots_package": {
+    "path": "/tmp/amber-stream120-slots.hap",
+    "sha256": "83d44e2d73f0437257f9232d26e8ba6859f4bf202624b0dc2d9d3c6e133d7324",
+    "bytes": 59532978,
+    "build": "BUILD SUCCESSFUL in19s164ms",
+    "build_log": "stream3-slots-build-final.log",
+    "signing": "AGC signed build output",
+    "install": "install -r succeeded; data preserved",
+    "launch": "EntryAbility succeeded; pid48374",
+    "performance": "stream120slots completed; body UI p95 9.807ms, 35/322 above8.333ms; frozen blocks stable; actual display capped60Hz in low-cost moving window"
+  },
+  "device_released": true,
+  "updated_date": "2026-10-01",
+  "final_acceptance": {
+    "stable120fps": false,
+    "related_tests_235_passed": true,
+    "changed_arkts_lint_zero_defects": true,
+    "agc_build_sign_install_launch_succeeded": true,
+    "two_complete_stream_end_screenshots": true,
+    "reasoning_native_text_identity_retained": true,
+    "frozen_markdown_blocks_stop_updating": true,
+    "terminal_message_and_markdown_identity_retained": true,
+    "thousand_unit_terminal_scroll_jump_reproduced": false,
+    "manual_pause_previously_verified": true,
+    "latest_package_manual_pause_retest": false,
+    "six_thousand_reasoning_cap_device_coverage": "not established",
+    "final_trace_sp_missing": true,
+    "final2_sp_valid": true,
+    "simulator_used_after_prohibition": false,
+    "system_refresh_setting_changed": false
+  },
+  "final_metrics": {
+    "first_run": {
+      "analysis": "stream120-final-analysis.json",
+      "late_reasoning_ui_p95_ms": 12.264,
+      "reasoning_text_measurements": 269,
+      "reasoning_distinct_native_text_ids": 11,
+      "reasoning_block_creations": 10,
+      "transition_max_ms": 30.327,
+      "completion_max_ms": 21.071,
+      "terminal_max_scroll_by": 24.50416,
+      "actual_fps": null
+    },
+    "second_run": {
+      "analysis": "stream120-final2-analysis.json",
+      "early_body": {
+        "window_seconds": [
+          2.65,
+          3.68
+        ],
+        "actual_fps": 120,
+        "full_sp_samples": 1,
+        "ui_p95_ms": 7.437,
+        "ui_over_8_333ms": 3,
+        "ui_frames": 123
+      },
+      "late_body": {
+        "window_seconds": [
+          5.65,
+          9.5
+        ],
+        "actual_fps": 60,
+        "full_sp_samples": 4,
+        "ui_p95_ms": 11.147,
+        "ui_over_8_333ms": 43,
+        "ui_frames": 226
+      },
+      "transition_max_ms": 11.074,
+      "completion_max_ms": 18.951,
+      "terminal_max_scroll_by": 23.777399,
+      "energy_assurance_cap": "60-60 at3.802770s; trace line189878",
+      "reasoning_duration_note": "about0.8s; no full stable SP reasoning window"
+    }
+  },
+  "latest_installed_90_package": "stream90-state.json"
+}

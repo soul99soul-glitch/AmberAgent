@@ -1,0 +1,64 @@
+09-30 21:26:19.316 20363 20363 E C05A06/app.amber.deepread/CODE_SIGN: [XpmIoctl]:Ioctl cmd 40087803 failed: Invalid argument (ignore)
+09-30 21:26:19.398 20363 20363 E C01301/app.amber.deepread/CompatiblePolicyDeviceType: [calculateResourceType:81]deviceType is empty.
+09-30 21:26:19.399 20363 20363 E C03D00/app.amber.deepread/JSLEAK_WATCHER_TS: user mode release hap is not allow
+09-30 21:26:19.486 20363 20496 E C01650/app.amber.deepread/SilentProxy: IsSupportSilentFromService:GetRdbService failed, err is 27394049.
+09-30 21:26:19.495 20363 20363 E C05102/app.amber.deepread/pdfservicelog: [NAPIEntry.cpp(InitPDFViewController:138)]controller Export: napi_unwrap fail
+09-30 21:26:19.509 20363 20363 E C01332/app.amber.deepread/UIAbility: [ui_ability_impl.cpp364]hasSaveData_: false
+09-30 21:26:19.510 20363 20363 E C04200/app.amber.deepread/WMS: SetWindowType: permission denied!
+09-30 21:26:19.524 20363 20363 E C04200/app.amber.deepread/WMS: singleton_container.cpp GetSingleton: cant get OHOS::Rosen::WindowInfoReporter
+09-30 21:26:19.527 20363 20363 E C04200/app.amber.deepread/IMockSessionManager: [nodict]Read result failed, code is: 4.
+09-30 21:26:19.527 20363 20363 E C04200/app.amber.deepread/IMockSessionManager: [nodict]Read result failed, code is: 4.
+09-30 21:26:19.532 20363 20449 E C0420A/app.amber.deepread/WMSLife: NotifyUIExtHostRectChangeInGlobalDisplayListeners: uiContent is null
+09-30 21:26:19.533 20363 20449 E C0420A/app.amber.deepread/WMSLife: NotifyUIExtHostRectChangeInGlobalDisplayListeners: uiContent is null
+09-30 21:26:19.536 20363 20363 E C01651/app.amber.deepread/data_share_manager_impl: RegisterClientDeathObserver: RegisterClientDeathObserver failed, bundleName is app.amber.deepread
+09-30 21:26:19.536 20363 20363 E C01651/app.amber.deepread/data_share_manager_impl: GetDataShareServiceProxy: RegisterClientDeathObserver failed
+09-30 21:26:19.537 20363 20449 E C01651/app.amber.deepread/data_share_manager_impl: RegisterClientDeathObserver: RegisterClientDeathObserver failed, bundleName is 
+09-30 21:26:19.537 20363 20449 E C01651/app.amber.deepread/data_share_manager_impl: GetDataShareServiceProxy: RegisterClientDeathObserver failed
+09-30 21:26:19.538 20363 20363 E C01301/app.amber.deepread/Ability: [page_config_manager.cpp62]configJson_ is empty
+09-30 21:26:19.542 20363 20363 E C0420A/app.amber.deepread/WMSLife: NotifyUIExtHostWindowRectChangeListeners: uiContent is null
+09-30 21:26:19.543 20363 20363 E C0420A/app.amber.deepread/WMSLife: NotifyUIExtHostWindowRectChangeListeners: uiContent is null
+09-30 21:26:19.553 20363 20363 E C03900/app.amber.deepread/Ace: [(-2:-1:undefined)] ConfigParserBase read system UI correction config file failed
+09-30 21:26:19.572 20363 20363 E C03934/app.amber.deepread/AceUIEvent: [(100000:100000:scope)] AceTransform load failed: Error loading shared library /system/lib64/libtransform_interaction_ext.z.so: No such file or directory
+09-30 21:26:19.595 20363 20363 E C01406/app.amber.deepread/OHOS::RS: [ui_effect] MaskPara This 7 para is not allowed to be operated
+09-30 21:26:19.595 20363 20363 E C01406/app.amber.deepread/OHOS::RS: [ui_effect] MaskPara register unmarshalling type:7 callback failed
+09-30 21:26:19.600 20363 20363 E C01E00/app.amber.deepread/ResourceManager: ref <private> id not found
+09-30 21:26:19.600 20363 20363 E C01E00/app.amber.deepread/ResourceManager: ref <private> id not found
+09-30 21:26:19.600 20363 20363 E C01E00/app.amber.deepread/ResourceManager: ref <private> id not found
+09-30 21:26:19.600 20363 20363 E C01E00/app.amber.deepread/ResourceManager: ref <private> id not found
+09-30 21:26:19.605 20363 20363 E C01203/app.amber.deepread/Ans: pop failed code:0
+09-30 21:26:19.610 20363 20363 E C01408/app.amber.deepread/Text: GetFileData: Path or realPath is nullptr
+09-30 21:26:19.610 20363 20363 E C01408/app.amber.deepread/Text: CheckConfigFile: Null data
+09-30 21:26:19.610 20363 20363 E C01408/app.amber.deepread/Text: ParseConfig: Failed to check config file
+09-30 21:26:19.610 20363 20363 E C01408/app.amber.deepread/Text: FontConfig: Failed to parse config, ret 1
+09-30 21:26:19.610 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.610 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.611 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.611 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.612 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.612 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.612 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.612 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.617 20363 20363 E C02D34/app.amber.deepread/HistogramClient: [nodict]ArkGraphics2d.Text.OH_Drawing_TextStyleAddFontVariation is not in metadata.
+09-30 21:26:19.641 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.641 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.644 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.644 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.647 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.647 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.651 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.651 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.654 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.654 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.656 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.659 20363 20363 E C01402/app.amber.deepread/2DGraphics: LoadFromTypeface: Drawing_Text [LoadFromTypeface] not variable font!
+09-30 21:26:19.664 20363 20363 E C02C03/app.amber.deepread/PARAM_WATCHER: [nodict]Read result failed, code is: 1.
+09-30 21:26:19.664 20363 20363 E C02C03/PARAM_WATCHER: Failed to add watcher for persist.rosen.animationtrace.enabled
+09-30 21:26:19.664 20363 20363 E C02C03/PARAM_WATCHER: SystemWatchParameter is failed!keyPrefix is:persist.rosen.animationtrace.enabled,errNum is:-1
+09-30 21:26:19.664 20363 20363 E C02C0B/BEGET: [service_watcher.c:85]WatchParameter failed! the errNum is -1
+09-30 21:26:20.102 20363 20626 E C05300/app.amber.deepread/: [a92ab10dfb93f35 0 0]Get token fail(107002001)
+09-30 21:26:20.104 20363 20363 E C05300/app.amber.deepread/: [a92ab10dfb93f35 0 0]Execute async work fail: : error(1000900010), innerCode(107002001)
+09-30 21:26:43.735 20363 20363 E C04500/app.amber.deepread/webview: ArkWebBridgeHelperLoadLibFile: dlns_create failed for '/data/storage/el1/bundle/arkwebcore/libs/arm64': No error information (errno=17)
+09-30 21:26:43.736 20363 20363 E C04500/app.amber.deepread/webview: GetWebEngine: api level of arkweb core is 0
+09-30 21:26:43.737 20363 20363 E C02C02/PARAM: Failed to connect server /dev/unix/socket/paramservice 13
+09-30 21:26:43.737 20363 20363 E C02C02/PARAM: connect param server failed!
+09-30 21:26:43.737 20363 20363 E C02C0B/BEGET: [param_request.c:217]SystemSetParameter failed! name is :web.flowbuffer.maxfd, the errNum is:114

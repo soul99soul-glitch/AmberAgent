@@ -19,6 +19,7 @@ import type {
   MemoryCandidate, MemoryEvent, MemoryEventType, MemoryKind, MemoryRecord, MemoryScope,
 } from './memory_models.ts';
 import { makeMemoryEvent, memoryKindFromWireName, memoryScopeFromWireName } from './memory_models.ts';
+import { canPromoteMemory, isMemoryActive, shouldArchiveIdleMemory } from './memory_lifecycle.ts';
 import { isSensitiveMemoryContent } from './memory_prompt_builder.ts';
 import { buildMemoryDreamPrompt } from './memory_dream_prompt.ts';
 import type { MemoryAddParams } from './memory_write.ts';
@@ -98,7 +99,6 @@ const normalize = (text: string): string => {
   let out: string = '';
   for (const ch of text.toLowerCase()) {
     if (/[\p{L}\p{N}]/u.test(ch)) out += ch;
-    if (out.length >= 200) break;
   }
   return out;
 };
@@ -119,20 +119,27 @@ const distinctStrings = (list: string[]): string[] => {
   return out;
 };
 
+// A previously merged/superseded record was deliberately restored by the user.
+// Preserve that decision rather than merging the same related versions again.
+const hasRelatedMemoryVersions = (records: MemoryRecord[]): boolean =>
+  records.some((record: MemoryRecord): boolean => records.some((other: MemoryRecord): boolean =>
+    record.id !== other.id && record.supersedesIds.indexOf(other.id) >= 0));
+
 export const planDreamMaintenance = (
   records: MemoryRecord[], candidates: MemoryCandidate[],
   now: number = Date.now(),
 ): MemoryDreamPlan => {
   const activeRecords: MemoryRecord[] = records.filter(
-    (r: MemoryRecord): boolean => !r.archived && r.kind !== 'topic');
+    (r: MemoryRecord): boolean => isMemoryActive(r, now) && r.kind !== 'topic');
   const expiredProjects: MemoryRecord[] = records.filter((record: MemoryRecord): boolean =>
     !record.archived && record.kind !== 'topic'
-    && record.scope === 'short_term'
-    && (record.expiresAt !== null && record.expiresAt <= now));
+    && ((record.expiresAt !== null && record.expiresAt <= now)
+      || shouldArchiveIdleMemory(record, now)));
   // duplicateGroups(:140-157)— groupBy 保插入序;组排序 pinned>long_term>confidence>updatedAt
   const groups: Map<string, MemoryRecord[]> = new Map<string, MemoryRecord[]>();
   for (const r of activeRecords) {
-    const key: string = normalize(r.content);
+    if (r.scope === 'core' || r.pinned) continue;
+    const key: string = `${r.scope}/${r.kind}/${r.content.trim()}`;
     const list: MemoryRecord[] = groups.get(key) ?? [];
     list.push(r);
     groups.set(key, list);
@@ -140,6 +147,7 @@ export const planDreamMaintenance = (
   const duplicateGroups: MemoryMergeSuggestion[] = [];
   for (const group of groups.values()) {
     if (group.length <= 1 || group[0].content.length < 8) continue;
+    if (hasRelatedMemoryVersions(group)) continue;
     const sorted: MemoryRecord[] = [...group].sort((a: MemoryRecord, b: MemoryRecord): number => {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
       const aLong: boolean = a.scope === 'long_term';
@@ -157,11 +165,7 @@ export const planDreamMaintenance = (
   }
   const promoteIds: number[] = activeRecords
     .filter((record: MemoryRecord): boolean =>
-      record.scope === 'short_term'
-      && record.kind === 'project'
-      && record.expiresAt === null
-      && record.confidence >= 0.82
-      && record.lastUsedAt !== null)
+      canPromoteMemory(record, now))
     .map((r: MemoryRecord): number => r.id);
   const activeNormalized: Set<string> = new Set<string>(
     activeRecords.map((r: MemoryRecord): string => normalize(r.content)));
@@ -176,10 +180,10 @@ export const planDreamMaintenance = (
     notes.push(`发现 ${duplicateGroups.length} 组可能重复的记忆，可合并后归档副本。`);
   }
   if (promoteIds.length > 0) {
-    notes.push(`发现 ${promoteIds.length} 条反复使用的短期项目记忆，可提升为长期记忆。`);
+    notes.push(`发现 ${promoteIds.length} 条反复使用的短期记忆，经至少两次实际引用或确认且跨越 14 天，可提升为长期记忆。`);
   }
   if (expiredProjects.length > 0) {
-    notes.push(`发现 ${expiredProjects.length} 条过期短期项目记忆，可归档。`);
+    notes.push(`发现 ${expiredProjects.length} 条过期或闲置记忆，可归档。`);
   }
   if (noisyCandidateIds.length > 0) {
     notes.push(`发现 ${noisyCandidateIds.length} 条低价值或重复候选，可忽略。`);
@@ -374,11 +378,12 @@ export const runMemoryDreamPlan = async (
   // planWithModel(:74-100)runCatching → getOrNull(:49-51)
   let modelPlan: MemoryDreamPlan | null = null;
   try {
-    modelPlan = await planDreamWithModel(deps, records, candidates);
+    const proposed: MemoryDreamPlan | null = await planDreamWithModel(deps, records, candidates);
+    modelPlan = proposed === null ? null : dreamPlanOnlyApplicable(proposed, records, nowFn());
   } catch {
     modelPlan = null;
   }
-  const plan: MemoryDreamPlan = mergeDreamPlanWith(localPlan, modelPlan);
+  const plan: MemoryDreamPlan = dreamPlanOnlyApplicable(mergeDreamPlanWith(localPlan, modelPlan), records, nowFn());
   // DREAM_PLANNED 事件(:54-70)— source 四分支逐字
   let source: string = 'none';
   if (memoryDreamPlanHasChanges(localPlan) && modelPlan !== null
@@ -406,18 +411,20 @@ const planDreamWithModel = async (
   const resolution: MemoryDaydreamModelResolution = await deps.resolveDaydreamModel();
   if (resolution.kind !== 'ok') return null;
   const prompt: string = buildMemoryDreamPrompt(
-    records.filter((r: MemoryRecord): boolean => !r.archived && r.kind !== 'topic').slice(0, 80),
-    candidates.filter((candidate: MemoryCandidate): boolean => candidate.kind !== 'topic').slice(0, 50));
+    records.filter((r: MemoryRecord): boolean => isMemoryActive(r, (deps.now ?? Date.now)()) && r.kind !== 'topic').slice(0, 80),
+    candidates.filter((candidate: MemoryCandidate): boolean => candidate.kind !== 'topic').slice(0, 50),
+    (deps.now ?? Date.now)());
   const text: string = await deps.generateText(prompt);
   return parseDreamModelPlanJson(text, records, candidates);
 };
 
 // ===== Applier(MemoryDreamApplier.kt 全文) =====
 
-const dreamIsManaged = (r: MemoryRecord): boolean => !r.archived && r.scope !== 'core' && r.kind !== 'topic';
+const dreamIsManaged = (r: MemoryRecord, now: number): boolean =>
+  isMemoryActive(r, now) && r.scope !== 'core' && r.kind !== 'topic';
 
-const dreamCanBeSuperseded = (r: MemoryRecord): boolean =>
-  dreamIsManaged(r) && !r.pinned && !isSensitiveMemoryContent(r.content);
+const dreamCanBeSuperseded = (r: MemoryRecord, now: number): boolean =>
+  dreamIsManaged(r, now) && !r.pinned && !isSensitiveMemoryContent(r.content);
 
 // managedMemoryComparator(:185-188)— long_term>pinned>confidence>updatedAt
 const managedCompare = (a: MemoryRecord, b: MemoryRecord): number => {
@@ -431,7 +438,7 @@ const managedCompare = (a: MemoryRecord, b: MemoryRecord): number => {
 
 // onlyApplicableToManagedMemories(:112-172)
 export const dreamPlanOnlyApplicable = (
-  plan: MemoryDreamPlan, records: MemoryRecord[],
+  plan: MemoryDreamPlan, records: MemoryRecord[], now: number = Date.now(),
 ): MemoryDreamPlan => {
   const byId: Map<number, MemoryRecord> = new Map<number, MemoryRecord>(
     records.map((r: MemoryRecord): [number, MemoryRecord] => [r.id, r]));
@@ -447,7 +454,7 @@ export const dreamPlanOnlyApplicable = (
     const seenIds: Set<number> = new Set<number>();
     for (const id of suggestion.oldMemoryIds) {
       const r: MemoryRecord | undefined = byId.get(id);
-      if (r !== undefined && dreamCanBeSuperseded(r) && !seenIds.has(r.id)) {
+      if (r !== undefined && dreamCanBeSuperseded(r, now) && !seenIds.has(r.id)) {
         seenIds.add(r.id);
         oldRecords.push(r);
       }
@@ -470,12 +477,15 @@ export const dreamPlanOnlyApplicable = (
     const seenIds: Set<number> = new Set<number>();
     for (const id of [suggestion.targetMemoryId, ...suggestion.duplicateMemoryIds]) {
       const r: MemoryRecord | undefined = byId.get(id);
-      if (r !== undefined && dreamIsManaged(r) && !supersededIds.has(r.id) && !seenIds.has(r.id)) {
+      if (r !== undefined && dreamIsManaged(r, now) && !r.pinned && !supersededIds.has(r.id) && !seenIds.has(r.id)) {
         seenIds.add(r.id);
         candidates.push(r);
       }
     }
     if (candidates.length < 2) continue;
+    if (hasRelatedMemoryVersions(candidates)) continue;
+    if (candidates.some((record: MemoryRecord): boolean =>
+      record.kind !== candidates[0].kind || record.scope !== candidates[0].scope)) continue;
     const target: MemoryRecord = [...candidates].sort(managedCompare)[0];
     const duplicateIds: number[] = candidates
       .filter((r: MemoryRecord): boolean => r.id !== target.id)
@@ -491,18 +501,20 @@ export const dreamPlanOnlyApplicable = (
   const mergeIds: Set<number> = new Set<number>(
     mergeSuggestions.flatMap((s: MemoryMergeSuggestion): number[] =>
       [s.targetMemoryId, ...s.duplicateMemoryIds]));
+  const promoteMemoryIds: number[] = distinctNumbers(plan.promoteMemoryIds
+    .map((id: number): MemoryRecord | undefined => byId.get(id))
+    .filter((r: MemoryRecord | undefined): r is MemoryRecord =>
+      r !== undefined && canPromoteMemory(r, now) && !mergeIds.has(r.id) && !supersededIds.has(r.id))
+    .map((r: MemoryRecord): number => r.id));
   return {
     mergeSuggestions,
-    promoteMemoryIds: distinctNumbers(plan.promoteMemoryIds
-      .map((id: number): MemoryRecord | undefined => byId.get(id))
-      .filter((r: MemoryRecord | undefined): r is MemoryRecord =>
-        r !== undefined && r.kind !== 'topic' && r.scope === 'short_term' && !r.archived && !supersededIds.has(r.id))
-      .map((r: MemoryRecord): number => r.id)),
+    promoteMemoryIds,
     archiveMemoryIds: distinctNumbers(plan.archiveMemoryIds
       .map((id: number): MemoryRecord | undefined => byId.get(id))
       .filter((r: MemoryRecord | undefined): r is MemoryRecord =>
-        r !== undefined && r.kind !== 'topic' && r.scope === 'short_term' && !r.archived && !r.pinned
-        && !mergeIds.has(r.id) && !supersededIds.has(r.id))
+        r !== undefined && r.kind !== 'topic' && !r.archived && (r.invalidatedAt ?? null) === null
+        && (r.scope === 'short_term' && !r.pinned || r.expiresAt !== null && r.expiresAt <= now)
+        && !mergeIds.has(r.id) && !supersededIds.has(r.id) && promoteMemoryIds.indexOf(r.id) < 0)
       .map((r: MemoryRecord): number => r.id)),
     ignoreCandidateIds: distinctStrings(plan.ignoreCandidateIds),
     supersedeSuggestions,
@@ -523,6 +535,7 @@ export interface MemoryDreamApplierDeps {
   addMemory: (params: MemoryAddParams) => Promise<MemoryRecord>;
   updateCandidate: (candidate: MemoryCandidate) => Promise<void>;
   addEvent: (event: MemoryEvent) => Promise<void>;
+  now?: () => number;
 }
 
 const logDreamEvent = (
@@ -536,7 +549,8 @@ export const runMemoryDreamApply = async (
   const records: MemoryRecord[] = await deps.getAllRecords();
   const byId: Map<number, MemoryRecord> = new Map<number, MemoryRecord>(
     records.map((r: MemoryRecord): [number, MemoryRecord] => [r.id, r]));
-  const applicablePlan: MemoryDreamPlan = dreamPlanOnlyApplicable(plan, records);
+  const now: number = (deps.now ?? Date.now)();
+  const applicablePlan: MemoryDreamPlan = dreamPlanOnlyApplicable(plan, records, now);
   if (!memoryDreamPlanHasChanges(applicablePlan)) return applicablePlan;
 
   for (const suggestion of applicablePlan.mergeSuggestions) {
@@ -546,7 +560,12 @@ export const runMemoryDreamApply = async (
       ? suggestion.mergedContent.trim() : null;
     const mergedContent: string = trimmed !== null && trimmed.length >= 8
       ? trimmed : target.content;
-    await deps.upsertRecord({ ...target, content: mergedContent });
+    const duplicateRecords: MemoryRecord[] = suggestion.duplicateMemoryIds
+      .map((id: number): MemoryRecord | undefined => byId.get(id))
+      .filter((record: MemoryRecord | undefined): record is MemoryRecord => record !== undefined);
+    await deps.upsertRecord({ ...target, content: mergedContent,
+      supersedesIds: distinctNumbers([...target.supersedesIds, ...suggestion.duplicateMemoryIds,
+        ...duplicateRecords.flatMap((record: MemoryRecord): number[] => record.supersedesIds)]) });
     await logDreamEvent(deps, 'memory_updated', target.id, 'Updated by dream merge.');
     for (const duplicateId of suggestion.duplicateMemoryIds) {
       const duplicate: MemoryRecord | undefined = byId.get(duplicateId);
@@ -562,7 +581,7 @@ export const runMemoryDreamApply = async (
     if (record === undefined) continue;
     if (record.scope === 'short_term') {
       await deps.upsertRecord({
-        ...record, scope: 'long_term', assistantId: '__long_term__', expiresAt: null,
+        ...record, scope: 'long_term', assistantId: '__long_term__',
       });
       await logDreamEvent(deps, 'memory_updated', id, 'Promoted by dream cleanup.');
     }

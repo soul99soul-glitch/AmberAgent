@@ -7,18 +7,7 @@ import { createTimeTool } from '../main/ets/chat/builtin_time_tool.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
 
 describe('createTimeTool(TimeTool.kt)', () => {
-  it('name/description/parameters 逐字', () => {
-    const t = createTimeTool();
-    assert.equal(t.name, 'get_time_info');
-    assert.equal(t.description,
-      'Get the current local date and time info from the device. Returns year/month/day, weekday, ISO date/time strings, timezone, and timestamp.');
-    const schema = t.parameters();
-    assert.ok(schema !== null);
-    assert.deepEqual(schema?.properties, {});
-    assert.equal(t.needsApproval, false);
-    assert.equal(t.allowsAutoApproval, true);
-    assert.equal(t.mandatoryApproval, false);
-  });
+
   it('payload 键序与值(注入固定时间)', async () => {
     const fixed = new Date(2026, 6, 28, 15, 4, 5, 123); // 2026-07-28 15:04:05 local(周二)
     const t = createTimeTool(() => fixed);

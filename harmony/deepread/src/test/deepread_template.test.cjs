@@ -13,6 +13,8 @@ const helpersFile = path.resolve(__dirname, '../main/ets/domain/helpers.ts');
 const enumsFile = path.resolve(__dirname, '../main/ets/domain/enums.ts');
 const markdownFile = path.resolve(__dirname, '../../../chat/src/main/ets/chat/markdown_blocks.ts');
 const moduleCache = new Map();
+const appearanceStorage = new Map();
+const AppStorage = { get: key => appearanceStorage.get(key), setOrCreate: (key, value) => appearanceStorage.set(key, value) };
 const loadModule = (filename) => {
   filename = path.resolve(filename);
   if (moduleCache.has(filename)) return moduleCache.get(filename);
@@ -23,7 +25,8 @@ const loadModule = (filename) => {
   }).outputText;
   const requireModule = (specifier) => {
     if (specifier === '@amber/deepread-domain') return Object.assign({},
-      loadModule(modelsFile), loadModule(helpersFile), loadModule(enumsFile));
+      loadModule(modelsFile), loadModule(helpersFile), loadModule(enumsFile),
+      loadModule(path.join(path.dirname(modelsFile), 'synthesis_templates.ts')));
     if (specifier === '@amber/chat-domain') return loadModule(markdownFile);
     if (specifier.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filename), specifier);
@@ -34,7 +37,7 @@ const loadModule = (filename) => {
     throw new Error(`Unexpected renderer dependency: ${specifier}`);
   };
   vm.runInNewContext(source, {
-    exports, require: requireModule, console, URL, TextEncoder, TextDecoder,
+    exports, require: requireModule, console, URL, TextEncoder, TextDecoder, AppStorage,
     Uint8Array, Buffer, Error, JSON, Math, Number, String, Array, Object, Map, Set, Date,
   }, { filename });
   return exports;
@@ -374,17 +377,29 @@ test('saving rejects unsafe template content before storage mutation and preserv
   assert.equal(loaded[0].html, '<article>{{content}}</article>');
 });
 
+test('legacy custom templates default to an empty description and new descriptions round-trip without changing HTML', async () => {
+  const legacy = { id: 'custom_legacy', name: '旧模板', html: '<article>{{content}}</article>', createdAt: 12 };
+  const old = await template.loadCustomTemplates({ get: async () => JSON.stringify([legacy]) });
+  assert.equal(old[0].description, ''); assert.equal(old[0].html, legacy.html);
+  const described = { ...old[0], description: '给阅读库展示的模板说明' };
+  let raw;
+  await template.saveCustomTemplates({ set: async (_key, value) => { raw = value; } }, [described]);
+  const loaded = await template.loadCustomTemplates({ get: async () => raw });
+  assert.equal(loaded[0].description, described.description); assert.equal(loaded[0].html, legacy.html);
+  assert.equal(loaded[0].createdAt, 12);
+});
+
 // ArkUI builders do not run in Node. Execute the actual page's persistence
 // methods with controlled page state and the real template validation/storage.
 const loadWorkbenchMethods = () => {
-  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/pages/DeepReadTemplateWorkbenchPage.ets');
+  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/components/deepread/DeepReadTemplateWorkbench.ets');
   const source = fs.readFileSync(filename, 'utf8');
   const start = source.indexOf('  private startNew():');
   const end = source.indexOf('\n  private async importHtmlFile(', start);
   assert.ok(start >= 0 && end > start, 'Workbench persistence methods were not found');
   const exports = {};
   const fixture = `class WorkbenchFixture {
-    templates = []; editingId = ''; editName = ''; editHtml = ''; note = '';
+    templates = []; editingId = ''; editName = ''; editDescription = ''; editHtml = ''; note = '';
     saving = false; storage = null; loaded = true; alive = true;
     lifecycleId = 0; editorId = 0; requestedTemplateId = '';
     ${source.slice(start, end)}
@@ -392,6 +407,7 @@ const loadWorkbenchMethods = () => {
   vm.runInNewContext(ts.transpileModule(fixture, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText, { exports, Error, String, Date, Promise,
+    getProductKind: () => 'agent',
     validateTemplateHtml: template.validateTemplateHtml,
     saveCustomTemplates: template.saveCustomTemplates,
     starterTemplateHtml: template.starterTemplateHtml,
@@ -408,7 +424,7 @@ const loadWorkbenchMethods = () => {
 };
 
 test('workbench reload uses the same percent scale and font mode as the article page', async () => {
-  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/pages/DeepReadTemplateWorkbenchPage.ets');
+  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/components/deepread/DeepReadTemplateWorkbench.ets');
   const source = fs.readFileSync(filename, 'utf8');
   const start = source.indexOf('  private reload():');
   const end = source.indexOf('\n  private startEdit(', start);
@@ -418,17 +434,24 @@ test('workbench reload uses the same percent scale and font mode as the article 
     { scale: '120', mode: 'serif', expectedScale: 1.2, expectedSerif: true },
     { scale: '70', mode: 'serif', expectedScale: 0.7, expectedSerif: true },
     { scale: '180', mode: 'default', expectedScale: 1.8, expectedSerif: false },
+    { scale: null, mode: null, product: 'deepread', expectedScale: 1, expectedSerif: true },
+    { scale: null, mode: null, product: 'agent', expectedScale: 1, expectedSerif: false },
+    { scale: '100', mode: 'default', product: 'deepread', expectedScale: 1, expectedSerif: false },
+    { scale: '100', mode: 'serif', product: 'deepread', expectedScale: 1, expectedSerif: true },
   ]) {
     const exports = {};
     const fixture = `class WorkbenchFixture {
       templates = []; storage = null; note = ''; fontScale = 1; fontSerif = true;
       alive = true; lifecycleId = 0; editorId = 0; requestedTemplateId = '';
+      previewFontScale = 0; previewFontMode = '';
+      loadPreview() {}
       ${source.slice(start, end)}
     } exports.WorkbenchFixture = WorkbenchFixture;`;
     vm.runInNewContext(ts.transpileModule(fixture, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     }).outputText, { exports, Error, String, Number, Promise, parseFloat,
       loadCustomTemplates: template.loadCustomTemplates,
+      getProductKind: () => preference.product ?? 'agent',
       getChatKvStore: () => ({ get: async key => key === 'deepread_font_scale' ? preference.scale : preference.mode }),
     }, { filename });
     const page = new exports.WorkbenchFixture();
@@ -448,7 +471,7 @@ test('workbench reload uses the same percent scale and font mode as the article 
 });
 
 test('Workbench preview sends raw rendered HTML with Chinese, CSS colors and percent text to loadData', () => {
-  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/pages/DeepReadTemplateWorkbenchPage.ets');
+  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/components/deepread/DeepReadTemplateWorkbench.ets');
   const source = fs.readFileSync(filename, 'utf8');
   const start = source.indexOf('  private loadPreview():');
   const end = source.indexOf('\n  private openPreview(', start);
@@ -470,6 +493,7 @@ test('Workbench preview sends raw rendered HTML with Chinese, CSS colors and per
   vm.runInNewContext(ts.transpileModule(fixture, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText, { exports, Error, String,
+    getProductKind: () => 'agent',
     SAMPLE_TITLE: title, BG: options.background, INK: options.foreground,
     INK3: options.muted, SURFACE: options.surface, LINE: options.border,
     buildSampleTemplateOutput: () => output,
@@ -487,12 +511,12 @@ test('Workbench preview sends raw rendered HTML with Chinese, CSS colors and per
   assert.ok(calls[0][0].includes(title));
   assert.ok(calls[0][0].includes('#123abc'));
   assert.ok(calls[0][0].includes('进度100%'));
-  assert.deepEqual(calls[0].slice(1), ['text/html', 'UTF-8', ' ', ' ']);
+  assert.deepEqual(calls[0].slice(1), ['text/html', 'UTF-8', 'https://amber-deepread.invalid/template-preview', 'https://amber-deepread.invalid/template-preview']);
   assert.equal(page.note, '');
 });
 
 test('Workbench current main-document errors close the preview with an error, while obsolete and subresource errors do nothing', () => {
-  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/pages/DeepReadTemplateWorkbenchPage.ets');
+  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/components/deepread/DeepReadTemplateWorkbench.ets');
   const source = fs.readFileSync(filename, 'utf8');
   const start = source.search(/^  private onPreviewError\(/m);
   assert.ok(start >= 0, 'Workbench onPreviewError method was not found');
@@ -528,14 +552,8 @@ test('Workbench current main-document errors close the preview with an error, wh
   }
 });
 
-test('Workbench Web error callbacks invoke the preview error consumer', () => {
-  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/pages/DeepReadTemplateWorkbenchPage.ets');
-  const source = fs.readFileSync(filename, 'utf8');
-  assert.match(source, /\.onErrorReceive\([\s\S]*?this\.onPreviewError\s*\(/);
-});
-
 test('Workbench waits for each current initial blank document once, and old preview/theme callbacks cannot close a new preview', () => {
-  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/pages/DeepReadTemplateWorkbenchPage.ets');
+  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/components/deepread/DeepReadTemplateWorkbench.ets');
   const source = fs.readFileSync(filename, 'utf8');
   const method = name => {
     const start = source.search(new RegExp('^  private (?:async )?' + name + '\\(', 'm'));
@@ -559,6 +577,7 @@ test('Workbench waits for each current initial blank document once, and old prev
   } exports.PreviewCallbacks = PreviewCallbacks;`, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText, { exports, Error, String, SAMPLE_TITLE: '中文标题 #100%',
+    getProductKind: () => 'agent',
     BG: '#FFFFFF', INK: '#1B1A17', INK3: '#57544C', SURFACE: '#FFFFFF', LINE: '#D6D1C4',
     validateTemplateHtml: template.validateTemplateHtml,
     buildSampleTemplateOutput: () => output, renderCustomTemplateHtml: template.renderCustomTemplateHtml,
@@ -701,4 +720,144 @@ test('workbench unsafe save leaves editor content visible and does not attempt a
   assert.ok(page.editHtml.includes('<script>'));
   assert.ok(page.note.includes('被禁元素'));
   assert.equal(page.saving, false);
+});
+
+// New iOS information hierarchy uses explicit judgments and numbered generation sources.
+const hierarchyOutput = () => {
+  const o = fullOutput();
+  o.bottomLine = 'BOTTOM_LINE_UNIQUE';
+  o.sources = [
+    { title: 'TEXT_SOURCE_UNIQUE', url: '', source: '输入正文', publishedAt: null },
+    { title: 'WEB_SOURCE_UNIQUE', url: 'https://example.com/a?x=1&y=2', source: 'example.com', publishedAt: null },
+    { title: 'UNUSED_SOURCE_UNIQUE', url: 'javascript:boom()', source: null, publishedAt: null },
+  ];
+  o.corePoints[0].sources = [1, 2, 2, 0, 9];
+  o.timeline[0].why = 'TURN_UNIQUE';
+  o.timeline[1].why = 'NON_TURN_UNIQUE';
+  Object.assign(o.analysis.perspectives[0], { interest: 'INTEREST_UNIQUE', quote: '<QUOTE_RAW>',
+    quoteBy: 'SPEAKER_UNIQUE', sources: [2] });
+  o.impacts = [{ target: 'TARGET_UNIQUE', horizon: 'short', effect: 'EFFECT_UNIQUE' },
+    { target: 'LONG_TARGET', horizon: 'long', effect: 'LONG_EFFECT' }];
+  o.watch = ['WATCH_UNIQUE'];
+  o.uncertainties = [{ claim: 'CLAIM_UNIQUE', status: 'single_source' },
+    { claim: 'CONFLICT_UNIQUE', status: 'conflicting' },
+    { claim: 'OFFICIAL_UNIQUE', status: 'pending_official' }, 'OLD_BARE_CLAIM'];
+  return o;
+};
+test('new hierarchy has a conclusion, judgments, turns, party interests and a verifiable outlook', () => {
+  const o = hierarchyOutput();
+  const html = template.renderEditorialSlantHtml('New hierarchy', o);
+  includesAll(html, ['BOTTOM_LINE_UNIQUE', 'SUMMARY_UNIQUE', '关键判断', '时间轴', '转折：',
+    'TURN_UNIQUE', '各方立场', '诉求：', 'INTEREST_UNIQUE', '&lt;QUOTE_RAW&gt;', 'SPEAKER_UNIQUE',
+    '影响与走向', 'TARGET_UNIQUE', '短期', '长期', 'EFFECT_UNIQUE', '接下来关注', 'WATCH_UNIQUE',
+    '待核实', '单一来源', '来源矛盾', '待官方确认', 'OLD_BARE_CLAIM']);
+  assert.ok(html.indexOf('BOTTOM_LINE_UNIQUE') < html.indexOf('SUMMARY_UNIQUE'));
+  assert.ok(html.indexOf('关键判断') < html.indexOf('时间轴'));
+  assert.equal(html.includes('ENTITY_UNIQUE_0'), false);
+  assert.equal(html.includes('NON_TURN_UNIQUE'), false);
+  assert.ok(html.includes('QUOTE_UNIQUE_9'));
+  assert.ok(html.includes('IMPLICATION_UNIQUE'));
+});
+test('numbered citations preserve text source positions, discard invalid ids, and never expose unsafe links', () => {
+  const html = template.renderEditorialSlantHtml('Sources', hierarchyOutput());
+  assert.match(html, /href="#dr-source-1"[^>]*>\[1\]</);
+  assert.match(html, /href="#dr-source-2"[^>]*>\[2\]</);
+  assert.ok(!html.includes('href="#dr-source-9"'));
+  assert.ok(html.includes('id="dr-source-1"'));
+  assert.ok(html.includes('id="dr-source-3"'));
+  assert.ok(html.includes('本文引用'));
+  assert.ok(!html.includes('javascript:'));
+  assert.equal(occurrences(html, 'REFERENCE_UNIQUE'), 1);
+  assert.equal(occurrences(html, 'READING_UNIQUE_13'), 1);
+  assert.ok(html.includes('https://example.com/a?x=1&amp;y=2'));
+});
+test('topic type changes question order without dropping legacy sections', () => {
+  const expected = {
+    event: ['关键判断', '时间轴', 'DIAGRAM_TITLE_UNIQUE', '各方立场', '待核实', '影响与走向'],
+    opinion: ['关键判断', '各方立场', '影响与走向', '待核实', '时间轴', 'DIAGRAM_TITLE_UNIQUE'],
+    product: ['关键判断', 'DIAGRAM_TITLE_UNIQUE', '各方立场', '影响与走向', '待核实', '时间轴'],
+    person: ['关键判断', '时间轴', '各方立场', '待核实', '影响与走向', 'DIAGRAM_TITLE_UNIQUE'],
+  };
+  for (const [topicType, labels] of Object.entries(expected)) {
+    const o = hierarchyOutput(); o.topicType = topicType;
+    const html = template.renderEditorialSlantHtml(topicType, o);
+    const positions = labels.map(label => html.indexOf(label));
+    assert.ok(positions.every((position, index) => position >= 0 && (!index || position > positions[index - 1])), topicType);
+  }
+});
+test('new template slots and old reference slots share one numbered source chapter', () => {
+  const raw = '<h1>{{title}}</h1>{{bottom_line}}{{summary}}{{core_points}}{{analysis}}{{outlook}}{{uncertainties}}{{sources}}';
+  assert.equal(template.validateTemplateHtml(raw), '');
+  assert.equal(template.validateTemplateHtml('{{bottom_line}}'), '');
+  const html = template.renderCustomTemplateHtml(raw, 'Custom', hierarchyOutput());
+  assert.ok(!html.includes('{{'));
+  for (const marker of ['BOTTOM_LINE_UNIQUE', 'WATCH_UNIQUE', 'CLAIM_UNIQUE', 'TEXT_SOURCE_UNIQUE'])
+    assert.equal(occurrences(html, marker), 1, marker);
+  const old = template.renderCustomTemplateHtml('{{references}}', 'Old snapshot', hierarchyOutput());
+  assert.equal(occurrences(old, 'TEXT_SOURCE_UNIQUE'), 1);
+});
+
+test('Workbench preview follows local citation anchors while blocking external navigation', () => {
+  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/components/deepread/DeepReadTemplateWorkbench.ets');
+  const source = fs.readFileSync(filename, 'utf8');
+  const callback = source.match(/\.onOverrideUrlLoading\((\(request: WebResourceRequest\): boolean => \{[\s\S]*?\n        \})\)/);
+  assert.ok(callback, 'Preview navigation callback is present');
+  const exports = {};
+  vm.runInNewContext(ts.transpileModule('exports.navigate = ' + callback[1], {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, { exports });
+  const navigate = url => exports.navigate({ getRequestUrl: () => url });
+  assert.equal(navigate('about:blank#dr-source-1'), false);
+  assert.equal(navigate('https://amber-deepread.invalid/template-preview#dr-source-1'), false);
+  assert.equal(navigate('https://amber-deepread.invalid/template-preview'), false);
+  assert.equal(navigate('https://amber-deepread.invalid/other'), true);
+  assert.equal(navigate('#dr-source-1'), false);
+  assert.equal(navigate('about:blank'), false);
+  assert.equal(navigate('data:text/html,preview'), false);
+  assert.equal(navigate('https://example.com/source'), true);
+  assert.equal(navigate('file:///data/private'), true);
+});
+
+
+test('reader appearance persists independently of generation templates and failed writes do not publish a selection', async () => {
+  const appearance = loadModule(path.join(etsRoot, 'DeepReadAppearance.ets'));
+  const values = new Map([['deepread_template_id', 'custom_keep']]);
+  const storage = { get: async (key, fallback) => values.get(key) ?? fallback,
+    set: async (key, value) => { values.set(key, value); } };
+  assert.equal((await appearance.loadDeepReadAppearance(storage)).readerLayout, 'classic');
+  await appearance.saveDeepReadReaderLayout(storage, 'debate');
+  await appearance.saveDeepReadReaderStyle(storage, 'journal');
+  const loaded = await appearance.loadDeepReadAppearance(storage);
+  assert.equal(loaded.readerLayout, 'debate');
+  assert.equal(loaded.readerStyle, 'journal');
+  assert.equal(values.get('deepread_template_id'), 'custom_keep');
+  const epoch = AppStorage.get('deepreadAppearanceEpoch');
+  await assert.rejects(appearance.saveDeepReadReaderStyle({ set: async () => { throw new Error('disk full'); } }, 'minimal'), /disk full/);
+  assert.equal(AppStorage.get('deepread.appearance.readerStyle'), 'journal');
+  assert.equal(AppStorage.get('deepreadAppearanceEpoch'), epoch);
+});
+
+test('four reading layouts reorder real sections and eight styles render distinct canvases without changing captured custom HTML', () => {
+  const appearance = loadModule(path.join(etsRoot, 'DeepReadAppearance.ets'));
+  const output = hierarchyOutput();
+  const first = { classic: '关键判断', brief: '关键判断', timeline: '时间轴', debate: '各方立场' };
+  for (const layout of appearance.DEEPREAD_READER_LAYOUTS) {
+    const html = template.renderEditorialSlantHtml('Layout', output, { readerLayout: layout.id, readerStyle: 'classic' });
+    const sections = ['关键判断', '时间轴', '各方立场', '待核实', '影响与走向', 'DIAGRAM_TITLE_UNIQUE'];
+    const leading = sections.reduce((a, b) => html.indexOf(a) < html.indexOf(b) ? a : b);
+    assert.equal(leading, first[layout.id]);
+    for (const marker of ['SUMMARY_UNIQUE', 'CLAIM_UNIQUE', 'TURN_UNIQUE', 'TEXT_SOURCE_UNIQUE'])
+      assert.equal(occurrences(html, marker), 1);
+  }
+  const documents = new Set();
+  for (const style of appearance.DEEPREAD_READER_STYLES) {
+    const html = template.renderEditorialSlantHtml('Style', output, { readerStyle: style.id, dark: true });
+    assert.ok(html.includes('--dr-bg:' + appearance.readerCanvas(style.id, true).background));
+    documents.add(html);
+  }
+  assert.equal(documents.size, 8);
+  const custom = '<article>{{title}}{{content}}</article>';
+  const baseline = template.renderCustomTemplateHtml(custom, 'Custom', output);
+  assert.equal(template.renderCustomTemplateHtml(custom, 'Custom', output,
+    { readerLayout: 'debate', readerStyle: 'colorPage', dark: true }), baseline);
 });

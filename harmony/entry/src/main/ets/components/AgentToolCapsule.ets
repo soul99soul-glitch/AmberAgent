@@ -1,7 +1,8 @@
 // AgentToolCallCapsule — 工具调用胶囊(对齐 Android ChatMessageTools.kt AgentToolCallCapsule)
 // wrap-content pill: 图标 + 标题文本 + 状态徽章 / 审批按钮
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, SIGNAL, ERROR, META, STATUS_AMBER } from '../design/tokens.ets';
-import { DotLoading } from './ui/DotLoading.ets';
+import { INK2, INK4, SURFACE2, LINE, ACCENT, SIGNAL, ERROR, META, STATUS_AMBER } from '../design/tokens.ets';
+import { DotRingLoading } from './ui/DotRingLoading.ets';
+import { Icon } from './ui/Icon.ets';
 const accentAlpha = (hex: string, alpha: number): string => {
   const value: string = hex.replace('#', '');
   if (value.length !== 6) return hex;
@@ -31,24 +32,23 @@ export enum ToolKind {
   Generic,
 }
 
-// 工具名 → 图标 emoji 映射(简化版,不用 hugeicons 库)
-export const toolIconEmoji = (toolName: string): string => {
-  if (toolName.startsWith('memory_tool')) return '✍️';
-  if (toolName.startsWith('search_web') || toolName.startsWith('scrape_web') || toolName.startsWith('webview_')) return '🔍';
-  if (toolName.startsWith('file_')) return '📄';
-  if (toolName.startsWith('terminal_')) return '⌨️';
-  if (toolName === 'python_execute') return '🐍';
-  if (toolName.startsWith('screen_') || toolName.startsWith('vlm_task')) return '🖥️';
-  if (toolName.startsWith('mcp__')) return '📦';
-  if (toolName === 'get_time_info') return '🕐';
-  if (toolName === 'clipboard_tool') return '📋';
-  if (toolName === 'text_to_speech') return '🔊';
-  if (toolName === 'ask_user') return '❓';
-  if (toolName === 'use_skill') return '✨';
+// Use existing flat monochrome symbols, rather than platform emoji artwork.
+export const toolIconName = (toolName: string): string => {
+  if (toolName.startsWith('memory_tool')) return 'edit';
+  if (toolName.startsWith('search_web') || toolName.startsWith('scrape_web') || toolName.startsWith('webview_')) return 'search';
+  if (toolName.startsWith('file_')) return 'doc';
+  if (toolName.startsWith('terminal_') || toolName === 'python_execute') return 'cpu';
+  if (toolName.startsWith('screen_') || toolName.startsWith('vlm_task')) return 'cpu';
+  if (toolName.startsWith('mcp__')) return 'plug';
+  if (toolName === 'get_time_info') return 'clock';
+  if (toolName === 'clipboard_tool') return 'clipboard';
+  if (toolName === 'text_to_speech') return 'speaker';
+  if (toolName === 'ask_user') return 'info';
+  if (toolName === 'use_skill') return 'spark';
   if (toolName.startsWith('wm_') || toolName.startsWith('hn_') || toolName.startsWith('reddit_') ||
       toolName.startsWith('juejin_') || toolName.startsWith('github_') || toolName.startsWith('bilibili_') ||
-      toolName.startsWith('zhihu_') || toolName.startsWith('feishu_docs_')) return '🔍';
-  return '🔧';
+      toolName.startsWith('zhihu_') || toolName.startsWith('feishu_docs_')) return 'search';
+  return 'gear';
 };
 
 // 工具名 → 类型分类
@@ -96,11 +96,10 @@ export const toolStatusColor = (status: ToolStatus): string => {
 
 // 状态徽章图标
 export const toolStatusIcon = (status: ToolStatus): string => {
-  if (status === ToolStatus.Succeeded) return '✓';
+  if (status === ToolStatus.Succeeded) return 'check';
   if (status === ToolStatus.Running) return '';
-  if (status === ToolStatus.WaitingApproval) return '⏱';
-  if (status === ToolStatus.Failed) return '✕';
-  return '✕';
+  if (status === ToolStatus.WaitingApproval) return 'clock';
+  return 'close';
 };
 
 @Component
@@ -120,88 +119,56 @@ export struct AgentToolCallCapsule {
 
   build(): void {
     Row() {
-      if (this.canOpen) {
-        Row() { this.CapsuleContent(); }
-          .layoutWeight(this.showApproval ? 1 : 0)
-          .flexShrink(1)
-          .padding({ left: 9, right: 9, top: 3, bottom: 3 })
-          .constraintSize({ minHeight: 44 })
-          .backgroundColor(this.showApproval ? SURFACE2 : accentAlpha(this.accentColorStore, 0.16))
-          .borderRadius(50)
-          .border({ width: this.showApproval ? 1 : 0, color: LINE })
-          .alignItems(VerticalAlign.Center)
-          .onClick((): void => { this.onCapsuleClick(); })
-          .accessibilityText(`查看工具 ${this.title}`)
-      } else {
-        Row() { this.CapsuleContent(); }
-          .layoutWeight(this.showApproval ? 1 : 0)
-          .flexShrink(1)
-          .padding({ left: 9, right: 9, top: 3, bottom: 3 })
-          .constraintSize({ minHeight: 32 })
-          .backgroundColor(this.showApproval ? SURFACE2 : accentAlpha(this.accentColorStore, 0.16))
-          .borderRadius(50)
-          .border({ width: this.showApproval ? 1 : 0, color: LINE })
-          .alignItems(VerticalAlign.Center)
+      Stack() {
+        this.CapsuleBody()
       }
+      .width('auto').constraintSize({ minHeight: this.canOpen ? 44 : 30, maxWidth: '100%' })
+      .flexShrink(1)
+      .enabled(this.canOpen)
+      .onClick((): void => { if (this.canOpen) this.onCapsuleClick(); })
+      .accessibilityText(`${this.title}，${toolStatusLabel(this.status)}`)
 
       if (this.showApproval) {
         if (this.canDeny) {
-          Text('✕')
-            .fontSize(12)
-            .fontColor(ERROR)
-            .width(44)
-            .height(44)
-            .flexShrink(0)
-            .textAlign(TextAlign.Center)
+          Row() { Icon({ name: 'close', iconSize: 14, color: ERROR }); }
+            .width(44).height(44).flexShrink(0)
+            .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
             .onClick((): void => { this.onDeny(); })
             .accessibilityText('拒绝工具执行')
         }
         if (this.canApprove) {
-          Text('✓')
-            .fontSize(12)
-            .fontColor(SIGNAL)
-            .width(44)
-            .height(44)
-            .flexShrink(0)
-            .textAlign(TextAlign.Center)
+          Row() { Icon({ name: 'check', iconSize: 14, color: SIGNAL }); }
+            .width(44).height(44).flexShrink(0)
+            .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
             .onClick((): void => { this.onApprove(); })
             .accessibilityText('批准工具执行')
         }
       }
     }
-      .opacity(this.themeEpoch >= 0 ? 1 : 1)
-    .width('100%')
-    .alignItems(VerticalAlign.Center)
+    .opacity(this.themeEpoch >= 0 ? 1 : 1)
+    .width('100%').alignItems(VerticalAlign.Center)
   }
 
   @Builder
-  private CapsuleContent(): void {
-    Text(toolIconEmoji(this.toolName))
-      .fontSize(14)
-      .margin({ right: 6 })
-
-    Text(this.title)
-      .fontSize(META)
-      .fontColor(this.showApproval ? INK2 : ACCENT)
-      .fontWeight(FontWeight.Medium)
-      .fontFamily('JetBrainsMono')
-      .maxLines(1)
-      .textOverflow({ overflow: TextOverflow.Ellipsis })
-      .layoutWeight(1)
-
-    if (!this.showApproval) {
-      if (this.status === ToolStatus.Running) {
-        DotLoading({ dotSize: 6, color: ACCENT })
-      } else {
-        Text(toolStatusIcon(this.status))
-          .fontSize(10)
-          .fontColor('#FFFFFF')
-          .width(16)
-          .height(16)
-          .borderRadius(8)
-          .backgroundColor(toolStatusColor(this.status))
-          .textAlign(TextAlign.Center)
+  private CapsuleBody(): void {
+    Row({ space: 7 }) {
+      Icon({ name: toolIconName(this.toolName), iconSize: 14, color: INK2 }).flexShrink(0)
+      Text(this.title)
+        .fontSize(META).fontColor(INK2).fontWeight(FontWeight.Medium)
+        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
+      if (!this.showApproval) {
+        if (this.status === ToolStatus.Running) {
+          DotRingLoading({ ringSize: 14, color: this.accentColorStore }).flexShrink(0)
+        } else {
+          Icon({ name: toolStatusIcon(this.status), iconSize: 12, color: toolStatusColor(this.status) })
+            .flexShrink(0)
+        }
       }
     }
+    .width('auto').constraintSize({ maxWidth: '100%' }).height(30)
+    .padding({ left: 12, right: 12 })
+    .backgroundColor(this.showApproval ? SURFACE2 : accentAlpha(this.accentColorStore, 0.10))
+    .borderRadius(15).border({ width: 0.7, color: LINE })
+    .alignItems(VerticalAlign.Center)
   }
 }

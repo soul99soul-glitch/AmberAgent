@@ -1,0 +1,69 @@
+{
+  "date": "2026-09-30T21:22:19.313914+08:00",
+  "scope": "Main Chat generation/regeneration publication and scroll following; shared native Markdown renderer/cache.",
+  "ios_reference_root": "/Users/arquiel/Downloads/AI/amberagent-ios/iosApp",
+  "ios_reference": {
+    "48ms_snapshot_gate": "iosApp/IOSAgentToolEngine.swift:473,718,764; completion:982",
+    "no_second_markdown_timer": "iosApp/MessageBubbleView.swift:2218-2221",
+    "stable_blocks": "iosApp/MessageBubbleView.swift:1323-1338,1430",
+    "native_timeline": "iosApp/ChatCollectionMessageList.swift:397,459",
+    "spring_and_user_pause": "iosApp/NativeTimelineScrollCore.swift:119-130,139,174,380-399",
+    "frame_driver": "iosApp/NativeTimelineScrollDriver.swift:247,264"
+  },
+  "implementation": {
+    "snapshot_interval_ms": 48,
+    "snapshot_policy": "Immediate leading publication, coalesced authoritative latest state, trailing timer, terminal flush; trailing timer is a Harmony-specific improvement over the observed iOS leading throttle.",
+    "markdown": "Parse the published snapshot immediately. Stable completed prefix cache plus active tail. No separate character reveal, 200ms parser gate or independent raw suffix paragraph.",
+    "native_identity": "Ordinal/type keys and ArkUI reference-bound block builders retain parent native Text/Scroll; only changed inline/list/code/table rows update.",
+    "scroll": "API 12 FrameCallback onIdle measures actual List geometry after layout. Critically damped spring uses iOS tau=0.06s, carries velocity across target growth. Stops at 0.5vp arrival; next real layout change restarts, without an idle vsync loop.",
+    "terminal_transition": "Main Chat rows disable repeated row arrival fade when provisional tail is moved to committed history.",
+    "heading_bug": "Prior parser hung on partial # space input (isolated process timed out at1500ms). Paragraph heading stop predicate now agrees with heading recognizer."
+  },
+  "verification": {
+    "focused_tests": {
+      "passed": 168,
+      "failed": 0,
+      "log": "tests.log"
+    },
+    "typescript": "chat tsc --noEmit passed",
+    "arkts_lint": "0 errors across changed sources; UI/parser6-file batch3 existing warnings, domain publication batch254 warnings, cache2 existing warnings; warnings not treated as clean.",
+    "build": "Final normal application BUILD SUCCESSFUL; symbol archive path warnings remain.",
+    "sign": "Project-generated entry-default-signed.hap passed simulator overwrite install. Offline self-signed install was rejected due to existing signature mismatch; no uninstall/data reset.",
+    "simulator": "127.0.0.1:5555; installed and launched final normal app after replay",
+    "replay": {
+      "chars": 3546,
+      "native_auto_scroll_frames_before_touch": 785,
+      "native_auto_scroll_frames_at_terminal": 785,
+      "chars_at_touch": 2720,
+      "chars_at_terminal": 3546,
+      "terminal_following": false,
+      "terminal_at_end": false,
+      "manual_return": "Observed final marker visible after Return to Bottom button.",
+      "runtime_error_filter_log_lines": 0,
+      "caveat": "Deterministic native component replay, not live provider or physical-device performance measurement. Pause count confirms no automatic scroll after touch; offsets during gesture also include user drag/fling."
+    },
+    "stable_prefix": "Cache test >20KB stable body: next4 frames parser receives <100char tail and prefix objects reused.",
+    "not_run": [
+      "Physical-device live model streaming UX comparison",
+      "Live model long output and video/FPS profiling"
+    ],
+    "fixture_removed_from_production": true,
+    "physical_device_install": {
+      "date": "2026-09-30T21:27:09.616438+08:00",
+      "serial": "6HK0226627000384",
+      "model": "HOP-AL00",
+      "package_sha256": "05a1fb50e448c1e3d6dd610eda7c924161fa8d8c9a2c5387ea680f40692ddbb5",
+      "install": "hdc install -r: install bundle successfully",
+      "launch": "aa start: start ability successfully; pid20363",
+      "visible": "Normal home screen visible; existing conversations and novel entry remain.",
+      "screenshot": "physical-installed.jpeg",
+      "logs": "physical-launch-errors.log",
+      "streaming_acceptance": "No new live provider generation requested or run in this installation turn."
+    }
+  },
+  "delivery": {
+    "hap": "/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/build/default/outputs/default/entry-default-signed.hap",
+    "sha256": "05a1fb50e448c1e3d6dd610eda7c924161fa8d8c9a2c5387ea680f40692ddbb5",
+    "git": "No commit or push; pre-existing and concurrent changes preserved."
+  }
+}

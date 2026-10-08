@@ -268,3 +268,79 @@ test('MarkdownCache:stats 累计命中/解析次数', () => {
   assert.equal(stats.prefixHits, 1);
   assert.equal(stats.parseCalls, 4);
 });
+// A normal streaming frame contains closed paragraphs and an unfinished final block.
+test('MarkdownCache:20KB稳定段落只解析一次,后续帧只解析活动尾并复用块对象', () => {
+  const inputs: string[] = [];
+  const cache = new MarkdownCache((md: string): MarkdownBlock[] => {
+    inputs.push(md);
+    return parseMarkdown(md);
+  });
+  const prefix = `${'已完成的正文。'.repeat(3000)}\n\n`;
+  let content = `${prefix}活动尾`;
+  const first = cache.getOrParse('stream', 0, content);
+  const stable = first.blocks[0];
+  inputs.length = 0;
+  for (const chunk of ['继续', '**强调', '**', '\n后续行']) {
+    content += chunk;
+    const result = cache.getOrParse('stream', 0, content);
+    assert.equal(result.incremental, true);
+    assert.strictEqual(result.blocks[0], stable);
+    assert.deepEqual(result.blocks, parseMarkdown(content));
+  }
+  assert.equal(inputs.length, 4);
+  assert.ok(inputs.every((input: string): boolean => input.length < 100));
+});
+
+test('MarkdownCache:每字符流式代码/表格/列表/数学/换行与全量解析深等', () => {
+  const samples: string[] = [
+    '前缀\n\n```ts\nconst x = 1;\n\nconst y = 2;\n```\n\n尾部',
+    '前缀\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\n尾部',
+    '# 标题\n\n- 第一项\n  - 嵌套项\n- 最后一项\n\n1. 一\n2. 二\n\n> 引用\n> 第二行\n\n尾部',
+    '前缀\n\n$$\na+b\n\n-c\n$$\n\n尾部 $x$ 和 \\(y\\)',
+    '前缀\n\n\\[\na+b\n\n-c\n\\]\n\n尾部',
+    '前缀\n\n文本 `$$` 与转义 \\$$\n\n后文',
+    '前缀\r\n\r\n```\r\ncode\r\n\r\n```\r\n\r\n尾部',
+    '前缀\n\n$$x\n\n仍未闭合\n\n继续',
+    '前缀\n\n嵌入 ```ts\ncode\n\n``` 后缀\n\n尾部',
+    '```ts\nx\n```\n\n嵌入 ```ts\ncode\n```\n\n尾部',
+    '\\[\n> 引用\n```\n\\]\n```\n\\]\n\n尾部',
+    '前缀\n \t\n活动段落\n\n尾部',
+  ];
+  for (const sample of samples) {
+    const cache = new MarkdownCache();
+    for (let length = 1; length <= sample.length; length++) {
+      const content = sample.slice(0, length);
+      const result = cache.getOrParse('sample', length - 1, content);
+      assert.deepEqual(result.blocks, parseMarkdown(content), `${JSON.stringify(sample)} at ${length}`);
+    }
+  }
+});
+
+test('MarkdownCache:替换/截短失效后重建稳定前缀', () => {
+  const cache = new MarkdownCache();
+  cache.getOrParse('m', 0, '旧段落\n\n活动尾');
+  for (const content of ['新段落\n\n新尾部', '新段落', '新段落\n\n继续']) {
+    assert.deepEqual(cache.getOrParse('m', 0, content).blocks, parseMarkdown(content));
+  }
+});
+
+
+test('MarkdownCache:checkpoint前进只解析新完成片段和活动尾,统计实际parse调用', () => {
+  const inputs: string[] = [];
+  const cache = new MarkdownCache((md: string): MarkdownBlock[] => {
+    inputs.push(md);
+    return parseMarkdown(md);
+  });
+  const first = cache.getOrParse('m', 0, '首段\n\n活动');
+  assert.deepEqual(inputs, ['首段\n\n', '活动']);
+  inputs.length = 0;
+  const next = cache.getOrParse('m', 0, '首段\n\n活动完成\n\n新活动');
+  assert.deepEqual(inputs, ['活动完成\n\n', '新活动']);
+  assert.strictEqual(next.blocks[0], first.blocks[0]);
+  inputs.length = 0;
+  const last = cache.getOrParse('m', 0, '首段\n\n活动完成\n\n新活动继续');
+  assert.deepEqual(inputs, ['新活动继续']);
+  assert.strictEqual(last.blocks[1], next.blocks[1]);
+  assert.equal(cache.stats().parseCalls, 5);
+  assert.equal(cache.stats().totalChars, '首段\n\n活动完成\n\n新活动继续'.length);
+});

@@ -1,0 +1,105 @@
+{
+  "date": "2026-10-01",
+  "scope": "Official native List animation trial installed and physically sampled; continuous120fps remains unachieved",
+  "implementation": [
+    "Scroller.scrollTo linear native animation; retarget only when measured geometry changes",
+    "Native animation duration max160ms,distance/720vp/s; keeps120 preferred60–120DisplaySync range",
+    "Driver active state covers callbacks after250ms attribution expiry",
+    "Real DRAG/FLING and touch cancel native motion; invalidation precedes synchronous native stop",
+    "Jump-to-top pauses follow; explicit history and keyboard position changes cancel existing native animation"
+  ],
+  "tests": {
+    "existing_and_driver": 51,
+    "scroll_attribution": 5,
+    "total": 56,
+    "failures": 0,
+    "red": "new native dispatch test failed before change;3 callback attribution tests failed against baseline ChatPage; jump-to-top cancellation test failed before fix",
+    "lint": "0 errors;3 existing ChatPage warnings"
+  },
+  "build": {
+    "success": true,
+    "duration": "28 s 378 ms",
+    "agc_signed": true,
+    "hap": "/tmp/amber-stream120-native-animation.hap",
+    "sha256": "e719b2fef270a6c6b31ae455f41d30e16f2fdea6f89550582ce02ffe7212f517",
+    "bytes": 59688029
+  },
+  "installed": true,
+  "device_fps_verified": true,
+  "pending": "Continuous120fps target remains unresolved; final native-animation package manual drag/jump-to-top has host test evidence but was not physically re-tested this round",
+  "source_sha256": {
+    "harmony/entry/src/main/ets/components/NativeTimelineFollow.ets": "8f963265d2caa1e4b79e933d92b7e865e9010bc83bbde672acbd604328f6ce64",
+    "harmony/entry/src/main/ets/pages/ChatPage.ets": "5feedd5e08122a5c4d191954882e738bfc1d1e6ca43ece9dbca4e7ddd835579a",
+    "harmony/chat/src/test/native_timeline_follow.test.cjs": "9da5f481d4bc3230bd2c96ad1a235f82df3da5637d75e65f2e9e9dc96cd88c08",
+    "harmony/chat/src/test/native_timeline_scroll_attribution.test.cjs": "38aef8effac4982b55e5ce76a95275b1a0ae62689a9a5008cf2e4f5272e8591f"
+  },
+  "baseline_backup": "/tmp/streamnative-baseline",
+  "baseline_verified_hap": "/tmp/amber-stream120-ltpo.hap",
+  "notes": [
+    "Native animation timing under missed frames belongs to OS; unit host is not proof of dropped-frame behavior",
+    "Earlier spring helper retained; no dead-code removal",
+    "No simulator launched, no device settings changed",
+    "One short sample has more uniform60Hz output than previous55.67fps sample, but content differs and this is not a controlled effect-size measurement",
+    "Native trace has92animatedList dispatches; onlyScrollToEdge occurs before firstnativeanimation during submission",
+    "Tail50fps window straddles stop;32/20fps afterstop and subsequentidle0fps excluded from steady-motion statistic"
+  ],
+  "official_sources": [
+    "https://developer.huawei.com/consumer/cn/doc/best-practices/bpta-zhenlv",
+    "https://developer.huawei.com/consumer/cn/doc/harmonyos-references/ts-container-scroll"
+  ],
+  "independent_review": "Read-only cancellation/attribution audit found jump-to-top ownership hole; fixed and covered by failing-then-passing test",
+  "installation": {
+    "device": "6HK0226627000384",
+    "bundle": "app.amber.deepread",
+    "hdc_result": "install bundle successfully",
+    "started": true,
+    "pid_after_launch": 25171,
+    "data_preserved": true,
+    "initial_ui": "ChatListPage; existing conversations visible"
+  },
+  "physical_validation": {
+    "recording": "30seconds hitrace and SP_daemon; real DeepSeek generation in existing 雨后城市 test conversation",
+    "native_list_animation_span_local": [
+      "02:26:34.493",
+      "02:26:42.590"
+    ],
+    "early_complete_120hz_fps": [
+      104,
+      120
+    ],
+    "steady_60hz_fps": [
+      60,
+      60,
+      59
+    ],
+    "steady_frame_intervals": 176,
+    "steady_intervals_over25ms": 1,
+    "energy_policy": "TouchUp to TouchIdle in3.000538s; first60Hz energy vote at02:26:37.479; native animation still subject to arbitration",
+    "final_visible_ui": "STREAM-END, heading, bold, italic and action footer visible in streamnativefinish.jpeg",
+    "continuous120fps": false,
+    "analysis": "streamnative-analysis.json"
+  },
+  "user_feedback": "整体还不错，远远没有稳定维持在120fps，但看着还算流畅",
+  "device_window_released": true,
+  "coordination": "Authorized deepread thread notified before installation and after device window release",
+  "current_decision": "Keep installed native-animation version based on user feedback and this sample; no further installation or settings changes in this window",
+  "evidence": {
+    "streamnative.csv": {
+      "sha256": "df722322ef7e4e3bedcb894c8ebe713d223e3d58e14f35ba1d6f91489bd7cebf",
+      "bytes": 9275
+    },
+    "streamnativefinish.jpeg": {
+      "sha256": "0eed7b2b95c4abf5572dc97729c076f5f64432ed1b902db5346dbb76791df10a",
+      "bytes": 217969
+    },
+    "streamnative-analysis.json": {
+      "sha256": "32037bee05320df6f9a8f6a8c55ed4dfac4a0becf6a23dc90b51af366f468e41",
+      "bytes": 7358
+    }
+  },
+  "raw_trace": {
+    "path": "/tmp/streamnative.trace",
+    "sha256": "2a400a79f4124305247bb2f435e303fc4a7e131b6690f66c6cfefff577b8405a",
+    "bytes": 68894449
+  }
+}

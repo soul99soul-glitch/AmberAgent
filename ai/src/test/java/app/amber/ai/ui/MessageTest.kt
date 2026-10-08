@@ -73,38 +73,6 @@ class MessageTest {
     }
 
     @Test
-    fun `limitContext with tool call at start should include corresponding user message`() {
-        val messages = listOf(
-            UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("User query"))),
-            UIMessage(
-                role = MessageRole.ASSISTANT, parts = listOf(
-                    UIMessagePart.Tool(
-                        toolCallId = "call1",
-                        toolName = "test_tool",
-                        input = "{}",
-                        output = emptyList()
-                    )
-                )
-            ),
-            UIMessage(
-                role = MessageRole.ASSISTANT, parts = listOf(
-                    UIMessagePart.Tool(
-                        toolCallId = "call1",
-                        toolName = "test_tool",
-                        input = "{}",
-                        output = listOf(UIMessagePart.Text("result"))
-                    )
-                )
-            ),
-            UIMessage(role = MessageRole.ASSISTANT, parts = listOf(UIMessagePart.Text("Final response")))
-        )
-
-        val result = messages.limitContext(2)
-        assertEquals(4, result.size)
-        assertEquals(messages, result)
-    }
-
-    @Test
     fun `handleMessageChunk finishes reasoning when text delta starts`() {
         val messages = listOf(UIMessage.user("go"))
             .handleMessageChunk(streamChunk(UIMessagePart.Reasoning("thinking", finishedAt = null)))

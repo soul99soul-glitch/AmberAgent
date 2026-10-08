@@ -1,8 +1,10 @@
-import { ACCENT, ERROR, INK, INK3, LINE, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
+import { ACCENT, ERROR, INK, INK3, LINE, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
 
 // Reader 修订／重生成、暂停代笔修改要求共用输入；写入范围由调用方冻结并展示。
 @Component
 export struct NovelRevisionBriefSheet {
+  @StorageProp('reduceMotion') private reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') private appBackgrounded: boolean = false;
   @Prop @Watch('resetDraft') draftKey: string = '';
   @Prop @Watch('cancel') closeRequest: number = 0;
   @Prop initialText: string = '';
@@ -89,6 +91,10 @@ export struct NovelRevisionBriefSheet {
         }.width('100%').border({ width: { top: 1 }, color: { top: LINE } })
       }.width('100%').height('80%').alignItems(HorizontalAlign.Start).backgroundColor(SURFACE)
         .borderRadius({ topLeft: 20, topRight: 20 }).padding({ left: 20, right: 20, top: 18, bottom: this.bottomPadding + 16 })
+        .transition(TransitionEffect.translate({ y: this.reduceMotion || this.appBackgrounded ? 0 : 160 })
+          .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
     }.width('100%').height('100%')
+      .transition(TransitionEffect.OPACITY
+        .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 }

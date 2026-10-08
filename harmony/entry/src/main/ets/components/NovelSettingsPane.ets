@@ -148,7 +148,7 @@ export struct NovelSettingsPane {
 
   private targetLabel(target: NovelModelTarget | null, inherited: string): string {
     if (target === null) return inherited;
-    if (target.kind === 'global') return '跟随聊天全局模型';
+    if (target.kind === 'global') return '使用应用中该职责的默认模型';
     const option: NovelModelOptionView | null = this.optionFor(target);
     if (option !== null) return `${option.providerLabel} · ${option.label}`;
     return `${target.providerId} · ${target.modelId}`;
@@ -347,9 +347,9 @@ export struct NovelSettingsPane {
       Text('模型职责').fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK)
       Text('固定模型不可用时会保留绑定并禁止静默替换。')
         .fontSize(12).fontColor(INK3).margin({ top: 4, bottom: 12 })
-      this.modelRole('写作模型', '跟随聊天全局模型', this.writingTarget, 'writing')
-      this.modelRole('审稿模型', '跟随写作模型', this.reviewTarget, 'review')
-      this.modelRole('内部职责模型', '未配置', this.stateSyncTarget, 'stateSync')
+      this.modelRole('写作模型', '使用默认写作模型', this.writingTarget, 'writing')
+      this.modelRole('审稿模型', '默认审稿模型或写作模型', this.reviewTarget, 'review')
+      this.modelRole('剧情同步模型', '默认剧情同步模型或写作模型', this.stateSyncTarget, 'stateSync')
     }
     .width('100%').padding(14).backgroundColor(SURFACE2).borderRadius(14)
     .margin({ bottom: 14 })
@@ -385,8 +385,8 @@ export struct NovelSettingsPane {
     Row() {
       Column() {
         Text(label).fontSize(13).fontColor(this.inheritedSelected(selected, role) ? ACCENT : INK2)
-        Text(role === 'writing' ? '使用应用聊天当前模型。' :
-          (role === 'review' ? '审稿使用当前写作模型。' : '不单独执行状态同步职责。'))
+        Text(role === 'writing' ? '优先使用应用默认写作模型，否则使用设置中的默认模型。' :
+          '优先使用应用中该职责的默认模型，否则跟随当前项目的写作模型。')
           .fontSize(11).fontColor(INK3).margin({ top: 2 })
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1)

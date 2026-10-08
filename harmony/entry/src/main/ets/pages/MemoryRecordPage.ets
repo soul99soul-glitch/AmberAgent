@@ -1,12 +1,13 @@
 import { router, KeyboardAvoidMode } from '@kit.ArkUI';
 import type { Conversation, MemoryRecord, MessageNode } from '@amber/chat-domain';
 import { getChatRepository } from '../di/AppContainer.ets';
-import { getMemoryLibraryOps, getMemoryTopicStoreOps } from '../platform_impl/MemoryStore.ets';
+import { getMemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
 import { CenteredTitleBar, PlainSection, CardGroup, PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { SSHUIColors } from '../components/SSHUIColors.ets';
 import { ACCENT } from '../design/tokens.ets';
 import { FONT_MONO, FONT_SANS_MEDIUM } from '../design/fonts.ets';
+import { isActiveMemoryRecord, memoryScopeLabel, memoryKindLabel } from '../components/MemoryPresentation.ets';
 
 interface MemoryRecordParams { memoryId?: string; }
 interface MemorySourceMessage { messageId: string; nodeId: string | null; }
@@ -20,6 +21,7 @@ struct MemoryRecordPage {
   @State loaded: boolean = false;
   @State saving: boolean = false;
   @State removing: boolean = false;
+  @State restoring: boolean = false;
   @State error: string = '';
   @State notice: string = '';
   @State sourceStatus: string = '';
@@ -50,7 +52,7 @@ struct MemoryRecordPage {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
   }
   private refreshColors(): void { this.colors = new SSHUIColors(); }
-  private memoryChanged(): void { if (this.alive && this.visible && !this.saving && !this.removing) this.reload(true); }
+  private memoryChanged(): void { if (this.alive && this.visible && !this.saving && !this.removing && !this.restoring) this.reload(true); }
 
   private async reload(preserveDraft: boolean = false): Promise<boolean> {
     const seq: number = ++this.loadSeq;
@@ -59,7 +61,7 @@ struct MemoryRecordPage {
       this.loaded = true; this.error = '源记忆 ID 无效'; return false;
     }
     try {
-      const records: MemoryRecord[] = await getMemoryTopicStoreOps().snapshotForTopics();
+      const records: MemoryRecord[] = await getMemoryLibraryOps().getAllRecords();
       if (!this.alive || !this.visible || seq !== this.loadSeq) return false;
       const found: MemoryRecord | null = records.find((item: MemoryRecord): boolean => item.id === this.memoryId) ?? null;
       const cleanDraft: boolean = this.record === null || this.draft === this.record.content;
@@ -94,7 +96,7 @@ struct MemoryRecordPage {
   }
 
   private async save(): Promise<void> {
-    if (this.record === null || this.record.kind === 'topic' || this.saving || this.removing) return;
+    if (this.record === null || this.record.kind === 'topic' || this.saving || this.removing || this.restoring) return;
     const text: string = this.draft.trim();
     if (text.length === 0) { this.error = '源记忆内容不能为空'; return; }
     this.saving = true; this.notice = ''; this.error = '';
@@ -112,7 +114,7 @@ struct MemoryRecordPage {
   }
 
   private remove(): void {
-    if (this.record === null || this.record.kind === 'topic' || this.saving || this.removing) return;
+    if (this.record === null || this.record.kind === 'topic' || this.saving || this.removing || this.restoring) return;
     AlertDialog.show({
       title: '删除源记忆', message: '删除这条源记忆。依赖它的主题摘要和派生文档会随真实源记录刷新。',
       primaryButton: { value: '取消', action: (): void => {} },
@@ -153,8 +155,8 @@ struct MemoryRecordPage {
 
   private recordLabel(): string {
     if (this.record === null) return '';
-    const status: string = this.record.archived ? '已归档' : this.record.expiresAt !== null && this.record.expiresAt <= Date.now() ? '已过期' : '有效';
-    return `#${this.record.id} · ${this.record.scope} / ${this.record.kind} · ${status}`;
+    const status: string = (this.record.invalidatedAt ?? null) !== null ? '已作废' : this.record.archived ? '已归档' : this.record.expiresAt !== null && this.record.expiresAt <= Date.now() ? '已过期' : '有效';
+    return `#${this.record.id} · ${memoryScopeLabel(this.record.scope)} / ${memoryKindLabel(this.record.kind)} · ${status}`;
   }
 
   // 编辑卡:标识行 + 圆角文本域(r12 内边距)+ 时间戳 + 文本动作(保存/删除)
@@ -174,24 +176,65 @@ struct MemoryRecordPage {
         TextArea({ text: this.draft, placeholder: '源记忆内容' }).width('100%').height(240)
           .fontSize(15).fontColor(this.colors.ink).placeholderColor(this.colors.muted)
           .backgroundColor(this.colors.inset).borderRadius(12).padding(12)
-          .enabled(!this.saving && !this.removing).onChange((value: string): void => { this.draft = value; })
-        Text(`创建：${new Date(this.record?.createdAt ?? 0).toLocaleString()}\n更新：${new Date(this.record?.updatedAt ?? 0).toLocaleString()}`)
+          .enabled(!this.saving && !this.removing && !this.restoring).onChange((value: string): void => { this.draft = value; })
+        Text(`记录日期：${new Date(this.record?.createdAt ?? 0).toLocaleString()}\n更新：${new Date(this.record?.updatedAt ?? 0).toLocaleString()}`)
           .fontSize(12).fontColor(this.colors.secondary).width('100%')
+        if (this.record?.expiresAt !== null) {
+          Text(`有效期至：${new Date(this.record?.expiresAt ?? 0).toLocaleString()}`)
+            .fontSize(12).fontColor(this.colors.secondary).width('100%')
+        }
+        if ((this.record?.invalidatedAt ?? null) !== null) {
+          Text(`失效日期：${new Date(this.record?.invalidatedAt ?? 0).toLocaleString()}`)
+            .fontSize(12).fontColor(this.colors.secondary).width('100%')
+        }
+        if ((this.record?.supersedesIds.length ?? 0) > 0) {
+          Text(`取代旧版本：${this.record?.supersedesIds.map((id: number): string => '#' + id).join('、') ?? ''}`)
+            .fontSize(12).fontColor(this.colors.secondary).width('100%')
+        }
+        if (this.record !== null && !isActiveMemoryRecord(this.record, Date.now())) {
+          Row() {
+            Text(this.restoring ? '恢复中…' : '恢复记忆').fontSize(14).fontColor(this.accentColor)
+              .constraintSize({ minWidth: 80, minHeight: 44 })
+              .enabled(!this.saving && !this.removing && !this.restoring)
+              .onClick((): void => { this.restore(); })
+            Blank()
+          }.width('100%')
+        }
         Row() {
           Text(this.saving ? '保存中' : '保存源记忆').fontSize(14).fontWeight(FontWeight.Medium)
             .fontFamily(FONT_SANS_MEDIUM)
-            .fontColor(this.saving || this.removing ? this.colors.muted : this.accentColor)
+            .fontColor(this.saving || this.removing || this.restoring ? this.colors.muted : this.accentColor)
             .constraintSize({ minHeight: 44 })
-            .enabled(!this.saving && !this.removing).onClick((): void => { this.save(); })
+            .enabled(!this.saving && !this.removing && !this.restoring).onClick((): void => { this.save(); })
           Blank()
           Text(this.removing ? '删除中' : '删除').fontSize(14).fontWeight(FontWeight.Medium)
             .fontFamily(FONT_SANS_MEDIUM)
-            .fontColor(this.saving || this.removing ? this.colors.muted : this.colors.error)
+            .fontColor(this.saving || this.removing || this.restoring ? this.colors.muted : this.colors.error)
             .constraintSize({ minHeight: 44 })
-            .enabled(!this.saving && !this.removing).onClick((): void => { this.remove(); })
+            .enabled(!this.saving && !this.removing && !this.restoring).onClick((): void => { this.remove(); })
         }.width('100%')
       }
     }.width('100%').padding({ left: 14, right: 14, top: 12, bottom: 10 })
+  }
+
+  private async restore(): Promise<void> {
+    if (this.record === null || this.restoring || this.saving || this.removing) return;
+    this.restoring = true; this.notice = ''; this.error = '';
+    let failure: string = '';
+    try { await getMemoryLibraryOps().restoreMemory(this.memoryId); }
+    catch (error) { failure = error instanceof Error ? error.message : String(error); }
+    const refreshed: boolean = await this.reload(true);
+    if (!this.alive) return;
+    if (refreshed && this.record !== null && isActiveMemoryRecord(this.record, Date.now())) this.notice = '记忆已恢复。';
+    if (failure.length > 0) this.error = this.notice.length > 0 ? failure : `恢复失败：${failure}`;
+    this.restoring = false;
+  }
+
+  @Builder
+  private EvidenceCard(): void {
+    Text(this.record?.evidence ?? '').fontSize(14).fontColor(this.colors.ink).width('100%')
+      .wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
+      .padding({ left: 14, right: 14, top: 12, bottom: 12 })
   }
 
   // 来源卡:会话出处 + 可定位的来源消息(行式 + 箭头)
@@ -244,7 +287,7 @@ struct MemoryRecordPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      CenteredTitleBar({ title: '源记忆' })
+      CenteredTitleBar({ title: '记忆详情' })
       Scroll() {
         Column() {
           if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
@@ -258,6 +301,10 @@ struct MemoryRecordPage {
           } else {
             PlainSection({ label: '源记忆' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.EditorCard(); } })
+            if ((this.record.evidence ?? '').trim().length > 0) {
+              PlainSection({ label: '用户原话' })
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.EvidenceCard(); } })
+            }
             PlainSection({ label: '真实来源' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.SourceCard(); } })
           }

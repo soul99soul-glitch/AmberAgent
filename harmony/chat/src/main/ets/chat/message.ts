@@ -16,3 +16,7 @@ export {
   toolInputAsJson, toText, reasoningPartText, summaryAsText, getTools, isValidToUpload,
   hasBase64Part, isEmptyInputMessage, isEmptyUIMessage,
 } from '@amber/deepread-domain';
+export {
+  CLAUDE_REDACTED_THINKING_METADATA_KEY, CLAUDE_THINKING_BLOCK_INDEX_METADATA_KEY,
+  hasProtocolReasoningContent, reasoningBlocksCanMerge, mergeReasoningMetadata,
+} from '@amber/deepread-domain';

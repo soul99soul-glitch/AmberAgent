@@ -28,7 +28,7 @@ const goalPart = (id = 'call-goal-1') => ({
   output: [], approvalState: { type: 'auto' }, metadata: null,
 });
 
-function fixture(observeScript, decideScript) {
+function fixture(observeScript, decideScript, review = null) {
   const events = [];
   const state = { calls: { observe: 0, choose: 0 } };
   const store = {
@@ -48,7 +48,7 @@ function fixture(observeScript, decideScript) {
   };
   const click = makeAgentTool({
     name: 'wm_click', description: 'click', parameters: () => null,
-    needsApproval: true, allowsAutoApproval: false, mandatoryApproval: true,
+    needsApproval: true, allowsAutoApproval: false, mandatoryApproval: review === null,
     execute: async () => {
       events.push('effect:click');
       return [{ type: 'text', text: '{"clicked":true}', metadata: null }];
@@ -60,7 +60,7 @@ function fixture(observeScript, decideScript) {
   });
   const goalTool = goal.createWebMountGoalTool();
   const adapter = goal.createWebMountGoalAdapter(ports);
-  const dispatcher = new AgentToolDispatcher({ hooks: defaultToolInvocationHooks() });
+  const dispatcher = new AgentToolDispatcher({ hooks: defaultToolInvocationHooks(), autoApprovalReview: review });
   const assistant = makeAssistant({});
   const providerFor = (script) => ({
     streamText: async (_messages, onChunk) => {
@@ -233,4 +233,23 @@ test('STARTED save failure means zero effect; cold recovery marks outcome_unknow
   assert.equal(JSON.parse(recoveredPart.output[0].text).status, 'outcome_unknown');
   assert.equal(recoveredPart.metadata.goal_v1.phase, 'finished');
   assert.equal(goal.recoverInterruptedWebMountGoals(recovered), recovered); // 幂等,不二次改写
+});
+
+test('auto approval review pauses real goal child before STARTED/effect and resumes its pinned document once', async () => {
+  let evaluations = 0;
+  const f = fixture([obs(0, 'first'), obs(0, 'first'), obs(0, 'done-marker')],
+    [{ kind: 'action', candidateId: 'cand-0', reason: '' }], async () => { evaluations++; return ['超出任务范围']; });
+  const script = [[f.chunk(goalPart())], [f.textChunk('done')]];
+  const loop = { ...f.makeLoop(script), autoApproveTools: true, autoApproveHighRiskTools: true };
+  let conv = await runAgenticToolLoop(seedConversation(), f.makeDeps(script), loop);
+  let p = pendingGoalPart(conv);
+  assert.equal(p.approvalState.type, 'pending'); assert.equal(p.metadata.goal_v1.phase, 'awaiting_approval');
+  assert.deepEqual(f.events, []); assert.equal(evaluations, 1);
+  assert.equal(require('../main/ets/chat/jev_auto_approval.ts').jevAutoApprovalReason(p), '自动批准复核：超出任务范围');
+  assert.equal(p.metadata.goal_v1.pendingStep.metadata.wm_document_v1.revision, 0);
+  assert.match(JSON.stringify(p.metadata.goal_v1.pendingStep.metadata.permission_trace), /jev_auto_approval.*超出任务范围/);
+  conv = applyToolApprovalToConversation(conv, p.toolCallId, { kind: 'approved' });
+  conv = await runToolLoopContinuation(conv, f.makeDeps(script), loop);
+  assert.equal(f.events.filter(e => e === 'effect:click').length, 1);
+  assert.equal(evaluations, 1);
 });

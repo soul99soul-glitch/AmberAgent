@@ -1,0 +1,290 @@
+--- a/harmony/entry/src/main/ets/components/NativeTimelineFollow.ets
++++ b/harmony/entry/src/main/ets/components/NativeTimelineFollow.ets
+@@ -1,10 +1,8 @@
+-// DisplaySync votes for actual display frames while the native List is moving.
+-// postFrameCallback alone can inherit the system's 30fps animation vote.
++// Native List animation owns intermediate positions. DisplaySync requests the
++// motion rate and samples changing layout without computing each scroll step.
+ import { display, UIContext } from '@kit.ArkUI';
+ import { displaySync } from '@kit.ArkGraphics2D';
+ import { deviceInfo } from '@kit.BasicServicesKit';
+-import { nativeTimelineSpringStep } from '@amber/chat-domain';
+-import type { NativeTimelineSpringSample } from '@amber/chat-domain';
+ 
+ export class NativeTimelineFollow {
+   private context: UIContext;
+@@ -14,8 +12,7 @@
+   private willScroll: () => void;
+   private pending: boolean = false;
+   private generation: number = 0;
+-  private lastFrameMs: number = 0;
+-  private velocity: number = 0;
++  private animationTarget: number = -1;
+   private clock: displaySync.DisplaySync = displaySync.create();
+   private frameCallback: (info: displaySync.IntervalInfo) => void = (_info: displaySync.IntervalInfo): void => {};
+ 
+@@ -48,53 +45,55 @@
+     // At rest cancel() releases the request entirely, allowing deeper idle rates.
+     this.clock.setExpectedFrameRateRange({ min: Math.min(60, rate), max: rate, expected: rate });
+     const generation: number = this.generation;
+-    this.frameCallback = (info: displaySync.IntervalInfo): void => {
+-      this.tick(generation, info.timestamp / 1_000_000,
+-        (info.targetTimestamp - info.timestamp) / 1_000_000);
++    this.frameCallback = (_info: displaySync.IntervalInfo): void => {
++      this.tick(generation);
+     };
+     this.clock.on('frame', this.frameCallback);
+     this.context.runScopedTask((): void => { this.clock.start(); });
+   }
+ 
++  isRunning(): boolean {
++    return this.pending && this.animationTarget >= 0;
++  }
++
+   cancel(): void {
++    const wasAnimating: boolean = this.animationTarget >= 0;
+     this.generation++;
+     if (this.pending) {
+       this.clock.stop();
+       this.clock.off('frame', this.frameCallback);
+     }
++    // Invalidate before stopping the List animation, whose callbacks may reenter.
+     this.pending = false;
+-    this.lastFrameMs = 0;
+-    this.velocity = 0;
++    this.animationTarget = -1;
++    if (wasAnimating) {
++      this.scroller.scrollTo({ xOffset: 0,
++        yOffset: this.scroller.currentOffset().yOffset, animation: false });
++    }
+   }
+ 
+-  tick(generation: number, frameTimeMs: number, frameIntervalMs: number): void {
++  tick(generation: number): void {
+     if (generation !== this.generation) return;
+     if (!this.mayFollow()) { this.cancel(); return; }
+     const target: number | null = this.bottomTarget();
+     if (target === null) {
+       // New structural row beyond the measured range: anchor it once, then measure.
++      this.cancel();
+       this.willScroll();
+       this.scroller.scrollEdge(Edge.Bottom);
+-      this.cancel();
+       return;
+     }
+     const current: number = this.scroller.currentOffset().yOffset;
+-    // A real LTPO rate change supplies a new interval. A missed frame instead
+-    // leaves a longer timestamp gap: discard that debt rather than jumping ahead.
+-    const dt: number = (this.lastFrameMs > 0 ?
+-      Math.min(frameTimeMs - this.lastFrameMs, frameIntervalMs) : frameIntervalMs) / 1000;
+-    this.lastFrameMs = frameTimeMs;
+-    const sample: NativeTimelineSpringSample = nativeTimelineSpringStep(current, this.velocity, target, dt);
+-    const arrived: boolean = Math.abs(target - sample.position) <= 0.5;
+-    const delta: number = (arrived ? target : sample.position) - current;
+-    this.velocity = sample.velocity;
+-    if (Math.abs(delta) > 0.01) {
+-      this.willScroll();
+-      this.scroller.scrollBy(0, delta);
+-    }
+-    if (arrived) {
+-      // Release the high-rate vote at rest, on touch, and when the page detaches.
+-      this.cancel();
+-    }
++    const distance: number = target - current;
++    if (distance <= 0.5) { this.cancel(); return; }
++    if (Math.abs(target - this.animationTarget) <= 0.5) return;
++    this.animationTarget = target;
++    this.willScroll();
++    // As in the native thinking panel, retarget only on geometry changes.
++    // Linear interpolation avoids restarting an ease-in on every text snapshot;
++    // duration keeps large paragraph bursts within the existing720vp/s ceiling.
++    this.scroller.scrollTo({ xOffset: 0, yOffset: target,
++      animation: { duration: Math.max(160, distance / 720 * 1000),
++        curve: Curve.Linear, canOverScroll: false } });
+   }
+ }
+--- a/harmony/entry/src/main/ets/pages/ChatPage.ets
++++ b/harmony/entry/src/main/ets/pages/ChatPage.ets
+@@ -1052,6 +1052,7 @@
+     // 对齐 ChatListNormalSection.kt:636-641 shouldScroll:自动滚动开 +
+     //   跟随中(或已在底部附近)+ 未暂停
+     if (deltaVp > 0 && this.shouldFollowIme()) {
++      this.nativeFollow?.cancel();
+       const token: number = ++this.imeProgrammaticScrollToken;
+       this.beginProgrammaticScroll();
+       try {
+@@ -1835,6 +1836,7 @@
+     this.atBottomApprox = false;
+     this.jumpButtonVisible = false;
+     this.initialJumpSuppressedUntilUserScroll = true;
++    this.nativeFollow?.cancel();
+     this.beginProgrammaticScroll();
+     try {
+       // Phase 5:历史加载占位 item 在 List 头部,scrollToIndex 索引需前移占位数
+@@ -4481,6 +4483,8 @@
+         },
+         onTimelineWillScroll: (offset: number, _state: ScrollState, source: ScrollSource): void => {
+           if (offset !== 0 && (source === ScrollSource.DRAG || source === ScrollSource.FLING)) {
++            this.nativeFollow?.cancel();
++            this.programmaticScrollPending = false;
+             this.showScrollNavigation();
+           }
+         },
+@@ -4488,7 +4492,8 @@
+           if (this.programmaticScrollPending && scrollState === ScrollState.Idle) {
+             this.programmaticScrollPending = false;
+           } else if ((scrollState === ScrollState.Scroll || scrollState === ScrollState.Fling) &&
+-            (this.userTouchActive || !this.programmaticScrollPending)) {
++            (this.userTouchActive ||
++              (!this.programmaticScrollPending && !this.nativeFollow?.isRunning()))) {
+             this.handleUserScroll(this.isGenerationActive());
+           }
+         },
+@@ -4531,6 +4536,9 @@
+         .shadow({ radius: 8, color: '#33000000', offsetY: 2 })
+         .alignContent(Alignment.Center)
+         .onClick((): void => {
++          this.followMode = 'paused';
++          this.atBottomApprox = false;
++          this.nativeFollow?.cancel();
+           this.beginProgrammaticScroll();
+           this.scroller.scrollEdge(Edge.Top);
+         })
+--- a/harmony/chat/src/test/native_timeline_follow.test.cjs
++++ b/harmony/chat/src/test/native_timeline_follow.test.cjs
+@@ -12,7 +12,9 @@
+   const source = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+   }).outputText;
+-  const clocks = [], frames = [], moves = [];
++  const clocks = [], frames = [], moves = [], animations = [];
++  let nativeMotion = null;
++  let advanceNative = () => {};
+   const displaySync = { create: () => {
+     const clock = { callback: null, rate: null, running: false,
+       setExpectedFrameRateRange: range => { clock.rate = range; },
+@@ -22,6 +24,7 @@
+         clock.running = true;
+         const callback = clock.callback;
+         const frame = { onFrame: (timestamp, frameNanos = 1e9 / 60) => {
++          advanceNative(frameNanos / 1e6);
+           callback({ timestamp, targetTimestamp: timestamp + frameNanos });
+           if (clock.running && clock.callback === callback) frames.push(frame);
+         } };
+@@ -37,9 +40,21 @@
+       } })
+     } } : name === '@kit.ArkGraphics2D' ? { displaySync } : name === '@kit.BasicServicesKit'
+       ? { deviceInfo: { sdkApiVersion: sdk } } : domain,
+-    canIUse: () => true, Edge: { Bottom: 'bottom' }, Math });
++    canIUse: () => true, Edge: { Bottom: 'bottom' }, Curve: { Linear: 'linear' }, Math });
+   let offset = 0, target = 80, allowed = true, time = 0;
++  advanceNative = intervalMs => {
++    if (!nativeMotion) return;
++    const step = Math.min(nativeMotion.target - offset, nativeMotion.speed * intervalMs / 1000);
++    offset += step;
++    if (step) moves.push(step);
++    if (offset >= nativeMotion.target) nativeMotion = null;
++  };
+   const scroller = { currentOffset: () => ({ yOffset: offset }),
++    scrollTo: options => {
++      animations.push(options);
++      if (options.animation === false) { offset = options.yOffset; nativeMotion = null; return; }
++      nativeMotion = { target: options.yOffset, speed: (options.yOffset - offset) / options.animation.duration * 1000 };
++    },
+     scrollBy: (_x, y) => { offset += y; moves.push(y); },
+     scrollEdge: () => { offset = target ?? 160; moves.push('edge'); } };
+   const driver = new exports.NativeTimelineFollow({ postFrameCallback: f => frames.push(f), runScopedTask: f => f() }, scroller,
+@@ -47,7 +62,7 @@
+   const busyFrame = () => { const f = frames.shift(); assert.ok(f); time += 1000 / 60; f.onFrame(time * 1e6); };
+   const frame = (intervalMs = 1000 / 60, elapsedMs = intervalMs) => { const f = frames.shift(); assert.ok(f); time += elapsedMs;
+     f.onFrame(time * 1e6, intervalMs * 1e6); if (f.onIdle) f.onIdle(1e6); };
+-  return { driver, clocks, frames, moves, frame, busyFrame, offset: () => offset,
++  return { driver, clocks, frames, moves, animations, frame, busyFrame, offset: () => offset,
+     target: value => { target = value; }, allow: value => { allowed = value; } };
+ }
+ 
+@@ -55,7 +70,7 @@
+   const f = await fixture();
+   f.driver.request(); f.driver.request();
+   assert.equal(f.frames.length, 1); assert.equal(f.moves.length, 0);
+-  f.target(120); f.frame();
++  f.target(120); f.frame(); f.frame();
+   assert.ok(f.offset() > 0 && f.offset() < 120);
+   while (f.frames.length) f.frame();
+   assert.ok(Math.abs(f.offset() - 120) < 0.01);
+@@ -67,11 +82,11 @@
+   const f = await fixture();
+   f.driver.request(); f.allow(false); f.driver.cancel(); f.frame();
+   assert.equal(f.moves.length, 0);
+-  f.allow(true); f.driver.request(); f.frame();
++  f.allow(true); f.driver.request(); f.frame(); f.frame();
+   assert.ok(f.offset() > 0);
+ });
+ 
+-test('growing geometry retargets the active spring; late terminal layout starts another frame', async () => {
++test('growing geometry retargets native animation; late terminal layout starts another frame', async () => {
+   const f = await fixture();
+   f.driver.request(); f.frame(); f.target(160); f.driver.request();
+   assert.equal(f.frames.length, 1);
+@@ -91,7 +106,7 @@
+ test('busy layout frames advance scrolling without waiting for onIdle', async () => {
+   const f = await fixture();
+   f.driver.request();
+-  f.busyFrame();
++  f.busyFrame(); f.busyFrame();
+   assert.ok(f.offset() > 0, 'stream growth must not stall until an idle frame');
+   assert.equal(f.frames.length, 1);
+   f.busyFrame();
+@@ -108,7 +123,7 @@
+   assert.equal(clock.rate.min, 60);
+   assert.equal(clock.rate.max, 120);
+   assert.ok(clock.running);
+-  for (let i = 1; clock.running && i < 120; i++) clock.callback({ timestamp: i * 1e9 / 120, targetTimestamp: (i + 1) * 1e9 / 120 });
++  for (let i = 1; clock.running && i < 120; i++) f.frame(1000 / 120);
+   assert.equal(clock.running, false);
+   assert.equal(clock.callback, null);
+   assert.equal(f.offset(), 80);
+@@ -146,7 +161,7 @@
+ 
+ 
+ test('LTPO120→90→60Hz changes retain bounded native motion without restarting the clock', async () => {
+-  const f = await fixture(); f.target(500); f.driver.request();
++  const f = await fixture(); f.target(500); f.driver.request(); f.frame(1000 / 120);
+   for (const hz of [120, 120, 90, 90, 60, 60, 120]) {
+     const before = f.offset();
+     f.frame(1000 / hz);
+@@ -160,15 +175,25 @@
+   assert.equal(f.clocks[0].running, false);
+ });
+ 
+-test('a dropped frame does not repay lost display time with a large catch-up step', async () => {
+-  const f = await fixture(); f.target(500); f.driver.request();
+-  f.frame(1000 / 120); f.frame(1000 / 120);
+-  const before = f.offset();
++test('late layout observations do not issue a catch-up scrollBy or restart unchanged native motion', async () => {
++  const f = await fixture(); f.target(500); f.driver.request(); f.frame(1000 / 120);
+   f.frame(1000 / 120, 50);
+-  assert.ok(f.offset() - before <= 6 + 1e-6,
+-    `one delivered120Hz frame must stay within6vp even after50ms of missing frames, got ${f.offset() - before}`);
+-  const afterDrop = f.offset();
+-  f.frame(1000 / 60);
+-  assert.ok(f.offset() - afterDrop <= 12 + 1e-6, 'a real LTPO60Hz tick can advance its full16.7ms');
++  assert.equal(f.animations.length, 1);
++  assert.equal(f.animations[0].yOffset, 500);
+   f.driver.cancel();
+ });
++
++test('system animation owns intermediate positions; unchanged geometry does not restart it', async () => {
++  const f = await fixture(); f.target(160); f.driver.request(); f.frame();
++  assert.equal(f.animations.length, 1, 'a native scrollTo animation must be issued');
++  const animation = f.animations[0];
++  assert.equal(animation.yOffset, 160);
++  assert.equal(animation.animation.curve, 'linear');
++  assert.ok(animation.animation.duration >= 160 / 720 * 1000);
++  for (let i = 0; i < 8; i++) f.frame(1000 / 120);
++  assert.equal(f.animations.length, 1, 'native animation must not restart every vsync');
++  assert.equal(f.driver.isRunning(), true, 'long native animations retain programmatic attribution');
++  f.driver.cancel();
++  assert.equal(f.animations.at(-1).animation, false, 'touch/exit explicitly stops native scrollTo');
++  assert.equal(f.driver.isRunning(), false);
++});

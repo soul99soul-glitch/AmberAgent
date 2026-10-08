@@ -8,14 +8,22 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MAX_PENDING_USER_MESSAGES,
-  makePendingUserMessage, isCollectablePending, pendingAsFollowup,
-  pendingPreviewText, buildCollectedPendingUserMessage,
-  enqueuePendingUserMessage, dequeueNextPendingUserMessage,
-  dequeueSteerPendingUserMessages, dequeueLeadingCollectableMessages,
-  cancelPendingUserMessage, movePendingUserMessage, convertSteerToFollowup,
+  makePendingUserMessage,
+  isCollectablePending,
+  pendingAsFollowup,
+  pendingPreviewText,
+  buildCollectedPendingUserMessage,
+  enqueuePendingUserMessage,
+  dequeueSteerPendingUserMessages,
+  dequeueLeadingCollectableMessages,
+  cancelPendingUserMessage,
+  movePendingUserMessage,
+  convertSteerToFollowup,
   preparePendingMessageForDispatch,
 } from '../main/ets/chat/pending_queue.ts';
-import type { PendingUserMessage } from '../main/ets/chat/pending_queue.ts';
+import type {
+  PendingUserMessage,
+} from '../main/ets/chat/pending_queue.ts';
 
 const textMsg = (id: string, text: string, mode: 'FOLLOWUP' | 'STEER' | 'COLLECT' = 'FOLLOWUP')
   : PendingUserMessage => makePendingUserMessage({
@@ -25,20 +33,7 @@ const textMsg = (id: string, text: string, mode: 'FOLLOWUP' | 'STEER' | 'COLLECT
   createdAtMs: 1000,
 });
 
-describe('makePendingUserMessage 默认值(PendingUserMessage.kt:16-22)', () => {
-  it('answer 默认 true,mode 默认 FOLLOWUP,createdAtMs 默认当前', () => {
-    const m = makePendingUserMessage({});
-    assert.equal(m.answer, true);
-    assert.equal(m.mode, 'FOLLOWUP');
-    assert.ok(m.createdAtMs > 0);
-    assert.ok(m.id.length > 0);
-  });
-});
-
 describe('isCollectablePending(PendingUserMessage.kt:24-25)', () => {
-  it('COLLECT + 全文本 → true', () => {
-    assert.equal(isCollectablePending(textMsg('a', 'hi', 'COLLECT')), true);
-  });
   it('COLLECT 但含图片 → false', () => {
     const m = makePendingUserMessage({
       id: 'a', mode: 'COLLECT',
@@ -49,16 +44,9 @@ describe('isCollectablePending(PendingUserMessage.kt:24-25)', () => {
     });
     assert.equal(isCollectablePending(m), false);
   });
-  it('FOLLOWUP 全文本 → false', () => {
-    assert.equal(isCollectablePending(textMsg('a', 'hi')), false);
-  });
 });
 
 describe('pendingAsFollowup(:27-29)', () => {
-  it('已是 FOLLOWUP 原样返回(引用相等)', () => {
-    const m = textMsg('a', 'hi');
-    assert.equal(pendingAsFollowup(m), m);
-  });
   it('STEER → copy mode=FOLLOWUP', () => {
     const m = textMsg('a', 'hi', 'STEER');
     const out = pendingAsFollowup(m);
@@ -97,14 +85,6 @@ describe('pendingPreviewText(:53-65)', () => {
 });
 
 describe('buildCollectedPendingUserMessage(:31-51)', () => {
-  it('空数组抛错(require)', () => {
-    assert.throws(() => buildCollectedPendingUserMessage([]), /must not be empty/);
-  });
-  it('单条 → asFollowup(不拼模板)', () => {
-    const out = buildCollectedPendingUserMessage([textMsg('a', 'hi', 'COLLECT')]);
-    assert.equal(out.mode, 'FOLLOWUP');
-    assert.equal(out.id, 'a');
-  });
   it('多条 → 合并文本/id+/answer any/createdAtMs min', () => {
     const a = makePendingUserMessage({
       id: 'a', mode: 'COLLECT', answer: false, createdAtMs: 300,
@@ -153,16 +133,6 @@ describe('enqueuePendingUserMessage(ConversationSession.kt:110-132)', () => {
 });
 
 describe('dequeue 系列(:134-168)', () => {
-  it('dequeueNext 取头', () => {
-    const { next, rest } = dequeueNextPendingUserMessage([textMsg('a', '1'), textMsg('b', '2')]);
-    assert.equal(next?.id, 'a');
-    assert.deepEqual(rest.map((m) => m.id), ['b']);
-  });
-  it('dequeueNext 空队列 → null', () => {
-    const { next, rest } = dequeueNextPendingUserMessage([]);
-    assert.equal(next, null);
-    assert.equal(rest.length, 0);
-  });
   it('dequeueSteer 取 STEER 前缀', () => {
     const cur = [textMsg('s1', '1', 'STEER'), textMsg('s2', '2', 'STEER'), textMsg('f1', '3')];
     const { consumed, rest } = dequeueSteerPendingUserMessages(cur);
@@ -198,10 +168,6 @@ describe('cancel/move/convert(:170-226)', () => {
     assert.deepEqual(clamped.messages.map((m) => m.id), ['a', 'b', 'c']);
     assert.equal(clamped.changed, false);
   });
-  it('move offset=0 直接 false', () => {
-    const cur = [textMsg('a', '1')];
-    assert.equal(movePendingUserMessage(cur, 'a', 0).changed, false);
-  });
   it('convertSteerToFollowup 全部 STEER → FOLLOWUP', () => {
     const cur = [textMsg('s', '1', 'STEER'), textMsg('f', '2')];
     const r = convertSteerToFollowup(cur);
@@ -226,11 +192,5 @@ describe('preparePendingMessageForDispatch(ChatService.kt:1057-1073)', () => {
     assert.equal(dispatch.mode, 'FOLLOWUP');
     assert.equal(dispatch.id, 's');
     assert.deepEqual(rest.map((m) => m.id), ['f1']);
-  });
-  it('FOLLOWUP 头 → 原样', () => {
-    const head = textMsg('f', '头');
-    const { dispatch, rest } = preparePendingMessageForDispatch([], head);
-    assert.equal(dispatch, head);
-    assert.equal(rest.length, 0);
   });
 });

@@ -1,8 +1,10 @@
-import { ACCENT, ACCENT_INK, INK, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2, ERROR } from '../design/tokens.ets';
+import { ACCENT, ACCENT_INK, INK, INK3, INK4, LINE, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2, ERROR } from '../design/tokens.ets';
 import { MarkdownText } from './MarkdownText.ets';
 
 @Component
 export struct NovelGhostwriteStartSheet {
+  @StorageProp('reduceMotion') private reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') private appBackgrounded: boolean = false;
   @Prop planContent: string = '';
   @Prop chapterCount: number = 1;
   @Prop branchName: string = '';
@@ -43,6 +45,10 @@ export struct NovelGhostwriteStartSheet {
         }.width('100%')
       }.width('100%').height('85%').backgroundColor(SURFACE).borderRadius({ topLeft: 20, topRight: 20 })
         .padding({ left: 20, right: 20, top: 12, bottom: 24 + this.bottomPadding })
+        .transition(TransitionEffect.translate({ y: this.reduceMotion || this.appBackgrounded ? 0 : 160 })
+          .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
     }.width('100%').height('100%')
+      .transition(TransitionEffect.OPACITY
+        .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 }

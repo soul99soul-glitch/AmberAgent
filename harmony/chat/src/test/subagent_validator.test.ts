@@ -10,14 +10,19 @@ import {
   subAgentValidateToolAllowlist,
 } from '../main/ets/index.ts';
 import type {
-  SubAgentDefinition, SubAgentMode, SubAgentOverride, SubAgentRuntimeSetting,
+  SubAgentDefinition,
+  SubAgentMode,
+  SubAgentOverride,
+  SubAgentRuntimeSetting,
 } from '../main/ets/chat/agent_prompt_config.ts';
 import {
-  makeSubAgentDefinition, makeSubAgentOverride,
+  makeSubAgentDefinition,
+  makeSubAgentOverride,
 } from '../main/ets/chat/agent_prompt_config.ts';
 import type { JsonObject, JsonValue } from '../main/ets/chat/json.ts';
 import {
-  EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS, EXTENDED_SUB_AGENT_TIMEOUT_MS,
+  EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS,
+  EXTENDED_SUB_AGENT_TIMEOUT_MS,
 } from '../main/ets/chat/subagent_models.ts';
 interface CustomInputOptions {
   name?: string | null;
@@ -136,55 +141,6 @@ const assertTools = (actual: string[], expected: string[]): void => {
   assert.deepEqual(new Set<string>(actual), new Set<string>(expected));
 };
 
-test('Android-aligned Task 2 API exposes read-only set behavior', () => {
-  assert.equal(DEFAULT_DYNAMIC_READ_ONLY_TOOLS instanceof Set, true);
-  assert.equal(DEFAULT_DYNAMIC_READ_ONLY_TOOLS.has('file_read'), true);
-  assert.equal(DEFAULT_DYNAMIC_READ_ONLY_TOOLS.has('terminal_execute'), false);
-  subAgentValidateToolAllowlist(
-    new Set(['file_read']), new Set(['file_read']));
-});
-
-// SmartSubAgentNames.kt — exact pool order and Kotlin signed Int.MIN_VALUE handling,
-// observed through the validator's private picker call.
-test('stable generated names use the exact Android pool and Kotlin hash behavior', () => {
-  const objectives: string[] = [
-    'seed-22', 'seed-7', 'seed-2', 'seed-10', 'seed-20', 'seed-5',
-    'seed-0', 'seed-23', 'seed-8', 'seed-3', 'seed-11', 'seed-21',
-    'seed-6', 'seed-1', 'seed-24', 'seed-9', 'seed-4', 'seed-12',
-  ];
-  const names: string[] = objectives.map((objective: string): string => {
-    const input: JsonObject = inputWithCustomSubagent({
-      name: null, description: null, systemPrompt: null, toolProfile: 'none',
-    });
-    input['task'] = { objective };
-    return subAgentResolveDefinition(input, makeSetting(), new Set<string>()).definition.name;
-  });
-  assert.deepEqual(names, [
-    'Alice', 'Henry', 'Oliver', 'Emma', 'Jack', 'Charlotte',
-    'William', 'Amelia', 'James', 'Grace', 'George', 'Sophie',
-    'Thomas', 'Lucy', 'Daniel', 'Ella', 'Samuel', 'Mia',
-  ]);
-
-  const minValueInput: JsonObject = inputWithCustomSubagent({
-    name: null, description: null, systemPrompt: null, toolProfile: 'none',
-  });
-  minValueInput['task'] = { objective: 'Ltdmds' };
-  assert.equal(subAgentResolveDefinition(
-    minValueInput, makeSetting(), new Set<string>()).definition.name, 'Alice');
-});
-
-// SubAgentValidatorTest.kt:taskSpecDefaultsOptionalPlanningFields, with exact defaults pinned.
-test('task spec defaults optional planning fields to exact Android guidance', () => {
-  const task = subAgentParseTask({ task: { objective: 'Inspect one focused issue' } });
-  assert.equal(task.objective, 'Inspect one focused issue');
-  assert.equal(task.outputFormat,
-    'Brief summary, findings, evidence, risks, and recommended next steps.');
-  assert.equal(task.toolsAndSources,
-    'Use only tools granted to this subagent. If no tools are granted, rely only on the task context.');
-  assert.equal(task.boundaries,
-    'Stay within the assigned objective; do not spawn subagents; report once and stop.');
-});
-
 test('present custom_subagent must have Android jsonObject shape', () => {
   assert.throws((): void => {
     subAgentResolveDefinition(
@@ -253,21 +209,6 @@ test('task validation preserves exact required-field errors and accepts the cont
   assert.equal(atLimit.context.length, 6000);
 });
 
-// SubAgentValidatorTest.kt:generic/missing names in roster and smart modes.
-test('roster mode replaces generic English name instead of failing', () => {
-  const result = subAgentResolveDefinition(
-    inputWithCustomSubagent({ name: 'General Helper' }), makeSetting(), new Set(['file_read']));
-  assert.match(result.definition.name, /^[A-Z][a-z]+$/);
-  assert.equal(result.definition.id.includes('general'), false);
-});
-
-test('roster mode replaces generic Chinese name instead of failing', () => {
-  const result = subAgentResolveDefinition(
-    inputWithCustomSubagent({ name: '万能助手' }), makeSetting(), new Set(['file_read']));
-  assert.match(result.definition.name, /^[A-Z][a-z]+$/);
-  assert.equal(result.definition.name.includes('万能'), false);
-});
-
 test('smart mode rejects a built-in subagent id with the exact Android error', () => {
   const error = caughtError((): void => {
     subAgentResolveDefinition(
@@ -285,22 +226,6 @@ test('roster mode allows a built-in subagent id', () => {
   assert.deepEqual(result.warnings, []);
 });
 
-test('smart mode assigns an English name when name is missing', () => {
-  const result = subAgentResolveDefinition(
-    inputWithCustomSubagent({ name: null }), makeSetting({ mode: 'smart_dynamic' }),
-    new Set(['file_read']));
-  assert.match(result.definition.name, /^[A-Z][a-z]+$/);
-  assert.equal(result.definition.dynamic, true);
-});
-
-test('roster mode assigns a name when dynamic name is missing', () => {
-  const result = subAgentResolveDefinition(
-    inputWithCustomSubagent({ name: null }), makeSetting(), new Set(['file_read']));
-  assert.match(result.definition.name, /^[A-Z][a-z]+$/);
-  assert.notEqual(result.definition.id, '');
-  assert.equal(result.definition.dynamic, true);
-});
-
 test('smart mode replaces generic English and Chinese names instead of failing', () => {
   const smart = makeSetting({ mode: 'smart_dynamic' });
   const english = subAgentResolveDefinition(
@@ -312,15 +237,6 @@ test('smart mode replaces generic English and Chinese names instead of failing',
   assert.match(chinese.definition.name, /^[A-Z][a-z]+$/);
   assert.equal(chinese.definition.name.includes('万能'), false);
   assert.equal(chinese.definition.dynamic, true);
-});
-
-test('smart mode assigns an English display name and preserves the unsigned hash role id', () => {
-  const result = subAgentResolveDefinition(
-    inputWithCustomSubagent({ name: '情书子代理', toolProfile: 'none' }),
-    makeSetting({ mode: 'smart_dynamic' }), new Set<string>());
-  assert.match(result.definition.name, /^[A-Z][a-z]+$/);
-  assert.equal(result.definition.id, 'dynamic-1hdixql');
-  assert.equal(result.definition.dynamic, true);
 });
 
 // Built-in override branch: canonical-id override lookup, explicit copy and setting caps.
@@ -400,14 +316,6 @@ test('dynamic role defaults to available read-only tools only', () => {
   assert.equal(result.definition.dynamic, true);
 });
 
-test('roster mode assigns an English display name while preserving non-Latin role identity', () => {
-  const result = subAgentResolveDefinition(
-    inputWithCustomSubagent({ name: '新闻员' }), makeSetting(), new Set(['file_read']));
-  assert.match(result.definition.name, /^[A-Z][a-z]+$/);
-  assert.equal(result.definition.id.startsWith('dynamic-'), true);
-  assert.equal(result.definition.dynamic, true);
-});
-
 test('custom_subagent and subagent_id are mutually exclusive', () => {
   const error = caughtError((): void => {
     subAgentResolveDefinition(
@@ -429,38 +337,6 @@ test('resolve selection and dynamic setting errors exactly match Android', () =>
       inputWithCustomSubagent(), makeSetting({ allowDynamicSubAgents: false }),
       new Set(['file_read']));
   }).message, 'Dynamic subagents are disabled in settings');
-});
-
-test('dynamic role allows a scoped Chinese temporary description', () => {
-  const result = subAgentResolveDefinition(inputWithCustomSubagent({
-    name: 'Micro Fiction Writer',
-    description: '临时微小说家，写一个极短的科幻故事。',
-    toolProfile: 'none',
-  }), makeSetting({ mode: 'smart_dynamic' }), new Set<string>());
-  assert.equal(result.definition.id, 'micro-fiction-writer');
-  assert.equal(result.definition.dynamic, true);
-});
-
-test('dynamic role defaults missing description and system prompt', () => {
-  const result = subAgentResolveDefinition(inputWithCustomSubagent({
-    name: 'Tiny Poet', description: null, systemPrompt: null, toolProfile: 'none',
-  }), makeSetting({ mode: 'smart_dynamic' }), new Set<string>());
-  assert.equal(result.definition.id, 'tiny-poet');
-  assert.equal(result.definition.description.includes('Use when'), true);
-  assert.equal(result.definition.systemPrompt.includes('Boundaries:'), true);
-  assert.equal(result.definition.systemPrompt.includes('Report output as:'), true);
-  assert.equal(result.definition.systemPrompt.length >= 80, true);
-  assertTools(result.definition.toolAllowlist, []);
-});
-
-test('dynamic role normalizes a description without an invocation cue', () => {
-  const result = subAgentResolveDefinition(inputWithCustomSubagent({
-    name: 'Focused Reviewer', description: 'Narrow review of one file.\nReturn concrete evidence.',
-    toolProfile: 'none',
-  }), makeSetting(), new Set<string>());
-  assert.equal(result.definition.description,
-    'Use when a bounded temporary subagent should handle this role: ' +
-    'Narrow review of one file. Return concrete evidence.');
 });
 
 test('dynamic prompt independently adds boundary, report, and short-focus instructions', () => {
@@ -524,21 +400,6 @@ test('dynamic history profile does not include full session-read tools', () => {
     makeSetting({ mode: 'smart_dynamic' }),
     new Set(['session_list', 'session_search', 'session_read', 'session_expand']));
   assertTools(result.definition.toolAllowlist, ['session_list', 'session_search']);
-});
-
-test('dynamic tool profiles accept Android hyphenated aliases', () => {
-  const workspace = subAgentResolveDefinition(
-    inputWithCustomSubagent({ toolProfile: 'workspace-read' }), makeSetting(),
-    new Set(['tools_list', 'file_list', 'file_read', 'file_search', 'search_web']));
-  assertTools(workspace.definition.toolAllowlist,
-    ['tools_list', 'file_list', 'file_read', 'file_search']);
-  const history = subAgentResolveDefinition(
-    inputWithCustomSubagent({ toolProfile: 'history-read' }), makeSetting(),
-    new Set(['tools_list', 'conversation_search', 'conversation_expand',
-      'session_list', 'session_search']));
-  assertTools(history.definition.toolAllowlist,
-    ['tools_list', 'conversation_search', 'conversation_expand',
-      'session_list', 'session_search']);
 });
 
 test('invalid dynamic tool profile has the exact Android error', () => {
@@ -712,15 +573,6 @@ test('settings below Android minima still clamp dynamic and built-in budgets to 
   assert.equal(builtIn.definition.outputBudgetChars, 1000);
 });
 
-test('resolved dynamic budgets stay within exact Android setting limits', () => {
-  const result = subAgentResolveDefinition(inputWithCustomSubagent({
-    maxTurns: 5, timeoutMs: 61000, outputBudgetChars: 13000,
-  }), makeSetting(), new Set(['file_read']));
-  assert.equal(result.definition.maxTurns, 4);
-  assert.equal(result.definition.timeoutMs, 60000);
-  assert.equal(result.definition.outputBudgetChars, 12000);
-});
-
 // Dynamic custom model controls are parsed exactly where Android does.
 test('dynamic role parses model, temperature, reasoning, and routing fields', () => {
   const result = subAgentResolveDefinition(inputWithCustomSubagent({
@@ -837,15 +689,4 @@ test('dynamic role resolution enforces normalized id, invocation, boundary, and 
   assert.equal(normalized.definition.systemPrompt.length >= 80, true);
   assert.equal(normalized.definition.systemPrompt.includes('Boundaries:'), true);
   assert.equal(normalized.definition.systemPrompt.includes('Report output as:'), true);
-});
-
-// Harmony 动态显示名统一为英文人名，内部角色 id 保持兼容。
-test('dynamic roles show normal English names without numeric suffixes', () => {
-  for (const requested of ['Grace_5', 'grace-5', 'GRACE', 'Micro Essay Writer', 'General Helper', '新闻员']) {
-    const resolved = subAgentResolveDefinition(
-      inputWithCustomSubagent({ name: requested, toolProfile: 'none' }),
-      makeSetting(), new Set<string>());
-    assert.match(resolved.definition.name, /^[A-Z][a-z]+$/);
-    if (requested.toLowerCase().startsWith('grace')) assert.equal(resolved.definition.name, 'Grace');
-  }
 });

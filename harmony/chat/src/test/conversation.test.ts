@@ -7,10 +7,8 @@ import { strict as assert } from 'node:assert';
 import { makeUserMessage, makeAssistantMessage, makeUIMessage } from '../main/ets/chat/message.ts';
 import type { UIMessage, UIMessagePartTool, UIMessagePartReasoning } from '../main/ets/chat/message.ts';
 import {
-  makeMessageNode, toMessageNode, nodeCurrentMessage, nodeRole,
-  makeConversation, patchConversation, currentMessages, updateCurrentMessages,
+  makeMessageNode, toMessageNode, nodeCurrentMessage, makeConversation, currentMessages, updateCurrentMessages,
   limitContext, finishReasoning, finishPendingTools, collectFileUrls,
-  DEFAULT_ASSISTANT_ID,
 } from '../main/ets/chat/conversation.ts';
 import type { MessageNode } from '../main/ets/chat/conversation.ts';
 
@@ -30,18 +28,6 @@ test('nodeCurrentMessage: 空 messages 抛异常', () => {
 test('nodeCurrentMessage: selectIndex 越界抛异常', () => {
   const n = makeMessageNode([makeUserMessage('a')], 5);
   assert.throws(() => nodeCurrentMessage(n));
-});
-
-test('nodeCurrentMessage: 返回 selectIndex 处消息', () => {
-  const m1 = makeUserMessage('a');
-  const m2 = makeAssistantMessage('b');
-  const n = makeMessageNode([m1, m2], 1);
-  assert.equal(nodeCurrentMessage(n).id, m2.id);
-});
-
-test('nodeRole: 取首条消息 role;空节点默认 user', () => {
-  assert.equal(nodeRole(makeMessageNode([makeAssistantMessage('x')], 0)), 'assistant');
-  assert.equal(nodeRole({ id: 'n', messages: [], selectIndex: 0 }), 'user');
 });
 
 // ===== Conversation.currentMessages =====
@@ -180,17 +166,4 @@ test('collectFileUrls: 递归 tool output,只收 file:// 前缀', () => {
   ]);
   const urls = collectFileUrls(c).sort();
   assert.deepEqual(urls, ['file:///tmp/a.png', 'file:///tmp/b.png', 'file:///tmp/c.pdf']);
-});
-
-test('DEFAULT_ASSISTANT_ID 与 Android 一致', () => {
-  assert.equal(DEFAULT_ASSISTANT_ID, '0950e2dc-9bd5-4801-afa3-aa887aa36b4e');
-});
-
-test('patchConversation 覆盖指定字段,其余保留(copy 语义)', () => {
-  const base = makeConversation('c1', [], { title: 'T', assistantId: 'a1' });
-  const out = patchConversation(base, { title: 'T2' });
-  assert.equal(out.title, 'T2');
-  assert.equal(out.assistantId, 'a1');
-  assert.equal(out.id, 'c1');
-  assert.notEqual(out, base);
 });

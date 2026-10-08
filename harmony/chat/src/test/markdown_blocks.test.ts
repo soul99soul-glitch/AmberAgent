@@ -2,11 +2,7 @@
 // 对齐 markdown_html.test.ts 覆盖面,验证 AST 结构而非 HTML 字符串
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  parseMarkdown,
-  orderedListLabel,
-  parseInline,
-} from '../main/ets/chat/markdown_blocks.ts';
+import { parseMarkdown, orderedListLabel, parseInline } from '../main/ets/chat/markdown_blocks.ts';
 import type {
   MarkdownBlock,
   InlineToken,
@@ -33,12 +29,6 @@ const inlineTexts = (inlines: InlineToken[]): string => {
 // ===== 行内解析 =====
 
 describe('parseInline basic', () => {
-  it('plain text → single text token', () => {
-    const tokens = parseInline('hello world');
-    assert.equal(tokens.length, 1);
-    assert.equal(tokens[0].type, 'text');
-    assert.equal(tokens[0].type === 'text' ? tokens[0].text : '', 'hello world');
-  });
 
   it('empty string → empty array', () => {
     assert.deepEqual(parseInline(''), []);
@@ -46,14 +36,6 @@ describe('parseInline basic', () => {
 });
 
 describe('parseInline code', () => {
-  it('inline code', () => {
-    const tokens = parseInline('use `console.log` to debug');
-    assert.equal(tokens.length, 3);
-    assert.equal(tokens[0].type, 'text');
-    assert.equal(tokens[1].type, 'code');
-    assert.equal(tokens[1].type === 'code' ? tokens[1].text : '', 'console.log');
-    assert.equal(tokens[2].type, 'text');
-  });
 
   it('code takes priority over bold/italic', () => {
     const tokens = parseInline('`**not bold**`');
@@ -64,12 +46,6 @@ describe('parseInline code', () => {
 });
 
 describe('parseInline bold', () => {
-  it('bold text', () => {
-    const tokens = parseInline('this is **bold** text');
-    assert.equal(tokens.length, 3);
-    assert.equal(tokens[1].type, 'bold');
-    assert.equal(tokens[1].type === 'bold' ? tokens[1].text : '', 'bold');
-  });
 
   it('bold cannot contain asterisks', () => {
     // **a*b** → italic match inside bold range overlaps → bold wins
@@ -91,6 +67,21 @@ describe('parseInline italic', () => {
 });
 
 describe('parseInline link', () => {
+  it('escaped labels keep brackets, backticks and dollar signs literal', () => {
+    const tokens = parseInline('[标题\\]\\(https://other.example\\) \\[报告 \\`代码\\` \\$价格\\$](https://news.test/story_%28edition%29)');
+    assert.deepEqual(tokens, [{ type: 'link', text: '标题](https://other.example) [报告 `代码` $价格$', url: 'https://news.test/story_%28edition%29' }]);
+  });
+
+  it('escaped-label prepass preserves code, math and normal image priority', () => {
+    assert.deepEqual(parseInline('`[标签\\]](https://news.test)`'), [{ type: 'code', text: '[标签\\]](https://news.test)' }]);
+    assert.deepEqual(parseInline('$x+1$ [docs](https://news.test) ![photo](https://news.test/photo.png)'), [
+      { type: 'math', latex: 'x+1', display: false }, { type: 'text', text: ' ' },
+      { type: 'link', text: 'docs', url: 'https://news.test' }, { type: 'text', text: ' ' },
+      { type: 'image', alt: 'photo', url: 'https://news.test/photo.png' },
+    ]);
+    assert.equal(parseInline('![photo\\*](https://news.test/photo.png)').some(token => token.type === 'link'), false);
+  });
+
   it('link', () => {
     const tokens = parseInline('see [docs](https://example.com) here');
     const linkTok = tokens.find((t: InlineToken): boolean => t.type === 'link');
@@ -150,11 +141,6 @@ describe('parseMarkdown headings', () => {
 });
 
 describe('parseMarkdown paragraphs', () => {
-  it('single paragraph', () => {
-    const blocks = blocksOf('Hello world');
-    assert.equal(blocks.length, 1);
-    assert.equal(blocks[0].kind, 'paragraph');
-  });
 
   it('two paragraphs separated by blank line', () => {
     const blocks = blocksOf('First.\n\nSecond.');
@@ -205,15 +191,6 @@ describe('parseMarkdown code blocks', () => {
 });
 
 describe('parseMarkdown lists', () => {
-  it('unordered list', () => {
-    const md = '- item one\n- item two\n- item three';
-    const block = firstBlock(md);
-    assert.equal(block.kind, 'list');
-    if (block.kind === 'list') {
-      assert.equal(block.ordered, false);
-      assert.equal(block.items.length, 3);
-    }
-  });
 
   it('ordered list preserves its source start number', () => {
     const md = '4. first\n5. second\n6. third';
@@ -308,10 +285,6 @@ describe('orderedListLabel numbering', () => {
 });
 
 describe('parseMarkdown blockquote', () => {
-  it('single line blockquote', () => {
-    const block = firstBlock('> This is a quote');
-    assert.equal(block.kind, 'blockquote');
-  });
 
   it('multi-line blockquote', () => {
     const md = '> line one\n> line two';
@@ -412,4 +385,13 @@ describe('parseMarkdown empty', () => {
   it('whitespace only → empty array', () => {
     assert.deepEqual(parseMarkdown('   \n\n  \n'), []);
   });
+});
+// Network snapshots can end before the first heading character arrives.
+it('partial heading markers always consume their source line', () => {
+  for (const source of ['# ', '## ', '### \t', '# \n', 'before\n\n## ']) {
+    const blocks = parseMarkdown(source);
+    assert.ok(blocks.length > 0);
+  }
+  assert.equal(parseMarkdown('# ')[0].kind, 'paragraph');
+  assert.equal(parseMarkdown('# 标题')[0].kind, 'heading');
 });

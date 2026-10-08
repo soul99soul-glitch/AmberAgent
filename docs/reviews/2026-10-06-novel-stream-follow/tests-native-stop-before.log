@@ -1,0 +1,38 @@
+✔ novel stream growth requests native motion instead of jumping to the edge for every snapshot (62.082625ms)
+✔ terminal generation keeps the visible body until persisted messages replace it (15.394542ms)
+✔ late completion cannot change the follow mode of a newly attached run (13.174292ms)
+✔ a paused reader stays in place when generation completes (8.359208ms)
+✔ a terminal event replayed during subscribe does not restore the obsolete subscription (8.385833ms)
+✔ the measured tail accounts for archived discussion, proposal cards, and quick-start or failed rows (7.147292ms)
+✔ a terminal read failure preserves the last visible body while releasing the ended run (7.804375ms)
+✔ continuing an earlier discussion uses its mode even when the last message and composer are writing (7.847292ms)
+✖ a native animation ending between growing frames cannot pause novel follow (29.608083ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 8
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 811.306667
+
+✖ failing tests:
+
+test at harmony/entry/src/test/novel_stream_follow.test.cjs:182:1
+✖ a native animation ending between growing frames cannot pause novel follow (29.608083ms)
+  AssertionError [ERR_ASSERTION]: programmatic completion is not a user gesture
+  + actual - expected
+  
+  + 'paused'
+  - 'following'
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/test/novel_stream_follow.test.cjs:187:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'paused',
+    expected: 'following',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

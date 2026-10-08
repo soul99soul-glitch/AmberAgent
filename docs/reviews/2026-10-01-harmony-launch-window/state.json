@@ -1,0 +1,22 @@
+{
+  "date": "2026-10-01",
+  "device": "6HK0226627000384",
+  "scope": "Dedicated API12 launch icon, rounded transparent corners, native centered splash, light/dark resources",
+  "changed": [
+    "harmony/entry/src/main/module.json5",
+    "harmony/entry/src/main/resources/base/media/start_icon.svg",
+    "harmony/entry/src/main/resources/dark/media/start_icon.svg",
+    "harmony/entry/src/main/resources/dark/element/color.json"
+  ],
+  "candidateHap": "/tmp/amber-launch-rounded.hap",
+  "sha256": "7043af538edd7580cd1481554c13440fcdb3d08990c3f8f20a90c6864e2cf89d",
+  "buildSuccess": true,
+  "agcSigned": true,
+  "installed": true,
+  "launched": true,
+  "deviceVisual": "Light-mode cold-start before/after screenshots inspected: large white square replaced by centered small rounded Amber icon; native launch expansion transition visible",
+  "darkVisual": "Resources compiled and packaged; dark-mode device cold start not sampled",
+  "arktsChanged": false,
+  "simulatorStarted": false,
+  "nativeVSyncRetained": "API20 dynamic lookup and setStreamingFrameRateActive present in packaged native library; no streaming code modified for this change"
+}

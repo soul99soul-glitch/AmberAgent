@@ -20,7 +20,10 @@ import type {
   UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartImage,
   UIMessagePartReasoning, UIMessagePartTool, MessageChunk, UIMessageAnnotation,
 } from './message.ts';
-import { makeUIMessage } from './message.ts';
+import {
+  makeUIMessage, hasProtocolReasoningContent, reasoningBlocksCanMerge, mergeReasoningMetadata,
+  CLAUDE_THINKING_BLOCK_INDEX_METADATA_KEY,
+} from './message.ts';
 import type { JsonObject } from './json.ts';
 import { mergeUsage } from './usage.ts';
 import { nowIso } from './ids.ts';
@@ -43,6 +46,23 @@ const isReasoningCloseDelta = (p: UIMessagePart): boolean => {
     case 'tool': return true;
     default: return false;
   }
+};
+
+const findReasoningTarget = (parts: UIMessagePart[], incoming: UIMessagePartReasoning): number => {
+  for (const key of [CLAUDE_THINKING_BLOCK_INDEX_METADATA_KEY, 'reasoning_id']) {
+    const identity = incoming.metadata?.[key];
+    if (identity !== undefined) {
+      // Claude block indexes restart at zero on each tool continuation. Finished
+      // blocks belong to earlier requests; Responses IDs remain unique and may
+      // receive encrypted metadata after their visible summary has closed.
+      return parts.findIndex((part: UIMessagePart): boolean => part.type === 'reasoning' &&
+        (key !== CLAUDE_THINKING_BLOCK_INDEX_METADATA_KEY || part.finishedAt === null) &&
+        part.metadata?.[key] === identity && reasoningBlocksCanMerge(part.metadata, incoming.metadata));
+    }
+  }
+  const last = parts[parts.length - 1];
+  return last?.type === 'reasoning' && reasoningBlocksCanMerge(last.metadata, incoming.metadata)
+    ? parts.length - 1 : -1;
 };
 
 // ===== coalesceStreamParts(MessageStreamAccumulator.kt:264-320) =====
@@ -85,7 +105,11 @@ export const coalesceStreamParts = (parts: UIMessagePart[]): UIMessagePart[] => 
       }
     } else if (part.type === 'reasoning') {
       if (part.reasoning.trim().length === 0) {
-        if (hasExplicitReasoningContentField(part.metadata)) {
+        if (hasProtocolReasoningContent(part.metadata)) {
+          flushText();
+          flushExplicitEmptyReasoning();
+          result.push(part);
+        } else if (hasExplicitReasoningContentField(part.metadata)) {
           if (pending.emptyReasoning === null) pending.emptyReasoning = part;
         }
       } else {
@@ -210,13 +234,14 @@ class MutableMessage {
   private appendReasoning(deltaPart: UIMessagePartReasoning): void {
     // 对齐 Android:空 reasoning 且无 metadata → 跳过(finishedAt 由关闭规则统一打 now)
     if (deltaPart.reasoning.length === 0 && deltaPart.metadata === null) return;
-    const last: UIMessagePart | undefined = this.parts[this.parts.length - 1];
+    const targetIndex = findReasoningTarget(this.parts, deltaPart);
+    const last = this.parts[targetIndex];
     if (last !== undefined && last.type === 'reasoning') {
       const merged: MutableReasoning = {
         reasoning: last.reasoning + deltaPart.reasoning,
         createdAt: last.createdAt,
         finishedAt: last.finishedAt,
-        metadata: deltaPart.metadata !== null ? deltaPart.metadata : last.metadata,
+        metadata: mergeReasoningMetadata(last.metadata, deltaPart.metadata),
       };
       if (deltaPart.reasoning.length > 0) {
         // accumulator 语义:内容追加采用 delta 的 finishedAt(可能为 null)
@@ -224,7 +249,7 @@ class MutableMessage {
       } else if (deltaPart.finishedAt !== null) {
         merged.finishedAt = deltaPart.finishedAt;
       }
-      this.parts[this.parts.length - 1] = {
+      this.parts[targetIndex] = {
         type: 'reasoning',
         reasoning: merged.reasoning,
         createdAt: merged.createdAt,
@@ -396,16 +421,18 @@ const appendPartImmutable = (acc: UIMessagePart[], deltaPart: UIMessagePart): UI
     }
     case 'reasoning': {
       if (deltaPart.reasoning.length === 0 && deltaPart.metadata === null) return acc;
-      const last = acc[acc.length - 1];
+      const targetIndex = findReasoningTarget(acc, deltaPart);
+      const last = acc[targetIndex];
       if (last !== undefined && last.type === 'reasoning') {
         // appendChunk 语义(Message.kt:98-104):内容追加强制 finishedAt=null
-        return [...acc.slice(0, -1), {
+        const merged: UIMessagePartReasoning = {
           type: 'reasoning',
           reasoning: last.reasoning + deltaPart.reasoning,
           createdAt: last.createdAt,
-          finishedAt: null,
-          metadata: deltaPart.metadata !== null ? deltaPart.metadata : last.metadata,
-        }];
+          finishedAt: deltaPart.reasoning.length > 0 ? null : deltaPart.finishedAt ?? last.finishedAt,
+          metadata: mergeReasoningMetadata(last.metadata, deltaPart.metadata),
+        };
+        return acc.map((part: UIMessagePart, index: number): UIMessagePart => index === targetIndex ? merged : part);
       }
       return [...acc, deltaPart];
     }

@@ -1,0 +1,15 @@
+10-01 11:33:32.173  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: target received type=0
+10-01 11:33:32.174  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: target received type=1
+10-01 11:33:32.174  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: pulse=1 result=0 x=33 y=124
+10-01 11:33:34.178  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: target received type=0
+10-01 11:33:34.178  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: target received type=1
+10-01 11:33:34.178  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: pulse=2 result=0 x=33 y=124
+10-01 11:33:36.178  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: target received type=0
+10-01 11:33:36.179  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: target received type=1
+10-01 11:33:36.179  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: pulse=3 result=0 x=33 y=124
+10-01 11:33:38.179  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: target received type=0
+10-01 11:33:38.180  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: target received type=1
+10-01 11:33:38.180  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: pulse=4 result=0 x=33 y=124
+10-01 11:33:40.181  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: target received type=0
+10-01 11:33:40.181  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: target received type=1
+10-01 11:33:40.181  9325  9325 I A00001/app.amber.deepread/StreamTouchProbe: pulse=5 result=0 x=33 y=124

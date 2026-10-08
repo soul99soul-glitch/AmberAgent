@@ -1,0 +1,2300 @@
+DEVECO_SDK_HOME=/Users/arquiel/Library/Huawei/commandline/command-line-tools/sdk
+OHOS_BASE_SDK_HOME=/Users/arquiel/Library/Huawei/commandline/command-line-tools/sdk/default/openharmony
+Running: hvigorw assembleApp --no-daemon
+> hvigor [32mFinished ::PreBuildApp... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@PreBuild...  [39m
+> hvigor [33mWARN: deepread: HAR modules cannot be installed independently. As a result, the "applyToProducts" configuration will not take effect. See more details.[39m
+> hvigor [32mUP-TO-DATE :deepread:default@PreBuild...  [39m
+> hvigor [33mWARN: chat: HAR modules cannot be installed independently. As a result, the "applyToProducts" configuration will not take effect. See more details.[39m
+> hvigor [32mUP-TO-DATE :chat:default@PreBuild...  [39m
+> hvigor [32mFinished ::DuplicateDependencyCheck... after 1 ms [39m
+> hvigor [32mFinished :entry:default@CreateModuleInfo... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@GenerateMetadata...  [39m
+> hvigor [32mFinished :entry:default@PreCheckSyscap... after 1 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgContextInfo... after 5 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@GeneratePkgSdkInfo...  [39m
+> hvigor [32mFinished :entry:default@ProcessIntegratedHsp... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :deepread:default@CreateHarBuildProfile...  [39m
+> hvigor [32mFinished :deepread:default@ConfigureCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :deepread:default@MergeProfile...  [39m
+> hvigor [32mFinished :entry:default@SyscapTransform... after 11 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessRouterMap...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessShareConfig...  [39m
+> hvigor [32mFinished :entry:default@ProcessStartupConfig... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :chat:default@CreateHarBuildProfile...  [39m
+> hvigor [32mFinished :deepread:default@BuildNativeWithCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :chat:default@MergeProfile...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@GenerateLoaderJson...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@CreateBuildProfile...  [39m
+> hvigor [32mFinished :deepread:default@BuildNativeWithNinja... after 1 ms [39m
+> hvigor [32mFinished :chat:default@ConfigureCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@MergeProfile...  [39m
+> hvigor [32mUP-TO-DATE :deepread:default@ProcessLibs...  [39m
+> hvigor [32mFinished :chat:default@BuildNativeWithCmake... after 1 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@MakePackInfo...  [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessProfile...  [39m
+> hvigor [32mUP-TO-DATE :deepread:default@DoNativeStrip...  [39m
+> hvigor [32mFinished :entry:default@ConfigureCmake... after 5 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@ProcessResource...  [39m
+> hvigor [32mFinished :chat:default@BuildNativeWithNinja... after 1 ms [39m
+> hvigor [32mFinished :entry:default@BuildNativeWithCmake... after 5 ms [39m
+> hvigor [32mUP-TO-DATE :entry:default@CompileResource...  [39m
+> hvigor [32mUP-TO-DATE :chat:default@ProcessLibs...  [39m
+> hvigor [32mFinished :entry:default@BuildJS... after 3 ms [39m
+> hvigor [32mUP-TO-DATE :chat:default@DoNativeStrip...  [39m
+> hvigor [91mERROR: Failed :entry:default@CompileArkTS... [39m
+> hvigor [33mWARN: 
+[33m1 WARN: [33m[33mArkTS:WARN: For details about ArkTS syntax errors, see FAQs[39m[39m
+[33m2 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/EntryLocalToolPorts.ets:20:34
+ To use this API, you need to apply for the permissions: ohos.permission.READ_PASTEBOARD [since 12]
+[39m[39m
+[33m3 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/EntryLocalToolPorts.ets:37:30
+ The system capacity of this api 'createMd' is not supported on all devices
+[39m[39m
+[33m4 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:22:35
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m5 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:28:46
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m6 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:34:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m7 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:35:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m8 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:40:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m9 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:41:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m10 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:46:46
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m11 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:55:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m12 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:56:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m13 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:61:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m14 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:62:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m15 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets:67:48
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m16 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:168:67
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m17 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:172:53
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m18 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:191:62
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m19 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:193:22
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m20 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:196:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m21 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:219:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m22 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:354:62
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m23 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:357:24
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m24 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:363:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m25 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:405:62
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m26 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:408:24
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m27 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:408:63
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m28 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RdbRepository.ets:411:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m29 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:56:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m30 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:58:25
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m31 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:65:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m32 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:67:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m33 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:69:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m34 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:75:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m35 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:77:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m36 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:79:46
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m37 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:81:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m38 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:84:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m39 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:92:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m40 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:96:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m41 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:98:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m42 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:106:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m43 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:108:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m44 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:110:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m45 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:116:25
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m46 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:121:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m47 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:123:25
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m48 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:128:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m49 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:130:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m50 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:137:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m51 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:161:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m52 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:163:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m53 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:164:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m54 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:180:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m55 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:182:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m56 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:186:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m57 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:189:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m58 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/FileStore.ets:196:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m59 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/CodexOAuthClient.ets:82:56
+ 'decode' has been deprecated.
+[39m[39m
+[33m60 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ArtifactPorts.ets:38:45
+ The 'PATCH' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33m61 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/EntryDocumentParser.ets:75:63
+ 'parse' has been deprecated.
+[39m[39m
+[33m62 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/EntryDocumentParser.ets:86:63
+ 'parse' has been deprecated.
+[39m[39m
+[33m63 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:557:26
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m64 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:561:21
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m65 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:567:26
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m66 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:570:21
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m67 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:580:21
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m68 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:601:47
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m69 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:683:52
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m70 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:739:51
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m71 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountSession.ets:743:45
+ 'packing' has been deprecated.
+[39m[39m
+[33m72 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountOAuthSupport.ets:29:30
+ The system capacity of this api 'createMd' is not supported on all devices
+[39m[39m
+[33m73 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountOAuthSupport.ets:37:31
+ The system capacity of this api 'createRandom' is not supported on all devices
+[39m[39m
+[33m74 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/WebMountOAuthSupport.ets:38:45
+ The system capacity of this api 'generateRandomSync' is not supported on all devices
+[39m[39m
+[33m75 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/GoogleAuthHttp.ets:19:75
+ The system capacity of this api 'createRandom' is not supported on all devices
+[39m[39m
+[33m76 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/GoogleAuthHttp.ets:19:90
+ The system capacity of this api 'generateRandomSync' is not supported on all devices
+[39m[39m
+[33m77 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/GoogleAuthHttp.ets:22:34
+ The system capacity of this api 'createMd' is not supported on all devices
+[39m[39m
+[33m78 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets:16:30
+ The system capacity of this api 'createMd' is not supported on all devices
+[39m[39m
+[33m79 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets:34:19
+ The system capacity of this api 'createSymKeyGenerator' is not supported on all devices
+[39m[39m
+[33m80 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets:39:34
+ The system capacity of this api 'createCipher' is not supported on all devices
+[39m[39m
+[33m81 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets:46:35
+ The system capacity of this api 'CryptoMode' is not supported on all devices
+[39m[39m
+[33m82 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets:46:46
+ The system capacity of this api 'ENCRYPT_MODE' is not supported on all devices
+[39m[39m
+[33m83 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets:48:10
+ The system capacity of this api 'authTag' is not supported on all devices
+[39m[39m
+[33m84 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets:49:71
+ The system capacity of this api 'authTag' is not supported on all devices
+[39m[39m
+[33m85 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets:65:34
+ The system capacity of this api 'createCipher' is not supported on all devices
+[39m[39m
+[33m86 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets:66:35
+ The system capacity of this api 'CryptoMode' is not supported on all devices
+[39m[39m
+[33m87 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets:66:46
+ The system capacity of this api 'DECRYPT_MODE' is not supported on all devices
+[39m[39m
+[33m88 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets:126:33
+ The system capacity of this api 'createRandom' is not supported on all devices
+[39m[39m
+[33m89 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets:127:47
+ The system capacity of this api 'generateRandomSync' is not supported on all devices
+[39m[39m
+[33m90 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SoulTools.ets:55:45
+ 'decode' has been deprecated.
+[39m[39m
+[33m91 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/GoogleRS256Signer.ets:28:65
+ The system capacity of this api 'createAsyKeyGenerator' is not supported on all devices
+[39m[39m
+[33m92 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/GoogleRS256Signer.ets:29:8
+ The system capacity of this api 'convertKey' is not supported on all devices
+[39m[39m
+[33m93 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/GoogleRS256Signer.ets:30:23
+ The system capacity of this api 'priKey' is not supported on all devices
+[39m[39m
+[33m94 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/GoogleRS256Signer.ets:32:58
+ The system capacity of this api 'createSign' is not supported on all devices
+[39m[39m
+[33m95 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/GoogleRS256Signer.ets:33:18
+ The system capacity of this api 'init' is not supported on all devices
+[39m[39m
+[33m96 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/GoogleRS256Signer.ets:35:62
+ The system capacity of this api 'sign' is not supported on all devices
+[39m[39m
+[33m97 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/GoogleRS256Signer.ets:37:27
+ The system capacity of this api 'clearMem' is not supported on all devices
+[39m[39m
+[33m98 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:118:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m99 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:122:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m100 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:124:19
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m101 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:133:11
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m102 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:136:13
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m103 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:149:35
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m104 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:152:41
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m105 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:153:24
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m106 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:154:32
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m107 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:157:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m108 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:161:21
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m109 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:220:28
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m110 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:223:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m111 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:225:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m112 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:226:28
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m113 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:227:21
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m114 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:228:25
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m115 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:229:25
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m116 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:230:27
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m117 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:231:25
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m118 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:232:34
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m119 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:237:10
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m120 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:268:28
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m121 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:271:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m122 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:273:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m123 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:274:31
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m124 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:275:26
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m125 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:276:24
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m126 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:277:28
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m127 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:282:10
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m128 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:290:28
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m129 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:293:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m130 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:293:39
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m131 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:296:10
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m132 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:502:28
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m133 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:504:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m134 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:505:35
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m135 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:506:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m136 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:509:51
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m137 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets:513:10
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m138 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/McpFilesStore.ets:52:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m139 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/McpFilesStore.ets:56:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m140 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/McpFilesStore.ets:58:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m141 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RecipeStore.ets:30:30
+ The system capacity of this api 'createMd' is not supported on all devices
+[39m[39m
+[33m142 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RecipeStore.ets:52:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m143 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RecipeStore.ets:53:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m144 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RecipeStore.ets:53:37
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m145 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RecipeStore.ets:54:64
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m146 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RecipeStore.ets:56:54
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m147 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RecipeStore.ets:71:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m148 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RecipeStore.ets:72:17
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m149 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RecipeStore.ets:72:37
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m150 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RecipeStore.ets:74:31
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m151 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/RecipePageLaunch.ets:60:16
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m152 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PluginArchive.ets:21:50
+ The system capacity of this api 'createMd' is not supported on all devices
+[39m[39m
+[33m153 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PluginArchive.ets:96:31
+ The system capacity of this api 'AsyKeySpecType' is not supported on all devices
+[39m[39m
+[33m154 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PluginArchive.ets:96:46
+ The system capacity of this api 'PUBLIC_KEY_SPEC' is not supported on all devices
+[39m[39m
+[33m155 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PluginArchive.ets:97:67
+ The system capacity of this api 'createAsyKeyGeneratorBySpec' is not supported on all devices
+[39m[39m
+[33m156 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PluginArchive.ets:97:101
+ The system capacity of this api 'generatePubKey' is not supported on all devices
+[39m[39m
+[33m157 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PluginArchive.ets:98:60
+ The system capacity of this api 'createVerify' is not supported on all devices
+[39m[39m
+[33m158 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PluginArchive.ets:99:18
+ The system capacity of this api 'init' is not supported on all devices
+[39m[39m
+[33m159 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PluginArchive.ets:100:23
+ The system capacity of this api 'verify' is not supported on all devices
+[39m[39m
+[33m160 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PluginStore.ets:220:29
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m161 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/PluginPageLaunch.ets:48:16
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m162 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/AgentCronStore.ets:108:56
+ 'encode' has been deprecated.
+[39m[39m
+[33m163 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SubAgentStore.ets:82:56
+ 'encode' has been deprecated.
+[39m[39m
+[33m164 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppFiles.ets:158:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m165 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppFiles.ets:160:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m166 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppFiles.ets:162:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m167 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppFiles.ets:173:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m168 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppPlatform.ets:107:30
+ The system capacity of this api 'createMd' is not supported on all devices
+[39m[39m
+[33m169 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/design/fonts.ets:35:12
+ 'registerFont' has been deprecated.
+[39m[39m
+[33m170 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/MacGatewayClient.ets:211:40
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m171 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SSHRuntimeFixture.ets:157:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m172 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/SSHRuntimeFixture.ets:192:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m173 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/entryability/EntryAbility.ets:41:17
+ This API is unavailable to phone, tablet.
+[39m[39m
+[33m174 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/entryability/EntryAbility.ets:108:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m175 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/PageTemplate.ets:31:45
+ 'back' has been deprecated.
+[39m[39m
+[33m176 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/PageTemplate.ets:207:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m177 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/PageTemplate.ets:242:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m178 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/PageTemplate.ets:385:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m179 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/PageTemplate.ets:503:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m180 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/PageTemplate.ets:543:45
+ 'back' has been deprecated.
+[39m[39m
+[33m181 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/PageTemplate.ets:912:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m182 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:177:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m183 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:245:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m184 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:266:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m185 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:266:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m186 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:272:44
+ 'getContext' has been deprecated.
+[39m[39m
+[33m187 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:278:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m188 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:281:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m189 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:281:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m190 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:291:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m191 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:293:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m192 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:293:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m193 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:312:15
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m194 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:355:39
+ 'back' has been deprecated.
+[39m[39m
+[33m195 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:364:39
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m196 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:373:39
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m197 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:412:13
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m198 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:513:11
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m199 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:563:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m200 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatAgentPermissionsPage.ets:53:7
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m201 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatAgentPermissionsPage.ets:53:19
+ 'show' has been deprecated.
+[39m[39m
+[33m202 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatAgentPermissionsPage.ets:99:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m203 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ui/PressGlowButton.ets:104:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m204 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ui/PressGlowButton.ets:108:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m205 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ui/PressGlowButton.ets:112:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m206 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ui/PressGlowButton.ets:115:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m207 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/SubAgentActivityStrip.ets:88:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m208 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/SubAgentActivityStrip.ets:88:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m209 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatListIndicators.ets:21:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m210 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:289:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m211 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:341:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m212 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:570:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m213 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:582:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m214 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:606:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m215 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:624:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m216 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:632:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m217 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:646:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m218 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:656:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m219 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:662:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m220 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:662:22
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m221 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:680:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m222 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:717:23
+ 'showToast' has been deprecated.
+[39m[39m
+[33m223 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:717:23
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m224 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:721:18
+ 'showActionMenu' has been deprecated.
+[39m[39m
+[33m225 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:759:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m226 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:766:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m227 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:768:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m228 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:771:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m229 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:779:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m230 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:796:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m231 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:806:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m232 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:809:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m233 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:809:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m234 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:827:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m235 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:830:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m236 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:830:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m237 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:921:20
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m238 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatListPage.ets:936:20
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m239 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatMcpSettingsPage.ets:282:16
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33m240 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatMcpSettingsPage.ets:632:39
+ 'back' has been deprecated.
+[39m[39m
+[33m241 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelParamsPage.ets:95:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33m242 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelParamsPage.ets:301:16
+ 'back' has been deprecated.
+[39m[39m
+[33m243 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelParamsPage.ets:601:63
+ 'back' has been deprecated.
+[39m[39m
+[33m244 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets:41:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33m245 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets:90:34
+ 'back' has been deprecated.
+[39m[39m
+[33m246 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets:92:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m247 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets:99:34
+ 'back' has been deprecated.
+[39m[39m
+[33m248 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets:101:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m249 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets:186:43
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m250 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatRecapPanel.ets:77:37
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33m251 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ImageSaveSupport.ets:16:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m252 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ImageSaveSupport.ets:47:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m253 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ImageSaveSupport.ets:63:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m254 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ImageSaveSupport.ets:72:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m255 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MermaidBlock.ets:43:45
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m256 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MermaidBlock.ets:45:26
+ 'px2vp' has been deprecated.
+[39m[39m
+[33m257 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MermaidBlock.ets:46:25
+ 'px2vp' has been deprecated.
+[39m[39m
+[33m258 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MermaidBlock.ets:109:57
+ 'vp2px' has been deprecated.
+[39m[39m
+[33m259 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MermaidBlock.ets:114:30
+ 'px2vp' has been deprecated.
+[39m[39m
+[33m260 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MermaidBlock.ets:118:44
+ 'px2vp' has been deprecated.
+[39m[39m
+[33m261 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MermaidBlock.ets:119:22
+ 'vp2px' has been deprecated.
+[39m[39m
+[33m262 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MermaidBlock.ets:136:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m263 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MermaidBlock.ets:136:22
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m264 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MermaidBlock.ets:174:46
+ 'vp2px' has been deprecated.
+[39m[39m
+[33m265 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MathRichBlock.ets:50:23
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m266 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ImageShareSupport.ets:11:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m267 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/ImageShareSupport.ets:29:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m268 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MarkdownText.ets:351:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m269 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MarkdownText.ets:353:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m270 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MarkdownText.ets:353:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m271 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MarkdownText.ets:367:44
+ 'getContext' has been deprecated.
+[39m[39m
+[33m272 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MarkdownText.ets:381:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m273 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MarkdownText.ets:381:17
+ 'show' has been deprecated.
+[39m[39m
+[33m274 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatInput.ets:81:53
+ The system capacity of this api 'TextAreaController' is not supported on all devices
+[39m[39m
+[33m275 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatInput.ets:86:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m276 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/GeneratedImageCarousel.ets:41:11
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m277 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/GeneratedImageCarousel.ets:42:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m278 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/GeneratedImageCarousel.ets:42:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m279 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ui/DotRingLoading.ets:27:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m280 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ui/DotRingLoading.ets:36:12
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33m281 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/SubAgentAvatar.ets:28:12
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33m282 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/SubAgentAvatar.ets:29:12
+ The 'stroke' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33m283 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatMessageCommon.ets:29:42
+ 'getContext' has been deprecated.
+[39m[39m
+[33m284 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MiniAppChatCard.ets:63:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m285 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MiniAppChatCard.ets:63:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m286 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MiniAppChatCard.ets:142:26
+ 'getContext' has been deprecated.
+[39m[39m
+[33m287 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/MiniAppChatCard.ets:174:26
+ 'getContext' has been deprecated.
+[39m[39m
+[33m288 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/AgentMessageRow.ets:614:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m289 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ui/DotLoading.ets:13:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m290 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ui/DotLoading.ets:21:10
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33m291 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ui/DotLoading.ets:24:10
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33m292 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ui/DotLoading.ets:28:10
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33m293 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatMessageCopySheet.ets:21:11
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m294 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:88:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m295 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:88:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m296 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:102:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m297 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:105:36
+ 'showToast' has been deprecated.
+[39m[39m
+[33m298 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:105:36
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m299 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:115:11
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m300 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:116:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m301 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:116:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m302 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:138:26
+ 'px2vp' has been deprecated.
+[39m[39m
+[33m303 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:138:66
+ 'vp2px' has been deprecated.
+[39m[39m
+[33m304 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:139:31
+ 'px2vp' has been deprecated.
+[39m[39m
+[33m305 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:159:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m306 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:159:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m307 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:173:57
+ 'vp2px' has been deprecated.
+[39m[39m
+[33m308 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:179:33
+ 'px2vp' has been deprecated.
+[39m[39m
+[33m309 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:182:55
+ 'px2vp' has been deprecated.
+[39m[39m
+[33m310 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:185:22
+ 'vp2px' has been deprecated.
+[39m[39m
+[33m311 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:204:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m312 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:204:22
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m313 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:225:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m314 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatExportSheet.ets:225:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m315 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatMessageToolPreviewSheet.ets:50:11
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m316 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatMessageToolPreviewSheet.ets:51:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m317 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatMessageToolPreviewSheet.ets:51:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m318 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatMessageToolPreviewSheet.ets:84:42
+ 'getContext' has been deprecated.
+[39m[39m
+[33m319 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/ChatMessageToolPreviewSheet.ets:87:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m320 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/CouncilSeatTools.ets:108:46
+ 'getContext' has been deprecated.
+[39m[39m
+[33m321 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/WorkspaceFileVM.ets:119:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m322 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:816:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m323 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:821:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m324 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:836:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m325 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:839:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m326 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:931:37
+ 'back' has been deprecated.
+[39m[39m
+[33m327 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:943:51
+ 'showToast' has been deprecated.
+[39m[39m
+[33m328 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:943:51
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m329 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:956:41
+ 'showToast' has been deprecated.
+[39m[39m
+[33m330 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:1196:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33m331 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:1700:44
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m332 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:1846:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m333 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:1846:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m334 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2157:14
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m335 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2244:44
+ 'getContext' has been deprecated.
+[39m[39m
+[33m336 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2293:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m337 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2293:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m338 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2325:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m339 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2583:24
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m340 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2649:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m341 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2651:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m342 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2656:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m343 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2659:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m344 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2805:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m345 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2805:17
+ 'show' has been deprecated.
+[39m[39m
+[33m346 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2912:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m347 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2941:14
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m348 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:2941:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m349 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3020:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m350 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3020:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m351 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3043:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m352 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3093:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m353 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3093:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m354 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3102:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m355 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3102:17
+ 'show' has been deprecated.
+[39m[39m
+[33m356 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3124:22
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m357 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3145:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m358 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3145:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m359 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3150:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m360 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3150:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m361 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3155:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m362 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3155:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m363 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3160:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m364 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3160:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m365 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3202:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m366 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3252:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m367 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3336:42
+ 'showToast' has been deprecated.
+[39m[39m
+[33m368 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3547:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m369 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:3547:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m370 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4125:20
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m371 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4128:51
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m372 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4183:20
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m373 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4186:51
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m374 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4740:13
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m375 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4814:18
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m376 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4819:18
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m377 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets:4925:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m378 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:129:14
+ 'getParams' has been deprecated.
+[39m[39m
+[33m379 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:197:14
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m380 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:591:44
+ 'getContext' has been deprecated.
+[39m[39m
+[33m381 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:597:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m382 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:600:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m383 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:600:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m384 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:676:8
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m385 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:677:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m386 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:677:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m387 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:684:44
+ 'getContext' has been deprecated.
+[39m[39m
+[33m388 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:690:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m389 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:693:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m390 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:693:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m391 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:747:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m392 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:747:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m393 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:782:33
+ 'getContext' has been deprecated.
+[39m[39m
+[33m394 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:801:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m395 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:804:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m396 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:804:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m397 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:809:33
+ 'getContext' has been deprecated.
+[39m[39m
+[33m398 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:822:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m399 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:825:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m400 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:825:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m401 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:833:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m402 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:833:17
+ 'show' has been deprecated.
+[39m[39m
+[33m403 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:852:30
+ 'showToast' has been deprecated.
+[39m[39m
+[33m404 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:856:20
+ 'back' has been deprecated.
+[39m[39m
+[33m405 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:908:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m406 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:926:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m407 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:948:39
+ 'back' has been deprecated.
+[39m[39m
+[33m408 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets:1192:30
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m409 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets:153:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m410 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets:156:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m411 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets:156:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m412 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets:254:16
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m413 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets:297:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m414 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets:303:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m415 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets:449:22
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m416 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets:453:28
+ 'showToast' has been deprecated.
+[39m[39m
+[33m417 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatSearchSettingsPage.ets:294:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m418 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatSearchSettingsPage.ets:743:17
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m419 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatSearchSettingsPage.ets:915:65
+ 'back' has been deprecated.
+[39m[39m
+[33m420 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatTaskModelPickerPage.ets:75:50
+ 'getParams' has been deprecated.
+[39m[39m
+[33m421 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatTaskModelPickerPage.ets:168:46
+ 'back' has been deprecated.
+[39m[39m
+[33m422 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatTaskModelPickerPage.ets:212:45
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m423 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatTaskModelsPage.ets:262:51
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m424 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatTaskModelsPage.ets:262:51
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m425 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatTaskModelsPage.ets:378:35
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m426 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/CouncilPage.ets:75:56
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m427 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/CouncilPage.ets:95:22
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m428 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/CouncilPage.ets:108:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m429 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/CouncilRunPage.ets:129:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33m430 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/CouncilRunPage.ets:498:18
+ 'showActionMenu' has been deprecated.
+[39m[39m
+[33m431 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/CouncilRunPage.ets:498:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m432 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/CouncilRunPage.ets:523:39
+ 'back' has been deprecated.
+[39m[39m
+[33m433 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/CouncilRunPage.ets:532:39
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m434 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:98:38
+ 'getParams' has been deprecated.
+[39m[39m
+[33m435 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:150:37
+ 'back' has been deprecated.
+[39m[39m
+[33m436 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:367:44
+ 'getContext' has been deprecated.
+[39m[39m
+[33m437 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:373:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m438 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:376:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m439 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:376:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m440 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:434:24
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m441 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:586:56
+ 'showToast' has been deprecated.
+[39m[39m
+[33m442 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets:866:18
+ The 'fill' API is supported since SDK version 26.0.0. However, the current compatible SDK version is 5.0.0(12).
+ It is recommended to use apiAvailable to safeguard API compatibility.
+[39m[39m
+[33m443 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadHistoryPage.ets:72:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m444 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadHistoryPage.ets:72:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m445 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadTemplateSettingsPage.ets:11:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m446 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadTemplateSettingsPage.ets:11:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m447 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/DeepReadTemplateWorkbenchPage.ets:151:24
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m448 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/FavoritePage.ets:57:14
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m449 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/FavoritePage.ets:59:42
+ 'showToast' has been deprecated.
+[39m[39m
+[33m450 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/FavoritePage.ets:70:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m451 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/FavoritePage.ets:70:17
+ 'show' has been deprecated.
+[39m[39m
+[33m452 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/FavoritePage.ets:76:26
+ 'showToast' has been deprecated.
+[39m[39m
+[33m453 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/HistoryPage.ets:114:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m454 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/HistoryPage.ets:124:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m455 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/HistoryPage.ets:175:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m456 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/HistoryPage.ets:178:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m457 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/HistoryPage.ets:181:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m458 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/HistoryPage.ets:203:20
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m459 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryTopicsPage.ets:130:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m460 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryTopicsPage.ets:130:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m461 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryTopicsPage.ets:142:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m462 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryTopicsPage.ets:222:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m463 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryTopicsPage.ets:241:41
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m464 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryTopicsPage.ets:252:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m465 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryTopicDetailPage.ets:35:46
+ 'getParams' has been deprecated.
+[39m[39m
+[33m466 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryTopicDetailPage.ets:72:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m467 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryTopicDetailPage.ets:72:17
+ 'show' has been deprecated.
+[39m[39m
+[33m468 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryTopicDetailPage.ets:118:43
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m469 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryTopicDetailPage.ets:149:18
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m470 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryRecordPage.ets:40:47
+ 'getParams' has been deprecated.
+[39m[39m
+[33m471 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryRecordPage.ets:116:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m472 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryRecordPage.ets:116:17
+ 'show' has been deprecated.
+[39m[39m
+[33m473 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryRecordPage.ets:144:16
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m474 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryRecordPage.ets:150:14
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m475 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryRecordPage.ets:170:43
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m476 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryDocumentPage.ets:36:49
+ 'getParams' has been deprecated.
+[39m[39m
+[33m477 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryDocumentPage.ets:79:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m478 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryDocumentPage.ets:79:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m479 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryDocumentPage.ets:135:43
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m480 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MemoryDocumentPage.ets:163:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m481 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:85:37
+ 'back' has been deprecated.
+[39m[39m
+[33m482 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:89:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m483 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:89:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m484 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:106:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m485 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:106:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m486 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:110:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m487 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:110:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m488 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:176:26
+ 'getContext' has been deprecated.
+[39m[39m
+[33m489 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppListPage.ets:208:26
+ 'getContext' has been deprecated.
+[39m[39m
+[33m490 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppBridgeImpl.ets:158:26
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m491 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppBridgeImpl.ets:199:65
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m492 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/platform_impl/MiniAppBridgeImpl.ets:421:15
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m493 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:138:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33m494 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:189:37
+ 'back' has been deprecated.
+[39m[39m
+[33m495 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:234:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m496 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:237:22
+ 'showDialog' has been deprecated.
+[39m[39m
+[33m497 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:253:16
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m498 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:378:57
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m499 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:434:18
+ 'showActionMenu' has been deprecated.
+[39m[39m
+[33m500 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:478:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m501 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:493:26
+ 'getContext' has been deprecated.
+[39m[39m
+[33m502 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:516:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m503 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:526:26
+ 'getContext' has been deprecated.
+[39m[39m
+[33m504 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:542:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m505 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:546:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m506 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:546:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m507 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets:695:16
+ 'key' can only be used for testing directories 
+[39m[39m
+[33m508 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppSettingsPage.ets:81:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33m509 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppSettingsPage.ets:98:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m510 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppSettingsPage.ets:98:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m511 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/MiniAppSettingsPage.ets:195:16
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m512 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:125:11
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m513 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:159:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m514 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:194:7
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m515 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:205:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m516 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:231:35
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m517 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:233:40
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m518 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:236:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m519 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:239:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m520 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:269:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m521 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:269:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m522 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:274:18
+ 'showActionMenu' has been deprecated.
+[39m[39m
+[33m523 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:282:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m524 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:403:13
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m525 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:589:19
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m526 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:609:11
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m527 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:629:19
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m528 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets:648:11
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m529 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:163:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m530 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:163:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m531 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:170:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m532 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:234:60
+ The system capacity of this api 'TextAreaController' is not supported on all devices
+[39m[39m
+[33m533 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:235:61
+ The system capacity of this api 'TextInputController' is not supported on all devices
+[39m[39m
+[33m534 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:249:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33m535 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:327:41
+ 'back' has been deprecated.
+[39m[39m
+[33m536 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:377:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m537 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:377:17
+ 'show' has been deprecated.
+[39m[39m
+[33m538 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:394:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m539 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:394:17
+ 'show' has been deprecated.
+[39m[39m
+[33m540 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:472:24
+ 'showToast' has been deprecated.
+[39m[39m
+[33m541 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:856:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m542 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:856:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m543 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:860:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m544 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:865:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m545 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:867:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m546 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:903:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m547 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:903:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m548 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:924:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m549 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:924:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m550 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:932:18
+ 'showActionMenu' has been deprecated.
+[39m[39m
+[33m551 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:946:18
+ 'showActionMenu' has been deprecated.
+[39m[39m
+[33m552 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:1077:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m553 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:1109:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m554 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:1109:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m555 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:1238:7
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m556 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:1238:19
+ 'show' has been deprecated.
+[39m[39m
+[33m557 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:1275:9
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m558 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:1275:21
+ 'show' has been deprecated.
+[39m[39m
+[33m559 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:1984:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m560 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:2017:18
+ 'showActionMenu' has been deprecated.
+[39m[39m
+[33m561 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:2162:17
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m562 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:2468:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m563 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:2468:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m564 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:2495:9
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m565 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:2756:11
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m566 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets:2851:15
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m567 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets:49:58
+ The system capacity of this api 'TextInputController' is not supported on all devices
+[39m[39m
+[33m568 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets:50:59
+ The system capacity of this api 'TextAreaController' is not supported on all devices
+[39m[39m
+[33m569 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets:55:41
+ 'getParams' has been deprecated.
+[39m[39m
+[33m570 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets:128:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m571 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets:161:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m572 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets:165:14
+ 'back' has been deprecated.
+[39m[39m
+[33m573 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets:201:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m574 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets:201:17
+ 'show' has been deprecated.
+[39m[39m
+[33m575 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets:244:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m576 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets:244:17
+ 'show' has been deprecated.
+[39m[39m
+[33m577 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets:261:14
+ 'back' has been deprecated.
+[39m[39m
+[33m578 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:357:42
+ 'getContext' has been deprecated.
+[39m[39m
+[33m579 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:359:37
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m580 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:361:38
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m581 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:363:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m582 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:364:39
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m583 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:367:16
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m584 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:369:16
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m585 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ProfilePage.ets:373:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m586 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/QuickMessagesPage.ets:81:37
+ 'back' has been deprecated.
+[39m[39m
+[33m587 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SearchPage.ets:165:27
+ 'getParams' has been deprecated.
+[39m[39m
+[33m588 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SearchPage.ets:296:14
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m589 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SearchPage.ets:296:14
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m590 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SearchPage.ets:302:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m591 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentExecutionPageFull.ets:12:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m592 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentExecutionPageFull.ets:12:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m593 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentMemoryPageFull.ets:234:13
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m594 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentMemoryPageFull.ets:234:25
+ 'show' has been deprecated.
+[39m[39m
+[33m595 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentMemoryPageFull.ets:293:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m596 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentMemoryPageFull.ets:296:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m597 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentPermissionsPageFull.ets:11:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m598 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAgentPermissionsPageFull.ets:11:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m599 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAppearancePage.ets:174:33
+ 'getContext' has been deprecated.
+[39m[39m
+[33m600 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAppearancePage.ets:184:60
+ 'decode' has been deprecated.
+[39m[39m
+[33m601 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAppearancePage.ets:188:24
+ 'showToast' has been deprecated.
+[39m[39m
+[33m602 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAppearancePage.ets:210:24
+ 'showToast' has been deprecated.
+[39m[39m
+[33m603 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAppearancePage.ets:212:24
+ 'showToast' has been deprecated.
+[39m[39m
+[33m604 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAppearancePage.ets:215:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m605 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAppearancePage.ets:225:33
+ 'getContext' has been deprecated.
+[39m[39m
+[33m606 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAppearancePage.ets:234:24
+ 'showToast' has been deprecated.
+[39m[39m
+[33m607 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAppearancePage.ets:236:24
+ 'showToast' has been deprecated.
+[39m[39m
+[33m608 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAppearancePage.ets:255:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m609 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingAppearancePage.ets:255:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m610 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingBackupPage.ets:73:18
+ 'showToast' has been deprecated.
+[39m[39m
+[33m611 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingBackupPage.ets:73:18
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m612 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingBackupPage.ets:86:12
+ 'getContext' has been deprecated.
+[39m[39m
+[33m613 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:45:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m614 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:104:32
+ 'showToast' has been deprecated.
+[39m[39m
+[33m615 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:153:34
+ 'showToast' has been deprecated.
+[39m[39m
+[33m616 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:158:34
+ 'showToast' has been deprecated.
+[39m[39m
+[33m617 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:173:30
+ 'showToast' has been deprecated.
+[39m[39m
+[33m618 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:179:30
+ 'showToast' has been deprecated.
+[39m[39m
+[33m619 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:185:30
+ 'showToast' has been deprecated.
+[39m[39m
+[33m620 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:188:30
+ 'showToast' has been deprecated.
+[39m[39m
+[33m621 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:201:15
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m622 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:201:27
+ 'show' has been deprecated.
+[39m[39m
+[33m623 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets:210:36
+ 'showToast' has been deprecated.
+[39m[39m
+[33m624 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets:412:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m625 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets:412:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m626 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets:717:20
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m627 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets:733:42
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m628 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets:886:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m629 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingDisplayPage.ets:63:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m630 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingDisplayPage.ets:63:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m631 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingDisplayPage.ets:88:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m632 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingDisplayPage.ets:88:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m633 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingExperimentalModelCouncilPageFull.ets:11:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m634 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingExperimentalModelCouncilPageFull.ets:11:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m635 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingExperimentalSubAgentPageFull.ets:11:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m636 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingExperimentalSubAgentPageFull.ets:11:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m637 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingExperimentalWebMountPage.ets:330:19
+ 'getContext' has been deprecated.
+[39m[39m
+[33m638 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:89:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m639 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:89:17
+ 'show' has been deprecated.
+[39m[39m
+[33m640 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:116:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m641 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:116:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m642 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:124:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m643 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:128:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m644 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:136:7
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m645 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:136:19
+ 'show' has been deprecated.
+[39m[39m
+[33m646 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:152:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m647 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:163:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m648 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:168:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m649 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:181:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m650 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:184:7
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m651 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:184:19
+ 'show' has been deprecated.
+[39m[39m
+[33m652 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:195:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m653 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingFilesPage.ets:209:22
+ 'showToast' has been deprecated.
+[39m[39m
+[33m654 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingMacGatewayPage.ets:144:53
+ To use this API, you need to apply for the permissions: ohos.permission.READ_PASTEBOARD [since 12]
+[39m[39m
+[33m655 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingMacGatewayPage.ets:241:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m656 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingMacGatewayPage.ets:241:17
+ 'show' has been deprecated.
+[39m[39m
+[33m657 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingMcpPageFull.ets:11:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m658 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingMcpPageFull.ets:11:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m659 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:66:31
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m660 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:67:33
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m661 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:206:14
+ 'back' has been deprecated.
+[39m[39m
+[33m662 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:208:7
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m663 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:208:19
+ 'show' has been deprecated.
+[39m[39m
+[33m664 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:220:14
+ 'back' has been deprecated.
+[39m[39m
+[33m665 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:223:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m666 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:223:17
+ 'show' has been deprecated.
+[39m[39m
+[33m667 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets:230:18
+ 'back' has been deprecated.
+[39m[39m
+[33m668 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelPage.ets:11:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m669 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingModelPage.ets:11:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m670 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingPage.ets:105:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m671 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingPage.ets:105:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m672 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingPage.ets:198:39
+ 'back' has been deprecated.
+[39m[39m
+[33m673 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingPage.ets:236:39
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m674 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSandboxPage.ets:91:20
+ 'showToast' has been deprecated.
+[39m[39m
+[33m675 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSandboxPage.ets:91:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m676 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSandboxPage.ets:211:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m677 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSandboxPage.ets:216:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m678 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSandboxPage.ets:225:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m679 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSandboxPage.ets:234:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m680 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSandboxPage.ets:243:40
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m681 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSearchListCards.ets:11:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m682 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSearchListCards.ets:11:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m683 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSearchServiceEditorSheet.ets:11:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m684 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSearchServiceEditorSheet.ets:11:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m685 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:69:31
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m686 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:70:33
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m687 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:179:14
+ 'back' has been deprecated.
+[39m[39m
+[33m688 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:181:7
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m689 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:181:19
+ 'show' has been deprecated.
+[39m[39m
+[33m690 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:193:14
+ 'back' has been deprecated.
+[39m[39m
+[33m691 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:196:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m692 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:196:17
+ 'show' has been deprecated.
+[39m[39m
+[33m693 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets:203:18
+ 'back' has been deprecated.
+[39m[39m
+[33m694 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSystemAccessPage.ets:128:12
+ 'back' has been deprecated.
+[39m[39m
+[33m695 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SkillDetailPage.ets:11:12
+ 'replaceUrl' has been deprecated.
+[39m[39m
+[33m696 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SkillDetailPage.ets:11:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m697 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SkillsPage.ets:53:12
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m698 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SkillsPage.ets:53:12
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m699 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SkillsPage.ets:143:11
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m700 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SkillsPage.ets:143:23
+ 'show' has been deprecated.
+[39m[39m
+[33m701 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSSHProfilesPage.ets:266:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m702 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSSHProfilesPage.ets:266:17
+ 'show' has been deprecated.
+[39m[39m
+[33m703 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSSHProfilesPage.ets:303:43
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m704 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingSSHProfilesPage.ets:432:81
+ 'back' has been deprecated.
+[39m[39m
+[33m705 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/TerminalView.ets:37:22
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m706 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/components/TerminalView.ets:135:26
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m707 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/TerminalPage.ets:58:48
+ 'getParams' has been deprecated.
+[39m[39m
+[33m708 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/TerminalPage.ets:317:44
+ 'pushUrl' has been deprecated.
+[39m[39m
+[33m709 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/TerminalPage.ets:344:17
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m710 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/TerminalPage.ets:375:17
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m711 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/RecipesPage.ets:222:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m712 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/RecipesPage.ets:222:17
+ 'show' has been deprecated.
+[39m[39m
+[33m713 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:259:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m714 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:259:17
+ 'show' has been deprecated.
+[39m[39m
+[33m715 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:309:7
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m716 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:309:19
+ 'show' has been deprecated.
+[39m[39m
+[33m717 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:333:5
+ 'AlertDialog' has been deprecated.
+[39m[39m
+[33m718 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:333:17
+ 'show' has been deprecated.
+[39m[39m
+[33m719 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:466:15
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m720 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:479:15
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m721 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:511:15
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m722 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:535:15
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m723 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:569:19
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m724 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:632:15
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m725 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:724:19
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m726 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/PluginsPage.ets:731:19
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m727 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/GoogleProviderAuthPage.ets:51:52
+ 'getParams' has been deprecated.
+[39m[39m
+[33m728 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/GoogleProviderAuthPage.ets:135:5
+ 'animateTo' has been deprecated.
+[39m[39m
+[33m729 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/GoogleProviderAuthPage.ets:155:48
+ 'getContext' has been deprecated.
+[39m[39m
+[33m730 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/GoogleProviderAuthPage.ets:216:46
+ 'getContext' has been deprecated.
+[39m[39m
+[33m731 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/GoogleProviderAuthPage.ets:217:20
+ Function may throw exceptions. Special handling is required.
+[39m[39m
+[33m732 WARN: [33m[33mArkTS:WARN File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/GoogleProviderAuthPage.ets:292:12
+ 'back' has been deprecated.
+[39m[39m[39m
+> hvigor [91mERROR: ArkTS Compiler Error
+[31m1 ERROR: [31m10605030 ArkTS Compiler Error
+Error Message: Structural typing is not supported (arkts-no-structural-typing) At File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:246:11
+[39m
+[39m
+[31m2 ERROR: [31m10605030 ArkTS Compiler Error
+Error Message: Structural typing is not supported (arkts-no-structural-typing) At File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:413:15
+[39m
+[39m
+[31m3 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: Expected 0 arguments, but got 1. At File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:132:22
+[39m
+[39m
+[31m4 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: Expected 0 arguments, but got 1. At File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:137:46
+[39m
+[39m
+[31m5 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: Property 'seedUrls' is missing in type 'HotItem' but required in type 'BoardHotActionItem'. At File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:246:11
+[39m
+[39m
+[31m6 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: Property 'applyFocusFilter' does not exist on type 'BoardPage'. At File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:316:20
+[39m
+[39m
+[31m7 ERROR: [31m10505001 ArkTS Compiler Error
+Error Message: Property 'seedUrls' is missing in type 'HotItem' but required in type 'BoardHotActionItem'. At File: /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/BoardPage.ets:413:15
+[39m
+[39m
+[31mCOMPILE RESULT:FAIL {ERROR:8 WARN:732}[39m
+
+[31m* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --debug option to get more log output.
+[39m
+[31m
+FAILURE: Build completed with 1 failure.[31m[39m
+[31m
+1: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task 'default@CompileArkTS'.
+  > Compilation error. See log for more details
+
+[31m* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --debug option to get more log output.
+[31m[39m
+[31m================================================================================[31m[39m
+> hvigor [91mERROR: BUILD FAILED in 11 s 184 ms [39m

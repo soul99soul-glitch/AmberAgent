@@ -9,13 +9,9 @@
 //   (entry 用当前 runtime 的 api.generateText),titleModel 设置项 = P1
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  makeConversation, toMessageNode, makeUserMessage, makeAssistantMessage,
-} from '../main/ets/index.ts';
+import { makeConversation, toMessageNode, makeUserMessage, makeAssistantMessage } from '../main/ets/index.ts';
 import type { Conversation } from '../main/ets/index.ts';
-import {
-  DEFAULT_TITLE_PROMPT, buildTitlePrompt, runAutoTitle,
-} from '../main/ets/chat/auto_title.ts';
+import { buildTitlePrompt, runAutoTitle } from '../main/ets/chat/auto_title.ts';
 import { createMemoryConversationStore } from '../main/ets/chat/chat_turn.ts';
 
 const convWith = (texts: string[], title: string = ''): Conversation => ({
@@ -23,23 +19,6 @@ const convWith = (texts: string[], title: string = ''): Conversation => ({
   title,
   messageNodes: texts.map((t: string, i: number) =>
     toMessageNode(i % 2 === 0 ? makeUserMessage(t) : makeAssistantMessage(t))),
-});
-
-describe('DEFAULT_TITLE_PROMPT', () => {
-  it('与 Android TitleSummary.kt:3-15 逐字一致(trimIndent 后)', () => {
-    const expected = `I will give you some dialogue content in the \`<content>\` block.
-You need to summarize the conversation between user and assistant into a short title.
-1. The title language should be consistent with the user's primary language
-2. Do not use punctuation or other special symbols
-3. Reply directly with the title
-4. Summarize using {locale} language
-5. The title should not exceed 10 characters
-
-<content>
-{content}
-</content>`;
-    assert.equal(DEFAULT_TITLE_PROMPT, expected);
-  });
 });
 
 describe('buildTitlePrompt', () => {

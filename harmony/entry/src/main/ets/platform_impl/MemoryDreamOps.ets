@@ -23,7 +23,7 @@ import {
 } from '@amber/chat-domain';
 import type { ChatProviderChoice } from '../di/AppContainer.ets';
 import {
-  buildProviderApi, currentChatModelReference, getChatKvStore, readTaskModelReference, TASK_COMPRESS_MODEL_KEY,
+  prepareProviderApi, currentChatModelReference, getChatKvStore, readTaskModelReference, TASK_COMPRESS_MODEL_KEY,
   resolveTaskModelReferenceChain,
 } from '../di/AppContainer.ets';
 import type { AgentRuntimeSnapshot, MemoryWorkerGateSnapshot } from './AgentRuntimePrefs.ets';
@@ -88,7 +88,7 @@ export const loadMemoryDreamPlanOpDeps = async (): Promise<MemoryDreamPlanOpDeps
         const name: string = header.name.trim();
         if (name.length > 0) headers[name] = header.value.trim();
       }
-      const api: OpenAIChatApi = buildProviderApi(choice.provider, headers);
+      const api: OpenAIChatApi = await prepareProviderApi(choice.provider, headers);
       // TextGenerationParams(model, reasoningLevel=daydreamReasoningLevel)
       //   (Planner.kt:94-97)— D-103 接线(MemoryModels.kt:142 默认 HIGH)
       const chunk: MessageChunk = await api.generateText(

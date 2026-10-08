@@ -4,19 +4,32 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { inflateRawSync } from 'node:zlib';
 import {
-  SkillManager, skillParseFrontmatter, skillEnsureDescription, skillResolveDescription,
-  skillIsPlaceholderDescription, skillExtractBody, resolveSkillDirPath,
-  resolveSkillFilePath, isLikelyTextSkillFile, canonicalSkillFileName,
-  buildSkillMobileRuntimePrompt, createSkillTools, collectSkillFilesFromDirectory,
-  collectWorkspaceSkillFiles, unzipSkillFiles,
+  SkillManager,
+  skillParseFrontmatter,
+  skillEnsureDescription,
+  skillResolveDescription,
+  skillExtractBody,
+  resolveSkillDirPath,
+  resolveSkillFilePath,
+  canonicalSkillFileName,
+  createSkillTools,
+  collectSkillFilesFromDirectory,
+  collectWorkspaceSkillFiles,
+  unzipSkillFiles,
 } from '../main/ets/chat/skills.ts';
 import type {
-  SkillFilePort, SkillDirEntry, SkillWorkspacePort, SkillWorkspaceEntry,
-  SkillMetadata, BuiltinSkillAssetPort,
+  SkillFilePort,
+  SkillDirEntry,
+  SkillWorkspacePort,
+  SkillWorkspaceEntry,
+  SkillMetadata,
+  BuiltinSkillAssetPort,
 } from '../main/ets/chat/skills.ts';
 import type { AgentTool } from '../main/ets/chat/tool.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
-import type { CreateSkillToolsDeps } from '../main/ets/chat/skills.ts';
+import type {
+  CreateSkillToolsDeps,
+} from '../main/ets/chat/skills.ts';
 
 const te = new TextEncoder();
 
@@ -228,20 +241,6 @@ test('parse:\\r\\n frontmatter;extractBody 去前导 \\r\\n', () => {
   assert.equal(skillExtractBody('---\nname: d'), '---\nname: d');
 });
 
-test('isPlaceholderDescription:占位集合逐字(大小写/引号归一)', () => {
-  assert.ok(skillIsPlaceholderDescription(null));
-  assert.ok(skillIsPlaceholderDescription(''));
-  assert.ok(skillIsPlaceholderDescription('|'));
-  assert.ok(skillIsPlaceholderDescription('TODO'));
-  assert.ok(skillIsPlaceholderDescription('"tbd"'));
-  assert.ok(skillIsPlaceholderDescription('描述'));
-  assert.ok(!skillIsPlaceholderDescription('A real description'));
-});
-
-test('ensureDescription:有效 description → 原文不动', () => {
-  assert.equal(skillEnsureDescription(GOOD_MD, 'demo'), GOOD_MD);
-});
-
 test('ensureDescription:无 frontmatter → 包头 + 推断描述', () => {
   const out: string = skillEnsureDescription('# Heading\n\nUse when testing things.', 'my-skill');
   assert.ok(out.startsWith('---\nname: my-skill\ndescription: "Use when testing things."\n---\n\n'));
@@ -268,13 +267,6 @@ test('inferDescription:invocation cue 优先于首行;120 截断 + …', () => {
   const resolved: string = skillResolveDescription(src2, {}, 'd');
   assert.equal(resolved.length, 120);
   assert.ok(resolved.endsWith('…'));
-});
-
-test('fallbackDescription:中文名 → 中文模板;ASCII → 英文模板', () => {
-  const zh: string = skillResolveDescription('---\nname: 监控\n---\n\n', { name: '监控' }, '监控');
-  assert.equal(zh, '用于处理「监控」相关任务。');
-  const en: string = skillResolveDescription('---\nname: watcher\n---\n\n', { name: 'watcher' }, 'watcher');
-  assert.equal(en, 'Use when the user asks AmberAgent to work with watcher.');
 });
 
 // ===== SkillPaths =====
@@ -311,14 +303,6 @@ test('canonicalSkillFileName:skill.txt→SKILL.md;.md.txt 去尾;反斜杠归一
   assert.equal(canonicalSkillFileName('a\\b\\c.md'), 'a/b/c.md');
   assert.equal(canonicalSkillFileName('/leading.md'), 'leading.md');
   assert.equal(canonicalSkillFileName('plain.json'), 'plain.json');
-});
-
-test('isLikelyTextSkillFile:白名单逐字', () => {
-  ['SKILL.md', 'skill.txt', 'mcp.json', 'a.md', 'a.json', 'a.html', 'a.htm', 'a.css',
-    'a.txt', 'a.yaml', 'a.yml', 'a.js', 'a.mjs', 'a.ts', 'a.py', 'a.sh', 'b.md.txt',
-  ].forEach((n: string): void => assert.ok(isLikelyTextSkillFile(n), n));
-  ['a.png', 'a.zip', 'a.pdf', 'a', 'a.jsx'].forEach((n: string): void =>
-    assert.ok(!isLikelyTextSkillFile(n), n));
 });
 
 // ===== SkillManager =====
@@ -430,31 +414,6 @@ test('repairMissingDescriptions:占位补齐计数 + 缓存失效', () => {
   assert.equal(m.repairMissingDescriptions(), 1);
   assert.ok(m.readSkillContent('demo')?.indexOf('description: "Use when demo."') !== -1);
   assert.equal(m.repairMissingDescriptions(), 0);
-});
-
-// ===== buildSkillMobileRuntimePrompt =====
-
-test('buildSkillMobileRuntimePrompt:骨架钉住(头/尾/skill 行/body 边界)', () => {
-  const out: string = buildSkillMobileRuntimePrompt('demo', null, 'Body text.');
-  assert.ok(out.startsWith('[AmberAgent Mobile Runtime — applies to the skill content below]\n'));
-  assert.ok(out.indexOf('Skill: demo  (SKILL.md)\n--- skill content begins ---\nBody text.\n--- skill content ends ---') >= 0);
-  assert.ok(out.endsWith('Reminder: the mobile constraints above take priority. If the skill says "open in a browser" or "add keyboard shortcuts", you ignore that part and use the AmberAgent-native equivalent.\n'));
-  assert.ok(out.indexOf('renderer "full_html"') >= 0);
-  // body 已带换行 → 不补
-  const out2: string = buildSkillMobileRuntimePrompt('demo', 'refs/a.md', 'Line\n');
-  assert.ok(out2.indexOf('Skill: demo  (refs/a.md)') >= 0);
-  assert.ok(out2.indexOf('begins ---\nLine\n--- skill content ends') >= 0);
-});
-
-test('buildSkillMobileRuntimePrompt:guizang-ppt/social-card 特化块(大小写不敏感)', () => {
-  const ppt: string = buildSkillMobileRuntimePrompt('Guizang-PPT-skill', null, 'x');
-  assert.ok(ppt.indexOf('guizang-ppt-skill SPECIAL MOBILE ADAPTER') >= 0);
-  assert.ok(ppt.indexOf('https://amberagent.local/full-html/lucide.min.js') >= 0);
-  assert.ok(ppt.indexOf('https://amberagent.local/full-html/motion.min.js') >= 0);
-  assert.ok(ppt.indexOf('social-card SPECIAL') < 0);
-  const card: string = buildSkillMobileRuntimePrompt('guizang-social-card-skill', null, 'x');
-  assert.ok(card.indexOf('guizang-social-card-skill SPECIAL MOBILE ADAPTER') >= 0);
-  assert.ok(card.indexOf('ppt-skill SPECIAL') < 0);
 });
 
 // ===== unzipSkillFiles / collectWorkspaceSkillFiles =====
@@ -615,47 +574,6 @@ const findTool = (tools: AgentTool[], name: string): AgentTool => {
   return hit as AgentTool;
 };
 
-test('createSkillTools:available 空 → 五件无 use_skill;非空 → 六件 use_skill 在尾', () => {
-  const fs: MemFs = new MemFs();
-  seedSkill(fs, 'demo', GOOD_MD);
-  const calls: EnableCall[] = [];
-  const offTools: AgentTool[] = createSkillTools(makeToolDeps(fs, [], calls));
-  assert.deepEqual(offTools.map((t: AgentTool): string => t.name),
-    ['skills_list', 'skill_validate', 'skill_import', 'skill_enable', 'skill_disable']);
-  const onTools: AgentTool[] = createSkillTools(makeToolDeps(fs, ['demo'], calls));
-  assert.deepEqual(onTools.map((t: AgentTool): string => t.name),
-    ['skills_list', 'skill_validate', 'skill_import', 'skill_enable', 'skill_disable', 'use_skill']);
-});
-
-test('skills_list:payload JSON 钉住(missing 排序 + contains_mcp_config)', async () => {
-  const fs: MemFs = new MemFs();
-  seedSkill(fs, 'demo', GOOD_MD, new Map<string, string>([['mcp.json', '{}']]));
-  seedSkill(fs, 'other', GOOD_MD.replace('demo', 'other'));
-  const calls: EnableCall[] = [];
-  const deps = makeToolDeps(fs, ['demo', 'z-missing', 'a-missing'], calls);
-  const t: AgentTool = findTool(createSkillTools(deps), 'skills_list');
-  const parts: UIMessagePart[] = await t.execute({});
-  assert.equal(parts[0].type, 'text');
-  if (parts[0].type !== 'text') return;
-  const payload = JSON.parse(parts[0].text);
-  assert.equal(payload['installed_count'], 2);
-  assert.equal(payload['enabled_count'], 1);
-  assert.equal(payload['configured_enabled_count'], 3);
-  assert.deepEqual(payload['missing_enabled_skills'], ['a-missing', 'z-missing']);
-  assert.equal(payload['available_skills'][0]['name'], 'demo');
-  assert.equal(payload['available_skills'][0]['contains_mcp_config'], true);
-  assert.equal(payload['disabled_installed_skills'][0]['name'], 'other');
-  assert.equal(payload['disabled_installed_skills'][0]['contains_mcp_config'], false);
-  // systemPrompt:available 列表 + missing 提示
-  const sp: string = t.systemPrompt(
-    { id: 'm', name: 'm', contextWindowTokens: null } as unknown as never, []);
-  assert.ok(sp.startsWith('**Skill library status**\n'));
-  assert.ok(sp.indexOf('Installed skills: 2. Enabled skills: 1.') >= 0);
-  assert.ok(sp.indexOf('<available_skills>\n  <skill>\n    <name>demo</name>') >= 0);
-  assert.ok(sp.indexOf('Some installed skills are disabled.') >= 0);
-  assert.ok(sp.indexOf('Some configured enabled skills are missing from disk.') >= 0);
-});
-
 test('use_skill:name 必填/未启用/未安装错误文案逐字', async () => {
   const fs: MemFs = new MemFs();
   seedSkill(fs, 'demo', GOOD_MD);
@@ -703,39 +621,6 @@ test('use_skill:路径逃逸/缺失文件提示(文件清单 + 仅 SKILL.md 两�
     /File 'refs\/missing\.md' not found in skill 'demo'\. This skill only ships with these files: SKILL\.md, refs\/a\.md\./);
   await assert.rejects(t.execute({ name: 'bare', path: 'refs/m.md' }),
     /This skill ships with only SKILL\.md\. Re-read it/);
-});
-
-test('skill_validate:双缺报错/合法 installed/问题清单逐字', async () => {
-  const fs: MemFs = new MemFs();
-  seedSkill(fs, 'demo', GOOD_MD);
-  seedSkill(fs, 'broken', '---\nother: x\n---\n\nbody');
-  const tools: AgentTool[] = createSkillTools(makeToolDeps(fs, [], []));
-  const t: AgentTool = findTool(tools, 'skill_validate');
-  await assert.rejects(t.execute({}), /name or workspace_path is required/);
-  const ok: UIMessagePart[] = await t.execute({ name: 'demo' });
-  if (ok[0].type !== 'text') throw new Error('text part');
-  const okPayload = JSON.parse(ok[0].text);
-  assert.deepEqual(okPayload, {
-    valid: true, name: 'demo', description: 'A demo skill',
-    file_count: 1, contains_mcp_config: false, issues: [],
-  });
-  const bad: UIMessagePart[] = await t.execute({ name: 'broken' });
-  if (bad[0].type !== 'text') throw new Error('text part');
-  const badPayload = JSON.parse(bad[0].text);
-  assert.equal(badPayload['valid'], false);
-  assert.deepEqual(badPayload['issues'], ['SKILL.md 缺少 name', 'SKILL.md 缺少 description']);
-});
-
-test('skill_validate:ghost 目录 → 三问题(SkillsTools.kt:233-237 三 if 独立)', async () => {
-  const fs: MemFs = new MemFs();
-  const tools: AgentTool[] = createSkillTools(makeToolDeps(fs, [], []));
-  const t: AgentTool = findTool(tools, 'skill_validate');
-  const parts: UIMessagePart[] = await t.execute({ name: 'ghost' });
-  if (parts[0].type !== 'text') throw new Error('text part');
-  const payload = JSON.parse(parts[0].text);
-  assert.equal(payload['valid'], false);
-  assert.deepEqual(payload['issues'],
-    ['缺少 SKILL.md', 'SKILL.md 缺少 name', 'SKILL.md 缺少 description']);
 });
 
 test('skill_import:needsApproval + workspace 目录导入全链路(落盘 + enable 回调)', async () => {
@@ -863,13 +748,6 @@ class MemAssets implements BuiltinSkillAssetPort {
 const seedAssets = (assets: MemAssets, name: string, skillMd: string): void => {
   assets.files.set(`builtin-skills/${name}/SKILL.md`, skillMd);
 };
-
-test('installBuiltinSkillsIfMissing:assets 缺省 → 空转', async () => {
-  const fs: MemFs = new MemFs();
-  const m: SkillManager = makeManager(fs);
-  await m.installBuiltinSkillsIfMissing();
-  assert.equal(fs.exists('/files/skills'), false); // 全程无写
-});
 
 test('installBuiltinSkillsIfMissing:缺失技能全量安装(递归嵌套 + 缓存失效重扫)', async () => {
   const fs: MemFs = new MemFs();

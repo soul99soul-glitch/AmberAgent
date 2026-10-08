@@ -36,6 +36,7 @@ export struct ChatMessageActionFooter {
   @Prop canEdit: boolean = true;
   @Prop canRegenerate: boolean = true;
   @Prop canFavorite: boolean = true;
+  @Prop isFavorite: boolean = false;
   onCopy: () => void = (): void => {};
   onFork: () => void = (): void => {};
   onEdit: () => void = (): void => {};
@@ -79,6 +80,7 @@ export struct ChatMessageActionFooter {
               canEdit: this.canEdit,
               canRegenerate: this.canRegenerate,
               canFavorite: this.canFavorite,
+              isFavorite: this.isFavorite,
               onCopy: (): void => this.onCopy(),
               onFork: (): void => this.onFork(),
               onEdit: (): void => this.onEdit(),

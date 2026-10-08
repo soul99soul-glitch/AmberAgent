@@ -52,9 +52,10 @@ test('encode: 键序逐字 + quote 转义 + Float 文本 + 可选行省略', () 
   assert.equal(lines[9], 'supersedes_ids: [3, 4]');
   assert.equal(lines[10], 'pinned: true');
   assert.equal(lines[11], 'archived: false');
-  assert.equal(lines[12], '---');
-  assert.equal(lines[13], '');
-  assert.equal(lines[14], '含 "引号" 与 \\反斜杠');
+  assert.equal(lines[12], 'reinforcement_count: 0');
+  assert.equal(lines[13], '---');
+  assert.equal(lines[14], '');
+  assert.equal(lines[15], '含 "引号" 与 \\反斜杠');
   // expires_at 缺失(null)→ 无该行
   assert.ok(!text.includes('expires_at'));
 });

@@ -123,6 +123,7 @@ struct SettingDisplayPage {
       enableAutoScroll: patch.enableAutoScroll ?? this.setting.enableAutoScroll,
       showBottomFollowAnimation: patch.showBottomFollowAnimation ?? this.setting.showBottomFollowAnimation,
       enableLatexRendering: patch.enableLatexRendering ?? this.setting.enableLatexRendering,
+      enableGenerativeWidgets: patch.enableGenerativeWidgets ?? this.setting.enableGenerativeWidgets,
       enableBlurEffect: patch.enableBlurEffect ?? this.setting.enableBlurEffect,
       chatFontFamily: patch.chatFontFamily ?? this.setting.chatFontFamily,
       enableVolumeKeyScroll: patch.enableVolumeKeyScroll ?? this.setting.enableVolumeKeyScroll,
@@ -245,6 +246,11 @@ struct SettingDisplayPage {
       label: '思考内容', desc: '在消息中显示模型的思考过程',
       checked: this.setting.showThinkingContent,
       onToggle: (): void => { this.update({ showThinkingContent: !this.setting.showThinkingContent }); },
+    })
+    CardToggleRow({
+      label: '生成式组件', desc: '显示正文中的卡片、图表和幻灯片，并收录到产物架',
+      checked: this.setting.enableGenerativeWidgets,
+      onToggle: (): void => { this.update({ enableGenerativeWidgets: !this.setting.enableGenerativeWidgets }); },
     })
     CardToggleRow({
       label: '自动收起思考', desc: '生成完成后自动折叠思考过程',

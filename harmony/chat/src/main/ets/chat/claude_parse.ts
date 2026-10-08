@@ -8,7 +8,7 @@
 //   ErrorParser.parseErrorDetail   → 复用 parseOpenAiErrorDetail(同算法,泛型)
 
 import type { JsonObject, JsonValue } from './json.ts';
-import { makeUIMessage } from './message.ts';
+import { makeUIMessage, CLAUDE_REDACTED_THINKING_METADATA_KEY, CLAUDE_THINKING_BLOCK_INDEX_METADATA_KEY } from './message.ts';
 import type { MessageChunk, UIMessage, UIMessageChoice, UIMessagePart } from './message.ts';
 import { nowIso } from './ids.ts';
 import type { TokenUsage } from './usage.ts';
@@ -26,10 +26,11 @@ const intOrNull = (v: JsonValue | undefined): number | null =>
 
 // ===== parseMessage(:526-595) =====
 
-export const parseClaudeMessage = (content: JsonValue[]): UIMessage => {
+export const parseClaudeMessage = (content: JsonValue[], streamBlockIndex: number | null = null): UIMessage => {
   const parts: UIMessagePart[] = [];
 
-  for (const contentBlock of content) {
+  for (let index = 0; index < content.length; index++) {
+    const contentBlock = content[index];
     if (!isObj(contentBlock)) continue;
     const type: string | null = strOrNull(contentBlock['type']);
 
@@ -41,17 +42,21 @@ export const parseClaudeMessage = (content: JsonValue[]): UIMessage => {
     } else if (type === 'thinking' || type === 'thinking_delta' || type === 'signature_delta') {
       const thinking: string = strOrNull(contentBlock['thinking']) ?? '';
       const signature: string | null = strOrNull(contentBlock['signature']);
-      if (thinking.length > 0 || signature !== null) {
+      if (thinking.length > 0 || signature !== null || type === 'thinking') {
+        const metadata: JsonObject = { [CLAUDE_THINKING_BLOCK_INDEX_METADATA_KEY]: streamBlockIndex ?? index };
+        if (signature !== null) metadata['signature'] = signature;
         parts.push({
           type: 'reasoning',
           reasoning: thinking,
           createdAt: nowIso(), // Android Clock.System.now() 等价
           finishedAt: null,
-          metadata: signature !== null ? { signature } : null,
+          metadata,
         });
       }
     } else if (type === 'redacted_thinking') {
-      // payload 由 provider 加密/遮蔽;不记录(Android 注释同,隐私约束)
+      parts.push({ type: 'reasoning', reasoning: '', createdAt: nowIso(), finishedAt: null,
+        metadata: { [CLAUDE_REDACTED_THINKING_METADATA_KEY]: contentBlock,
+          [CLAUDE_THINKING_BLOCK_INDEX_METADATA_KEY]: streamBlockIndex ?? index } });
     } else if (type === 'tool_use') {
       const id: string = strOrNull(contentBlock['id']) ?? '';
       const name: string = strOrNull(contentBlock['name']) ?? '';
@@ -160,12 +165,12 @@ export const parseClaudeStreamEvent = (
   if (isObj(contentBlock)) contentArray.push(contentBlock);
   if (isObj(deltaObj)) contentArray.push(deltaObj);
 
-  let deltaMessage: UIMessage = parseClaudeMessage(contentArray);
+  const blockIndex: number | null = intOrNull(dataJson['index']);
+  let deltaMessage: UIMessage = parseClaudeMessage(contentArray, blockIndex);
 
   // content_block_start/delta 顶层 index 是并行 tool use 的唯一关联键:
   // input_json_delta 不带 tool id,不注入 index 时 merge 层只能回退到
   // "最后一个 Tool",并行 tool 的参数会串线(Android 注释 :225-227 逐字语义)
-  const blockIndex: number | null = intOrNull(dataJson['index']);
   if (blockIndex !== null && deltaMessage.parts.some((p: UIMessagePart): boolean => p.type === 'tool')) {
     deltaMessage = {
       ...deltaMessage,

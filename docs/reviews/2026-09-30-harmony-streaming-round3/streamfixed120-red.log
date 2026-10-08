@@ -1,0 +1,73 @@
+✔ layout requests coalesce, sample after layout and move in bounded native frames (85.111666ms)
+✔ touch/cancel prevents a queued old frame from moving the list (9.992167ms)
+✔ growing geometry retargets native animation; late terminal layout starts another frame (11.976375ms)
+✔ new structural row outside measured range anchors once without a frame loop (7.399834ms)
+✔ busy layout frames advance scrolling without waiting for onIdle (6.346125ms)
+✖ fixed-rate trial requests120Hz only during native follow and releases at rest (9.431791ms)
+✔ API12 uses its known current refresh rate and cancellation releases the vote (4.790708ms)
+✖ fixed-rate trial uses supported modes without assuming120Hz on lower-refresh screens (6.701208ms)
+✖ API12 can request its already-known120Hz rate without reading newer display properties (4.054167ms)
+✔ LTPO120→90→60Hz changes retain bounded native motion without restarting the clock (6.386917ms)
+✔ late layout observations do not issue a catch-up scrollBy or restart unchanged native motion (6.25925ms)
+✔ system animation owns intermediate positions; unchanged geometry does not restart it (3.071084ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 9
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 329.085583
+
+✖ failing tests:
+
+test at harmony/chat/src/test/native_timeline_follow.test.cjs:117:1
+✖ fixed-rate trial requests120Hz only during native follow and releases at rest (9.431791ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  60 !== 120
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:123:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 60,
+    expected: 120,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at harmony/chat/src/test/native_timeline_follow.test.cjs:143:1
+✖ fixed-rate trial uses supported modes without assuming120Hz on lower-refresh screens (6.701208ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  60 !== 120
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:148:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 60,
+    expected: 120,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at harmony/chat/src/test/native_timeline_follow.test.cjs:154:1
+✖ API12 can request its already-known120Hz rate without reading newer display properties (4.054167ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  60 !== 120
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:158:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 60,
+    expected: 120,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

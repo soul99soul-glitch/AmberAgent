@@ -1,0 +1,125 @@
+{
+  "scope": "mid-generation occasional jump; preserve supported 90Hz motion request",
+  "tests": {
+    "command": "node --import ./node_modules/tsx/dist/loader.mjs --test src/test/native_markdown_inline.test.ts src/test/native_markdown_draw.test.cjs src/test/native_timeline_bottom_target.test.cjs src/test/native_timeline_follow.test.cjs src/test/native_timeline_motion.test.ts src/test/chat_timeline_identity.test.cjs src/test/markdown_block_slots.test.cjs",
+    "cwd": "harmony/chat",
+    "passed": 47,
+    "failed": 0
+  },
+  "source_sha256": {
+    "harmony/entry/src/main/ets/pages/ChatPage.ets": "48d1e441634128346a609ec400f6f75e9b85c524da8ab857fc41e8497c70d78c",
+    "harmony/entry/src/main/ets/components/NativeMarkdownText.ets": "8c1873539891e7154dd7dfdb581a42019fb4b272d0b44229e08dfdb1aacf8241",
+    "harmony/entry/src/main/ets/components/NativeMarkdownInline.ts": "6cb36590cfc1d094c8be364d570fdabca5c060ffa357e2f37cc18211c4370174",
+    "harmony/entry/src/main/ets/components/NativeTimelineFollow.ets": "e333c0f0dfac678c796ca54b8ab146be8685cae8d80f78bf47bf250c64704bfa",
+    "harmony/chat/src/test/native_timeline_bottom_target.test.cjs": "8c053a89f20a31987f0c4215a2377c89339a07c3cb434579787c2424b79ea0a0",
+    "harmony/chat/src/test/native_markdown_inline.test.ts": "1b4663debef2fc937579b68dd3e90fe2664cdce893c3dbbb8b1663b035929ade",
+    "harmony/chat/src/test/native_markdown_draw.test.cjs": "500584d79f7e463f2e5a565fdcdad0c9e4b762cd24a9415aa0993a3922b726ba"
+  },
+  "installed": true,
+  "device_jump_verification": false,
+  "device_fps_verification": true,
+  "physical_device": "6HK0226627000384",
+  "pending": "New bounded-follow package built and signed; phone remains on8d7d1430with restored text until window confirmed",
+  "findings": [
+    {
+      "kind": "reproduced-current-code",
+      "cause": "52vp suggestion spacer leaves viewport during normal text growth, null target triggers immediate scrollEdge",
+      "before": "offset1000→1092 in one edge jump",
+      "after": "measured target1092, spring first step1009.889... (under20vp)"
+    },
+    {
+      "kind": "old-trace-mechanism",
+      "cause": "new Text first measured 0x0 then full113chars /305px in next frame",
+      "trace": "/tmp/stream120final2.trace",
+      "lines": [
+        229059,
+        229601
+      ],
+      "not_current90_reproduction": true,
+      "fix_status": "Prebinding candidate rejected on real device and withdrawn; initial empty-layout optimization remains unverified/unresolved"
+    },
+    {
+      "kind": "ios-source-difference",
+      "cause": "new block first fade is fixed500ms in iOS; Harmony previously120chars→50ms"
+    }
+  ],
+  "build": {
+    "successful": true,
+    "duration": "25s129ms",
+    "signed_hap": "/tmp/amber-stream90-jumpfix-verified.hap",
+    "sha256": "8d7d143039b77514deb6c74ebfe5eae7de7d68d1d270552dcc0a66e56bd0c31f",
+    "bytes": 59684817
+  },
+  "latest_report": {
+    "user": "视觉上又跳了两次",
+    "installed_bundle_update_time_ms": 1790786108906,
+    "installed_bundle_update_time_local": "2026-10-01T00:35:08.906+08:00",
+    "fix_hap_mtime_local": "2026-10-01T00:48:17.803945+08:00",
+    "pid": 21432,
+    "fix_was_not_installed_for_report": true,
+    "installed_hap_hash": "unavailable: device app bundle is not readable by hdc shell; no bypass attempted",
+    "device_interference_observed": "deepread thread exec-df5c414f issued back and tap1159,194; next dump exec-c53f0ea3 was user chat with 正在回复 and rain-city prose",
+    "interference_causation": "unconfirmed; no timestamped trace of the two reported jumps",
+    "coordination": "sent request to pause other thread physical UI operations",
+    "sampling": "read-only40s trace/SP started, no injected UI actions",
+    "passive_capture_result": {
+      "duration_seconds": 40,
+      "fps_samples": 40,
+      "non_idle_fps_samples": 0,
+      "scroll_by_calls": 0,
+      "scroll_edge_calls": 0,
+      "markdown_update_calls": 0,
+      "result": "Only idle captured; does not reproduce or disprove the two reported jumps",
+      "trace_path": "/tmp/streamjumppassive.trace",
+      "sha256": "8bc3421dc5d7f6a3156d6fb0523a58f6313b805ac702ae10f6481da5eb8b549e"
+    }
+  },
+  "rejected_candidate": {
+    "hap_sha256": "03bbb44e78c764e58609ea8bdf45d07c6c8960d06b465174affd8c6849223e86",
+    "installed_in_validation": true,
+    "result": "Historical user and assistant Markdown text blank on device; prebinding failed despite runtimeAPI26",
+    "evidence": "/tmp/streamjumpbefore.jpeg",
+    "resolution": "Removed prebinding and restored unconditional onAppear content binding; preserved suggestion-target and500ms entry-fade fixes"
+  },
+  "pid": 41130,
+  "launch_verified": true,
+  "history_text_display_verified": true,
+  "device_fps_result": "variable; body53–57fps in sampled late seconds; fixed90 request not achieved",
+  "capture": {
+    "trace": "/tmp/streamjumpverified.trace",
+    "sha256": "34ccae2112ae9f7bf57b5f12c6a569d4c49d47675cc920845d3b7ed3246194c3",
+    "pid": 41130,
+    "completed_visible": true,
+    "mid_generation_edge_calls": 0,
+    "remaining_jump": {
+      "offset_trace_units": 100.536736,
+      "time_seconds": 4.43345,
+      "line": 223842,
+      "frame_interval_ms": 16.646,
+      "trigger": "Three new Text nodes1887/1891/1899 filled from0 to122/69/244px after attachment"
+    }
+  },
+  "burst_fix": {
+    "tests_passed": 48,
+    "device_verified": false,
+    "installed": false,
+    "change": "limit large-layout spring catch-up displacement and velocity to720vp/s",
+    "pending": "Await user confirmation of additional one-minute exclusive physical-device window",
+    "build": {
+      "successful": true,
+      "duration": "38s152ms",
+      "signed_hap": "/tmp/amber-stream90-bounded-follow.hap",
+      "sha256": "04705e2165498c001fbe0365d5cc943f2b2d1662af9519278bcdfb05f1c2332c",
+      "bytes": 59684905
+    },
+    "source_sha256": {
+      "harmony/chat/src/main/ets/chat/native_timeline_motion.ts": "e7380d0d09a5927a46db95811045c7652901284d3836f0e692d6911e70e9195d",
+      "harmony/chat/src/test/native_timeline_motion.test.ts": "c03e0afcf959447fe8cfae6b7637a9046af34b971eee0351aa9d2124d166cc51",
+      "harmony/entry/src/main/ets/components/NativeMarkdownText.ets": "8c1873539891e7154dd7dfdb581a42019fb4b272d0b44229e08dfdb1aacf8241",
+      "harmony/entry/src/main/ets/components/NativeMarkdownInline.ts": "6cb36590cfc1d094c8be364d570fdabca5c060ffa357e2f37cc18211c4370174",
+      "harmony/entry/src/main/ets/components/NativeTimelineFollow.ets": "e333c0f0dfac678c796ca54b8ab146be8685cae8d80f78bf47bf250c64704bfa",
+      "harmony/entry/src/main/ets/pages/ChatPage.ets": "48d1e441634128346a609ec400f6f75e9b85c524da8ab857fc41e8497c70d78c"
+    },
+    "lint": "No defects"
+  }
+}

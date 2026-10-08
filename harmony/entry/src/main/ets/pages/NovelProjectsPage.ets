@@ -7,10 +7,13 @@ import type { NovelStorySeed } from '@amber/deepread-domain';
 // 行操作收进长按菜单(对齐会话首页交互);恢复删除项目为列表尾注链接。
 import { ACCENT, ACCENT_INK, ACCENT_LIGHT, BG, INK, INK2, INK3, INK4, ERROR, MOTION_ENTER, MOTION_OVERLAY, MOTION_STAGGER, OVERLAY, SHADOW_OVERLAY, SURFACE, SURFACE2, TITLE, TEXT_STYLES } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
-import { CenteredTitleBar, PageTitleBar, PlainSection, CardGroup, BtnFill, BtnGhost, Seg, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
+import { CenteredTitleBar, PlainSection, CardGroup, BtnFill, BtnGhost, Seg, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { router, promptAction, KeyboardAvoidMode } from '@kit.ArkUI';
-import { getNovelCreation, getNovelWorkspaceService } from '../di/AppContainer.ets';
+import { StudioHero } from '../components/studio/StudioHero.ets';
+import { StudioButton } from '../components/studio/StudioButton.ets';
+import { router, promptAction, KeyboardAvoidMode, curves } from '@kit.ArkUI';
+import { getNovelCreation, getNovelWorkspaceService, loadNovelModelOptions } from '../di/AppContainer.ets';
+import type { NovelModelOption } from '../di/AppContainer.ets';
 import type { NovelProject, NovelProjectFailure, NovelProjectRecoveryPreview } from '@amber/deepread-domain';
 import type { NovelWorkspaceImportPreview } from '../platform_impl/NovelWorkspaceService.ets';
 import { fileIo, picker } from '@kit.CoreFileKit';
@@ -40,6 +43,7 @@ struct NovelProjectsPage {
   @State importPreview: NovelWorkspaceImportPreview | null = null;
   @State recoveryPreview: NovelProjectRecoveryPreview | null = null;
   @State loading: boolean = true;
+  @State modelSetupRequired: boolean = false;
   @State renameDialogOpen: boolean = false;
   @State renameId: string = '';
   @State nameInput: string = '';
@@ -48,6 +52,7 @@ struct NovelProjectsPage {
   @State importing: boolean = false;
   @State errorMsg: string = '';
   @State pressedId: string = '';
+  @State designVisible: boolean = true;
   // 创建 sheet(iOS NovelProjectCreateSheet):空白项目 / 快速开始(题材+核心想法)
   @State createSheetOpen: boolean = false;
   @State createMode: number = 0;
@@ -66,6 +71,8 @@ struct NovelProjectsPage {
   private firstShowDone: boolean = false;
   private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
   private keyboardAvoidanceActive: boolean = false;
+  private createSession: number = 0;
+  private createExitPromptOpen: boolean = false;
 
   aboutToAppear(): void {
     this.pageAlive = true;
@@ -75,6 +82,8 @@ struct NovelProjectsPage {
   }
 
   onPageShow(): void {
+    this.designVisible = true;
+    if (this.createSheetOpen) this.enableKeyboardAvoidance();
     if (getProductKind() === 'novel') markWantRoutingReady(this.getUIContext().getRouter());
     if (this.firstShowDone) {
       this.loadProjects().catch((e: Error): void => {
@@ -85,9 +94,14 @@ struct NovelProjectsPage {
     }
   }
 
-  onPageHide(): void { this.restoreKeyboardAvoidance(); }
+  onPageHide(): void {
+    this.designVisible = false;
+    this.pressedId = '';
+    this.restoreKeyboardAvoidance();
+  }
 
   aboutToDisappear(): void {
+    this.designVisible = false;
     this.restoreKeyboardAvoidance();
     this.pageAlive = false;
     this.loadToken++;
@@ -99,7 +113,7 @@ struct NovelProjectsPage {
       return true;
     }
     if (this.createSheetOpen) {
-      if (!this.creating) this.dismissCreateSheet();
+      this.requestDismissCreateSheet();
       return true;
     }
     if (this.renameDialogOpen) {
@@ -149,13 +163,24 @@ struct NovelProjectsPage {
         this.loadedOnce = true;
         this.errorMsg = '';
       }
+      // A broken service configuration must not hide healthy local manuscripts.
+      if (getProductKind() === 'novel') {
+        const modelOptions: NovelModelOption[] = await loadNovelModelOptions();
+        if (this.pageAlive && token === this.loadToken) {
+          this.modelSetupRequired = !modelOptions.some((option: NovelModelOption): boolean => option.available);
+        }
+      }
+
     } finally {
       if (this.pageAlive && token === this.loadToken) this.loading = false;
     }
   }
 
   openCreateSheet(): void {
-    if (this.importing || this.restoring || this.importPreview !== null || this.recoveryPreview !== null) return;
+    if (this.createSheetOpen || this.creating || this.importing || this.restoring ||
+      this.importPreview !== null || this.recoveryPreview !== null) return;
+    this.createSession++;
+    this.createExitPromptOpen = false;
     this.createMode = 0;
     this.createName = '';
     this.quickGenre = '';
@@ -170,8 +195,40 @@ struct NovelProjectsPage {
 
   private dismissCreateSheet(): void {
     this.createSheetOpen = false;
+    this.createExitPromptOpen = false;
     this.errorMsg = '';
     this.restoreKeyboardAvoidance();
+  }
+
+  private hasCreateDraft(): boolean {
+    return this.createName.trim().length > 0 || this.quickGenre.trim().length > 0 ||
+      this.quickIdea.trim().length > 0 || this.quickWorld.trim().length > 0 ||
+      this.quickCharacters.trim().length > 0 || this.quickDirection.trim().length > 0;
+  }
+
+  private isCreateSessionActive(session: number): boolean {
+    return this.pageAlive && this.designVisible && this.createSheetOpen && session === this.createSession;
+  }
+
+  private requestDismissCreateSheet(): void {
+    if (!this.isCreateSessionActive(this.createSession) || this.creating || this.createExitPromptOpen) return;
+    if (!this.hasCreateDraft()) {
+      this.dismissCreateSheet();
+      return;
+    }
+    const session: number = this.createSession;
+    this.createExitPromptOpen = true;
+    AlertDialog.show({ title: '放弃新建小说？', message: '已填写的项目名称和故事种子会丢失。',
+      primaryButton: { value: '继续编辑', action: (): void => {
+        if (this.isCreateSessionActive(session)) this.createExitPromptOpen = false;
+      } },
+      secondaryButton: { value: '放弃更改', fontColor: ERROR, action: (): void => {
+        if (this.isCreateSessionActive(session) && !this.creating) this.dismissCreateSheet();
+      } },
+      cancel: (): void => {
+        if (this.isCreateSessionActive(session)) this.createExitPromptOpen = false;
+      },
+    });
   }
 
   openRename(p: NovelProject): void {
@@ -388,6 +445,76 @@ struct NovelProjectsPage {
     }).catch((): void => {});
   }
 
+  private projectStats(): string {
+    let chapters: number = 0;
+    for (const project of this.projects) chapters += project.chapters.length;
+    return `${this.projects.length} 个故事 · ${chapters} 章`;
+  }
+
+  private openStandaloneSettings(): void {
+    router.pushUrl({ url: 'pages/NovelStandaloneSettingsPage' });
+  }
+
+  @Builder
+  StandaloneTitleBar(): void {
+    Stack({ alignContent: Alignment.Center }) {
+      Text('小说创作').fontSize(18).fontWeight(600).fontFamily(FONT_SANS_SEMIBOLD)
+        .fontColor(INK).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        .textAlign(TextAlign.Center).width('100%').padding({ left: 96, right: 96 })
+      Row() {
+        Blank()
+        Row() {
+          Icon({ name: 'arrow_down_to_line', iconSize: 21, color: INK })
+        }.width(44).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+          .enabled(!this.importing && !this.restoring && this.importPreview === null && this.recoveryPreview === null)
+          .accessibilityText('导入小说工作区或完整备份')
+          .onClick((): void => { this.importWorkspace(); })
+        Row() {
+          Icon({ name: 'gear', iconSize: 21, color: INK })
+        }.width(44).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+          .accessibilityText('设置').onClick((): void => { this.openStandaloneSettings(); })
+      }.width('100%')
+    }.width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight, bottom: 8 })
+      .backgroundColor(BG)
+  }
+
+  @Builder
+  ModelSetupPrompt(): void {
+    Row({ space: 12 }) {
+      Icon({ name: 'key', iconSize: 20, color: ACCENT })
+      Column({ space: 2 }) {
+        Text('先配置写作模型').fontSize(14).fontWeight(600).fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text('添加 API 服务后才能开始生成。').fontSize(12).fontColor(INK3)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+      Icon({ name: 'chevron_right', iconSize: 14, color: INK3 })
+    }.width('100%').constraintSize({ minHeight: 56 }).padding({ left: 16, right: 16 })
+      .backgroundColor(SURFACE).borderRadius(14).accessibilityText('先配置写作模型，添加 API 服务后才能开始生成')
+      .onClick((): void => { this.openStandaloneSettings(); })
+  }
+
+  @Builder
+  StudioEmptyLibrary(): void {
+    Scroll() {
+      Column({ space: 24 }) {
+        StudioHero({ kind: 'novel', title: '故事从一句话开始', caption: '把灵感留在纸上',
+          detail: '设定、章节与创作记录，随故事一起保存。', compact: false, active: this.designVisible })
+        Column({ space: 12 }) {
+          StudioButton({ label: '新建项目', iconName: 'plus', primary: true,
+            disabled: this.importing || this.restoring || this.importPreview !== null || this.recoveryPreview !== null,
+            onTap: (): void => { this.openCreateSheet(); } })
+          StudioButton({ label: this.importing ? '导入中…' : '导入项目', iconName: 'arrow_down_to_line', primary: false,
+            disabled: this.importing || this.restoring || this.importPreview !== null || this.recoveryPreview !== null,
+            onTap: (): void => { this.importWorkspace(); } })
+        }.width('100%').constraintSize({ maxWidth: 360 })
+        this.RestoreFooter()
+      }.width('100%').alignItems(HorizontalAlign.Center)
+        .padding({ left: 20, right: 20, top: 24,
+          bottom: this.modelSetupRequired ? 100 + Math.max(this.navBarHeight, 24) : 24 + this.navBarHeight })
+    }.width('100%').layoutWeight(1).align(Alignment.TopStart).scrollBar(BarState.Off)
+  }
+
   @Builder
   projectRow(project: NovelProject, isLast: boolean, idx: number): void {
     Column() {
@@ -421,11 +548,22 @@ struct NovelProjectsPage {
       .constraintSize({ minHeight: 64 })
       .padding({ left: 16, right: 16, top: 12, bottom: 12 })
       .backgroundColor(this.pressedId === project.id ? SURFACE2 : Color.Transparent)
+      .scale({ x: getProductKind() === 'novel' && this.pressedId === project.id ? 0.985 : 1,
+        y: getProductKind() === 'novel' && this.pressedId === project.id ? 0.985 : 1 })
+      .opacity(getProductKind() === 'novel' && this.pressedId === project.id ? 0.9 : 1)
+      .translate({ y: getProductKind() === 'novel' && this.pressedId === project.id ? 1 : 0 })
       .onTouch((e: TouchEvent): void => {
-        if (e.type === TouchType.Down) this.pressedId = project.id;
-        else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressedId = '';
+        if (e.type !== TouchType.Down && e.type !== TouchType.Up && e.type !== TouchType.Cancel) return;
+        if (getProductKind() === 'novel') {
+          animateTo({ duration: 240, curve: curves.springCurve(0, 1, 220, 26) }, (): void => {
+            this.pressedId = e.type === TouchType.Down ? project.id : '';
+          });
+        } else {
+          this.pressedId = e.type === TouchType.Down ? project.id : '';
+        }
       })
       .enabled(!this.importing && !this.restoring)
+      .accessibilityText(`${project.name}，${project.chapters.length} 章，点击继续创作，长按管理项目`)
       .onClick((): void => { this.openWorkspace(project.id, ''); })
       .gesture(
         LongPressGesture()
@@ -531,25 +669,42 @@ struct NovelProjectsPage {
   Fab(): void {
     Column() {
       Blank()
-      Row() {
-        Icon({ name: 'plus', iconSize: 18, color: ACCENT_INK })
-        Text('新建项目')
-          .fontSize(15).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
-          .fontColor(ACCENT_INK).margin({ left: 6 })
+      if (getProductKind() === 'novel' && (this.projects.length > 0 || this.projectFailures.length > 0)) {
+        Column() {
+          StudioButton({ label: '新建项目', iconName: 'plus', primary: true,
+            disabled: this.importing || this.restoring || this.importPreview !== null || this.recoveryPreview !== null,
+            onTap: (): void => { this.openCreateSheet(); } })
+            .accessibilityText('新建小说项目')
+        }.width('80%').constraintSize({ maxWidth: 240 })
+          .margin({ bottom: this.modelSetupRequired ? 12 : 24 + Math.max(this.navBarHeight, 24) })
+          .transition(TransitionEffect.OPACITY
+            .combine(TransitionEffect.translate({ y: 10 }))
+            .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
+      } else if (getProductKind() !== 'novel') {
+        Row() {
+          Icon({ name: 'plus', iconSize: 18, color: ACCENT_INK })
+          Text('新建项目')
+            .fontSize(15).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+            .fontColor(ACCENT_INK).margin({ left: 6 })
+        }
+        .alignItems(VerticalAlign.Center)
+        .constraintSize({ minHeight: 50 })
+        .padding({ left: 24, right: 24 })
+        .backgroundColor(ACCENT)
+        .borderRadius(25)
+        .shadow({ radius: 16, color: SHADOW_OVERLAY, offsetY: 6 })
+        .margin({ bottom: 24 + Math.max(this.navBarHeight, 24) })
+        .enabled(!this.importing && !this.restoring && this.importPreview === null && this.recoveryPreview === null)
+        .onClick((): void => { this.openCreateSheet(); })
+        .accessibilityText('新建小说项目')
+        .transition(TransitionEffect.OPACITY
+          .combine(TransitionEffect.translate({ y: 10 }))
+          .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
       }
-      .alignItems(VerticalAlign.Center)
-      .constraintSize({ minHeight: 50 })
-      .padding({ left: 24, right: 24 })
-      .backgroundColor(ACCENT)
-      .borderRadius(25)
-      .shadow({ radius: 16, color: SHADOW_OVERLAY, offsetY: 6 })
-      .margin({ bottom: 24 + Math.max(this.navBarHeight, 24) })
-      .enabled(!this.importing && !this.restoring && this.importPreview === null && this.recoveryPreview === null)
-      .onClick((): void => { this.openCreateSheet(); })
-      .accessibilityText('新建小说项目')
-      .transition(TransitionEffect.OPACITY
-        .combine(TransitionEffect.translate({ y: 10 }))
-        .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
+      if (getProductKind() === 'novel' && this.modelSetupRequired) {
+        Column() { this.ModelSetupPrompt() }.width('100%').constraintSize({ maxWidth: 480 })
+          .padding({ left: 16, right: 16 }).margin({ bottom: 24 + Math.max(this.navBarHeight, 24) })
+      }
     }
     .width('100%').height('100%')
     .alignItems(HorizontalAlign.Center)
@@ -560,7 +715,7 @@ struct NovelProjectsPage {
   @Builder
   CreateSheet(): void {
     Column() {
-      Blank().onClick((): void => { if (!this.creating) this.dismissCreateSheet(); })
+      Blank().onClick((): void => { this.requestDismissCreateSheet(); })
       Column() {
         Text('新建小说')
           .fontSize(17).fontWeight(FontWeight.Bold).fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
@@ -620,7 +775,7 @@ struct NovelProjectsPage {
           Text('取消').fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
             .layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
             .enabled(!this.creating)
-            .onClick((): void => { this.dismissCreateSheet(); })
+            .onClick((): void => { this.requestDismissCreateSheet(); })
           Text(this.creating ? '创建中…' : '创建')
             .fontSize(14).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
             .layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
@@ -647,13 +802,7 @@ struct NovelProjectsPage {
       ForEach([this.themeEpoch], (_e: number): void => {
       Column() {
         if (getProductKind() === 'novel') {
-          PageTitleBar({ title: '小说创作', showBack: false, actionText: '设置',
-            onAction: (): void => { router.pushUrl({ url: 'pages/NovelStandaloneSettingsPage' }); } })
-          Row() {
-            Blank()
-            Text('导入项目').fontSize(14).fontColor(ACCENT).constraintSize({ minHeight: 44 })
-              .onClick((): void => { this.importWorkspace(); })
-          }.width('100%').padding({ left: 20, right: 20 })
+          this.StandaloneTitleBar()
         } else {
           CenteredTitleBar({ title: '小说创作', actionIcon: 'arrow_down_to_line',
             onAction: (): void => { this.importWorkspace(); } })
@@ -684,44 +833,54 @@ struct NovelProjectsPage {
           .width('100%').padding({ top: 64, left: 18, right: 18 })
           .alignItems(HorizontalAlign.Start)
         } else if (this.projects.length === 0 && this.projectFailures.length === 0) {
-          // 空态(iOS ContentUnavailableView):大图标座 + 标题 + 说明 + 新建/导入
-          Column() {
-            Row() {
-              Icon({ name: 'book', iconSize: 30, color: ACCENT })
+          if (getProductKind() === 'novel') {
+            this.StudioEmptyLibrary()
+          } else {
+            // 空态(iOS ContentUnavailableView):大图标座 + 标题 + 说明 + 新建/导入
+            Column() {
+              Row() {
+                Icon({ name: 'book', iconSize: 30, color: ACCENT })
+              }
+              .width(76).height(76).borderRadius(38)
+              .backgroundColor(ACCENT_LIGHT)
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .margin({ bottom: 20 })
+              Text('开始一本新小说')
+                .fontSize(TITLE)
+                .fontWeight(600)
+                .lineHeight(TEXT_STYLES.screenTitle.lineHeight)
+                .fontFamily(FONT_SANS_SEMIBOLD)
+                .fontColor(INK2)
+              Text('项目会独立保存设定、正文、分支和创作记录。')
+                .fontSize(TEXT_STYLES.secondary.size)
+                .fontWeight(TEXT_STYLES.secondary.weight)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight)
+                .fontFamily(TEXT_STYLES.secondary.family)
+                .fontColor(INK3)
+                .margin({ top: 8 })
+              Row({ space: 12 }) {
+                BtnFill({ label: '新建项目', onTap: (): void => { this.openCreateSheet(); } })
+                BtnGhost({ label: '导入项目', onTap: (): void => { this.importWorkspace(); } })
+              }
+              .margin({ top: 24 })
+              .justifyContent(FlexAlign.Center)
+              this.RestoreFooter()
             }
-            .width(76).height(76).borderRadius(38)
-            .backgroundColor(ACCENT_LIGHT)
+            .width('100%').layoutWeight(1)
             .justifyContent(FlexAlign.Center)
-            .alignItems(VerticalAlign.Center)
-            .margin({ bottom: 20 })
-            Text('开始一本新小说')
-              .fontSize(TITLE)
-              .fontWeight(600)
-              .lineHeight(TEXT_STYLES.screenTitle.lineHeight)
-              .fontFamily(FONT_SANS_SEMIBOLD)
-              .fontColor(INK2)
-            Text('项目会独立保存设定、正文、分支和创作记录。')
-              .fontSize(TEXT_STYLES.secondary.size)
-              .fontWeight(TEXT_STYLES.secondary.weight)
-              .lineHeight(TEXT_STYLES.secondary.lineHeight)
-              .fontFamily(TEXT_STYLES.secondary.family)
-              .fontColor(INK3)
-              .margin({ top: 8 })
-            Row({ space: 12 }) {
-              BtnFill({ label: '新建项目', onTap: (): void => { this.openCreateSheet(); } })
-              BtnGhost({ label: '导入项目', onTap: (): void => { this.importWorkspace(); } })
-            }
-            .margin({ top: 24 })
-            .justifyContent(FlexAlign.Center)
-            this.RestoreFooter()
+            .alignItems(HorizontalAlign.Center)
+            .padding({ bottom: 96 })
           }
-          .width('100%').layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-          .padding({ bottom: 96 })
         } else {
           Scroll() {
             Column() {
+              if (getProductKind() === 'novel') {
+                Column() {
+                  StudioHero({ kind: 'novel', title: '你的写作书房', caption: '故事在这里慢慢生长',
+                    detail: this.projectStats(), compact: true, active: this.designVisible })
+                }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 6 })
+              }
               if (this.projects.length > 0) {
               PlainSection({ label: '项目' })
               CardGroup({ radius: 18, stroke: true, content: (): void => { this.ProjectRows(); } })
@@ -742,6 +901,8 @@ struct NovelProjectsPage {
             }
             .width('100%')
             .alignItems(HorizontalAlign.Start)
+            .padding({ bottom: getProductKind() === 'novel'
+              ? 96 + Math.max(this.navBarHeight, 24) + (this.modelSetupRequired ? 76 : 0) : 0 })
           }
           .layoutWeight(1)
           .align(Alignment.TopStart)
@@ -750,7 +911,9 @@ struct NovelProjectsPage {
       .width('100%').height('100%').backgroundColor(BG)
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
-      if (!this.loading && !this.createSheetOpen && (this.projects.length > 0 || this.projectFailures.length > 0) && this.importPreview === null && this.recoveryPreview === null) {
+      if (!this.loading && !this.createSheetOpen &&
+        (this.projects.length > 0 || this.projectFailures.length > 0 || this.modelSetupRequired) &&
+        this.importPreview === null && this.recoveryPreview === null) {
         this.Fab()
       }
 

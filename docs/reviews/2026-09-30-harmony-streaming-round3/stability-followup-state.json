@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-01",
+  "symptom": "User sees most streaming motion at60fps and brief120fps; target remains stable120fps",
+  "device_window": "Two-minute availability question pending; no new UI/install operations performed",
+  "packages": [
+    {
+      "path": "/tmp/amber-stream121-cache.hap",
+      "sha256": "bff99640584297fcafeb36629347005d1448242146c4b89cf51834ef7be8bdb0",
+      "bytes": 59646525,
+      "range_on_120Hz_device": [
+        60,
+        120,
+        120
+      ],
+      "build_success": true,
+      "build_duration": "33s470ms",
+      "agc_signed": true,
+      "installed_in_this_followup": false,
+      "device_validated": false
+    },
+    {
+      "path": "/tmp/amber-stream121-fixed.hap",
+      "sha256": "48eb8cb6bc281d43ddce952d6cc61a0960ee1310f63cf9218e5533a0603c4ccf",
+      "bytes": 59645633,
+      "range_on_120Hz_device": [
+        120,
+        120,
+        120
+      ],
+      "build_success": true,
+      "build_duration": "23s82ms",
+      "agc_signed": true,
+      "installed_in_this_followup": false,
+      "device_validated": false
+    }
+  ],
+  "code_change": "AgentMessageRow single-snapshot groupMessageParts cache.6 real render reads now cause1 grouping and still6 message/parts dependency reads. Same-ID text/terminal/tool changes invalidate.",
+  "tests": {
+    "cache_regressions_and_grouping": 23,
+    "streaming_suite": 239,
+    "fixed_range_motion_suite": 10,
+    "lint_cache": "zero defects",
+    "lint_fixed_candidate": "zero defects"
+  },
+  "existing_trace_finding": "Two captures enterTouchIdle3.000986/3.001182s afterTouchUp.60Hz policy follows. In final2 policy precedes DisplaySync stop, so clock lifetime is not this downgrade cause.",
+  "hypothesis_to_test": "Fixed supported120 range is a documented stronger request, not a guarantee. Compare signedA/B in same motion scenario; if no benefit restoreA.",
+  "working_source_rate": "Original60-120 preferred120 restored pending evidence",
+  "current_installed_package_from_last_verified_turn": "/tmp/amber-stream120-final.hap sha256d0b262a6020916c19a1a6610f648beae3f8e198e48d0de951446c51f10e3fff5; not refreshed this turn",
+  "cache_source_sha256": "9adc60975a35d313d277a28710603e052c120e2541ee216a91d78e8b3b1e2b09",
+  "superseded_by": "User requested90fps motion;120 A/B no longer the active plan."
+}

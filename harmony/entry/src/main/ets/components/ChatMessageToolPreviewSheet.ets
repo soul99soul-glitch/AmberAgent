@@ -6,12 +6,13 @@
 // 降级(跳过): HighlightCodeBlock(用 JsonTree 替代) / ZoomableAsyncImage / FaviconRow /
 //   memory delete(需 MemoryRepository) / MarkdownBlock answer(用 MarkdownText)
 
-import type { UIMessagePartTool, UIMessagePartText, JsonValue } from '@amber/chat-domain';
-import { toolInputAsJson, toolOutputJson, toolOutputText } from '@amber/chat-domain';
+import type { UIMessagePartTool, JsonValue } from '@amber/chat-domain';
+import { toolInputAsJson, toolOutputJson, maskSensitiveJsonObject, maskSensitiveJsonText } from '@amber/chat-domain';
 import type { JsonObject } from '@amber/chat-domain';
 import { INK, INK2, INK3, INK4, ACCENT, SURFACE, SURFACE2, LINE, ACCENT_LIGHT, BODY, META, LABEL } from '../design/tokens.ets';
 import { JsonTree } from './ui/JsonTree.ets';
 import { MarkdownText } from './MarkdownText.ets';
+import { Icon } from './ui/Icon.ets';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { promptAction } from '@kit.ArkUI';
 import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshApprovalProtocolLabel } from './SSHApprovalSummary.ets';
@@ -19,6 +20,7 @@ import { SSHUIColors } from './SSHUIColors.ets';
 import { RecipeApprovalView, recipeApprovalView } from './RecipeApprovalSummary.ets';
 import { pluginApprovalView } from './PluginApprovalSummary.ets';
 import { JevApprovalFacts } from './JevApprovalFacts.ets';
+import { common } from '@kit.AbilityKit';
 
 // 搜索结果项
 interface SearchResultItem {
@@ -53,9 +55,9 @@ export struct ChatMessageToolPreviewSheet {
     try {
       const recipe: RecipeApprovalView | null = this.packageApprovalView();
       if (recipe !== null && recipe.pendingStep !== null) {
-        return JSON.stringify(JSON.parse(recipe.pendingStep.input), null, 2);
+        return maskSensitiveJsonText(recipe.pendingStep.input);
       }
-      return JSON.stringify(toolInputAsJson(this.part), null, 2);
+      return JSON.stringify(maskSensitiveJsonObject(toolInputAsJson(this.part)), null, 2);
     } catch (_e) {
       return '{}';
     }
@@ -63,10 +65,27 @@ export struct ChatMessageToolPreviewSheet {
 
   private getOutputJson(): JsonObject {
     try {
-      return toolOutputJson(this.part);
+      return maskSensitiveJsonObject(toolOutputJson(this.part));
     } catch (_e) {
       return {} as JsonObject;
     }
+  }
+
+  private getOutputText(): string {
+    const texts: string[] = [];
+    for (const part of this.part.output) {
+      if (part.type === 'text') texts.push(maskSensitiveJsonText(part.text));
+    }
+    return texts.join('\n');
+  }
+
+  private openSearchSource(url: string): void {
+    if (url.length === 0) return;
+    const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+    ctx.startAbility({ action: 'ohos.want.action.viewData', entities: ['entity.system.browsable'], uri: url })
+      .catch((_error: Error): void => {
+        promptAction.showToast({ message: '无法打开来源链接', duration: 1500 });
+      });
   }
 
   // search_web 专项:提取 answer + items
@@ -135,14 +154,14 @@ export struct ChatMessageToolPreviewSheet {
           .fontSize(BODY)
           .fontWeight(FontWeight.Medium)
           .fontColor(INK)
-        Blank()
-        Text('关闭')
-          .fontSize(META)
-          .fontColor(INK3)
-          .onClick((): void => { this.onDismiss(); })
+          .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Row() {
+          Icon({ name: 'close', iconSize: 18, color: INK2 })
+        }.width(44).height(44).justifyContent(FlexAlign.Center)
+          .onClick((): void => { this.onDismiss(); }).accessibilityText('关闭工具详情')
       }
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 12, bottom: 8 })
+      .width('100%').height(56)
+      .padding({ left: 16, right: 4, top: 12 })
 
       Scroll() {
         Column() {
@@ -167,7 +186,7 @@ export struct ChatMessageToolPreviewSheet {
     }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
-    .height('70%')
+    .height('100%')
     .backgroundColor(SURFACE)
     .borderRadius({ topLeft: 16, topRight: 16 })
   }
@@ -205,7 +224,7 @@ export struct ChatMessageToolPreviewSheet {
       }
       if (view.canonicalJSON.length > 0) {
         Text('固定审核内容').fontSize(META).fontColor(this.sshColors.muted).width('100%').margin({ top: 8 })
-        JsonTree({ json: view.canonicalJSON }).width('100%')
+        JsonTree({ json: maskSensitiveJsonText(view.canonicalJSON) }).width('100%')
       }
     }.width('100%').padding(16)
     if (view.pendingStep !== null && isSSHApprovalTool(view.pendingStep.toolName)) {
@@ -278,6 +297,7 @@ export struct ChatMessageToolPreviewSheet {
           .backgroundColor(SURFACE2)
           .borderRadius(8)
           .margin({ left: 16, right: 16, bottom: 6 })
+          .onClick((): void => { this.openSearchSource(item.url); })
         }, (item: SearchResultItem, idx: number): string => `search-${idx}`)
       } else {
         // 无结果 → JSON 树
@@ -298,9 +318,9 @@ export struct ChatMessageToolPreviewSheet {
         .padding({ left: 16, right: 16, top: 8 })
 
       // output 文本(MarkdownText)
-      if (toolOutputText(this.part).length > 0) {
+      if (this.getOutputText().length > 0) {
         MarkdownText({
-          content: toolOutputText(this.part),
+          content: this.getOutputText(),
           fontSize: 13,
           fontColor: INK2,
         })
@@ -338,7 +358,7 @@ export struct ChatMessageToolPreviewSheet {
       Row() {
         Text('输出结果').fontSize(META).fontColor(INK3).layoutWeight(1)
         Text('复制').fontSize(LABEL).fontColor(ACCENT)
-          .onClick((): void => { this.copyToClipboard(toolOutputText(this.part)); })
+          .onClick((): void => { this.copyToClipboard(this.getOutputText()); })
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 8, bottom: 4 })
@@ -348,7 +368,7 @@ export struct ChatMessageToolPreviewSheet {
           JsonTree({ json: JSON.stringify(this.getOutputJson(), null, 2) })
             .width('100%').padding(12).backgroundColor(SURFACE2).borderRadius(8)
         } else {
-          Text(toolOutputText(this.part))
+          Text(this.getOutputText())
             .fontSize(LABEL).fontColor(INK2).fontFamily('JetBrainsMono')
             .width('100%').padding(12).backgroundColor(SURFACE2).borderRadius(8)
         }
@@ -366,7 +386,7 @@ export struct ChatMessageToolPreviewSheet {
         .fontColor(INK3)
         .width('100%')
         .padding({ left: 16, right: 16, top: 8, bottom: 4 })
-      Text(toolOutputText(this.part))
+      Text(this.getOutputText())
         .fontSize(LABEL)
         .fontColor(INK2)
         .fontFamily('JetBrainsMono')

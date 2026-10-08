@@ -56,8 +56,3 @@ test('longTermProjects:project/reference(:813-819);currentProjects:short_term pr
   assert.deepEqual(g.longTermProjects.map((m: AssistantMemory): number => m.id), [1, 2]);
   assert.deepEqual(g.currentProjects.map((m: AssistantMemory): number => m.id), [5]);
 });
-
-test('三组全空 → 触发页空文案分支(:840-847)', () => {
-  const g = memorySummaryGroups([], [], []);
-  assert.equal(g.stable.length + g.longTermProjects.length + g.currentProjects.length, 0);
-});

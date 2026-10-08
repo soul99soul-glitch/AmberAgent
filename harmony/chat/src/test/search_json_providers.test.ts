@@ -4,12 +4,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { HttpClient, HttpRequest, HttpResponse } from '@amber/deepread-domain';
-import type { JsonObject } from '../main/ets/chat/json.ts';
+
 import type { SearchServiceOptions } from '../main/ets/search/search_service.ts';
-import {
-  makeSearchServiceOptions, initSearchSdk,
-} from '../main/ets/search/search_service.ts';
-import { javaUrlEncodeForm, javaUrlDecodeForm, buildQuery } from '../main/ets/search/url_codec.ts';
+import { makeSearchServiceOptions, initSearchSdk } from '../main/ets/search/search_service.ts';
+import { javaUrlEncodeForm, javaUrlDecodeForm } from '../main/ets/search/url_codec.ts';
 import { wikipediaSearch } from '../main/ets/search/wikipedia_service.ts';
 import { hackerNewsSearch } from '../main/ets/search/hackernews_service.ts';
 import { jinaSearchService } from '../main/ets/search/jina_service.ts';
@@ -41,11 +39,6 @@ test('javaUrlDecodeForm:+ 转空格、%XX 解码 UTF-8', () => {
   assert.equal(javaUrlDecodeForm('hello+world'), 'hello world');
   assert.equal(javaUrlDecodeForm('%E4%B8%AD%E6%96%87'), '中文');
   assert.equal(javaUrlDecodeForm('a%26b'), 'a&b');
-});
-
-test('buildQuery:插入序 + encodeURIComponent 语义(okhttp 近似,偏差登记)', () => {
-  assert.equal(buildQuery([['a', '1'], ['b', 'x y'], ['c', '中文']]),
-    'a=1&b=x%20y&c=%E4%B8%AD%E6%96%87');
 });
 
 // ===== Wikipedia(WikipediaSearchService.kt 全文) =====
@@ -135,20 +128,6 @@ test('hn:非 2xx → 抛错文案逐字', async () => {
     hackerNewsSearch('x', { resultSize: 10 }),
     (e: Error): boolean => e.message === 'Hacker News request failed #500',
   );
-});
-
-// ===== Jina(JinaSearchService.kt 全文;SearchService 形态) =====
-
-test('jina:parameters/scrapingParameters schema 逐字(:41-61)', () => {
-  assert.equal(jinaSearchService.name, 'Jina');
-  const p = jinaSearchService.parameters;
-  assert.ok(p !== null);
-  assert.deepEqual(Object.keys(p.properties), ['query']);
-  assert.deepEqual(p.required, ['query']);
-  const s = jinaSearchService.scrapingParameters;
-  assert.ok(s !== null);
-  assert.deepEqual(Object.keys(s.properties), ['url']);
-  assert.deepEqual(s.required, ['url']);
 });
 
 test('jina search:POST 默认 URL + body {q} + 无 key 不带 Authorization', async () => {

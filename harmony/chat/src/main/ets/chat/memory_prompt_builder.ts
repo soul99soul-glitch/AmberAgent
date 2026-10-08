@@ -3,6 +3,7 @@
 // 安全过滤:core/memory/safety/MemoryContentSafety.kt 全文(internal → 导出供后续
 //   extraction 切片使用)
 
+import { isMemoryActive, memoryDateLabel, memoryLocalDate } from './memory_lifecycle.ts';
 import type { MemoryRecord } from './memory_models.ts';
 
 // buildMemoryContext(MemoryPromptBuilder.kt:8-40)— buildString 逐 append 忠实:
@@ -12,10 +13,13 @@ export const buildMemoryContext = (
   records: MemoryRecord[],
   debug: boolean = false,
   debugDetails: Record<number, string> = {},
+  now: number = Date.now(),
 ): string => {
+  records = records.filter((record: MemoryRecord): boolean => isMemoryActive(record, now));
   if (records.length === 0) return '';
   let out: string = '';
   out += '<memory_context>\n';
+  out += `今天是 ${memoryLocalDate(now)}。相对时间以记忆的记录日期为准。\n`;
   out += '以下是与当前请求相关的记忆；若与当前用户消息冲突，以当前用户消息为准。\n';
   for (let index = 0; index < records.length; index++) {
     const record: MemoryRecord = records[index];
@@ -28,6 +32,7 @@ export const buildMemoryContext = (
     out += '] ';
     // Kotlin replace("\n"," ") = 全量替换(JS replace 仅首个 → split/join)
     out += record.content.trim().split('\n').join(' ');
+    out += ` [memory:${record.id}] (${memoryDateLabel(record)})`;
     if (debug) {
       out += ' (id=';
       out += String(record.id);
@@ -42,7 +47,7 @@ export const buildMemoryContext = (
     }
     if (index !== records.length - 1) out += '\n';
   }
-  out += '\n';
+  out += '\n使用某条记忆时附上它的 [[memory:编号]] 标记，只引用实际用于回答的记忆。\n';
   out += '</memory_context>';
   return out;
 };

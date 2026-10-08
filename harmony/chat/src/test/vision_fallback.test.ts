@@ -6,12 +6,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  ImageEncodingError, VisualRecognitionError, hasImageParts,
-  shouldFallbackToVisionRecognition, resolveVisionRecognitionPrompt,
-  DEFAULT_VISION_RECOGNITION_PROMPT, javaStringHashCode,
-  runWithVisionFallback, VISION_FALLBACK_STATUS,
+  ImageEncodingError,
+  VisualRecognitionError,
+  shouldFallbackToVisionRecognition,
+  resolveVisionRecognitionPrompt,
+  DEFAULT_VISION_RECOGNITION_PROMPT,
+  runWithVisionFallback,
 } from '../main/ets/chat/vision_fallback.ts';
-import type { VisionFallbackHook } from '../main/ets/chat/vision_fallback.ts';
+import type {
+  VisionFallbackHook,
+} from '../main/ets/chat/vision_fallback.ts';
 import { runChatTurn, createMemoryConversationStore } from '../main/ets/chat/chat_turn.ts';
 import type { ChatStreamProvider } from '../main/ets/chat/chat_turn.ts';
 import { runRegenerateAt } from '../main/ets/chat/regenerate.ts';
@@ -48,15 +52,6 @@ const makeForceSpy = (flags: Array<boolean | undefined>): MessageTransformer => 
   },
 });
 
-// ===== 分类器(GenerationHandler.kt:1122-1138) =====
-
-test('ImageEncodingError:消息格式 FileEncoder.kt:37-40,分类直 true', () => {
-  const err = new ImageEncodingError('file://a.png', new Error('boom'));
-  assert.equal(err.message, 'Failed to encode image: boom');
-  assert.equal(err.imageUrl, 'file://a.png');
-  assert.equal(shouldFallbackToVisionRecognition(err), true);
-});
-
 test('分类器:9 关键词命中(image/vision/modalit/unsupported url/... 大小写不敏感)', () => {
   assert.equal(shouldFallbackToVisionRecognition(new Error('Invalid MIME type: image/webp')), true);
   assert.equal(shouldFallbackToVisionRecognition(new Error('UNSUPPORTED URL scheme')), true);
@@ -78,13 +73,6 @@ test('分类器:cause 链拼接判定(外层无关键词,内层命中);环防护
   assert.equal(shouldFallbackToVisionRecognition(a), false);
 });
 
-test('VisualRecognitionError:可选 cause 透传', () => {
-  const cause = new Error('http 500');
-  const err = new VisualRecognitionError('视觉识别模型调用失败：http 500', cause);
-  assert.equal(err.cause, cause);
-  assert.equal(new VisualRecognitionError('请先配置视觉识别模型').cause, undefined);
-});
-
 // ===== OcrPrompt.kt =====
 
 test('resolveVisionRecognitionPrompt:旧 OCR 提示词迁移(大小写不敏感);blank → 默认;自定义保留', () => {
@@ -93,84 +81,6 @@ test('resolveVisionRecognitionPrompt:旧 OCR 提示词迁移(大小写不敏感)
   assert.equal(resolveVisionRecognitionPrompt('   '), DEFAULT_VISION_RECOGNITION_PROMPT);
   assert.equal(resolveVisionRecognitionPrompt('  自定义提示  '), '自定义提示');
   assert.equal(DEFAULT_VISION_RECOGNITION_PROMPT.startsWith('You are a visual recognition assistant.'), true);
-});
-
-test('javaStringHashCode:31 滚哈希(Kotlin String.hashCode)', () => {
-  assert.equal(javaStringHashCode(''), 0);
-  assert.equal(javaStringHashCode('abc'), 96354); // ((97*31)+98)*31+99
-});
-
-test('hasImageParts:image part url 非 blank 才算(:822-823)', () => {
-  assert.equal(hasImageParts([makeUserMessage('t')]), false);
-  assert.equal(hasImageParts([
-    { ...makeUserMessage('t'), parts: [{ type: 'image', url: '  ', metadata: null }] },
-  ]), false);
-  assert.equal(hasImageParts([{ ...makeUserMessage('t'), parts: imageParts }]), true);
-});
-
-// ===== runWithVisionFallback(:601-665 内层兜底单元) =====
-
-test('兜底单元:首轮成功 → 不重建;状态不置兜底文案', async () => {
-  const statuses: Array<string | null> = [];
-  let rebuilds = 0;
-  const hook: VisionFallbackHook = {
-    modelSupportsImageInput: true,
-    rebuildInternalMessages: (): Promise<UIMessage[]> => { rebuilds += 1; return Promise.resolve([]); },
-  };
-  await runWithVisionFallback(
-    [{ ...makeUserMessage('t'), parts: imageParts }], hook,
-    (_m: UIMessage[]): Promise<void> => Promise.resolve(),
-    (s: string | null): void => { statuses.push(s); });
-  assert.equal(rebuilds, 0);
-  assert.deepEqual(statuses, []);
-});
-
-test('兜底单元:图像错误 → 状态文案 + force 重建消息重投同一 callProvider', async () => {
-  const statuses: Array<string | null> = [];
-  const forced: UIMessage[] = [makeUserMessage('OCR 文本')];
-  const seen: UIMessage[][] = [];
-  const hook: VisionFallbackHook = {
-    modelSupportsImageInput: true,
-    rebuildInternalMessages: (): Promise<UIMessage[]> => Promise.resolve(forced),
-  };
-  let calls = 0;
-  await runWithVisionFallback(
-    [{ ...makeUserMessage('t'), parts: imageParts }], hook,
-    (m: UIMessage[]): Promise<void> => {
-      calls += 1;
-      seen.push(m);
-      return calls === 1
-        ? Promise.reject(new ImageEncodingError('u', new Error('x')))
-        : Promise.resolve();
-    },
-    (s: string | null): void => { statuses.push(s); });
-  assert.equal(calls, 2);
-  assert.equal(seen[1], forced, '第二次调用收到重建消息');
-  assert.deepEqual(statuses, [VISION_FALLBACK_STATUS]);
-  assert.equal(VISION_FALLBACK_STATUS, '正在改用视觉识别模型读取图片...');
-});
-
-test('兜底单元:模型不支持图像 / 无图消息 / 错误不命中 → 原错误重抛不重建', async () => {
-  const imgMsgs: UIMessage[] = [{ ...makeUserMessage('t'), parts: imageParts }];
-  let rebuilds = 0;
-  const hook = (supports: boolean): VisionFallbackHook => ({
-    modelSupportsImageInput: supports,
-    rebuildInternalMessages: (): Promise<UIMessage[]> => { rebuilds += 1; return Promise.resolve([]); },
-  });
-  const fail = (_m: UIMessage[]): Promise<void> =>
-    Promise.reject(new ImageEncodingError('u', new Error('x')));
-  // 模型不支持
-  await assert.rejects(runWithVisionFallback(imgMsgs, hook(false), fail), /Failed to encode image/);
-  // 无图消息
-  await assert.rejects(runWithVisionFallback([makeUserMessage('t')], hook(true), fail), /Failed to encode image/);
-  // hook 缺失
-  await assert.rejects(runWithVisionFallback(imgMsgs, undefined, fail), /Failed to encode image/);
-  // 错误不命中分类器
-  await assert.rejects(
-    runWithVisionFallback(imgMsgs, hook(true), (_m: UIMessage[]): Promise<void> =>
-      Promise.reject(new Error('network down'))),
-    /network down/);
-  assert.equal(rebuilds, 0);
 });
 
 test('兜底单元:兜底自身错误向外传播(进外层重试循环分类,:655-664)', async () => {

@@ -809,6 +809,7 @@ export {
 // ===== D-070:搜索工具组 + 搜索偏好持久化 + entry 接线面 =====
 export {
   SEARCH_PREFS_KEYS, defaultSearchPrefs, loadSearchPrefs, saveSearchPrefs, updateSearchPrefs,
+  initializeDeepReadSearchPrefs,
 } from './search/search_prefs.ts';
 export { createDeepReadSearchProviders } from './search/deepread_search_registry.ts';
 export type { DeepReadSearchGoogle, DeepReadSearchProviderDependencies } from './search/deepread_search_registry.ts';
@@ -1518,3 +1519,25 @@ export type {
 
 export { createNovelProjectOperationTools, executeNovelProjectOperation } from './chat/novel_project_operations.ts';
 export type { NovelProjectOperationPort } from './chat/novel_project_operations.ts';
+
+// Memory optimization: temporal history, reinforcement and derived profiles.
+export { restoreMemoryRecord } from './chat/memory_restore.ts';
+export { reinforceMemoryRecords } from './chat/memory_recall_store.ts';
+export { isMemoryActive, canPromoteMemory, shouldArchiveIdleMemory, memoryLocalDate, memoryDateLabel } from './chat/memory_lifecycle.ts';
+export { applyMemoryExtractionActions, collectMemoryExtractionSources, memoryExpiryOn,
+  normalizeMemoryRelativeDates, isGroundedMemoryRewrite } from './chat/memory_extraction_actions.ts';
+export type { MemoryExtractionAction, MemoryExtractionApplyResult, MemoryExtractionSource } from './chat/memory_extraction_actions.ts';
+
+export { memoryProfileSources, buildMemoryProfile, coveredMemoryProfileRecords,
+  isMemoryProfileCurrent, selectMemoryProfile, MINIMUM_MEMORY_PROFILE_SOURCES, MAX_MEMORY_PROFILE_ITEMS } from './chat/memory_profile.ts';
+export type { MemoryProfile, MemoryProfileItem, MemoryProfileSelection, MemoryProfileSourceSnapshot } from './chat/memory_profile.ts';
+export { nearDuplicateCandidates, planConfirmedMemoryMerges, remapMemoryProfileItems,
+  buildMemoryProfilePassPrompt, parseMemoryProfilePassOutput } from './chat/memory_semantic_dedup.ts';
+export type { MemoryNearDuplicateCandidate, MemorySemanticMerge, MemoryProfilePassOutput } from './chat/memory_semantic_dedup.ts';
+
+export { createMemoryCitationTransformer, readMemoryCitationIds, memoryCitationIds, stripMemoryCitations } from './chat/memory_citations.ts';
+export { invalidateMemoryTopicsForSource } from './chat/memory_topics.ts';
+
+export { parseStoredMemoryProfile } from './chat/memory_profile.ts';
+
+export { extractionMessagesContaminated } from './chat/memory_extractor.ts';

@@ -1,0 +1,88 @@
+✔ archive draft changes nothing until author confirms summary and selects decisions (55.63475ms)
+✔ archive scope binds branch and source message content rather than transcript revision (27.371958ms)
+✔ malformed archive output fails and leaves cursor and decisions untouched (9.491333ms)
+✔ long discussion archives complete earliest sources within the model budget then continues with cumulative context (69.575958ms)
+✔ archive explains an earliest source that cannot fit without sending or advancing its cursor (12.637958ms)
+✖ manual archive accepts a complete JSON fence while still validating the archive schema (14.820959ms)
+✔ mapSuggestionKind: EN and CN aliases (1.036084ms)
+✔ parseSuggestions: extracts first { to last } amid prose (0.907916ms)
+✔ parseSuggestions: rejects invalid items instead of claiming no suggestions (0.266292ms)
+✔ parseSuggestions: caps at MAX_SUGGESTIONS (0.197917ms)
+✔ parseSuggestions: malformed JSON and wrong schemas are distinct from valid empty results (0.179667ms)
+✔ collectModelText: newest snapshot replaces prior assistant text (9.234125ms)
+✔ analyzeChapterSuggestions: parses model JSON into suggestions (10.126458ms)
+✔ analyzeChapterSuggestions: model failure remains a provider error (1.206042ms)
+✔ analyzeChapterSuggestions: validates the model and disables authoring tools (2.446166ms)
+✔ analyzeChapterSuggestions: malformed model output is an output error, not a provider failure (2.492625ms)
+✖ the suggestion prompt example can be copied as a valid material proposal (0.523167ms)
+✖ invalid suggestion output gets one format correction using the original chapter and materials (4.08825ms)
+✖ format correction stops after one attempt, and transport failure never starts a correction (1.26275ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 15
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 441.772333
+
+✖ failing tests:
+
+test at harmony/deepread/src/test/novel_discussion_archive.test.ts:1:8851
+✖ manual archive accepts a complete JSON fence while still validating the archive schema (14.820959ms)
+  Error [NovelError]: 归档摘要不是有效 JSON，请重试或手动整理讨论
+      at invalidInput (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/deepread/src/main/ets/novel/error.ts:33:3)
+      at parseArchiveDraft (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/deepread/src/main/ets/novel/discussion_archive.ts:75:11)
+      at prepareNovelDiscussionArchive (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/deepread/src/main/ets/novel/discussion_archive.ts:128:18)
+      at async TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/deepread/src/test/novel_discussion_archive.test.ts:147:21)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'invalid_input',
+    entityId: ''
+  }
+
+test at harmony/deepread/src/test/novel_suggestion_engine.test.ts:1:5943
+✖ the suggestion prompt example can be copied as a valid material proposal (0.523167ms)
+  Error [NovelError]: 资料建议解析失败：第 1 条建议需要有效类别、标题和正文
+      at invalidModelOutput (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/deepread/src/main/ets/novel/error.ts:50:3)
+      at parseSuggestions (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/deepread/src/main/ets/novel/suggestion_engine.ts:95:13)
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/deepread/src/test/novel_suggestion_engine.test.ts:164:16)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'invalid_output',
+    entityId: ''
+  }
+
+test at harmony/deepread/src/test/novel_suggestion_engine.test.ts:1:6211
+✖ invalid suggestion output gets one format correction using the original chapter and materials (4.08825ms)
+  Error [NovelError]: 资料建议解析失败：第 1 条建议需要有效类别、标题和正文
+      at invalidModelOutput (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/deepread/src/main/ets/novel/error.ts:50:3)
+      at parseSuggestions (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/deepread/src/main/ets/novel/suggestion_engine.ts:95:13)
+      at analyzeChapterSuggestions (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/deepread/src/main/ets/novel/suggestion_engine.ts:194:12)
+      at async TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/deepread/src/test/novel_suggestion_engine.test.ts:185:18)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'invalid_output',
+    entityId: ''
+  }
+
+test at harmony/deepread/src/test/novel_suggestion_engine.test.ts:1:7579
+✖ format correction stops after one attempt, and transport failure never starts a correction (1.26275ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/deepread/src/test/novel_suggestion_engine.test.ts:215:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

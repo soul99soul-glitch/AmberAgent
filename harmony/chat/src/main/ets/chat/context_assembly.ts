@@ -51,7 +51,7 @@ export const buildStaticSystemPromptParts = (
 // tools.mapNotNull { systemPrompt(model, messages).takeIf(isNotBlank) }.joinToString('\n\n')
 export const buildToolSystemPrompt = (
   tools: AgentTool[], model: ChatModel, messages: UIMessage[],
-): string => tools
+): string => model.abilities.indexOf('tool') < 0 ? '' : tools
   .map((t: AgentTool): string => t.systemPrompt(model, messages))
   .filter((s: string): boolean => s.trim().length > 0)
   .join('\n\n');

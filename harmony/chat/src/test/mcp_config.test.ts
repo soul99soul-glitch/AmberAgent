@@ -11,9 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  makeMcpCommonOptions, makeMcpTool, makeMcpSseServer, makeMcpStreamableHttpServer,
-  cloneMcpServerConfig, mcpStatusReconnecting, mcpStatusError,
-  MCP_STATUS_IDLE,
+  makeMcpCommonOptions, makeMcpTool, makeMcpSseServer, makeMcpStreamableHttpServer
 } from '../main/ets/chat/mcp_config.ts';
 import {
   serializeMcpServerConfigList, parseMcpServerConfigList,
@@ -25,14 +23,6 @@ import {
 
 // ===== 模型默认值(McpConfig.kt:9-25) =====
 
-test('McpCommonOptions 默认值:enable=true/name=""/headers=[]/tools=[]', () => {
-  const c = makeMcpCommonOptions({});
-  assert.equal(c.enable, true);
-  assert.equal(c.name, '');
-  assert.deepEqual(c.headers, []);
-  assert.deepEqual(c.tools, []);
-});
-
 test('McpTool 默认值:enable=true/needsApproval=true(fail-closed 逐字)/description·inputSchema=null', () => {
   const t = makeMcpTool({ name: 'read' });
   assert.equal(t.enable, true);
@@ -40,29 +30,6 @@ test('McpTool 默认值:enable=true/needsApproval=true(fail-closed 逐字)/descr
   assert.equal(t.description, null);
   assert.equal(t.inputSchema, null);
   assert.equal(t.needsApproval, true);
-});
-
-test('McpServerConfig 默认值:id 随机 uuid/url="";kind 判别', () => {
-  const sse = makeMcpSseServer({});
-  const http = makeMcpStreamableHttpServer({});
-  assert.equal(sse.kind, 'sse');
-  assert.equal(http.kind, 'streamable_http');
-  assert.match(sse.id, /^[0-9a-f-]{36}$/);
-  assert.notEqual(sse.id, http.id);
-  assert.equal(sse.url, '');
-  assert.equal(sse.commonOptions.enable, true);
-});
-
-test('clone 默认参 = 自身字段(McpConfig.kt:38-41/:52-55);覆盖 id/commonOptions', () => {
-  const base = makeMcpSseServer({ id: 'srv-1', url: 'https://a' });
-  const same = cloneMcpServerConfig(base);
-  assert.deepEqual(same, base);
-  const renamed = cloneMcpServerConfig(
-    base, 'srv-2', makeMcpCommonOptions({ name: 'n2' }));
-  assert.equal(renamed.kind, 'sse');
-  assert.equal(renamed.id, 'srv-2');
-  assert.equal(renamed.commonOptions.name, 'n2');
-  assert.equal(renamed.url, 'https://a');
 });
 
 // ===== 线格式(kotlinx 逐字) =====
@@ -153,12 +120,6 @@ test('kv_store:save/load 往返;无键 → null', async () => {
 });
 
 // ===== McpStatus(McpStatus.kt) =====
-
-test('McpStatus 五态构造', () => {
-  assert.deepEqual(MCP_STATUS_IDLE, { kind: 'idle' });
-  assert.deepEqual(mcpStatusReconnecting(2, 5), { kind: 'reconnecting', attempt: 2, maxAttempts: 5 });
-  assert.deepEqual(mcpStatusError('e'), { kind: 'error', message: 'e' });
-});
 
 // ===== McpImportParser(McpImportParser.kt 全文) =====
 

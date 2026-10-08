@@ -86,7 +86,7 @@ const loadSettingsSaveMethod = (saveSelection) => {
     ${source.slice(start, end)}
   } exports.SettingsFixture = SettingsFixture;`;
   vm.runInNewContext(transpile(fixture), {
-    exports, Promise, Error, String, saveDeepReadModelSelection: saveSelection,
+    exports, Promise, Error, String, getProductKind: () => 'agent', saveDeepReadModelSelection: saveSelection,
     promptAction: { showToast: (value) => toasts.push(value.message) },
   }, { filename });
   return { page: new exports.SettingsFixture(), toasts };
@@ -118,7 +118,7 @@ test('settings updates its label and closes only after the provider/model pair h
 });
 
 const loadTemplateGenerateMethod = (getRuntime) => {
-  const filename = path.join(ENTRY, 'pages/DeepReadTemplateWorkbenchPage.ets');
+  const filename = path.join(ENTRY, 'components/deepread/DeepReadTemplateWorkbench.ets');
   const source = fs.readFileSync(filename, 'utf8');
   const start = source.indexOf('  private async generate(');
   const end = source.indexOf('\n  private templateDate(', start);

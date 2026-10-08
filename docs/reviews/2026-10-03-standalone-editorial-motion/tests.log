@@ -1,0 +1,22 @@
+✔ force regeneration failure or abort cannot celebrate a retained complete article (45.611875ms)
+✔ only a successful complete persisted result receives the publication stamp (14.903875ms)
+✔ leave and return suppresses a late celebration while allowing the article result to settle (2.583209ms)
+✔ background or theme changes clear the trigger and reject a late completion from that visual cycle (2.564875ms)
+✔ newsroom observes only this topic, never creates completion stamps, and releases all listeners (3.105625ms)
+✔ section retry celebrates only when the whole article becomes complete (7.162583ms)
+✔ collection impression follows persisted success, never merely starting or failed collection (39.12075ms)
+✔ leaving and returning, backgrounding, and changing theme suppress old async success (15.093416ms)
+✔ whole chapter offers its existing archive choice before revealing the success impression (3.113ms)
+✔ the impression stays in the originating project and branch; leaving正文 clears it (2.330125ms)
+✔ opening without a new trigger stays quiet; repeated stamps replace their pending fade (24.07575ms)
+✔ leaving during a stamp settles it and suppresses a late fade callback (4.628583ms)
+✔ destroyed stamps cannot update their owner through a retained callback (5.000042ms)
+✔ backgrounding settles the stamp without restarting it on foreground (2.436708ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 201.065833

@@ -405,12 +405,12 @@ test('sh: null content-type + 空白体 → 静默 return(:168-169)', async () =
   await t.send({ id: 'a', method: 'ping', jsonrpc: '2.0' });
 });
 
-test('sh: inline SSE — data trim concat 无换行 quirk(:362-366)', async () => {
+test('sh: inline SSE — multiline data forms one JSON payload', async () => {
   const port: FakePort = new FakePort();
   port.postStreamQueue.push(postResp(200, '', [], 'text/event-stream',
     new FakeLineStream([
-      'data: {"id":"a","re',
-      'data: sult":{},"jsonrpc":"2.0"}',
+      'data: {"id":"a",',
+      'data: "result":{},"jsonrpc":"2.0"}',
       '',
     ])));
   const t: McpStreamableHttpTransport = new McpStreamableHttpTransport(
@@ -425,7 +425,7 @@ test('sh: inline SSE — data trim concat 无换行 quirk(:362-366)', async () =
   assert.deepEqual(got[0]['result'], {});
 });
 
-test('sh: inline SSE — replay 响应 id 改写(:339-343)', async () => {
+test('sh: inline SSE — unrelated response retains its original ID', async () => {
   const port: FakePort = new FakePort();
   port.postStreamQueue.push(postResp(200, '', [], 'text/event-stream',
     new FakeLineStream([
@@ -440,7 +440,38 @@ test('sh: inline SSE — replay 响应 id 改写(:339-343)', async () => {
     got.push(m);
   });
   await t.send({ id: 'req-1', method: 'tools/list', jsonrpc: '2.0' });
-  assert.equal(got[0]['id'], 'req-1');
+  assert.equal(got[0]['id'], 'server-side');
+});
+
+test('sh: inline SSE — notifications and unrelated responses cannot impersonate matching response', async () => {
+  const port = new FakePort();
+  port.postStreamQueue.push(postResp(200, '', [], 'text/event-stream', new FakeLineStream([
+    'data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}', '',
+    'data: {"jsonrpc":"2.0","id":"other","result":{"tools":[{"name":"wrong"}]}}', '',
+    'data: {"jsonrpc":"2.0","id":"req-1","result":{"tools":[{"name":"right"}]}}', '',
+  ])));
+  const transport = new McpStreamableHttpTransport(port, 'https://x/mcp', []);
+  const got: JsonObject[] = [];
+  transport.onMessage(message => got.push(message));
+  await transport.start();
+  await transport.send({ id: 'req-1', method: 'tools/list', jsonrpc: '2.0' });
+  assert.deepEqual(got.map(message => message.id ?? message.method),
+    ['notifications/tools/list_changed', 'other', 'req-1']);
+});
+
+test('sh: inline SSE — CRLF separator and complete frame at EOF both dispatch', async () => {
+  const port = new FakePort();
+  port.postStreamQueue.push(postResp(200, '', [], 'text/event-stream', new FakeLineStream([
+    'data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}\r', '\r',
+    'event: message\r', 'data: {"jsonrpc":"2.0","id":"req-1","result":{"tools":[]}}\r',
+  ])));
+  const transport = new McpStreamableHttpTransport(port, 'https://x/mcp', []);
+  const got: JsonObject[] = [];
+  transport.onMessage(message => got.push(message));
+  await transport.start();
+  await transport.send({ id: 'req-1', method: 'tools/list', jsonrpc: '2.0' });
+  assert.deepEqual(got.map(message => message.id ?? message.method),
+    ['notifications/tools/list_changed', 'req-1']);
 });
 
 test('sh: inline SSE 解码失败 → onError + 抛(:344-348)', async () => {

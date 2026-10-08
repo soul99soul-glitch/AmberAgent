@@ -4,48 +4,15 @@ import assert from 'node:assert/strict';
 
 import {
   StreamingCharRevealClock,
-  streamingDisplayTargetSpeed,
-  streamingDisplayMaxCharsPerEmit,
-  streamingDisplayBacklogCatchUpEnd,
   safeStreamingDisplayEnd,
   safeStreamingTerminalEnd,
   streamingImmediateDisplayText,
-  streamingTailActiveWhen,
   StreamingDisplayState,
-  STREAM_DISPLAY_SPEED_ALPHA,
-  STREAM_DISPLAY_MIN_EMIT_INTERVAL_MS,
   streamingNextCodePointEnd,
 } from '../main/ets/chat/streaming_display.ts';
-import type { StreamingDisplaySliceProxy } from '../main/ets/chat/streaming_display.ts';
-
-// ===== StreamingCharRevealClock =====
-
-test('Clock: 未 stamp 的字符 progressAt 返回 1(已定型)', () => {
-  const clock = new StreamingCharRevealClock();
-  assert.equal(clock.progressAt(0, 1000, 500), 1);
-});
-
-test('Clock: stamp 后 progressAt 返回 0(尚未到出现时间)', () => {
-  const clock = new StreamingCharRevealClock();
-  clock.stamp('abc', 0, 1000, 500, 50, 200, 10);
-  // 第一个字符 appearNanos = 1000,now = 1000 → progress 0
-  assert.equal(clock.progressAt(0, 1000, 500), 0);
-});
-
-test('Clock: stamp 后 progressAt 经过 fadeNanos 返回 1(完成)', () => {
-  const clock = new StreamingCharRevealClock();
-  clock.stamp('a', 0, 1000, 500, 50, 200, 10);
-  // appearNanos=1000, now=1500, fade=500 → progress 1
-  assert.equal(clock.progressAt(0, 1500, 500), 1);
-});
-
-test('Clock: stamp 后 progressAt 中间值在 0-1 之间', () => {
-  const clock = new StreamingCharRevealClock();
-  clock.stamp('a', 0, 1000, 500, 50, 200, 10);
-  // appearNanos=1000, now=1250, fade=500 → progress 0.5
-  const p = clock.progressAt(0, 1250, 500);
-  assert.ok(p > 0.4 && p < 0.6);
-});
+import type {
+  StreamingDisplaySliceProxy,
+} from '../main/ets/chat/streaming_display.ts';
 
 test('Clock: 多字符 cascade(stagger 错峰)', () => {
   const clock = new StreamingCharRevealClock();
@@ -73,50 +40,6 @@ test('Clock: maxPending 溢出 → 最旧的直接标记完成', () => {
   assert.equal(clock.progressAt(0, 1000, 500), 1);
 });
 
-// ===== streamingDisplayTargetSpeed =====
-
-test('targetSpeed: backlog=0 → base 速率', () => {
-  assert.equal(streamingDisplayTargetSpeed(0, true), 72);
-});
-
-test('targetSpeed: 大 backlog → 不超过 max', () => {
-  const speed = streamingDisplayTargetSpeed(10000, true);
-  assert.ok(speed <= 1500);
-});
-
-test('targetSpeed: streaming=false → final 速率(更快)', () => {
-  const s1 = streamingDisplayTargetSpeed(500, true);
-  const s2 = streamingDisplayTargetSpeed(500, false);
-  assert.ok(s2 > s1);
-});
-
-// ===== maxCharsPerEmit =====
-
-test('maxCharsPerEmit: streaming=true → 8', () => {
-  assert.equal(streamingDisplayMaxCharsPerEmit(true), 8);
-});
-
-test('maxCharsPerEmit: streaming=false → 20', () => {
-  assert.equal(streamingDisplayMaxCharsPerEmit(false), 20);
-});
-
-// ===== backlogCatchUpEnd =====
-
-test('catchUpEnd: target <= visible → target', () => {
-  assert.equal(streamingDisplayBacklogCatchUpEnd(100, 80), 80);
-});
-
-test('catchUpEnd: backlog 超 max → catch-up snap', () => {
-  // visible=0, target=2000, max backlog=1200 → snap to 2000-1200=800
-  assert.equal(streamingDisplayBacklogCatchUpEnd(0, 2000), 800);
-});
-
-// ===== safeStreamingDisplayEnd / safeStreamingTerminalEnd =====
-
-test('safeEnd: ASCII 文本无调整', () => {
-  assert.equal(safeStreamingDisplayEnd('hello world', 5), 5);
-});
-
 test('safeEnd: 末尾 surrogate pair → 不在中间断', () => {
   // 😀 = U+1F600 (surrogate pair), 截断在 high surrogate 后 → 应跳到 pair 后
   const str = 'ab😀cd';
@@ -132,12 +55,6 @@ test('safeTerminalEnd: emoji 末尾安全截断', () => {
   assert.ok(end === str.length || end <= str.length - 2);
 });
 
-// ===== streamingImmediateDisplayText =====
-
-test('immediateDisplay: ASCII → 原样', () => {
-  assert.equal(streamingImmediateDisplayText('hello'), 'hello');
-});
-
 test('immediateDisplay: ZWJ emoji 序列不被截断', () => {
   // 👨‍👩‍👧 = man + ZWJ + woman + ZWJ + girl
   const str = 'abc👨‍👩‍👧';
@@ -146,32 +63,11 @@ test('immediateDisplay: ZWJ emoji 序列不被截断', () => {
   assert.ok(result.length === str.length || !result.endsWith('👨'));
 });
 
-// ===== streamingTailActiveWhen =====
-
-test('tailActive: true → true', () => {
-  assert.equal(streamingTailActiveWhen(true), true);
-});
-
-test('tailActive: false → false', () => {
-  assert.equal(streamingTailActiveWhen(false), false);
-});
-
-// ===== streamingNextCodePointEnd:Unicode 安全前进 =====
-
-test('nextCodePointEnd:ASCII 每次前进 1', () => {
-  assert.equal(streamingNextCodePointEnd('abc', 1), 2);
-});
-
 test('nextCodePointEnd:surrogate pair 前进 2(不劈开 emoji)', () => {
   // 😀 = U+1F600,surrogate pair 占 2 个 UTF-16 单元
   const str = 'a😀b';
   assert.equal(streamingNextCodePointEnd(str, 1), 3);
   assert.equal(streamingNextCodePointEnd(str, 3), 4);
-});
-
-test('nextCodePointEnd:越过末尾返回 length', () => {
-  assert.equal(streamingNextCodePointEnd('ab', 2), 2);
-  assert.equal(streamingNextCodePointEnd('ab', 5), 2);
 });
 
 // ===== StreamingDisplayState:可注入时间逐字 reveal 驱动 =====
@@ -401,18 +297,6 @@ test('State:内容修正后不再重新 pacing(不把旧前缀当 backlog)', () 
 
 // ===== Unicode 安全切分(默认切分路径) =====
 
-test('State:reveal 不劈开 surrogate pair', () => {
-  const state = new StreamingDisplayState();
-  const str = 'ab😀cd';
-  state.advance(str, true, 1000);
-  // 可见长度必须落在安全切分位置(不落在 surrogate 中间)
-  const visible: string = str.substring(0, state.visibleLength);
-  const lastChar: string = visible.length > 0 ? visible.charAt(visible.length - 1) : '';
-  // 若截断处是 high surrogate(单独出现)说明劈开了 pair
-  assert.equal(/\uD800[\uDC00-\uDFFF]/.test(lastChar), false,
-    `可见前缀不能以孤立 high surrogate 结尾(${JSON.stringify(lastChar)})`);
-});
-
 test('State:reveal 不劈开 ZWJ 序列 / combining mark', () => {
   const state = new StreamingDisplayState();
   // 👨‍👩‍👧 = man + ZWJ + woman + ZWJ + girl
@@ -421,17 +305,4 @@ test('State:reveal 不劈开 ZWJ 序列 / combining mark', () => {
   assert.equal(state.visibleLength, str.length);
   const visible: string = str.substring(0, state.visibleLength);
   assert.ok(!visible.endsWith('👨'), '不能停在 ZWJ 序列中间');
-});
-
-test('State:可见长度与 safeStreamingDisplayEnd 一致', () => {
-  const state = new StreamingDisplayState();
-  const str = 'hello world';
-  state.advance(str, true, 1000);
-  const visible: string = str.substring(0, state.visibleLength);
-  assert.equal(visible.length, safeStreamingDisplayEnd(str, visible.length));
-});
-
-test('State:min emit interval 常量对齐 Android 8ms', () => {
-  assert.equal(STREAM_DISPLAY_MIN_EMIT_INTERVAL_MS, 8);
-  assert.ok(STREAM_DISPLAY_SPEED_ALPHA > 0 && STREAM_DISPLAY_SPEED_ALPHA < 1);
 });

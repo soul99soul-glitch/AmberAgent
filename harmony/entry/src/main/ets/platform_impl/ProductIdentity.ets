@@ -21,6 +21,6 @@ export const getProductKind = (): ProductKind =>
 export const productRootPage = (): string => {
   const kind: ProductKind = getProductKind();
   if (kind === 'novel') return 'pages/NovelProjectsPage';
-  if (kind === 'deepread') return 'pages/BoardPage';
+  if (kind === 'deepread') return 'pages/DeepReadRootPage';
   return 'pages/ChatListPage';
 };

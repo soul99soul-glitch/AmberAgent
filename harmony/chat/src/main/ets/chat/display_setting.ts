@@ -30,6 +30,7 @@ export interface DisplaySetting {
   enableAutoScroll: boolean;
   showBottomFollowAnimation: boolean;
   enableLatexRendering: boolean;
+  enableGenerativeWidgets: boolean;
   enableBlurEffect: boolean;
   chatFontFamily: string;   // 'DEFAULT' | 'SERIF' | 'MONO'
   enableVolumeKeyScroll: boolean;
@@ -69,6 +70,7 @@ export const makeDisplaySetting = (opts: Partial<DisplaySetting> = {}): DisplayS
   enableAutoScroll: opts.enableAutoScroll ?? true,
   showBottomFollowAnimation: opts.showBottomFollowAnimation ?? true,
   enableLatexRendering: opts.enableLatexRendering ?? true,
+  enableGenerativeWidgets: opts.enableGenerativeWidgets ?? true,
   enableBlurEffect: opts.enableBlurEffect ?? false,
   chatFontFamily: opts.chatFontFamily ?? 'DEFAULT',
   enableVolumeKeyScroll: opts.enableVolumeKeyScroll ?? false,

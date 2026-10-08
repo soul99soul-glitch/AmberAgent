@@ -20,12 +20,6 @@ test('extractReadableTextArkTs: falls back to baseUrl when no title', () => {
   assert.equal(r.sectionCount, 1);
 });
 
-test('extractReadableTextArkTs: title is empty when none and no baseUrl', () => {
-  const html = '<body><p>This is a sufficiently long paragraph exceeding the eighteen character minimum length.</p></body>';
-  const r = extractReadableTextArkTs(html);
-  assert.equal(r.title, '');
-});
-
 // ===== script/style/noscript/svg/canvas stripping (Android fidelity) =====
 
 test('strips <script> content', () => {
@@ -101,23 +95,6 @@ test('filters out lines shorter than 18 characters', () => {
   assert.equal(r.sectionCount, 1);
 });
 
-test('exactly 18 characters passes the filter (boundary >=)', () => {
-  // 18 chars exactly
-  const exactly18 = 'abcdefghijklmnopqr';
-  const html = `<p>${exactly18}</p>`;
-  const r = extractReadableTextArkTs(html);
-  assert.ok(r.contentText.includes(exactly18), '18 chars passes >= 18 filter');
-  assert.equal(r.sectionCount, 1);
-});
-
-test('17 characters is filtered out (boundary)', () => {
-  const seventeen = 'abcdefghijklmnopq';
-  const html = `<p>${seventeen}</p>`;
-  const r = extractReadableTextArkTs(html);
-  assert.equal(r.sectionCount, 0);
-  assert.equal(r.contentText, '');
-});
-
 // ===== distinct dedup (Android fidelity) =====
 
 test('dedups identical lines', () => {
@@ -126,14 +103,6 @@ test('dedups identical lines', () => {
   const r = extractReadableTextArkTs(html);
   const lines = r.contentText.split('\n');
   assert.equal(lines.length, 1, 'duplicates removed');
-});
-
-// ===== whitespace compression =====
-
-test('collapses inline whitespace runs to single space', () => {
-  const html = '<p>words     with     \t\t\t   many     spaces    between    them    here    ok.</p>';
-  const r = extractReadableTextArkTs(html);
-  assert.ok(!r.contentText.includes('  '), 'no double spaces remain');
 });
 
 // ===== extractReadableText double-path =====

@@ -1,0 +1,311 @@
+✖ one reasoning/body snapshot is grouped once across all six existing render reads (156.105ms)
+✖ same-id text snapshots invalidate grouping without changing content part indices (8.228625ms)
+✖ same-id terminal reasoning metadata and tool approval/output changes invalidate the cache (4.807416ms)
+✖ the actual message Prop watcher owns invalidation, including empty and replacement messages (3.333417ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 0
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 526.147125
+
+✖ failing tests:
+
+test at src/test/message_row_blocks_cache.test.cjs:42:1
+✖ one reasoning/body snapshot is grouped once across all six existing render reads (156.105ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  6 !== 1
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/message_row_blocks_cache.test.cjs:50:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 6,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/test/message_row_blocks_cache.test.cjs:56:1
+✖ same-id text snapshots invalidate grouping without changing content part indices (8.228625ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  4 !== 2
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/message_row_blocks_cache.test.cjs:65:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 4,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/test/message_row_blocks_cache.test.cjs:68:1
+✖ same-id terminal reasoning metadata and tool approval/output changes invalidate the cache (4.807416ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  5 !== 2
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/message_row_blocks_cache.test.cjs:77:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 5,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/test/message_row_blocks_cache.test.cjs:80:1
+✖ the actual message Prop watcher owns invalidation, including empty and replacement messages (3.333417ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /@Prop\s+@Watch\('onMessageChanged'\)\s+message:\s*UIMessage/. Input:
+  
+  '// AgentMessageRow — chat/novel 共用的完整 agent 消息行。\n' +
+    '// host 通过静态 capabilities 决定可交互入口，并用具名 hostFooter slot 注入宿主尾部。\n' +
+    '\n' +
+    "import { MOTION_OVERLAY, INK, SURFACE2, USER_BG, USER_INK, ACCENT } from '../design/tokens.ets';\n" +
+    'import type {\n' +
+    '  AskUserQuestion, MessagePartBlock, ReasoningCardState, ThinkingStep, UIMessage,\n' +
+    '  UIMessagePartDocument, UIMessagePartReasoning, UIMessagePartTool,\n' +
+    "} from '@amber/chat-domain';\n" +
+    'import {\n' +
+    '  ASK_USER_TOOL_NAME, buildAskUserAnswerPayload, groupMessageParts,\n' +
+    '  parseAskUserQuestions,\n' +
+    '  streamToolIndex,\n' +
+    "} from '@amber/chat-domain';\n" +
+    "import type { ToolApprovalPartLocator } from '@amber/chat-domain';\n" +
+    "import { MarkdownText } from './MarkdownText.ets';\n" +
+    "import { ChatMessageReasoning } from './ChatMessageReasoning.ets';\n" +
+    "import { ChatMessageTools } from './ChatMessageTools.ets';\n" +
+    "import { ChatMessageAskUserStep } from './ChatMessageAskUserStep.ets';\n" +
+    "import { recipeAskUserPart } from './RecipeApprovalSummary.ets';\n" +
+    "import { pluginAskUserPart } from './PluginApprovalSummary.ets';\n" +
+    "import { ChatMessageAvatar } from './ChatMessageAvatar.ets';\n" +
+    "import { ChatMessageSubAgentStep } from './ChatMessageSubAgentStep.ets';\n" +
+    "import { ChatMessageCouncilStep } from './ChatMessageCouncilStep.ets';\n" +
+    "import { WidgetMessageContent } from './WidgetMessageContent.ets';\n" +
+    "import { ChatMessageActionFooter, resolveActionFooterMode } from './ChatMessageActionFooter.ets';\n" +
+    "import { ContentAttachmentChip, urlBasename } from './ContentAttachmentChip.ets';\n" +
+    "import { MiniAppChatCard } from './MiniAppChatCard.ets';\n" +
+    "import { UIAvatar } from './UIAvatar.ets';\n" +
+    "import { ChatUserBubble } from './ChatUserBubble.ets';\n" +
+    "import { ImagePreviewDialog } from './ui/ImagePreviewDialog.ets';\n" +
+    '\n' +
+    'export interface AgentMessageRowHostCapabilities {\n' +
+    '  copy: boolean;\n' +
+    '  fork: boolean;\n' +
+    '  branchSwitch: boolean;\n' +
+    '  edit: boolean;\n' +
+    '  regenerate: boolean;\n' +
+    '  favorite: boolean;\n' +
+    '  openActions: boolean;\n' +
+    '  approveTool: boolean;\n' +
+    '  denyTool: boolean;\n' +
+    '  answerTool: boolean;\n' +
+    '  openToolPreview: boolean;\n' +
+    '  openSubAgentRun: boolean;\n' +
+    '  openCouncilRun?: boolean;\n' +
+    '  runMiniApp: boolean;\n' +
+    '  modifyMiniApp: boolean;\n' +
+    '  openMiniAppList: boolean;\n' +
+    '  // F44:文档附件是否可打开(宿主提供真实 open 路径时置 true)\n' +
+    '  openDocument: boolean;\n' +
+    '}\n' +
+    '\n' +
+    'export const NO_AGENT_MESSAGE_ROW_CAPABILITIES: AgentMessageRowHostCapabilities = {\n' +
+    '  copy: false,\n' +
+    '  fork: false,\n' +
+    '  branchSwitch: false,\n' +
+    '  edit: false,\n' +
+    '  regenerate: false,\n' +
+    '  favorite: false,\n' +
+    '  openActions: false,\n' +
+    '  approveTool: false,\n' +
+    '  denyTool: false,\n' +
+    '  answerTool: false,\n' +
+    '  openToolPreview: false,\n' +
+    '  openSubAgentRun: false,\n' +
+    '  runMiniApp: false,\n' +
+    '  modifyMiniApp: false,\n' +
+    '  openMiniAppList: false,\n' +
+    '  openDocument: false,\n' +
+    '};\n' +
+    '\n' +
+    '@Component\n' +
+    'export struct AgentMessageRow {\n' +
+    "  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌\n" +
+    "  @StorageProp('darkMode') darkMode: boolean = false;\n" +
+    '  @Prop message: UIMessage;\n' +
+    '  @Prop capabilities: AgentMessageRowHostCapabilities = NO_AGENT_MESSAGE_ROW_CAPABILITIES;\n' +
+    '  @Prop branchCount: number = 1;\n' +
+    '  @Prop selectIndex: number = 0;\n' +
+    '  @Prop isLastAssistant: boolean = false;\n' +
+    '  // D-053:本行是否属于活动流式尾部(reasoning loading 判定;\n' +
+    '  //   Android messageLoading 语义,流式尾/regen 预览传 true)\n' +
+    "  @Prop @Watch('onStreamingChange') streaming: boolean = false;\n" +
+    '  // generationActive 与网络文本增量分离：reasoning/tool loading 跟随前者，\n' +
+    '  // Markdown reveal 只在真实 live text delta 时启用，避免 one-shot 假流式。\n' +
+    '  @Prop textDeltasLive: boolean = true;\n' +
+    '  @Prop autoCloseThinking: boolean = true;\n' +
+    '  // 显示与字体设置:思考内容总开关(关闭时隐藏 reasoning 步骤)\n' +
+    '  @Prop showThinkingContent: boolean = true;\n' +
+    '  // F16:显示设置消费(默认值 == 当前渲染行为,不改变既有外观)\n' +
+    '  @Prop showAssistantBubble: boolean = false;\n' +
+    '  @Prop showModelName: boolean = true;\n' +
+    '  @Prop showModelIcon: boolean = false;\n' +
+    '  // D0-4:用户头像(DisplaySetting.showUserAvatar;默认 false = 1:1 原型无抬头)\n' +
+    '  @Prop showUserAvatar: boolean = false;\n' +
+    "  @Prop userAvatar: string = '';\n" +
+    "  @Prop userNickname: string = '';\n" +
+    '  @Prop fontSizeRatio: number = 1.0;\n' +
+    '  @Prop codeBlockAutoCollapse: boolean = false;\n' +
+    '  @Prop showLineNumbers: boolean = false;\n' +
+    '  // 聊天字体族(DisplaySetting.chatFontFamily 三选,传递 MarkdownText)\n' +
+    "  @Prop chatFontFamily: string = 'DEFAULT';\n" +
+    '  // LaTeX 渲染开关(DisplaySetting.enableLatexRendering,传递 MarkdownText)\n' +
+    '  @Prop enableLatexRendering: boolean = true;\n' +
+    '  // 同一 message id 可同时出现在已提交行与工具续跑预览中；预览使用独立键命名空间。\n' +
+    "  @Prop streamKeyTag: string = '';\n" +
+    '  onSwitch: (idx: number) => void = (_idx: number): void => {};\n' +
+    '  onRegenerate: () => void = (): void => {};\n' +
+    '  onEdit: () => void = (): void => {};\n' +
+    '  onOpenActions: () => void = (): void => {};\n' +
+    '  onFork: () => void = (): void => {};\n' +
+    '  // D-057/R08:工具审批回调(toolCallId + 可选精确 locator;旧调用只传 id)\n' +
+    '  onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator) => void =\n' +
+    '    (_id: string, _loc?: ToolApprovalPartLocator): void => {};\n' +
+    '  onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator) => void =\n' +
+    '    (_id: string, _loc?: ToolApprovalPartLocator): void => {};\n' +
+    '  // D-105/R08:ask_user 应答回调(ChatMessageAskUserStep.kt onToolAnswer)\n' +
+    '  onAnswerTool: (toolCallId: string, answer: string, locator?: ToolApprovalPartLocator) => void =\n' +
+    '    (_id: string, _a: string, _loc?: ToolApprovalPartLocator): void => {};\n' +
+    '  onOpenSubAgentRun: (runId: string, tools: UIMessagePartTool[]) => void =\n' +
+    '    (_id: string, _t: UIMessagePartTool[]): void => {};\n' +
+    '  onCopy: () => void = (): void => {};\n' +
+    '  @Prop isFavorite: boolean = false;\n' +
+    '  onFavorite: (text: string) => void = (_t: string): void => {};\n' +
+    '  onOpenToolPreview: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator) => void =\n' +
+    '    (_p: UIMessagePartTool, _l?: ToolApprovalPartLocator): void => {};\n' +
+    '  jevSubjectHashForPart: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator) => string =\n' +
+    "    (_p: UIMessagePartTool, _l?: ToolApprovalPartLocator): string => '';\n" +
+    '  // generate_image 修改回调(edit 流程,宿主 ChatPage 注入)\n' +
+    '  onModifyGeneratedImage: (url: string) => void = (_url: string): void => {};\n' +
+    '  onWidgetAction: (prompt: string) => void = (_prompt: string): void => {};\n' +
+    '  onOpenCouncilRun: (runId: string, tools: UIMessagePartTool[]) => void =\n' +
+    '    (_runId: string, _tools: UIMessagePartTool[]): void => {};\n' +
+    '  // F44:文档附件打开(宿主未提供路径时 capabilities.openDocument=false → 纯展示)\n' +
+    '  onOpenDocument: (part: UIMessagePartDocument) => void = (_p: UIMessagePartDocument): void => {};\n' +
+    '  // P3:可见文本增长回调(逐字 reveal / 终态 drain 推进时触发;冒泡到 ChatPage\n' +
+    '  //   复用既有 followStreamingUpdate,不新建第二套滚动状态机)\n' +
+    '  onTextGrow: () => void = (): void => {};\n' +
+    '  // MiniApp:卡片回调冒泡(onRun 进 Runner;onModify 组装修订 prompt 回填输入框;\n' +
+    '  //   onOpenList 进列表页 — 均在 host 层实现,AgentMessageRow 仅透传)\n' +
+    '  onRunMiniApp: (appId: string) => void = (_appId: string): void => {};\n' +
+    '  onModifyMiniApp: (prompt: string) => void = (_prompt: string): void => {};\n' +
+    '  onOpenMiniAppList: () => void = (): void => {};\n' +
+    '  @BuilderParam hostHeader: () => void;\n' +
+    '  @BuilderParam hostFooter: () => void;\n' +
+    '  // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)\n' +
+    '  @State reasoningStates: Record<string, string> = {};\n' +
+    '  // D-105:ask_user 草稿态(题 id → 文本/单选值;:102;题 id → 多选集;:104)\n' +
+    '  @State askAnswers: Record<string, string> = {};\n' +
+    '  @State askMultiAnswers: Record<string, string[]> = {};\n' +
+    '  // D-053:本会话内见过流式(Android sawStreamingMessage:123 —\n' +
+    '  //   流式结束后保持 Preview 不自动折叠)\n' +
+    '  @State sawStream: boolean = false;\n' +
+    '  // 1:1 原型 fadeRise .26s ease-out:行入场 opacity 0→1 + translateY 4→0\n' +
+    '  @Prop animateEntrance: boolean = true;\n' +
+    '  @State enterOpacity: number = 0;\n' +
+    '  @State enterY: number = 4;\n' +
+    '  @State imagePreviewOpen: boolean = false;\n' +
+    '  @State imagePreviewUrls: string[] = [];\n' +
+    '  @State imagePreviewIndex: number = 0;\n' +
+    '\n' +
+    '  private openImagePreview(url: string): void {\n' +
+    '    const urls: string[] = [];\n' +
+    '    for (const part of this.message.parts) {\n' +
+    "      if (part.type === 'image') urls.push(part.url);\n" +
+    '    }\n' +
+    '    this.imagePreviewUrls = urls;\n' +
+    '    this.imagePreviewIndex = Math.max(0, urls.indexOf(url));\n' +
+    '    this.imagePreviewOpen = true;\n' +
+    '  }\n' +
+    '\n' +
+    '  @Builder\n' +
+    '  private MessageImagePreview(): void {\n' +
+    '    ImagePreviewDialog({ images: this.imagePreviewUrls, initialIndex: this.imagePreviewIndex,\n' +
+    '      onDismiss: (): void => { this.imagePreviewOpen = false; } })\n' +
+    '  }\n' +
+    '\n' +
+    '  aboutToAppear(): void {\n' +
+    '    if (this.streaming) this.sawStream = true;\n' +
+    '  }\n' +
+    '\n' +
+    '  private onStreamingChange(_propName: string): void {\n' +
+    '    if (this.streaming) this.sawStream = true;\n' +
+    '  }\n' +
+    '\n' +
+    '  // loading = messageLoading && finishedAt == null(ChatMessageReasoning.kt:107)\n' +
+    '  private reasoningLoading(p: UIMessagePartReasoning): boolean {\n' +
+    '    return this.streaming && p.finishedAt === null;\n' +
+    '  }\n' +
+    '\n' +
+    '  // 纯文本:text part 拼接 + 去 **/`(收藏等用途)\n' +
+    '  private plainText(): string {\n' +
+    "    let s: string = '';\n" +
+    '    for (const p of this.message.parts) {\n' +
+    "      if (p.type === 'text') s += p.text;\n" +
+    '    }\n' +
+    "    return s.replace(/\\*\\*([^*]+)\\*\\*/g, '$1').replace(/`([^`]+)`/g, '$1');\n" +
+    '  }\n' +
+    '\n' +
+    "  // :952-960 已拒绝展示:'已拒绝' + 非空白 reason → ': reason'(红色;\n" +
+    "  //   chat_message_tool_denied zh 逐字,冒号为 ASCII ': ')\n" +
+    '  private deniedLabel(t: UIMessagePartTool): string {\n' +
+    "    if (t.approvalState.type !== 'denied') return '';\n" +
+    '    const reason: string = t.approvalState.reason;\n' +
+    "    return reason.trim().length > 0 ? `已拒绝: ${reason}` : '已拒绝';\n" +
+    '  }\n' +
+    '\n' +
+    '  private packageAskUserPart(t: UIMessagePartTool): UIMessagePartTool | null {\n' +
+    '    return recipeAskUserPart(t) ?? pluginAskUserPart(t);\n' +
+    '  }\n' +
+    '\n' +
+    '  private askQuestionsOf(t: UIMessagePartTool): AskUserQuestion[] {\n' +
+    '    return parseAskUserQuestions((this.packageAskUserPart(t) ?? t).input);\n' +
+    '  }\n' +
+    '\n' +
+    '  // R08:partIndex 必须是原 message.parts 索引。先 indexOf 原数组;\n' +
+    '  //   group 复制体不在原数组时,仅用 metadata stream_tool_index 作为**匹配键**\n' +
+    '  //   在原 parts 中唯一查找,取该候选的真实 parts 下标;不唯一则拒歧义不传。\n' +
+    '  //   (streamToolIndex 是流内工具序号,可能与 parts 下标不同,不能直接当 partIndex)\n' +
+    '  private locatorFor(t: UIMessagePartTool): ToolApprovalPartLocator | undefined {\n' +
+    '    const index: number = this.message.parts.indexOf(t);\n' +
+    '    if (index >= 0) return { messageId: this.message.id, partIndex: index };\n' +
+    '    const sidx: number | null = streamToolIndex(t);\n' +
+    '    if (sidx === null) return undefined;\n' +
+    '    let found: number = -1;\n' +
+    '    let count: number = 0;\n' +
+    '    for (let i: number = 0; i < this.message.parts.length; i++) {\n' +
+    '      const p = this.message.parts[i];\n' +
+    "      if (p.type === 'tool' && streamToolIndex(p as UIMessagePartTool) === sidx) {\n" +
+    '  '... 17085 more characters
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/message_row_blocks_cache.test.cjs:82:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: "// AgentMessageRow — chat/novel 共用的完整 agent 消息行。\n// host 通过静态 capabilities 决定可交互入口，并用具名 hostFooter slot 注入宿主尾部。\n\nimport { MOTION_OVERLAY, INK, SURFACE2, USER_BG, USER_INK, ACCENT } from '../design/tokens.ets';\nimport type {\n  AskUserQuestion, MessagePartBlock, ReasoningCardState, ThinkingStep, UIMessage,\n  UIMessagePartDocument, UIMessagePartReasoning, UIMessagePartTool,\n} from '@amber/chat-domain';\nimport {\n  ASK_USER_TOOL_NAME, buildAskUserAnswerPayload, groupMessageParts,\n  parseAskUserQuestions,\n  streamToolIndex,\n} from '@amber/chat-domain';\nimport type { ToolApprovalPartLocator } from '@amber/chat-domain';\nimport { MarkdownText } from './MarkdownText.ets';\nimport { ChatMessageReasoning } from './ChatMessageReasoning.ets';\nimport { ChatMessageTools } from './ChatMessageTools.ets';\nimport { ChatMessageAskUserStep } from './ChatMessageAskUserStep.ets';\nimport { recipeAskUserPart } from './RecipeApprovalSummary.ets';\nimport { pluginAskUserPart } from './PluginApprovalSummary.ets';\nimport { ChatMessageAvatar } from './ChatMessageAvatar.ets';\nimport { ChatMessageSubAgentStep } from './ChatMessageSubAgentStep.ets';\nimport { ChatMessageCouncilStep } from './ChatMessageCouncilStep.ets';\nimport { WidgetMessageContent } from './WidgetMessageContent.ets';\nimport { ChatMessageActionFooter, resolveActionFooterMode } from './ChatMessageActionFooter.ets';\nimport { ContentAttachmentChip, urlBasename } from './ContentAttachmentChip.ets';\nimport { MiniAppChatCard } from './MiniAppChatCard.ets';\nimport { UIAvatar } from './UIAvatar.ets';\nimport { ChatUserBubble } from './ChatUserBubble.ets';\nimport { ImagePreviewDialog } from './ui/ImagePreviewDialog.ets';\n\nexport interface AgentMessageRowHostCapabilities {\n  copy: boolean;\n  fork: boolean;\n  branchSwitch: boolean;\n  edit: boolean;\n  regenerate: boolean;\n  favorite: boolean;\n  openActions: boolean;\n  approveTool: boolean;\n  denyTool: boolean;\n  answerTool: boolean;\n  openToolPreview: boolean;\n  openSubAgentRun: boolean;\n  openCouncilRun?: boolean;\n  runMiniApp: boolean;\n  modifyMiniApp: boolean;\n  openMiniAppList: boolean;\n  // F44:文档附件是否可打开(宿主提供真实 open 路径时置 true)\n  openDocument: boolean;\n}\n\nexport const NO_AGENT_MESSAGE_ROW_CAPABILITIES: AgentMessageRowHostCapabilities = {\n  copy: false,\n  fork: false,\n  branchSwitch: false,\n  edit: false,\n  regenerate: false,\n  favorite: false,\n  openActions: false,\n  approveTool: false,\n  denyTool: false,\n  answerTool: false,\n  openToolPreview: false,\n  openSubAgentRun: false,\n  runMiniApp: false,\n  modifyMiniApp: false,\n  openMiniAppList: false,\n  openDocument: false,\n};\n\n@Component\nexport struct AgentMessageRow {\n  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌\n  @StorageProp('darkMode') darkMode: boolean = false;\n  @Prop message: UIMessage;\n  @Prop capabilities: AgentMessageRowHostCapabilities = NO_AGENT_MESSAGE_ROW_CAPABILITIES;\n  @Prop branchCount: number = 1;\n  @Prop selectIndex: number = 0;\n  @Prop isLastAssistant: boolean = false;\n  // D-053:本行是否属于活动流式尾部(reasoning loading 判定;\n  //   Android messageLoading 语义,流式尾/regen 预览传 true)\n  @Prop @Watch('onStreamingChange') streaming: boolean = false;\n  // generationActive 与网络文本增量分离：reasoning/tool loading 跟随前者，\n  // Markdown reveal 只在真实 live text delta 时启用，避免 one-shot 假流式。\n  @Prop textDeltasLive: boolean = true;\n  @Prop autoCloseThinking: boolean = true;\n  // 显示与字体设置:思考内容总开关(关闭时隐藏 reasoning 步骤)\n  @Prop showThinkingContent: boolean = true;\n  // F16:显示设置消费(默认值 == 当前渲染行为,不改变既有外观)\n  @Prop showAssistantBubble: boolean = false;\n  @Prop showModelName: boolean = true;\n  @Prop showModelIcon: boolean = false;\n  // D0-4:用户头像(DisplaySetting.showUserAvatar;默认 false = 1:1 原型无抬头)\n  @Prop showUserAvatar: boolean = false;\n  @Prop userAvatar: string = '';\n  @Prop userNickname: string = '';\n  @Prop fontSizeRatio: number = 1.0;\n  @Prop codeBlockAutoCollapse: boolean = false;\n  @Prop showLineNumbers: boolean = false;\n  // 聊天字体族(DisplaySetting.chatFontFamily 三选,传递 MarkdownText)\n  @Prop chatFontFamily: string = 'DEFAULT';\n  // LaTeX 渲染开关(DisplaySetting.enableLatexRendering,传递 MarkdownText)\n  @Prop enableLatexRendering: boolean = true;\n  // 同一 message id 可同时出现在已提交行与工具续跑预览中；预览使用独立键命名空间。\n  @Prop streamKeyTag: string = '';\n  onSwitch: (idx: number) => void = (_idx: number): void => {};\n  onRegenerate: () => void = (): void => {};\n  onEdit: () => void = (): void => {};\n  onOpenActions: () => void = (): void => {};\n  onFork: () => void = (): void => {};\n  // D-057/R08:工具审批回调(toolCallId + 可选精确 locator;旧调用只传 id)\n  onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator) => void =\n    (_id: string, _loc?: ToolApprovalPartLocator): void => {};\n  onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator) => void =\n    (_id: string, _loc?: ToolApprovalPartLocator): void => {};\n  // D-105/R08:ask_user 应答回调(ChatMessageAskUserStep.kt onToolAnswer)\n  onAnswerTool: (toolCallId: string, answer: string, locator?: ToolApprovalPartLocator) => void =\n    (_id: string, _a: string, _loc?: ToolApprovalPartLocator): void => {};\n  onOpenSubAgentRun: (runId: string, tools: UIMessagePartTool[]) => void =\n    (_id: string, _t: UIMessagePartTool[]): void => {};\n  onCopy: () => void = (): void => {};\n  @Prop isFavorite: boolean = false;\n  onFavorite: (text: string) => void = (_t: string): void => {};\n  onOpenToolPreview: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator) => void =\n    (_p: UIMessagePartTool, _l?: ToolApprovalPartLocator): void => {};\n  jevSubjectHashForPart: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator) => string =\n    (_p: UIMessagePartTool, _l?: ToolApprovalPartLocator): string => '';\n  // generate_image 修改回调(edit 流程,宿主 ChatPage 注入)\n  onModifyGeneratedImage: (url: string) => void = (_url: string): void => {};\n  onWidgetAction: (prompt: string) => void = (_prompt: string): void => {};\n  onOpenCouncilRun: (runId: string, tools: UIMessagePartTool[]) => void =\n    (_runId: string, _tools: UIMessagePartTool[]): void => {};\n  // F44:文档附件打开(宿主未提供路径时 capabilities.openDocument=false → 纯展示)\n  onOpenDocument: (part: UIMessagePartDocument) => void = (_p: UIMessagePartDocument): void => {};\n  // P3:可见文本增长回调(逐字 reveal / 终态 drain 推进时触发;冒泡到 ChatPage\n  //   复用既有 followStreamingUpdate,不新建第二套滚动状态机)\n  onTextGrow: () => void = (): void => {};\n  // MiniApp:卡片回调冒泡(onRun 进 Runner;onModify 组装修订 prompt 回填输入框;\n  //   onOpenList 进列表页 — 均在 host 层实现,AgentMessageRow 仅透传)\n  onRunMiniApp: (appId: string) => void = (_appId: string): void => {};\n  onModifyMiniApp: (prompt: string) => void = (_prompt: string): void => {};\n  onOpenMiniAppList: () => void = (): void => {};\n  @BuilderParam hostHeader: () => void;\n  @BuilderParam hostFooter: () => void;\n  // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)\n  @State reasoningStates: Record<string, string> = {};\n  // D-105:ask_user 草稿态(题 id → 文本/单选值;:102;题 id → 多选集;:104)\n  @State askAnswers: Record<string, string> = {};\n  @State askMultiAnswers: Record<string, string[]> = {};\n  // D-053:本会话内见过流式(Android sawStreamingMessage:123 —\n  //   流式结束后保持 Preview 不自动折叠)\n  @State sawStream: boolean = false;\n  // 1:1 原型 fadeRise .26s ease-out:行入场 opacity 0→1 + translateY 4→0\n  @Prop animateEntrance: boolean = true;\n  @State enterOpacity: number = 0;\n  @State enterY: number = 4;\n  @State imagePreviewOpen: boolean = false;\n  @State imagePreviewUrls: string[] = [];\n  @State imagePreviewIndex: number = 0;\n\n  private openImagePreview(url: string): void {\n    const urls: string[] = [];\n    for (const part of this.message.parts) {\n      if (part.type === 'image') urls.push(part.url);\n    }\n    this.imagePreviewUrls = urls;\n    this.imagePreviewIndex = Math.max(0, urls.indexOf(url));\n    this.imagePreviewOpen = true;\n  }\n\n  @Builder\n  private MessageImagePreview(): void {\n    ImagePreviewDialog({ images: this.imagePreviewUrls, initialIndex: this.imagePreviewIndex,\n      onDismiss: (): void => { this.imagePreviewOpen = false; } })\n  }\n\n  aboutToAppear(): void {\n    if (this.streaming) this.sawStream = true;\n  }\n\n  private onStreamingChange(_propName: string): void {\n    if (this.streaming) this.sawStream = true;\n  }\n\n  // loading = messageLoading && finishedAt == null(ChatMessageReasoning.kt:107)\n  private reasoningLoading(p: UIMessagePartReasoning): boolean {\n    return this.streaming && p.finishedAt === null;\n  }\n\n  // 纯文本:text part 拼接 + 去 **/`(收藏等用途)\n  private plainText(): string {\n    let s: string = '';\n    for (const p of this.message.parts) {\n      if (p.type === 'text') s += p.text;\n    }\n    return s.replace(/\\*\\*([^*]+)\\*\\*/g, '$1').replace(/`([^`]+)`/g, '$1');\n  }\n\n  // :952-960 已拒绝展示:'已拒绝' + 非空白 reason → ': reason'(红色;\n  //   chat_message_tool_denied zh 逐字,冒号为 ASCII ': ')\n  private deniedLabel(t: UIMessagePartTool): string {\n    if (t.approvalState.type !== 'denied') return '';\n    const reason: string = t.approvalState.reason;\n    return reason.trim().length > 0 ? `已拒绝: ${reason}` : '已拒绝';\n  }\n\n  private packageAskUserPart(t: UIMessagePartTool): UIMessagePartTool | null {\n    return recipeAskUserPart(t) ?? pluginAskUserPart(t);\n  }\n\n  private askQuestionsOf(t: UIMessagePartTool): AskUserQuestion[] {\n    return parseAskUserQuestions((this.packageAskUserPart(t) ?? t).input);\n  }\n\n  // R08:partIndex 必须是原 message.parts 索引。先 indexOf 原数组;\n  //   group 复制体不在原数组时,仅用 metadata stream_tool_index 作为**匹配键**\n  //   在原 parts 中唯一查找,取该候选的真实 parts 下标;不唯一则拒歧义不传。\n  //   (streamToolIndex 是流内工具序号,可能与 parts 下标不同,不能直接当 partIndex)\n  private locatorFor(t: UIMessagePartTool): ToolApprovalPartLocator | undefined {\n    const index: number = this.message.parts.indexOf(t);\n    if (index >= 0) return { messageId: this.message.id, partIndex: index };\n    const sidx: number | null = streamToolIndex(t);\n    if (sidx === null) return undefined;\n    let found: number = -1;\n    let count: number = 0;\n    for (let i: number = 0; i < this.message.parts.length; i++) {\n      const p = this.message.parts[i];\n      if (p.type === 'tool' && streamToolIndex(p as UIMessagePartTool) === sidx) {\n  "... 17085 more characters,
+    expected: /@Prop\s+@Watch\('onMessageChanged'\)\s+message:\s*UIMessage/,
+    operator: 'match',
+    diff: 'simple'
+  }

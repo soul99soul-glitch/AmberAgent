@@ -1,0 +1,49 @@
+{
+  "scope": "Prefer120fps with system LTPO60–120 range and bounded motion across rate changes/missed frames",
+  "implementation": [
+    "API20+ chooses highest supported mode up to120; API12 uses known current mode",
+    "Native frame targetTimestamp determines expected interval; elapsed missed-frame debt is not repaid in a large step",
+    "Spring displacement/velocity limited to720vp/s; releases DisplaySync at rest/touch/detach",
+    "Preserves48ms snapshot cadence, native List, Markdown fade and measured suggestion spacer target"
+  ],
+  "tests": {
+    "passed": 50,
+    "failed": 0,
+    "lint": "no defects",
+    "build": "AGC signed build successful22s217ms"
+  },
+  "installed": {
+    "device": "6HK0226627000384",
+    "result": "install bundle successfully; EntryAbility start success",
+    "hap": "/tmp/amber-stream120-ltpo.hap",
+    "bytes": 59684762,
+    "sha256": "95ba2f890209114f05aad24fe04c45ae3e7a57e7c0d0ef08d6dd0089ebd3e14b",
+    "pid": 52886
+  },
+  "physical_verification": {
+    "user_feedback": "感觉不错，但不知道是多少fps",
+    "capture": "read-only SP60s plus hitrace40s; user triggered generation; no input injection during capture",
+    "app_visible_after_capture": "ChatListPage; no final reply screenshot captured",
+    "actual_fps": "initial app samples106/115; transition92; steady automatic-follow53–59, mean55.67fps",
+    "system": "TouchUp→TouchIdle thenUI_ANIMATION_ENERGY_ASSURANCE[60–60], despite activeDisplaySync[60,120,120]",
+    "remaining": "occasional33ms presentation intervals; stable120fps not achieved",
+    "list_scroll_max_trace_units": 32.994339,
+    "scroll_to_edge_calls": 0,
+    "evidence": "streamltpolive-analysis.json"
+  },
+  "trace": {
+    "path": "/tmp/streamltpolive.trace",
+    "bytes": 50002257,
+    "sha256": "2cdd5b3f09e52474fdbe9dc30c02391fb8eada8acea8998174a745cbf2c96067"
+  },
+  "source_sha256_at_evidence_save": {
+    "harmony/entry/src/main/ets/components/NativeTimelineFollow.ets": "1137c8318f9b7189299c15c515596d4c72c5f16ec98d43f23243b5552e3617c6",
+    "harmony/chat/src/main/ets/chat/native_timeline_motion.ts": "e7380d0d09a5927a46db95811045c7652901284d3836f0e692d6911e70e9195d",
+    "harmony/chat/src/test/native_timeline_follow.test.cjs": "388a961352bf4e9894d4e3ef4f60bcc883958a439c4b5e5c0c50271f6eb54c1d",
+    "harmony/chat/src/test/native_timeline_motion.test.ts": "c03e0afcf959447fe8cfae6b7637a9046af34b971eee0351aa9d2124d166cc51",
+    "harmony/entry/src/main/ets/components/NativeMarkdownText.ets": "8c1873539891e7154dd7dfdb581a42019fb4b272d0b44229e08dfdb1aacf8241",
+    "harmony/entry/src/main/ets/components/NativeMarkdownInline.ts": "6cb36590cfc1d094c8be364d570fdabca5c060ffa357e2f37cc18211c4370174"
+  },
+  "official_reference": "https://developer.huawei.com/consumer/cn/doc/best-practices/bpta-ltpo-description",
+  "supersedes": "streamjump-state.json pending bounded-follow installation and fixed90 target; bounded spring is included in this installed120LTPO package"
+}

@@ -5,6 +5,7 @@
 #include "plugin_js_napi.h"
 #include "mosh_napi.h"
 #include "google_loopback_napi.h"
+#include "stream_frame_rate.h"
 
 #include <memory>
 #include <string>
@@ -182,6 +183,7 @@ napi_value Init(napi_env env, napi_value exports)
     if (RegisterPython(env, exports) == nullptr) return nullptr;
     if (RegisterMosh(env, exports) == nullptr) return nullptr;
     if (RegisterPluginJs(env, exports) == nullptr) return nullptr;
+    if (RegisterStreamingFrameRate(env, exports) == nullptr) return nullptr;
     return RegisterGoogleLoopback(env, exports);
 }
 

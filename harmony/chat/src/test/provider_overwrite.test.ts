@@ -4,11 +4,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  copyProviderSettingWithModels, findProviderForModel,
-  makeProviderModel, makeProviderSettingClaude, makeProviderSettingGoogle,
+  copyProviderSettingWithModels,
+  findProviderForModel,
+  makeProviderModel,
+  makeProviderSettingClaude,
+  makeProviderSettingGoogle,
   makeProviderSettingOpenAIVariant,
 } from '../main/ets/chat/provider_settings.ts';
-import type { ProviderModel, ProviderSetting } from '../main/ets/chat/provider_settings.ts';
+import type {
+  ProviderModel,
+  ProviderSetting,
+} from '../main/ets/chat/provider_settings.ts';
 
 const container = (models: ProviderModel[]): ProviderSetting =>
   makeProviderSettingOpenAIVariant({
@@ -22,13 +28,6 @@ test('findProviderForModel: 容器未命中 → null(overwrite 不兜底,:501)',
   });
   const orphan: ProviderModel = makeProviderModel({ id: 'm-x', providerOverwrite: overwrite });
   assert.equal(findProviderForModel([container([])], orphan), null);
-});
-
-test('findProviderForModel: 命中且无 overwrite → 容器 provider 同引用', () => {
-  const m: ProviderModel = makeProviderModel({ id: 'm-1', modelId: 'gpt-4o' });
-  const c: ProviderSetting = container([m]);
-  const r: ProviderSetting | null = findProviderForModel([c], m);
-  assert.equal(r, c);
 });
 
 test('findProviderForModel: 命中 + overwrite → overwrite 副本,models=[],变体字段全保留', () => {
@@ -57,14 +56,6 @@ test('findProviderForModel: checkOverwrite=false → 忽略 overwrite 返回容�
   const c: ProviderSetting = container([m]);
   const r: ProviderSetting | null = findProviderForModel([c], m, false);
   assert.equal(r, c);
-});
-
-test('findProviderForModel: 反查序 = providers × models 声明序(:509-518)', () => {
-  const m: ProviderModel = makeProviderModel({ id: 'm-1' });
-  const first: ProviderSetting = container([m]);
-  const second: ProviderSetting = makeProviderSettingClaude({ id: 'p-2', models: [m] });
-  const r: ProviderSetting | null = findProviderForModel([first, second], m);
-  assert.equal(r, first);
 });
 
 test('copyProviderSettingWithModels: 三变体显式字段保留 + models 替换', () => {

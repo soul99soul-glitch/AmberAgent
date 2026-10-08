@@ -1,0 +1,44 @@
+name: Harmony Tests
+
+on:
+  pull_request:
+    paths:
+      - 'harmony/**'
+      - 'scripts/test-harmony.mjs'
+      - 'scripts/harmony-standalone/**'
+      - 'package.json'
+      - 'AGENTS.md'
+      - '.github/workflows/harmony-tests.yml'
+  push:
+    branches: [main, harmony-preview]
+    paths:
+      - 'harmony/**'
+      - 'scripts/test-harmony.mjs'
+      - 'scripts/harmony-standalone/**'
+      - 'package.json'
+      - 'AGENTS.md'
+      - '.github/workflows/harmony-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            harmony/chat/package-lock.json
+            harmony/deepread/package-lock.json
+      - name: Install domain test dependencies
+        run: |
+          npm ci --prefix harmony/chat
+          npm ci --prefix harmony/deepread
+      - name: Run Harmony domain and Entry tests
+        run: npm run test:harmony

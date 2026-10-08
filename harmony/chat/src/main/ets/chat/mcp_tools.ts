@@ -85,6 +85,7 @@ export const mcpImportKey = (config: McpServerConfig): string =>
 
 // InputSchema.Obj data class toString 逐字:Obj(properties=<json>, required=<list|null>)
 const schemaToKotlinString = (schema: InputSchemaObj): string => {
+  if (schema.jsonSchema !== undefined) return JSON.stringify(schema.jsonSchema);
   const required: string = schema.required === null
     ? 'null' : `[${schema.required.join(', ')}]`;
   return `Obj(properties=${JSON.stringify(schema.properties)}, required=${required})`;
@@ -115,6 +116,7 @@ const serverToJson = (server: McpServerConfig, status: McpStatus | undefined,
       if (includeSchema) {
         t['schema'] = tool.inputSchema === null ? '' : schemaToKotlinString(tool.inputSchema);
       }
+      if (tool.annotations !== undefined) t['annotations'] = tool.annotations;
       return t;
     });
     out['tools'] = arr;

@@ -1,0 +1,33 @@
+✔ layout requests coalesce, sample after layout and move in bounded native frames (34.672541ms)
+✔ touch/cancel prevents a queued old frame from moving the list (4.662042ms)
+✔ growing geometry retargets the active spring; late terminal layout starts another frame (6.517625ms)
+✔ new structural row outside measured range anchors once without a frame loop (3.979209ms)
+✔ busy layout frames advance scrolling without waiting for onIdle (3.336333ms)
+✖ active native follow requests display frames above the default 30fps vote and releases them at rest (4.751334ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 380.339209
+
+✖ failing tests:
+
+test at harmony/chat/src/test/native_timeline_follow.test.cjs:93:1
+✖ active native follow requests display frames above the default 30fps vote and releases them at rest (4.751334ms)
+  AssertionError [ERR_ASSERTION]: native motion must own a DisplaySync clock
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:96:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -14,12 +14,15 @@ export struct InteractiveMessageTimeline {
   @Prop cachedItems: number = 0;
   @Prop showOlderLoader: boolean = false;
   @Prop showDivider: boolean = false;
+  @Prop showScrollBar: boolean = true;
   onTimelineAppear: () => void = (): void => {};
   onViewportHeightChange: (height: number) => void = (_height: number): void => {};
   onReachStart: () => void = (): void => {};
   onVisibleRangeChange: (start: number, end: number) => void =
     (_start: number, _end: number): void => {};
   onTimelineTouch: (event: TouchEvent) => void = (_event: TouchEvent): void => {};
+  onTimelineWillScroll: (offset: number, state: ScrollState, source: ScrollSource) => void =
+    (_offset: number, _state: ScrollState, _source: ScrollSource): void => {};
   onTimelineScroll: (offset: number, state: ScrollState) => void =
     (_offset: number, _state: ScrollState): void => {};
   onTimelineScrollStop: () => void = (): void => {};
@@ -51,6 +54,7 @@ export struct InteractiveMessageTimeline {
     .width('100%')
     .layoutWeight(1)
     .cachedCount(this.cachedItems)
+    .scrollBar(this.showScrollBar ? BarState.Auto : BarState.Off)
     .padding({
       left: this.horizontalGutter,
       right: this.horizontalGutter,
@@ -67,6 +71,9 @@ export struct InteractiveMessageTimeline {
       this.onVisibleRangeChange(start, end);
     })
     .onTouch((event: TouchEvent): void => { this.onTimelineTouch(event); })
+    .onWillScroll((offset: number, state: ScrollState, source: ScrollSource): void => {
+      this.onTimelineWillScroll(offset, state, source);
+    })
     .onDidScroll((offset: number, state: ScrollState): void => {
       this.onTimelineScroll(offset, state);
     })

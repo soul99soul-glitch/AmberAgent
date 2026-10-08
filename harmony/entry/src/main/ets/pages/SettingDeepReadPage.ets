@@ -19,10 +19,12 @@ import { PillSelect } from '../components/ui/Select.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { BUILTIN_TEMPLATES, loadCustomTemplates } from '../platform_impl/DeepReadTemplate.ets';
 import type { DeepReadTemplateDef, CustomTemplateDef } from '../platform_impl/DeepReadTemplate.ets';
-import { router, promptAction } from '@kit.ArkUI';
+import { router, promptAction, curves } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { getAppContainer, getModelRegistry, resolveChatProviderChoice } from '../di/AppContainer.ets';
+import { getAppContainer, getChatKvStore, getModelRegistry, resolveChatProviderChoice } from '../di/AppContainer.ets';
 import type { DeepReadModelOption } from '../di/AppContainer.ets';
+import { defaultSearchPrefs, loadSearchPrefs, updateSearchPrefs } from '@amber/chat-domain';
+import type { SearchSettings, SearchServiceOptions } from '@amber/chat-domain';
 import type { TaskModelReference } from '@amber/chat-domain';
 import { loadDeepReadModelSelection, saveDeepReadModelSelection } from '../platform_impl/DeepReadModelSelection.ets';
 import type { DeepReadModelSelectionState } from '../platform_impl/DeepReadModelSelection.ets';
@@ -32,6 +34,17 @@ import type { Storage, ModelConfig } from '@amber/deepread-domain';
 import { makeModelConfig } from '@amber/deepread-domain';
 import { HOTLIST_PRESETS } from '../platform_impl/NewsNowProvider.ets';
 import type { NewsNowPreset } from '../platform_impl/NewsNowProvider.ets';
+import { DeepReadHaptics } from '../design/DeepReadHaptics.ets';
+import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
+import { markWantRoutingReady } from '../entryability/EntryAbility.ets';
+import { DeepReadTabBar } from '../components/deepread/DeepReadTabBar.ets';
+import { DeepReadPaperBackground } from '../components/deepread/DeepReadPaperBackground.ets';
+import { DeepReadSettingsHeader } from '../components/deepread/DeepReadSettingsVisual.ets';
+import { loadDeepReadAppearance } from '../platform_impl/DeepReadAppearance.ets';
+import { DeepReadDockScroll } from '../components/deepread/DeepReadDockScroll.ets';
+import { DeepReadSettingsForm } from '../components/deepread/DeepReadSettingsForm.ets';
+import { writeDeepReadSearchEditorDraft, consumeDeepReadSearchEditorDraft } from '../platform_impl/DeepReadSearchDraft.ets';
+import type { DeepReadSearchEditorDraft } from '../platform_impl/DeepReadSearchDraft.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Settings';
@@ -42,6 +55,30 @@ interface SourceToggle {
   displayName: string;
   enabled: boolean;
 }
+
+interface DeepReadSettingsRouteParams {
+  standaloneTabRoot?: boolean;
+}
+
+// This AppStorage snapshot is process-local; it is never registered with PersistentStorage.
+interface DeepReadSettingsSearchDraft {
+  settings: SearchSettings;
+  selectedId: string;
+}
+interface DeepReadSettingsReadingDraft {
+  fontModeIndex: number;
+  fontScalePercent: number;
+  templateId: string;
+  persistedTemplateId: string;
+}
+interface DeepReadSettingsSessionDraft {
+  search: DeepReadSettingsSearchDraft | null;
+  reading: DeepReadSettingsReadingDraft | null;
+  modelReference: TaskModelReference | null;
+  modelLabel: string;
+  modelDetail: string;
+}
+const SETTINGS_SESSION_DRAFT: string = 'deepreadSettingsSessionDraft';
 
 // 搜索源定义(需 key 的)
 interface SearchSourceDef {
@@ -57,11 +94,35 @@ const KEYED_SOURCES: SearchSourceDef[] = [
   { id: 'exa', displayName: 'Exa', keyPlaceholder: 'exa-...' },
 ];
 
-@Entry
 @Component
-struct SettingDeepReadPage {
+export struct SettingDeepReadPageContent {
+  onBackHandler: (handler: () => boolean) => void = (_handler: () => boolean): void => {};
+  @Prop embeddedRoot: boolean = false;
+  @Prop @Watch('rootVisibilityChanged') rootVisible: boolean = false;
+
+  private rootVisibilityChanged(): void {
+    if (this.rootVisible) this.onPageShow(); else this.onPageHide();
+  }
+
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
+  @StorageProp('appBackgrounded') @Watch('motionPolicyChanged') appBackgrounded: boolean = false;
+  @State standaloneRoot: boolean = true;
+  @StorageProp('reduceMotion') @Watch('motionPolicyChanged') reduceMotion: boolean = false;
+  @StorageProp('deepreadActiveTab') @Watch('motionPolicyChanged') activeTab: number = 2;
+  @State standaloneSearch: SearchSettings = defaultSearchPrefs();
+  @State standaloneSearchLoaded: boolean = false;
+  @State standaloneSearchError: string = '';
+  @State selectedSearchId: string = '';
+  @State modelDraftDirty: boolean = false;
+  private searchLoadToken: number = 0;
+  private persistedTemplateId: string = 'none';
+  private settingsEdited: boolean = false;
+  private readingSettingsLoaded: boolean = false;
+  private restoredReadingDraft: boolean = false;
+  private pendingSearchDraft: DeepReadSettingsSearchDraft | null = null;
+  @State arrivalOffset: number = 0;
   @State aiKey: string = '';
   @State aiBaseUrl: string = 'https://api.deepseek.com';
   @State model: string = 'deepseek-chat';
@@ -104,9 +165,16 @@ struct SettingDeepReadPage {
 
   private storage: Storage | null = null;
   private pageAlive: boolean = false;
+  private pageVisible: boolean = false;
   private loadToken: number = 0;
   private pageLoad: Promise<void> = Promise.resolve();
   private modelLoadToken: number = 0;
+  private readonly settingsScroller: Scroller = new Scroller();
+  private readonly dockScroll: DeepReadDockScroll = new DeepReadDockScroll();
+  private firstArrival: boolean = true;
+  private arrivalTimer: number = -1;
+  private restoreScrollPending: boolean = true;
+  private confirmationTimer: number = -1;
 
   onBackPress(): boolean {
     if (!this.modelSheetOpen) return false;
@@ -115,34 +183,156 @@ struct SettingDeepReadPage {
   }
 
   aboutToAppear(): void {
+    this.onBackHandler((): boolean => { return this.onBackPress(); });
     this.pageAlive = true;
+    if (getProductKind() === 'deepread') {
+      this.standaloneRoot = this.readStandaloneRoot();
+      if (this.standaloneRoot) this.restoreSessionDraft();
+    }
     const token: number = ++this.loadToken;
     this.pageLoad = this.loadPage(token).catch((e: Error): void => {
       if (this.pageAlive && token === this.loadToken) {
         this.saved = `加载失败：${e.message}`;
       }
     });
+    if (this.rootVisible) this.onPageShow();
   }
 
   aboutToDisappear(): void {
+    this.dockScroll.reset();
+    this.saveSessionDraft();
     this.pageAlive = false;
+    this.pageVisible = false;
+    this.settleArrival();
     this.loadToken++;
     this.modelLoadToken++;
+    this.searchLoadToken++;
+    if (this.confirmationTimer >= 0) clearTimeout(this.confirmationTimer);
   }
 
   // 从模板工作台返回时刷新自定义模板列表(aboutToAppear 在栈内返回不重跑)
   onPageShow(): void {
+    this.pageVisible = true;
+    this.dockScroll.reset();
+    if (getProductKind() === 'deepread') {
+      this.standaloneRoot = this.readStandaloneRoot();
+      if (!this.embeddedRoot) markWantRoutingReady(this.getUIContext().getRouter());
+      if (this.standaloneRoot && !this.embeddedRoot) AppStorage.setOrCreate<number>('deepreadActiveTab', 2);
+      this.refreshStandaloneSearch();
+      if (!this.embeddedRoot) this.arrive();
+    }
     const storage: Storage | null = this.storage;
     if (storage === null) return;
+    if (getProductKind() === 'deepread') this.refreshTemplateSelection();
     loadCustomTemplates(storage).then((list: CustomTemplateDef[]): void => {
       if (this.pageAlive) this.customTemplates = list;
     }).catch((): void => {});
     this.refreshTaskModelSelection();
   }
 
+  private readStandaloneRoot(): boolean {
+    const params: DeepReadSettingsRouteParams | null = router.getParams() as DeepReadSettingsRouteParams | null;
+    return this.embeddedRoot || parseInt(router.getLength(), 10) <= 1 || params?.standaloneTabRoot === true;
+  }
+
+  onPageHide(): void {
+    this.dockScroll.reset();
+    this.saveSessionDraft();
+    this.pageVisible = false;
+    this.settleArrival();
+    if (getProductKind() === 'deepread' && this.standaloneRoot) {
+      AppStorage.setOrCreate<number>('deepreadSettingsOffset', this.settingsScroller.currentOffset().yOffset);
+    }
+  }
+
+  private markSettingsEdited(): void {
+    this.settingsEdited = true;
+    this.clearSavedNotice();
+  }
+
+  private saveSessionDraft(): void {
+    if (getProductKind() !== 'deepread' || !this.standaloneRoot) return;
+    if (!this.settingsEdited && !this.modelDraftDirty) { AppStorage.delete(SETTINGS_SESSION_DRAFT); return; }
+    const search: SearchSettings = this.standaloneSearch;
+    const draft: DeepReadSettingsSessionDraft = {
+      search: this.standaloneSearchLoaded ? {
+        settings: search, selectedId: this.selectedSearchId,
+      } : this.pendingSearchDraft,
+      reading: this.readingSettingsLoaded ? {
+        fontModeIndex: this.fontModeIndex, fontScalePercent: this.fontScalePercent,
+        templateId: this.templateId, persistedTemplateId: this.persistedTemplateId,
+      } : null,
+      modelReference: this.modelDraftDirty ? this.taskModelReference : null,
+      modelLabel: this.taskModelLabel, modelDetail: this.taskModelDetail,
+    };
+    // Retain an isolated draft only in process memory, including unsaved search credentials.
+    AppStorage.setOrCreate<DeepReadSettingsSessionDraft>(SETTINGS_SESSION_DRAFT,
+      JSON.parse(JSON.stringify(draft)) as DeepReadSettingsSessionDraft);
+  }
+
+  private restoreSessionDraft(): void {
+    const cached: DeepReadSettingsSessionDraft | undefined = AppStorage.get<DeepReadSettingsSessionDraft>(SETTINGS_SESSION_DRAFT);
+    if (cached === undefined) return;
+    const draft: DeepReadSettingsSessionDraft = JSON.parse(JSON.stringify(cached)) as DeepReadSettingsSessionDraft;
+    this.settingsEdited = true;
+    this.pendingSearchDraft = draft.search;
+    if (draft.reading !== null) {
+      this.fontModeIndex = draft.reading.fontModeIndex;
+      this.fontScalePercent = draft.reading.fontScalePercent;
+      this.templateId = draft.reading.templateId;
+      this.persistedTemplateId = draft.reading.persistedTemplateId;
+      this.readingSettingsLoaded = true;
+      this.restoredReadingDraft = true;
+    }
+    if (draft.modelReference !== null) {
+      this.taskModelReference = draft.modelReference;
+      this.modelDraftDirty = true;
+      this.taskModelLabel = draft.modelLabel;
+      this.taskModelDetail = draft.modelDetail;
+    }
+  }
+
+  private arrive(): void {
+    if (!this.firstArrival || !this.standaloneRoot) return;
+    this.firstArrival = false;
+    const direction: number = AppStorage.get<number>('deepreadTabDirection') ?? 0;
+    if (direction === 0 || this.reduceMotion || this.appBackgrounded || this.activeTab !== 2) return;
+    this.arrivalOffset = direction * 30;
+    // Commit the starting position before the first animation transaction.
+    this.arrivalTimer = setTimeout((): void => {
+      if (this.arrivalTimer < 0) return;
+      this.arrivalTimer = -1;
+      if (!this.pageAlive || !this.pageVisible || this.reduceMotion || this.appBackgrounded || this.activeTab !== 2) {
+        this.arrivalOffset = 0;
+        return;
+      }
+      this.getUIContext().animateTo({ duration: 260, curve: curves.springCurve(0, 1, 240, 30) }, (): void => {
+        this.arrivalOffset = 0;
+      });
+    }, 16);
+  }
+
+  private motionPolicyChanged(): void {
+    if (this.reduceMotion || this.appBackgrounded || this.activeTab !== 2) this.settleArrival();
+  }
+
+  private settleArrival(): void {
+    if (this.arrivalTimer >= 0) clearTimeout(this.arrivalTimer);
+    this.arrivalTimer = -1;
+    this.arrivalOffset = 0;
+  }
+
+  private restoreSettingsScroll(): void {
+    if (!this.restoreScrollPending || !this.standaloneRoot) return;
+    this.restoreScrollPending = false;
+    const offset: number = AppStorage.get<number>('deepreadSettingsOffset') ?? 0;
+    this.settingsScroller.scrollTo({ xOffset: 0, yOffset: offset, animation: false });
+  }
+
   private async loadPage(token: number): Promise<void> {
     const storage: Storage = getAppContainer().storage;
     this.storage = storage;
+    if (getProductKind() === 'deepread') await loadDeepReadAppearance(storage);
     const aiKey: string = await storage.get<string>('ai_api_key', '');
     const aiBaseUrl: string = await storage.get<string>('ai_base_url', 'https://api.deepseek.com');
     const model: string = await storage.get<string>('ai_model', 'deepseek-chat');
@@ -164,7 +354,7 @@ struct SettingDeepReadPage {
     // P5:关注筛选/阅读体验/看板模型
     const focusKeywords: string = await storage.get<string>('deepread_focus_keywords', '');
     const focusMode: string = await storage.get<string>('deepread_focus_mode', 'all');
-    const fontMode: string = await storage.get<string>('deepread_font_mode', 'default');
+    const fontMode: string = await storage.get<string>('deepread_font_mode', getProductKind() === 'deepread' ? 'serif' : 'default');
     const fontScale: number = Number(await storage.get<number>('deepread_font_scale', 100));
     const boardModelId: string = await storage.get<string>('deepread_model_id', '');
     const tplId: string = await storage.get<string>('deepread_template_id', 'none');
@@ -181,12 +371,90 @@ struct SettingDeepReadPage {
     this.models = models;
     this.focusKeywords = focusKeywords;
     this.focusModeIndex = focusMode === 'focus_first' ? 1 : focusMode === 'focus_only' ? 2 : 0;
-    this.fontModeIndex = fontMode === 'serif' ? 1 : 0;
-    this.fontScalePercent = Math.max(70, Math.min(180, Number.isFinite(fontScale) ? fontScale : 100));
+    if (!this.restoredReadingDraft) {
+      this.fontModeIndex = fontMode === 'serif' ? 1 : 0;
+      this.fontScalePercent = Math.max(70, Math.min(180, Number.isFinite(fontScale) ? fontScale : 100));
+    }
+    this.readingSettingsLoaded = true;
     this.boardModelId = boardModelId;
-    this.templateId = tplId;
+    if (!this.restoredReadingDraft || tplId !== this.persistedTemplateId) this.templateId = tplId;
+    this.persistedTemplateId = tplId;
     this.customTemplates = await loadCustomTemplates(storage);
     await this.refreshTaskModelSelection();
+  }
+
+  private async refreshStandaloneSearch(): Promise<void> {
+    const editor: DeepReadSearchEditorDraft | null = consumeDeepReadSearchEditorDraft();
+    if (editor !== null) {
+      this.searchLoadToken++;
+      this.standaloneSearch = editor.settings;
+      this.selectedSearchId = editor.selectedId;
+      this.standaloneSearchLoaded = true;
+      this.standaloneSearchError = '';
+      if (editor.dirty) this.markSettingsEdited();
+      return;
+    }
+    // Returning from another settings page must not replace an unsaved service or credential.
+    if (this.standaloneSearchLoaded) return;
+    const token: number = ++this.searchLoadToken;
+    try {
+      const current: SearchSettings = await loadSearchPrefs(getChatKvStore());
+      if (!this.pageAlive || token !== this.searchLoadToken) return;
+      const draft: DeepReadSettingsSearchDraft | null = this.pendingSearchDraft;
+      this.standaloneSearch = draft === null ? current : draft.settings;
+      this.selectedSearchId = draft === null
+        ? current.searchServices[current.searchServiceSelected]?.id ?? '' : draft.selectedId;
+      this.standaloneSearch.searchServiceSelected = this.standaloneSearch.searchServices.findIndex(
+        (service: SearchServiceOptions): boolean => service.id === this.selectedSearchId);
+      this.pendingSearchDraft = null;
+      this.standaloneSearchLoaded = true;
+      this.standaloneSearchError = this.selectedSearchId.length > 0 && this.standaloneSearch.searchServiceSelected < 0
+        ? '首选搜索服务已删除，请重新选择' : '';
+    } catch (error) {
+      if (this.pageAlive && token === this.searchLoadToken) this.standaloneSearchError = '读取搜索配置失败：' + String(error);
+    }
+  }
+
+  private openSearchServiceEditor(serviceId: string): void {
+    if (!this.standaloneSearchLoaded) return;
+    writeDeepReadSearchEditorDraft({ settings: this.standaloneSearch,
+      selectedId: this.selectedSearchId, dirty: false });
+    router.pushUrl({ url: 'pages/DeepReadSearchServiceEditorPage', params: { serviceId } }).catch((error: Error): void => {
+      consumeDeepReadSearchEditorDraft();
+      if (this.pageAlive) this.standaloneSearchError = '无法打开搜索服务：' + error.message;
+    });
+  }
+
+  private async saveStandaloneSettings(): Promise<void> {
+    this.clearSavedNotice();
+    if (!this.standaloneSearchLoaded) throw new Error('搜索设置尚未读取完成');
+    const draft: SearchSettings = JSON.parse(JSON.stringify(this.standaloneSearch)) as SearchSettings;
+    const selected: number = draft.searchServices.findIndex(
+      (service: SearchServiceOptions): boolean => service.id === this.selectedSearchId);
+    if (this.selectedSearchId.length > 0 && selected < 0) throw new Error('首选搜索服务已删除，请重新选择');
+    draft.searchServiceSelected = Math.max(0, selected);
+    await updateSearchPrefs(getChatKvStore(), (current: SearchSettings): SearchSettings => {
+      draft.enableWebSearch = current.enableWebSearch;
+      const resultSize: number = draft.searchCommonOptions.resultSize;
+      draft.searchCommonOptions = current.searchCommonOptions;
+      draft.searchCommonOptions.resultSize = resultSize;
+      return draft;
+    });
+    await this.saveStandaloneReading();
+  }
+
+  private async refreshTemplateSelection(): Promise<void> {
+    await this.pageLoad;
+    const storage: Storage | null = this.storage;
+    if (storage === null || !this.pageAlive) return;
+    const token: number = this.loadToken;
+    const selected: string = await storage.get<string>('deepread_template_id', 'none');
+    if (!this.pageAlive || token !== this.loadToken) return;
+    if (selected !== this.persistedTemplateId) {
+      this.templateId = selected;
+      this.persistedTemplateId = selected;
+      this.clearSavedNotice();
+    }
   }
 
   private async refreshTaskModelSelection(): Promise<void> {
@@ -194,8 +462,21 @@ struct SettingDeepReadPage {
     try {
       const selection: DeepReadModelSelectionState = await loadDeepReadModelSelection();
       if (!this.pageAlive || token !== this.modelLoadToken) return;
-      this.taskModelReference = selection.reference;
       this.taskModelOptions = selection.options;
+      if (getProductKind() === 'deepread' && this.modelDraftDirty) {
+        const draft: TaskModelReference | null = this.taskModelReference;
+        const option: DeepReadModelOption | undefined = selection.options.find((item: DeepReadModelOption): boolean =>
+          draft !== null && draft.kind === 'fixed' && item.providerId === draft.pair.providerId && item.modelId === draft.pair.modelId);
+        if (draft !== null && draft.kind === 'auto') {
+          this.taskModelLabel = '跟随当前模型';
+          this.modelError = '';
+        } else {
+          this.taskModelLabel = option === undefined ? '所选模型（不可用）' : `${option.providerLabel} / ${option.label}`;
+          this.modelError = option === undefined || !option.available ? '所选模型已不可用，请重新选择' : '';
+        }
+        return;
+      }
+      this.taskModelReference = selection.reference;
       this.taskModelLabel = selection.label;
       this.taskModelDetail = selection.detail;
       this.modelError = '';
@@ -207,6 +488,20 @@ struct SettingDeepReadPage {
 
   private async selectTaskModel(option: DeepReadModelOption | null): Promise<void> {
     if (this.savingModel) return;
+    if (getProductKind() === 'deepread') {
+      if (option !== null && !option.available) { this.modelError = '此模型当前不可用，请先检查服务商配置'; return; }
+      this.modelLoadToken++;
+      this.taskModelReference = option === null ? { kind: 'auto' }
+        : { kind: 'fixed', pair: { providerId: option.providerId, modelId: option.modelId } };
+      this.taskModelLabel = option === null ? '跟随当前模型' : `${option.providerLabel} / ${option.label}`;
+      this.taskModelDetail = option === null ? '每轮任务开始时读取最新聊天选择。' : '固定使用此服务商与模型。';
+      DeepReadHaptics.selection();
+      this.modelDraftDirty = true;
+      this.modelError = '';
+      this.modelSheetOpen = false;
+      this.clearSavedNotice();
+      return;
+    }
     const token: number = this.loadToken;
     this.modelLoadToken++;
     this.savingModel = true;
@@ -270,6 +565,9 @@ struct SettingDeepReadPage {
     for (const c of this.customTemplates) {
       out.push({ id: c.id, name: c.name, description: '' });
     }
+    if (this.templateId.length > 0 && !out.some((template: DeepReadTemplateDef): boolean => template.id === this.templateId)) {
+      out.push({ id: this.templateId, name: '当前自定义模板', description: '此模板当前未在模板库中' });
+    }
     return out;
   }
 
@@ -306,6 +604,15 @@ struct SettingDeepReadPage {
   private showModelMenu(): void {
     this.modelSheetOpen = true;
     this.refreshTaskModelSelection();
+  }
+
+  private modelSheetTransition(card: boolean): TransitionEffect {
+    if (getProductKind() === 'deepread') {
+      if (this.appBackgrounded) return TransitionEffect.IDENTITY;
+      if (this.reduceMotion) return TransitionEffect.OPACITY.animation({ duration: 120, curve: Curve.EaseOut });
+    }
+    const effect: TransitionEffect = card ? TransitionEffect.translate({ y: 160 }) : TransitionEffect.OPACITY;
+    return effect.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut });
   }
 
   @Builder
@@ -350,13 +657,12 @@ struct SettingDeepReadPage {
       .padding({ bottom: 12 })
       .backgroundColor(SURFACE)
       .borderRadius({ topLeft: 20, topRight: 20 })
-      .transition(TransitionEffect.translate({ y: 160 })
-        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+      .transition(this.modelSheetTransition(true))
     }
     .width('100%').height('100%')
     .backgroundColor('#66000000')
     .justifyContent(FlexAlign.End)
-    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+    .transition(this.modelSheetTransition(false))
   }
 
   @Builder
@@ -554,12 +860,51 @@ struct SettingDeepReadPage {
     }
   }
 
+  private async saveStandaloneReading(): Promise<void> {
+    this.clearSavedNotice();
+    await this.pageLoad;
+    const storage: Storage | null = this.storage;
+    if (storage === null) throw new Error('设置尚未读取完成');
+    const token: number = this.loadToken;
+    if (this.modelDraftDirty) {
+      const draft: TaskModelReference | null = this.taskModelReference;
+      const option: DeepReadModelOption | undefined = this.taskModelOptions.find((item: DeepReadModelOption): boolean =>
+        draft !== null && draft.kind === 'fixed' && item.providerId === draft.pair.providerId && item.modelId === draft.pair.modelId);
+      if (draft !== null && draft.kind === 'fixed' && (option === undefined || !option.available)) {
+        throw new Error('所选模型已不可用，请重新选择');
+      }
+      this.taskModelReference = await saveDeepReadModelSelection(option ?? null);
+    }
+    await storage.set<string>('deepread_font_mode', this.fontModeIndex === 1 ? 'serif' : 'default');
+    await storage.set<number>('deepread_font_scale', this.fontScalePercent);
+    await storage.set<string>('deepread_template_id', this.templateId);
+    if (this.pageAlive && token === this.loadToken) {
+      DeepReadHaptics.success();
+      this.modelDraftDirty = false;
+      this.settingsEdited = false;
+      this.restoredReadingDraft = false;
+      if (getProductKind() === 'deepread' && this.standaloneRoot) AppStorage.delete(SETTINGS_SESSION_DRAFT);
+      this.persistedTemplateId = this.templateId;
+      this.getUIContext().animateTo({ duration: this.reduceMotion ? 0 : 300, curve: Curve.EaseOut }, (): void => {
+        this.saved = '已保存，下一次生成将使用此配置。';
+      });
+      this.confirmationTimer = setTimeout((): void => { this.clearSavedNotice(); }, 3000);
+    }
+  }
+
+  private clearSavedNotice(): void {
+    if (this.confirmationTimer >= 0) clearTimeout(this.confirmationTimer);
+    this.confirmationTimer = -1;
+    this.getUIContext().animateTo({ duration: this.reduceMotion ? 0 : 300, curve: Curve.EaseOut }, (): void => { this.saved = ''; });
+  }
+
   // 卡片内输入框统一样式(向卡片行靠:SURFACE2 底 r8,正文 15)
   private inputFontSize(): number {
     return TEXT_STYLES.body.size;
   }
 
-  build(): void {
+  @Builder
+  HostSettings(): void {
     Stack() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
@@ -631,6 +976,50 @@ struct SettingDeepReadPage {
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  StandaloneSettings(): void {
+    Stack({ alignContent: Alignment.Bottom }) {
+      DeepReadPaperBackground({ nightReading: true })
+      Column() {
+        DeepReadSettingsHeader({ title: '设置', root: this.standaloneRoot })
+        Scroll(this.settingsScroller) {
+          DeepReadSettingsForm({ modelLabel: this.taskModelLabel, modelDetail: this.taskModelDetail,
+            modelOptions: this.taskModelOptions, modelError: this.modelError, templates: this.allTemplateChips(),
+            search: $standaloneSearch, searchLoaded: $standaloneSearchLoaded, selectedSearchId: $selectedSearchId,
+            searchError: $standaloneSearchError, fontModeIndex: $fontModeIndex,
+            fontScalePercent: $fontScalePercent, templateId: $templateId, notice: this.saved,
+            onModel: (): void => { this.showModelMenu(); },
+            onEdited: (): void => { this.markSettingsEdited(); },
+            onSearchEdit: (serviceId: string): void => { this.openSearchServiceEditor(serviceId); },
+            onSearchRetry: (): void => { this.refreshStandaloneSearch(); },
+            onSave: async (): Promise<void> => { await this.saveStandaloneSettings(); } })
+            .width('100%').padding({ left: D.gutter, right: D.gutter,
+              bottom: this.standaloneRoot ? this.navBarHeight + 104 : this.navBarHeight + 28 })
+            .onAreaChange((_oldArea: Area, _newArea: Area): void => { this.restoreSettingsScroll(); })
+        }.width('100%').layoutWeight(1).scrollBar(BarState.Off).align(Alignment.TopStart)
+          .onDidScroll((_x: number, y: number, state: ScrollState): void => {
+            if (this.standaloneRoot && this.pageVisible && this.activeTab === 2) {
+              if (!this.embeddedRoot) this.dockScroll.update(y, this.settingsScroller.currentOffset().yOffset, state !== ScrollState.Idle);
+            }
+          })
+      }.width('100%').height('100%').translate({ x: this.reduceMotion ? 0 : this.arrivalOffset })
+        .opacity(this.embeddedRoot || !this.standaloneRoot || this.activeTab === 2 ? 1 : 0)
+      if (this.standaloneRoot && !this.embeddedRoot) { DeepReadTabBar({ selected: 2 }) }
+    }.width('100%').height('100%').backgroundColor(D.paper)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  build(): void {
+    Stack() {
+      ForEach([this.themeEpoch], (_epoch: number): void => {
+        if (getProductKind() === 'deepread') {
+          this.StandaloneSettings();
+          if (this.modelSheetOpen) { this.ModelSheet(); }
+        } else { this.HostSettings(); }
+      }, (epoch: number): string => `theme-${epoch}`)
+    }.width('100%').height('100%').backgroundColor(D.paper)
   }
 
   // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──
@@ -1081,5 +1470,35 @@ struct SettingDeepReadPage {
       .width('100%').padding({ left: 14, right: 14, top: 12, bottom: 12 })
     }
     .width('100%')
+  }
+}
+
+
+@Entry
+@Component
+struct SettingDeepReadPage {
+  @State private visible: boolean = false;
+  private backHandler: () => boolean = (): boolean => false;
+  onBackPress(): boolean { return this.backHandler(); }
+  onPageShow(): void { this.visible = true; }
+  onPageHide(): void { this.visible = false; }
+
+  aboutToAppear(): void {
+    if (getProductKind() === 'deepread') {
+      const boundRouter = this.getUIContext().getRouter();
+      for (let index: number = 1; index <= parseInt(router.getLength(), 10); index++) {
+        const state: router.RouterState | undefined = boundRouter.getStateByIndex(index);
+        if (state?.name !== 'DeepReadRootPage' && state?.path !== 'pages/DeepReadRootPage') continue;
+        AppStorage.setOrCreate<number>('deepreadDesiredTab', 2);
+        boundRouter.back({ url: 'pages/DeepReadRootPage' });
+        return;
+      }
+      boundRouter.replaceUrl({ url: 'pages/DeepReadRootPage', params: { tab: 2 } }).then((): void => { boundRouter.clear(); });
+    }
+  }
+
+  build(): void {
+    if (getProductKind() !== 'deepread') { SettingDeepReadPageContent({ rootVisible: this.visible, onBackHandler: (handler: () => boolean): void => { this.backHandler = handler; } }) }
+    else { Column().width('100%').height('100%').backgroundColor(D.paper) }
   }
 }

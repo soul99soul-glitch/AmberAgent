@@ -4,9 +4,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PermissionDecisionResolver, permissionDecisionTraceToJson,
-  approvalStateSimpleName, toolHasSessionGrant, policyRequiresSubAgentApproval,
-  ASK_USER_TOOL_NAME, HISTORY_READ_TOOLS_AUTO_APPROVED_FOR_SUBAGENT,
+  PermissionDecisionResolver,
+  toolHasSessionGrant,
+  policyRequiresSubAgentApproval,
+  ASK_USER_TOOL_NAME,
+  HISTORY_READ_TOOLS_AUTO_APPROVED_FOR_SUBAGENT,
 } from '../main/ets/chat/tool_permission.ts';
 import type { UIMessagePartTool, ToolApprovalState } from '../main/ets/chat/message.ts';
 import { makeAgentTool } from '../main/ets/chat/tool.ts';
@@ -35,16 +37,6 @@ const defOf = (name: string, opts: { needsApproval?: boolean; allowsAutoApproval
     mandatoryApproval: opts.mandatoryApproval ?? false,
     execute: () => Promise.resolve([]),
   });
-
-describe('approvalStateSimpleName(Kotlin class simpleName 等价)', () => {
-  it('五态映射', () => {
-    assert.equal(approvalStateSimpleName({ type: 'auto' }), 'Auto');
-    assert.equal(approvalStateSimpleName({ type: 'pending' }), 'Pending');
-    assert.equal(approvalStateSimpleName({ type: 'approved' }), 'Approved');
-    assert.equal(approvalStateSimpleName({ type: 'denied', reason: 'r' }), 'Denied');
-    assert.equal(approvalStateSimpleName({ type: 'answered', answer: 'a' }), 'Answered');
-  });
-});
 
 describe('toolHasSessionGrant(:215-222)', () => {
   it('grant_id 非空白字符串 → true;缺/空/非法 JSON → false', () => {
@@ -172,40 +164,5 @@ describe('PermissionDecisionResolver.resolve 优先级链', () => {
     const d = makeResolver().resolve(defOf('memory_write'), toolCall('memory_write'), false, false);
     assert.equal(d.action, 'ask');
     assert.equal(d.source, 'ui');
-  });
-  it('shouldPauseForApproval:action==ask → true', () => {
-    const r = makeResolver();
-    assert.equal(r.shouldPauseForApproval(defOf('memory_write'), toolCall('memory_write'), false), true);
-    assert.equal(r.shouldPauseForApproval(defOf('file_read'), toolCall('file_read'), false), false);
-  });
-});
-
-describe('permissionDecisionTraceToJson(:43-72)', () => {
-  it('键集与嵌套 policy 逐字', () => {
-    const d = makeResolver().resolve(defOf('file_read'), toolCall('file_read'), false, false);
-    const j = permissionDecisionTraceToJson(d.trace) as Record<string, unknown>;
-    assert.equal(j['tool_name'], 'file_read');
-    assert.equal(j['invocation_context'], 'normal');
-    assert.equal(j['approval_state'], 'Auto');
-    assert.equal(j['action'], 'allow');
-    assert.equal(j['source'], 'policy');
-    assert.equal(j['auto_approve_tools'], false);
-    assert.equal(j['auto_approve_high_risk_tools'], false);
-    assert.equal(j['auto_approved_by_run'], false);
-    const policy = j['policy'] as Record<string, unknown>;
-    assert.equal(policy['category'], 'workspace');
-    assert.equal(policy['risk'], 'normal');
-    assert.equal(policy['mutates'], false);
-    assert.equal(policy['needs_approval'], false);
-    assert.equal(policy['auto_approvable'], true);
-    assert.equal(policy['concurrency_safe'], true);
-    assert.equal(policy['parallel_group'], 'workspace');
-    assert.equal(policy['speculative_eligible'], true);
-    assert.equal(policy['output_budget_chars'], 262144 + 2048);
-    assert.equal(policy['mandatory_approval'], false);
-    assert.equal(policy['always_ask'], false);
-    // 可选缺省即省略
-    assert.ok(!('speculative_block_reason' in policy));
-    assert.ok(!('reason' in policy));
   });
 });

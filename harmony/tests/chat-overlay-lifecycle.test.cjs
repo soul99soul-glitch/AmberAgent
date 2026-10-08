@@ -50,6 +50,7 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 const makeChat = productionClass('pages/ChatPage.ets', [
   'openDrawer', 'closeDrawer', 'openDrawerConversation', 'closeModelMenu', 'toggleModelMenu', 'onBackPress',
   'openSubAgentSheet', 'closeSubAgentSheet', 'onPageHide', 'aboutToDisappear',
+  'hideScrollNavigation', 'restoreKeyboardAvoidance', 'syncStreamingFrameRate', 'closeRecap',
 ]);
 function chat({ loadProviders = () => Promise.resolve([]), resolveChoice = () => Promise.resolve(null),
   getManager = () => Promise.reject(new Error('unexpected manager request')) } = {}) {
@@ -57,7 +58,7 @@ function chat({ loadProviders = () => Promise.resolve([]), resolveChoice = () =>
     animateTo: (_options, mutation) => mutation(), Curve: { EaseOut: 'EaseOut' },
     loadProviders, getChatKvStore: () => ({}), getSubAgentManager: getManager,
     resolveEffectiveChatChoice: resolveChoice, buildTopModelMenuGroups: () => [],
-    hilog: { warn() {} }, HILOG_DOMAIN: 1, HILOG_TAG: 'test', clearInterval,
+    hilog: { warn() {} }, HILOG_DOMAIN: 1, HILOG_TAG: 'test', clearInterval, clearTimeout,
     inputMethod: { getController: () => ({ stopInputSession: () => Promise.resolve() }) },
     router: { replaceUrl() { throw new Error('Same conversation must not navigate'); } },
   });
@@ -70,6 +71,9 @@ function chat({ loadProviders = () => Promise.resolve([]), resolveChoice = () =>
     subAgentLiveText: '', unsubSubAgentLive: null,
     runConversationId: '', contextChoiceSeq: 0, nativeContextSeq: 0, webmountHookBinding: null,
     greetTimer: -1, cursorTimer: -1,
+    scrollNavigationHideTimer: -1, scrollNavigationVisible: false, keyboardAvoidanceActive: false,
+    appBackgrounded: false, sending: false, streamingFrameRate: { update() {} }, nativeFollow: null,
+    recapOpen: false, recapSourceLoading: false, recapOpenSeq: 0,
     refreshDrawerConversations() {}, detachConversationRun() {}, flushInputDraft() {},
     invalidatePicker() {}, stopGreetTimer() {},
     detachKeyboardListener() { this.imeListenerAttached = false; },

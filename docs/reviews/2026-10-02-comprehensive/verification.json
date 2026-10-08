@@ -1,0 +1,41 @@
+{
+  "head": "5ea51f7a548198ee4676fc63ef0b3bbfa34ba290",
+  "branch": "harmony-preview",
+  "confirmedProblemGroups": 41,
+  "priorityCounts": {
+    "P1": 13,
+    "P2": 28
+  },
+  "tests": {
+    "chat": 2486,
+    "deepread": 1000,
+    "cjs": 515,
+    "total": 4001,
+    "failures": 0
+  },
+  "domainTypeChecks": "both noEmit exit 0; domain source unchanged after successful check",
+  "arktsLint": "phase scoped checks exit 0 / 0 errors; warnings retained; final Detail 0 defects",
+  "build": "BUILD SUCCESSFUL in 15 s 287 ms",
+  "offlineSignAndVerify": "exit 0 / verify-app success; separate output not used for replacement install",
+  "installedHap": "/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/build/default/outputs/default/entry-default-signed.hap",
+  "installedHapSha256": "13ee6572a8eb04975a197f8f04b3ff8d37e2aeb0af604f82f4683a31748da270",
+  "installedDevelopmentCertificateSha256": "2BE8BA11E80E1D3691D342249223230AFC4C090E14DEBEC8452B71520A69CE05",
+  "finalSignatureVerification": "verify-app passed; profile certificate matches bm installed bundle",
+  "deviceTarget": "127.0.0.1:5555",
+  "install": "install bundle successfully",
+  "launch": "force stop process successfully; start ability successfully",
+  "hashedFiles": 906,
+  "sourceDrift": [],
+  "repairDeltaFiles": 70,
+  "repairProductionFiles": 46,
+  "missingBaselineFiles": 0,
+  "deviceUi": "name initial value, typing and tab-return draft, API mode stale hint absent; final return home; test draft not saved; original light preference restored",
+  "notAcceptedLive": [
+    "OAuth cloud login",
+    "paid provider generation",
+    "WebDAV server",
+    "background long tasks",
+    "physical device"
+  ],
+  "gitMutations": "no commit/push/PR"
+}

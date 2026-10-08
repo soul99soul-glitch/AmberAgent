@@ -12,10 +12,12 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import BuildProfile from 'BuildProfile';
 import { getSkillManager, rescheduleCronTasksOnStartup, getChatKvStore, resetWorkspaceManager,
   interruptTerminalForBackground } from '../di/AppContainer.ets';
-import { loadDisplaySetting } from '@amber/chat-domain';
+import { loadDisplaySetting, initializeDeepReadSearchPrefs } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
-import { themePackStore, applyCurrentTheme } from '../design/theme_packs.ets';
+import { DeepReadDesign } from '../design/DeepReadDesign.ets';
+import { DeepReadMotionPreferences } from '../platform_impl/DeepReadMotionPreferences.ets';
+import { themePackStore, applyCurrentTheme, resolveThemeDark } from '../design/theme_packs.ets';
 import type { ThemePack } from '../design/theme_packs.ets';
 import { registerAmberFonts, registerAmberFontsFor } from '../design/fonts.ets';
 import { syncMacGatewayPushTokenOnLaunch } from '../platform_impl/MacGatewayClient.ets';
@@ -27,6 +29,7 @@ import { runRuntimeE3Fixture } from '../platform_impl/RuntimeE3Fixture.ets';
 import { cancelNativePluginJsSessions } from '../platform_impl/NativePluginJsTransport.ets';
 import { getMemoryTopicCoordinator } from '../platform_impl/MemoryTopicOps.ets';
 import { getWebMountOAuthRuntime } from '../platform_impl/WebMountOAuthRuntime.ets';
+import { publishWindowSize } from '../design/adaptive.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -39,7 +42,7 @@ let themeWindow: window.Window | null = null;
 export const applyWindowTheme = (dark: boolean): void => {
   if (themeWindow === null) return;
   try {
-    themeWindow.setWindowBackgroundColor(BG);
+    themeWindow.setWindowBackgroundColor(getProductKind() === 'deepread' ? DeepReadDesign.paper : BG);
     themeWindow.setWindowSystemBarProperties({
       statusBarColor: WINDOW_SYSTEM_BAR_TRANSPARENT,
       statusBarContentColor: dark ? WINDOW_DARK_CONTENT : WINDOW_LIGHT_CONTENT,
@@ -184,6 +187,7 @@ export const publishWantRoute = (
 };
 
 export default class EntryAbility extends UIAbility {
+  private motionPreferences: DeepReadMotionPreferences = new DeepReadMotionPreferences();
   private avoidAreaWindow: window.Window | null = null;
   private displayDensity: number = 3;
   private systemDarkMode: boolean = false;
@@ -209,6 +213,11 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<string>('accentColor', ACCENT);
     AppStorage.setOrCreate<Context>('abilityContext', this.context);
     AppStorage.setOrCreate('productKind', productKindForBundle(this.context.applicationInfo.name));
+    DeepReadDesign.registerFonts();
+    if (getProductKind() === 'deepread') {
+      AppStorage.delete('deepreadSettingsSessionDraft');
+    }
+    if (getProductKind() === 'deepread' || getProductKind() === 'novel') this.motionPreferences.start();
     // Want 契约(§7.2):分享/deep-link 收 URL/title → 写 AppStorage 供 Index 跳转
     this.routeFromWant(want);
     if (BuildProfile.DEBUG && getProductKind() === 'agent') {
@@ -283,10 +292,26 @@ export default class EntryAbility extends UIAbility {
       hilog.info(DOMAIN, TAG, 'statusBar px=%{public}d density=%{public}f vp=%{public}d', topPx, density, topVp);
       hilog.info(DOMAIN, TAG, 'navBar px=%{public}d vp=%{public}d', bottomPx, bottomVp);
       this.avoidAreaWindow = win;
+      // 两栏布局判定(design/adaptive.ets):折叠/展开会换屏幕与密度,每次重读
+      const rect: window.Rect = win.getWindowProperties().windowRect;
+      if (rect.width > 0 && rect.height > 0) {
+        publishWindowSize(rect.width, rect.height, density);
+      } else {
+        // 窗口尺寸未就绪时先按屏幕估,windowSizeChange 到达后校正(避免平板首帧闪单栏)
+        try {
+          const screen: display.Display = display.getDefaultDisplaySync();
+          publishWindowSize(screen.width, screen.height, density);
+        } catch (_e) {}
+      }
+      win.on('windowSizeChange', (size: window.Size): void => {
+        try { this.displayDensity = display.getDefaultDisplaySync().densityPixels; } catch (_e) {}
+        publishWindowSize(size.width, size.height, this.displayDensity);
+      });
       // 字体走 UIContext 注册(全局 font.registerFont 本机实测不生效,见 design/fonts.ets);
       // 独立 try:getUIContext 竞态抛异常时不得连累沉浸式设置
       try {
         registerAmberFontsFor(win.getUIContext().getFont());
+        DeepReadDesign.registerFonts(win.getUIContext().getFont());
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'uicontext font register failed: %{public}s', String(e));
       }
@@ -313,6 +338,7 @@ export default class EntryAbility extends UIAbility {
           // 竞态兜底:内容加载后 UIContext 必然就绪,再注册一次字体(幂等)
           try {
             registerAmberFontsFor(windowStage.getMainWindowSync().getUIContext().getFont());
+            DeepReadDesign.registerFonts(windowStage.getMainWindowSync().getUIContext().getFont());
           } catch (e) {
             hilog.warn(DOMAIN, TAG, 'post-load font register failed: %{public}s', String(e));
           }
@@ -336,7 +362,9 @@ export default class EntryAbility extends UIAbility {
         .catch((): void => {});
       // 主题包:先 hydrate(KV 选中包/导入库),再按包应用;applyCurrentTheme 内含 applyTheme 全套
       const packReady: Promise<void> = themePackStore.hydrate(getChatKvStore()).then((): void => {
-        applyCurrentTheme(resolvedDark);
+        const themeDark: boolean = resolveThemeDark(themePackStore.current(), resolvedDark);
+        applyCurrentTheme(themeDark);
+        AppStorage.setOrCreate<boolean>('darkMode', themeDark);
         AppStorage.setOrCreate<string>('themePackId', themePackStore.current().id);
         AppStorage.setOrCreate<boolean>('homeDotGrid', themePackStore.current().dotGrid);
       }).catch((): void => {
@@ -348,13 +376,18 @@ export default class EntryAbility extends UIAbility {
       // (否则裸 setAccentColor 会清掉导入包的上墨色,重启后按钮字色退化)
       return loadDisplaySetting(getChatKvStore())
         .then((s: DisplaySetting): Promise<DisplaySetting> => packReady.then((): DisplaySetting => s));
-    }).then((s: DisplaySetting): void => {
-      const accent: string = s.accentColor.length > 0 ? s.accentColor : ACCENT;
+    }).then((s: DisplaySetting): Promise<void> => {
       const currentPack: ThemePack = themePackStore.current();
+      const accent: string = getProductKind() === 'novel' && currentPack.id.startsWith('novel-') ? currentPack.accent
+        : (s.accentColor.length > 0 ? s.accentColor : ACCENT);
       setAccentColor(accent, accent === currentPack.accent ? currentPack.accentInk : undefined);
       AppStorage.setOrCreate<string>('accentColor', accent);
+      return getProductKind() === 'deepread'
+        ? initializeDeepReadSearchPrefs(getChatKvStore()) : Promise.resolve();
+    }).then((): void => { start(); }).catch((error: Error): void => {
+      hilog.error(DOMAIN, TAG, 'startup preferences failed: %{public}s', String(error));
       start();
-    }).catch((): void => { start(); });
+    });
   }
 
   onConfigurationUpdate(newConfig: Configuration): void {
@@ -363,9 +396,10 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<boolean>('systemDarkMode', isDark);
     const mode: string = AppStorage.get<string>('uiColorMode') ?? 'system';
     if (mode === 'system') {
-      applyCurrentTheme(isDark);
-      AppStorage.setOrCreate<boolean>('darkMode', isDark);
-      applyWindowTheme(isDark);
+      const themeDark: boolean = resolveThemeDark(themePackStore.current(), isDark);
+      applyCurrentTheme(themeDark);
+      AppStorage.setOrCreate<boolean>('darkMode', themeDark);
+      applyWindowTheme(themeDark);
     }
   }
 
@@ -382,6 +416,7 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     hilog.info(DOMAIN, TAG, 'onForeground — 回前台续跑');
     AppStorage.setOrCreate<boolean>('appBackgrounded', false);
+    if (getProductKind() === 'deepread' || getProductKind() === 'novel') this.motionPreferences.refresh();
     if (getProductKind() === 'agent') getMemoryTopicCoordinator().foreground();
     // 后台生成保活对称释放(回到前台即不需要长时任务;desired 先行再串行停止)
     setGenerationKeepAliveBackground(this.context, false).catch((): void => {});
@@ -406,6 +441,7 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     hilog.info(DOMAIN, TAG, 'onDestroy — 清理后台任务与进度发布');
+    this.motionPreferences.stop();
     disposeGenerationKeepAlive(this.context).catch((): void => {});
   }
 }

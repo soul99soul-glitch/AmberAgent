@@ -1,0 +1,10 @@
+{
+  "firstReturnApplied": [
+    "旧关注"
+  ],
+  "afterQueuePersisted": "新关注",
+  "boardStillApplied": [
+    "旧关注"
+  ],
+  "pendingWrites": 0
+}

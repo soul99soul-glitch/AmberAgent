@@ -1,0 +1,38 @@
+✔ thinking text preserves raw line breaks and Markdown symbols, matching the iOS plain text view (113.083833ms)
+✔ only overflow animates and repeated geometry does not restart the glide (20.389208ms)
+✔ a growing target retargets from the visible offset and large catch-up is speed-limited (16.756417ms)
+✔ content measuring before a still-growing card viewport does not start a false overflow glide (5.56775ms)
+✔ touch cancels native motion; an upward browse pauses until the user returns to bottom (6.157833ms)
+✔ stop is idempotent and a detached thinking scroll cannot restart (15.437042ms)
+✔ reasoning freezes completed text blocks while preserving every original newline (14.210042ms)
+✔ a 6000-character thought with 200 short lines uses bounded native text blocks (31.477834ms)
+✔ the stream-to-body handoff preserves the 6000-character window until explicit reopen (14.5905ms)
+✔ window boundaries, blank lines and long unbroken paragraphs retain exact raw text (6.207958ms)
+✔ each delta updates the existing tail slot without republishing the ForEach array or frozen text (19.621417ms)
+✔ a moving 6000-character window retains notice and clipped-edge slots by absolute source position (13.818834ms)
+✔ adding and evicting blocks changes only the array structure and preserves surviving slots (10.5195ms)
+✔ finished handoff retains stream slots and explicit reopen leaves the continuous Text path intact (12.654125ms)
+✔ a retained active message row reads each current snapshot, including reasoning and body growth (130.081458ms)
+✔ quick start streams current thinking while keeping the structured JSON out of the visible message (8.128459ms)
+✔ composer shows the effective novel default while preserving a missing or disabled fixed choice (57.413083ms)
+✔ model selection persists only writing and closes after commit; Back cannot interrupt the pending sheet (12.694583ms)
+✔ failed model persistence stays in the sheet, unavailable choices do not save, and stale sessions cannot close new sheets (21.53275ms)
+✔ a failed defaults read never enables a model write and exposes a retryable configuration error (8.400833ms)
+✔ closing and reopening project control retains all unsaved plan fields without publishing or crossing branches (8.200833ms)
+✔ failed plan saves keep the draft; successful saves refresh the baseline so later official edits remain visible (8.855333ms)
+✔ model sheet uses matching enter and exit motion, reduced opacity, and no hidden/background animation (11.162791ms)
+✔ a new workspace page restores disk drafts and formal apply removes the saved draft (28.98875ms)
+✔ failed restore disables draft editing and formal application until a successful retry (7.040125ms)
+✔ old sheet reads cannot overwrite a later sheet and failed autosave keeps editable input for retry (16.929959ms)
+✔ a failed clear never resurrects a withdrawn disk draft and successful retry allows later formal edits (6.94575ms)
+✔ reopening an autosave failure retries the retained snapshot before a new page reads it (15.143291ms)
+✔ classified quick-start proposals retain the existing editable adoption and rejection paths (6.4735ms)
+✔ plan and story edits preserve structured branch settings and invalidate only the changed plan (168.0675ms)
+ℹ tests 30
+ℹ suites 0
+ℹ pass 30
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1125.128542

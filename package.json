@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "test:harmony": "node scripts/test-harmony.mjs"
+  },
   "dependencies": {
     "@types/ink": "^2.0.3"
   }

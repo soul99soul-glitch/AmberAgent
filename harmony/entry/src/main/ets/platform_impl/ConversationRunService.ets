@@ -81,6 +81,7 @@ export class DetachedConversationContext {
   readonly signal: AbortSignalLike;
   readonly activityStore: AgentToolActivityStore = new AgentToolActivityStore();
   conversation: Conversation;
+  recalledMemoryIds: number[] = [];
   baseTools: AgentTool[] = [];
   subAgentTools: AgentTool[] = [];
   private readonly service: ConversationRunService;

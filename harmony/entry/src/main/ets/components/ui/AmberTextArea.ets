@@ -61,12 +61,17 @@ export struct AmberTextArea {
           Text(this.label).fontSize(BODY).fontColor(INK2).layoutWeight(1)
           if (this.enableFullscreen) {
             Text('⛶').fontSize(BODY).fontColor(INK3)
+              .width(44).height(44).textAlign(TextAlign.Center)
               .onClick((): void => {
                 this.fullScreenText = this.value;
                 this.fullScreenOpen = true;
               })
           }
-          Icon({ name: 'folder', iconSize: BODY, color: INK3 }).margin({ left: 12 })
+          Row() {
+            Icon({ name: 'folder', iconSize: BODY, color: INK3 })
+          }
+            .width(44).height(44).margin({ left: 12 })
+            .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
             .onClick((): void => { this.onImportFile(); })
         }
         .width('100%')
@@ -114,6 +119,7 @@ export struct AmberTextArea {
     .alignItems(HorizontalAlign.Start)
     .bindSheet(this.fullScreenOpen, this.FullScreenEditor(), {
       height: SheetSize.LARGE,
+      showClose: false,
       onDisappear: (): void => { this.fullScreenOpen = false; },
     })
   }
@@ -122,9 +128,11 @@ export struct AmberTextArea {
     Column() {
       Row() {
         Text('取消').fontSize(BODY).fontColor(INK3)
+          .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.Center)
           .onClick((): void => { this.fullScreenOpen = false; })
         Blank()
-        Text('保存').fontSize(BODY).fontColor(ACCENT)
+        Text('保存').fontSize(BODY).fontColor(INK)
+          .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.Center)
           .onClick((): void => {
             this.onChange(this.clampLength(this.fullScreenText));
             this.fullScreenOpen = false;

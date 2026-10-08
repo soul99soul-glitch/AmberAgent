@@ -834,6 +834,27 @@ describe('GenerationSubAgentRunner provider errors and cancellation', () => {
 });
 
 describe('GenerationSubAgentRunner approval and report retry', () => {
+  it('returns approval_required when the report retry stops at a pending tool', async () => {
+    const port = new FakeGenerationPort();
+    const first = [makeUserMessage('task'), makeAssistantMessage('Original visible answer')];
+    port.scripts.push(async request => { request.onUpdate(first); return first; });
+    port.scripts.push(async request => {
+      const pending: UIMessagePartTool = {
+        type: 'tool', toolCallId: 'retry-pending', toolName: 'session_read', input: '{}', output: [],
+        approvalState: { type: 'pending' }, metadata: null,
+      };
+      const latest = [...request.messages, makeUIMessage('assistant', [pending])];
+      request.onUpdate(latest);
+      return latest;
+    });
+    const display: string[] = [];
+    const result = await run(port, definition(['session_read']), [], display);
+    assert.equal(result.status, 'approval_required');
+    assert.equal(result.summary, 'Subagent requested approval for session_read.');
+    assert.equal(display.at(-1), 'Original visible answer');
+    assert.equal(port.requests.length, 2);
+  });
+
   it('inspects only the final message pending tools and returns the exact approval result', async () => {
     const port = new FakeGenerationPort();
     const oldPending: UIMessagePartTool = {

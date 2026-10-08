@@ -10,9 +10,11 @@ import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { HttpClient, HttpRequest, HttpResponse, AbortSignalLike } from '@amber/deepread-domain';
+import { httpResponseStatusFromHeaders, isEventStreamResponse } from '@amber/deepread-domain';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Http';
+const STREAM_PREFIX_PROBE_BYTES: number = 1024;
 
 const sanitizeUrlForLog = (url: string): string => {
   const hashIndex: number = url.indexOf('#');
@@ -127,7 +129,7 @@ class OhosHttpClient implements HttpClient {
     });
   }
 
-  // status 未知时暂存 chunk，确保错误正文不会先送入 SSE parser。
+  // status 未知时以 SSE MIME 或正文开头的协议字段确认流；JSON 等正文等待真实状态码。
   fetchStream(req: HttpRequest, opts: StreamOpts): Promise<HttpResponse> {
     const url: string = req.url;
     const safeUrl: string = sanitizeUrlForLog(url);
@@ -154,11 +156,13 @@ class OhosHttpClient implements HttpClient {
       let settled: boolean = false;
       let destroyed: boolean = false;
       let status: number | null = null;
+      let eventStream: boolean = false;
       let dataEnded: boolean = false;
       let headers: Record<string, string> = {};
       let pendingChunks: ArrayBuffer[] = [];
       let chunkCount: number = 0;
       let totalBytes: number = 0;
+      let probedPrefixBytes: number = 0;
       let dataEndNotified: boolean = false;
 
       const destroyOnce = (): void => {
@@ -216,7 +220,7 @@ class OhosHttpClient implements HttpClient {
         }
         return true;
       };
-      const flushPendingSuccessChunks = (): boolean => {
+      const flushPendingStreamChunks = (): boolean => {
         const chunks: ArrayBuffer[] = pendingChunks;
         pendingChunks = [];
         for (const chunk of chunks) {
@@ -224,15 +228,19 @@ class OhosHttpClient implements HttpClient {
         }
         return true;
       };
+      const canConsumeStream = (): boolean => {
+        if (status === null) return eventStream;
+        return status >= 200 && status < 400;
+      };
       const settleWhenReady = (): void => {
-        if (settled || status === null) return;
-        if (status <= 0) {
+        if (settled) return;
+        if (status !== null && status <= 0) {
           fail(new Error(`${safeUrl} stream returned invalid HTTP status ${status}`),
             'fetchStream invalid status: %{public}s');
           return;
         }
-        if (status >= 200 && status < 400 && !flushPendingSuccessChunks()) return;
-        if (!dataEnded) return;
+        if (canConsumeStream() && !flushPendingStreamChunks()) return;
+        if (status === null || !dataEnded) return;
 
         if (status >= 400) {
           const body: string = this.decodeChunks(pendingChunks);
@@ -269,16 +277,38 @@ class OhosHttpClient implements HttpClient {
       }
 
       httpRequest.on('headersReceive', (raw: Object): void => {
-        if (!settled) headers = this.copyHeaders(raw);
+        if (settled) return;
+        headers = this.copyHeaders(raw);
+        eventStream = eventStream || isEventStreamResponse(headers);
+        // requestInStream 的 Promise 在 dataEnd 后才返回状态码。
+        // 提供状态行的运行时可从响应头提前识别最终响应。
+        const headerStatus: number | null = httpResponseStatusFromHeaders(headers);
+        if (headerStatus !== null &&
+          ((headerStatus >= 200 && headerStatus < 300) || headerStatus >= 400)) {
+          status = headerStatus;
+        }
+        // 当前 Harmony 运行时不含状态行。SSE MIME/正文前缀只决定提前消费，
+        // status 仍未知；最终 HTTP code 或既有协议终态负责收口，不伪造 200。
+        settleWhenReady();
       });
       httpRequest.on('dataReceive', (data: ArrayBuffer): void => {
         if (settled) return;
         chunkCount += 1;
         totalBytes += data.byteLength;
-        if (status !== null && status >= 200 && status < 400) {
+        if (canConsumeStream()) {
           emit(data, false);
         } else {
           pendingChunks.push(data);
+          // Some compatible gateways send SSE as text/plain or omit MIME. Waiting
+          // for requestInStream's status buffers the whole answer until dataEnd.
+          // Inspect only the response prefix; known HTTP errors stay buffered.
+          if (status === null && probedPrefixBytes < STREAM_PREFIX_PROBE_BYTES) {
+            probedPrefixBytes = Math.min(totalBytes, STREAM_PREFIX_PROBE_BYTES);
+            if (this.hasEventStreamPrefix(pendingChunks)) {
+              eventStream = true;
+              flushPendingStreamChunks();
+            }
+          }
         }
       });
       httpRequest.on('dataEnd', (): void => {
@@ -321,6 +351,23 @@ class OhosHttpClient implements HttpClient {
     const source: Record<string, string> = raw as Record<string, string>;
     for (const key of Object.keys(source)) headers[key] = source[key];
     return headers;
+  }
+
+  private hasEventStreamPrefix(chunks: ArrayBuffer[]): boolean {
+    const prefix: Uint8Array = new Uint8Array(STREAM_PREFIX_PROBE_BYTES);
+    let length: number = 0;
+    for (const chunk of chunks) {
+      const bytes: Uint8Array = new Uint8Array(chunk);
+      const copied: number = Math.min(bytes.length, STREAM_PREFIX_PROBE_BYTES - length);
+      prefix.set(bytes.subarray(0, copied), length);
+      length += copied;
+      if (length === STREAM_PREFIX_PROBE_BYTES) break;
+    }
+    const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
+    const text: string = decoder.decodeToString(prefix.subarray(0, length));
+    // SSE fields/comments start at column zero; allow BOM and initial empty lines.
+    // A data: occurrence inside JSON or an ordinary error message is insufficient.
+    return /^(?:\uFEFF)?(?:\r?\n)*(?:data|event|id|retry|):/.test(text);
   }
 
   private decodeChunks(chunks: ArrayBuffer[]): string {

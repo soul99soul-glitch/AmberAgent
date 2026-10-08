@@ -1,0 +1,14 @@
+共 3 个文件,分 1 批(每批最多 80)
+--- 批 1/1 (3 文件) ---
+[32mThe configuration file /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/code-linter.json5 is in use.[0m
+[32mWorking...[=>------------------------------------------------]2%[0m[32mWorking...[==>-----------------------------------------------]5%[0m[32mCurrently active product: default[0m                                     
+[32mWorking...[==>-----------------------------------------------]5%[0m[32mWorking...[=======>------------------------------------------]15%[0m[32mWorking...[============>-------------------------------------]25%[0m[32mWorking...[=================>--------------------------------]35%[0m[32mWorking...[======================>---------------------------]44%[0m[32mWorking...[===========================>----------------------]55%[0m[32mWorking...[================================>-----------------]64%[0m[32mWorking...[====================================>-------------]72%[0m[32mWorking...[=======================================>----------]80%[0m[32mWorking...[===========================================>------]87%[0m[32mWorking...[===============================================>--]95%[0m[32mWorking...[================================================>-]97%[0m[32mFinished...[==================================================]100%[0m
+[33mCodeLinter found some defects in your code.[0m
+/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets(5)
+299:38      warn        Prioritize structured clone for deep clone operations.                    @performance/bad-deep-clone-check
+363:7       warn        Replace state variables with local variables for temporary calculation    @performance/hp-arkui-use-local-var-to-replace-state-var
+371:7       warn        Replace state variables with local variables for temporary calculation    @performance/hp-arkui-use-local-var-to-replace-state-var
+379:5       warn        Replace state variables with local variables for temporary calculation    @performance/hp-arkui-use-local-var-to-replace-state-var
+392:9       warn        Replace state variables with local variables for temporary calculation    @performance/hp-arkui-use-local-var-to-replace-state-var
+-Defects: 5; Errors: 0; Warns: 5; Suggestions: 0;
+

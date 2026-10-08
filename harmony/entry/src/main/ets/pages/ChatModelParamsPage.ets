@@ -1,3 +1,4 @@
+import { DeepReadSubpageDock, DeepReadDockLayout } from '../components/deepread/DeepReadSubpageDock.ets';
 // ChatModelParamsPage — 模型级自定义参数编辑面(D-109)
 // Android 锚点:
 //   SettingProviderModelSettingsForm.kt:259-271(高级设置 tab 的
@@ -23,10 +24,22 @@ import { FONT_MONO, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { router } from '@kit.ArkUI';
 import type {
   CustomBody, CustomHeader, JsonValue, ProviderModel, ProviderSetting,
-  ModelType, ModalityFull, BuiltInTools, ProviderSettingOpenAIVariant,
+  ModelType, ModalityFull, BuiltInTools, ProviderSettingOpenAIVariant, ModelAbility,
 } from '@amber/chat-domain';
 import { loadProviders, saveProviders } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
+import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
+import { DeepReadSettingsHeader, DeepReadSettingsSection, DeepReadSettingsGroup,
+  DeepReadSettingsToggle, DeepReadSettingsPicker, DeepReadSettingsButton,
+  DeepReadSettingsRow, DeepReadSettingsNote } from '../components/deepread/DeepReadSettingsVisual.ets';
+
+interface ModelFieldOptions {
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+}
 
 
 // UA 伪装预设(iOS OpenAICompatUserAgents / Android SettingProviderModelSettingsForm 同源)
@@ -47,19 +60,24 @@ const MODEL_TYPE_OPTIONS: string[] = ['聊天', '生图', '嵌入'];
 const MODEL_TYPE_VALUES: string[] = ['chat', 'image', 'embedding'];
 
 class ModelParameterColors {
-  background: string = BG;
-  ink: string = INK;
-  muted: string = INK3;
-  line: string = LINE;
-  raised: string = RAISED;
-  error: string = ERROR;
+  background: string = getProductKind() === 'deepread' ? D.paper : BG;
+  ink: string = getProductKind() === 'deepread' ? D.ink : INK;
+  muted: string = getProductKind() === 'deepread' ? D.muted : INK3;
+  line: string = getProductKind() === 'deepread' ? D.rule : LINE;
+  raised: string = getProductKind() === 'deepread' ? D.paper : RAISED;
+  error: string = getProductKind() === 'deepread' ? D.danger : ERROR;
 }
 
 @Entry
 @Component
 struct ChatModelParamsPage {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
+  @StorageProp('reduceMotion') reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') appBackgrounded: boolean = false;
   @State loaded: boolean = false;
+  @State saving: boolean = false;
+  @State error: string = '';
+  @State advancedExpanded: boolean = false;
   @State modelLabel: string = '';
   // 草稿态(dialogState.currentState 语义;raw 文本 + 最近合法 body 值)
   @State headerNames: string[] = [];
@@ -79,6 +97,7 @@ struct ChatModelParamsPage {
   @State inputImage: boolean = false;
   @State inputAudio: boolean = false;
   @State contextWindowText: string = '';
+  @State toolCallingEnabled: boolean = true;
   // 同一 model.tools 草稿；不因当前协议不支持而移除已存选项。
   @State toolSearch: boolean = false;
   @State toolUrlContext: boolean = false;
@@ -118,6 +137,7 @@ struct ChatModelParamsPage {
           ? model.providerOverwrite.name : '';
         // 模型属性草稿
         this.modelType = model.type;
+        this.toolCallingEnabled = model.abilities.indexOf('tool') >= 0;
         this.inputText = model.inputModalities.indexOf('text') >= 0;
         this.inputImage = model.inputModalities.indexOf('image') >= 0;
         this.inputAudio = model.inputModalities.indexOf('audio') >= 0;
@@ -129,8 +149,13 @@ struct ChatModelParamsPage {
         this.updateToolProtocol(model.providerOverwrite ?? provider);
       }
       this.loaded = true;
+    }).catch((e: Error): void => {
+      this.error = `加载失败：${e.message}`;
+      this.loaded = true;
     });
   }
+
+  onBackPress(): boolean { return this.saving; }
 
   private refreshColors(): void { this.colors = new ModelParameterColors(); }
   private updateToolProtocol(provider: ProviderSetting): void {
@@ -253,7 +278,7 @@ struct ChatModelParamsPage {
     const raw: string = this.contextWindowText.trim();
     if (raw.length === 0) return null;
     const n: number = Number(raw);
-    if (!Number.isFinite(n) || n <= 0) return null;
+    if (!Number.isSafeInteger(n) || n <= 0) return null;
     return Math.trunc(n);
   }
 
@@ -262,45 +287,53 @@ struct ChatModelParamsPage {
     return idx >= 0 ? idx : 0;
   }
 
-  private confirm(): void {
-    if (this.provider === null) return;
-    const provider: ProviderSetting = this.provider;
-    const headers: CustomHeader[] = this.headerNames.map(
-      (n: string, i: number): CustomHeader => ({
-        name: n.trim(), value: (this.headerValues[i] ?? '').trim(),
-      }));
-    const bodies: CustomBody[] = this.bodyKeys.map(
-      (k: string, i: number): CustomBody => ({
-        key: k.trim(), value: this.bodyValues[i] ?? '',
-      }));
-    const inputModalities: ModalityFull[] = this.draftInputModalities();
+  private async confirm(): Promise<void> {
+    if (this.provider === null || this.saving) return;
+    this.error = '';
+    if (this.bodyErrors.some((error: string): boolean => error.length > 0)) {
+      this.error = '请先修正自定义 Body 中无效的 JSON。';
+      this.advancedExpanded = true;
+      return;
+    }
     const contextWindow: number | null = this.draftContextWindow();
-    const modelType: string = this.modelType;
+    if (this.contextWindowText.trim().length > 0 && contextWindow === null) {
+      this.error = '上下文窗口请填写大于 0 的整数，或留空。';
+      return;
+    }
+    const providerId: string = this.provider.id;
+    const headers: CustomHeader[] = this.headerNames.map(
+      (n: string, i: number): CustomHeader => ({ name: n.trim(), value: (this.headerValues[i] ?? '').trim() }));
+    const bodies: CustomBody[] = this.bodyKeys.map(
+      (k: string, i: number): CustomBody => ({ key: k.trim(), value: this.bodyValues[i] ?? '' }));
     const tools: BuiltInTools[] = [];
     if (this.toolSearch) tools.push('search');
     if (this.toolUrlContext) tools.push('url_context');
     if (this.toolImageGen) tools.push('image_generation');
-    const models: ProviderModel[] = provider.models.map((m: ProviderModel): ProviderModel => {
-      if (m.id !== this.modelRowId) return m;
-      // arkts-no-spread:显式字段拷贝
-      return {
-        modelId: m.modelId, displayName: m.displayName, id: m.id,
-        type: modelType as ModelType,
-        customHeaders: headers, customBodies: bodies,
-        inputModalities: inputModalities, outputModalities: m.outputModalities,
-        abilities: m.abilities, tools: tools,
-        contextWindowTokens: contextWindow, providerOverwrite: m.providerOverwrite,
-      };
-    });
-    loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): void => {
-      const all: ProviderSetting[] = (list ?? []).map((p: ProviderSetting): ProviderSetting => {
-        if (p.id !== provider.id) return p;
-        return this.rebuildProvider(p, models);
-      });
-      saveProviders(getChatKvStore(), all).then((): void => {
-        router.back();
-      });
-    });
+    this.saving = true;
+    try {
+      const all: ProviderSetting[] = (await loadProviders(getChatKvStore())) ?? [];
+      const provider: ProviderSetting | undefined = all.find((p: ProviderSetting): boolean => p.id === providerId);
+      const model: ProviderModel | undefined = provider?.models.find((m: ProviderModel): boolean => m.id === this.modelRowId);
+      if (provider === undefined || model === undefined) throw new Error('该模型已被删除，请返回刷新。');
+      // 只更新当前模型的草稿字段，保留刚读取的服务商与其他模型。
+      const updated: ProviderModel = JSON.parse(JSON.stringify(model)) as ProviderModel;
+      updated.type = this.modelType as ModelType;
+      updated.customHeaders = headers;
+      updated.customBodies = bodies;
+      updated.inputModalities = this.draftInputModalities();
+      updated.contextWindowTokens = contextWindow;
+      updated.tools = tools;
+      updated.abilities = model.abilities.filter((ability: ModelAbility): boolean => ability !== 'tool');
+      if (this.toolCallingEnabled) updated.abilities.push('tool');
+      const models: ProviderModel[] = provider.models.map((m: ProviderModel): ProviderModel => m.id === this.modelRowId ? updated : m);
+      const next: ProviderSetting[] = all.map((p: ProviderSetting): ProviderSetting => p.id === providerId ? this.rebuildProvider(p, models) : p);
+      await saveProviders(getChatKvStore(), next);
+      router.back();
+    } catch (e) {
+      this.error = `保存失败：${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      this.saving = false;
+    }
   }
 
   // provider 为 sealed 三变体 — 经 JSON 序列化 round-trip 替换 models
@@ -312,31 +345,30 @@ struct ChatModelParamsPage {
   }
 
   // ProviderOverrideSettings(:251-257)对齐 — 移除覆写(置 null 即时落库)
-  private removeOverwrite(): void {
-    if (this.provider === null) return;
-    const provider: ProviderSetting = this.provider;
-    const models: ProviderModel[] = provider.models.map((m: ProviderModel): ProviderModel => {
-      if (m.id !== this.modelRowId) return m;
-      return {
-        modelId: m.modelId, displayName: m.displayName, id: m.id, type: m.type,
-        customHeaders: m.customHeaders, customBodies: m.customBodies,
-        inputModalities: m.inputModalities, outputModalities: m.outputModalities,
-        abilities: m.abilities, tools: m.tools,
-        contextWindowTokens: m.contextWindowTokens, providerOverwrite: null,
-      };
-    });
-    loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): void => {
-      const all: ProviderSetting[] = (list ?? []).map((p: ProviderSetting): ProviderSetting => {
-        if (p.id !== provider.id) return p;
-        return this.rebuildProvider(p, models);
-      });
-      saveProviders(getChatKvStore(), all).then((): void => {
-        this.provider = this.rebuildProvider(provider, models);
-        this.hasOverwrite = false;
-        this.overwriteName = '';
-        this.updateToolProtocol(provider);
-      });
-    });
+  private async removeOverwrite(): Promise<void> {
+    if (this.provider === null || this.saving) return;
+    const providerId: string = this.provider.id;
+    this.saving = true;
+    this.error = '';
+    try {
+      const all: ProviderSetting[] = (await loadProviders(getChatKvStore())) ?? [];
+      const provider: ProviderSetting | undefined = all.find((p: ProviderSetting): boolean => p.id === providerId);
+      const model: ProviderModel | undefined = provider?.models.find((m: ProviderModel): boolean => m.id === this.modelRowId);
+      if (provider === undefined || model === undefined) throw new Error('该模型已被删除，请返回刷新。');
+      const updated: ProviderModel = JSON.parse(JSON.stringify(model)) as ProviderModel;
+      updated.providerOverwrite = null;
+      const models: ProviderModel[] = provider.models.map((m: ProviderModel): ProviderModel => m.id === this.modelRowId ? updated : m);
+      const next: ProviderSetting[] = all.map((p: ProviderSetting): ProviderSetting => p.id === providerId ? this.rebuildProvider(p, models) : p);
+      await saveProviders(getChatKvStore(), next);
+      this.provider = this.rebuildProvider(provider, models);
+      this.hasOverwrite = false;
+      this.overwriteName = '';
+      this.updateToolProtocol(provider);
+    } catch (e) {
+      this.error = `移除失败：${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      this.saving = false;
+    }
   }
 
   @Builder
@@ -403,7 +435,198 @@ struct ChatModelParamsPage {
     .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 10 })
   }
 
-  build() {
+  private advancedSummary(): string {
+    const parts: string[] = [];
+    if (this.hasOverwrite) parts.push(`服务商覆写：${this.overwriteName}`);
+    if (this.modelType !== 'chat') parts.push(this.modelType === 'image' ? '生图模型' : '嵌入模型');
+    if (this.inputImage || this.inputAudio) parts.push('扩展输入模态');
+    if (this.toolSearch || this.toolUrlContext || this.toolImageGen) parts.push('已设内置工具');
+    if (this.headerNames.length > 0) parts.push(`${this.headerNames.length} 项 Header`);
+    if (this.bodyKeys.length > 0) parts.push(`${this.bodyKeys.length} 项 Body`);
+    return parts.length > 0 ? parts.join(' · ') : '类型、输入模态与自定义请求';
+  }
+
+  @Builder
+  private ReadingField(options: ModelFieldOptions): void {
+    Column({ space: 7 }) {
+      Text(options.label).fontSize(13).fontColor(D.muted).width('100%')
+      TextInput({ text: options.value, placeholder: options.placeholder }).height(44)
+        .fontSize(15).fontFamily(FONT_MONO).fontColor(D.ink).placeholderColor(D.muted)
+        .backgroundColor(D.paper).borderRadius(10).onChange(options.onChange)
+    }.width('100%').padding(16).alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  private BasicReadingOptions(): void {
+    if (this.modelType === 'chat') {
+      DeepReadSettingsToggle({ label: '工具调用', checked: this.toolCallingEnabled, last: false,
+        onChange: (checked: boolean): void => { this.toolCallingEnabled = checked; } })
+    }
+    this.ReadingField({ label: '上下文窗口（tokens）', value: this.contextWindowText, placeholder: '留空表示未知',
+      onChange: (value: string): void => { this.contextWindowText = value; } })
+  }
+
+  @Builder
+  private ReadingModelAttributes(): void {
+    DeepReadSettingsPicker({ label: '模型类型', options: MODEL_TYPE_OPTIONS, selected: this.modelTypeIndex(),
+      onSelect: (index: number): void => { this.modelType = MODEL_TYPE_VALUES[index]; } })
+    DeepReadSettingsToggle({ label: '文本输入', checked: this.inputText,
+      onChange: (checked: boolean): void => { this.inputText = checked; } })
+    DeepReadSettingsToggle({ label: '图片输入', checked: this.inputImage,
+      onChange: (checked: boolean): void => { this.inputImage = checked; } })
+    DeepReadSettingsToggle({ label: '音频输入', checked: this.inputAudio, last: true,
+      onChange: (checked: boolean): void => { this.inputAudio = checked; } })
+  }
+
+  @Builder
+  private ReadingBuiltInTools(): void {
+    DeepReadSettingsToggle({ label: '联网搜索', checked: this.toolSearch,
+      onChange: (checked: boolean): void => { this.toolSearch = checked; } })
+    DeepReadSettingsToggle({ label: '网址上下文（Google）', checked: this.toolUrlContext,
+      onChange: (checked: boolean): void => { this.toolUrlContext = checked; } })
+    DeepReadSettingsToggle({ label: '生成图片', checked: this.toolImageGen, last: true,
+      onChange: (checked: boolean): void => { this.toolImageGen = checked; } })
+  }
+
+  @Builder
+  private ReadingUa(): void {
+    ForEach(UA_PRESETS, (preset: string[]): void => {
+      DeepReadSettingsRow({ label: preset[0], value: this.uaCurrent() === preset[1] ? '已选' : '',
+        valueAccent: true, chevron: false, onTap: (): void => { this.applyUaPreset(preset[1]); } })
+    }, (preset: string[]): string => preset[0])
+    if (this.uaIndex() >= 0) {
+      DeepReadSettingsRow({ label: '清除 User-Agent', destructive: true, chevron: false, last: true,
+        onTap: (): void => { this.clearUa(); } })
+    }
+  }
+
+  @Builder
+  private ReadingHeaders(): void {
+    ForEach(this.headerNames, (_name: string, index: number): void => {
+      this.ReadingField({ label: `Header ${index + 1} 名称`, value: this.headerNames[index] ?? '', placeholder: 'Header 名称',
+        onChange: (value: string): void => { this.setHeaderName(index, value); } })
+      this.ReadingField({ label: '值', value: this.headerValues[index] ?? '', placeholder: 'Header 值',
+        onChange: (value: string): void => { this.setHeaderValue(index, value); } })
+      DeepReadSettingsRow({ label: '删除此 Header', destructive: true, chevron: false,
+        onTap: (): void => { this.removeHeader(index); } })
+    }, (_name: string, index: number): string => `reading-header-${index}`)
+    DeepReadSettingsRow({ label: '添加 Header', action: true, chevron: false, last: true,
+      onTap: (): void => { this.addHeader(); } })
+  }
+
+  @Builder
+  private ReadingBodies(): void {
+    ForEach(this.bodyKeys, (_key: string, index: number): void => {
+      this.ReadingField({ label: `Body ${index + 1} Key`, value: this.bodyKeys[index] ?? '', placeholder: 'Body Key',
+        onChange: (value: string): void => { this.setBodyKey(index, value); } })
+      Column({ space: 7 }) {
+        Text('值（JSON）').fontSize(13).fontColor(D.muted).width('100%')
+        TextArea({ text: this.bodyTexts[index] ?? '', placeholder: 'JSON 值' }).height(100)
+          .fontFamily(FONT_MONO).fontSize(15).fontColor(D.ink).placeholderColor(D.muted)
+          .backgroundColor(D.paper).borderRadius(10).onChange((value: string): void => { this.setBodyText(index, value); })
+        if ((this.bodyErrors[index] ?? '').length > 0) {
+          Text(this.bodyErrors[index]).fontSize(13).fontColor(D.danger).width('100%')
+        }
+      }.width('100%').padding(16)
+      DeepReadSettingsRow({ label: '删除此 Body', destructive: true, chevron: false,
+        onTap: (): void => { this.removeBody(index); } })
+    }, (_key: string, index: number): string => `reading-body-${index}`)
+    DeepReadSettingsRow({ label: '添加 Body', action: true, chevron: false, last: true,
+      onTap: (): void => { this.addBody(); } })
+  }
+
+  @Builder
+  private ReadingAdvancedOptions(): void {
+    if (this.hasOverwrite) {
+      DeepReadSettingsSection({ title: '服务商覆写' })
+      DeepReadSettingsGroup({ content: (): void => { this.ReadingOverwrite(); } })
+      DeepReadSettingsNote({ text: '移除覆写会立即保存，其他修改仍需点击下方保存。' })
+    }
+    DeepReadSettingsSection({ title: '模型属性' })
+    DeepReadSettingsGroup({ content: (): void => { this.ReadingModelAttributes(); } })
+    DeepReadSettingsSection({ title: '服务商内置工具' })
+    DeepReadSettingsGroup({ content: (): void => { this.ReadingBuiltInTools(); } })
+    DeepReadSettingsNote({ text: `实际请求服务商：${this.toolProviderName}。这些选项会保留；深度阅读使用设置页中的搜索服务，内置工具是否生效取决于生成管线与服务商协议，不能替代搜索服务配置。` })
+    DeepReadSettingsSection({ title: 'User-Agent 预设' })
+    DeepReadSettingsGroup({ content: (): void => { this.ReadingUa(); } })
+    DeepReadSettingsSection({ title: '自定义 Headers' })
+    DeepReadSettingsGroup({ content: (): void => { this.ReadingHeaders(); } })
+    DeepReadSettingsSection({ title: '自定义 Body' })
+    DeepReadSettingsGroup({ content: (): void => { this.ReadingBodies(); } })
+    DeepReadSettingsNote({ text: '自定义 Body 按原规则覆盖请求字段，包括 tools。保存前请确认 JSON 与请求协议一致。' })
+  }
+
+  @Builder
+  private ReadingOverwrite(): void {
+    DeepReadSettingsRow({ label: this.overwriteName, detail: '当前模型使用独立的服务商参数', chevron: false })
+    DeepReadSettingsRow({ label: '移除覆写', destructive: true, chevron: false, last: true,
+      onTap: (): void => { this.removeOverwrite(); } })
+  }
+
+  private toggleReadingAdvanced(): void {
+    if (this.saving) return;
+    if (this.reduceMotion || this.appBackgrounded) {
+      this.advancedExpanded = !this.advancedExpanded;
+      return;
+    }
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
+      this.advancedExpanded = !this.advancedExpanded;
+    });
+  }
+
+  @Builder
+  private ReadingAdvancedEntry(): void {
+    DeepReadSettingsRow({ label: this.advancedExpanded ? '收起高级设置' : '高级设置', detail: this.advancedSummary(),
+      picker: !this.advancedExpanded, last: true, onTap: (): void => { this.toggleReadingAdvanced(); } })
+  }
+
+  @Builder
+  private ReadingPage(): void {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column() {
+        DeepReadSettingsHeader({ title: '模型设置', onBack: (): void => { if (!this.saving) router.back(); } })
+        if (!this.loaded) {
+          Text('加载中…').fontSize(15).fontColor(D.muted).margin({ top: 32 })
+        } else if (this.provider === null) {
+          Text(this.error.length > 0 ? this.error : '模型不存在').fontSize(15).fontColor(D.muted).padding(18)
+        } else {
+          Scroll() {
+            Column() {
+              Text(this.modelLabel).fontSize(24).fontFamily(D.serif).fontWeight(FontWeight.Bold)
+                .fontColor(D.ink).width('100%').padding({ left: 16, right: 16, top: 12 }).wordBreak(WordBreak.BREAK_ALL)
+              Text(this.provider.name).fontSize(13).fontColor(D.muted).width('100%').padding({ left: 16, right: 16, top: 6 })
+              DeepReadSettingsSection({ title: '基础设置' })
+              DeepReadSettingsGroup({ content: (): void => { this.BasicReadingOptions(); } })
+              DeepReadSettingsNote({ text: '工具调用允许生成流程使用已配置的工具；模型是否支持以服务商实际返回为准。上下文窗口用于描述模型容量，留空不会覆写为 0。' })
+              DeepReadSettingsSection({ title: '高级设置' })
+              DeepReadSettingsGroup({ content: (): void => { this.ReadingAdvancedEntry(); } })
+              if (this.advancedExpanded) {
+                Column() { this.ReadingAdvancedOptions(); }.width('100%')
+                  .transition(TransitionEffect.OPACITY.animation({ duration: this.reduceMotion || this.appBackgrounded ? 0 : 160 }))
+              }
+            }.width('100%').padding({ left: D.gutter, right: D.gutter, bottom: 24 }).enabled(!this.saving)
+          }.layoutWeight(1).width('100%').align(Alignment.TopStart)
+          Column({ space: 10 }) {
+            if (this.error.length > 0) { Text(this.error).fontSize(13).fontColor(D.danger).width('100%') }
+            DeepReadSettingsButton({ label: this.saving ? '保存中…' : '保存模型设置', icon: 'check_circle', disabled: this.saving,
+              onTap: (): void => { this.confirm(); } })
+          }.width('100%').padding({ left: D.gutter, right: D.gutter, top: 8, bottom: DeepReadDockLayout.bottomInset(this.navBarHeight) })
+        }
+      }.width('100%').height('100%').backgroundColor(D.paper)
+      DeepReadSubpageDock({ onBeforeLeave: (): boolean => { return !this.saving; } }).align(Alignment.Bottom).hitTestBehavior(HitTestMode.Transparent)
+    }.width('100%').height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  build(): void {
+    if (getProductKind() === 'deepread') {
+      ForEach([`${this.themeEpoch}:${this.darkMode}:${this.accentColor}`], (_epoch: string): void => { this.ReadingPage(); },
+        (epoch: string): string => epoch)
+    } else { this.HostPage(); }
+  }
+
+  @Builder
+  private HostPage(): void {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
@@ -414,6 +637,7 @@ struct ChatModelParamsPage {
       } else if (this.provider === null) {
         Text('模型不存在').fontSize(13).fontColor(this.colors.muted).margin({ top: 32 })
       } else {
+        if (this.error.length > 0) { Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').padding(16) }
         Scroll() {
           Column() {
             // ── 提供商覆写(SettingProviderModelSettingsForm.kt:734-821 对齐) ──
@@ -458,6 +682,15 @@ struct ChatModelParamsPage {
                 selected: this.modelTypeIndex(),
                 onSelect: (idx: number): void => { this.modelType = MODEL_TYPE_VALUES[idx]; },
               })
+              if (this.modelType === 'chat') {
+                ToggleRow({
+                  label: '工具调用', checked: this.toolCallingEnabled, isLast: true,
+                  onToggle: (): void => { this.toolCallingEnabled = !this.toolCallingEnabled; },
+                })
+                Text('默认开启，允许模型调用搜索、MCP 等工具。模型不支持工具调用时可关闭。')
+                  .fontSize(TEXT_STYLES.secondary.size).fontColor(this.colors.muted)
+                  .width('100%').padding({ left: 16, right: 16, bottom: 8 })
+              }
               Text('输入模态')
                 .fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
                 .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
@@ -594,13 +827,13 @@ struct ChatModelParamsPage {
           .width('100%').padding({ left: 16, right: 16, bottom: 16 }).justifyContent(FlexAlign.Start)
         }
         .align(Alignment.TopStart)
-        .layoutWeight(1)
+        .layoutWeight(1).enabled(!this.saving)
 
         Row() {
           Blank()
-          BtnGhost({ label: '取消', onTap: (): void => { router.back(); } })
+          BtnGhost({ label: '取消', onTap: (): void => { if (!this.saving) router.back(); } })
           Row() {
-            BtnFill({ label: '确定', onTap: (): void => { this.confirm(); } })
+            BtnFill({ label: this.saving ? '保存中…' : '确定', onTap: (): void => { this.confirm(); } })
           }
           .margin({ left: 8 })
         }

@@ -1,0 +1,39 @@
+✔ thinking text preserves raw line breaks and Markdown symbols, matching the iOS plain text view (28.701125ms)
+✔ only overflow animates and repeated geometry does not restart the glide (4.53025ms)
+✔ a growing target retargets from the visible offset and large catch-up is speed-limited (3.492792ms)
+✔ content measuring before a still-growing card viewport does not start a false overflow glide (2.88ms)
+✔ touch cancels native motion; an upward browse pauses until the user returns to bottom (2.555875ms)
+✔ stop is idempotent and a detached thinking scroll cannot restart (3.255292ms)
+✖ reasoning freezes completed text blocks while preserving every original newline (3.846167ms)
+✔ a 6000-character thought with 200 short lines uses bounded native text blocks (2.459625ms)
+✔ the stream-to-body handoff preserves the 6000-character window until explicit reopen (3.618875ms)
+✔ window boundaries, blank lines and long unbroken paragraphs retain exact raw text (2.253875ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 9
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 282.826166
+
+✖ failing tests:
+
+test at harmony/chat/src/test/reasoning_native_follow.test.cjs:115:1
+✖ reasoning freezes completed text blocks while preserving every original newline (3.846167ms)
+  AssertionError [ERR_ASSERTION]: growing tail must preserve native Text identity
+  + actual - expected
+  
+  + 'source-452:partialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartial final\n'
+  - 'source-452:partialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartial'
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/reasoning_native_follow.test.cjs:123:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'source-452:partialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartial final\n',
+    expected: 'source-452:partialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartialpartial',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

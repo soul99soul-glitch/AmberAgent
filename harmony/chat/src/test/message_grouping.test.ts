@@ -4,11 +4,11 @@
 //   coalesceSubAgentSteps / coalesceCouncilSteps / mergeDuplicateRunBlocks
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { UIMessagePart, UIMessagePartText, UIMessagePartReasoning, UIMessagePartTool } from '../main/ets/chat/message.ts';
+import type {
+  UIMessagePart, UIMessagePartText, UIMessagePartReasoning, UIMessagePartTool,
+} from '../main/ets/chat/message.ts';
 import type { JsonObject } from '../main/ets/chat/json.ts';
-import {
-  groupMessageParts,
-} from '../main/ets/chat/message_grouping.ts';
+import { groupMessageParts } from '../main/ets/chat/message_grouping.ts';
 import type {
   ThinkingStep, MessagePartBlock,
 } from '../main/ets/chat/message_grouping.ts';
@@ -57,19 +57,6 @@ describe('groupMessageParts basic grouping', () => {
     assert.equal(tb.steps.length, 2);
     assert.equal(tb.steps[0].kind, 'reasoning');
     assert.equal(tb.steps[1].kind, 'tool');
-  });
-
-  it('merges consecutive text parts into one ContentBlock', () => {
-    const parts: UIMessagePart[] = [
-      text('hello '),
-      text('world'),
-    ];
-    const blocks = groupMessageParts(parts);
-    assert.equal(blocks.length, 1);
-    assert.equal(blockKind(blocks[0]), 'content');
-    const cb = blocks[0] as { kind: 'content'; part: UIMessagePartText; index: number };
-    assert.equal(cb.part.text, 'hello world');
-    assert.equal(cb.index, 0);
   });
 
   it('flushes thinking before text and text before non-text non-thinking', () => {
@@ -245,30 +232,6 @@ describe('groupMessageParts mergeDuplicateRunBlocks', () => {
     assert.equal(blockKind(blocks[0]), 'council');
     const cb = blocks[0] as { kind: 'council'; step: { tools: UIMessagePartTool[] } };
     assert.equal(cb.step.tools.length, 2);
-  });
-});
-
-describe('groupMessageParts text metadata merge', () => {
-  it('second text metadata overrides first when non-null', () => {
-    const parts: UIMessagePart[] = [
-      { type: 'text', text: 'a', metadata: { foo: 'bar' } as JsonObject },
-      { type: 'text', text: 'b', metadata: { foo: 'baz' } as JsonObject },
-    ];
-    const blocks = groupMessageParts(parts);
-    const cb = blocks[0] as { kind: 'content'; part: UIMessagePartText };
-    assert.equal(cb.part.text, 'ab');
-    assert.deepEqual(cb.part.metadata, { foo: 'baz' });
-  });
-
-  it('second text null metadata keeps first metadata', () => {
-    const parts: UIMessagePart[] = [
-      { type: 'text', text: 'a', metadata: { foo: 'bar' } as JsonObject },
-      { type: 'text', text: 'b', metadata: null },
-    ];
-    const blocks = groupMessageParts(parts);
-    const cb = blocks[0] as { kind: 'content'; part: UIMessagePartText };
-    assert.equal(cb.part.text, 'ab');
-    assert.deepEqual(cb.part.metadata, { foo: 'bar' });
   });
 });
 

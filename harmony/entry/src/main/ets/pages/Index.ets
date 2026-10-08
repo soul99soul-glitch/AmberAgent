@@ -7,9 +7,11 @@
 import { router, window } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
 import type { ConversationSummary, ContinueCandidate, AgentCronTask } from '@amber/chat-domain';
+import type { DeepReadScheduler } from '@amber/deepread-domain';
 import { mergeContinueCandidates, continueStatusText, SOURCE_LABEL } from '@amber/chat-domain';
-import { getChatRepository, describeChatModel, getNovelCreation, getAgentCronManager, getRepository } from '../di/AppContainer.ets';
+import { getChatRepository, describeChatModel, getNovelCreation, getAgentCronManager, getRepository, getDeepReadScheduler } from '../di/AppContainer.ets';
 import { getMiniAppRepositorySync } from '../platform_impl/MiniAppPlatform.ets';
+import { loadDeepReadContinueCandidates } from '../platform_impl/DeepReadContinueSupport.ets';
 import {
   INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, ACCENT_INK, TINY, TEXT_STYLES,
 } from '../design/tokens.ets';
@@ -242,21 +244,9 @@ struct Index {
         return out;
       })
       .catch((_err: Error): ContinueCandidate[] => []);
-    const deepList: Promise<ContinueCandidate[]> = getRepository().listHistory(3)
-      .then((entries): ContinueCandidate[] => entries
-        .filter((e): boolean => e.phase !== 'COMPLETE')
-        .slice(0, 3)
-        .map((e): ContinueCandidate => ({
-          sourceKind: 'deepread',
-          sourceId: e.topicId,
-          route: { kind: 'deepread', topicId: e.topicId, title: e.title },
-          title: e.title.length > 0 ? e.title : '深度阅读',
-          summary: e.phase,
-          lastUpdatedAt: e.updatedAt,
-          status: 'waiting_user',
-          priority: 0,
-          isRunning: e.phase !== 'COMPLETE',
-        })))
+    const deepList: Promise<ContinueCandidate[]> = getDeepReadScheduler()
+      .then((scheduler: DeepReadScheduler): Promise<ContinueCandidate[]> =>
+        loadDeepReadContinueCandidates(getRepository(), scheduler))
       .catch((_err: Error): ContinueCandidate[] => []);
     const miniList: Promise<ContinueCandidate[]> = getMiniAppRepositorySync().listAll()
       .then((apps): ContinueCandidate[] => apps.slice(0, 2).map((app): ContinueCandidate => ({

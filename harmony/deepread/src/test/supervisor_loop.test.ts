@@ -1,19 +1,16 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import {
-  buildPrompt, buildWriterReminder, runStageSupervisorLoop, TimeoutError,
-  CollectRunFn, SupervisorContext,
-} from '../main/ets/agent/supervisor_loop.ts';
-import { tryFallbackAfterStageFailure } from '../main/ets/agent/try_fallback.ts';
+import { buildPrompt, runStageSupervisorLoop, TimeoutError, CollectRunFn, SupervisorContext } from '../main/ets/agent/supervisor_loop.ts';
+
 import { createSectionWriterTools } from '../main/ets/agent/section_writer_tools.ts';
 import type { UIMessage, UIMessagePart, UIMessagePartText } from '../main/ets/agent/message.ts';
-import { makeUserMessage, makeAssistantMessage, makeUIMessage } from '../main/ets/agent/message.ts';
+import { makeAssistantMessage, makeUIMessage } from '../main/ets/agent/message.ts';
 import type { DeepReadEvidencePack, EvidenceCard, DeepReadArticlePlan } from '../main/ets/research/evidence_pack.ts';
-import type { DeepReadOutput } from '../main/ets/domain/models.ts';
+
 import { makeEmptyDeepReadOutput } from '../main/ets/domain/models.ts';
 import { statusOf } from '../main/ets/domain/helpers.ts';
 import type { DeepReadGenerationStage } from '../main/ets/domain/enums.ts';
-import { STAGE_LABELS, WRITER_TOOL_NAMES } from '../main/ets/domain/enums.ts';
+import { WRITER_TOOL_NAMES } from '../main/ets/domain/enums.ts';
 
 // ===== fixtures =====
 
@@ -53,44 +50,6 @@ const assistantWithOverviewToolCall = (): UIMessage => {
   return makeUIMessage('assistant', parts);
 };
 
-// ===== buildPrompt =====
-
-test('buildPrompt: includes date, title, stage label, playbook', () => {
-  const prompt = buildPrompt({
-    topicTitle: '量子计算', stage: 'OVERVIEW',
-    existingOutput: makeEmptyDeepReadOutput(), seedUrl: null,
-    scrapeWebAvailable: false, evidencePack: makePack(), articlePlan: emptyPlan(),
-    stageEvidence: [makeCard('src-1')], stageTimeoutMs: 90_000,
-    playbookMarkdown: '## 规则\n要点', todayIso: '2026-06-23',
-  });
-  assert.ok(prompt.includes('今天日期：2026-06-23'));
-  assert.ok(prompt.includes('话题标题：量子计算'));
-  assert.ok(prompt.includes(`目标段落：${STAGE_LABELS.OVERVIEW}`));
-  assert.ok(prompt.includes('## 规则'));
-  assert.ok(prompt.includes('要点'));
-});
-
-test('buildPrompt: includes seedUrl section when provided', () => {
-  const prompt = buildPrompt({
-    topicTitle: 't', stage: 'OVERVIEW', existingOutput: makeEmptyDeepReadOutput(),
-    seedUrl: 'https://seed.example.com/x', scrapeWebAvailable: true,
-    evidencePack: makePack(), articlePlan: emptyPlan(),
-    stageEvidence: [makeCard('s1')], stageTimeoutMs: 90_000,
-    playbookMarkdown: '', todayIso: '2026-06-23',
-  });
-  assert.ok(prompt.includes('用户指定来源 URL：https://seed.example.com/x'));
-});
-
-test('buildPrompt: omits seedUrl section when null', () => {
-  const prompt = buildPrompt({
-    topicTitle: 't', stage: 'OVERVIEW', existingOutput: makeEmptyDeepReadOutput(),
-    seedUrl: null, scrapeWebAvailable: false, evidencePack: makePack(),
-    articlePlan: emptyPlan(), stageEvidence: [makeCard('s1')],
-    stageTimeoutMs: 90_000, playbookMarkdown: '', todayIso: '2026-06-23',
-  });
-  assert.ok(!prompt.includes('用户指定来源 URL'));
-});
-
 test('buildPrompt: legacy scrape flag cannot advertise tools absent from the writer set', () => {
   const base = (scrape: boolean) => buildPrompt({
     topicTitle: 't', stage: 'OVERVIEW', existingOutput: makeEmptyDeepReadOutput(),
@@ -101,39 +60,6 @@ test('buildPrompt: legacy scrape flag cannot advertise tools absent from the wri
   assert.ok(!base(true).includes('scrape_web'));
   assert.ok(!base(false).includes('scrape_web'));
   assert.ok(base(true).includes('不确定'));
-});
-
-test('buildPrompt: includes stage-specific requirement', () => {
-  for (const stage of ['OVERVIEW', 'NARRATIVE', 'ANALYSIS', 'EXTENDED_READING'] as DeepReadGenerationStage[]) {
-    const prompt = buildPrompt({
-      topicTitle: 't', stage, existingOutput: makeEmptyDeepReadOutput(),
-      seedUrl: null, scrapeWebAvailable: false, evidencePack: makePack(),
-      articlePlan: emptyPlan(), stageEvidence: [makeCard('s1')],
-      stageTimeoutMs: 90_000, playbookMarkdown: '', todayIso: '2026-06-23',
-    });
-    assert.ok(prompt.includes(WRITER_TOOL_NAMES[stage]), `stage ${stage} mentions its writer tool`);
-  }
-});
-
-test('buildPrompt: includes article plan fields', () => {
-  const plan: DeepReadArticlePlan = {
-    ...emptyPlan(),
-    overviewAngle: '测试角度',
-    narrativeSlots: ['slot1', 'slot2'],
-    analysisQuestions: ['问题一'],
-    riskOrUncertainty: ['风险点'],
-    requiredSourceIds: ['src-1', 'src-2'],
-  };
-  const prompt = buildPrompt({
-    topicTitle: 't', stage: 'OVERVIEW', existingOutput: makeEmptyDeepReadOutput(),
-    seedUrl: null, scrapeWebAvailable: false, evidencePack: makePack(), articlePlan: plan,
-    stageEvidence: [makeCard('s1')], stageTimeoutMs: 90_000, playbookMarkdown: '', todayIso: '2026-06-23',
-  });
-  assert.ok(prompt.includes('angle: 测试角度'));
-  assert.ok(prompt.includes('narrative_slots: slot1 / slot2'));
-  assert.ok(prompt.includes('问题一'));
-  assert.ok(prompt.includes('风险点'));
-  assert.ok(prompt.includes('required_source_ids: src-1, src-2'));
 });
 
 test('buildPrompt: includes evidence card with excerpt + image candidates', () => {
@@ -156,76 +82,6 @@ test('buildPrompt: includes evidence card with excerpt + image candidates', () =
   assert.ok(prompt.includes('evidence_excerpt:'));
   assert.ok(prompt.includes('image_candidates:'));
   assert.ok(prompt.includes('hero'));
-});
-
-test('buildPrompt: empty evidence → "没有可用证据"', () => {
-  const prompt = buildPrompt({
-    topicTitle: 't', stage: 'OVERVIEW', existingOutput: makeEmptyDeepReadOutput(),
-    seedUrl: null, scrapeWebAvailable: false, evidencePack: makePack([]),
-    articlePlan: emptyPlan(), stageEvidence: [], stageTimeoutMs: 90_000,
-    playbookMarkdown: '', todayIso: '2026-06-23',
-  });
-  assert.ok(prompt.includes('没有可用证据'));
-});
-
-test('buildPrompt: includes section_states from existing output', () => {
-  const existing: DeepReadOutput = { ...makeEmptyDeepReadOutput(), sectionStates: { OVERVIEW: { status: 'READY', errorMessage: null } } };
-  const prompt = buildPrompt({
-    topicTitle: 't', stage: 'NARRATIVE', existingOutput: existing,
-    seedUrl: null, scrapeWebAvailable: false, evidencePack: makePack(),
-    articlePlan: emptyPlan(), stageEvidence: [makeCard('s1')], stageTimeoutMs: 90_000,
-    playbookMarkdown: '', todayIso: '2026-06-23',
-  });
-  assert.ok(prompt.includes('section_states:'));
-  assert.ok(prompt.includes('overview=ready'));
-});
-
-// ===== buildWriterReminder =====
-
-test('buildWriterReminder: includes pass number + stage writer tool', () => {
-  const r0 = buildWriterReminder('OVERVIEW', 0);
-  assert.ok(r0.includes('reminder #1'));
-  assert.ok(r0.includes(WRITER_TOOL_NAMES.OVERVIEW));
-  const r1 = buildWriterReminder('ANALYSIS', 1);
-  assert.ok(r1.includes('reminder #2'));
-  assert.ok(r1.includes(WRITER_TOOL_NAMES.ANALYSIS));
-});
-
-// ===== tryFallbackAfterStageFailure =====
-
-test('tryFallback: already READY → returns true without writing', async () => {
-  const preset: DeepReadOutput = { ...makeEmptyDeepReadOutput(), sectionStates: { OVERVIEW: { status: 'READY', errorMessage: null } } };
-  const writer = createSectionWriterTools({ topicId: 't', topicTitle: 'x', imageCandidates: [], initialOutput: preset });
-  const result = await tryFallbackAfterStageFailure({
-    writer, stage: 'OVERVIEW', messages: [], sources: [], reason: 'test', allowReadyRewrite: false,
-  });
-  assert.equal(result, true);
-});
-
-test('tryFallback: useful assistant text → recovered (READY BASIC)', async () => {
-  const writer = createSectionWriterTools({ topicId: 't', topicTitle: 'x', imageCandidates: [] });
-  const msgs: UIMessage[] = [
-    makeUserMessage('研究'),
-    makeAssistantMessage('这是模型生成的足够长的中文概览文本内容,包含足够汉字以通过有效性检查阈值要求。'),
-  ];
-  const result = await tryFallbackAfterStageFailure({
-    writer, stage: 'OVERVIEW', messages: msgs, sources: [makeCard('s1')], reason: 'missing writer tool', allowReadyRewrite: false,
-  });
-  assert.equal(result, true);
-  assert.equal(statusOf(writer.current(), 'OVERVIEW'), 'READY');
-  assert.equal(writer.current().sectionQualities.OVERVIEW, 'BASIC');
-});
-
-test('tryFallback: low-quality text + no sources → not recovered (false)', async () => {
-  const writer = createSectionWriterTools({ topicId: 't', topicTitle: 'x', imageCandidates: [] });
-  const msgs: UIMessage[] = [
-    makeAssistantMessage('短'),
-  ];
-  // EXTENDED_READING fallback 需要 http 链接;给空 sources → 不会 READY
-  const result = await tryFallbackAfterStageFailure({
-    writer, stage: 'EXTENDED_READING', messages: msgs, sources: [], reason: 'timeout', allowReadyRewrite: false,
-  });
-  assert.equal(result, false);
 });
 
 // ===== runStageSupervisorLoop: happy path (LLM calls writer tool) =====

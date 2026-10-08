@@ -10,7 +10,9 @@ import type { AbortSignalLike, HttpClient, HttpRequest } from '@amber/deepread-d
 import { SseAssembler } from '@amber/deepread-domain';
 import type { SseEvent } from '@amber/deepread-domain';
 
-import type { MessageChunk, UIMessage } from './message.ts';
+import type { MessageChunk, UIMessage, UIMessageChoice, UIMessagePart } from './message.ts';
+import { makeAssistantMessage } from './message.ts';
+import { MessageStreamAccumulator } from './stream_accumulator.ts';
 import type { JsonObject } from './json.ts';
 import type { TextGenerationParams } from './provider_model.ts';
 import type { ProviderSettingGoogle } from './provider_settings.ts';
@@ -18,7 +20,7 @@ import { buildGoogleCompletionRequestBody } from './google_request.ts';
 import type { GoogleImageEncoder } from './google_request.ts';
 import {
   createGoogleStreamToolIdAllocator, parseGoogleResponseBody,
-  parseGoogleStreamEventData, unwrapGoogleResponse,
+  parseGoogleStreamEventData, unwrapGoogleResponse, googleFailedFinishReason,
 } from './google_parse.ts';
 import { parseOpenAiErrorDetail } from './openai_parse.ts';
 import type { JsonValue } from './json.ts';
@@ -196,6 +198,9 @@ export const createGoogleChatApi = (deps: GoogleChatApiDeps): OpenAIChatApi => {
     // 流 scope tool id 稳定分配(Android :334)
     const allocator = createGoogleStreamToolIdAllocator();
     const state: { error: Error | null; sawEvent: boolean } = { error: null, sawEvent: false };
+    // Do not expose executable calls before the whole response succeeds. The
+    // tool loop can speculatively execute a call as soon as it enters a snapshot.
+    const pendingTools: Map<number, MessageStreamAccumulator> = new Map();
 
     const resp = await deps.http.fetchStream(req, {
       signal: opts?.signal,
@@ -213,7 +218,27 @@ export const createGoogleChatApi = (deps: GoogleChatApiDeps): OpenAIChatApi => {
             if (evtError !== null) throw evtError;
             const chunk: MessageChunk | null =
               parseGoogleStreamEventData(evt.data, params.model.modelId, allocator);
-            if (chunk !== null) onChunk(chunk);
+            if (chunk === null) continue;
+            const failure: string | null = googleFailedFinishReason(chunk);
+            const visibleChoices: UIMessageChoice[] = chunk.choices.map((choice: UIMessageChoice): UIMessageChoice => {
+              const delta: UIMessage | null = choice.delta;
+              if (delta === null) return choice;
+              const tools: UIMessagePart[] = delta.parts.filter((part: UIMessagePart): boolean => part.type === 'tool');
+              if (tools.length > 0 && failure === null) {
+                let accumulator: MessageStreamAccumulator | undefined = pendingTools.get(choice.index);
+                if (accumulator === undefined) {
+                  accumulator = new MessageStreamAccumulator([makeAssistantMessage('')]);
+                  pendingTools.set(choice.index, accumulator);
+                }
+                accumulator.append({ ...chunk, usage: null, choices: [{ ...choice,
+                  delta: { ...delta, parts: tools }, finishReason: null }] });
+              }
+              return { ...choice, delta: { ...delta,
+                parts: delta.parts.filter((part: UIMessagePart): boolean => part.type !== 'tool') },
+                finishReason: failure === null ? choice.finishReason : null };
+            });
+            onChunk({ ...chunk, choices: visibleChoices });
+            if (failure !== null) throw new Error(`Google generation failed: ${failure}`);
           }
         } catch (e) {
           // malformed event 不能只打日志吞掉(Android :407-412):终止消费并抛出
@@ -230,6 +255,12 @@ export const createGoogleChatApi = (deps: GoogleChatApiDeps): OpenAIChatApi => {
     if (!state.sawEvent) {
       throw errorFromFailureBody(resp.status, resp.body);
     }
+    throwIfCancelled(opts?.signal);
+    pendingTools.forEach((accumulator: MessageStreamAccumulator, index: number): void => {
+      const delta: UIMessage | undefined = accumulator.snapshot()[0];
+      if (delta !== undefined) onChunk({ id: newId(), model: params.model.modelId, usage: null,
+        choices: [{ index, delta, message: null, finishReason: null }] });
+    });
   };
 
   const generateText = async (

@@ -2,12 +2,12 @@
 //
 // Android 基准: ChatMessageTools.kt(985 行)
 // 升级内容: AgentToolCallCapsule pill + 状态徽章 + 图标映射 + toolDisplayTitle
-//   + 失败检测 + 拒绝原因弹窗 + output 预览折叠 + 工具类型分类
+//   + 失败检测 + 拒绝原因 + 点击胶囊查看输出详情 + 工具类型分类
 // 降级(跳过): shimmer / FaviconRow / ZoomableAsyncImage / TTS replay / workspace-file 卡片
 
 import type { UIMessagePartTool, UIMessagePartText, UIMessagePartImage } from '@amber/chat-domain';
-import { toolActivityStatus, toolOutputJson } from '@amber/chat-domain';
-import { MOTION_OVERLAY, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ERROR, META, LABEL } from '../design/tokens.ets';
+import { toolActivityStatus, toolOutputJson, jevAutoApprovalReason } from '@amber/chat-domain';
+import { MOTION_OVERLAY, INK2, INK3, SURFACE, LINE, ERROR, META, LABEL } from '../design/tokens.ets';
 import { GeneratedImageCarousel } from './GeneratedImageCarousel.ets';
 import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshApprovalProtocolLabel } from './SSHApprovalSummary.ets';
 import { SSHUIColors } from './SSHUIColors.ets';
@@ -20,7 +20,6 @@ import {
   AgentToolCallCapsule,
   ToolStatus,
   ToolKind,
-  toolIconEmoji,
   getToolKind,
   toolKindLabel,
 } from './AgentToolCapsule.ets';
@@ -170,6 +169,14 @@ export struct ChatMessageTools {
 
       JevApprovalFacts({ part: this.part, subjectHash: this.jevSubjectHash })
 
+      if (jevAutoApprovalReason(this.part).length > 0) {
+        Column() {
+          Text(jevAutoApprovalReason(this.part)).fontSize(LABEL).fontColor(INK2)
+            .lineHeight(18).width('100%')
+        }
+        .width('100%').padding({ left: 32, top: 4 })
+      }
+
       // denied → 拒绝原因
       if (this.part.approvalState.type === 'denied' && this.deniedLabel.length > 0) {
         Text(this.deniedLabel)
@@ -190,8 +197,8 @@ export struct ChatMessageTools {
           .margin({ top: 4, left: 32 })
       }
 
-      // output 预览(折叠/展开)
-      if (this.part.toolName !== 'generate_image' && this.firstOutputText().length > 0) {
+      // 无详情入口的宿主保留结果；Chat 只在点击胶囊后展示。
+      if (!this.canOpenPreview && this.part.toolName !== 'generate_image' && this.firstOutputText().length > 0) {
         Column() {
           Column() {
             if (this.outputExpanded) {

@@ -5,23 +5,44 @@ import assert from 'node:assert/strict';
 import { createMemoryKeyValueStore } from '../main/ets/chat/kv_store.ts';
 import { makeSearchServiceOptions } from '../main/ets/search/search_service.ts';
 import {
-  SEARCH_PREFS_KEYS, defaultSearchPrefs, loadSearchPrefs, saveSearchPrefs, updateSearchPrefs,
+  SEARCH_PREFS_KEYS,
+  defaultSearchPrefs,
+  loadSearchPrefs,
+  saveSearchPrefs,
+  updateSearchPrefs,
+  initializeDeepReadSearchPrefs,
 } from '../main/ets/search/search_prefs.ts';
 
-test('prefs:空 store → 默认逐字(services [bing_local]/common 10/selected 0/ids []/五内置 true/webview true)', async () => {
+test('DeepRead first launch enables and persists the free aggregate before settings and search read it', async () => {
   const store = createMemoryKeyValueStore();
-  const d = await loadSearchPrefs(store);
-  assert.equal(d.searchServices.length, 1);
-  assert.equal(d.searchServices[0].type, 'bing_local');
-  assert.equal(d.searchCommonOptions.resultSize, 10);
-  assert.equal(d.searchServiceSelected, 0);
-  assert.deepEqual(d.searchEnabledServiceIds, []);
-  assert.equal(d.searchBuiltinDuckDuckGoEnabled, true);
-  assert.equal(d.searchBuiltinBingEnabled, true);
-  assert.equal(d.searchBuiltinJinaEnabled, true);
-  assert.equal(d.searchBuiltinWikipediaEnabled, true);
-  assert.equal(d.searchBuiltinHackerNewsEnabled, true);
-  assert.equal(d.searchGoogleWebViewFallbackEnabled, true);
+  assert.deepEqual((await loadSearchPrefs(store)).searchEnabledServiceIds, [], 'chat defaults remain unchanged');
+  await store.put(SEARCH_PREFS_KEYS.builtinBing, 'false');
+  await initializeDeepReadSearchPrefs(store);
+  const settings = await loadSearchPrefs(store);
+  assert.equal(settings.searchServices[0].type, 'bing_local');
+  assert.deepEqual(settings.searchEnabledServiceIds, [settings.searchServices[0].id]);
+  assert.equal(settings.searchBuiltinBingEnabled, false, 'other saved source preferences survive initialization');
+  assert.equal(settings.enableWebSearch, false, 'chat web-search master switch is independent');
+  const saved = new Map(store.entries);
+  await initializeDeepReadSearchPrefs(store);
+  assert.deepEqual(store.entries, saved, 'subsequent launches do not rewrite settings or service IDs');
+});
+
+test('DeepRead initialization preserves existing services and an explicitly disabled aggregate', async () => {
+  const store = createMemoryKeyValueStore();
+  const settings = defaultSearchPrefs();
+  await saveSearchPrefs(store, settings);
+  const saved = new Map(store.entries);
+  await initializeDeepReadSearchPrefs(store);
+  assert.deepEqual(store.entries, saved);
+  assert.deepEqual((await loadSearchPrefs(store)).searchEnabledServiceIds, []);
+
+  for (const key of [SEARCH_PREFS_KEYS.searchServices, SEARCH_PREFS_KEYS.searchEnabledServiceIds]) {
+    const existing = createMemoryKeyValueStore();
+    await existing.put(key, '[]');
+    await initializeDeepReadSearchPrefs(existing);
+    assert.equal(existing.entries.size, 1, 'a partial existing preference set is not treated as a fresh install');
+  }
 });
 
 test('prefs:save→load 往返;键字符串冻结(ADR-0001);services JSON type 居首', async () => {

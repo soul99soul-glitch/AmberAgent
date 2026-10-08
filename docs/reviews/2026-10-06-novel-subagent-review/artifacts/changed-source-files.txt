@@ -1,0 +1,7 @@
+harmony/entry/src/main/ets/components/NovelChapterVersionPreview.ets
+harmony/entry/src/main/ets/components/NovelGhostwriteStartSheet.ets
+harmony/entry/src/main/ets/components/NovelMaterialEditorSheet.ets
+harmony/entry/src/main/ets/components/NovelRevisionBriefSheet.ets
+harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets
+harmony/entry/src/main/ets/pages/NovelProjectsPage.ets
+harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets

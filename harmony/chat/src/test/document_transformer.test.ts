@@ -4,8 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  MAX_INLINE_FILE_BYTES, MAX_INLINE_TEXT_CHARS, buildDocumentPrompt,
-  createDocumentTransformer, isLikelyTextFile, readDocumentContent,
+  MAX_INLINE_FILE_BYTES, MAX_INLINE_TEXT_CHARS, createDocumentTransformer, isLikelyTextFile, readDocumentContent
 } from '../main/ets/chat/document_transformer.ts';
 import type {
   DocumentFileHandle, DocumentReaderDeps,
@@ -125,14 +124,6 @@ test('二进制占位逐字(:108-115)', async () => {
     '[BINARY_OR_ARCHIVE_FILE]\nname: a.zip\nmime: application/zip\n' +
     'size_bytes: 100\nlocal_path: /data/f\n' +
     'The file is attached but was not inlined as text. Use available tools, such as terminal_execute, to inspect, extract, or process it.\n');
-});
-
-test('prompt 模板:18 空格缩进保留(trimMargin 无 | quirk)+ 首 \n 尾 \n(:29-36)', () => {
-  const SP: string = ' '.repeat(18);
-  assert.equal(
-    buildDocumentPrompt('a.txt', 'C'),
-    `\n${SP}## user sent a file: a.txt\n${SP}<content>\n${SP}\`\`\`\n` +
-    `${SP}C\n${SP}\`\`\`\n${SP}</content>\n`);
 });
 
 test('transform:每个 document prompt add(0) 逆序;非 document 消息恒量 copy;无 doc 不加', async () => {

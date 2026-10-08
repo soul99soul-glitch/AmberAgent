@@ -67,8 +67,8 @@ export const executeRecipeBatch = async (
         const port: RecipeExecutionPort = {
           primitive: (name: string): AgentTool | null => definitions.get(name) ?? null,
           capture: (part: UIMessagePartTool): JsonObject | null => options.capture?.(part) ?? null,
-          decide: (part: UIMessagePartTool, tool: AgentTool): PermissionDecision => options.dispatcher.resolveDecision(tool, part,
-            options.autoApproveTools, options.autoApproveHighRiskTools, [], options.invocationContext),
+          decide: (part: UIMessagePartTool, tool: AgentTool, signal?: AbortSignalLike): Promise<PermissionDecision> => options.dispatcher.resolveReviewedDecision(tool, part,
+            options.autoApproveTools, options.autoApproveHighRiskTools, [], options.invocationContext, signal ?? options.signal),
           dispatch: (part: UIMessagePartTool, tool: AgentTool, signal?: AbortSignalLike): Promise<UIMessagePartTool | null> => options.dispatcher.execute(part, tool,
             options.autoApproveTools, options.autoApproveHighRiskTools, [],
             options.invocationContext, retry, signal),
@@ -91,9 +91,10 @@ export const executeRecipeBatch = async (
           metadata: { ...(current.metadata ?? {}), ...captured } });
       }
       const tool = definitions.get(current.toolName) ?? null;
-      const decision = options.dispatcher.resolveDecision(tool, current,
+      const decision = await options.dispatcher.resolveReviewedDecision(tool, current,
         options.autoApproveTools, options.autoApproveHighRiskTools,
-        options.autoApprovedToolNames, options.invocationContext);
+        options.autoApprovedToolNames, options.invocationContext, options.signal);
+      if (options.signal?.aborted) return { pairs, paused: true };
       if (decision.action === 'ask') {
         await save({ ...current, approvalState: { type: 'pending' },
           metadata: { ...(current.metadata ?? {}), permission_trace: permissionDecisionTraceToJson(decision.trace) } });

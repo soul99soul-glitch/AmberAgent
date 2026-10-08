@@ -1,0 +1,16 @@
+{
+  "novel": {
+    "real_hap_sha256": "bee23fb82850a0921a321ea501a5cdce489a10a43ceb70024ff05a928dd98acf",
+    "bytes": 59220606,
+    "real_install": "pending: USB Offline",
+    "emulator_hap_sha256": "1afb597d2f8ac33022fceba1464dd87d37fabcb6d0196c87276dca2e80c0a9ef",
+    "emulator_install": "success"
+  },
+  "deepread": {
+    "real_hap_sha256": "62f8ae2edbe199425ba8f6386f9bd1aa3998065ffdc4cd2566988d67f8ea894c",
+    "bytes": 59236801,
+    "real_install": "pending: USB Offline",
+    "emulator_hap_sha256": "2acdf10ffd27070694fb256641119194c4a532f6572bfb8a80d9c5cfcfb2144e",
+    "emulator_install": "success"
+  }
+}

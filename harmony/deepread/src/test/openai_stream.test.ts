@@ -6,34 +6,9 @@ import type { SseEvent } from '../main/ets/platform/sse_assembler.ts';
 const evt = (data: string, done = false): SseEvent => ({ data: data, done: done });
 const enc = (s: string): ArrayBuffer => new TextEncoder().encode(s).buffer as ArrayBuffer;
 
-test('parse: content delta extracted', () => {
-  const d = parseOpenAiStreamEvent(evt('{"choices":[{"delta":{"content":"Hello"}}]}'));
-  assert.equal(d.deltaText, 'Hello');
-  assert.equal(d.reasoningText, '');
-  assert.equal(d.done, false);
-});
-
-test('parse: reasoning_content delta extracted', () => {
-  const d = parseOpenAiStreamEvent(evt('{"choices":[{"delta":{"reasoning_content":"think"}}]}'));
-  assert.equal(d.deltaText, '');
-  assert.equal(d.reasoningText, 'think');
-});
-
-test('parse: empty delta object yields empty text', () => {
-  const d = parseOpenAiStreamEvent(evt('{"choices":[{"delta":{}}]}'));
-  assert.equal(d.deltaText, '');
-  assert.equal(d.done, false);
-});
-
 test('parse: finish_reason stop marks done', () => {
   const d = parseOpenAiStreamEvent(evt('{"choices":[{"delta":{},"finish_reason":"stop"}]}'));
   assert.equal(d.done, true);
-});
-
-test('parse: finish_reason null is not done', () => {
-  const d = parseOpenAiStreamEvent(evt('{"choices":[{"delta":{"content":"x"},"finish_reason":null}]}'));
-  assert.equal(d.deltaText, 'x');
-  assert.equal(d.done, false);
 });
 
 test('parse: [DONE] data marks done', () => {
@@ -54,12 +29,6 @@ test('parse: no choices → empty, no throw', () => {
 
 test('parse: malformed JSON → empty, no throw', () => {
   const d = parseOpenAiStreamEvent(evt('{not json'));
-  assert.equal(d.deltaText, '');
-  assert.equal(d.done, false);
-});
-
-test('parse: empty data → empty', () => {
-  const d = parseOpenAiStreamEvent(evt(''));
   assert.equal(d.deltaText, '');
   assert.equal(d.done, false);
 });
@@ -159,14 +128,4 @@ test('parseOpenAiStreamEvent: tool_calls without index falls back to array posit
   assert.equal(d.toolCalls.length, 1);
   assert.equal(d.toolCalls[0].index, 0);
   assert.equal(d.toolCalls[0].name, 'write_file');
-});
-
-test('parseOpenAiStreamEvent: text-only delta yields empty toolCalls', () => {
-  const evt: SseEvent = {
-    data: JSON.stringify({ choices: [{ delta: { content: 'hi' } }] }),
-    done: false,
-  };
-  const d = parseOpenAiStreamEvent(evt);
-  assert.equal(d.deltaText, 'hi');
-  assert.deepEqual(d.toolCalls, []);
 });

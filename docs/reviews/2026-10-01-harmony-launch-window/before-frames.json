@@ -1,0 +1,86 @@
+[
+  {
+    "i": 0,
+    "ms": 273,
+    "remote": "/data/local/tmp/amberlaunchbefore0.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore0.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 1,
+    "ms": 554,
+    "remote": "/data/local/tmp/amberlaunchbefore1.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore1.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 2,
+    "ms": 820,
+    "remote": "/data/local/tmp/amberlaunchbefore2.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore2.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 3,
+    "ms": 1084,
+    "remote": "/data/local/tmp/amberlaunchbefore3.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore3.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 4,
+    "ms": 1408,
+    "remote": "/data/local/tmp/amberlaunchbefore4.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore4.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 5,
+    "ms": 1756,
+    "remote": "/data/local/tmp/amberlaunchbefore5.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore5.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 6,
+    "ms": 2089,
+    "remote": "/data/local/tmp/amberlaunchbefore6.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore6.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 7,
+    "ms": 2394,
+    "remote": "/data/local/tmp/amberlaunchbefore7.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore7.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 8,
+    "ms": 2731,
+    "remote": "/data/local/tmp/amberlaunchbefore8.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore8.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 9,
+    "ms": 3127,
+    "remote": "/data/local/tmp/amberlaunchbefore9.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore9.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 10,
+    "ms": 3485,
+    "remote": "/data/local/tmp/amberlaunchbefore10.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore10.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 11,
+    "ms": 3869,
+    "remote": "/data/local/tmp/amberlaunchbefore11.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore11.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 12,
+    "ms": 4261,
+    "remote": "/data/local/tmp/amberlaunchbefore12.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore12.jpeg as jpeg, width: 1264, height: 1848"
+  },
+  {
+    "i": 13,
+    "ms": 4658,
+    "remote": "/data/local/tmp/amberlaunchbefore13.jpeg",
+    "result": "fileType: \nprocess: display 0, file type: jpeg, width: 1264, height: 1848\nfileType: jpeg\nsnapshot: pixel format is: 3\nsnapshot: convert rgba8888 to rgb888 successfully.\n\nsuccess: snapshot display 0 , write to /data/local/tmp/amberlaunchbefore13.jpeg as jpeg, width: 1264, height: 1848"
+  }
+]

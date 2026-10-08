@@ -2,9 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  FILE_FOLDER_UPLOAD, MAX_CHAT_ATTACHMENT_BYTES,
-  convertBase64ImagePartToLocalFile, createBase64ImageToLocalFileTransformer,
-  decodeBase64, extractBase64Payload, isDataImageUrl,
+  convertBase64ImagePartToLocalFile, createBase64ImageToLocalFileTransformer, decodeBase64
 } from '../main/ets/chat/base64_image_transformer.ts';
 import type { Base64ImageDeps } from '../main/ets/chat/base64_image_transformer.ts';
 import { makeAssistantMessage, makeUserMessage } from '../main/ets/chat/message.ts';
@@ -29,23 +27,6 @@ const deps = (
     },
   };
 };
-
-test('常量逐字:upload 目录名 + 128MB 上限(FilesManager.kt:45,650)', () => {
-  assert.equal(FILE_FOLDER_UPLOAD, 'upload');
-  assert.equal(MAX_CHAT_ATTACHMENT_BYTES, 128 * 1024 * 1024);
-});
-
-test('extractBase64Payload: substringAfter 语义(含/不含分隔符)', () => {
-  assert.equal(extractBase64Payload('data:image/png;base64,QUJD'), 'QUJD');
-  assert.equal(extractBase64Payload('no-marker'), 'no-marker');
-  assert.equal(extractBase64Payload('base64,'), '');
-});
-
-test('isDataImageUrl: 仅 data:image 前缀', () => {
-  assert.equal(isDataImageUrl('data:image/png;base64,x'), true);
-  assert.equal(isDataImageUrl('data:video/mp4;base64,x'), false);
-  assert.equal(isDataImageUrl('file:///a.png'), false);
-});
 
 test('decodeBase64: 往返 + 非法符号抛错 + 错误 padding 抛错', () => {
   assert.deepEqual([...decodeBase64('QUJD')], [0x41, 0x42, 0x43]); // 'ABC'

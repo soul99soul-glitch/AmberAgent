@@ -1,0 +1,422 @@
+[
+  {
+    "path": "harmony/chat/src/main/ets/chat/chat_turn.ts",
+    "change": "modified",
+    "beforeSha256": "eb380bc79a9bc6e0fb9c73dfa935e48a18ca492a8c475ac43368b77b41b6c377",
+    "afterSha256": "a9da98733aafac403270d4bf117d8145da777b7fc178c5b24b7f3e0bd7613e52"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/context_engine.ts",
+    "change": "modified",
+    "beforeSha256": "7ff343d1401095ebc05ab6c8b8e852123bb708898e22ac15a4e66e79c3c2ffff",
+    "afterSha256": "3fb8d2d0e0c21bfd67121cc01bcdae4eeecf5277923e42bdd1ff8fde2434f361"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/council_tools.ts",
+    "change": "modified",
+    "beforeSha256": "6b825882a0d13d8d6884ebea6533a0e9c881858b7ba44301fbb3535ead63ca55",
+    "afterSha256": "3b04b1c18f911a4e64c6969baf38096b6fcd1ef22384920cf2919dc817154cb4"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/generation_retry_wait.ts",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "f2b068fc053126e7d119ebe73ab91853a2cdc37212bc194dd06f32e4fd888797"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/openai_chat_api.ts",
+    "change": "modified",
+    "beforeSha256": "b5809ea14e356e0ce01472c922e1366c36d3eec33492a336057e86f8c92d550a",
+    "afterSha256": "5d09a35ee7bec24bdabc047b49283c290e955f4bc2737d064b5617441c21c840"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/openai_responses_api.ts",
+    "change": "modified",
+    "beforeSha256": "53d494863c623f4d2393ddd633a1018fd77260f4baba7019243004f4094275b2",
+    "afterSha256": "bed52b8313f5c286a762a638beba8bae41988bef732a26251f40d1b70ffec3cb"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/provider_runtime.ts",
+    "change": "modified",
+    "beforeSha256": "e0280a49cc483a962bd801b63eb4aaff5fdec05a3e206140913a96985ee72727",
+    "afterSha256": "40ef5fc3d00ee8294c3eb5cf05a0dc9d2b649fd4a77ac078cbb360f379c2cdf7"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/regenerate.ts",
+    "change": "modified",
+    "beforeSha256": "30828448e7a873b044ed67aa297409079f22ad4f8ce0bca249a5ed47ee799e4f",
+    "afterSha256": "ca5bce4827cfed436ad5918e0a182b8fe1125c64712bd994b4822c59a12722fc"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/subagent_manager.ts",
+    "change": "modified",
+    "beforeSha256": "d2bebf6841eed755b8c3321756693e9a2e97e67bca9af05236fc40ae8bad6d32",
+    "afterSha256": "977848d7a1290a0ffc70a6c303e6f19e62cb3bb6d898fd0e09d069757ef8bc09"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/subagent_runner.ts",
+    "change": "modified",
+    "beforeSha256": "63413f8a4c0cc0893f33752ceb2982836a7c300f5747d2244949fcd8d9318199",
+    "afterSha256": "4c1046f88ad21a7ef05dafabba2c3df5d7e78cc814fbac1de0f66d867c8ef6cb"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/subagent_tools.ts",
+    "change": "modified",
+    "beforeSha256": "02442c5a063a20f32f2f9a4f8873fec2ec2698bdaa0c90cb62a70cc2bd8d5550",
+    "afterSha256": "0426cabbd4100dfaa842a4c5f90d03d1d500aab5f43ff62e4e087069fe24b118"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/sync_webdav.ts",
+    "change": "modified",
+    "beforeSha256": "3963196da4bdc4931ce2839bca8f9543f16702d9308c950e8e0547b6876d5cec",
+    "afterSha256": "27c7e8848466c95dce9ea294c38b01a9ff55bfb4e49519f9fe22fde999214e44"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/chat/tool_loop.ts",
+    "change": "modified",
+    "beforeSha256": "5d82e27eda3cb76ed2a541296bf9aee171a1738a59ce1ab25ee8aec98c829ec9",
+    "afterSha256": "8267a1e631183d9fb01649159d6f3f6f5df02c8edccb1707fc1f89e75d1b618b"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/index.ts",
+    "change": "modified",
+    "beforeSha256": "b2adea227a9153809ca0c8fa9e590dd9404cb220b8a849be91869824aa58353e",
+    "afterSha256": "712dffc3a0a5d2b3b53af18eeca3fe1ae845edd970c004e9447afd6a79c3be7c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/free_web_engines.ts",
+    "change": "modified",
+    "beforeSha256": "992aedd1add2f581d65596100a40f8cc9de486283fd2de326cd6fc45db816ed0",
+    "afterSha256": "77cd13afb00df454c0945ec59352f53f436a5c8d8c34637fc73bf43bf82eab1a"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/search_aggregator.ts",
+    "change": "modified",
+    "beforeSha256": "07acf95ef711146f8b943a43daa6dd5051eca6fae264323d27c91498a867e064",
+    "afterSha256": "dd4807edae53cbdb7a1a7c11f327651416ada8854276364689614b8d5cbdc70c"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/search_orchestrator.ts",
+    "change": "modified",
+    "beforeSha256": "766460940472bcc55d4a1220f0baeb4514c212f56cb24bda09008fff25d5a309",
+    "afterSha256": "dd20460234dd242eec30c8d26fdd963ebcbb403cb1acb7d5e7e4a2862e14fbe1"
+  },
+  {
+    "path": "harmony/chat/src/main/ets/search/search_tools.ts",
+    "change": "modified",
+    "beforeSha256": "641272c3fd2ea3d8ceeffff50491544a30e618fcbd1f86e0b8dbe291bcf95406",
+    "afterSha256": "e89223805f0c5c2469a4f78eee6b11ec6486ddef661056eaf330589ba412065e"
+  },
+  {
+    "path": "harmony/chat/src/test/council_tools.test.ts",
+    "change": "modified",
+    "beforeSha256": "0f30431df547ba1c88654bb8e8b064b921e707728c8699d473c4501b724911e7",
+    "afterSha256": "b5b84fe8f1e16772688bbef3b388a30eed635b1bc0a9b6e285bd6a2fb9ece153"
+  },
+  {
+    "path": "harmony/chat/src/test/memory_topic_store.test.cjs",
+    "change": "modified",
+    "beforeSha256": "e4c8b1409148d1fbbddc207f191b33debcdefaf326aab90e0fe1507e91d3f491",
+    "afterSha256": "bdc89a99de498a09c9c380bbf434402f0f8cc70117e27e889f9a8ac8856191f9"
+  },
+  {
+    "path": "harmony/chat/src/test/oauth_provider_sync_entry.test.cjs",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "c3726c1254891d5d194a0560844a1122384428dee75ec688adc93fc6a682164e"
+  },
+  {
+    "path": "harmony/chat/src/test/provider_auxiliary_auth_entry.test.cjs",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "8d8faf0af28e40be27127f3a3f02d6802e44bf2a1e2077d3b0c6008384fcbc81"
+  },
+  {
+    "path": "harmony/chat/src/test/rdb_repository.test.cjs",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "6bed581d5787ce7553cc4765a2fd07404568d0c12478305380329df2b8823314"
+  },
+  {
+    "path": "harmony/chat/src/test/review_phase2_chat.test.ts",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "68a5d6522f3dfa0e71ccf304e4151bce48b6f1fb23c222b9e15887aa99afe74c"
+  },
+  {
+    "path": "harmony/chat/src/test/search_cancellation.test.ts",
+    "change": "modified",
+    "beforeSha256": "876da67a89c0712d6d1afe1ba36a43e325cc445174102c1d3148a253d1912087",
+    "afterSha256": "0996c61f10a289b97f0d249c47821fd64c9db8c1ea17edfb04f089b4a98abc3d"
+  },
+  {
+    "path": "harmony/chat/src/test/skill_catalog_refresh_entry.test.cjs",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "9f3242adb63d9b16cc155a1da96c71bebcd101e0c8f544e7db3645c0d162c9b4"
+  },
+  {
+    "path": "harmony/chat/src/test/subagent_runner.test.ts",
+    "change": "modified",
+    "beforeSha256": "33fbbbfe05689e708119c9c2c6b310fe77b327795a0b45852548879bca5c8726",
+    "afterSha256": "82b8dae444afa3aef19b0b8d286a86710442f13225db64a5ae5faeae1cd650e7"
+  },
+  {
+    "path": "harmony/chat/src/test/subagent_tools.test.ts",
+    "change": "modified",
+    "beforeSha256": "6bd5bdd2b7509fcfe955627c7b43910f7a6edd700a73848edc0b73dd7339bf1e",
+    "afterSha256": "d3578a909302f4f78a13f91f344086ad7c7872be5c4a2f7fbff6facbbb82b127"
+  },
+  {
+    "path": "harmony/chat/src/test/sync_webdav.test.ts",
+    "change": "modified",
+    "beforeSha256": "08b2c024bf7c0101ce50f127aa43eb77f270ebdc189e8c7e9ee8f545bcd3361d",
+    "afterSha256": "98c80c582af6cd8118f7c51f1cc64a9548a04e44c3bc0974f5617c1a47364d03"
+  },
+  {
+    "path": "harmony/chat/src/test/task_model_consumers.test.cjs",
+    "change": "modified",
+    "beforeSha256": "124cb7d965579672df707715d8232d9bd276306aedd2c5f18a143f0151cb2dfd",
+    "afterSha256": "8f79f476ceecceff8dba79e68e6712cd7402dcaaa5620e5fe529be603d54ff3c"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/agent/section_writer_tools.ts",
+    "change": "modified",
+    "beforeSha256": "f8dd6606d3bcfbfe61f0a4b459171cb470d36f828f1b62790b13263be72caab2",
+    "afterSha256": "f694f8fc57c1d77be6a79b5569535c244fe73252c080fb7acfb2d53e0eb2cdff"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/council/manager.ts",
+    "change": "modified",
+    "beforeSha256": "d66138656a320dbd945e620cb794f411495b26b103bb559d4f66e6b043b3dadf",
+    "afterSha256": "ff4cb9b3b91d63019d49c0e4b90cb84527c3273f7c07b9acfb87628756fc9a0d"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/creation.ts",
+    "change": "modified",
+    "beforeSha256": "dc559228bc4459008ae7b62fb21e1e4af8a9de2510cc2cad58cf1babd7e89ff7",
+    "afterSha256": "35dcd530785b5948dd0827dbec5b05f8acfa20ae18e866f46853b7549bb45bf5"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/discussion_archive.ts",
+    "change": "modified",
+    "beforeSha256": "5bfa1ade42b1f70c85bfe7ed61f7a6dbfd0a5e9a3b4d71bbb61458f383681349",
+    "afterSha256": "1bf2f31b1d6135d79731e44d2bbdebecda043e86618743ca5b507c54d9fa8a67"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/ghostwrite.ts",
+    "change": "modified",
+    "beforeSha256": "e08938affaf2110da937786730e553dcc56d5682b49ccec323dd4dd50b47e7dd",
+    "afterSha256": "67f2f0ef1837150b1e9f4ea8d436e43ee5b122719b5c1289312b782a786234ef"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/polish.ts",
+    "change": "modified",
+    "beforeSha256": "356f375f9640a90601d646cf676d53c947a3ce8a1debb7938a6221e6819992b0",
+    "afterSha256": "5c17e46dd3536f01cf1d17b23ec4ec9686bd32cb738f399c05a3bd570ccf2b52"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/repository.ts",
+    "change": "modified",
+    "beforeSha256": "eed95078bd23d6831481065dccfe18c238febbac172059dc1446f3a9069ce957",
+    "afterSha256": "fa8223f3547ec37b8e6adb3729e70bcb44d522b83c97014d263ab5e95d7e8a43"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/research/url_filter.ts",
+    "change": "modified",
+    "beforeSha256": "2b0ced5a3c89c10d0ad758b66a1087323bd1bf4dd291daff86219301856c3c3a",
+    "afterSha256": "9e84cfd4310a4e01319f993c8695bb948950f3d158e0c160c52df9a3562c4811"
+  },
+  {
+    "path": "harmony/deepread/src/test/council_round_boundary.test.ts",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "8334c6d78dd7e18222718194e176806cbd963fcdc3375cd098a4c21efeb1045f"
+  },
+  {
+    "path": "harmony/deepread/src/test/novel_audit_regressions.test.ts",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "6b63f41fa8112e7abc9b8ba27190f9c53eed1915cf575f33d15234ea0ed65bf5"
+  },
+  {
+    "path": "harmony/deepread/src/test/novel_discussion_archive.test.ts",
+    "change": "modified",
+    "beforeSha256": "5574ce25b9f370b5a391cb0c2697f7ea0c7e886b0778263ce0adf7631d89ea30",
+    "afterSha256": "3dc2f1aed3ea6f63b8bac6d19ecf3677198acff1f7753e622d16fe4cf305672d"
+  },
+  {
+    "path": "harmony/deepread/src/test/url_filter.test.ts",
+    "change": "modified",
+    "beforeSha256": "8fa4b5727856e4a47e1644a28ed0ef18a6a8fb669e58c1200a163818be208934",
+    "afterSha256": "6e0a5178b7014c28a2623e12354ac99cdf31bff0ce07267c176b68314974975a"
+  },
+  {
+    "path": "harmony/deepread/src/test/writer_tool_contract.test.ts",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "fc4f49ca53e3f78ad189f2b25ebacafe99e75d7d82c58cebebe780b5db509fe7"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/ProviderTemplatePickerSheet.ets",
+    "change": "modified",
+    "beforeSha256": "761e2a6236de5dd615591cb64667db8052af1838dd75482809f7a07ebd9778cb",
+    "afterSha256": "56002ffeb21d8563bf0de80b67e9c62c1b2f2275c62dd2a8214a21663af90a91"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/di/AppContainer.ets",
+    "change": "modified",
+    "beforeSha256": "2f888a88a63ef3073f6bdf7a29305beeb75ee047c57dcea3ecf4f96eb63252ee",
+    "afterSha256": "ab0f07a3cc27f6b4b057df21a187dc464e35ff5c531ce301e8bbbccb6fd13025"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatPage.ets",
+    "change": "modified",
+    "beforeSha256": "75abb6fea49232544e4d2210ad8922583ee499deaf47dce71ebb017ac48c43c9",
+    "afterSha256": "db289feac3bc24da6772d558a85e666871d0885832d4257e137fa12478c2751e"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets",
+    "change": "modified",
+    "beforeSha256": "148b4ad2499f6efa24b54bc22c6af03adc6f509264b2b32454a0bb00b2b0b8c8",
+    "afterSha256": "af1cc4cb699fd1b748c6a17e4f684a2e51e671a3ba3f4c7dd07f9c3801b59b03"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets",
+    "change": "modified",
+    "beforeSha256": "619712bb44395d519ec00eb0a5cb5fc8b85eb596c4b624e9782aec926bf6423a",
+    "afterSha256": "a95f131b9e19ed9df0e06d501ab6efbe166283bb396b45fb97c307d2a520b927"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/DeepReadHistoryPage.ets",
+    "change": "modified",
+    "beforeSha256": "aec7846ae992b4bd2c278cf5d3c7b65d990ab5fb2d0d3d7478151abaaa69d622",
+    "afterSha256": "eb6c15eb710f0f9cb8cefdad8c1b6fc3327a61a54fafd223e04a557a8961ef62"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets",
+    "change": "modified",
+    "beforeSha256": "1f43e753e8365062f322d3841739f99098f952a5eeebfcd43981e4f4007841d7",
+    "afterSha256": "4ae47f25a9fb1f337a743bfb0e49412864a0c2dc71f01a25e2682d6314aebeb5"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/SettingBackupPage.ets",
+    "change": "modified",
+    "beforeSha256": "5811a26e2f2574007ddf456350b6960e86d193e4b3003e04e98ccaf4f082209d",
+    "afterSha256": "25485c1f9d0a5c82596a803f2a552e7ec5df4534b6690ce12997156822bec041"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets",
+    "change": "modified",
+    "beforeSha256": "2a7edaf0bcefda9029b8550ed8651c0de04a78b6506a9f71420335effb7cf32e",
+    "afterSha256": "7c84bf0bbc5681b36ac353f9633c6acdd473ad8cb5b55f2d99fbb212fd43d645"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/CodexOAuthClient.ets",
+    "change": "modified",
+    "beforeSha256": "7883b9dffd05210bdabac971c967a3d2cc3e752ebe293cddbf77e7dc928a5e00",
+    "afterSha256": "a926df76cb6cf2fa9a872352aea11e2c9528a179647e65eac953a1c691c843b1"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ContextCompactionSupport.ets",
+    "change": "modified",
+    "beforeSha256": "ef68d11e45ffc9205f2b3147b4e3593b68e7287d4a22f7ba074e8f459ba20a64",
+    "afterSha256": "1f84627f67673b23d491110d4275b7345d4dc130b01c744f043db7cbad43c384"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunAuxiliary.ets",
+    "change": "modified",
+    "beforeSha256": "51d6d5597bac1644d6799757eca25f26be811e90aefe491fd48816feb0e58165",
+    "afterSha256": "e568d93e9fca90fa3e211886d779d9006601fce75dea54f37dad9df3102a7f90"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunDependencies.ets",
+    "change": "modified",
+    "beforeSha256": "3f8d47f959851b59c87ca21fd671c1f7206368b1cfd85b055c5f627eb7209738",
+    "afterSha256": "ee3d521dd476df862d6456de041f3fbe10f77d435933ccbbbd33843f7c9abf0c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunTools.ets",
+    "change": "modified",
+    "beforeSha256": "3238a17f35e12554e616828643b9989fd9ad105f986ada15422988ff4b70c85f",
+    "afterSha256": "ab3d21c1c8e4ef72fec04b1b50d2599593b9f8d87d310a27def17d742844c248"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/GrokOAuthClient.ets",
+    "change": "modified",
+    "beforeSha256": "9ac76d226dd506c067c287b26274e3d49c7231df5933dd0dc1ad0e1a79b88b90",
+    "afterSha256": "5547255a98c03b5900421c1dc46d2d65a895f80ed8925665b693b30c6acf29b3"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/MemoryDreamOps.ets",
+    "change": "modified",
+    "beforeSha256": "770b79f0d6b67b126a9e5d1ce5a8250f9fd81de53d408ef4fbba90b8004a8025",
+    "afterSha256": "4683e37353964530ca6092e696be18c3b8dc49f1b4e3891c8de26d0852fd657c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/MemoryTopicOps.ets",
+    "change": "modified",
+    "beforeSha256": "57356a62282dac37e530a302cfbefe89c980a772399fe9147a4c5f1fd6483482",
+    "afterSha256": "16779cc1120ae102c2be723c3e990d312f928f7fdbce0f212d614aad9b1cb770"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/OcrSupport.ets",
+    "change": "modified",
+    "beforeSha256": "7d4d14b22aff572fa90f2d9b97b64a2e005b97f7d8437ca06a6788da31832287",
+    "afterSha256": "98e801f1fa5407c47974cc1e6cab0f0d148115d40e3aad6042f15aa74649fe99"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/RdbRepository.ets",
+    "change": "modified",
+    "beforeSha256": "e95b4b0444211e4450de5ef6767241985fc4b415311749f30454d680b9d5a8f1",
+    "afterSha256": "50d49195340a32be880e8e7fe4ad11d3a342b881eb932056dc5460898818b5a8"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/WebDavTransport.ets",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "c49feffb62e3a9a85e1f9f893706296530e413578bd3f4fc0c5a2b7986b18885"
+  },
+  {
+    "path": "harmony/entry/src/test/backup_io.test.cjs",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "6ea69e855fa54c7c1075f4461265666c03a2d3d3585f2086dee88990a6c726fa"
+  },
+  {
+    "path": "harmony/entry/src/test/provider_field_binding.test.cjs",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "5af7df707e58cbd1822317d969358bc54c583ac769d8c4a71dfc1c2264326eef"
+  },
+  {
+    "path": "harmony/entry/src/test/provider_template_entry.test.cjs",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "64a33f867290fcf5e8af6cf2297530120c1ec3ec4660e34a3179a0d12324a642"
+  },
+  {
+    "path": "harmony/entry/src/test/ui_send_provider_lifecycle.test.cjs",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "36c02fc152ed313c59159bd735fbc83db83f60b653c54f7f266c49b5e2cd1e58"
+  },
+  {
+    "path": "harmony/entry/src/test/webdav_transport.test.cjs",
+    "change": "added",
+    "beforeSha256": null,
+    "afterSha256": "eeeec3548f0aae96f885212713952c4b8fe0e8cab304cc940d434a6172778293"
+  },
+  {
+    "path": "harmony/tests/chat-overlay-lifecycle.test.cjs",
+    "change": "modified",
+    "beforeSha256": "b05d97f566089751b179ba00c9e418efb716273da86c63b68412d772bb23ead3",
+    "afterSha256": "1db630d628a97679cd2fe3951edaa2de80e3c7cb07225a8687905e8bdd6b9ba7"
+  },
+  {
+    "path": "harmony/tests/novel-editor-lifecycle.test.cjs",
+    "change": "modified",
+    "beforeSha256": "4f2301beeef76086d7b54536130ed20c7c286e0790a4999cc9c63167da8c478f",
+    "afterSha256": "9ddcfea8be14ee3e79fe4f2b23d8229b94900d45724f1064e439181190e06608"
+  }
+]

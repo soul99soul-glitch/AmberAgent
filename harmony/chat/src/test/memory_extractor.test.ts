@@ -48,15 +48,18 @@ const record = (over: Partial<MemoryRecord>): MemoryRecord => makeMemoryRecord({
 
 // ===== 提示词 =====
 
-test('extraction prompt: 模板块逐字 + 消息块 trimIndent + text take(4000)', () => {
+test('extraction prompt: 用户证据带时间 + 上文只读 + text take(4000)', () => {
   const longText: string = 'x'.repeat(5000);
   const prompt: string = buildMemoryExtractionPrompt(
     [userMsg('你好', 'm-1'), userMsg(longText, 'm-2')], ['m-1', 'm-2'], '中文 (中国)');
   assert.ok(prompt.startsWith('You extract durable memory candidates for AmberAgent.\nLocale: 中文 (中国)\n'));
-  assert.ok(prompt.indexOf('"expires_in_days": null') >= 0);
-  assert.ok(prompt.indexOf('- At most 5 candidates.\n') >= 0);
+  assert.ok(prompt.includes('"expires_on":null'));
+  assert.ok(prompt.includes('Read-only previous assistant context'));
+  assert.ok(prompt.includes('createdAt'));
+  assert.ok(prompt.includes('- At most 5 candidates.'));
   assert.ok(prompt.indexOf('Use these source_message_ids when relevant: m-1, m-2.\n') >= 0);
-  assert.ok(prompt.endsWith(`Conversation:\nmessage_id: m-1\nrole: user\ntext: 你好\n\nmessage_id: m-2\nrole: user\ntext: ${'x'.repeat(4000)}`));
+  assert.ok(prompt.includes('x'.repeat(4000)));
+  assert.ok(!prompt.includes('x'.repeat(4001)));
 });
 
 // ===== 过滤器 =====
@@ -139,10 +142,10 @@ test('parse: content 空白跳过;expires_in_days → now+days*86400000', () => 
   assert.equal(out[0].candidate.expiresAt, NOW + 3 * 86_400_000);
 });
 
-test('parse: 根非对象/candidates 非数组/项非对象 → 抛错(Kotlin getter 语义)', () => {
+test('parse: 非对象根/非数组失败,单条坏项跳过避免整批停摆', () => {
   assert.throws((): void => { parseMemoryCandidates('[1,2]', 'c', []); }, /not a JsonObject/);
   assert.throws((): void => { parseMemoryCandidates('{"candidates": 5}', 'c', []); }, /not a JsonArray/);
-  assert.throws((): void => { parseMemoryCandidates('{"candidates": [7]}', 'c', []); }, /not a JsonObject/);
+  assert.deepEqual(parseMemoryCandidates('{"candidates": [7]}', 'c', []), []);
   assert.throws((): void => { parseMemoryCandidates('not json at all', 'c', []); });
   // candidates 缺失 → 空(orEmpty)
   assert.deepEqual(parseMemoryCandidates('{"other": 1}', 'c', []), []);
@@ -301,23 +304,23 @@ test('编排: 模型/provider 缺失 → 各自 skipped 消息(modelId 仅 provi
 test('编排: 全链路 — started → autoWrite(durable)/candidate 分流 + 事件类型与字段', async () => {
   resetMemoryExtractionDebounce();
   const llm: string = '{"candidates":[' +
-    '{"content":"用户偏好简短回复且周末活跃","scope":"long_term","kind":"user","confidence":0.95,"reason":"稳定偏好"},' +
-    '{"content":"可能有点用但不明确的内容","kind":"user","confidence":0.6,"reason":"不确定"}' +
+    '{"content":"用户偏好简短回复且周末活跃","source_message_id":"m1","scope":"long_term","kind":"user","confidence":0.95,"reason":"稳定偏好"},' +
+    '{"content":"可能有点用但不明确的内容","source_message_id":"m1","scope":"long_term","kind":"user","confidence":0.6,"reason":"不确定"}' +
     ']}';
   const h = harness({ llmText: llm, now: NOW });
-  await runMemoryExtraction(conv(), h.deps);
+  await runMemoryExtraction(makeConversation('conv-1', [toMessageNode(userMsg('用户偏好简短回复且周末活跃。可能有点用但不明确的内容', 'm1'))]), h.deps);
   const types: MemoryEventType[] = h.events.map((e: MemoryEvent): MemoryEventType => e.type);
-  assert.deepEqual(types, ['extraction_started', 'durable_memory_created', 'candidate_created']);
+  assert.deepEqual(types, ['extraction_started', 'candidate_created', 'durable_memory_created']);
   // autoWrite:显式 scope+kind+confidence 0.95 ≥ 0.85 → addMemory + durable 事件
   assert.equal(h.addedMemories.length, 1);
   assert.equal(h.addedMemories[0].content, '用户偏好简短回复且周末活跃');
-  assert.equal(h.events[1].memoryId, 42);
-  assert.equal(h.events[1].message, 'Auto-created durable user memory.');
-  assert.equal(h.events[1].modelId, 'model-x');
+  assert.equal(h.events[2].memoryId, 42);
+  assert.equal(h.events[2].message, 'Auto-created durable user memory.');
+  assert.equal(h.events[2].modelId, 'model-x');
   // 第二候选:无显式 scope → 不 autoWrite → addCandidate + reason 为事件 message
   assert.equal(h.addedCandidates.length, 1);
-  assert.equal(h.events[2].message, '不确定');
-  assert.equal(h.events[2].candidateId, h.addedCandidates[0].id);
+  assert.equal(h.events[1].message, '不确定');
+  assert.equal(h.events[1].candidateId, h.addedCandidates[0].id);
   // started 事件带 modelId/messageCount
   assert.equal(h.events[0].modelId, 'model-x');
   assert.equal(h.events[0].messageCount, 1);

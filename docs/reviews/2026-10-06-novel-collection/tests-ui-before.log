@@ -1,0 +1,45 @@
+✔ collection impression follows persisted success, never merely starting or failed collection (67.474125ms)
+✔ leaving and returning, backgrounding, and changing theme suppress old async success (15.609708ms)
+✖ whole chapter collection completes directly without an automatic archive dialog (4.241667ms)
+✔ the impression stays in the originating project and branch; leaving正文 clears it (4.432834ms)
+✔ writing mode changes preserve selection with reduced motion and never animate a hidden page (3.3335ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 240.807042
+
+✖ failing tests:
+
+test at harmony/entry/src/test/novel_editorial_motion.test.cjs:73:1
+✖ whole chapter collection completes directly without an automatic archive dialog (4.241667ms)
+  AssertionError [ERR_ASSERTION]: discussion archive must remain a manual action
+  + actual - expected
+  
+  + {
+  +   message: '要整理尚未归档的讨论吗？你可以编辑摘要并逐项确认创作决定，确认后才用于下一轮创作。',
+  +   primaryButton: {
+  +     action: [Function: action],
+  +     value: '不了'
+  +   },
+  +   secondaryButton: {
+  +     action: [Function: action],
+  +     value: '整理讨论'
+  +   },
+  +   title: '正文已收进章节'
+  + }
+  - undefined
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/test/novel_editorial_motion.test.cjs:76:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: undefined,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

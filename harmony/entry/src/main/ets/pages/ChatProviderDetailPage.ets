@@ -1,8 +1,14 @@
+import { DeepReadSubpageDock, DeepReadDockLayout } from '../components/deepread/DeepReadSubpageDock.ets';
 // ChatProviderDetailPage — 提供商详情(Android SettingProviderDetailPage 1:1 结构)
 // 头部:// PROVIDERS eyebrow + slug 16 Bold + 在线点 + name·auth·N 个模型;
 // 配置 / 模型 双 tab(accent 2dp 下划线);配置 tab = 启用/名称/API Key/端点等;
 // 模型 tab = 模型列表 + 参数入口 + 逗号编辑;保存显式按钮;删除置底。
 // 新增流:列表页模板选择后经暂存函数交接对象进入本页,保存时插入。
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
+import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
+import { DeepReadSettingsHeader, DeepReadSettingsSection, DeepReadSettingsGroup, DeepReadSettingsRow,
+  DeepReadSettingsToggle, DeepReadSettingsPicker, DeepReadSettingsNote, DeepReadSettingsButton,
+} from '../components/deepread/DeepReadSettingsVisual.ets';
 import { router, promptAction } from '@kit.ArkUI';
 import { picker, fileIo } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
@@ -94,9 +100,15 @@ interface ProviderExportPayload {
 @Component
 struct ChatProviderDetailPage {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
+  @StorageProp('reduceMotion') reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') appBackgrounded: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State provider: ProviderSetting | null = null;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
+  @State advancedOpen: boolean = false;
+  @State loadError: string = '';
+  @State loading: boolean = true;
   @State tab: number = 0; // 0 配置 / 1 模型
   // 表单字段
   @State providerEnabled: boolean = true;
@@ -157,10 +169,10 @@ struct ChatProviderDetailPage {
       if (target === null && draft !== null) {
         target = draft;
       }
-      if (target !== null) {
-        this.applyProvider(target);
-      }
-    }).catch((): void => {});
+      if (target !== null) this.applyProvider(target);
+      else this.loadError = '模型服务不存在，请返回重新选择。';
+      this.loading = false;
+    }).catch((): void => { this.loadError = '无法读取模型服务，请返回后重试。'; this.loading = false; });
   }
 
   // 返回自模型参数页等场景:仅刷新 provider 引用(携带最新 models 参数),
@@ -191,6 +203,8 @@ struct ChatProviderDetailPage {
       }
     }).catch((): void => {});
   }
+
+  onBackPress(): boolean { return this.ioBusy; }
 
   aboutToDisappear(): void {
     this.pageAlive = false;
@@ -281,9 +295,9 @@ struct ChatProviderDetailPage {
 
   private parseModels(existing: ProviderModel[]): ProviderModel[] {
     return this.modelsText
-      .split(',')
+      .split(/[,\n]/)
       .map((s: string): string => s.trim())
-      .filter((s: string): boolean => s.length > 0)
+      .filter((s: string, index: number, ids: string[]): boolean => s.length > 0 && ids.indexOf(s) === index)
       .map((id: string): ProviderModel => {
         const hit: ProviderModel | undefined = existing.find(
           (m: ProviderModel): boolean => m.modelId === id);
@@ -298,6 +312,14 @@ struct ChatProviderDetailPage {
   private fetchModels(): void {
     const raw: ProviderSetting | null = this.provider;
     if (raw === null || this.fetchBusy) return;
+    if (raw.type === 'google' && raw.authMode === 'api_key' && !raw.useServiceAccount && this.vertexAI) {
+      this.fetchMsg = 'Vertex API Key 模式请手动填写模型 ID。';
+      return;
+    }
+    if (raw.type === 'openai' && (this.authMode === 'codex_oauth' || this.authMode === 'grok_oauth')) {
+      this.fetchMsg = '账号登录时会添加可用模型，也可以手动填写模型 ID。';
+      return;
+    }
     this.fetchBusy = true;
     this.fetchMsg = '正在拉取…';
     if (raw.type === 'google' && (raw.authMode !== 'api_key' || raw.useServiceAccount)) {
@@ -322,10 +344,10 @@ struct ChatProviderDetailPage {
     }
     let headers: Record<string, string> = {};
     if (raw.type === 'claude') {
-      headers['x-api-key'] = (raw as ProviderSettingClaude).apiKey;
+      headers['x-api-key'] = this.apiKey.trim();
       headers['anthropic-version'] = '2023-06-01';
     } else if (raw.type === 'google') {
-      headers['x-goog-api-key'] = (raw as ProviderSettingGoogle).apiKey;
+      headers['x-goog-api-key'] = this.apiKey.trim();
     } else {
       headers = openAIAuthHeaders(this.authMode as OpenAIAuthMode, this.baseUrl.trim(), this.apiKey.trim());
     }
@@ -406,11 +428,11 @@ struct ChatProviderDetailPage {
     this.fetchedIds = [];
   }
 
-  private ioBusy: boolean = false;
+  @State ioBusy: boolean = false;
 
-  private async save(): Promise<void> {
+  private async save(): Promise<boolean> {
     const raw: ProviderSetting | null = this.provider;
-    if (raw === null || this.ioBusy) return;
+    if (raw === null || this.ioBusy) return false;
     this.ioBusy = true;
     // api_key/plan 模式必须填 Key;codex/grok 的凭据由登录态承载(apiKey 字段同步)
     if (raw.type === 'openai' && this.authMode !== 'codex_oauth' && this.authMode !== 'grok_oauth'
@@ -418,13 +440,13 @@ struct ChatProviderDetailPage {
       this.savedMsg = '请先填写 API Key';
       setTimeout((): void => { this.savedMsg = ''; }, 2000);
       this.ioBusy = false;
-      return;
+      return false;
     }
     if (raw.type !== 'openai' && this.unsupportedAuthMsg.length > 0 && this.apiKey.trim().length === 0) {
       this.savedMsg = '请先填写 API Key';
       setTimeout((): void => { this.savedMsg = ''; }, 2000);
       this.ioBusy = false;
-      return;
+      return false;
     }
     const apiKeySnapshot: string = this.apiKey;
     const models: ProviderModel[] = this.parseModels(raw.models);
@@ -484,7 +506,7 @@ struct ChatProviderDetailPage {
         balanceOption: o.balanceOption,
       });
     }
-    await loadProviders(getChatKvStore()).then(async (list: ProviderSetting[] | null): Promise<void> => {
+    return await loadProviders(getChatKvStore()).then(async (list: ProviderSetting[] | null): Promise<boolean> => {
       const all: ProviderSetting[] = list ?? [];
       if (updated.type === 'openai') {
         const openAi: ProviderSettingOpenAIVariant = updated as ProviderSettingOpenAIVariant;
@@ -495,19 +517,29 @@ struct ChatProviderDetailPage {
         }
       }
       const idx: number = all.findIndex((p: ProviderSetting): boolean => p.id === updated.id);
+      if (idx < 0 && !this.isNew) throw new Error('模型服务已被删除，请返回重新添加。');
+      if (idx >= 0) {
+        const latestModels: ProviderModel[] = all[idx].models;
+        // Only the catalog IDs are edited here; retain parameters saved by the model editor.
+        updated.models = updated.models.map((model: ProviderModel): ProviderModel =>
+          latestModels.find((latest: ProviderModel): boolean => latest.modelId === model.modelId) ?? model);
+      }
       if (idx >= 0) {
         all[idx] = updated;
       } else {
         all.unshift(updated);
       }
-      return saveProviders(getChatKvStore(), all).then((): void => {
+      return saveProviders(getChatKvStore(), all).then((): boolean => {
         this.provider = updated;
+        this.isNew = false;
         this.unsupportedAuthMsg = '';
         this.savedMsg = '已保存';
         setTimeout((): void => { this.savedMsg = ''; }, 1500);
+        return true;
       });
-    }).catch((e: Error): void => {
+    }).catch((e: Error): boolean => {
       this.savedMsg = `保存失败：${e.message}`;
+      return false;
     }).finally((): void => {
       this.ioBusy = false;
     });
@@ -705,18 +737,26 @@ struct ChatProviderDetailPage {
     });
   }
 
+  private loginOverlayDuration(): number {
+    return getProductKind() === 'deepread' && (this.reduceMotion || this.appBackgrounded) ? 0 : MOTION_OVERLAY;
+  }
+
+  private loginOverlayScale(): number {
+    return getProductKind() === 'deepread' && (this.reduceMotion || this.appBackgrounded) ? 1 : 0.96;
+  }
+
   @Builder
   GrokLoginOverlay(): void {
     Column() {
       Column() {
         Text('登录 xAI(Grok)')
-          .fontSize(17).fontWeight(600).fontColor(INK).margin({ bottom: 12 })
+          .fontSize(17).fontWeight(600).fontColor((getProductKind() === 'deepread' ? D.ink : INK)).margin({ bottom: 12 })
         Text('已在浏览器打开授权页。登录完成后页面会跳转到一个打不开的本地地址,请把地址栏里的完整链接复制回来粘贴到下面:')
           .fontSize(TEXT_STYLES.secondary.size)
           .lineHeight(TEXT_STYLES.secondary.lineHeight)
-          .fontColor(INK3).margin({ bottom: 12 })
+          .fontColor((getProductKind() === 'deepread' ? D.muted : INK3)).margin({ bottom: 12 })
         TextArea({ text: this.grokPasteUrl, placeholder: 'http://127.0.0.1:8787/callback?code=…' })
-          .fontSize(TEXT_STYLES.meta.size).fontFamily(FONT_MONO).fontColor(INK)
+          .fontSize(TEXT_STYLES.meta.size).fontFamily(FONT_MONO).fontColor((getProductKind() === 'deepread' ? D.ink : INK))
           .backgroundColor(SURFACE2).borderRadius(8)
           .padding({ left: 12, right: 12, top: 10, bottom: 10 })
           .height(72)
@@ -727,26 +767,26 @@ struct ChatProviderDetailPage {
         }
         Row() {
           Text('取消')
-            .fontSize(14).fontColor(INK3)
+            .fontSize(14).fontColor((getProductKind() === 'deepread' ? D.muted : INK3))
             .layoutWeight(1).textAlign(TextAlign.Center)
             .padding({ top: 8, bottom: 8 })
             .onClick((): void => { this.cancelGrokLogin(); })
           Text(this.grokBusy ? '交换中…' : '完成登录')
-            .fontSize(14).fontColor(this.grokBusy ? INK3 : this.accentColorStore)
+            .fontSize(14).fontColor(this.grokBusy ? (getProductKind() === 'deepread' ? D.muted : INK3) : this.accentColorStore)
             .layoutWeight(1).textAlign(TextAlign.Center)
             .padding({ top: 8, bottom: 8 })
             .onClick((): void => { this.confirmGrokLogin(); })
         }
         .width('100%').margin({ top: 12 })
       }
-      .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+      .width('80%').padding(22).backgroundColor((getProductKind() === 'deepread' ? D.card : SURFACE)).borderRadius(16)
       .shadow({ radius: 24, color: OVERLAY, offsetY: 8 })
-      .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
-        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+      .transition(TransitionEffect.scale({ x: this.loginOverlayScale(), y: this.loginOverlayScale() })
+        .animation({ duration: this.loginOverlayDuration(), curve: Curve.EaseOut }))
     }
     .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.Center)
-    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+    .transition(TransitionEffect.OPACITY.animation({ duration: this.loginOverlayDuration(), curve: Curve.EaseOut }))
   }
 
   private copyCodexUserCode(): void {
@@ -777,23 +817,23 @@ struct ChatProviderDetailPage {
     Column() {
       Column() {
         Text('登录 ChatGPT')
-          .fontSize(17).fontWeight(600).fontColor(INK).margin({ bottom: 12 })
+          .fontSize(17).fontWeight(600).fontColor((getProductKind() === 'deepread' ? D.ink : INK)).margin({ bottom: 12 })
         Text('在浏览器中打开登录页,输入以下设备码完成授权:')
           .fontSize(TEXT_STYLES.secondary.size)
           .lineHeight(TEXT_STYLES.secondary.lineHeight)
-          .fontColor(INK3).margin({ bottom: 12 })
+          .fontColor((getProductKind() === 'deepread' ? D.muted : INK3)).margin({ bottom: 12 })
         Text(this.codexUserCode)
           .fontSize(26).fontWeight(FontWeight.Bold).fontFamily(FONT_MONO)
-          .fontColor(INK).letterSpacing(2)
+          .fontColor((getProductKind() === 'deepread' ? D.ink : INK)).letterSpacing(2)
           .margin({ bottom: 18 })
         Row() {
           Text('复制设备码')
-            .fontSize(14).fontColor(this.accentColorStore)
+            .fontSize(14).fontColor(getProductKind() === 'deepread' ? D.accent : this.accentColorStore)
             .layoutWeight(1).textAlign(TextAlign.Center)
             .padding({ top: 8, bottom: 8 })
             .onClick((): void => { this.copyCodexUserCode(); })
           Text('打开登录页')
-            .fontSize(14).fontColor(this.accentColorStore)
+            .fontSize(14).fontColor(getProductKind() === 'deepread' ? D.accent : this.accentColorStore)
             .layoutWeight(1).textAlign(TextAlign.Center)
             .padding({ top: 8, bottom: 8 })
             .onClick((): void => { this.openCodexVerification(); })
@@ -801,21 +841,21 @@ struct ChatProviderDetailPage {
         .width('100%')
         Row() {
           Text('取消登录')
-            .fontSize(14).fontColor(INK3)
+            .fontSize(14).fontColor((getProductKind() === 'deepread' ? D.muted : INK3))
             .layoutWeight(1).textAlign(TextAlign.Center)
             .padding({ top: 8, bottom: 8 })
             .onClick((): void => { this.cancelCodexLogin(); })
         }
         .width('100%').margin({ top: 8 })
       }
-      .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+      .width('80%').padding(22).backgroundColor((getProductKind() === 'deepread' ? D.card : SURFACE)).borderRadius(16)
       .shadow({ radius: 24, color: OVERLAY, offsetY: 8 })
-      .transition(TransitionEffect.scale({ x: 0.96, y: 0.96 })
-        .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+      .transition(TransitionEffect.scale({ x: this.loginOverlayScale(), y: this.loginOverlayScale() })
+        .animation({ duration: this.loginOverlayDuration(), curve: Curve.EaseOut }))
     }
     .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.Center)
-    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+    .transition(TransitionEffect.OPACITY.animation({ duration: this.loginOverlayDuration(), curve: Curve.EaseOut }))
   }
 
   // Provider 导出(脱敏 JSON,不含 apiKey;Android 导出分享对齐)
@@ -909,7 +949,7 @@ struct ChatProviderDetailPage {
     if (raw === null || this.ioBusy) return;
     this.ioBusy = true;
     AlertDialog.show({
-      title: '删除 Provider',
+      title: getProductKind() === 'deepread' ? '删除模型服务' : '删除 Provider',
       message: `删除「${this.name}」?其 API Key 与模型配置将从本机移除。`,
       primaryButton: { value: '取消', action: (): void => { this.ioBusy = false; } },
       secondaryButton: {
@@ -939,6 +979,200 @@ struct ChatProviderDetailPage {
         },
       },
     });
+  }
+
+  private readingModelIds(): string[] {
+    const ids: string[] = [];
+    for (const part of this.modelsText.split(/[,\n]/)) {
+      const id: string = part.trim();
+      if (id.length > 0 && ids.indexOf(id) < 0) ids.push(id);
+    }
+    return ids;
+  }
+
+  private readingModelName(id: string): string {
+    const model: ProviderModel | undefined = this.provider?.models.find((item: ProviderModel): boolean => item.modelId === id);
+    return model !== undefined && model.displayName.length > 0 ? model.displayName : id;
+  }
+
+  private async openReadingModel(id: string): Promise<void> {
+    const model: ProviderModel | undefined = this.provider?.models.find((item: ProviderModel): boolean => item.modelId === id);
+    if (model === undefined) { this.savedMsg = '请先保存新模型，再编辑模型参数。'; return; }
+    await this.openModelParameters(model.id);
+  }
+
+  private async saveAndBack(): Promise<void> {
+    if (await this.save()) router.back();
+  }
+
+  private async configureReadingGoogle(): Promise<void> {
+    if (await this.save()) this.openGoogleAuth();
+  }
+
+  @Builder
+  readingField(options: ProviderFieldOptions): void {
+    Column({ space: 6 }) {
+      Text(options.label).fontSize(13).fontColor(D.muted).width('100%')
+      TextInput({ text: options.value, placeholder: options.placeholder })
+        .type(options.obscure ? InputType.Password : InputType.Normal)
+        .fontSize(16).fontColor(D.ink).placeholderColor(D.muted)
+        .height(46).backgroundColor(D.paper).borderRadius(10)
+        .padding({ left: 12, right: 12 }).enabled(!this.ioBusy)
+        .onChange(options.onChange)
+    }.width('100%').padding({ left: 16, right: 16, top: 10, bottom: 10 })
+  }
+
+  @Builder
+  ReadingConnection(): void {
+    DeepReadSettingsToggle({ label: '启用服务', checked: this.providerEnabled,
+      onChange: (value: boolean): void => { this.providerEnabled = value; } })
+    this.readingField({ label: '名称', value: this.name, placeholder: '模型服务名称', obscure: false, mono: false,
+      onChange: (value: string): void => { this.name = value; } })
+    if (this.provider !== null && this.provider.type === 'openai') {
+      DeepReadSettingsPicker({ label: '认证方式', options: this.authModeOptions(), selected: this.authModeIndex(),
+        onSelect: (index: number): void => { this.selectAuthMode(index); } })
+      if (this.authMode === 'codex_oauth') {
+        DeepReadSettingsRow({ label: this.codexBusy ? '等待登录…' : this.codexAccount.length > 0 ? '重新登录 ChatGPT' : '登录 ChatGPT',
+          detail: this.codexAccount, valueAccent: true,
+          onTap: (): void => { this.startCodexLogin(); } })
+        if (this.codexStatus.length > 0) { DeepReadSettingsNote({ text: this.codexStatus }) }
+      } else if (this.authMode === 'grok_oauth') {
+        DeepReadSettingsRow({ label: this.grokBusy ? '等待登录…' : this.grokAccount.length > 0 ? '重新登录 Grok' : '登录 Grok',
+          detail: this.grokAccount, onTap: (): void => { this.startGrokLogin(); } })
+        if (this.grokStatus.length > 0) { DeepReadSettingsNote({ text: this.grokStatus }) }
+      }
+    }
+    if ((this.provider?.type !== 'google' || this.isGoogleApiKey())
+      && this.authMode !== 'codex_oauth' && this.authMode !== 'grok_oauth') {
+      this.readingField({ label: 'API Key', value: this.apiKey, placeholder: '填写服务商提供的密钥', obscure: true, mono: true,
+        onChange: (value: string): void => { this.apiKey = value; } })
+    }
+    if (this.provider?.type !== 'google' || this.isGoogleApiKey()) {
+      if (this.pinnedBaseUrl().length > 0) {
+        Text(`服务地址 · ${this.pinnedBaseUrl()}`).fontSize(13).fontColor(D.muted)
+          .width('100%').padding(16).wordBreak(WordBreak.BREAK_ALL)
+      } else {
+        this.readingField({ label: '服务地址', value: this.baseUrl, placeholder: 'https://api.example.com/v1', obscure: false, mono: true,
+          onChange: (value: string): void => { this.baseUrl = value; } })
+      }
+    }
+    if (this.provider?.type === 'google') {
+      DeepReadSettingsRow({ label: '保存并配置 Google 认证', detail: 'API Key、服务账号或账号授权', last: true,
+        onTap: (): void => { this.configureReadingGoogle(); } })
+    }
+  }
+
+  @Builder
+  ReadingModels(): void {
+    ForEach(this.readingModelIds(), (id: string, index: number): void => {
+      DeepReadSettingsRow({ label: this.readingModelName(id), detail: id,
+        value: this.provider?.models.some((model: ProviderModel): boolean => model.modelId === id) ? '参数' : '待保存',
+        last: index === this.readingModelIds().length - 1,
+        onTap: (): void => { this.openReadingModel(id); } })
+    }, (id: string): string => id)
+    if (this.readingModelIds().length === 0) {
+      Text('填写模型 ID，或从服务商拉取模型。').fontSize(15).fontColor(D.muted)
+        .width('100%').padding(16)
+    }
+    Column({ space: 6 }) {
+      Text('模型 ID').fontSize(13).fontColor(D.muted).width('100%')
+      TextArea({ text: this.modelsText, placeholder: '每行一个模型 ID，也可用逗号分隔' })
+        .fontSize(15).fontColor(D.ink).placeholderColor(D.muted).backgroundColor(D.paper)
+        .borderRadius(10).height(84).padding(12).enabled(!this.ioBusy)
+        .onChange((value: string): void => { this.modelsText = value; })
+    }.width('100%').padding(16)
+    DeepReadSettingsRow({ label: this.fetchBusy ? '正在拉取模型…' : '拉取可用模型', last: true,
+      onTap: (): void => { this.fetchModels(); } }).enabled(!this.fetchBusy && !this.ioBusy)
+    if (this.fetchMsg.length > 0) {
+      Text(this.fetchMsg).fontSize(13).fontColor(this.fetchMsg.startsWith('拉取失败') ? D.danger : D.muted)
+        .lineHeight(19).width('100%').padding({ left: 16, right: 16, bottom: 12 })
+    }
+    if (this.fetchedIds.length > 0) {
+      DeepReadSettingsRow({ label: '添加全部发现的模型', value: `${this.fetchedIds.length} 个`,
+        onTap: (): void => { this.addAllFetched(); } })
+      ForEach(this.fetchedIds, (id: string, index: number): void => {
+        DeepReadSettingsRow({ label: id, value: '添加', valueAccent: true,
+          last: index === this.fetchedIds.length - 1,
+          onTap: (): void => { this.addFetchedId(id); } })
+      }, (id: string): string => `found-${id}`)
+    }
+  }
+
+  @Builder
+  ReadingRequestOptions(): void {
+    if (this.provider?.type === 'openai') {
+      DeepReadSettingsToggle({ label: 'Responses API', checked: this.useResponseApi,
+        onChange: (value: boolean): void => { this.useResponseApi = value; } })
+      this.readingField({ label: '请求路径', value: this.chatPath, placeholder: '/chat/completions', obscure: false, mono: true,
+        onChange: (value: string): void => { this.chatPath = value; } })
+    } else if (this.provider?.type === 'google' && this.isGoogleApiKey()) {
+      DeepReadSettingsToggle({ label: 'Vertex AI', checked: this.vertexAI,
+        onChange: (value: boolean): void => { this.vertexAI = value; } })
+      if (this.vertexAI) {
+        this.readingField({ label: 'Google Cloud 项目', value: this.projectId, placeholder: 'project-id', obscure: false, mono: true,
+          onChange: (value: string): void => { this.projectId = value; } })
+        this.readingField({ label: '区域', value: this.location, placeholder: 'us-central1 或 global', obscure: false, mono: true,
+          onChange: (value: string): void => { this.location = value; } })
+      }
+    } else if (this.provider?.type === 'claude') {
+      DeepReadSettingsToggle({ label: '提示词缓存', checked: this.promptCaching, last: true,
+        onChange: (value: boolean): void => { this.promptCaching = value; } })
+    }
+    DeepReadSettingsRow({ label: '导出已保存配置', detail: '不包含 API Key 或账号令牌', last: true,
+      onTap: (): void => { this.exportProvider(); } })
+  }
+
+  private toggleReadingAdvanced(): void {
+    if (this.ioBusy) return;
+    if (this.reduceMotion || this.appBackgrounded) {
+      this.advancedOpen = !this.advancedOpen;
+      return;
+    }
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
+      this.advancedOpen = !this.advancedOpen;
+    });
+  }
+
+  @Builder
+  ReadingProviderPage(): void {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column() {
+        DeepReadSettingsHeader({ title: '服务配置', onBack: (): void => { if (!this.ioBusy) router.back(); } })
+        Scroll() {
+          Column() {
+            if (this.loading || this.provider === null) {
+              DeepReadSettingsNote({ text: this.loading ? '正在读取…' : this.loadError })
+            } else {
+              DeepReadSettingsSection({ title: '连接信息' })
+              DeepReadSettingsGroup({ content: (): void => { this.ReadingConnection(); } }).enabled(!this.ioBusy)
+              if (this.unsupportedAuthMsg.length > 0) { DeepReadSettingsNote({ text: this.unsupportedAuthMsg }) }
+              DeepReadSettingsSection({ title: '模型' })
+              DeepReadSettingsGroup({ content: (): void => { this.ReadingModels(); } }).enabled(!this.ioBusy)
+              DeepReadSettingsNote({ text: '模型及连接信息统一保存。选择文章生成使用的模型，请返回设置页。' })
+              DeepReadSettingsSection({ title: '其他选项' })
+              DeepReadSettingsRow({ label: '高级设置', value: this.advancedOpen ? '收起' : '展开', last: true,
+                onTap: (): void => { this.toggleReadingAdvanced(); } })
+                .backgroundColor(D.card).borderRadius(D.radius)
+              if (this.advancedOpen) {
+                DeepReadSettingsGroup({ content: (): void => { this.ReadingRequestOptions(); } })
+                  .margin({ top: 8 }).enabled(!this.ioBusy)
+                  .transition(TransitionEffect.OPACITY.animation({ duration: this.reduceMotion || this.appBackgrounded ? 0 : 160 }))
+              }
+              if (this.savedMsg.length > 0) {
+                Text(this.savedMsg).fontSize(13).lineHeight(19).fontColor(this.savedMsg === '已保存' ? D.done : D.danger)
+                  .width('100%').padding({ left: 16, right: 16, top: 16 })
+              }
+              DeepReadSettingsButton({ label: this.ioBusy ? '正在保存…' : '保存并返回', icon: 'check', disabled: this.ioBusy,
+                onTap: (): void => { this.saveAndBack(); } }).margin({ top: 24 })
+              DeepReadSettingsRow({ label: '删除模型服务', destructive: true, chevron: false, last: true,
+                onTap: (): void => { this.removeSelf(); } }).margin({ top: 16 }).enabled(!this.ioBusy)
+            }
+          }.width('100%').padding({ left: D.gutter, right: D.gutter, bottom: DeepReadDockLayout.bottomInset(this.navBarHeight) })
+        }.align(Alignment.TopStart).layoutWeight(1).scrollBar(BarState.Off)
+      }.width('100%').height('100%').backgroundColor(D.paper)
+      DeepReadSubpageDock({ onBeforeLeave: (): boolean => { return !this.ioBusy; } }).align(Alignment.Bottom).hitTestBehavior(HitTestMode.Transparent)
+    }.width('100%').height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
   @Builder
@@ -1012,6 +1246,9 @@ struct ChatProviderDetailPage {
     Stack() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
+      if (getProductKind() === 'deepread') {
+        this.ReadingProviderPage()
+      } else {
       Column() {
       // 头部:back + // PROVIDERS + slug16 Bold/点/摘要 + (占位)
       Row() {
@@ -1363,6 +1600,8 @@ struct ChatProviderDetailPage {
     }
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+
+      }
 
     // Codex 设备码登录叠层
     if (this.codexLoginOpen) {

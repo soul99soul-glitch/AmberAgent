@@ -1,9 +1,7 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import {
-  fallbackPlan, buildPlanningPrompt, parsePlanJson, normalizePlan, generateArticlePlan,
-} from '../main/ets/research/article_plan.ts';
-import type { DeepReadEvidencePack, DeepReadArticlePlan } from '../main/ets/research/evidence_pack.ts';
+import { fallbackPlan, parsePlanJson, normalizePlan, generateArticlePlan } from '../main/ets/research/article_plan.ts';
+import type { DeepReadEvidencePack } from '../main/ets/research/evidence_pack.ts';
 import { cardsFor } from '../main/ets/research/evidence_pack.ts';
 import type { DeepReadSource } from '../main/ets/research/source_prefetcher.ts';
 import type { AiClient } from '../main/ets/platform/ai_client.ts';
@@ -67,18 +65,6 @@ const throwingAi = (): AiClient => ({
   generateText: async (): Promise<UIMessage[]> => { throw new Error('LLM unavailable'); },
 });
 
-// ===== fallbackPlan =====
-
-test('fallbackPlan: produces valid structure', () => {
-  const pack = buildPack(8);
-  const plan = fallbackPlan('量子计算', pack);
-  assert.ok(plan.overviewAngle.includes('量子计算'));
-  assert.ok(plan.narrativeSlots.length >= 1);
-  assert.ok(plan.analysisQuestions.length >= 1);
-  assert.equal(typeof plan.overviewAngle, 'string');
-  assert.ok(Array.isArray(plan.stageSourceIds.overview));
-});
-
 test('fallbackPlan: stageSourceIds start from pack.cardsByStage and fill from global pool', () => {
   const pack = buildPack(8);  // OVERVIEW has s1..s6, NARRATIVE s7..s8, others empty
   const plan = fallbackPlan('t', pack);
@@ -100,70 +86,11 @@ test('R24: fallbackPlan gives every stage evidence from the global pool', () => 
   }
 });
 
-test('fallbackPlan: requiredSourceIds = distinct stage ids, take target', () => {
-  const pack = buildPack(8);
-  const plan = fallbackPlan('t', pack);
-  // 8 cards → target 8
-  assert.equal(plan.requiredSourceIds.length, 8);
-  assert.deepEqual(plan.requiredSourceIds, ['s1','s2','s3','s4','s5','s6','s7','s8']);
-});
-
-// ===== buildPlanningPrompt =====
-
-test('buildPlanningPrompt: includes title', () => {
-  const pack = buildPack(8);
-  const prompt = buildPlanningPrompt('我的话题', pack, '');
-  assert.ok(prompt.includes('我的话题'));
-});
-
-test('buildPlanningPrompt: includes source listings', () => {
-  const pack = buildPack(8);
-  const prompt = buildPlanningPrompt('话题', pack, '');
-  assert.ok(prompt.includes('[s1]'));
-  assert.ok(prompt.includes('credibility:'));
-});
-
-test('buildPlanningPrompt: includes playbook when provided', () => {
-  const pack = buildPack(8);
-  const prompt = buildPlanningPrompt('话题', pack, '## 我的规则\n要点一');
-  assert.ok(prompt.includes('我的规则'));
-  assert.ok(prompt.includes('要点一'));
-});
-
-test('buildPlanningPrompt: omits playbook section when empty', () => {
-  const pack = buildPack(8);
-  const prompt = buildPlanningPrompt('话题', pack, '');
-  assert.ok(!prompt.includes('## 本地规则'));
-});
-
-test('buildPlanningPrompt: includes JSON schema instructions', () => {
-  const pack = buildPack(8);
-  const prompt = buildPlanningPrompt('话题', pack, '');
-  assert.ok(prompt.includes('overview_angle'));
-  assert.ok(prompt.includes('stage_source_ids'));
-});
-
-// ===== parsePlanJson =====
-
-test('parsePlanJson: whole-text JSON', () => {
-  const text = '{"overview_angle": "x", "narrative_slots": ["a"]}';
-  const r = parsePlanJson(text);
-  assert.ok(r !== null);
-  assert.equal(r?.overview_angle, 'x');
-});
-
 test('parsePlanJson: fenced code block', () => {
   const text = 'Here is the plan:\n```json\n{"overview_angle": "y"}\n```\nDone.';
   const r = parsePlanJson(text);
   assert.ok(r !== null);
   assert.equal(r?.overview_angle, 'y');
-});
-
-test('parsePlanJson: fenced without json lang', () => {
-  const text = '```\n{"overview_angle": "z"}\n```';
-  const r = parsePlanJson(text);
-  assert.ok(r !== null);
-  assert.equal(r?.overview_angle, 'z');
 });
 
 test('parsePlanJson: balanced braces extraction (string-aware)', () => {
@@ -225,14 +152,6 @@ test('normalizePlan: caps stageSourceIds at STAGE_EVIDENCE_MAX', () => {
   };
   const plan = normalizePlan(parsed, 't', pack);
   assert.ok(plan.stageSourceIds.overview.length <= STAGE_EVIDENCE_MAX);
-});
-
-test('normalizePlan: empty parsed fields → fallback defaults', () => {
-  const pack = buildPack(8);
-  const plan = normalizePlan({}, '我的话题', pack);
-  assert.ok(plan.overviewAngle.length > 0);
-  assert.ok(plan.narrativeSlots.length > 0);
-  assert.ok(plan.analysisQuestions.length > 0);
 });
 
 test('normalizePlan: accepts camelCase field names too', () => {

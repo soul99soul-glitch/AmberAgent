@@ -22,6 +22,7 @@ import type { JsonValue } from '../main/ets/chat/json.ts';
 import { createTimeTool } from '../main/ets/chat/builtin_time_tool.ts';
 import { createToolRegistry } from '../main/ets/chat/tool_registry.ts';
 import { createToolSearchTool } from '../main/ets/chat/builtin_introspection_tools.ts';
+import { jevUnverifiedChanges } from '../main/ets/chat/jev_completion.ts';
 
 // ===== 构造助手 =====
 
@@ -109,6 +110,63 @@ const toolPartOf = (m: UIMessage, callId: string): UIMessagePartTool =>
     p.type === 'tool' && (p as UIMessagePartTool).toolCallId === callId) as UIMessagePartTool;
 
 describe('runChatTurnWithTools 单步与循环', () => {
+  it('非流式两次审批续跑保留工具结果，最终回复仍有待验证的修改事实', async () => {
+    const path = 'notes/nonstream-continuation.ts';
+    const responses = [
+      toolDelta('write-call', 'file_write', JSON.stringify({ path, content: 'marker' })),
+      toolDelta('edit-call', 'file_edit', JSON.stringify({ path, old_text: 'marker', new_text: 'verified' })),
+      textDelta('已完成并验证文件修改'),
+    ].map((chunk): MessageChunk => ({
+      ...chunk, choices: chunk.choices.map((choice) => ({ ...choice, message: choice.delta, delta: null })),
+    }));
+    const calls: UIMessage[][] = [];
+    const provider: ChatStreamProvider = {
+      streamText: (): Promise<void> => Promise.reject(new Error('must use generateText')),
+      generateText: (messages: UIMessage[]): Promise<MessageChunk> => {
+        calls.push(messages);
+        assert.ok(calls.length <= responses.length, 'tool continuation must terminate after the final reply');
+        return Promise.resolve(responses[calls.length - 1]);
+      },
+    };
+    const executed: string[] = [];
+    const tools = ['file_write', 'file_edit'].map((name): AgentTool => makeAgentTool({
+      name, description: name, needsApproval: true,
+      execute: (): Promise<UIMessagePart[]> => {
+        executed.push(name);
+        return Promise.resolve([{ type: 'text', metadata: null,
+          text: JSON.stringify(name === 'file_write' ? { path, size_bytes: 6 } : { path, replace_count: 1 }) }]);
+      },
+    }));
+    const deps: ChatTurnDeps = { ...baseDeps(provider), assistant: makeAssistant({ streamOutput: false }) };
+    const loop = loopOf(provider, tools);
+    const approve = (conv: Conversation, id: string): Conversation => ({
+      ...conv, messageNodes: conv.messageNodes.map((node) => ({
+        ...node, messages: node.messages.map((message) => ({
+          ...message, parts: message.parts.map((part): UIMessagePart =>
+            part.type === 'tool' && part.toolCallId === id ? { ...part, approvalState: { type: 'approved' } } : part),
+        })),
+      })),
+    });
+    const writePending = await runChatTurnWithTools(makeConversation('nonstream-tools', []), '修改文件', deps, loop);
+    assert.equal(toolPartOf(currentMessages(writePending).at(-1)!, 'write-call').approvalState.type, 'pending');
+    const editPending = await runToolLoopContinuation(approve(writePending, 'write-call'), deps, loop);
+    assert.equal(toolPartOf(currentMessages(editPending).at(-1)!, 'edit-call').approvalState.type, 'pending');
+    const out = await runToolLoopContinuation(approve(editPending, 'edit-call'), deps, loop);
+    const canonical = currentMessages(out);
+    assert.deepEqual(executed, ['file_write', 'file_edit']);
+    assert.equal(calls.length, 3);
+    for (const id of ['write-call', 'edit-call']) {
+      const savedTool = toolPartOf(canonical.at(-1)!, id);
+      const sentTool = toolPartOf(calls[2].at(-1)!, id);
+      assert.ok(savedTool, `${id} remains in canonical history`);
+      assert.ok(sentTool, `${id} reaches the final provider request`);
+      assert.equal(savedTool.output.length, 1);
+      assert.equal(sentTool.output.length, 1);
+    }
+    assert.equal(toText(canonical.at(-1)!).trim(), '已完成并验证文件修改');
+    assert.deepEqual(jevUnverifiedChanges(canonical)?.changedFiles, [path]);
+  });
+
   it('tool call chunk 后 abort:保留部分工具消息但不执行工具副作用', async () => {
     const signalState: { aborted: boolean } = { aborted: false };
     let ran: boolean = false;

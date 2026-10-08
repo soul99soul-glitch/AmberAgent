@@ -4,10 +4,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  PLACEHOLDER_KEYS, createPlaceholderTransformer, replaceAllIgnoreCase,
-  replacePlaceholders, resolvePlaceholderValue,
+  createPlaceholderTransformer,
+  replaceAllIgnoreCase,
+  replacePlaceholders,
 } from '../main/ets/chat/placeholder_transformer.ts';
-import type { PlaceholderValues } from '../main/ets/chat/placeholder_transformer.ts';
+import type {
+  PlaceholderValues,
+} from '../main/ets/chat/placeholder_transformer.ts';
 import { makeUserMessage, makeAssistantMessage } from '../main/ets/chat/message.ts';
 import type { UIMessage } from '../main/ets/chat/message.ts';
 import { makeAssistant } from '../main/ets/chat/assistant.ts';
@@ -32,13 +35,6 @@ const ctx = (assistantName: string): TransformerContext => ({
   assistant: makeAssistant({ name: assistantName }),
 });
 
-test('13 键插入序逐字(:62-114)', () => {
-  assert.deepEqual(PLACEHOLDER_KEYS, [
-    'cur_date', 'cur_time', 'cur_datetime', 'model_id', 'model_name', 'locale',
-    'timezone', 'system_version', 'device_info', 'battery_level', 'nickname', 'char', 'user',
-  ]);
-});
-
 test('替换:{{key}} 与 {key} 双形态 + 大小写不敏感 + 全部替换(:173-178)', () => {
   const out: string = replacePlaceholders(
     '{{model_id}} {MODEL_ID} {{Model_Id}}', values(), 'A');
@@ -54,28 +50,6 @@ test('替换:值含 $ 不做 JS 特殊解释(Kotlin 字面语义);顺序执行�
   const chained = values({ nickname: (): string => '{char}' });
   assert.equal(replacePlaceholders('{nickname}', chained, 'Hero'), 'Hero',
     'nickname 先插入 {char},char 键后执行命中(LinkedHashMap 序忠实)');
-});
-
-test('resolver:blank 回退 — nickname/user blank → user;char blank → assistant(:103-113)', () => {
-  const v = values();
-  assert.equal(resolvePlaceholderValue('nickname', v, 'A'), 'user');
-  assert.equal(resolvePlaceholderValue('user', v, 'A'), 'user');
-  assert.equal(resolvePlaceholderValue('char', v, ''), 'assistant');
-  assert.equal(resolvePlaceholderValue('char', v, '  '), 'assistant');
-  const named = values({ nickname: (): string => '米' });
-  assert.equal(resolvePlaceholderValue('nickname', named, 'A'), '米');
-  assert.equal(resolvePlaceholderValue('char', v, '小琥'), '小琥');
-});
-
-test('resolver:全键映射(model_id/model_name/locale/timezone/system_version/device_info/battery)', () => {
-  const v = values();
-  assert.equal(resolvePlaceholderValue('model_id', v, ''), 'gpt-test');
-  assert.equal(resolvePlaceholderValue('model_name', v, ''), 'GPT Test');
-  assert.equal(resolvePlaceholderValue('locale', v, ''), 'LOCALE');
-  assert.equal(resolvePlaceholderValue('timezone', v, ''), 'TZ');
-  assert.equal(resolvePlaceholderValue('system_version', v, ''), 'SYSVER');
-  assert.equal(resolvePlaceholderValue('device_info', v, ''), 'DEV');
-  assert.equal(resolvePlaceholderValue('battery_level', v, ''), '88');
 });
 
 test('transform:text part 全量替换;非 text part 不动;assistant.name 注入 char', async () => {

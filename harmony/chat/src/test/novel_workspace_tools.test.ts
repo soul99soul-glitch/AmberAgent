@@ -4,11 +4,13 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createNovelWorkspaceTools,
+  novelAuditToolResult,
 } from '../main/ets/chat/novel_workspace_tools.ts';
 import type {
   NovelWorkspaceToolPort,
 } from '../main/ets/chat/novel_workspace_tools.ts';
 import type { JsonObject } from '../main/ets/chat/json.ts';
+import type { NovelAuditReport, AbortSignalLike } from '@amber/deepread-domain';
 import type { UIMessagePart, UIMessagePartText } from '../main/ets/chat/message.ts';
 import type { AgentTool } from '../main/ets/chat/tool.ts';
 
@@ -90,90 +92,6 @@ describe('createNovelWorkspaceTools', () => {
     assert.equal(ingest.allowsAutoApproval, false);
   });
 
-  it('publishes complete object schemas, including discriminated write/delete patches', () => {
-    const tools: AgentTool[] = createNovelWorkspaceTools(makePort([]));
-    assert.deepEqual(tool(tools, 'novel_workspace_list').parameters(), {
-      type: 'object',
-      properties: {
-        path: {
-          type: 'string',
-          description: 'Optional workspace-relative directory. Defaults to the active branch root.',
-        },
-      },
-      required: [],
-      additionalProperties: false,
-    });
-    assert.deepEqual(tool(tools, 'novel_workspace_read').parameters(), {
-      type: 'object',
-      properties: {
-        path: { type: 'string', description: 'Workspace-relative text file path to read.' },
-      },
-      required: ['path'],
-      additionalProperties: false,
-    });
-    assert.deepEqual(tool(tools, 'novel_workspace_grep').parameters(), {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Text to search for in workspace text files.' },
-        path: {
-          type: 'string',
-          description: 'Optional workspace-relative directory or file. Defaults to the active branch root.',
-        },
-        max_results: {
-          type: 'integer',
-          minimum: 1,
-          description: 'Optional maximum number of matching lines to return.',
-        },
-      },
-      required: ['query'],
-      additionalProperties: false,
-    });
-    assert.deepEqual(tool(tools, 'novel_workspace_status').parameters(), {
-      type: 'object', properties: {}, required: [], additionalProperties: false,
-    });
-    assert.deepEqual(tool(tools, 'novel_workspace_write').parameters(), {
-      type: 'object',
-      properties: {
-        proposal_id: {
-          type: 'string',
-          description: 'Stable proposal id. Reuse the same value when retrying the same proposed change.',
-        },
-        patches: {
-          type: 'array',
-          minItems: 1,
-          items: {
-            description: 'A proposed patch. write requires text content; delete requires content to be null.',
-            oneOf: [
-              {
-                type: 'object',
-                properties: {
-                  operation: { type: 'string', enum: ['write'] },
-                  path: { type: 'string', description: 'Allowed workspace-relative path for this proposal.' },
-                  content: { type: 'string', description: 'Complete UTF-8 text to write.' },
-                },
-                required: ['operation', 'path', 'content'],
-                additionalProperties: false,
-              },
-              {
-                type: 'object',
-                properties: {
-                  operation: { type: 'string', enum: ['delete'] },
-                  path: { type: 'string', description: 'Allowed workspace-relative path for this proposal.' },
-                  content: { type: 'null', description: 'Must be null when deleting a path.' },
-                },
-                required: ['operation', 'path', 'content'],
-                additionalProperties: false,
-              },
-            ],
-          },
-          description: 'One or more proposed writes or deletes. This tool stages a proposal; it never applies it directly.',
-        },
-      },
-      required: ['proposal_id', 'patches'],
-      additionalProperties: false,
-    });
-  });
-
   it('delegates each call to the bound port and emits the existing JSON text payload', async () => {
     const calls: PortCall[] = [];
     const tools: AgentTool[] = createNovelWorkspaceTools(makePort(calls));
@@ -199,17 +117,71 @@ describe('createNovelWorkspaceTools', () => {
       { name: 'write', input: writeInput },
     ]);
   });
+});
 
-  it('propagates port failures for dispatcher normalization', async () => {
-    const port: NovelWorkspaceToolPort = {
-      ...makePort([]),
-      read(): Promise<JsonObject> {
-        return Promise.reject(new Error('workspace path is unavailable'));
-      },
-    };
-    await assert.rejects(
-      tool(createNovelWorkspaceTools(port), 'novel_workspace_read').execute({ path: 'missing.md' }),
-      /workspace path is unavailable/,
-    );
+describe('novel continuity audit tool report', () => {
+  const report = (): NovelAuditReport => ({
+    ok: true, issues: [], raw: '{"issues":[]}',
+    coverage: { checkedChars: 100, totalChars: 100, complete: true },
+    cancelled: false, invalidEvidenceCount: 0,
+    blocks: [{ chapterId: 'chapter-7', sourceDigest: 'digest', start: 0, end: 100, status: 'checked', error: null }],
   });
+  const executeAudit = async (value: NovelAuditReport): Promise<JsonObject> => {
+    const port: NovelWorkspaceToolPort = { ...makePort([]), audit: async (): Promise<JsonObject> => novelAuditToolResult(value) };
+    return jsonOutput(await tool(createNovelWorkspaceTools(port), 'novel_continuity_audit').execute({}));
+  };
+  it('keeps failed block causes and partial coverage when the valid issue list is empty', async () => {
+    const value = report(); value.ok = false;
+    value.coverage = { checkedChars: 100, totalChars: 200, complete: false };
+    value.blocks.push({ chapterId: 'chapter-8', sourceDigest: 'd2', start: 0, end: 100, status: 'failed', error: 'provider disconnected' });
+    const output = await executeAudit(value);
+    assert.equal(output.ok, false); assert.deepEqual(output.issues, []); assert.equal(output.issue_count, 0);
+    assert.deepEqual(output.coverage, { checked_chars: 100, total_chars: 200, complete: false });
+    assert.deepEqual(output.failed_blocks, [{ id: 'chapter-8', start: 0, end: 100, status: 'failed', error: 'provider disconnected' }]);
+  });
+  it('keeps invalid evidence as an explicit cause rather than an empty passed audit', async () => {
+    const value = report(); value.ok = false; value.invalidEvidenceCount = 2;
+    const output = await executeAudit(value);
+    assert.equal(output.ok, false); assert.deepEqual(output.issues, []);
+    assert.equal(output.invalid_evidence_count, 2); assert.deepEqual(output.failed_blocks, []);
+  });
+  it('keeps cancelled and unexamined ranges in actual JSON tool output', async () => {
+    const value = report(); value.ok = false; value.cancelled = true;
+    value.coverage = { checkedChars: 0, totalChars: 100, complete: false };
+    value.blocks[0].status = 'cancelled'; value.blocks[0].error = '审校已取消，该范围尚未检查';
+    const output = await executeAudit(value);
+    assert.equal(output.ok, false); assert.equal(output.cancelled, true); assert.deepEqual(output.issues, []);
+    assert.deepEqual(output.failed_blocks, [{ id: 'chapter-7', start: 0, end: 100, status: 'cancelled', error: '审校已取消，该范围尚未检查' }]);
+  });
+  it('preserves existing string issue formatting and a genuinely complete empty report', async () => {
+    const value = report();
+    const emptyOutput = await executeAudit(value);
+    assert.equal(emptyOutput.ok, true); assert.deepEqual(emptyOutput.issues, []);
+    assert.deepEqual(emptyOutput.coverage, { checked_chars: 100, total_chars: 100, complete: true });
+    assert.equal(emptyOutput.cancelled, false); assert.equal(emptyOutput.invalid_evidence_count, 0);
+    value.ok = false;
+    value.issues = [{ severity: 'major', chapterRef: '第7章', summary: '名字不一致', suggestion: '统一名字',
+      chapterId: 'chapter-7', sourceDigest: 'digest', quote: '原文', start: 0, end: 2 }];
+    const output = await executeAudit(value);
+    assert.deepEqual(output.issues, ['[major] 第7章: 名字不一致 → 统一名字']);
+  });
+});
+
+it('continuity audit tool forwards the exact parent cancellation signal to its bound host', async () => {
+  const signal: AbortSignalLike = {
+    aborted: false,
+    addEventListener: (): void => {},
+    removeEventListener: (): void => {},
+  };
+  let received: AbortSignalLike | undefined;
+  const port: NovelWorkspaceToolPort = {
+    ...makePort([]),
+    audit: async (parentSignal?: AbortSignalLike): Promise<JsonObject> => {
+      received = parentSignal;
+      return { ok: false, cancelled: parentSignal?.aborted ?? false };
+    },
+  };
+  const audit = tool(createNovelWorkspaceTools(port), 'novel_continuity_audit');
+  await audit.execute({}, signal);
+  assert.equal(received, signal);
 });

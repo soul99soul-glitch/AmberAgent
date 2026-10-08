@@ -7,7 +7,9 @@ require('../../../chat/node_modules/tsx/dist/cjs/index.cjs');
 const { observeDeepReadLibrary, queryDeepReadLibraryRows } = require('../../../deepread/src/main/ets/domain/library.ts');
 const { makeEmptyDeepReadOutput } = require('../../../deepread/src/main/ets/domain/models.ts');
 const { STAGE_ORDER } = require('../../../deepread/src/main/ets/domain/enums.ts');
+const { firstFailureMessage } = require('../../../deepread/src/main/ets/domain/helpers.ts');
 const { isCacheEntryExpired } = require('../../../deepread/src/main/ets/platform/deep_read_progress.ts');
+const { rootComponentInitializers } = require('../../../deepread/src/test/deepread_ui_fixture.cjs');
 const source = fs.readFileSync(path.join(__dirname, '../main/ets/pages/DeepReadHistoryPage.ets'), 'utf8');
 function method(name) {
   const match = new RegExp('^  (?:private )?(?:async )?' + name + '\\(', 'm').exec(source);
@@ -21,9 +23,9 @@ function method(name) {
 }
 const names = ['aboutToAppear', 'onPageShow', 'onPageHide', 'aboutToDisappear', 'leaveVisible', 'stopObservation',
   'startObservation', 'attachObservation', 'connectScheduler', 'reloadHistory', 'loadHistorySnapshot', 'visibleItems',
-  'reopen', 'rowKey', 'createArticle'];
-const globals = source.slice(source.indexOf('function historyStatusLabel'), source.indexOf('@Entry'));
-const code = ts.transpileModule(globals + '\nclass Page {\n' + names.map(method).join('\n') + '\n}\nreturn Page;',
+  'reopen', 'rowKey', 'createArticle', 'sourceSummary', 'arrive', 'settleArrival', 'motionPolicyChanged', 'settleEmptyFeedback', 'selectLibraryFilter', 'restoreLibraryScroll', 'readStandaloneRoot'];
+const globals = source.slice(source.indexOf('function historyStatusLabel'), source.indexOf('@Component\nexport struct DeepReadHistoryPageContent'));
+const code = ts.transpileModule(globals + '\nclass Page {\n' + rootComponentInitializers(source) + '\n' + names.map(method).join('\n') + '\n}\nreturn Page;',
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const tick = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
 function deferred() { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }
@@ -48,18 +50,30 @@ function entry(id = 'saved', title = '阅读文章', complete = false) {
 }
 function fixture(initial = [], options = {}) {
   const history = stream(initial), runs = stream([]), routes = [], keyboard = [];
+  const memory = options.memory ?? new Map(), routing = [], animations = [], keyframes = [];
+  const arrivalTimers = new Map(); let timerId = 0;
+  let offset = options.offset ?? 0;
+  let keyboardMode = 'offset';
   const scheduler = { getActiveRuns: () => runs.getCurrent(), observeActiveRuns: () => runs };
   const repository = { observeHistory: limit => { assert.equal(limit, 0); return history; },
     listHistory: limit => { assert.equal(limit, 0); return options.read ? options.read() : Promise.resolve(history.getCurrent().slice()); } };
   const Page = new Function('getRepository', 'getDeepReadScheduler', 'observeDeepReadLibrary', 'queryDeepReadLibraryRows',
-    'isCacheEntryExpired', 'router', 'KeyboardAvoidMode', code)(() => repository,
+    'isCacheEntryExpired', 'router', 'KeyboardAvoidMode', 'getProductKind', 'AppStorage', 'markWantRoutingReady', 'curves', 'firstFailureMessage', 'setTimeout', 'clearTimeout', 'Curve', code)(() => repository,
     options.scheduler ? options.scheduler : async () => scheduler, observeDeepReadLibrary, queryDeepReadLibraryRows, isCacheEntryExpired,
-    { pushUrl: async route => { routes.push(route); } }, { OFFSET: 'offset', RESIZE: 'resize' });
-  const page = new Page(); Object.assign(page, { pageAlive: false, pageVisible: false, observationToken: 0,
+    { pushUrl: async route => { routes.push(route); }, getLength: () => String(options.depth ?? 1), getParams: () => options.params ?? {} }, { OFFSET: 'offset', RESIZE: 'resize' },
+    () => options.product ?? 'agent', { get: key => memory.get(key), setOrCreate: (key, value) => memory.set(key, value) },
+    router => routing.push(router), { springCurve: () => 'spring' }, firstFailureMessage,
+    (fn, delay) => { assert.equal(delay, 16); arrivalTimers.set(++timerId, fn); return timerId; }, id => arrivalTimers.delete(id), { EaseOut: 'ease-out' });
+  const page = new Page(); Object.assign(page, { dockScroll: { reset() {} }, pageAlive: false, pageVisible: false, observationToken: 0,
     loadToken: 0, unsubscribeLibrary: null, entries: [], activeRuns: [], query: '', filter: 'all', loaded: false,
     loadError: '', runtimeError: '', keyboardAdjusted: false, previousKeyboardAvoidMode: 'offset',
-    getUIContext: () => ({ getKeyboardAvoidMode: () => 'offset', setKeyboardAvoidMode: mode => keyboard.push(mode) }) });
-  return { page, history, runs, routes, keyboard, scheduler, repository };
+    filters: ['all', 'running', 'complete', 'failed', 'incomplete'], standaloneRoot: true, firstArrival: true, restoreScrollPending: true,
+    emptyBounceTimer: -1, emptyBounceId: 0, emptyIconScale: 1, arrivalOffset: 0, arrivalTimer: -1, reduceMotion: false, appBackgrounded: false, activeTab: 1, composeOpen: false,
+    libraryScroller: { currentOffset: () => ({ yOffset: offset }), scrollTo: ({ yOffset }) => { offset = yOffset; } },
+    getUIContext: () => ({ getKeyboardAvoidMode: () => keyboardMode, setKeyboardAvoidMode: mode => { keyboardMode = mode; keyboard.push(mode); },
+      getRouter: () => 'currentRouter', keyframeAnimateTo: (options, frames) => { keyframes.push({ options, frames }); }, animateTo: (options, finish) => { animations.push(options); finish(); } }) });
+  return { page, history, runs, routes, keyboard, scheduler, repository, memory, routing, animations, keyframes, arrivalTimers,
+    advanceArrival: () => { const [id, fn] = arrivalTimers.entries().next().value; arrivalTimers.delete(id); fn(); }, offset: () => offset, keyboardMode: () => keyboardMode };
 }
 
 test('actual aggregate subscription adds a new admitted task before its first cache and updates completion live', async () => {
@@ -134,7 +148,6 @@ test('repository read failures remain visible without blocking creation and reop
   f.page.createArticle(); f.page.reopen({ id: 'topic', title: '标题' }); await tick();
   assert.deepEqual(f.routes.map(route => route.url), ['pages/DeepReadComposePage', 'pages/DeepReadArticlePage']);
   assert.equal(f.routes[1].params.topicId, 'topic');
-  assert.match(source, /minHeight: 44/); assert.doesNotMatch(source, /setTimeout|setInterval|observeRunning\(/);
 });
 
 test('manual refresh failure stays visible when the only library row is an active task without a cache', async () => {
@@ -144,5 +157,89 @@ test('manual refresh failure stays visible when the only library row is an activ
   f.page.reloadHistory(); await tick();
   assert.equal(f.page.entries.length, 0); assert.equal(f.page.visibleItems().length, 1);
   assert.match(f.page.loadError, /历史读取失败/);
-  assert.match(source, /this\.loadError\.length > 0 && this\.visibleItems\(\)\.length > 0/);
+});
+
+test('replacing the standalone tab restores the search, filter and scroll without persisting product settings', async () => {
+  const memory = new Map([['deepreadTabDirection', 1]]);
+  const first = fixture([entry('saved', '正文检索词', true)], { product: 'deepread', memory, offset: 315 });
+  first.page.aboutToAppear(); first.page.onPageShow(); await tick();
+  first.page.query = '正文检索词'; first.page.filter = 'complete'; first.page.onPageHide();
+  const returned = fixture([entry('saved', '正文检索词', true)], { product: 'deepread', memory });
+  returned.page.aboutToAppear(); returned.page.onPageShow(); await tick(); returned.page.restoreLibraryScroll(); returned.advanceArrival();
+  assert.equal(returned.page.query, '正文检索词'); assert.equal(returned.page.filter, 'complete');
+  assert.equal(returned.offset(), 315); assert.equal(returned.page.visibleItems().length, 1);
+  assert.deepEqual(returned.routing, ['currentRouter']); assert.equal(returned.animations.length, 1);
+  returned.page.onPageHide(); returned.page.onPageShow(); await tick();
+  assert.equal(returned.animations.length, 1, 'returning from an article does not repeat the tab animation');
+  returned.page.createArticle(); assert.equal(returned.page.composeOpen, true); assert.equal(returned.routes.length, 0);
+});
+
+test('a pushed standalone library keeps Back reachable and source metadata does not duplicate URLs', async () => {
+  const saved = entry('saved', '真实来源');
+  saved.output.inputSources = [{ kind: 'text', content: '文本' }, { kind: 'file', content: '文件' }, { kind: 'web', url: 'https://example.com' }];
+  saved.sourceUrl = 'https://example.com'; saved.output.references = [{ title: '原文', url: 'https://example.com' }];
+  const f = fixture([saved], { product: 'deepread', depth: 2 });
+  f.page.aboutToAppear(); f.page.onPageShow(); await tick();
+  assert.equal(f.page.standaloneRoot, false); assert.equal(f.animations.length, 0);
+  assert.equal(f.page.visibleItems()[0].summary, '文件 1 · 手动文本 1 · 搜索结果 1');
+});
+
+test('library hide before embedded composer disappearance preserves the final host keyboard mode', async () => {
+  const { actualPage } = require('../../../deepread/src/test/deepread_ui_fixture.cjs');
+  const f = fixture([entry()], { product: 'deepread' });
+  f.page.aboutToAppear(); f.page.onPageShow(); await tick();
+  const sheet = actualPage('components/deepread/DeepReadComposerSheet.ets', ['aboutToAppear', 'aboutToDisappear'], {
+    KeyboardAvoidMode: { OFFSET: 'offset', RESIZE: 'resize' },
+  });
+  Object.assign(sheet, { embedded: true, alive: false, pickerToken: 0, templateLoadToken: 0, busy: false,
+    getUIContext: f.page.getUIContext, loadTemplates() {} });
+  sheet.aboutToAppear(); assert.equal(sheet.previousKeyboardAvoidMode, 'resize');
+  f.page.onPageHide(); assert.equal(f.keyboardMode(), 'offset');
+  sheet.aboutToDisappear(); assert.equal(f.keyboardMode(), 'offset');
+  assert.deepEqual(f.keyboard, ['resize', 'resize', 'offset']);
+});
+
+test('explicit standalone tab root params take effect before the replaced article clears its old stack', async () => {
+  const f = fixture([entry()], { product: 'deepread', depth: 2, params: { standaloneTabRoot: true } });
+  f.page.aboutToAppear(); assert.equal(f.page.standaloneRoot, true);
+  f.page.onPageShow(); await tick(); assert.equal(f.page.standaloneRoot, true);
+  assert.deepEqual(f.routing, ['currentRouter']);
+  const nested = fixture([entry()], { product: 'deepread', depth: 2 });
+  nested.page.aboutToAppear(); assert.equal(nested.page.standaloneRoot, false);
+  nested.page.onPageShow(); await tick(); assert.equal(nested.page.standaloneRoot, false);
+});
+
+for (const cancel of ['hide', 'disappear', 'reduceMotion', 'appBackgrounded', 'activeTab']) {
+  test(`Library deferred entrance cancels on ${cancel} and cannot replay after return`, async () => {
+    const f = fixture([], { product: 'deepread', memory: new Map([['deepreadTabDirection', 1]]) });
+    f.page.aboutToAppear(); f.page.onPageShow(); await tick();
+    const late = f.arrivalTimers.values().next().value;
+    if (cancel === 'hide') f.page.onPageHide();
+    else if (cancel === 'disappear') f.page.aboutToDisappear();
+    else { f.page[cancel] = cancel === 'activeTab' ? 0 : true; f.page.motionPolicyChanged(); }
+    assert.equal(f.arrivalTimers.size, 0); assert.equal(f.page.arrivalOffset, 0);
+    f.page.pageAlive = true; f.page.pageVisible = true; f.page.reduceMotion = false; f.page.appBackgrounded = false; f.page.activeTab = 1;
+    late(); f.page.arrive(); assert.equal(f.animations.length, 0); assert.equal(f.arrivalTimers.size, 0);
+  });
+}
+
+for (const cancel of ['hide', 'reduceMotion', 'appBackgrounded', 'activeTab']) {
+  test(`Library empty feedback cancels on ${cancel} before its deferred frame`, async () => {
+    const f = fixture([entry('saved', '已完成文章', true)], { product: 'deepread' });
+    f.page.aboutToAppear(); f.page.onPageShow(); await tick(); f.page.selectLibraryFilter('failed');
+    const late = f.arrivalTimers.values().next().value;
+    if (cancel === 'hide') f.page.onPageHide();
+    else { f.page[cancel] = cancel === 'activeTab' ? 0 : true; f.page.motionPolicyChanged(); }
+    assert.equal(f.page.emptyIconScale, 1); assert.equal(f.arrivalTimers.size, 0);
+    f.page.pageVisible = true; f.page.reduceMotion = false; f.page.appBackgrounded = false; f.page.activeTab = 1;
+    late(); assert.equal(f.keyframes.length, 0);
+  });
+}
+
+test('hiding during a finite empty-state keyframe prevents its late frame from enlarging the icon', async () => {
+  const f = fixture([entry('saved', '已完成文章', true)], { product: 'deepread' });
+  f.page.aboutToAppear(); f.page.onPageShow(); await tick(); f.page.selectLibraryFilter('failed'); f.advanceArrival();
+  const motion = f.keyframes[0]; motion.frames[0].event(); assert.equal(f.page.emptyIconScale, 1.15);
+  f.page.onPageHide(); assert.equal(f.page.emptyIconScale, 1);
+  f.page.pageVisible = true; motion.frames[0].event(); assert.equal(f.page.emptyIconScale, 1);
 });

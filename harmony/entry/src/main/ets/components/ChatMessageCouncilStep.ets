@@ -69,22 +69,28 @@ const councilStatusToToolStatus = (status: string): ToolStatus => {
 // 从 output 提取席位列表
 const extractSeats = (tools: UIMessagePartTool[]): string[] => {
   for (let i: number = tools.length - 1; i >= 0; i--) {
-    const t: UIMessagePartTool = tools[i];
-    if (t.toolName === 'model_council_read' && t.output.length > 0) {
-      const json: JsonObject = toolOutputJson(t);
-      const turns: JsonValue = json['turns'];
-      if (Array.isArray(turns)) {
-        const seats: string[] = [];
-        for (const turn of turns) {
-          if (typeof turn === 'object' && turn !== null && !Array.isArray(turn)) {
-            const seatId: JsonValue = (turn as JsonObject)['seat_id'];
-            if (typeof seatId === 'string' && seats.indexOf(seatId) < 0) {
-              seats.push(seatId);
-            }
-          }
-        }
-        return seats;
+    const tool: UIMessagePartTool = tools[i];
+    if (!COUNCIL_TOOL_NAMES.has(tool.toolName) || tool.output.length === 0) continue;
+    const json: JsonObject = toolOutputJson(tool);
+    const rawRun: JsonValue = json['run'];
+    const run: JsonObject | null = rawRun !== null && typeof rawRun === 'object' && !Array.isArray(rawRun)
+      ? rawRun as JsonObject : null;
+    const lists: JsonValue[] = [json['seats'], run === null ? null : run['seats'],
+      json['turns'], run === null ? null : run['turns']];
+    for (const list of lists) {
+      if (!Array.isArray(list)) continue;
+      const names: string[] = [];
+      const ids: string[] = [];
+      for (const item of list) {
+        if (item === null || typeof item !== 'object' || Array.isArray(item)) continue;
+        const seat: JsonObject = item as JsonObject;
+        const id: JsonValue = seat['seat_id'] ?? seat['seatId'];
+        const name: JsonValue = seat['name'] ?? seat['seat_name'] ?? seat['seatName'] ?? id;
+        if (typeof name !== 'string' || name.length === 0) continue;
+        const key: string = typeof id === 'string' && id.length > 0 ? id : name;
+        if (ids.indexOf(key) < 0) { ids.push(key); names.push(name); }
       }
+      if (names.length > 0) return names;
     }
   }
   return [];
@@ -201,8 +207,10 @@ export struct ChatMessageCouncilStep {
         const task: JsonValue = input['task'];
         if (task !== null && typeof task === 'object' && !Array.isArray(task)) {
           const obj: JsonValue = (task as JsonObject)['objective'];
-          if (typeof obj === 'string') return obj;
+          if (typeof obj === 'string' && obj.length > 0) return obj;
         }
+        const objective: JsonValue = input['objective'];
+        if (typeof objective === 'string') return objective;
       }
     }
     return '';

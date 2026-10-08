@@ -1,0 +1,13 @@
+✔ native motion after250ms attribution expiry is not classified as user scroll (0.414542ms)
+✔ an idle callback from retargeting does not turn the next native frame into a user scroll (0.063125ms)
+✔ real drag and fling stop native motion before the user position is reconciled (0.078833ms)
+✔ native animation source does not cancel itself; touch and ordinary user movement still reconcile (0.053166ms)
+✔ jump to top pauses and releases native follow before changing position (1.865416ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 392.789958

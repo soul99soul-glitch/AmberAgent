@@ -25,12 +25,18 @@ export struct ChatMessageActionsSheet {
   @Prop message: UIMessage;
   @Prop isUser: boolean = false;
   @Prop isLastAssistant: boolean = false;
+  @Prop canFavorite: boolean = false;
+  @Prop isFavorite: boolean = false;
+  @Prop canArchive: boolean = false;
   onCopy: () => void = (): void => {};
   onEdit: () => void = (): void => {};
   onRegenerate: () => void = (): void => {};
   onFork: () => void = (): void => {};
   onShare: () => void = (): void => {};
+  onFavorite: () => void = (): void => {};
   onExport: () => void = (): void => {};
+  onArchive: () => void = (): void => {};
+  onOpenWorkspace: () => void = (): void => {};
   onDelete: () => void = (): void => {};
   onDismiss: () => void = (): void => {};
 
@@ -58,6 +64,13 @@ export struct ChatMessageActionsSheet {
           })
           this.rowDivider()
         }
+        if (this.canFavorite) {
+          this.actionRow('star', this.isFavorite ? '取消收藏' : '收藏消息', false, (): void => {
+            this.onDismiss();
+            this.onFavorite();
+          })
+          this.rowDivider()
+        }
         // share:恒显示,仅暴露回调(组件内不做外部调用)
         this.actionRow('share', '分享', false, (): void => {
           this.onDismiss();
@@ -67,6 +80,18 @@ export struct ChatMessageActionsSheet {
         this.actionRow('doc', '导出对话', false, (): void => {
           this.onDismiss();
           this.onExport();
+        })
+        this.rowDivider()
+        if (this.canArchive) {
+          this.actionRow('doc', '保存到 Workspace', false, (): void => {
+            this.onDismiss();
+            this.onArchive();
+          })
+          this.rowDivider()
+        }
+        this.actionRow('folder', '查看 Workspace 文件', false, (): void => {
+          this.onDismiss();
+          this.onOpenWorkspace();
         })
         this.rowDivider()
         // fork:恒显示

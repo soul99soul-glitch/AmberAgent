@@ -70,9 +70,11 @@ const sourceDigest = (project: NovelProject, messages: NovelMessage[]): string =
 const parseArchiveDraft = (text: string): { summary: string; decisions: string[] } => {
   let raw: RawArchiveDraft;
   try {
-    raw = JSON.parse(text) as RawArchiveDraft;
+    // Accept a complete Markdown JSON wrapper, while keeping the payload validation strict.
+    const fenced: RegExpMatchArray | null = text.trim().match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i);
+    raw = JSON.parse(fenced === null ? text.trim() : fenced[1]) as RawArchiveDraft;
   } catch {
-    throw invalidInput('归档摘要不是有效 JSON，请重试或手动整理讨论');
+    throw invalidInput('模型返回的归档摘要格式不完整，请重新整理讨论');
   }
   if (raw === null || typeof raw.summary !== 'string' || raw.summary.trim().length === 0) {
     throw invalidInput('归档摘要为空或格式不完整');

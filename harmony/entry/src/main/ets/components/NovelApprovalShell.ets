@@ -69,7 +69,7 @@ export struct NovelApprovalShell {
               .fontColor(this.statusColor()).margin({ left: 5 })
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
-          .alignItems(VerticalAlign.Center)
+          .alignItems(VerticalAlign.Center).margin({ left: 8 })
         }
       }
       .width('100%').alignItems(VerticalAlign.Center)

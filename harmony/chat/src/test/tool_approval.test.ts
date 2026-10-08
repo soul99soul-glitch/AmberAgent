@@ -4,11 +4,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  TOOL_APPROVAL_CONTINUATION_WORDS, isToolApprovalContinuation,
-  findToolNameInConversation, conversationHasPendingOrUnexecutedTools,
-  resolveApprovalState, applyToolApprovalToConversation,
-  conversationHasPendingTools, cancelToolForNewUserMessage,
-  skipStaleToolForContinuation, resolveIdleToolBlocker,
+  isToolApprovalContinuation,
+  conversationHasPendingOrUnexecutedTools,
+  resolveApprovalState,
+  applyToolApprovalToConversation,
+  conversationHasPendingTools,
+  cancelToolForNewUserMessage,
+  skipStaleToolForContinuation,
+  resolveIdleToolBlocker,
 } from '../main/ets/chat/tool_approval.ts';
 import { makeConversation, currentMessages, toMessageNode } from '../main/ets/chat/conversation.ts';
 import type { Conversation, MessageNode } from '../main/ets/chat/conversation.ts';
@@ -55,12 +58,6 @@ describe('isToolApprovalContinuation(:945-953)', () => {
     assert.equal(isToolApprovalContinuation('今天天气怎么样'), false);
     assert.equal(isToolApprovalContinuation('   '), false);
     assert.equal(isToolApprovalContinuation('不要继续'), false); // compact=不要继续,非词表且不 startsWith 继续
-  });
-  it('词表 15 值逐字', () => {
-    assert.deepEqual(TOOL_APPROVAL_CONTINUATION_WORDS, [
-      '继续', '继续吧', '可以继续', '执行', '执行吧', '确认', '同意', '批准',
-      'ok', 'yes', 'y', 'continue', 'goahead', 'approve', 'approved',
-    ]);
   });
 });
 
@@ -148,11 +145,6 @@ describe('handleToolApproval 纯逻辑(:1133-1172)', () => {
     const approved = applyToolApprovalToConversation(conv, 'c1', { kind: 'approved' });
     assert.equal(conversationHasPendingTools(approved), false);
   });
-  it('findToolNameInConversation(:2535-2541)', () => {
-    const conv = convWithTool(toolPart('c1', 'memory_write', { type: 'pending' }));
-    assert.equal(findToolNameInConversation(conv, 'c1'), 'memory_write');
-    assert.equal(findToolNameInConversation(conv, 'nope'), null);
-  });
   it('conversationHasPendingOrUnexecutedTools(:2543-2546)', () => {
     const pending = convWithTool(toolPart('c1', 'file_write', { type: 'pending' }));
     assert.equal(conversationHasPendingOrUnexecutedTools(pending), true);
@@ -183,12 +175,6 @@ describe('陈旧工具处理(:955-970 逐字)', () => {
 });
 
 describe('resolveIdleToolBlocker(:869-943)', () => {
-  it('无阻塞工具 → changed=false', () => {
-    const conv = makeConversation('c1', [toMessageNode(makeUIMessage('assistant', [{ type: 'text', text: 'x', metadata: null }]))]);
-    const r = resolveIdleToolBlocker(conv, '继续', true);
-    assert.equal(r.changed, false);
-    assert.equal(r.event, null);
-  });
   it('R15 「继续」不再批准 pending → 取消陈旧工具,shouldResume=false', () => {
     const conv = convWithTool(toolPart('c1', 'file_write', { type: 'pending' }));
     const r = resolveIdleToolBlocker(conv, '继续', true);

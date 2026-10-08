@@ -1,0 +1,329 @@
+--- before/harmony/entry/src/main/ets/components/NovelChapterVersionPreview.ets
++++ after/harmony/entry/src/main/ets/components/NovelChapterVersionPreview.ets
+@@ -1,8 +1,10 @@
+-import { ACCENT, ACCENT_INK, ERROR, INK, INK3, INK4, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
++import { ACCENT, ACCENT_INK, ERROR, INK, INK3, INK4, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
+ import { MarkdownText } from './MarkdownText.ets';
+ 
+ @Component
+ export struct NovelChapterVersionPreview {
++  @StorageProp('reduceMotion') private reduceMotion: boolean = false;
++  @StorageProp('appBackgrounded') private appBackgrounded: boolean = false;
+   @Prop title: string = '';
+   @Prop content: string = '';
+   @Prop metadata: string = '';
+@@ -75,6 +77,10 @@
+         .borderRadius({ topLeft: 20, topRight: 20 })
+         .padding({ left: 18, right: 18, top: 12, bottom: 14 + this.bottomPadding })
+         .onClick((): void => {})
++        .transition(TransitionEffect.translate({ y: this.reduceMotion || this.appBackgrounded ? 0 : 160 })
++          .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
+     }.width('100%').height('100%')
++      .transition(TransitionEffect.OPACITY
++        .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
+   }
+ }
+--- before/harmony/entry/src/main/ets/components/NovelGhostwriteStartSheet.ets
++++ after/harmony/entry/src/main/ets/components/NovelGhostwriteStartSheet.ets
+@@ -1,8 +1,10 @@
+-import { ACCENT, ACCENT_INK, INK, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2, ERROR } from '../design/tokens.ets';
++import { ACCENT, ACCENT_INK, INK, INK3, INK4, LINE, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2, ERROR } from '../design/tokens.ets';
+ import { MarkdownText } from './MarkdownText.ets';
+ 
+ @Component
+ export struct NovelGhostwriteStartSheet {
++  @StorageProp('reduceMotion') private reduceMotion: boolean = false;
++  @StorageProp('appBackgrounded') private appBackgrounded: boolean = false;
+   @Prop planContent: string = '';
+   @Prop chapterCount: number = 1;
+   @Prop branchName: string = '';
+@@ -43,6 +45,10 @@
+         }.width('100%')
+       }.width('100%').height('85%').backgroundColor(SURFACE).borderRadius({ topLeft: 20, topRight: 20 })
+         .padding({ left: 20, right: 20, top: 12, bottom: 24 + this.bottomPadding })
++        .transition(TransitionEffect.translate({ y: this.reduceMotion || this.appBackgrounded ? 0 : 160 })
++          .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
+     }.width('100%').height('100%')
++      .transition(TransitionEffect.OPACITY
++        .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
+   }
+ }
+--- before/harmony/entry/src/main/ets/components/NovelMaterialEditorSheet.ets
++++ after/harmony/entry/src/main/ets/components/NovelMaterialEditorSheet.ets
+@@ -1,4 +1,4 @@
+-import { ACCENT, ERROR, INK, INK3, LINE, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
++import { ACCENT, ERROR, INK, INK3, LINE, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
+ import { MATERIAL_KIND_LABELS, normalizeNovelMaterialFields } from '@amber/deepread-domain';
+ import type { NovelMaterial, NovelMaterialFields, NovelMaterialKind } from '@amber/deepread-domain';
+ import { NovelMaterialMetadataFields } from './NovelMaterialMetadataFields.ets';
+@@ -27,6 +27,8 @@
+ 
+ @Component
+ export struct NovelMaterialEditorSheet {
++  @StorageProp('reduceMotion') private reduceMotion: boolean = false;
++  @StorageProp('appBackgrounded') private appBackgrounded: boolean = false;
+   @Prop @Watch('resetDraft') draftKey: string = '';
+   @Prop @Watch('cancel') closeRequest: number = 0;
+   @Prop initialDraft: NovelMaterialEditorDraft = emptyMaterialEditorDraft();
+@@ -158,6 +160,10 @@
+         }.width('100%').border({ width: { top: 1 }, color: { top: LINE } })
+       }.width('100%').height('88%').alignItems(HorizontalAlign.Start).backgroundColor(SURFACE)
+         .borderRadius({ topLeft: 20, topRight: 20 }).padding({ left: 20, right: 20, top: 18, bottom: this.bottomPadding + 16 })
++        .transition(TransitionEffect.translate({ y: this.reduceMotion || this.appBackgrounded ? 0 : 160 })
++          .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
+     }.width('100%').height('100%')
++      .transition(TransitionEffect.OPACITY
++        .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
+   }
+ }
+--- before/harmony/entry/src/main/ets/components/NovelRevisionBriefSheet.ets
++++ after/harmony/entry/src/main/ets/components/NovelRevisionBriefSheet.ets
+@@ -1,8 +1,10 @@
+-import { ACCENT, ERROR, INK, INK3, LINE, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
++import { ACCENT, ERROR, INK, INK3, LINE, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
+ 
+ // Reader 修订／重生成、暂停代笔修改要求共用输入；写入范围由调用方冻结并展示。
+ @Component
+ export struct NovelRevisionBriefSheet {
++  @StorageProp('reduceMotion') private reduceMotion: boolean = false;
++  @StorageProp('appBackgrounded') private appBackgrounded: boolean = false;
+   @Prop @Watch('resetDraft') draftKey: string = '';
+   @Prop @Watch('cancel') closeRequest: number = 0;
+   @Prop initialText: string = '';
+@@ -89,6 +91,10 @@
+         }.width('100%').border({ width: { top: 1 }, color: { top: LINE } })
+       }.width('100%').height('80%').alignItems(HorizontalAlign.Start).backgroundColor(SURFACE)
+         .borderRadius({ topLeft: 20, topRight: 20 }).padding({ left: 20, right: 20, top: 18, bottom: this.bottomPadding + 16 })
++        .transition(TransitionEffect.translate({ y: this.reduceMotion || this.appBackgrounded ? 0 : 160 })
++          .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
+     }.width('100%').height('100%')
++      .transition(TransitionEffect.OPACITY
++        .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
+   }
+ }
+--- before/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets
++++ after/harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets
+@@ -638,6 +638,24 @@
+     .width('100%').height('100%').backgroundColor(OVERLAY)
+     .justifyContent(FlexAlign.End)
+     .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
++  }
++
++  @Builder
++  private VersionPreviewSheet(version: NovelChapterVersion): void {
++    NovelChapterVersionPreview({
++      title: version.title, content: version.content,
++      metadata: `${this.versionKindLabel(version.kind)} · ${this.versionTime(version.createdAt)} · ${charCountOf(version.content)} 字`,
++      busy: this.busy, errorMessage: this.errorMsg, bottomPadding: Math.max(this.navBarHeight, 24),
++      forkName: this.versionForkName, forkAvailable: this.versionCheckpoint !== null,
++      forkDetail: this.versionForkDetail, busyLabel: this.versionForking ? '创建分支中…' : '恢复中…',
++      onForkName: (name: string): void => { this.versionForkName = name; },
++      onFork: (): void => { this.confirmVersionFork(); },
++      onBack: (): void => {
++        if (!this.busy) { this.versionPreview = null; this.errorMsg = ''; }
++      },
++      onClose: (): void => { this.closeVersions(); },
++      onRestore: (): void => { this.confirmRestoreVersion(); },
++    })
+   }
+ 
+   @Builder
+@@ -959,20 +977,7 @@
+             if (this.versionPreview === null) {
+               this.VersionsSheet()
+             } else {
+-              NovelChapterVersionPreview({
+-                title: this.versionPreview.title, content: this.versionPreview.content,
+-                metadata: `${this.versionKindLabel(this.versionPreview.kind)} · ${this.versionTime(this.versionPreview.createdAt)} · ${charCountOf(this.versionPreview.content)} 字`,
+-                busy: this.busy, errorMessage: this.errorMsg, bottomPadding: Math.max(this.navBarHeight, 24),
+-                forkName: this.versionForkName, forkAvailable: this.versionCheckpoint !== null,
+-                forkDetail: this.versionForkDetail, busyLabel: this.versionForking ? '创建分支中…' : '恢复中…',
+-                onForkName: (name: string): void => { this.versionForkName = name; },
+-                onFork: (): void => { this.confirmVersionFork(); },
+-                onBack: (): void => {
+-                  if (!this.busy) { this.versionPreview = null; this.errorMsg = ''; }
+-                },
+-                onClose: (): void => { this.closeVersions(); },
+-                onRestore: (): void => { this.confirmRestoreVersion(); },
+-              })
++              this.VersionPreviewSheet(this.versionPreview)
+             }
+           }
+           if (this.editOpen) {
+--- before/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets
++++ after/harmony/entry/src/main/ets/pages/NovelProjectsPage.ets
+@@ -83,6 +83,7 @@
+ 
+   onPageShow(): void {
+     this.designVisible = true;
++    if (this.createSheetOpen) this.enableKeyboardAvoidance();
+     if (getProductKind() === 'novel') markWantRoutingReady(this.getUIContext().getRouter());
+     if (this.firstShowDone) {
+       this.loadProjects().catch((e: Error): void => {
+--- before/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets
++++ after/harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets
+@@ -674,7 +674,7 @@
+         this.ghostwriteJob = ghostwrite;
+         this.ghostwriteReport = ghostwriteReport;
+         this.polishJob = polish;
+-        if (ghostwrite !== null) this.settingTab = 3;
++        if (ghostwrite !== null && getProductKind() !== 'novel') this.settingTab = 3;
+         this.ghostwriteModelAvailable = modelAvailable;
+         this.ghostwriteModelIssue = modelIssue;
+         // 等 List 收到新 rows 的可见范围回调再落底；Promise 返回后的
+@@ -727,7 +727,7 @@
+       if (next === null && previous !== null) {
+         this.ghostwriteReport = await getNovelCreation().latestGhostwriteReport(this.projectId);
+       }
+-      if (next !== null) this.settingTab = 3;
++      if (next !== null && getProductKind() !== 'novel') this.settingTab = 3;
+       const previousProgress: number = previous?.progress.length ?? 0;
+       const nextProgress: number = next?.progress.length ?? 0;
+       if (previousProgress !== nextProgress || (previous !== null && next === null)) {
+@@ -884,8 +884,8 @@
+     finally { this.ghostwriteBusy = false; }
+   }
+ 
+-  private ghostwriteAuthorPlanPreview(): string {
+-    const content: string = this.ghostwritePreview?.planContent ?? '';
++  private ghostwriteAuthorPlanPreview(preview: NovelGhostwriteStartPreview | null = this.ghostwritePreview): string {
++    const content: string = preview?.planContent ?? '';
+     const settings: NovelBranchSettings | undefined = this.project?.branchSettings;
+     const contract: NovelChapterContract | undefined = settings?.chapterContract;
+     if (settings !== undefined && contract !== undefined && contract.status === 'confirmed' && content === confirmedChapterPlanText(settings)) {
+@@ -903,7 +903,7 @@
+     try {
+       this.ghostwriteJob = await getNovelCreation().startGhostwrite(this.projectId, targetChapterCount, preview);
+       this.ghostwritePreview = null;
+-      this.settingTab = 3;
++      if (getProductKind() !== 'novel') this.settingTab = 3;
+       this.errorMsg = '';
+       this.scheduleGhostwritePoll();
+     } catch (error) {
+@@ -968,7 +968,7 @@
+     this.ghostwriteBusy = true;
+     try {
+       this.ghostwriteJob = await getNovelCreation().resumeGhostwrite(this.projectId, job.jobId);
+-      this.settingTab = 3;
++      if (getProductKind() !== 'novel') this.settingTab = 3;
+       this.errorMsg = '';
+       this.scheduleGhostwritePoll();
+     } catch (error) {
+@@ -984,7 +984,7 @@
+     this.ghostwriteBusy = true;
+     try {
+       this.ghostwriteJob = await getNovelCreation().retryGhostwrite(this.projectId, job.jobId);
+-      this.settingTab = 3;
++      if (getProductKind() !== 'novel') this.settingTab = 3;
+       this.errorMsg = '';
+       this.scheduleGhostwritePoll();
+     } catch (error) {
+@@ -2243,10 +2243,20 @@
+       (s: NovelMaterialSuggestion): boolean => s.status === 'pending' && kinds.indexOf(s.kind) >= 0);
+   }
+ 
++  private pendingSettingProposalsIn(kinds: NovelMaterialKind[]): NovelSettingProposal[] {
++    const p: NovelProject | null = this.project;
++    if (p === null) return [];
++    return p.settingProposals.filter(
++      (proposal: NovelSettingProposal): boolean => proposal.status === 'pending' && kinds.indexOf(proposal.kind) >= 0);
++  }
++
+   private branchSettingsWith(foreshadows: NovelForeshadow[], decisions: NovelConfirmedDecision[]): NovelBranchSettings {
+     const p: NovelProject | null = this.project;
+     if (p === null) return emptyNovelBranchSettings();
+     return {
++      chapterContract: p.branchSettings.chapterContract,
++      upcomingArc: p.branchSettings.upcomingArc,
++      suggestedChapterCount: p.branchSettings.suggestedChapterCount,
+       thisChapterPlan: p.branchSettings.thisChapterPlan,
+       futurePlan: p.branchSettings.futurePlan,
+       preferences: p.branchSettings.preferences,
+@@ -2971,6 +2981,8 @@
+     const retained: ControlPlanDraft | undefined = this.controlPlanDrafts.get(owner);
+     if (retained !== undefined) {
+       this.showControlPlanDraft(retained, !sameControlPlanDraft(retained, this.controlPlanBaseline));
++      // 缓存可能来自失败的自动保存；重开时再落盘，不能用内存恢复提示掩盖失败。
++      this.persistControlPlanDraft(owner, sameControlPlanDraft(retained, this.controlPlanBaseline) ? null : retained);
+       return;
+     }
+     this.showControlPlanDraft(this.controlPlanBaseline, false);
+@@ -3084,13 +3096,11 @@
+     const savedPlan: ControlPlanDraft = {
+       thisChapterPlan: this.planThisChapter, futurePlan: this.planFuture, preferences: this.planPreferences,
+     };
+-    await this.saveNovelBranchSettings({
+-      thisChapterPlan: savedPlan.thisChapterPlan,
+-      futurePlan: savedPlan.futurePlan,
+-      preferences: savedPlan.preferences,
+-      foreshadows: s.foreshadows,
+-      confirmedDecisions: s.confirmedDecisions,
+-    });
++    const settings: NovelBranchSettings = this.branchSettingsWith(s.foreshadows, s.confirmedDecisions);
++    settings.thisChapterPlan = savedPlan.thisChapterPlan;
++    settings.futurePlan = savedPlan.futurePlan;
++    settings.preferences = savedPlan.preferences;
++    await this.saveNovelBranchSettings(settings);
+     if (this.errorMsg.length === 0) {
+       this.controlPlanDrafts.set(owner, savedPlan);
+       if (this.controlPlanOwner === owner) {
+@@ -3224,6 +3234,17 @@
+       forceIncludeMaterialIds: JSON.stringify(this.contextOverrides?.forceIncludeMaterialIds ?? []),
+       forceExcludeMaterialIds: JSON.stringify(this.contextOverrides?.forceExcludeMaterialIds ?? []),
+     } }).catch((error: Error): void => { if (this.pageAlive) this.errorMsg = String(error); });
++  }
++
++  @Builder
++  private GhostwriteStartPreviewSheet(preview: NovelGhostwriteStartPreview): void {
++    NovelGhostwriteStartSheet({
++      planContent: this.ghostwriteAuthorPlanPreview(preview), branchName: preview.branchName,
++      chapterCount: preview.targetChapterCount, busy: this.ghostwriteBusy,
++      errorMessage: this.ghostwritePreviewError, bottomPadding: Math.max(this.navBarHeight, 12),
++      onConfirm: (): void => { this.confirmGhostwriteStart(); },
++      onClose: (): void => { if (!this.ghostwriteBusy) this.ghostwritePreview = null; },
++    })
+   }
+ 
+   @Builder
+@@ -3372,7 +3393,6 @@
+               Text(this.busy ? '保存中…' : '保存').fontSize(14).fontWeight(FontWeight.Medium)
+                 .fontFamily(FONT_SANS_MEDIUM).fontColor(this.busy ? INK4 : ACCENT)
+                 .constraintSize({ minWidth: 44, minHeight: 44 }).textAlign(TextAlign.End)
+-                .enabled(!this.busy)
+                 .enabled(!this.busy && this.controlPlanReady)
+                 .onClick((): void => { this.savePlanPrefs(); })
+             }.width('100%').margin({ top: 6 })
+@@ -3669,10 +3689,16 @@
+ 
+   @Builder
+   private PendingMaterialSuggestions(kinds: NovelMaterialKind[]): void {
+-    if (this.pendingSuggestionsIn(kinds).length > 0) {
++    if (this.pendingSuggestionsIn(kinds).length > 0 || this.pendingSettingProposalsIn(kinds).length > 0) {
+       Text('待确认').fontSize(13).fontFamily(FONT_SANS_MEDIUM).fontColor(INK2).margin({ bottom: 8 })
+-      Text('Amber 从正文中发现了资料变化，采用后才会写入资料库。')
++      Text('建议采用后才会写入资料库。')
+         .fontSize(11).fontColor(INK3).margin({ bottom: 10 })
++      ForEach(this.pendingSettingProposalsIn(kinds), (proposal: NovelSettingProposal): void => {
++        NovelSettingProposalCard({
++          title: proposal.title, content: proposal.content, kindLabel: MATERIAL_KIND_LABELS[proposal.kind],
++          onResolve: (accept: boolean): void => { this.resolveSettingProposal(proposal, accept); },
++        })
++      }, (proposal: NovelSettingProposal): string => `setting:${proposal.id}`)
+       ForEach(this.pendingSuggestionsIn(kinds), (s: NovelMaterialSuggestion): void => {
+         NovelSettingProposalCard({
+           title: s.title, content: s.content, kindLabel: MATERIAL_KIND_LABELS[s.kind],
+@@ -4169,13 +4195,7 @@
+           })
+         }
+         if (this.ghostwritePreview !== null) {
+-          NovelGhostwriteStartSheet({
+-            planContent: this.ghostwriteAuthorPlanPreview(), branchName: this.ghostwritePreview.branchName,
+-            chapterCount: this.ghostwritePreview.targetChapterCount, busy: this.ghostwriteBusy,
+-            errorMessage: this.ghostwritePreviewError, bottomPadding: Math.max(this.navBarHeight, 12),
+-            onConfirm: (): void => { this.confirmGhostwriteStart(); },
+-            onClose: (): void => { if (!this.ghostwriteBusy) this.ghostwritePreview = null; },
+-          })
++          this.GhostwriteStartPreviewSheet(this.ghostwritePreview)
+         }
+         if (this.ghostwriteBriefOpen) {
+           NovelRevisionBriefSheet({ draftKey: this.ghostwriteBriefKey, closeRequest: this.ghostwriteBriefCloseRequest,

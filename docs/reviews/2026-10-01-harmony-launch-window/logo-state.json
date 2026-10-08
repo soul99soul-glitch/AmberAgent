@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-01",
+  "scope": "User refined splash to full native window background and centered standalone A logo; remove icon tile",
+  "lightBackground": "#FFFFFF",
+  "darkBackground": "#000000",
+  "logoTileRemoved": true,
+  "candidateHap": "/tmp/amber-launch-centered-logo.hap",
+  "sha256": "372a4ccf02ba986dd231681ae959a6e59782b9789fd3c2ee14c05e86e9abb51c",
+  "buildSuccess": true,
+  "agcSigned": true,
+  "installed": true,
+  "launchSuccess": true,
+  "lightColdStartVisuallyVerified": true,
+  "darkResourcesCompiledAndPackaged": true,
+  "darkColdStartVisuallyVerified": false,
+  "systemThemeChanged": false,
+  "simulatorStarted": false,
+  "arktsChanged": false,
+  "nativeVSyncUnmodified": true,
+  "lightCapture": "logo-light.jpeg"
+}

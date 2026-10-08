@@ -159,7 +159,8 @@ class MoshApprovalRuntime {
       errorCode: null, errorMessage: null };
   }
 }
-const approvalFixture = async (parts: UIMessagePartTool[], enableMosh: boolean = false) => {
+const approvalFixture = async (parts: UIMessagePartTool[], enableMosh: boolean = false,
+  review?: import('../main/ets/chat/tool_dispatcher.ts').AutoApprovalReview) => {
   const credentials = new FixtureCredentials();
   const profiles = await SSHProfileStore.create({ kv: createMemoryKeyValueStore(), credentials });
   for (const id of ['p', 'q']) {
@@ -181,7 +182,8 @@ const approvalFixture = async (parts: UIMessagePartTool[], enableMosh: boolean =
       return [{ type: 'text', text: 'executed', metadata: null }];
     }))).tools();
     return { ...loopFor(provider, tools, guard.captureInvocationMetadata),
-      dispatcher: new AgentToolDispatcher({ hooks: [...defaultToolInvocationHooks(), guard.hook] }) };
+      dispatcher: new AgentToolDispatcher({ hooks: [...defaultToolInvocationHooks(), guard.hook], autoApprovalReview: review }),
+      autoApproveTools: review !== undefined, autoApproveHighRiskTools: review !== undefined };
   };
   await runChatTurnWithTools(makeConversation('ssh-approval', []), 'run', depsFor(provider, store), build());
   const resume = async (): Promise<Conversation> => {
@@ -547,3 +549,18 @@ for (const changeDefault of [true, false]) {
     }
   });
 }
+
+test('auto review persists real terminal target and existing approval guard still rejects changed host on resume', async () => {
+  let reviews = 0;
+  const s = await approvalFixture([toolPart('reviewed-terminal', 'terminal_job_start', '{"profile_id":"p"}')], false,
+    async () => { reviews++; return ['外发数据']; });
+  const pending = partsOf(s.store.load())[0];
+  assert.equal(pending.approvalState.type, 'pending'); assert.equal(reviews, 1); assert.deepEqual(s.executed(), []);
+  const original = pending.metadata?.terminal_target;
+  assert.match(JSON.stringify(pending.metadata?.permission_trace), /jev_auto_approval.*外发数据/);
+  const profile = s.profiles.get('p')!;
+  await s.profiles.saveMetadata({ ...profile, host: 'changed-host' }, profile.revision);
+  const out = await s.resume();
+  assertTargetFailure(out, 'reviewed-terminal'); assert.deepEqual(s.executed(), []);
+  assert.deepEqual(partsOf(out)[0].metadata?.terminal_target, original); assert.equal(reviews, 1);
+});

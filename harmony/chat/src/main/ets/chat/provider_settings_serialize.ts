@@ -103,6 +103,8 @@ const serializeModel = (m: ProviderModel): string => {
   parts.push(`"outputModalities":[${m.outputModalities.map(
     (v): string => esc(MODALITY_WIRE[v])).join(',')}]`);
   parts.push(`"abilities":[${m.abilities.map((v): string => esc(ABILITY_WIRE[v])).join(',')}]`);
+  // 旧版空能力列表没有关闭开关。保存显式关闭标记，避免下次读取恢复默认开启。
+  if (m.type === 'chat' && !m.abilities.includes('tool')) parts.push('"toolCallingDisabled":true');
   parts.push(`"tools":[${m.tools.map(
     (t: BuiltInTools): string => `{"type":${esc(t)}}`).join(',')}]`);
   if (m.contextWindowTokens !== null) parts.push(`"contextWindowTokens":${m.contextWindowTokens}`);
@@ -115,11 +117,17 @@ const serializeModel = (m: ProviderModel): string => {
 const parseModel = (v: JsonValue): ProviderModel => {
   const o = isObj(v) ? v : {};
   const overwriteRaw = o['providerOverwrite'];
+  const type: ModelType = modelTypeFromWire(strOr(o, 'type', 'CHAT'));
+  const abilities: ModelAbility[] = arrOf(o, 'abilities').map(
+    (v): ModelAbility => abilityFromWire(typeof v === 'string' ? v : ''));
+  if (type === 'chat' && !boolOr(o, 'toolCallingDisabled', false) && !abilities.includes('tool')) {
+    abilities.push('tool');
+  }
   return makeProviderModel({
     modelId: strOr(o, 'modelId', ''),
     displayName: strOr(o, 'displayName', ''),
     id: strOr(o, 'id', ''),
-    type: modelTypeFromWire(strOr(o, 'type', 'CHAT')),
+    type,
     customHeaders: arrOf(o, 'customHeaders').map((h: JsonValue): CustomHeader => {
       const x = isObj(h) ? h : {};
       return { name: strOr(x, 'name', ''), value: strOr(x, 'value', '') };
@@ -132,8 +140,7 @@ const parseModel = (v: JsonValue): ProviderModel => {
       (v): ModalityFull => modalityFromWire(typeof v === 'string' ? v : 'TEXT')),
     outputModalities: arrOf(o, 'outputModalities').map(
       (v): ModalityFull => modalityFromWire(typeof v === 'string' ? v : 'TEXT')),
-    abilities: arrOf(o, 'abilities').map(
-      (v): ModelAbility => abilityFromWire(typeof v === 'string' ? v : '')),
+    abilities,
     tools: arrOf(o, 'tools').map((v): BuiltInTools => {
       const t = isObj(v) && typeof v['type'] === 'string' ? v['type'] : '';
       if (BUILT_IN_TOOLS.indexOf(t) < 0) throw new Error(`unknown BuiltInTools: ${t}`);

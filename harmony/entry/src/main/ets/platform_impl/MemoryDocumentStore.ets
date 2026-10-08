@@ -1,6 +1,6 @@
 // Readonly Markdown projection; MemoryStore owns serialization and the source of truth.
 import { fileIo } from '@kit.CoreFileKit';
-import type { MemoryDerivedDocument, MemoryDocumentProjection, MemoryRecord } from '@amber/chat-domain';
+import type { MemoryDerivedDocument, MemoryDocumentProjection, MemoryRecord, MemoryProfile } from '@amber/chat-domain';
 import { renderMemoryDocuments } from '@amber/chat-domain';
 import { writeTextFileAtomic } from './AtomicJsonFile.ets';
 
@@ -28,8 +28,8 @@ const existingPaths = async (): Promise<string[]> => {
   return paths;
 };
 
-export const syncMemoryDocuments = async (records: MemoryRecord[], now: number): Promise<void> => {
-  const projections: MemoryDocumentProjection[] = renderMemoryDocuments(records, now);
+export const syncMemoryDocuments = async (records: MemoryRecord[], now: number, profile: MemoryProfile | null = null): Promise<void> => {
+  const projections: MemoryDocumentProjection[] = renderMemoryDocuments(records, now, profile);
   const expected: string[] = [];
   for (const projection of projections) {
     const path: string = fullPath(projection.relativePath);

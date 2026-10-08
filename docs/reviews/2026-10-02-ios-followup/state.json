@@ -1,0 +1,68 @@
+{
+  "baselineHead": "5ea51f7a548198ee4676fc63ef0b3bbfa34ba290",
+  "baselineSnapshot": "/tmp/amber-ios-followup-20261002-baseline",
+  "phases": [
+    {
+      "id": 1,
+      "status": "complete",
+      "reviewer": "phase1_review"
+    },
+    {
+      "id": 2,
+      "status": "complete",
+      "reviewer": "phase1_review"
+    },
+    {
+      "id": 3,
+      "status": "complete",
+      "reviewer": "phase1_review"
+    },
+    {
+      "id": 4,
+      "status": "complete",
+      "reviewer": "phase1_review"
+    },
+    {
+      "id": 5,
+      "status": "complete",
+      "reviewers": [
+        "phase1_reasoning",
+        "phase1_review",
+        "phase5_ui_fixture"
+      ],
+      "finalReviewer": "final_narrow_review",
+      "uiReviewer": "final_ui_acceptance"
+    }
+  ],
+  "authorization": "Continuous implementation and independent subagent reviews authorized; no commit or push requested",
+  "verification": {
+    "phase1Focused": "213 passed plus 11 provider-tools passed",
+    "phase1Types": "chat and deepread passed",
+    "phase1Lint": "0 errors",
+    "phase1Build": "assembleApp and signing verification passed",
+    "phase2Focused": "202 passed; independent 166 passed",
+    "phase2Types": "chat passed",
+    "phase2Build": "assembleApp and signing verification passed",
+    "phase2Lint": "0 errors",
+    "phase3Focused": "38 final worker tests; root57 incl sync repair; independent38 final",
+    "phase3Types": "chat passed",
+    "phase3Lint": "0 errors",
+    "phase3Build": "assembleApp/sign4/verify-app/install/launch passed",
+    "phase3UI": "independently inspected light/dark previews, source, saved HTML readback, switch off/on; final dark chart contrast passed",
+    "phase4Focused": "root23; independent27incl4rowcache passed",
+    "phase4Types": "chat and pure projections passed",
+    "phase4Lint": "0 errors",
+    "phase4Build": "assembleApp build3/sign3/verify-app/install/launch passed",
+    "phase4UI": "Pura90 light/dark original-position receipts, five plan states, real local adopt/ignore+reopen, full patch, final44x44 touch passed",
+    "phase5Focused": "A18, B159, C42; last necessary regression-related79 and independent76 passed",
+    "phase5Types": "chat passed after final fix; deepread passed at integration",
+    "phase5Build": "final assembleApp/sign/verify-app/AGC overwrite install passed",
+    "phase5Lint": "affected files 0 errors",
+    "phase5OfflineMain": "actual Pura90 file_write/edit approved once each, both actual outputs verified; final reply retains tool history; completion notice displayed; light44x44 confirmed",
+    "integrationTests": "chat2787/deepread1189/Entry78 passed before final narrow fix; no extra full rerun",
+    "phase5UI": "Pura90 light/dark completion notice44x44, actual draft append without send, four purpose settings and direct/recipe risk reason layout passed",
+    "cleanup": "OWN chats/file removed normally; OWN novels soft-deleted; original raw assistants/providers exact restored2/9, original Jev key absent, no OWN UUID preference references; readback SHA exact, UID/GID/mode unchanged; localhost stopped, simulator returned stopped, HDC forwards empty"
+  },
+  "currentHead": "b2d054bd7",
+  "testPolicy": "Only necessary regression for reproduced failure; no extra test cases, no repeated full suite unless implementation change requires it"
+}

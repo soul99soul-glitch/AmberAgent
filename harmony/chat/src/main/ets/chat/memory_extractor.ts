@@ -23,16 +23,18 @@
 import type { Conversation } from './conversation.ts';
 import { currentMessages } from './conversation.ts';
 import type { UIMessage, UIMessagePartTool } from './message.ts';
-import { toText } from './message.ts';
+
 import type {
   MemoryCandidate, MemoryEvent, MemoryEventType, MemoryKind, MemoryRecord, MemoryScope,
 } from './memory_models.ts';
 import { makeMemoryCandidate, makeMemoryEvent } from './memory_models.ts';
-import { filterMemoryCandidates } from './memory_candidate_filter.ts';
+
 import { buildMemoryExtractionPrompt } from './memory_extraction_prompt.ts';
 import { isSensitiveMemoryContent } from './memory_prompt_builder.ts';
 import { deriveMemoryExpiresAt } from './memory_time_anchor.ts';
 import type { MemoryAddParams } from './memory_write.ts';
+import type { MemoryExtractionAction, MemoryExtractionActionKind, MemoryExtractionApplyResult } from './memory_extraction_actions.ts';
+import { collectMemoryExtractionSources, isGroundedMemoryRewrite, memoryExpiryOn, normalizeMemoryRelativeDates } from './memory_extraction_actions.ts';
 
 export const SHORT_TERM_PROJECT_AUTO_WRITE_CONFIDENCE: number = 0.72;
 export const DURABLE_AUTO_WRITE_CONFIDENCE: number = 0.85;
@@ -43,6 +45,12 @@ export interface ParsedMemoryCandidate {
   candidate: MemoryCandidate;
   explicitScope: boolean;
   explicitKind: boolean;
+  action: MemoryExtractionActionKind;
+  sourceMessageId: string | null;
+  evidence: string;
+  targetId: number | null;
+  expiresOn: string | null;
+  declaredSensitive: boolean;
 }
 
 const MEMORY_SCOPE_WIRES: string[] = ['core', 'short_term', 'long_term'];
@@ -123,17 +131,25 @@ export const parseMemoryCandidates = (
   const out: ParsedMemoryCandidate[] = [];
   for (const item of ((list as unknown[] | undefined) ?? []).slice(0, 5)) {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-      throw new Error('Element is not a JsonObject');
+      continue;
     }
     const obj: Record<string, unknown> = item as Record<string, unknown>;
+    const actionValue: string = stringOrNull(obj['action']) ?? 'add';
+    if (!['add', 'update', 'invalidate', 'confirm', 'noop'].includes(actionValue)) continue;
     const content: string = (stringOrNull(obj['content']) ?? '').trim();
     if (content.length === 0) continue;
     const expiresInDays: number | null = longOrNull(obj['expires_in_days']);
     const scopeValue: string | null = stringOrNull(obj['scope']);
     const kindValue: string | null = stringOrNull(obj['kind']);
-    if (kindValue === 'topic') throw new Error('记忆提炼不能创建派生主题');
+    if (kindValue === 'topic') continue;
     const scope: MemoryScope = scopeFromWireOrDefault(scopeValue);
     out.push({
+      action: actionValue as MemoryExtractionActionKind,
+      sourceMessageId: stringOrNull(obj['source_message_id']) ?? stringOrNull(obj['sourceMessageId']),
+      evidence: (stringOrNull(obj['evidence']) ?? content).trim(),
+      targetId: longOrNull(obj['update_memory_id'] ?? obj['updateMemoryId']),
+      expiresOn: stringOrNull(obj['expires_on'] ?? obj['expiresOn']),
+      declaredSensitive: obj['sensitive'] === true,
       explicitScope: scopeValue !== null && MEMORY_SCOPE_WIRES.indexOf(scopeValue) >= 0,
       explicitKind: kindValue !== null && MEMORY_KIND_WIRES.indexOf(kindValue) >= 0,
       candidate: makeMemoryCandidate({
@@ -144,6 +160,9 @@ export const parseMemoryCandidates = (
         reason: stringOrNull(obj['reason']) ?? '',
         sourceConversationId: conversationId,
         sourceMessageIds,
+        evidence: (stringOrNull(obj['evidence']) ?? content).trim(),
+        sensitive: obj['sensitive'] === true,
+        createdAt: now,
         expiresAt: resolveCandidateExpiresAt(content, scope, expiresInDays, now),
       }),
     });
@@ -204,6 +223,11 @@ export interface MemoryExtractionDeps {
   addMemory: (params: MemoryAddParams) => Promise<MemoryRecord>;
   addEvent: (event: MemoryEvent) => Promise<void>;
   countEventsSince: (type: MemoryEventType, createdAfter: number) => Promise<number>;
+  // Platform runs the pure apply helper against its latest full snapshot inside
+  // its write queue and commits once, including archived history and evidence.
+  applyActions?: (actions: MemoryExtractionAction[], now: number) => Promise<MemoryExtractionApplyResult>;
+  // Host rechecks durable conversation and runtime state after model work yields.
+  canApply?: () => Promise<boolean>;
   now?: () => number;
 }
 
@@ -255,6 +279,17 @@ export const runMemoryExtraction = async (
   }
 };
 
+export const extractionMessagesContaminated = (messages: UIMessage[]): boolean => {
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type !== 'tool') continue;
+      const name: string = (part as UIMessagePartTool).toolName;
+      if (name === 'search_web' || name === 'scrape_web' || name.startsWith('mcp__') || name === 'mcp_call_tool') return true;
+    }
+  }
+  return false;
+};
+
 const runMemoryExtractionGuarded = async (
   conversation: Conversation, deps: MemoryExtractionDeps,
 ): Promise<void> => {
@@ -288,21 +323,8 @@ const runMemoryExtractionGuarded = async (
     });
     return;
   }
-  // D5-4:污染检测(iOS 对齐:联网/MCP 触碰过的会话暂停提炼 —
-  //   外部内容(搜索结果/MCP 数据)不应沉淀为长期记忆,防污染)
-  let contaminated: boolean = false;
-  for (const m of messages) {
-    if (contaminated) break;
-    for (const part of m.parts) {
-      if (part.type !== 'tool') continue;
-      const toolName: string = (part as UIMessagePartTool).toolName;
-      if (toolName === 'search_web' || toolName === 'scrape_web'
-        || toolName.startsWith('mcp__') || toolName === 'mcp_call_tool') {
-        contaminated = true;
-        break;
-      }
-    }
-  }
+  // Sources that touched external tools never become automatically extracted facts.
+  const contaminated: boolean = extractionMessagesContaminated(messages);
   if (contaminated) {
     await logEvent(deps, 'extraction_skipped', {
       conversationId,
@@ -335,43 +357,120 @@ const runMemoryExtractionGuarded = async (
 
   // :110-181 主体(runCatching → onFailure EXTRACTION_FAILED)
   try {
-    const sourceMessages: UIMessage[] = messages.slice(-16);
-    const sourceIds: string[] = sourceMessages.map((m: UIMessage): string => m.id);
-    const prompt: string = buildMemoryExtractionPrompt(sourceMessages, sourceIds, deps.locale);
+    const sourceIds: string[] = messages.slice(-16)
+      .filter((message: UIMessage): boolean => message.role === 'user')
+      .map((message: UIMessage): string => message.id).slice(-1);
+    const sources = collectMemoryExtractionSources(messages, sourceIds);
+    if (sources.length === 0) return;
+    const related: MemoryRecord[] = (await deps.getAllActiveRecords(nowFn()))
+      .filter((record: MemoryRecord): boolean => record.kind !== 'topic' && !record.archived
+        && record.invalidatedAt == null && (record.expiresAt === null || record.expiresAt > nowFn()))
+      .slice(-24);
+    const sourceMessages: UIMessage[] = messages.filter((message: UIMessage): boolean => sourceIds.includes(message.id));
+    const prompt: string = buildMemoryExtractionPrompt(sourceMessages, sourceIds, deps.locale, related, sources, nowFn());
     const text: string = await deps.generateText(prompt);
-    const parsed: ParsedMemoryCandidate[] =
-      parseMemoryCandidates(text, conversationId, sourceIds, nowFn());
-    const metaById: Map<string, ParsedMemoryCandidate> = new Map<string, ParsedMemoryCandidate>(
-      parsed.map((p: ParsedMemoryCandidate): [string, ParsedMemoryCandidate] => [p.candidate.id, p]));
-    const candidates: MemoryCandidate[] = parsed.map(
-      (p: ParsedMemoryCandidate): MemoryCandidate => p.candidate);
-    const filtered = filterMemoryCandidates(candidates, await deps.getAllActiveRecords(nowFn()));
-    await deps.addCandidates(filtered.rejected);
-    for (const candidate of filtered.accepted) {
-      const meta: ParsedMemoryCandidate | undefined = metaById.get(candidate.id);
-      const autoWrite: boolean = shouldAutoWriteCandidate(
-        candidate, meta?.explicitScope === true, meta?.explicitKind === true);
-      if (autoWrite) {
-        const memory: MemoryRecord = await deps.addMemory({
-          scope: candidate.scope,
-          kind: candidate.kind,
-          content: candidate.content,
-          sourceConversationId: candidate.sourceConversationId,
-          sourceMessageIds: candidate.sourceMessageIds,
-          expiresAt: candidate.expiresAt,
-          confidence: candidate.confidence,
-        });
-        await logEvent(deps,
-          isDurableAutoWriteCandidate(candidate) ? 'durable_memory_created' : 'memory_created',
-          {
-            conversationId, memoryId: memory.id, modelId,
-            message: autoWriteEventMessage(candidate),
-          });
-      } else {
-        await deps.addCandidate(candidate);
-        await logEvent(deps, 'candidate_created', {
-          conversationId, candidateId: candidate.id, modelId, message: candidate.reason,
-        });
+    if (deps.canApply !== undefined && !(await deps.canApply())) {
+      await logEvent(deps, 'extraction_skipped', {
+        conversationId, modelId, message: 'Live source or memory write permissions changed during extraction.',
+      });
+      return;
+    }
+    // Worker settings and the source object may change while model work yields.
+    if (!deps.worker.enabled || !deps.worker.extractionEnabled) return;
+    const currentMessagesSnapshot: UIMessage[] = currentMessages(conversation);
+    if (extractionMessagesContaminated(currentMessagesSnapshot)) {
+      await logEvent(deps, 'extraction_skipped', { conversationId, modelId, message: 'External tool content arrived during extraction; writes paused.' });
+      return;
+    }
+    const currentSources = collectMemoryExtractionSources(currentMessagesSnapshot, sourceIds);
+    if (JSON.stringify(currentSources) !== JSON.stringify(sources)) {
+      await logEvent(deps, 'extraction_skipped', { conversationId, modelId, message: 'Source messages changed during extraction.' });
+      return;
+    }
+    const parsed: ParsedMemoryCandidate[] = parseMemoryCandidates(text, conversationId, sourceIds, nowFn());
+    const actions: MemoryExtractionAction[] = [];
+    const rejected: MemoryCandidate[] = [];
+    const pending: MemoryCandidate[] = [];
+    for (const meta of parsed) {
+      if (meta.action === 'noop') continue;
+      const source = sources.find((item): boolean => item.id === meta.sourceMessageId);
+      const candidate: MemoryCandidate = meta.candidate;
+      const evidence: string = meta.evidence;
+      let issue: string | null = null;
+      if (source === undefined || evidence.length === 0 || !source.evidenceText.includes(evidence)) issue = 'unverified_user_evidence';
+      const resolvedEvidence: string = source === undefined ? evidence
+        : normalizeMemoryRelativeDates(evidence, source.createdAt);
+      if (issue === null && !isGroundedMemoryRewrite(candidate.content, evidence, source?.assistantContext ?? '', resolvedEvidence)) {
+        issue = 'ungrounded_rewrite';
+      }
+      if (meta.declaredSensitive || isSensitiveMemoryContent(candidate.content) || isSensitiveMemoryContent(evidence)) issue = 'sensitive';
+      if (candidate.content.length > 500 || candidate.confidence < 0.45) issue = 'low_value';
+      const target: MemoryRecord | undefined = related.find((record: MemoryRecord): boolean => record.id === meta.targetId);
+      if (meta.action !== 'add' && target === undefined) issue = 'target_not_shown';
+      if (meta.action === 'add' && (!meta.explicitScope || !meta.explicitKind || candidate.scope === 'core')) issue = 'invalid_add_fields';
+      const content: string = source === undefined ? candidate.content
+        : normalizeMemoryRelativeDates(candidate.content, source.createdAt);
+      let expiresAt: number | null = candidate.expiresAt;
+      if (meta.expiresOn !== null && meta.expiresOn.trim().length > 0) {
+        expiresAt = memoryExpiryOn(meta.expiresOn.trim());
+        if (meta.action !== 'confirm' && meta.action !== 'invalidate'
+          && (expiresAt === null || expiresAt <= nowFn())) issue = 'invalid_or_expired_date';
+      } else if (candidate.scope === 'short_term' && source !== undefined) {
+        // Legacy expires_in_days is anchored to message time, not worker time.
+        if (candidate.expiresAt !== null) {
+          const sentAt: number = new Date(source.createdAt).getTime();
+          if (Number.isFinite(sentAt)) expiresAt = sentAt + (candidate.expiresAt - candidate.createdAt);
+        } else {
+          const sentAt: number = new Date(source.createdAt).getTime();
+          expiresAt = deriveMemoryExpiresAt(content, Number.isFinite(sentAt) ? sentAt : nowFn());
+        }
+      }
+      if ((meta.action === 'add' || meta.action === 'update') && expiresAt !== null && expiresAt <= nowFn()) issue = 'expired_write';
+      if (issue !== null) {
+        rejected.push({ ...candidate, sourceMessageIds: meta.sourceMessageId === null ? [] : [meta.sourceMessageId],
+          status: 'filtered', reason: [candidate.reason, issue].filter((part: string): boolean => part.length > 0).join('; ') });
+        continue;
+      }
+      const verified: MemoryCandidate = { ...candidate, content, evidence, expiresAt,
+        sourceMessageIds: [source!.id] };
+      if (meta.action === 'add' && !shouldAutoWriteCandidate(verified, meta.explicitScope, meta.explicitKind)
+        && !related.some((record: MemoryRecord): boolean => record.content.trim() === content.trim())) {
+        pending.push(verified);
+        continue;
+      }
+      actions.push({ action: meta.action, content, evidence, sourceMessageId: source!.id,
+        sourceConversationId: conversationId, scope: candidate.scope, kind: candidate.kind,
+        confidence: candidate.confidence, expiresAt, targetId: target?.id ?? null,
+        targetUpdatedAt: target?.updatedAt ?? null });
+    }
+    await deps.addCandidates(rejected);
+    for (const candidate of pending) {
+      await deps.addCandidate(candidate);
+      await logEvent(deps, 'candidate_created', { conversationId, candidateId: candidate.id, modelId, message: candidate.reason });
+    }
+    if (deps.applyActions !== undefined) {
+      const applied: MemoryExtractionApplyResult = await deps.applyActions(actions, nowFn());
+      for (const memory of applied.added) await logEvent(deps,
+        memory.scope === 'long_term' && (memory.kind === 'user' || memory.kind === 'feedback')
+          ? 'durable_memory_created' : 'memory_created',
+        { conversationId, memoryId: memory.id, modelId, message: 'Auto-created evidence-backed memory.' });
+      for (const memory of applied.updated) await logEvent(deps, 'memory_updated',
+        { conversationId, memoryId: memory.id, modelId, message: `Preserved prior version: ${memory.supersedesIds.join(', ')}.` });
+      for (const memory of applied.invalidated) await logEvent(deps, 'memory_invalidated',
+        { conversationId, memoryId: memory.id, modelId, message: `Invalidated by user evidence: ${actions.find((item: MemoryExtractionAction): boolean => item.targetId === memory.id && item.action === 'invalidate')?.evidence ?? ''}` });
+      for (const memory of applied.confirmed) await logEvent(deps, 'memory_updated',
+        { conversationId, memoryId: memory.id, modelId, message: 'Confirmed by independent user evidence.' });
+      if (applied.rejectedReasons.length > 0) await logEvent(deps, 'extraction_skipped',
+        { conversationId, modelId, message: applied.rejectedReasons.join('; ') });
+    } else {
+      // Compatibility with older hosts: targeted writes require an atomic writer.
+      for (const item of actions) {
+        if (item.action !== 'add') continue;
+        const memory: MemoryRecord = await deps.addMemory({ scope: item.scope, kind: item.kind,
+          content: item.content, evidence: item.evidence, sourceConversationId: conversationId,
+          sourceMessageIds: [item.sourceMessageId], expiresAt: item.expiresAt, confidence: item.confidence });
+        await logEvent(deps, isDurableAutoWriteCandidate(makeMemoryCandidate(item)) ? 'durable_memory_created' : 'memory_created',
+          { conversationId, memoryId: memory.id, modelId, message: autoWriteEventMessage(makeMemoryCandidate(item)) });
       }
     }
   } catch (error) {

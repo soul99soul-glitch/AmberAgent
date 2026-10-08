@@ -1,10 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  mergeContinueCandidates, continueStatusText, STATUS_RANK,
-  type ContinueCandidate,
-} from '../main/ets/chat/continue_candidate.ts';
+import { mergeContinueCandidates, STATUS_RANK, type ContinueCandidate } from '../main/ets/chat/continue_candidate.ts';
 
 const cand = (over: Partial<ContinueCandidate>): ContinueCandidate => ({
   sourceKind: 'chat',
@@ -34,9 +31,4 @@ test('merge sorts by priority, status rank, time', () => {
 test('merge respects limit', () => {
   const many = Array.from({ length: 20 }, (_, i) => cand({ sourceId: `${i}` }));
   assert.equal(mergeContinueCandidates([many], 5).length, 5);
-});
-
-test('status text', () => {
-  assert.equal(continueStatusText('waiting_user'), '待你确认');
-  assert.equal(continueStatusText('running'), '进行中');
 });

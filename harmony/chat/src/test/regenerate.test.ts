@@ -91,6 +91,28 @@ describe('selectMessageBranch', () => {
 });
 
 describe('runRegenerateAt', () => {
+  it('throttles rapid regeneration flushes, shares their snapshot and keeps the final raw and stored tail', async () => {
+    const conv = threeNodeConv();
+    let now = 100;
+    const raw: UIMessage[][] = [];
+    const visible: UIMessage[][] = [];
+    const provider = { streamText: async (_messages: UIMessage[], onChunk: (chunk: MessageChunk) => void) => {
+      for (let i = 0; i < 20; i++) { onChunk(chunkOf('字')); now++; }
+    } };
+    const out = await runRegenerateAt(conv, conv.messageNodes[2].id, {
+      ...deps(provider), nowMs: () => now,
+      onRawFlushSnapshot: (messages) => { raw.push(messages); },
+      onUpdate: (messages) => { visible.push(messages); },
+    });
+    assert.equal(visible.length, 2, 'sub-48ms chunks coalesce, then completion publishes the full tail');
+    assert.equal(raw.length, 2, 'one gated flush plus an unconditional final raw snapshot');
+    assert.equal(raw[0], visible[0], 'raw and UI share a single immutable flush snapshot');
+    const last = (messages: UIMessage[]) => messages.at(-1)!.parts[0];
+    assert.equal(last(raw[1]).type === 'text' ? (last(raw[1]) as { text: string }).text : '', '字'.repeat(20));
+    assert.equal(last(currentMessages(out)).type === 'text'
+      ? (last(currentMessages(out)) as { text: string }).text : '', '字'.repeat(20));
+    assert.notEqual(currentMessages(out).at(-1)!.finishedAt, null);
+  });
   it('assistant 节点:新分支追加进同节点,selectIndex 指向新分支,节点总数不变', async () => {
     const conv = threeNodeConv();
     const store = createMemoryConversationStore();
@@ -187,15 +209,21 @@ describe('runRegenerateAt', () => {
     const conv = threeNodeConv();
     const store = createMemoryConversationStore();
     const signal = { aborted: true };
+    let now = 100;
+    const raw: UIMessage[][] = [];
     const d: RegenerateDeps = {
       ...deps({
         streamText: (_m: UIMessage[], onChunk: (c: MessageChunk) => void): Promise<void> => {
-          onChunk(chunkOf('部分'));
+          onChunk(chunkOf('部'));
+          now++;
+          onChunk(chunkOf('分'));
           return Promise.reject(new Error('stream aborted'));
         },
       }),
       store,
       abortSignal: signal,
+      nowMs: () => now,
+      onRawFlushSnapshot: (messages) => { raw.push(messages); },
     };
     const out = await runRegenerateAt(conv, conv.messageNodes[2].id, d);
     const node = out.messageNodes[2];
@@ -204,6 +232,8 @@ describe('runRegenerateAt', () => {
     const last = node.messages[2];
     assert.equal(last.parts[0].type === 'text' ? (last.parts[0] as { text: string }).text : '', '部分');
     assert.equal(store.saved.length, 1);
+    const captured = raw.at(-1)!.at(-1)!.parts[0];
+    assert.equal(captured.type === 'text' ? captured.text : '', '部分', 'abort raw tail includes the last gated-out chunk');
   });
 
   it('非 abort 错误维持传播(会话不变)', async () => {

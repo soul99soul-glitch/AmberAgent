@@ -46,6 +46,7 @@ const harness = async () => {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText, { exports: adapterExports, require: () => domain, Map, Promise, Date, Error });
   const host = { ...domain, exports, Error, Promise, Map, Set, JSON, String, Number, Date, Math,
+    getProductKind: () => 'agent',
     DOMAIN: 1, TAG: 'test', hilog: { info() {} },
     getChatKvStore: () => kv,
     readTaskModelReference: async key => domain.decodeTaskModelReference(await kv.get(key)),

@@ -1,3 +1,4 @@
+import { permissionDecisionTraceToJson } from '../tool_permission.ts';
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { JsonObject, JsonValue } from '../json.ts';
 import type { UIMessagePartTool, UIMessagePartText } from '../message.ts';
@@ -292,7 +293,9 @@ export const createPluginLoopAdapter = (deps: PluginLoopAdapterDeps): PluginLoop
           const pending = { ...parent, approvalState: { type: 'pending' as const }, output: [] };
           await save(pending, checkpoint, port); return pending;
         }
-        if (port.decide(parent, def).action === 'deny') return finish(parent, checkpoint, port, new PluginRunError('denied', 'Plugin import is denied by current policy.'));
+        const decision = await port.decide(parent, def, signal);
+        if (signal?.aborted) return finish(parent, checkpoint, port, new PluginRunError('cancelled', 'Plugin import cancelled.', 'cancelled'));
+        if (decision.action === 'deny') return finish(parent, checkpoint, port, new PluginRunError('denied', 'Plugin import is denied by current policy.'));
         let receipt: JsonValue;
         try {
           const primitives = checkpoint.preview.candidate.tools.flatMap((d) => d.primitiveTools)
@@ -398,12 +401,17 @@ export const createPluginLoopAdapter = (deps: PluginLoopAdapterDeps): PluginLoop
               step = { ...step!, approvalState: { type: 'approved' } };
             }
           } else step = { ...step!, metadata: { ...step!.metadata, ...port.capture(step!) } };
-          const decision = port.decide(step, def!);
+          const decision = await port.decide(step, def!, signal);
+          if (signal?.aborted) {
+            const cancelled = new PluginRunError('cancelled', 'Plugin host call cancelled.', 'cancelled');
+            await rejectJs(checkpoint, cancelled); return finish(parent, checkpoint, port, cancelled);
+          }
           if (decision.action === 'deny') {
             const denied = new PluginRunError('denied', decision.reason); await rejectJs(checkpoint, denied); return finish(parent, checkpoint, port, denied);
           }
           if (decision.action === 'ask') {
-            checkpoint = { ...checkpoint, phase: 'awaiting_approval', pendingStep: { ...step, approvalState: { type: 'pending' } } };
+            checkpoint = { ...checkpoint, phase: 'awaiting_approval', pendingStep: { ...step, approvalState: { type: 'pending' },
+            metadata: { ...step.metadata, permission_trace: permissionDecisionTraceToJson(decision.trace) } } };
             const pending = { ...withCheckpoint(parent, checkpoint), output: [], approvalState: { type: 'pending' as const } };
             await save(pending, checkpoint, port); return pending;
           }

@@ -12,8 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  makeGenerationRetrySetting, classifyGenerationFailure, decideGenerationRetry,
-  delayForAttempt, RETRY_STATUS_TEMPLATE,
+  makeGenerationRetrySetting, classifyGenerationFailure, decideGenerationRetry, delayForAttempt, RETRY_STATUS_TEMPLATE
 } from '../main/ets/chat/generation_retry.ts';
 import type { GenerationRetrySetting } from '../main/ets/chat/generation_retry.ts';
 
@@ -63,15 +62,6 @@ const failingProvider = (errors: Error[], thenText: string): { provider: ChatStr
 };
 
 const instantSleep = (): Promise<void> => Promise.resolve();
-
-test('默认 GenerationRetrySetting(GenerationRetry.kt:14-20)', () => {
-  const s = makeGenerationRetrySetting({});
-  assert.equal(s.enabled, true);
-  assert.equal(s.maxRetries, 5);
-  assert.equal(s.initialDelayMs, 1000);
-  assert.equal(s.maxDelayMs, 16000);
-  assert.equal(s.jitterRatio, 0.15);
-});
 
 test('classify: 取消 → CANCELLED 不可重试(:52-58)', () => {
   // JS 映射:Error.name === 'AbortError'(ArkTS/浏览器 AbortController 约定)

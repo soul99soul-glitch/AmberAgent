@@ -145,13 +145,22 @@ const accentLightFor = (hex: string, dark: boolean): string => {
     if (hex === '#4F86D6') return '#1B2638';
     if (hex === '#9277C4') return '#282039';
     if (hex === '#C2607A') return '#351F28';
-    return '#2A211B';
+    if (hex === '#B8623A') return '#2A211B';
+  } else {
+    if (hex === '#5E9C6E') return '#EFF8F0';
+    if (hex === '#4F86D6') return '#EEF4FD';
+    if (hex === '#9277C4') return '#F3F0FC';
+    if (hex === '#C2607A') return '#FDF0F4';
+    if (hex === '#B8623A') return '#FFF5F0';
   }
-  if (hex === '#5E9C6E') return '#EFF8F0';
-  if (hex === '#4F86D6') return '#EEF4FD';
-  if (hex === '#9277C4') return '#F3F0FC';
-  if (hex === '#C2607A') return '#FDF0F4';
-  return '#FFF5F0';
+  // 旧五色保留既定配色;其他内置/导入强调色在当前卡片面上混合,不回退陶土色。
+  const accent: number = parseInt(hex.substring(1), 16);
+  const surface: number = parseInt(SURFACE.substring(1), 16);
+  const weight: number = dark ? 0.20 : 0.12;
+  const channel = (shift: number): number => Math.round(
+    ((surface >> shift) & 0xFF) * (1 - weight) + ((accent >> shift) & 0xFF) * weight);
+  const rgb: number = (channel(16) << 16) | (channel(8) << 8) | channel(0);
+  return `#${rgb.toString(16).padStart(6, '0').toUpperCase()}`;
 };
 
 export const applyTheme = (dark: boolean): void => {
@@ -259,6 +268,7 @@ export const applyPaperPalette = (o: PaperPaletteOverrides): void => {
   HOME_INK2 = o.ink2;
   HOME_MUTED = o.muted;
   HOME_MUTED2 = o.muted2;
+  ACCENT_LIGHT = accentLightFor(ACCENT, darkTheme);
   bumpThemeEpoch();
 };
 

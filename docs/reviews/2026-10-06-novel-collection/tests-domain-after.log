@@ -1,0 +1,31 @@
+✔ archive draft changes nothing until author confirms summary and selects decisions (21.020166ms)
+✔ archive scope binds branch and source message content rather than transcript revision (4.821875ms)
+✔ malformed archive output fails and leaves cursor and decisions untouched (2.372833ms)
+✔ long discussion archives complete earliest sources within the model budget then continues with cumulative context (32.235125ms)
+✔ archive explains an earliest source that cannot fit without sending or advancing its cursor (5.686166ms)
+✔ manual archive accepts a complete JSON fence while still validating the archive schema (6.144833ms)
+✔ ordinary write, regeneration, polish and new durable jobs share the stale gate; discussion stays usable (40.8235ms)
+✔ ordinary requests expose domain context while retaining canonical archived messages (6.318084ms)
+✔ foreground suggestion failures throw and persist a visible chapter warning with inherited stateSync (5.596ms)
+✔ suggestion completion after source edits or branch switches never writes old suggestions into the new snapshot (9.695542ms)
+✔ mapSuggestionKind: EN and CN aliases (0.737958ms)
+✔ parseSuggestions: extracts first { to last } amid prose (0.37725ms)
+✔ parseSuggestions: rejects invalid items instead of claiming no suggestions (0.24975ms)
+✔ parseSuggestions: caps at MAX_SUGGESTIONS (0.150792ms)
+✔ parseSuggestions: malformed JSON and wrong schemas are distinct from valid empty results (0.09225ms)
+✔ collectModelText: newest snapshot replaces prior assistant text (3.855958ms)
+✔ analyzeChapterSuggestions: parses model JSON into suggestions (3.222584ms)
+✔ analyzeChapterSuggestions: model failure remains a provider error (0.785625ms)
+✔ analyzeChapterSuggestions: validates the model and disables authoring tools (2.419583ms)
+✔ analyzeChapterSuggestions: malformed model output is an output error, not a provider failure (3.1745ms)
+✔ the suggestion prompt example can be copied as a valid material proposal (0.377125ms)
+✔ invalid suggestion output gets one format correction using the original chapter and materials (1.80925ms)
+✔ format correction stops after one attempt, and transport failure never starts a correction (4.217584ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 266.602792

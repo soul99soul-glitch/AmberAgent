@@ -3,17 +3,19 @@
 // Android 基准: core/memory/prompt/MemoryDreamPrompt.kt(全文 54 行)
 //   模板 trimIndent 逐字;记录/候选行 '- #id [scope/kind] content' joinToString('\n')
 
+import { isMemoryActive, memoryDateLabel, memoryLocalDate } from './memory_lifecycle.ts';
 import type { MemoryCandidate, MemoryRecord } from './memory_models.ts';
 
 export const buildMemoryDreamPrompt = (
-  records: MemoryRecord[], candidates: MemoryCandidate[],
+  records: MemoryRecord[], candidates: MemoryCandidate[], now: number = Date.now(),
 ): string => {
-  const recordLines: string = records.filter((record: MemoryRecord): boolean => record.kind !== 'topic').map(
-    (r: MemoryRecord): string => `- #${r.id} [${r.scope}/${r.kind}] ${r.content}`).join('\n');
+  const recordLines: string = records.filter((record: MemoryRecord): boolean => record.kind !== 'topic' && isMemoryActive(record, now)).map(
+    (r: MemoryRecord): string => `- #${r.id} [${r.scope}/${r.kind}] ${r.content} (${memoryDateLabel(r)}; reinforcement_count=${r.reinforcementCount ?? 0})`).join('\n');
   const candidateLines: string = candidates.filter((candidate: MemoryCandidate): boolean => candidate.kind !== 'topic').map(
     (c: MemoryCandidate): string => `- #${c.id} [${c.scope}/${c.kind}] ${c.content}`).join('\n');
   return 'Review AmberAgent memories and produce a reviewable JSON diff.\n' +
     'Return only JSON with keys: merge, promote, archive, supersede, delete_suggestions, notes.\n' +
+    `Today is ${memoryLocalDate(now)}. Interpret relative dates against each record date.\n` +
     'Do not invent new facts.\n' +
     'Do not physically delete anything.\n' +
     '\n' +
@@ -47,7 +49,7 @@ export const buildMemoryDreamPrompt = (
     '- Merge only when memories describe the same durable fact.\n' +
     '- Use supersede only when newer evidence clearly replaces or conflicts with older non-core memories.\n' +
     '- Supersede creates a new memory and archives old memories; do not use it for duplicates.\n' +
-    '- Promote short_term to long_term only when the fact is likely useful across future conversations.\n' +
+    '- Promote short_term only after at least two actual citations or user confirmations and reinforcement at least 14 days after its record date; retrieval is not confirmation.\n' +
     '- Archive expired or stale project memories; do not archive durable user preference or feedback.\n' +
     '- delete_suggestions may only contain pending candidate ids, never formal memory ids.\n' +
     '- Keep notes concrete and short.\n' +

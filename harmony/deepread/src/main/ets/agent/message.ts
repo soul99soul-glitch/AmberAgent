@@ -5,6 +5,7 @@
 import type { JsonObject } from './json.ts';
 import { newId, nowIso } from './ids.ts';
 import type { TokenUsage } from './usage.ts';
+import { hasProtocolReasoningContent } from './reasoning_metadata.ts';
 
 export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
@@ -231,7 +232,7 @@ export const isValidToUpload = (message: UIMessage): boolean =>
       case 'video': return part.url.trim().length > 0;
       case 'audio': return part.url.trim().length > 0;
       case 'document': return part.url.trim().length > 0;
-      case 'reasoning': return part.reasoning.trim().length > 0;
+      case 'reasoning': return part.reasoning.trim().length > 0 || hasProtocolReasoningContent(part.metadata);
       default: return true;
     }
   });

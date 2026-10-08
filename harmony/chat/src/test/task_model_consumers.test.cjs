@@ -35,7 +35,7 @@ test('typed OCR/image choices share their health target and isolate duplicate UU
       const choice = ref.kind === 'fixed' ? choices.get(`${ref.pair.providerId}:${type}`) : null;
       return choice?.model.id === ref.pair.modelId ? choice : null;
     },
-    buildProviderApi: provider => ({ generateText: async (messages, params) => {
+    prepareProviderApi: async provider => ({ generateText: async (messages, params) => {
       recognitions.push({ provider, messages, params });
       return { choices: [{ message: domain.makeAssistantMessage(provider.baseUrl) }] };
     } }),

@@ -22,7 +22,7 @@ function load(relative, storage, imports = {}) {
 for (const [bundle, kind, root] of [
   ['app.amber.deepread', 'agent', 'pages/ChatListPage'],
   ['app.amber.novel', 'novel', 'pages/NovelProjectsPage'],
-  ['app.amber.deepread.reader', 'deepread', 'pages/BoardPage'],
+  ['app.amber.deepread.reader', 'deepread', 'pages/DeepReadRootPage'],
 ]) {
   test(`${kind} root and both notification types target their installed sandbox`, async () => {
     const storage = new Map([['abilityContext', { applicationInfo: { name: bundle } }]]);

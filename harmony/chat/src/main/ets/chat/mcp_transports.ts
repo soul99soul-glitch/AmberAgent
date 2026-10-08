@@ -477,9 +477,7 @@ export class McpStreamableHttpTransport implements McpTransport {
       return;
     }
     if (ctNoParams === 'text/event-stream') {
-      const replayId: JsonValue | null = message['id'] !== undefined && message['method'] !== undefined
-        ? message['id'] as JsonValue : null;
-      await this.handleInlineSse(response.lines, replayId);
+      await this.handleInlineSse(response.lines);
       return;
     }
     if (response.contentType === null && response.bodyText.trim().length === 0) return;
@@ -582,7 +580,8 @@ export class McpStreamableHttpTransport implements McpTransport {
     }
   }
 
-  // :297-301/:339-343 — replay:响应 id 改写为 replayMessageId
+  // Only an explicit resumption may rewrite an ID. Normal POST streams retain
+  // every JSON-RPC ID so the client's pending table matches the actual response.
   private rewriteReplay(msg: JsonObject, replayMessageId: JsonValue | null): JsonObject {
     if (replayMessageId === null || msg['result'] === undefined) return msg;
     const out: JsonObject = { ...msg };
@@ -590,9 +589,7 @@ export class McpStreamableHttpTransport implements McpTransport {
     return out;
   }
 
-  // :316-368(行泵;data trim concat 无换行 quirk 逐字 :365)
-  private async handleInlineSse(lines: McpSseLineStream | null,
-    replayMessageId: JsonValue | null): Promise<void> {
+  private async handleInlineSse(lines: McpSseLineStream | null): Promise<void> {
     if (lines === null) return;
     let sb: string = '';
     let id: string | null = null;
@@ -606,7 +603,7 @@ export class McpStreamableHttpTransport implements McpTransport {
       if (eventName === null || eventName === 'message') {
         try {
           const msg: JsonObject = decodeMessage(sb);
-          this.messageBlock(this.rewriteReplay(msg, replayMessageId));
+          this.messageBlock(msg);
         } catch (e) {
           // :344-348 — onError + 抛
           const err: Error = e instanceof Error ? e : new Error(String(e));
@@ -617,8 +614,9 @@ export class McpStreamableHttpTransport implements McpTransport {
     };
 
     for (;;) {
-      const line: string | null = await lines.readLine();
-      if (line === null) break;
+      const rawLine: string | null = await lines.readLine();
+      if (rawLine === null) break;
+      const line: string = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
       if (line.length === 0) {
         dispatch();
         id = null;
@@ -631,9 +629,10 @@ export class McpStreamableHttpTransport implements McpTransport {
       } else if (line.startsWith('event:')) {
         eventName = line.substring(line.indexOf('event:') + 6).trim();
       } else if (line.startsWith('data:')) {
-        sb += line.substring(line.indexOf('data:') + 5).trim();
+        const data: string = line.substring(5);
+        sb += (sb.length === 0 ? '' : '\n') + (data.startsWith(' ') ? data.substring(1) : data);
       }
     }
-    // dispatch 失败 → onError + 抛(:344-348):包于 send 调用链
+    dispatch();
   }
 }

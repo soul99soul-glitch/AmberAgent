@@ -22,7 +22,7 @@ import {
   makeTextGenerationParams, newId, probeVisionModelHealth, taskModelReferenceFromId, toChatModel, toText,
 } from '@amber/chat-domain';
 import type { ChatProviderChoice } from '../di/AppContainer.ets';
-import { buildProviderApi, resolveConfiguredTaskModel } from '../di/AppContainer.ets';
+import { prepareProviderApi, resolveConfiguredTaskModel } from '../di/AppContainer.ets';
 import { loadTaskModelReference } from './TaskModelSelectionSupport.ets';
 
 const DOMAIN: number = 0x0001;
@@ -147,7 +147,7 @@ export const findProviderOfModel = (
 export const generateVisionText = async (
   provider: ProviderSetting, model: ProviderModel, messages: UIMessage[],
 ): Promise<string | null> => {
-  const api: OpenAIChatApi = buildProviderApi(provider, {});
+  const api: OpenAIChatApi = await prepareProviderApi(provider, {});
   const chunk = await api.generateText(
     messages, makeTextGenerationParams({ model: toChatModel(model) }));
   const first = chunk.choices.length > 0 ? chunk.choices[0] : null;

@@ -582,6 +582,10 @@ export const toolSandboxInputPreview = (
   const inp: JsonObject = input ?? toolInputAsJson(tool);
   const name: string = tool.toolName;
   let picked: string | null = null;
+  // Provider names, identities and URLs can also contain supplied credentials.
+  if (name === 'provider_list') return '查看已配置的提供商';
+  if (name === 'provider_configure') return '保存提供商和模型配置';
+  if (name === 'provider_models') return '获取提供商模型列表';
   if (name === 'search_web') {
     picked = getFirstStringContent(inp, ['query', 'q', 'keyword', 'keywords']);
   } else if (name === 'scrape_web') {

@@ -1,0 +1,13 @@
+{
+  "first": 1,
+  "second": 2,
+  "firstLoads": 1,
+  "oldCallbackState": {
+    "loads": 1,
+    "attached": false,
+    "initialized": false,
+    "open": true
+  },
+  "noAttachLoads": 1,
+  "freshCallbackLoads": 2
+}

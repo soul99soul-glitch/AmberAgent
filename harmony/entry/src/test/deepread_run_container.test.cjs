@@ -9,7 +9,7 @@ const factory = source.slice(source.indexOf('export const getDeepReadScheduler =
 const code = ts.transpileModule('let deepReadScheduler=null; let deepReadSchedulerInit=null;\n' + factory + '\nreturn getDeepReadScheduler;',
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 
-async function fixture({ cached = null, globalId = 'none', abilities = [], captureError = false } = {}) {
+async function fixture({ cached = null, globalId = 'none', abilities = [], captureError = false, product = 'agent' } = {}) {
   const calls = { capture: [], searches: [], generation: [], steps: [], snapshots: [] };
   let configured;
   const runtime = { model: { modelId: 'exact-model', abilities }, api: { id: 'captured-provider' }, params: { temperature: .25 } };
@@ -22,7 +22,7 @@ async function fixture({ cached = null, globalId = 'none', abilities = [], captu
     'captureDeepReadTemplate', 'createTavilyAndFallbackRegistry', 'loadSearchPrefs', 'getChatKvStore', 'ensureSearchSdk',
     'searchDeepReadGoogle', 'createSourcePrefetcher', 'createEntryAbortController', 'getDeepReadPlaybookRepository',
     'createChatDeepReadAiClient', 'beginDeepReadGenerationStep', 'observeDeepReadGenerationSnapshot', 'hilog', 'DOMAIN', 'TAG',
-    'toolToModelTool', 'createScheduler', 'mapCacheEntryObservable', 'isInterruptedPhase', 'setDeepReadGenerationActivity'];
+    'getProductKind', 'toolToModelTool', 'createScheduler', 'mapCacheEntryObservable', 'isInterruptedPhase', 'setDeepReadGenerationActivity'];
   const values = [() => ({ repository: {}, httpClient: {}, storage: { get: async () => globalId }, prefetcher: {}, aiClient: {}, notifier: {} }),
     Repository, () => ({ save: async () => {} }), async () => runtime,
     async (_storage, id) => { calls.capture.push(id); if (captureError) throw Error('模板已删除'); return { id, name: 'captured default', kind: 'native', html: null, capturedAt: 1 }; },
@@ -30,7 +30,7 @@ async function fixture({ cached = null, globalId = 'none', abilities = [], captu
     async (...args) => { calls.searches.push(args); return []; }, (_http, registry) => ({ registry }), () => ({}),
     () => ({ read: async () => ({ markdown: 'Actual playbook' }) }),
     hooks => { calls.hooks = hooks; return { generateText: async params => { calls.generation.push(params); return []; } }; },
-    (...args) => calls.steps.push(args), (...args) => calls.snapshots.push(args), { info() {} }, 1, 'test', tool => tool,
+    (...args) => calls.steps.push(args), (...args) => calls.snapshots.push(args), { info() {} }, 1, 'test', () => product, tool => tool,
     deps => { configured = deps; return { id: 'scheduler' }; }, () => ({}), () => false, () => {}];
   const getScheduler = new Function(...names, code)(...values);
   await getScheduler();
@@ -71,3 +71,10 @@ test('a fresh forced generation captures the current default instead of silently
   const manager = await f.configured.createRunManager('topic', 'title', 1, { force: true });
   assert.equal(manager.templateSnapshot.id, 'new-default'); assert.deepEqual(f.calls.capture, ['new-default']);
 });
+
+ test('standalone DeepRead uses the new JSON hierarchy even when its selected model supports tools', async () => {
+  const f = await fixture({ abilities: ['tool'], product: 'deepread' });
+  const manager = await f.configured.createRunManager('topic', 'title', 1);
+  assert.equal(manager.writerMode, 'structured');
+  assert.equal(manager.model, 'exact-model');
+ });

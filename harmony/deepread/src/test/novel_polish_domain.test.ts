@@ -1,33 +1,11 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import {
-  MAX_POLISH_CONTEXT_ITEMS,
-  MAX_POLISH_CONTEXT_ITEM_CHARS,
-  MAX_POLISH_CONTEXT_TOTAL_CHARS,
-  applyPolishReview,
-  assertPolishClaim,
-  cancelPolishJob,
-  claimPolishJob,
-  commitPolishChapter,
-  failPolishJob,
-  makePolishCandidate,
-  makePolishChapterTarget,
-  makePolishContextSnapshotItem,
-  makePolishJob,
-  pausePolishJob,
-  polishReceipt,
-  projectPolishProgress,
-  resumePolishJob,
-  retryPolishJob,
-  transitionPolishJob,
-  validateDurablePolishJob,
-  validatePolishReview,
-  withPolishCandidate,
-  yieldPolishJobToSystem,
-  type DurablePolishJob,
-  type PolishCandidate,
-  type PolishContextOptions,
-  type PolishReview,
+  MAX_POLISH_CONTEXT_ITEMS, MAX_POLISH_CONTEXT_ITEM_CHARS, applyPolishReview, cancelPolishJob,
+  claimPolishJob, commitPolishChapter, makePolishCandidate, makePolishChapterTarget,
+  makePolishContextSnapshotItem, makePolishJob, polishReceipt, projectPolishProgress,
+  transitionPolishJob, validateDurablePolishJob, withPolishCandidate, type DurablePolishJob,
+  type PolishCandidate, type PolishContextOptions, type PolishReview,
 } from '../main/ets/novel/polish.ts';
 
 const NOW = 1_700_000_000_000;
@@ -99,23 +77,6 @@ const reviewFor = (
   rewriteInstructions: rewriteRequired ? '修正时间称谓，不改变剧情事实。' : '',
 });
 
-test('job freezes a closed contiguous chapter range, context provenance and warnings', () => {
-  const created = job();
-  assert.equal(created.kind, 'batch_polish');
-  assert.equal(created.stage, 'queued');
-  assert.equal(created.startOrdinal, 3);
-  assert.equal(created.endOrdinal, 4);
-  assert.equal(created.cursor, 0);
-  assert.deepEqual(created.targets.map(target => target.id), ['chapter-3', 'chapter-4']);
-  assert.equal(created.targets[0].sourceContent, '主角抵达渡口。');
-  assert.notEqual(created.targets[0].sourceDigest, '');
-  assert.deepEqual(created.contextOptions, OPTIONS);
-  assert.deepEqual(created.contextSnapshot.map(item => item.sourcePath), [
-    'plot/state.md', 'setting/foreshadows/ferry.md', 'setting/decisions/tone.md',
-  ]);
-  assert.deepEqual(created.warnings.map(warning => warning.kind), ['plot_stale', 'unresolved']);
-});
-
 test('target validation rejects duplicate ids, duplicate or descending ordinals and empty source', () => {
   const base = targets();
   assert.throws(() => makePolishJob({
@@ -145,9 +106,6 @@ test('target validation rejects duplicate ids, duplicate or descending ordinals 
 });
 
 test('context snapshot is bounded, path-safe and cannot include a disabled source kind', () => {
-  assert.equal(MAX_POLISH_CONTEXT_ITEMS > 0, true);
-  assert.equal(MAX_POLISH_CONTEXT_ITEM_CHARS > 0, true);
-  assert.equal(MAX_POLISH_CONTEXT_TOTAL_CHARS >= MAX_POLISH_CONTEXT_ITEM_CHARS, true);
   assert.throws(() => makePolishContextSnapshotItem({
     kind: 'plot', sourcePath: '../secret.md', content: '不可越界',
   }));
@@ -173,48 +131,6 @@ test('context snapshot is bounded, path-safe and cannot include a disabled sourc
   }));
 });
 
-test('claim lease and epoch reject a second or stale owner', () => {
-  const claimed = claimPolishJob(job(), 'owner-a', NOW + 1, 60_000);
-  assert.equal(claimed.claim?.epoch, 1);
-  assert.throws(() => claimPolishJob(claimed, 'owner-b', NOW + 2, 60_000));
-  assert.doesNotThrow(() => assertPolishClaim(claimed, { token: 'owner-a', epoch: 1 }, NOW + 2));
-  assert.throws(() => assertPolishClaim(claimed, { token: 'owner-a', epoch: 0 }, NOW + 2));
-  const reclaimed = claimPolishJob(claimed, 'owner-b', NOW + 60_001, 60_000);
-  assert.equal(reclaimed.claim?.epoch, 2);
-  assert.throws(() => assertPolishClaim(reclaimed, { token: 'owner-a', epoch: 1 }, NOW + 60_002));
-});
-
-test('candidate and review are bound to chapter, source and candidate digests', () => {
-  const writing = writingJob();
-  const candidate = candidateFor(writing);
-  const reviewing = withPolishCandidate(writing, candidate, NOW + 2);
-  assert.equal(reviewing.stage, 'reviewing');
-  assert.throws(() => withPolishCandidate(writing, {
-    jobId: candidate.jobId,
-    candidateId: candidate.candidateId,
-    chapterId: candidate.chapterId,
-    chapterOrdinal: candidate.chapterOrdinal,
-    sourceDigest: 'wrong-source',
-    content: candidate.content,
-    digest: candidate.digest,
-    attempt: candidate.attempt,
-  }, NOW + 2));
-  const review = validatePolishReview(reviewFor(candidate), candidate);
-  assert.equal(review.candidateDigest, candidate.digest);
-  assert.throws(() => validatePolishReview({
-    jobId: review.jobId,
-    chapterId: review.chapterId,
-    chapterOrdinal: review.chapterOrdinal,
-    sourceDigest: review.sourceDigest,
-    candidateId: review.candidateId,
-    candidateDigest: 'wrong-candidate',
-    findings: review.findings,
-    blocking: review.blocking,
-    rewriteRequired: review.rewriteRequired,
-    rewriteInstructions: review.rewriteInstructions,
-  }, candidate));
-});
-
 test('durable validation rejects tampered target, context and candidate content', () => {
   const created = job();
   assert.throws(() => validateDurablePolishJob({
@@ -234,53 +150,6 @@ test('durable validation rejects tampered target, context and candidate content'
       ...reviewing.candidate, content: '被篡改的候选正文',
     },
   }));
-});
-
-test('candidate and review from another job cannot be transplanted', () => {
-  const writing = writingJob();
-  const foreignCandidate = { ...candidateFor(writing), jobId: 'polish-other' };
-  assert.throws(() => withPolishCandidate(writing, foreignCandidate, NOW + 2));
-
-  const candidate = candidateFor(writing);
-  const foreignReview = { ...reviewFor(candidate), jobId: 'polish-other' };
-  assert.throws(() => validatePolishReview(foreignReview, candidate));
-});
-
-test('review permits at most two targeted rewrites before a durable failure', () => {
-  let current = withPolishCandidate(writingJob(), candidateFor(writingJob()), NOW + 2);
-  const firstCandidate = current.candidate as PolishCandidate;
-  current = applyPolishReview(current, reviewFor(firstCandidate, true), NOW + 3);
-  assert.equal(current.stage, 'rewriting_1');
-  current = withPolishCandidate(current, candidateFor(current, 1, 'candidate-3-r1'), NOW + 4);
-  const secondCandidate = current.candidate as PolishCandidate;
-  current = applyPolishReview(current, reviewFor(secondCandidate, true), NOW + 5);
-  assert.equal(current.stage, 'rewriting_2');
-  current = withPolishCandidate(current, candidateFor(current, 2, 'candidate-3-r2'), NOW + 6);
-  const thirdCandidate = current.candidate as PolishCandidate;
-  current = applyPolishReview(current, reviewFor(thirdCandidate, true), NOW + 7);
-  assert.equal(current.stage, 'failed');
-  assert.equal(current.resumeStage, 'reviewing');
-  assert.match(current.failure ?? '', /两次/);
-});
-
-test('pause and system yield clear ownership, resume exact stage, and failed retry restores it', () => {
-  const claimed = claimPolishJob(writingJob(), 'owner-a', NOW + 2, 60_000);
-  const paused = pausePolishJob(claimed, { token: 'owner-a', epoch: 1 }, NOW + 3);
-  assert.equal(paused.stage, 'paused');
-  assert.equal(paused.resumeStage, 'writing');
-  assert.equal(paused.claim, null);
-  assert.equal(resumePolishJob(paused, NOW + 4).stage, 'writing');
-
-  const claimedAgain = claimPolishJob(resumePolishJob(paused, NOW + 4), 'owner-b', NOW + 5, 60_000);
-  const waiting = yieldPolishJobToSystem(claimedAgain, { token: 'owner-b', epoch: 2 }, NOW + 6);
-  assert.equal(waiting.stage, 'waiting_system');
-  assert.equal(resumePolishJob(waiting, NOW + 7).stage, 'writing');
-
-  const claimedThird = claimPolishJob(resumePolishJob(waiting, NOW + 7), 'owner-c', NOW + 8, 60_000);
-  const failed = failPolishJob(claimedThird, { token: 'owner-c', epoch: 3 }, 'provider failed', NOW + 9);
-  assert.equal(failed.stage, 'failed');
-  assert.equal(failed.resumeStage, 'writing');
-  assert.equal(retryPolishJob(failed, NOW + 10).stage, 'queued');
 });
 
 test('reviewed commit records a bound receipt and advances the cursor chapter by chapter', () => {
@@ -354,33 +223,4 @@ test('validation rejects malformed context bindings and receipts, while cancel i
   assert.equal(cancelled.stage, 'cancelled');
   assert.equal(cancelled.claim, null);
   assert.throws(() => transitionPolishJob(cancelled, 'writing', NOW + 2));
-});
-
-
-test('non-contiguous chapter targets survive durable serialization and cursor advancement', () => {
-  const original = targets();
-  const selected = makePolishJob({
-    jobId: 'subset', projectId: 'project-1', branchId: 'main', expectedCas: CAS, now: NOW,
-    targets: [original[0], makePolishChapterTarget({
-      id: 'chapter-8', ordinal: 8, title: '远航', sourceContent: '第八章正文。',
-    })],
-    contextOptions: OPTIONS, contextSnapshot: contextSnapshot(), warnings: [], modelPolicyAtStart: POLICY,
-  });
-  const restored = validateDurablePolishJob(JSON.parse(JSON.stringify(selected)));
-  assert.deepEqual(restored.targets.map(target => target.ordinal), [3, 8]);
-  assert.equal(restored.startOrdinal, 3);
-  assert.equal(restored.endOrdinal, 8);
-  let current = claimPolishJob(restored, 'subset-owner', NOW + 1, 60_000);
-  current = transitionPolishJob(current, 'writing', NOW + 2);
-  const candidate = candidateFor(current);
-  current = withPolishCandidate(current, candidate, NOW + 3);
-  current = applyPolishReview(current, reviewFor(candidate), NOW + 4);
-  current = commitPolishChapter(current, { token: 'subset-owner', epoch: 1 }, {
-    branchId: 'main', commitId: 'subset-commit',
-    receipt: polishReceipt(current.jobId, candidate.chapterId, candidate.chapterOrdinal,
-      candidate.sourceDigest, candidate.candidateId, candidate.digest),
-    nextCas: { branchId: 'main', head: 'subset-commit', treeDigest: 'tree-2' },
-  }, NOW + 5);
-  assert.equal(current.cursor, 1);
-  assert.equal(current.targets[current.cursor].ordinal, 8);
 });

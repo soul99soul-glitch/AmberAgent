@@ -1,0 +1,25 @@
+✔ layout requests coalesce, sample after layout and move in bounded native frames (65.232083ms)
+✔ touch/cancel prevents a queued old frame from moving the list (8.878334ms)
+✔ growing geometry retargets native animation; late terminal layout starts another frame (7.476125ms)
+✔ new structural row outside measured range anchors once without a frame loop (3.850958ms)
+✔ busy layout frames advance scrolling without waiting for onIdle (4.895917ms)
+✔ fixed-rate trial requests120Hz only during native follow and releases at rest (3.645708ms)
+✔ API12 uses its known current refresh rate and cancellation releases the vote (4.26025ms)
+✔ fixed-rate trial uses supported modes without assuming120Hz on lower-refresh screens (15.511041ms)
+✔ API12 can request its already-known120Hz rate without reading newer display properties (2.607667ms)
+✔ LTPO120→90→60Hz changes retain bounded native motion without restarting the clock (3.731208ms)
+✔ late layout observations do not issue a catch-up scrollBy or restart unchanged native motion (2.946416ms)
+✔ system animation owns intermediate positions; unchanged geometry does not restart it (2.118583ms)
+✔ native motion after250ms attribution expiry is not classified as user scroll (0.384667ms)
+✔ an idle callback from retargeting does not turn the next native frame into a user scroll (0.060958ms)
+✔ real drag and fling stop native motion before the user position is reconciled (0.07975ms)
+✔ native animation source does not cancel itself; touch and ordinary user movement still reconcile (0.05325ms)
+✔ jump to top pauses and releases native follow before changing position (1.658458ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 286.207542

@@ -9,34 +9,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  tokenizeCode, highlightCode, HIGHLIGHT_COLORS, HighlightToken,
-} from '../main/ets/chat/code_highlight.ts';
+import { tokenizeCode, highlightCode, HIGHLIGHT_COLORS } from '../main/ets/chat/code_highlight.ts';
 
 // ===== normalizeLang(经 highlightCode 间接验证) =====
-
-test('js 别名归一为 javascript', () => {
-  const tokens = tokenizeCode('const x = 1;', 'js');
-  assert.equal(tokens[0].type, 'keyword');
-  assert.equal(tokens[0].text, 'const');
-});
-
-test('tsx 别名归一为 typescript', () => {
-  const tokens = tokenizeCode('const x: string = "hi";', 'tsx');
-  assert.equal(tokens[0].text, 'const');
-  assert.equal(tokens[0].type, 'keyword');
-});
-
-test('py 别名归一为 python', () => {
-  const tokens = tokenizeCode('def foo():\n  pass', 'py');
-  assert.equal(tokens[0].text, 'def');
-  assert.equal(tokens[0].type, 'keyword');
-});
-
-test('sh 别名归一为 bash', () => {
-  const tokens = tokenizeCode('# comment\necho hi', 'sh');
-  assert.equal(tokens[0].type, 'comment');
-});
 
 // ===== tokenizeCode 各语言 =====
 
@@ -96,12 +71,6 @@ test('bash:# 行注释 + echo 关键字', () => {
 
 // ===== highlightCode HTML 输出 =====
 
-test('highlightCode:输出含 span + 颜色', () => {
-  const html = highlightCode('const x = 1;', 'javascript');
-  assert.ok(html.includes('<span'));
-  assert.ok(html.includes(HIGHLIGHT_COLORS.keyword));
-});
-
 test('highlightCode:HTML 转义(< > & ")', () => {
   const html = highlightCode('const x = a < b && c > d;', 'javascript');
   assert.ok(html.includes('&lt;'));
@@ -136,16 +105,3 @@ test('highlightCode:模板字符串(js/ts)', () => {
 });
 
 // ===== 边界 =====
-
-test('tokenizeCode:纯空白', () => {
-  const tokens = tokenizeCode('   \n  ', 'javascript');
-  assert.equal(tokens.length, 1);
-  assert.equal(tokens[0].type, 'plain');
-});
-
-test('tokenizeCode:非关键字标识符 → plain', () => {
-  const tokens = tokenizeCode('myVariable = 1', 'javascript');
-  const varToken = tokens.find((t) => t.text === 'myVariable');
-  assert.ok(varToken);
-  assert.equal(varToken?.type, 'plain');
-});

@@ -149,7 +149,7 @@ const syncAccessTokenToProvider = async (providerId: string, accessToken: string
   const next: ProviderSetting[] = list.map((p: ProviderSetting): ProviderSetting => {
     if (p.id !== providerId || p.type !== 'openai') return p;
     const v: ProviderSettingOpenAIVariant = p as ProviderSettingOpenAIVariant;
-    if (v.apiKey === accessToken) return p;
+    if (v.authMode !== 'codex_oauth' || v.apiKey === accessToken) return p;
     dirty = true;
     return {
       id: v.id, enabled: v.enabled, name: v.name, models: v.models,
@@ -238,6 +238,7 @@ export const pollCodexDeviceCode = async (
       };
       const resp = await postJson(`${ISSUER}/api/accounts/deviceauth/token`,
         JSON.stringify(pollBody));
+      if (shouldCancel()) throw new Error('已取消登录');
       if (resp.status >= 200 && resp.status < 300) {
         const obj = JSON.parse(resp.body) as Record<string, Object>;
         const authorizationCode: string = claimString(obj, 'authorization_code');
@@ -246,6 +247,7 @@ export const pollCodexDeviceCode = async (
           throw new Error('设备登录响应缺少授权码');
         }
         const tokens: CodexTokens = await exchangeAuthorizationCode(authorizationCode, codeVerifier);
+        if (shouldCancel()) throw new Error('已取消登录');
         await saveCodexTokens(providerId, tokens);
         await syncAccessTokenToProvider(providerId, tokens.accessToken);
         return tokens;

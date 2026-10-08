@@ -1,0 +1,23 @@
+{
+  "verified_at_utc": "2026-09-30T16:52:25.346461+00:00",
+  "harmony_head": "a95bd92c998c41cf9d89f18d96b82115eb3b002a",
+  "ios_head": "9cd4630aaaecb5b27f29eb8257268e9c011bbf03",
+  "source_files": 1045,
+  "changed_during_build": [],
+  "source_fingerprint_sha256": "6dec82f175fa0b9cede315c238feab6c5e353244c5e9af3de2cb519842ed2d79",
+  "source_scope": "rg-visible Harmony .ets/.ts/.json5 files",
+  "artifact_path": "/private/tmp/novel-functional-completion-20261001/entry-default-signed.hap",
+  "artifact_bytes": 59684642,
+  "artifact_sha256": "eed805482aca3188902f4a680421dd00e368145dcb9e707d1f22390b89d4bda8",
+  "build_log": "/private/tmp/novel-p6-current-build-final.log",
+  "build_success": true,
+  "build_duration_seconds": 68.691,
+  "domain_and_filestore_tests": 331,
+  "chat_novel_tests": 35,
+  "domain_tsc": "passed",
+  "chat_tsc": "passed",
+  "installed": false,
+  "launched": false,
+  "new_ui_device_acceptance": "pending",
+  "cloud_model_acceptance": "pending"
+}

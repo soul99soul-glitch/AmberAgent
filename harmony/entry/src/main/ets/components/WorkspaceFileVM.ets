@@ -7,7 +7,10 @@
 // 本文件为纯 class(非 @Component),供 pages/组件 引入做状态管理与列表计算。
 // ArkUI 规则: 无 as unknown / 无对象展开 / 无 any/unknown。
 
-import { createEntryWorkspaceFsPort, workspaceRootAbs } from '../platform_impl/WorkspaceStore.ets';
+import { createEntryWorkspaceManager, workspaceRootAbs } from '../platform_impl/WorkspaceStore.ets';
+import { normalizeWorkspacePath } from '@amber/chat-domain';
+import type { WorkspaceEntry } from '@amber/chat-domain';
+import { fileIo } from '@kit.CoreFileKit';
 
 // ===== 文件信息(与 WorkspaceFileSheet/Preview 共享;导出供 pages 引用) =====
 export interface WorkspaceFileInfo {
@@ -107,29 +110,32 @@ export function formatFileTime(iso: string): string {
 }
 
 // ===== 视图模型 =====
-// 占位实现:HarmonyOS 文件选择器/SAF 在 P1 接入;当前 loadFiles 返回空数组,
-// 页面可通过 onOpenFile 回调把外部注入的文件列表回填(参见 WorkspaceFileSheet props)。
+// 读取既有 Workspace 文件树，归档产物与 file_write 文件使用同一根目录。
 export class WorkspaceFileVM {
-  // 删除 workspace 文件(通过 WorkspaceFsPort.deleteRecursively,根 = 镜像目录)
-  // 失败静默(对齐 Android: refresh 后行消失即视为成功)
-  deleteFile(path: string): Promise<void> {
-    return new Promise<void>((resolve: () => void): void => {
-      try {
-        if (path.length === 0) { resolve(); return; }
-        const port = createEntryWorkspaceFsPort();
-        const abs: string = `${workspaceRootAbs()}/${path}`;
-        port.deleteRecursively(abs);
-      } catch (_e) {
-        // 静默:对齐 Android Log.w + refresh
-      }
-      resolve();
-    });
+  // 列表只提供文件；删除失败交给宿主显示，不能把失败伪装成成功。
+  async deleteFile(path: string): Promise<void> {
+    const normalized: string = normalizeWorkspacePath(path);
+    if (normalized === '.') throw new Error('不能删除 Workspace 根目录');
+    fileIo.unlinkSync(`${workspaceRootAbs()}/${normalized}`);
   }
 
-  // 占位:返回空数组(P1 接入 fileIo 遍历)
-  loadFiles(): Promise<WorkspaceFileInfo[]> {
-    return new Promise<WorkspaceFileInfo[]>((resolve: (v: WorkspaceFileInfo[]) => void): void => {
-      resolve([]);
-    });
+  async loadFiles(): Promise<WorkspaceFileInfo[]> {
+    const manager = createEntryWorkspaceManager();
+    const root: string = workspaceRootAbs();
+    const files: WorkspaceFileInfo[] = [];
+    const visit = async (path: string): Promise<void> => {
+      const entries: WorkspaceEntry[] = await manager.list(path);
+      for (const entry of entries) {
+        if (entry.directory) {
+          await visit(entry.path);
+        } else {
+          const modifiedAt: string = new Date(fileIo.statSync(`${root}/${entry.path}`).mtime * 1000).toISOString();
+          files.push(makeWorkspaceFileInfo(entry.name, entry.path, entry.sizeBytes ?? 0,
+            modifiedAt, entry.mimeType ?? mimeTypeForPath(entry.name)));
+        }
+      }
+    };
+    await visit('.');
+    return sortFiles(files, 'date');
   }
 }

@@ -2,8 +2,7 @@
 // 灵魂 = agentSoulMarkdown(每次对话注入的核心指令),查看/编辑/单次回退;
 // 核心记忆 = MEMORY_BUCKET_GLOBAL 桶；支持列表/新增/删除/编辑。
 // 视觉骨架:iOS 二级页设计语言(CenteredTitleBar + PlainSection + CardGroup r18 描边 + StatusChip + FooterNote)
-import type { AssistantMemory } from '@amber/chat-domain';
-import { MEMORY_BUCKET_GLOBAL } from '@amber/chat-domain';
+import type { MemoryRecord, MemoryEvent } from '@amber/chat-domain';
 import { getMemoryLibraryOps, MemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { loadAgentRuntimeSnapshot, updateAgentSoulMarkdown, updateRecallToggles } from '../platform_impl/AgentRuntimePrefs.ets';
@@ -18,12 +17,19 @@ import {
 } from '../components/PageTemplate.ets';
 import { router, KeyboardAvoidMode } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
+import { MemoryChangeLog } from '../components/MemoryChangeLog.ets';
+import { countActiveMemories, isActiveMemoryRecord, memoryKindLabel } from '../components/MemoryPresentation.ets';
 
 @Entry
 @Component
 struct SettingAgentMemoryPageFull {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
-  @State memories: AssistantMemory[] = [];
+  @State memories: MemoryRecord[] = [];
+  @State events: MemoryEvent[] = [];
+  @State activeCount: number = 0;
+  @State memoryError: string = '';
+  @State adding: boolean = false;
+  @StorageProp('memoryRevision') @Watch('memoryChanged') memoryRevision: number = 0;
   @State loaded: boolean = false;
   @State draft: string = '';
   @State editingId: number = -1;
@@ -112,16 +118,21 @@ struct SettingAgentMemoryPageFull {
     });
   }
 
+  private memoryChanged(): void { this.reload(); }
+
   private reload(): void {
     if (this.reloadInFlight) {
       this.reloadRequested = true;
       return;
     }
     this.reloadInFlight = true;
-    this.ops.listBucket(MEMORY_BUCKET_GLOBAL).then((list: AssistantMemory[]): void => {
-      this.memories = list;
-      this.loaded = true;
-    }).catch((): void => { this.loaded = true; }).finally((): void => {
+    this.ops.getAllRecords().then((list: MemoryRecord[]): Promise<void> => {
+      const now: number = Date.now();
+      this.activeCount = countActiveMemories(list, now);
+      this.memories = list.filter((item: MemoryRecord): boolean => item.scope === 'core' && item.kind !== 'topic' && isActiveMemoryRecord(item, now));
+      this.loaded = true; this.memoryError = '';
+      return this.ops.getRecentEvents(200).then((events: MemoryEvent[]): void => { this.events = events; });
+    }).catch((error: Error): void => { this.loaded = true; this.memoryError = error.message; }).finally((): void => {
       this.reloadInFlight = false;
       if (this.reloadRequested) {
         this.reloadRequested = false;
@@ -132,9 +143,12 @@ struct SettingAgentMemoryPageFull {
 
   private add(): void {
     const text: string = this.draft.trim();
-    if (text.length === 0) return;
+    if (text.length === 0 || this.adding) return;
+    this.adding = true; this.memoryError = '';
     this.ops.addMemory({ scope: 'core', kind: 'note', content: text })
-      .then((): void => { this.draft = ''; this.reload(); });
+      .then((): void => { this.draft = ''; this.reload(); })
+      .catch((error: Error): void => { this.memoryError = error.message; })
+      .finally((): void => { this.adding = false; });
   }
 
   // 新增记忆卡:iOS 白卡(r18 描边)内嵌输入行 + accent 文本动作
@@ -151,7 +165,7 @@ struct SettingAgentMemoryPageFull {
         .backgroundColor(Color.Transparent)
         .layoutWeight(1)
         .onChange((v: string): void => { this.draft = v; })
-      Text('添加')
+      Text(this.adding ? '保存中' : '添加')
         .fontSize(15)
         .fontWeight(FontWeight.Medium)
         .lineHeight(TEXT_STYLES.secondary.lineHeight)
@@ -160,6 +174,7 @@ struct SettingAgentMemoryPageFull {
         .constraintSize({ minWidth: 44, minHeight: 44 })
         .textAlign(TextAlign.Center)
         .margin({ left: 8 })
+        .enabled(!this.adding)
         .onClick((): void => { this.add(); })
     }
     .width('100%')
@@ -175,7 +190,7 @@ struct SettingAgentMemoryPageFull {
   }
 
   @Builder
-  private MemoryItem(m: AssistantMemory, idx: number): void {
+  private MemoryItem(m: MemoryRecord, idx: number): void {
     Column() {
       if (this.editingId === m.id) {
         Row() {
@@ -199,7 +214,8 @@ struct SettingAgentMemoryPageFull {
             .margin({ left: 4 })
             .onClick((): void => {
               this.ops.updateContent(m.id, this.editDraft.trim())
-                .then((): void => { this.setEditingMemory(-1); this.reload(); });
+                .then((): void => { this.setEditingMemory(-1); this.reload(); })
+                .catch((error: Error): void => { this.memoryError = error.message; });
             })
           Text('取消')
             .fontSize(15)
@@ -227,15 +243,17 @@ struct SettingAgentMemoryPageFull {
           .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       Row() {
-        StatusChip({ text: `${m.kind}${m.pinned ? ' · pinned' : ''}` })
+        StatusChip({ text: `${memoryKindLabel(m.kind)}${m.pinned ? ' · 置顶' : ''}` })
         Blank()
-        Icon({ name: 'trash', iconSize: 15, color: ERROR })
+        Row() { Icon({ name: 'trash', iconSize: 15, color: ERROR }) }
+          .width(44).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
           .onClick((): void => {
             AlertDialog.show({
               title: '删除记忆', message: '删除这条核心记忆？',
               primaryButton: { value: '取消', action: (): void => {} },
               secondaryButton: { value: '删除', fontColor: ERROR, action: (): void => {
-                this.ops.deleteMemory(m.id).then((): void => { this.reload(); });
+                this.ops.deleteMemory(m.id).then((): void => { this.reload(); })
+                  .catch((error: Error): void => { this.memoryError = error.message; });
               } },
             });
           })
@@ -262,9 +280,9 @@ struct SettingAgentMemoryPageFull {
   @Builder
   private MemoryListCard(): void {
     Column() {
-      ForEach(this.memories, (m: AssistantMemory, idx: number): void => {
+      ForEach(this.memories, (m: MemoryRecord, idx: number): void => {
         this.MemoryItem(m, idx);
-      }, (m: AssistantMemory): string => `${m.id}`)
+      }, (m: MemoryRecord): string => `${m.id}`)
     }
     .width('100%')
   }
@@ -280,7 +298,7 @@ struct SettingAgentMemoryPageFull {
   // 自动积累卡(对齐 iOS 自动积累区;后端 = recall enableCoreMemory)
   @Builder
   private AutoMemoryCard(): void {
-    CardToggleRow({ label: '自动记忆', desc: 'Amber 会记住对话里值得留存的信息',
+    CardToggleRow({ label: '召回核心记忆', desc: '在对话中使用已保存的核心记忆',
       checked: this.autoMemory, isLast: true,
       onToggle: (): void => { this.toggleAutoMemory(); } })
   }
@@ -288,6 +306,9 @@ struct SettingAgentMemoryPageFull {
   // 专题与文档入口(此前 MemoryPage 下线后两页失去入口);iOS 族 CardRow(28 着色方座)
   @Builder
   private MemoryEntryCard(): void {
+    CardRow({ label: '管理全部记忆', desc: `${this.activeCount} 条活跃记忆 · 包含已归档记录与恢复入口`, iconName: 'brain',
+      plateStyle: 'accent', plateSize: 28,
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/MemoryRecordsPage' }); } })
     CardRow({ label: '记忆主题', desc: '自动归并的主题及其源记忆成员', iconName: 'brain',
       plateStyle: 'accent', plateSize: 28,
       onRowClick: (): void => { router.pushUrl({ url: 'pages/MemoryTopicsPage' }); } })
@@ -391,6 +412,11 @@ struct SettingAgentMemoryPageFull {
       .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 
+  @Builder
+  private ChangeLogCard(): void {
+    MemoryChangeLog({ events: this.events, accentColor: this.accentColorStore })
+  }
+
   build(): void {
     Stack() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
@@ -409,11 +435,11 @@ struct SettingAgentMemoryPageFull {
                 .width('100%').padding({ left: GUTTER, right: GUTTER, top: 6 })
             }
 
-            PlainSection({ label: '自动积累' })
+            PlainSection({ label: '记忆召回' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.AutoMemoryCard(); } })
               .margin({ left: GUTTER, right: GUTTER })
 
-            PlainSection({ label: '专题与文档' })
+            PlainSection({ label: '记忆管理' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.MemoryEntryCard(); } })
               .margin({ left: GUTTER, right: GUTTER })
 
@@ -422,7 +448,11 @@ struct SettingAgentMemoryPageFull {
               .margin({ left: GUTTER, right: GUTTER })
             FooterNote({ text: 'Agent 会在对话中自动沉淀，也可手动添加' })
 
-            PlainSection({ label: '记忆列表' })
+            if (this.memoryError.length > 0) {
+              Text(this.memoryError).fontSize(13).fontColor(ERROR).width('100%')
+                .padding({ left: GUTTER, right: GUTTER, top: 8 }).wordBreak(WordBreak.BREAK_ALL)
+            }
+            PlainSection({ label: '核心记忆列表' })
             if (this.loaded && this.memories.length === 0) {
               Column() {
                 Text('暂无核心记忆')
@@ -446,6 +476,9 @@ struct SettingAgentMemoryPageFull {
               CardGroup({ radius: 18, stroke: true, content: (): void => { this.MemoryListCard(); } })
                 .margin({ left: GUTTER, right: GUTTER })
             }
+            PlainSection({ label: '记忆变更记录' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.ChangeLogCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
             PageSpacer()
           }
           .width('100%')

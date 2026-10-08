@@ -1,0 +1,31 @@
+✔ layout requests coalesce, sample after layout and move in bounded native frames (116.068333ms)
+✔ touch/cancel prevents a queued old frame from moving the list (9.657834ms)
+✔ growing geometry retargets native animation; late terminal layout starts another frame (12.978166ms)
+✔ new structural row outside measured range anchors once without a frame loop (7.875959ms)
+✔ busy layout frames advance scrolling without waiting for onIdle (6.386334ms)
+✔ active native follow prefers120Hz with LTPO headroom and releases its request at rest (6.158042ms)
+✔ API12 uses its known current refresh rate and cancellation releases the vote (7.693875ms)
+✔ LTPO ceiling uses supported modes without assuming120Hz on lower-refresh screens (28.875667ms)
+✔ API12 can request its already-known120Hz rate without reading newer display properties (7.653209ms)
+✔ LTPO120→90→60Hz changes retain bounded native motion without restarting the clock (5.277708ms)
+✔ late layout observations do not issue a catch-up scrollBy or restart unchanged native motion (4.678208ms)
+✔ system animation owns intermediate positions; unchanged geometry does not restart it (5.431625ms)
+✔ native motion after250ms attribution expiry is not classified as user scroll (0.630125ms)
+✔ an idle callback from retargeting does not turn the next native frame into a user scroll (0.147083ms)
+✔ real drag and fling stop native motion before the user position is reconciled (0.09325ms)
+✔ native animation source does not cancel itself; touch and ordinary user movement still reconcile (0.058958ms)
+✔ jump to top pauses and releases native follow before changing position (1.613625ms)
+✔ pulses only while following, using measured same-window coordinates (56.915375ms)
+✔ real user interaction blocks the rest of this run; later snapshots cannot restart it (8.438666ms)
+✔ a run is bounded to 30 seconds even if snapshots continue (6.941375ms)
+✔ API12 and unmeasured targets never inject (22.841417ms)
+✔ queued callbacks cannot inject after blocking or after a new run starts (5.231209ms)
+✔ a delayed first callback past the deadline cannot inject (5.762208ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 464.240708

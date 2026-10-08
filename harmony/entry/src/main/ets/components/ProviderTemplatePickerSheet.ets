@@ -5,7 +5,11 @@
 import {
   ACCENT, BG, INK, INK2, INK3, INK4, LABEL, LINE, META, MOTION_OVERLAY, OVERLAY, SURFACE2,
 } from '../design/tokens.ets';
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
+import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
+import { DeepReadSettingsSection, DeepReadSettingsGroup, DeepReadSettingsRow, DeepReadSettingsNote } from './deepread/DeepReadSettingsVisual.ets';
 import type { ProviderSetting } from '@amber/chat-domain';
+import { makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude } from '@amber/chat-domain';
 import { DEFAULT_PROVIDERS, toProviderMonogram, providerSlug } from '../di/ProviderDefaults.ets';
 
 export type OAuthTemplateKind = 'codex' | 'gemini';
@@ -25,13 +29,27 @@ const OAUTH_ROWS: OAuthRow[] = [
 @Component
 export struct ProviderTemplatePickerSheet {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
+  @StorageProp('reduceMotion') reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') appBackgrounded: boolean = false;
   @Prop show: boolean = false;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @Prop existingIds: string = ''; // JSON 数组字符串(ArkTS @Prop 传数组受限,序列化传递)
   onPickPreset: (p: ProviderSetting) => void = (_p: ProviderSetting): void => {};
   onOauthPick: (kind: OAuthTemplateKind) => void = (_kind: OAuthTemplateKind): void => {};
   onDismiss: () => void = (): void => {};
 
+  private pickerTransition(card: boolean): TransitionEffect {
+    if (getProductKind() === 'deepread') {
+      if (this.appBackgrounded) return TransitionEffect.IDENTITY;
+      if (this.reduceMotion) return TransitionEffect.OPACITY.animation({ duration: 120, curve: Curve.EaseOut });
+    }
+    const effect: TransitionEffect = card
+      ? TransitionEffect.translate({ y: 80 }).combine(TransitionEffect.OPACITY) : TransitionEffect.OPACITY;
+    return effect.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut });
+  }
+
   private bundled(): ProviderSetting[] {
+    if (getProductKind() === 'deepread') return DEFAULT_PROVIDERS;
     const exist: string = this.existingIds;
     return DEFAULT_PROVIDERS.filter((p: ProviderSetting): boolean => exist.indexOf(`"${p.id}"`) < 0);
   }
@@ -62,6 +80,66 @@ export struct ProviderTemplatePickerSheet {
       .border({ width: 1, color: LINE })
   }
 
+  @Builder
+  ReadingPresets(): void {
+    ForEach(this.bundled(), (provider: ProviderSetting, index: number): void => {
+      DeepReadSettingsRow({ label: provider.name, detail: providerSlug(provider),
+        last: index === this.bundled().length - 1,
+        onTap: (): void => { this.onPickPreset(provider); } })
+    }, (provider: ProviderSetting): string => provider.id)
+  }
+
+  private pickProtocol(protocol: string): void {
+    if (protocol === 'claude') {
+      this.onPickPreset(makeProviderSettingClaude({ name: 'Claude' }));
+    } else if (protocol === 'google') {
+      this.onPickPreset(makeProviderSettingGoogle({ name: 'Google Gemini' }));
+    } else {
+      this.onPickPreset(makeProviderSettingOpenAIVariant({ name: 'OpenAI 兼容 API' }));
+    }
+  }
+
+  @Builder
+  ReadingProtocols(): void {
+    DeepReadSettingsRow({ label: 'OpenAI 兼容 API',
+      onTap: (): void => { this.pickProtocol('openai'); } })
+    DeepReadSettingsRow({ label: 'Google Gemini',
+      onTap: (): void => { this.pickProtocol('google'); } })
+    DeepReadSettingsRow({ label: 'Claude', last: true,
+      onTap: (): void => { this.pickProtocol('claude'); } })
+  }
+
+  @Builder
+  ReadingLogin(): void {
+    DeepReadSettingsRow({ label: '使用 ChatGPT 登录', detail: '通过设备码连接 Codex', last: true,
+      onTap: (): void => { this.onOauthPick('codex'); } })
+  }
+
+  @Builder
+  ReadingSheet(): void {
+    Column() {
+      Row().width(42).height(4).backgroundColor(D.rule).borderRadius(2).margin({ top: 10, bottom: 12 })
+      Row() {
+        Text('添加模型服务').fontSize(22).fontWeight(FontWeight.Bold).fontColor(D.ink).layoutWeight(1)
+        Text('取消').fontSize(17).fontColor(D.accent).height(44)
+          .onClick((): void => { this.onDismiss(); })
+      }.width('100%').padding({ left: D.gutter, right: D.gutter })
+      Scroll() {
+        Column() {
+          DeepReadSettingsSection({ title: '自定义服务' })
+          DeepReadSettingsGroup({ content: (): void => { this.ReadingProtocols(); } })
+          DeepReadSettingsSection({ title: '品牌预置' })
+          DeepReadSettingsGroup({ content: (): void => { this.ReadingPresets(); } })
+          DeepReadSettingsNote({ text: '选择预置后，可以修改名称和服务地址。同一服务支持添加多份配置。' })
+          DeepReadSettingsSection({ title: '账号连接' })
+          DeepReadSettingsGroup({ content: (): void => { this.ReadingLogin(); } })
+        }.width('100%').padding({ left: D.gutter, right: D.gutter, bottom: 24 + this.navBarHeight })
+      }.layoutWeight(1).scrollBar(BarState.Off)
+    }.width('100%').height('88%').backgroundColor(D.paper)
+      .borderRadius({ topLeft: 24, topRight: 24 }).onClick((): void => {})
+      .transition(this.pickerTransition(true))
+  }
+
   build(): void {
     if (this.themeEpoch >= 0 && this.show) {
       Stack({ alignContent: Alignment.Bottom }) {
@@ -70,9 +148,11 @@ export struct ProviderTemplatePickerSheet {
           .height('100%')
           .backgroundColor(OVERLAY)
           .onClick((): void => { this.onDismiss(); })
-          .transition(TransitionEffect.OPACITY
-            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+          .transition(this.pickerTransition(false))
 
+        if (getProductKind() === 'deepread') {
+          this.ReadingSheet()
+        } else {
         Column() {
           Text('')
             .width(42).height(4).borderRadius(2)
@@ -180,6 +260,7 @@ export struct ProviderTemplatePickerSheet {
         .onClick((): void => {})
         .transition(TransitionEffect.translate({ y: 80 }).combine(TransitionEffect.OPACITY)
           .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+        }
       }
       .width('100%')
       .height('100%')

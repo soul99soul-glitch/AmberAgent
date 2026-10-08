@@ -1,3 +1,4 @@
+import { jevAutoApprovalReason } from '../main/ets/chat/jev_auto_approval.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -193,4 +194,29 @@ test('same-turn import refreshes search/schema/execution; disabled and deleted n
     dispatcher: new AgentToolDispatcher({ hooks: [] }), makeProviderForStep: scoped.factory,
   });
   assert.equal(payload(partOf(scopedConv, 'scope-denied'))['status'], 'failed'); assert.deepEqual(mathInputs, [21]);
+});
+
+test('auto approval review pauses real Recipe primitive checkpoint, retains target and resumes one effect', async () => {
+  const d = writeRecipe(); const f = persisted(d, [{ descriptor: d, enabled: true }]);
+  const effects: string[] = []; let reviewed = 0;
+  const defs = primitives(effects);
+  const model = scripted([[call('parent-review', 'recipe__copy_text', { source: 'input.txt', destination: 'output.txt' })],
+    [{ type: 'text', text: 'complete', metadata: null }]]);
+  const dispatcher = new AgentToolDispatcher({ autoApprovalReview: async () => { reviewed++; return ['破坏性']; } });
+  const loop: ToolLoopOptions = { tools: [...defs, ...createRecipeTools({ store: f.store, installed: f.state.installed, primitives: defs })],
+    recipeAdapter: createRecipeLoopAdapter({ store: f.store, installed: f.state.installed }), dispatcher,
+    autoApproveTools: true, autoApproveHighRiskTools: true, makeProviderForStep: model.factory,
+    captureInvocationMetadata: () => ({ terminal_target: { profileId: 'pinned' } }) };
+  let conv = await runChatTurnWithTools(makeConversation('recipe-review'), 'copy', deps(model.provider, f.conversations), loop);
+  let parent = partOf(conv, 'parent-review');
+  assert.equal(parent.approvalState.type, 'pending'); assert.equal(checkpoint(parent).phase, 'awaiting_approval');
+  assert.equal(jevAutoApprovalReason(parent), '自动批准复核：破坏性');
+  assert.deepEqual(effects, ['read']); assert.equal(reviewed, 1);
+  const child = checkpoint(parent).pendingStep!;
+  assert.deepEqual(child.metadata!['terminal_target'], { profileId: 'pinned' });
+  assert.match(JSON.stringify(child.metadata!['permission_trace']), /jev_auto_approval.*破坏性/);
+  assert.equal(checkpoint(partOf(f.state.saved.at(-1)!, 'parent-review')).phase, 'awaiting_approval');
+  conv = await runToolLoopContinuation(approve(conv, 'parent-review'), deps(model.provider, f.conversations), loop);
+  parent = partOf(conv, 'parent-review');
+  assert.equal(checkpoint(parent).phase, 'finished'); assert.deepEqual(effects, ['read', 'write:output.txt']); assert.equal(reviewed, 1);
 });

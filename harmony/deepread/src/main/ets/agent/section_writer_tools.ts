@@ -9,6 +9,7 @@
 // JSON 解析边界:tool input 是模型返回的 JSON 字符串,这里允许 Record<string, unknown>
 // 解析(对照 json_schema_validator.ts 的解析边界模式)。
 
+import { parseSourceNumbers, parseImpacts, parseUncertainties } from './hierarchy_fields.ts';
 import type { UIMessagePartText } from './message.ts';
 import { makeSuccessOutput } from './tool_execution.ts';
 import type { ToolDefinition } from './tool_execution.ts';
@@ -195,7 +196,12 @@ const hasAnalysisContent = (o: DeepReadOutput): boolean => {
   if ((o.analysis.coreDispute?.trim().length ?? 0) >= 20) return true;
   if ((o.analysis.implications?.trim().length ?? 0) >= 20) return true;
   if (o.analysis.perspectives.some(p => p.viewpoint.trim().length >= 20)) return true;
-  return o.analysis.quotes.some(q => q.text.trim().length >= 8);
+  if (o.analysis.quotes.some(q => q.text.trim().length >= 8)) return true;
+  // The current editorial schema writes consequences into impacts rather than
+  // implications. A concise dispute/perspective can accompany that full analysis.
+  const hasPosition = (o.analysis.coreDispute?.trim().length ?? 0) > 0 ||
+    o.analysis.perspectives.some(p => p.viewpoint.trim().length > 0);
+  return hasPosition && (o.impacts?.some(impact => impact.effect.trim().length >= 20) ?? false);
 };
 
 const hasExtendedReadingContent = (o: DeepReadOutput): boolean =>
@@ -226,6 +232,7 @@ export interface SectionWriterTools extends WriterState {
   markRunning: (stages: DeepReadGenerationStage[]) => DeepReadOutput;
   markFailed: (stage: DeepReadGenerationStage, message: string) => DeepReadOutput;
   markVisibleWrite: () => void;
+  writeSources: (sources: ReadingLink[]) => DeepReadOutput;
   markRequiredWrite: () => void;
   writeFallbackSection: (
     stage: DeepReadGenerationStage,
@@ -310,6 +317,7 @@ export const createSectionWriterTools = (
           ...current,
           topicType: topicTypeRaw !== null ? cleanText(topicTypeRaw, TOPIC_TYPE_MAX) : current.topicType,
           summary: summary ?? current.summary,
+          bottomLine: objString(obj, 'bottom_line') !== null ? cleanText(objString(obj, 'bottom_line')!, 120) : current.bottomLine,
           keyEntities: mergeStrings(current.keyEntities, stringListFrom(obj, 'key_entities', ENTITY_MAX_CHARS), KEY_ENTITIES_MAX),
           references: mergeReadingLinks(current.references, references, READING_LINKS_REF_MAX),
         };
@@ -356,7 +364,7 @@ export const createSectionWriterTools = (
     execute: async (input: string): Promise<UIMessagePartText[]> => {
       const obj = asObject(input);
       const timeline = parseTimeline(obj).slice(0, TIMELINE_MAX);
-      const corePoints = parseCorePoints(obj).slice(0, CORE_POINTS_MAX);
+      const corePoints = parseCorePoints(obj, output.sources?.length ?? 0).slice(0, CORE_POINTS_MAX);
       const references = parseReadingLinks(obj, 'references');
       const rawTimelineCount = objObjectList(obj, 'timeline').length;
       const rawCorePointCount = objObjectList(obj, 'core_points').length;
@@ -404,7 +412,7 @@ export const createSectionWriterTools = (
       const updated = update(current => {
         const coreDisputeRaw = objString(obj, 'core_dispute');
         const implicationsRaw = objString(obj, 'implications');
-        const perspectives = parsePerspectives(obj);
+        const perspectives = parsePerspectives(obj, current.sources?.length ?? 0);
         const quotes = parseQuotes(obj);
         const nextAnalysis: DeepAnalysis = {
           coreDispute: coreDisputeRaw !== null ? cleanText(coreDisputeRaw, ANALYSIS_DISPUTE_MAX) : current.analysis.coreDispute,
@@ -415,6 +423,9 @@ export const createSectionWriterTools = (
         const next: DeepReadOutput = {
           ...current,
           analysis: nextAnalysis,
+          impacts: Array.isArray(obj['impacts']) ? parseImpacts(obj) : current.impacts,
+          watch: Array.isArray(obj['watch']) ? stringListFrom(obj, 'watch', 160).slice(0, 3) : current.watch,
+          uncertainties: Array.isArray(obj['uncertainties']) ? parseUncertainties(obj) : current.uncertainties,
           references: mergeReadingLinks(current.references, parseReadingLinks(obj, 'references'), READING_LINKS_REF_MAX),
         };
         // 主字段不足:合法 references 仍保留,只不标 READY
@@ -590,6 +601,14 @@ export const createSectionWriterTools = (
     generationComplete: sectionsReady(current) && current.generationPhase === 'VERIFYING',
   }));
 
+  // Numbered references are a local projection of the same verified source order
+  // used in stage prompts. No model output may fabricate or reorder this list.
+  const writeSources = (sources: ReadingLink[]): DeepReadOutput => update(current => {
+    if (sources.length === 0) return withSectionStatus(current, 'EXTENDED_READING', 'FAILED', '没有可用于引用的已读取来源。');
+    markRequiredWrite();
+    return withSectionQuality(withSectionStatus({ ...current, sources }, 'EXTENDED_READING', 'READY'), 'EXTENDED_READING', 'STANDARD');
+  });
+
   // ===== markPhase / markRunning / markFailed =====
   const markPhase = (phase: DeepReadOutput['generationPhase']): DeepReadOutput =>
     update(current => ({ ...current, generationPhase: phase }));
@@ -703,6 +722,7 @@ export const createSectionWriterTools = (
     markRunning,
     markFailed,
     markVisibleWrite,
+    writeSources,
     markRequiredWrite,
     writeFallbackSection,
     executeFinish,
@@ -721,31 +741,37 @@ const parseTimeline = (o: Record<string, unknown>): TimelineEvent[] =>
       date: date !== null ? cleanText(date, 80) : '',
       event: cleanText(event, TIMELINE_EVENT_MAX),
       isHighlight: objBool(obj, 'is_highlight') ?? false,
+      why: objString(obj, 'why') !== null ? cleanText(objString(obj, 'why')!, 180) : null,
       imageUrl: urlString(obj, 'image_url'),
       imageCaption: (() => { const c = objString(obj, 'image_caption'); return c !== null ? cleanText(c, HERO_CAPTION_MAX) : null; })(),
     } as TimelineEvent;
   }).filter((x): x is TimelineEvent => x !== null);
 
-const parseCorePoints = (o: Record<string, unknown>): CorePoint[] =>
+const parseCorePoints = (o: Record<string, unknown>, sourceCount: number = 0): CorePoint[] =>
   objObjectList(o, 'core_points').map(obj => {
     const point = objString(obj, 'point');
     if (point === null) return null;
     const supporting = objString(obj, 'supporting');
     return {
       point: cleanText(point, CORE_POINT_MAX),
+      sources: parseSourceNumbers(obj, sourceCount),
       supporting: supporting !== null ? cleanText(supporting, CORE_SUPPORTING_MAX) : null,
       imageUrl: urlString(obj, 'image_url'),
       imageCaption: (() => { const c = objString(obj, 'image_caption'); return c !== null ? cleanText(c, HERO_CAPTION_MAX) : null; })(),
     } as CorePoint;
   }).filter((x): x is CorePoint => x !== null);
 
-const parsePerspectives = (o: Record<string, unknown>): Perspective[] =>
+const parsePerspectives = (o: Record<string, unknown>, sourceCount: number = 0): Perspective[] =>
   objObjectList(o, 'perspectives').map(obj => {
     const viewpoint = objString(obj, 'viewpoint');
     if (viewpoint === null) return null;
     const holder = objString(obj, 'holder');
     return {
       viewpoint: cleanText(viewpoint, PERSPECTIVE_VIEWPOINT_MAX),
+      interest: objString(obj, 'interest') !== null ? cleanText(objString(obj, 'interest')!, 120) : null,
+      quote: objString(obj, 'quote') !== null ? cleanText(objString(obj, 'quote')!, QUOTE_TEXT_MAX) : null,
+      quoteBy: objString(obj, 'quote_by') !== null ? cleanText(objString(obj, 'quote_by')!, QUOTE_ATTR_MAX) : null,
+      sources: parseSourceNumbers(obj, sourceCount),
       holder: holder !== null ? cleanText(holder, PERSPECTIVE_HOLDER_MAX) : null,
     } as Perspective;
   }).filter((x): x is Perspective => x !== null).slice(0, PERSPECTIVES_MAX);

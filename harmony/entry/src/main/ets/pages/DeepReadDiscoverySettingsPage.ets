@@ -1,3 +1,4 @@
+import { DeepReadSubpageDock, DeepReadDockLayout } from '../components/deepread/DeepReadSubpageDock.ets';
 import { getAppContainer } from '../di/AppContainer.ets';
 import { DEEPREAD_DISCOVERY_CATEGORIES, DEEPREAD_DISCOVERY_SOURCES } from '@amber/deepread-domain';
 import type { Storage, DeepReadDiscoveryCategory } from '@amber/deepread-domain';
@@ -5,6 +6,12 @@ import { BG, INK, INK3, INK4, SURFACE2, ERROR, GUTTER, META } from '../design/to
 import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, FooterNote, BtnFill } from '../components/PageTemplate.ets';
 import { PillSelect } from '../components/ui/Select.ets';
+import { DeepReadHaptics } from '../design/DeepReadHaptics.ets';
+import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
+import { DeepReadPaperBackground } from '../components/deepread/DeepReadPaperBackground.ets';
+import { DeepReadSettingsHeader, DeepReadSettingsSection, DeepReadSettingsGroup,
+  DeepReadSettingsNote, DeepReadSettingsPicker, DeepReadSettingsToggle, DeepReadSettingsButton } from '../components/deepread/DeepReadSettingsVisual.ets';
 
 interface DiscoverySourceToggle {
   id: string;
@@ -31,6 +38,9 @@ struct DeepReadDiscoverySettingsPage {
   @State error: string = '';
   private alive: boolean = false;
   private loadToken: number = 0;
+  private writeQueue: Promise<void> = Promise.resolve();
+  private pendingWrites: number = 0;
+  private writeFailure: string = '';
 
   aboutToAppear(): void {
     this.alive = true;
@@ -81,10 +91,42 @@ struct DeepReadDiscoverySettingsPage {
       enabled: source.id === id ? !source.enabled : source.enabled,
     }));
     this.notice = '';
+    if (getProductKind() === 'deepread') {
+      const source: DiscoverySourceToggle | undefined = this.sources.find((item: DiscoverySourceToggle): boolean => item.id === id);
+      if (source !== undefined) this.persistPreference('source_' + id, source.enabled ? 'true' : 'false');
+    }
   }
 
   private sourceGroup(category: DeepReadDiscoveryCategory): DiscoverySourceToggle[] {
     return this.sources.filter((source: DiscoverySourceToggle): boolean => source.category === category);
+  }
+
+  private persistPreference(key: string, value: string | number): void {
+    if (getProductKind() !== 'deepread') { this.notice = ''; return; }
+    if (!this.settingsLoaded || this.loading) return;
+    DeepReadHaptics.selection();
+    this.pendingWrites++;
+    this.saving = true;
+    this.error = '';
+    // Each event owns its captured value; serialize writes so rapid toggles cannot finish backwards.
+    this.writeQueue = this.writeQueue.then(async (): Promise<void> => {
+      try {
+        await getAppContainer().storage.set<string | number>(key, value);
+      } catch (error) {
+        this.writeFailure = '保存发现设置失败：' + String(error);
+      } finally {
+        this.pendingWrites--;
+        if (this.pendingWrites === 0) {
+          if (this.writeFailure.length > 0 && this.alive) {
+            const message: string = this.writeFailure;
+            this.writeFailure = '';
+            await this.loadSettings(this.loadToken);
+            if (this.alive) this.error = message;
+          }
+          if (this.alive) this.saving = false;
+        }
+      }
+    });
   }
 
   private async saveSettings(): Promise<void> {
@@ -150,7 +192,7 @@ struct DeepReadDiscoverySettingsPage {
         Text('缓存刷新间隔').fontSize(16).fontFamily(FONT_SANS_MEDIUM).fontColor(INK).layoutWeight(1)
         PillSelect({ options: ['15 分钟', '30 分钟', '1 小时', '2 小时'],
           selectedIndex: [15, 30, 60, 120].indexOf(this.refreshMinutes), triggerColor: INK, triggerMinHeight: 44,
-          onSelect: (index: number): void => { this.refreshMinutes = [15, 30, 60, 120][index]; this.notice = ''; } })
+          onSelect: (index: number): void => { this.refreshMinutes = [15, 30, 60, 120][index]; this.persistPreference('deepread_hotlist_refresh_minutes', this.refreshMinutes); } })
           .width(112)
       }.width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
         .padding({ left: 14, right: 14, top: 8, bottom: 8 })
@@ -161,7 +203,8 @@ struct DeepReadDiscoverySettingsPage {
     }.width('100%')
   }
 
-  build(): void {
+  @Builder
+  HostDiscoverySettings(): void {
     Column() {
       ForEach([this.themeEpoch], (_epoch: number): void => {
         Column() {
@@ -210,5 +253,77 @@ struct DeepReadDiscoverySettingsPage {
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
       }, (epoch: number): string => `theme-${epoch}`)
     }.width('100%').height('100%').backgroundColor(BG)
+  }
+
+  @Builder
+  StandaloneRefresh(): void {
+    DeepReadSettingsPicker({ label: '刷新间隔', options: ['15 分钟', '30 分钟', '60 分钟', '120 分钟'],
+      selected: [15, 30, 60, 120].indexOf(this.refreshMinutes),
+      onSelect: (index: number): void => { this.refreshMinutes = [15, 30, 60, 120][index]; this.persistPreference('deepread_hotlist_refresh_minutes', this.refreshMinutes); } })
+    DeepReadSettingsToggle({ label: '仅在 Wi-Fi 下刷新', checked: this.wifiOnly,
+      onChange: (value: boolean): void => { this.wifiOnly = value; this.persistPreference('deepread_hotlist_wifi_only', value ? 'true' : 'false'); } })
+    DeepReadSettingsToggle({ label: '将英文标题译为中文', checked: this.translateZh, last: true,
+      onChange: (value: boolean): void => { this.translateZh = value; this.persistPreference('deepread_hotlist_translate_zh', value ? 'true' : 'false'); } })
+  }
+
+  @Builder
+  StandaloneFocus(): void {
+    TextInput({ text: this.focusKeywords, placeholder: '关键词，用逗号分隔' }).fontSize(17).fontColor(D.ink)
+      .placeholderColor(D.muted).backgroundColor(Color.Transparent).height(50).padding({ left: 16, right: 16 })
+      .onChange((value: string): void => { this.focusKeywords = value; this.persistPreference('deepread_focus_keywords', value.trim()); })
+    Row().width('100%').height(0.5).backgroundColor(D.rule).margin({ left: 16 })
+    DeepReadSettingsPicker({ label: '展示方式', options: ['全部热点', '关注优先', '只看关注'], selected: this.focusModeIndex,
+      last: true, onSelect: (index: number): void => { this.focusModeIndex = index; this.persistPreference('deepread_focus_mode', index === 1 ? 'focus_first' : index === 2 ? 'focus_only' : 'all'); } })
+  }
+
+  @Builder
+  StandaloneSourceGroup(category: DeepReadDiscoveryCategory): void {
+    ForEach(this.sourceGroup(category), (source: DiscoverySourceToggle, index: number): void => {
+      DeepReadSettingsToggle({ label: source.displayName, checked: source.enabled,
+        last: index === this.sourceGroup(category).length - 1,
+        onChange: (_value: boolean): void => { this.changeSource(source.id); } })
+    }, (source: DiscoverySourceToggle): string => source.id)
+  }
+
+  @Builder
+  StandaloneDiscoverySettings(): void {
+    Stack({ alignContent: Alignment.Bottom }) {
+      DeepReadPaperBackground()
+      Column() {
+        DeepReadSettingsHeader({ title: '热点来源' })
+        Scroll() {
+          Column() {
+            if (this.loading) { Text('正在读取设置…').fontSize(15).fontColor(D.muted).padding({ top: 24 }) }
+            else if (this.settingsLoaded) {
+              DeepReadSettingsSection({ title: '刷新' })
+              DeepReadSettingsGroup({ content: (): void => { this.StandaloneRefresh(); } })
+              DeepReadSettingsSection({ title: '关注' })
+              DeepReadSettingsGroup({ content: (): void => { this.StandaloneFocus(); } })
+              ForEach(DEEPREAD_DISCOVERY_CATEGORIES, (category: DeepReadDiscoveryCategory): void => {
+                DeepReadSettingsSection({ title: category })
+                DeepReadSettingsGroup({ content: (): void => { this.StandaloneSourceGroup(category); } })
+              }, (category: DeepReadDiscoveryCategory): string => category)
+              DeepReadSettingsNote({ text: '修改即时保存，返回发现页后应用。' })
+            }
+            if (this.error.length > 0) {
+              Text(this.error).fontSize(13).fontColor(D.danger).lineHeight(19).width('100%').padding({ top: 12 })
+              if (!this.settingsLoaded) {
+                DeepReadSettingsButton({ label: '重试读取', onTap: (): void => { this.loadSettings(++this.loadToken); } }).margin({ top: 16 })
+              }
+            }
+          }.width('100%').padding({ left: D.gutter, right: D.gutter, bottom: DeepReadDockLayout.bottomInset(this.navBarHeight) })
+        }.width('100%').layoutWeight(1).scrollBar(BarState.Off).align(Alignment.TopStart)
+      }.width('100%').height('100%')
+      DeepReadSubpageDock().align(Alignment.Bottom).hitTestBehavior(HitTestMode.Transparent)
+    }.width('100%').height('100%').backgroundColor(D.paper)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  build(): void {
+    Column() {
+      ForEach([this.themeEpoch], (_epoch: number): void => {
+        if (getProductKind() === 'deepread') { this.StandaloneDiscoverySettings(); } else { this.HostDiscoverySettings(); }
+      }, (epoch: number): string => `theme-${epoch}`)
+    }.width('100%').height('100%').backgroundColor(D.paper)
   }
 }

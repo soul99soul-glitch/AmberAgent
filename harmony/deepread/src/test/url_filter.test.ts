@@ -179,3 +179,23 @@ test('多重 @ userinfo 也被正确剥离(a@b@127.0.0.1)', () => {
   assert.equal(urlAllowedForBackgroundFetch('http://a@b@127.0.0.1/', false, false), false);
   assert.equal(urlAllowedForBackgroundFetch('http://a@b@8.8.8.8/', false, false), true);
 });
+
+test('absolute DNS names retain the same private/public classification', () => {
+  for (const host of ['localhost.', 'svc.localhost.', 'router.local.', 'api.internal.', 'host.lan.', '127.0.0.1.']) {
+    assert.equal(urlAllowedForBackgroundFetch(`http://${host}/`, false, false), false, host);
+    assert.equal(urlAllowedForBackgroundFetch(`http://${host}/`, true, true), true, host);
+  }
+  assert.equal(urlAllowedForBackgroundFetch('https://example.com./', false, false), true);
+});
+
+test('IPv6 equivalent loopback, unspecified, link-local and mapped private addresses are blocked', () => {
+  for (const host of ['0:0:0:0:0:0:0:1', '0000:0:0::1', '0:0:0:0:0:0:0:0',
+    'fe90::1', 'febf::1', 'fe80:0:0:0:0:0:0:1',
+    '0:0:0:0:0:ffff:127.0.0.1', '0:0:0:0:0:ffff:7f00:1', '0000::ffff:192.168.1.1']) {
+    assert.equal(urlAllowedForBackgroundFetch(`http://[${host}]/`, false, false), false, host);
+    assert.equal(urlAllowedForBackgroundFetch(`http://[${host}]/`, true, true), true, host);
+  }
+  for (const host of ['2001:4860:4860::8888', 'fec0::1', '0:0:0:0:0:ffff:8.8.8.8']) {
+    assert.equal(urlAllowedForBackgroundFetch(`http://[${host}]/`, false, false), true, host);
+  }
+});

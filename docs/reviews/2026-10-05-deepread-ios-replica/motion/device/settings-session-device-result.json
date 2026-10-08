@@ -1,0 +1,11 @@
+{
+  "target": "127.0.0.1:5555",
+  "result": "PASS",
+  "rootDraftResultSize": 11,
+  "rootDraftDuckDuckGo": false,
+  "newAbilityUnsavedResultSize": 10,
+  "newAbilityUnsavedDuckDuckGo": true,
+  "savedColdResultSize": 11,
+  "restoredOriginalResultSize": 10,
+  "changedFieldsRestored": true
+}

@@ -1,0 +1,24 @@
+✔ schema: conversation + message_node 表与索引;无废弃 nodes 列 (0.419083ms)
+✔ conversationToRow: ISO→epoch ms、bool→int、suggestions JSON (0.951667ms)
+✔ conversation 行 round-trip: row→domain 还原(nodes 由 message_node 行组装) (0.593584ms)
+✔ messageNodeToRow: messages blob 为 UIMessage JSON 数组;node_index/select_index 保留 (0.0815ms)
+✔ repository: save→getById 完整还原;重复 save 替换 nodes(upsert) (0.26075ms)
+✔ repository: list 排序 is_pinned DESC, update_at DESC;assistantId 过滤 (0.167083ms)
+✔ repository: 同 update_at 的列表顺序按 id 升序稳定(分页边界不重复/遗漏) (0.1175ms)
+✔ repository: listRecent limit;search 标题子串(ASCII 大小写不敏感)同序 (0.1395ms)
+✔ repository: delete 级联移除 nodes;getSummaryById;不存在返回 null (0.109958ms)
+✔ repository: 分支节点(messages 数组 + selectIndex)持久化不丢分支语义 (0.136ms)
+✔ repository: restoreConversations 批量写入并保留分支/元数据 (0.352917ms)
+✔ message search keeps an older real body hit when latest JSON discriminator is a coarse false positive (191.151959ms)
+✔ message search selects latest real hit regardless of row order and preserves conversation recency/limit (11.952792ms)
+✔ message search trims query and returns no hits for empty query or nonpositive limit (8.640167ms)
+✔ RdbRepository.ets handles initialization failure and clears pending initialization for retry (246.186584ms)
+✔ ChatRdbRepository.ets handles initialization failure and clears pending initialization for retry (354.117167ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1030.50075

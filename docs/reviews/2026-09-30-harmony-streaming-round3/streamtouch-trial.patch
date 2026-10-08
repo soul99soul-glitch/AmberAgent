@@ -1,0 +1,347 @@
+--- harmony/entry/src/main/cpp/napi_init.cpp (baseline)
++++ harmony/entry/src/main/cpp/napi_init.cpp (trial)
+@@ -5,6 +5,7 @@
+ #include "plugin_js_napi.h"
+ #include "mosh_napi.h"
+ #include "google_loopback_napi.h"
++#include "stream_touch_probe.h"
+ 
+ #include <memory>
+ #include <string>
+@@ -182,6 +183,7 @@
+     if (RegisterPython(env, exports) == nullptr) return nullptr;
+     if (RegisterMosh(env, exports) == nullptr) return nullptr;
+     if (RegisterPluginJs(env, exports) == nullptr) return nullptr;
++    if (RegisterStreamTouchProbe(env, exports) == nullptr) return nullptr;
+     return RegisterGoogleLoopback(env, exports);
+ }
+ 
+--- harmony/entry/src/main/cpp/CMakeLists.txt (baseline)
++++ harmony/entry/src/main/cpp/CMakeLists.txt (trial)
+@@ -70,7 +70,7 @@
+ 
+ add_library(amber_native SHARED napi_init.cpp ssh_core.cpp ssh_napi.cpp
+     python_core.cpp python_napi.cpp mosh_core.cpp mosh_napi.cpp plugin_js_core.cpp plugin_js_napi.cpp
+-    google_loopback_core.cpp google_loopback_napi.cpp)
++    google_loopback_core.cpp google_loopback_napi.cpp stream_touch_probe.cpp)
+ target_compile_features(amber_native PRIVATE cxx_std_17)
+ target_include_directories(amber_native PRIVATE "${AMBER_RUST_ROOT}/include" "${AMBER_SSH_INSTALL}/include")
+ target_include_directories(amber_native SYSTEM PRIVATE "${AMBER_PYTHON_INSTALL}/include/python3.14"
+@@ -83,4 +83,4 @@
+ target_link_options(amber_native PRIVATE -Wl,--no-undefined -Wl,--exclude-libs,ALL -Wl,--as-needed)
+ # Rust 1.96 OHOS --print=native-static-libs reports these two system libraries.
+ target_link_libraries(amber_native PRIVATE amber_rust amber_ssh2 amber_python amber_mosh
+-    amber_protobuf amber_crypto libace_napi.z.so libjsvm.so unwind z dl m c)
++    amber_protobuf amber_crypto libace_napi.z.so libjsvm.so libohinput.so unwind z dl m c)
+--- harmony/entry/src/main/cpp/types/libamber_native/index.d.ts (baseline)
++++ harmony/entry/src/main/cpp/types/libamber_native/index.d.ts (trial)
+@@ -1,5 +1,10 @@
+ /** Counts UTF-8 text with o200k_base, cl100k_base, claude, or gemini. */
+ export const countBatch: (tokenizerIds: string[], texts: string[]) => Promise<number[]>;
++
++/** Temporary API20+ same-window touch probe; returns the native result code. */
++export const streamTouchProbeTap: (
++  windowId: number, windowX: number, windowY: number, displayX: number, displayY: number
++) => number;
+ 
+ export type SSHAuthMethod = 'password' | 'privateKey';
+ export type SSHHandleKind = 'exec' | 'pty';
+--- harmony/entry/src/main/ets/pages/ChatPage.ets (baseline)
++++ harmony/entry/src/main/ets/pages/ChatPage.ets (trial)
+@@ -52,6 +52,7 @@
+ import { getConversationRecapService } from '../platform_impl/ConversationRecapSupport.ets';
+ import { ChatRecapPanel } from '../components/ChatRecapPanel.ets';
+ import { MarkdownText } from '../components/MarkdownText.ets';
++import { StreamTouchProbe } from '../components/StreamTouchProbe.ets';
+ import type { TopModelMenuGroup, ReasoningLevelOption, ReasoningLevel } from '@amber/chat-domain';
+ import {
+   getChatRepository, getChatAssistants, resolveChatRuntime, ChatRuntime, getConversationRunService,
+@@ -515,6 +516,10 @@
+   private imeKeyboardHeightVp: number = 0;
+   private imeListenerAttached: boolean = false;
+   private imeWindow: window.Window | null = null;
++  private streamTouchProbe: StreamTouchProbe = new StreamTouchProbe(
++    (): boolean => this.pageAlive && this.pageVisible && this.sending && !this.userTouchActive &&
++      this.nativeFollow !== null && this.nativeFollow.isRunning(),
++    (): window.Window | null => this.imeWindow);
+   private imeProgrammaticScrollToken: number = 0;
+   private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
+   private keyboardAvoidanceActive: boolean = false;
+@@ -543,6 +548,7 @@
+     this.pageAlive = false;
+     this.pageVisible = false;
+     this.nativeFollow?.cancel();
++    this.streamTouchProbe.block();
+     this.closeRecap();
+     this.queueSheetOpen = false;
+     this.compactSummaryOpen = false;
+@@ -650,6 +656,7 @@
+     let timelineChanged: boolean = false;
+     this.currentRunId = snapshot.runId;
+     this.sending = snapshot.sending;
++    this.streamTouchProbe.sync(snapshot.runId, snapshot.sending);
+     this.streamingTail = snapshot.streamingTail;
+     this.regenTail = snapshot.regenTail;
+     this.regenNodeId = snapshot.regenNodeId;
+@@ -895,6 +902,7 @@
+     this.restoreKeyboardAvoidance();
+     this.pageVisible = false;
+     this.nativeFollow?.cancel();
++    this.streamTouchProbe.block();
+     this.closeRecap();
+     this.closeModelMenu();
+     this.closeSubAgentSheet();
+@@ -4472,6 +4480,7 @@
+         },
+         onTimelineTouch: (event: TouchEvent): void => {
+           if (event.type === TouchType.Down) {
++            this.streamTouchProbe.block();
+             this.userTouchActive = true;
+             this.nativeFollow?.cancel();
+           }
+@@ -4918,10 +4927,31 @@
+       .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+     }
+     
++      // Dedicated inert probe target in the header's empty left margin, outside List.
++      Blank().width(8).height(8)
++        .position({ x: 8, y: this.statusBarHeight + 2 })
++        .onAreaChange((_old: Area, area: Area): void => {
++          this.streamTouchProbe.setTarget(
++            this.getUIContext().vp2px(Number(area.globalPosition.x) + 4),
++            this.getUIContext().vp2px(Number(area.globalPosition.y) + 4));
++        })
++        .onTouch((event: TouchEvent): void => {
++          const synthetic: boolean = event.changedTouches.some((point: TouchObject): boolean => point.id === 99);
++          if (synthetic) {
++            hilog.info(0x0001, 'StreamTouchProbe', 'target received type=%{public}d', event.type);
++          } else if (event.type === TouchType.Down) {
++            this.streamTouchProbe.block();
++          }
++          event.stopPropagation();
++        })
+       }, (e: number): string => `theme-${e}`)
+ }
+       .enabled(this.themeEpoch >= 0)
+     .width('100%').height('100%')
++    .onTouch((event: TouchEvent): void => {
++      if (event.type === TouchType.Down &&
++        !event.changedTouches.some((point: TouchObject): boolean => point.id === 99)) this.streamTouchProbe.block();
++    })
+     // 1:1 原型 slideInR .28s ease-out:整页入场 translateX 20→0 + opacity 0→1
+     //   乘 themeTick 读取建依赖:主题变更 onPageShow 后 build 重读令牌
+     .opacity(this.pageEnterOpacity * (this.themeTick >= 0 ? 1 : 1))
+--- harmony/entry/src/main/cpp/stream_touch_probe.cpp (baseline)
++++ harmony/entry/src/main/cpp/stream_touch_probe.cpp (trial)
+@@ -0,0 +1,58 @@
++#include "stream_touch_probe.h"
++#include <multimodalinput/oh_input_manager.h>
++#include <chrono>
++#include <dlfcn.h>
++
++namespace {
++// Resolve the API20 entry only when called; the shared library must load on API12.
++using InjectTouch = int32_t (*)(int32_t, Input_TouchEvent *, int32_t, int32_t);
++
++napi_value Tap(napi_env env, napi_callback_info info)
++{
++    size_t argc = 5;
++    napi_value args[5] = {};
++    int32_t values[5] = {};
++    int32_t result = -2;
++    if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok || argc != 5) {
++        napi_throw_type_error(env, nullptr, "streamTouchProbeTap requires five coordinates/IDs");
++        return nullptr;
++    }
++    for (size_t i = 0; i < 5; ++i) {
++        if (napi_get_value_int32(env, args[i], &values[i]) != napi_ok || values[i] < 0) {
++            napi_throw_type_error(env, nullptr, "streamTouchProbeTap requires nonnegative integers");
++            return nullptr;
++        }
++    }
++    static void *library = dlopen("libnative_window_manager.so", RTLD_NOW | RTLD_LOCAL);
++    static auto inject = library == nullptr ? nullptr :
++        reinterpret_cast<InjectTouch>(dlsym(library, "OH_WindowManager_InjectTouchEvent"));
++    if (inject == nullptr) {
++        result = -1;
++    } else if (auto *event = OH_Input_CreateTouchEvent()) {
++        OH_Input_SetTouchEventFingerId(event, 99);
++        OH_Input_SetTouchEventDisplayX(event, values[3]);
++        OH_Input_SetTouchEventDisplayY(event, values[4]);
++        const auto now = std::chrono::duration_cast<std::chrono::microseconds>(
++            std::chrono::steady_clock::now().time_since_epoch()).count();
++        OH_Input_SetTouchEventActionTime(event, now);
++        OH_Input_SetTouchEventAction(event, 1); // DOWN, official Input_TouchEventAction
++        const int32_t down = inject(values[0], event, values[1], values[2]);
++        OH_Input_SetTouchEventActionTime(event, now + 1);
++        OH_Input_SetTouchEventAction(event, 3); // UP; always release the attempted contact.
++        const int32_t up = inject(values[0], event, values[1], values[2]);
++        result = down != 0 ? down : up;
++        OH_Input_DestroyTouchEvent(&event);
++    }
++    napi_value value = nullptr;
++    napi_create_int32(env, result, &value);
++    return value;
++}
++} // namespace
++
++napi_value RegisterStreamTouchProbe(napi_env env, napi_value exports)
++{
++    napi_property_descriptor descriptor = {
++        "streamTouchProbeTap", nullptr, Tap, nullptr, nullptr, nullptr, napi_default, nullptr
++    };
++    return napi_define_properties(env, exports, 1, &descriptor) == napi_ok ? exports : nullptr;
++}
+--- harmony/entry/src/main/cpp/stream_touch_probe.h (baseline)
++++ harmony/entry/src/main/cpp/stream_touch_probe.h (trial)
+@@ -0,0 +1,4 @@
++#pragma once
++#include <napi/native_api.h>
++
++napi_value RegisterStreamTouchProbe(napi_env env, napi_value exports);
+--- harmony/entry/src/main/ets/components/StreamTouchProbe.ets (baseline)
++++ harmony/entry/src/main/ets/components/StreamTouchProbe.ets (trial)
+@@ -0,0 +1,69 @@
++// Temporary, bounded same-process touch experiment. No global input injection.
++import { window } from '@kit.ArkUI';
++import { deviceInfo } from '@kit.BasicServicesKit';
++import { hilog } from '@kit.PerformanceAnalysisKit';
++import { streamTouchProbeTap } from 'libamber_native.so';
++
++export class StreamTouchProbe {
++  private timer: number = -1;
++  private runId: string = '';
++  private blocked: boolean = false;
++  private ticks: number = 0;
++  private generation: number = 0;
++  private deadline: number = 0;
++  private globalX: number = -1;
++  private globalY: number = -1;
++  private mayPulse: () => boolean;
++  private getWindow: () => window.Window | null;
++
++  constructor(mayPulse: () => boolean, getWindow: () => window.Window | null) {
++    this.mayPulse = mayPulse;
++    this.getWindow = getWindow;
++  }
++
++  setTarget(globalX: number, globalY: number): void {
++    this.globalX = Math.round(globalX);
++    this.globalY = Math.round(globalY);
++  }
++
++  sync(runId: string, active: boolean): void {
++    if (!active) { this.stop(); return; }
++    if (!canIUse('SystemCapability.Window.SessionManager') ||
++      !canIUse('SystemCapability.MultimodalInput.Input.Core') || deviceInfo.sdkApiVersion < 20) return;
++    if (runId !== this.runId) {
++      this.stop();
++      this.runId = runId;
++      this.blocked = false;
++      this.ticks = 0;
++    }
++    if (runId.length === 0 || this.blocked || this.timer !== -1) return;
++    this.deadline = Date.now() + 30000;
++    const generation: number = this.generation;
++    this.timer = setInterval((): void => { this.pulse(generation); }, 2000);
++  }
++
++  block(): void { this.blocked = true; this.stop(); }
++
++  private stop(): void {
++    this.generation++;
++    if (this.timer !== -1) clearInterval(this.timer);
++    this.timer = -1;
++  }
++
++  private pulse(generation: number): void {
++    if (generation !== this.generation || this.blocked) return;
++    if (Date.now() >= this.deadline) { this.block(); return; }
++    this.ticks++;
++    if (!this.mayPulse() || this.globalX < 0 || this.globalY < 0) return;
++    const win: window.Window | null = this.getWindow();
++    if (win === null) return;
++    const props: window.WindowProperties = win.getWindowProperties();
++    const x: number = this.globalX - props.windowRect.left;
++    const y: number = this.globalY - props.windowRect.top;
++    if (x < 0 || y < 0 || x >= props.windowRect.width || y >= props.windowRect.height) return;
++    const result: number = streamTouchProbeTap(props.id, x, y, this.globalX, this.globalY);
++    hilog.info(0x0001, 'StreamTouchProbe', 'pulse=%{public}d result=%{public}d x=%{public}d y=%{public}d',
++      this.ticks, result, x, y);
++    if (result !== 0) this.block();
++  }
++}
+--- harmony/chat/src/test/stream_touch_probe.test.cjs (baseline)
++++ harmony/chat/src/test/stream_touch_probe.test.cjs (trial)
+@@ -0,0 +1,71 @@
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const path = require('node:path');
++const vm = require('node:vm');
++const ts = require('typescript');
++
++function fixture(sdk = 26) {
++  const file = path.resolve(__dirname, '../../../entry/src/main/ets/components/StreamTouchProbe.ets');
++  const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
++    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
++  }).outputText;
++  const exports = {}, calls = [], timers = new Map();
++  let serial = 0, moving = true, now = 0;
++  vm.runInNewContext(code, { exports, require: name => {
++    if (name === '@kit.BasicServicesKit') return { deviceInfo: { sdkApiVersion: sdk } };
++    if (name === '@kit.PerformanceAnalysisKit') return { hilog: { info() {} } };
++    if (name === 'libamber_native.so') return { streamTouchProbeTap: (...args) => { calls.push(args); return 0; } };
++    return {};
++  }, canIUse: () => true, Math, Date: { now: () => now },
++  setInterval: (fn, ms) => { assert.equal(ms, 2000); timers.set(++serial, fn); return serial; },
++  clearInterval: id => timers.delete(id) });
++  const probe = new exports.StreamTouchProbe(() => moving, () => ({ getWindowProperties: () => ({
++    id: 42, windowRect: { left: 10, top: 20, width: 1000, height: 1800 },
++  }) }));
++  probe.setTarget(30, 60);
++  return { probe, calls, timers, moving: value => { moving = value; }, tick: (elapsed = 2000) => {
++    now += elapsed;
++    const callback = [...timers.values()][0]; assert.ok(callback); callback();
++  } };
++}
++
++test('pulses only while following, using measured same-window coordinates', () => {
++  const f = fixture(); f.probe.sync('run1', true); f.tick();
++  assert.deepEqual(f.calls, [[42, 20, 40, 30, 60]]);
++  f.moving(false); f.tick(); assert.equal(f.calls.length, 1);
++  f.probe.sync('run1', false); assert.equal(f.timers.size, 0);
++});
++
++test('real user interaction blocks the rest of this run; later snapshots cannot restart it', () => {
++  const f = fixture(); f.probe.sync('run1', true); f.tick(); f.probe.block();
++  f.probe.sync('run1', true); assert.equal(f.timers.size, 0);
++  f.probe.sync('run2', true); f.tick(); assert.equal(f.calls.length, 2);
++});
++
++test('a run is bounded to 30 seconds even if snapshots continue', () => {
++  const f = fixture(); f.probe.sync('run1', true);
++  for (let i = 0; i < 15; i++) f.tick();
++  assert.equal(f.calls.length, 14); assert.equal(f.timers.size, 0);
++  f.probe.sync('run1', true); assert.equal(f.timers.size, 0);
++});
++
++test('API12 and unmeasured targets never inject', () => {
++  const old = fixture(12); old.probe.sync('run1', true); assert.equal(old.timers.size, 0);
++  const f = fixture(); f.probe.setTarget(-1, -1); f.probe.sync('run1', true); f.tick();
++  assert.equal(f.calls.length, 0);
++});
++
++
++test('queued callbacks cannot inject after blocking or after a new run starts', () => {
++  const f = fixture(); f.probe.sync('run1', true);
++  const stale = [...f.timers.values()][0];
++  f.probe.block(); stale(); assert.equal(f.calls.length, 0);
++  f.probe.sync('run2', true); stale(); assert.equal(f.calls.length, 0);
++  f.tick(); assert.equal(f.calls.length, 1);
++});
++
++test('a delayed first callback past the deadline cannot inject', () => {
++  const f = fixture(); f.probe.sync('run1', true); f.tick(31000);
++  assert.equal(f.calls.length, 0); assert.equal(f.timers.size, 0);
++});

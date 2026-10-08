@@ -1,0 +1,540 @@
+--- before/NovelWorkspacePage.ets
++++ after/NovelWorkspacePage.ets
+@@ -18,6 +18,7 @@
+ } from '../components/AgentMessageRow.ets';
+ import type { AgentMessageRowHostCapabilities } from '../components/AgentMessageRow.ets';
+ import { InteractiveMessageTimeline } from '../components/InteractiveMessageTimeline.ets';
++import { NativeTimelineFollow } from '../components/NativeTimelineFollow.ets';
+ import { NovelDiscussionArchiveSheet } from '../components/NovelDiscussionArchiveSheet.ets';
+ import { NovelDiscussionArchiveCard } from '../components/NovelDiscussionArchiveCard.ets';
+ import { NovelRunRecoveryCard } from '../components/NovelRunRecoveryCard.ets';
+@@ -52,7 +53,7 @@
+ import { shareNovelFile, NovelShareFormat } from '../platform_impl/NovelShareSupport.ets';
+ import { MATERIAL_KIND_LABELS } from '@amber/deepread-domain';
+ import {
+-  NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion, NovelBranch,
++  NovelProject, NovelMessage, makeNovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion, NovelBranch,
+   NovelMaterialFields, NovelWorkspaceCas, NovelWorkspaceSnapshot, makeNovelMaterial, materialOrigin, NovelInjectionOverrides, novelComposerRunKind,
+   NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget,
+   NovelRunKind, NovelRun, NovelActiveRun, NovelRunEvent, NovelOrdinaryRun, NovelOrdinaryRunView, latestAssistantText, ordinaryRunMessages, ordinaryRunHistoryCount,
+@@ -345,6 +346,8 @@
+   @State singlePolishChapterId: string = '';
+   @State polishStartError: string = '';
+   @State activeQuickStart: boolean = false;
++  @State private activeRunKind: NovelRunKind | null = null;
++  @State private completedPreview: UIMessage[] = [];
+   @State failedQuickStart: boolean = false;
+   @State ghostwriteModelAvailable: boolean = false;
+   @State ghostwriteModelIssue: string = '正在检查模型配置…';
+@@ -356,6 +359,10 @@
+   private reloadToken: number = 0;
+   private initialScrollArmed: boolean = false;
+   private novelScrollToken: number = 0;
++  private nativeFollow: NativeTimelineFollow | null = null;
++  private novelViewportHeight: number = 0;
++  private novelLastVisibleIndex: number = -1;
++  private novelUserScrolling: boolean = false;
+   private userTouchActive: boolean = false;
+   private recoveryAttemptedToolCalls: Set<string> = new Set();
+   private ghostwritePollToken: number = 0;
+@@ -457,6 +464,7 @@
+     this.auditController = null;
+     this.reloadToken++;
+     this.novelScrollToken++;
++    this.nativeFollow?.cancel();
+     this.ghostwritePollToken++;
+     this.polishPollToken++;
+     if (this.currentUnsub !== null) {
+@@ -666,7 +674,10 @@
+           this.collectionFeedbackToken++;
+           this.clearStudioFeedback();
+         }
++        const workspaceChanged: boolean = this.project === null ||
++          this.workspaceStatus?.activeBranchId !== status.activeBranchId;
+         this.project = project;
++        this.completedPreview = [];
+         this.workspaceStatus = status;
+         this.ordinaryRecovery = recovery.record?.branchId === status.activeBranchId ? recovery : null;
+         if (this.contextOverrides !== null && this.contextOverrides.branchId !== status.activeBranchId) this.contextOverrides = null;
+@@ -679,12 +690,12 @@
+         this.ghostwriteModelIssue = modelIssue;
+         // 等 List 收到新 rows 的可见范围回调再落底；Promise 返回后的
+         // setTimeout 仍可能早于 ArkUI 完成 ForEach 布局。
+-        this.initialScrollArmed = project.messages.length > 0 || activeRun !== null;
++        if (workspaceChanged) this.initialScrollArmed = project.messages.length > 0 || activeRun !== null;
+         if (activeRun !== null &&
+           (this.activeRunId !== activeRun.run.id || this.currentUnsub === null)) {
+           this.attachNovelRun(
+             activeRun.run, activeRun.historyCount, activeRun.userText,
+-            activeRun.startedAt, '正在继续离页前的生成…', activeRun.runKind === 'quick_start');
++            activeRun.startedAt, '正在继续离页前的生成…', activeRun.runKind === 'quick_start', activeRun.runKind ?? null);
+         } else if (activeRun === null && this.currentUnsub === null && this.activeRunId.length > 0) {
+           this.clearNovelRunUi();
+         }
+@@ -1212,7 +1223,8 @@
+     const historyCount: number = kind === 'resume' || record.originalRequest.operation.kind === 'tool_continuation'
+       ? ordinaryRunHistoryCount(record) : this.project?.messages.length ?? 0;
+     this.attachNovelRun(run, historyCount, '', Date.now(),
+-      kind === 'retry' ? '正在按原请求重试…' : '正在继续原任务…', record.runKind === 'quick_start');
++      kind === 'retry' ? '正在按原请求重试…' : '正在继续原任务…', record.runKind === 'quick_start',
++      record.runKind ?? (record.mode === 'discuss' ? 'discussion' : 'prose_whole_chapter'));
+   }
+ 
+   private copyOrdinaryPartial(recordId: string, text: string): void {
+@@ -1564,11 +1576,60 @@
+       if (!this.pageAlive || token !== this.novelScrollToken || this.userTouchActive) return;
+       this.atBottomApprox = true;
+       this.jumpButtonVisible = false;
++      this.nativeFollow?.cancel();
+       this.chatScroller.scrollEdge(Edge.Bottom);
+     }, 0);
+   }
+ 
++  private novelTimelineItemCount(): number {
++    let count: number = 0;
++    const project: NovelProject | null = this.project;
++    if (project !== null) {
++      if (this.ordinaryRecoveryRecord() !== null && this.activeRunId.length === 0) count++;
++      if (this.ghostwriteJob !== null) count++;
++      if (project.messages.length === 0 && this.activeRunId.length === 0) count++;
++      if (this.ghostwriteJob === null && this.ghostwriteReport !== null) count++;
++      const messages: NovelMessage[] = this.novelTimelineMessages();
++      const expandedArchives: string[] = this.expandedArchiveIds;
++      for (const message of messages) {
++        if (discussionArchiveAtMessage(project.discussionArchives, message) !== null) count++;
++        if (discussionMessageVisible(project.discussionArchives, expandedArchives, message)) count++;
++        count += this.settingProposalsAt(message).length;
++      }
++      count += orphanSettingProposals(project.settingProposals, project.messages).length;
++    }
++    if (this.pendingUserText.length > 0 && this.activeMessages.length === 0) count++;
++    if (this.activeRunId.length === 0) count += this.failedMessages.length + this.completedPreview.length;
++    else {
++      const activeCount: number = this.activeRunTimelineMessages().length;
++      if (this.activeQuickStart) count += 1 + activeCount;
++      else if (activeCount === 0) count++;
++    }
++    return count;
++  }
++
++  private measuredNovelBottomTarget(): number | null {
++    const current: number = this.chatScroller.currentOffset().yOffset;
++    if (this.chatScroller.isAtEnd()) return current;
++    const lastIndex: number = this.novelTimelineItemCount() - 1;
++    if (lastIndex < 0) return current;
++    if (this.novelLastVisibleIndex < lastIndex || this.novelViewportHeight <= 0) return null;
++    const rect: RectResult = this.chatScroller.getItemRect(lastIndex);
++    return current + Math.max(0, rect.y + rect.height - this.novelViewportHeight);
++  }
++
++  private requestNovelNativeFollow(): void {
++    if (this.nativeFollow === null) {
++      this.nativeFollow = new NativeTimelineFollow(this.getUIContext(), this.chatScroller,
++        (): boolean => this.pageAlive && this.studioPageVisible && !this.studioBackgrounded && this.tab === 0 &&
++          !this.userTouchActive && shouldScrollOnStreamUpdate(this.followMode, this.atBottomApprox),
++        (): number | null => this.measuredNovelBottomTarget(), (): void => {});
++    }
++    this.nativeFollow.request();
++  }
++
+   private beginNovelGenerationFollow(): void {
++    this.novelUserScrolling = false;
+     this.followMode = transitionOnJumpToBottom(true);
+     this.atBottomApprox = true;
+     this.jumpButtonVisible = false;
+@@ -1579,7 +1640,7 @@
+     this.followMode = transitionOnStreamUpdate(this.followMode, this.atBottomApprox);
+     this.jumpButtonVisible = this.followMode === 'paused';
+     if (shouldScrollOnStreamUpdate(this.followMode, this.atBottomApprox)) {
+-      this.scheduleNovelScrollToBottom();
++      this.requestNovelNativeFollow();
+     }
+   }
+ 
+@@ -1587,11 +1648,12 @@
+     const wasPaused: boolean = this.followMode === 'paused';
+     this.followMode = transitionOnGenerateEnd(this.followMode);
+     this.jumpButtonVisible = wasPaused;
+-    if (!wasPaused) this.scheduleNovelScrollToBottom();
++    if (!wasPaused) this.requestNovelNativeFollow();
+   }
+ 
+   private reconcileNovelUserScroll(): void {
+     this.novelScrollToken++;
++    this.nativeFollow?.cancel();
+     let atEnd: boolean = false;
+     try {
+       atEnd = this.chatScroller.isAtEnd();
+@@ -1605,6 +1667,7 @@
+   }
+ 
+   private jumpNovelToBottom(): void {
++    this.novelUserScrolling = false;
+     this.followMode = transitionOnJumpToBottom(this.activeRunId.length > 0);
+     this.scheduleNovelScrollToBottom();
+   }
+@@ -1732,7 +1795,7 @@
+       if (!this.pageAlive || this.composerDraftOwner !== owner) return;
+       this.failedInput = '';
+       this.attachNovelRun(
+-        run, this.project.messages.length, text, Date.now(), '正在连接模型并组织正文…', runKind === 'quick_start');
++        run, this.project.messages.length, text, Date.now(), '正在连接模型并组织正文…', runKind === 'quick_start', runKind);
+     } catch (error) {
+       if (this.pageAlive && this.composerDraftOwner === owner) {
+         if (clearedRevision >= 0 && canRestoreFailedInput(
+@@ -1917,8 +1980,10 @@
+     const run: NovelRun = getNovelCreation().continueTool(this.projectId, resolvedId, verdict);
+     const historyCount: number = (this.project?.messages ?? []).findIndex((message: NovelMessage): boolean =>
+       novelMessageUi(message).parts.some((part: UIMessagePart): boolean => part.type === 'tool' && part.toolCallId === resolvedId));
++    const sourceMessage: NovelMessage | undefined = this.project?.messages[historyCount];
+     this.attachNovelRun(
+-      run, historyCount, '', Date.now(), '正在继续同一轮任务…');
++      run, historyCount, '', Date.now(), '正在继续同一轮任务…', false,
++      sourceMessage?.runKind ?? (sourceMessage?.mode === 'discuss' ? 'discussion' : 'prose_whole_chapter'));
+   }
+ 
+   // R08:locator(messageId+partIndex)优先精确定位到目标工具 part 的 toolCallId;
+@@ -1956,6 +2021,7 @@
+   private clearNovelRunUi(): void {
+     this.activeRunId = '';
+     this.activeQuickStart = false;
++    this.activeRunKind = null;
+     this.activeRunCreatedAt = 0;
+     this.pendingUserText = '';
+     this.activeMessages = [];
+@@ -1968,7 +2034,7 @@
+ 
+   private attachNovelRun(
+     run: NovelRun, historyCount: number, pendingUserText: string,
+-    startedAt: number, statusText: string, quickStart: boolean = false,
++    startedAt: number, statusText: string, quickStart: boolean = false, runKind: NovelRunKind | null = null,
+   ): void {
+     if (this.currentUnsub !== null) {
+       const previous: () => void = this.currentUnsub;
+@@ -1988,9 +2054,13 @@
+     this.errorMsg = '';
+     this.failedMessages = [];
+     this.failedQuickStart = false;
++    this.completedPreview = [];
+     const owner: string = this.composerDraftOwner;
+     const inputMode: NovelComposeMode = this.composeMode;
++    this.activeRunKind = runKind ?? (quickStart ? 'quick_start' :
++      (inputMode === 'discuss' ? 'discussion' : 'prose_whole_chapter'));
+     this.beginNovelGenerationFollow();
++    let terminalSeen: boolean = false;
+     const unsub: () => void = run.subscribe((event: NovelRunEvent): void => {
+       if (this.activeRunId !== run.id) return;
+       if (event.kind === 'status') {
+@@ -2003,6 +2073,7 @@
+         this.followNovelStreamingUpdate();
+       } else if (event.kind === 'completed' || event.kind === 'waiting_user' ||
+         event.kind === 'interrupted' || event.kind === 'failed') {
++        terminalSeen = true;
+         if (event.kind === 'failed' && event.unsavedMessages !== undefined) {
+           this.failedMessages = event.unsavedMessages.slice();
+           this.failedQuickStart = this.activeQuickStart;
+@@ -2012,15 +2083,30 @@
+           this.failedInputMode = inputMode;
+           this.failedInputRunKind = this.activeQuickStart ? 'quick_start' : null;
+         }
+-        this.finishNovelGenerationFollow();
+-        this.clearNovelRunUi();
+         if (event.kind === 'failed') this.errorMsg = event.message;
+         this.currentUnsub = null;
+-        this.reload();
++        void this.settleNovelRunUi(run.id);
+       }
+     });
+-    if (this.activeRunId === run.id) this.currentUnsub = unsub;
++    if (!terminalSeen && this.activeRunId === run.id) this.currentUnsub = unsub;
+     else unsub();
++  }
++
++  private async settleNovelRunUi(runId: string): Promise<void> {
++    const reloadToken: number = this.reloadToken + 1;
++    // Keep the live body until reload atomically publishes the saved transcript.
++    await this.reload();
++    if (!this.pageAlive || reloadToken !== this.reloadToken ||
++      (this.activeRunId.length > 0 && this.activeRunId !== runId)) return;
++    if (this.activeRunId === runId) {
++      // A read failure must neither hide the last body nor keep an ended run locked.
++      if (this.failedMessages.length === 0) {
++        this.completedPreview = this.activeRunTimelineMessages().map((message: UIMessage): UIMessage =>
++          this.activeRunMessage(message));
++      }
++      this.clearNovelRunUi();
++    }
++    this.finishNovelGenerationFollow();
+   }
+ 
+   private async resolveSettingProposal(proposal: NovelSettingProposal, accept: boolean): Promise<void> {
+@@ -2061,7 +2147,7 @@
+ 
+   private attachChapterRun(run: NovelRun, statusText: string): void {
+     this.attachNovelRun(
+-      run, this.project?.messages.length ?? 0, '', Date.now(), statusText);
++      run, this.project?.messages.length ?? 0, '', Date.now(), statusText, false, 'regenerate');
+   }
+ 
+   async regenerateChapter(chapterId: string): Promise<void> {
+@@ -2570,6 +2656,7 @@
+       Text(this.assistantLabel(message))
+         .fontSize(12)
+         .fontColor(INK3)
++        .height(18)
+         .margin({ bottom: 4 })
+     }
+     if (message.clonedFromMessageId !== undefined) {
+@@ -2593,7 +2680,7 @@
+           .fontSize(12).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
+           .fontColor(ACCENT_INK).margin({ left: 6 })
+       }
+-      .constraintSize({ minHeight: 44 })
++      .height(44)
+       .padding({ left: 16, right: 16 })
+       .borderRadius(22)
+       .backgroundColor(ACCENT)
+@@ -2619,17 +2706,27 @@
+   @Builder
+   activeRunHeader(show: boolean = true): void {
+     if (show) {
+-      Text(this.activeMessages.length > 0 ? '正在写' : '正在思考')
+-        .fontSize(12)
+-        .fontColor(ACCENT)
+-        .margin({ bottom: 4 })
+-      if (this.activeFrameSeen) {
+-        Text(this.activeTransport === 'live' ? '实时' :
+-          (this.activeTransport === 'buffered' ? '缓冲' : '非流式'))
+-          .fontSize(10)
+-          .fontColor(INK3)
+-          .margin({ left: 8, bottom: 4 })
+-      }
++      Row() {
++        Text(this.activeMessages.length > 0 ? '正在写' : '正在思考')
++          .fontSize(12)
++          .fontColor(ACCENT)
++        if (this.activeFrameSeen) {
++          Text(this.activeTransport === 'live' ? '实时' :
++            (this.activeTransport === 'buffered' ? '缓冲' : '非流式'))
++            .fontSize(10)
++            .fontColor(INK3)
++            .margin({ left: 8 })
++        }
++      }.height(18).alignItems(VerticalAlign.Center).margin({ bottom: 4 })
++    }
++  }
++
++  @Builder
++  private activeRunFooter(message: UIMessage): void {
++    if (message.role === 'assistant' && this.activeRunKind !== 'discussion' && !this.activeQuickStart &&
++      toText(message).trim().length > 0) {
++      // The saved collection button is44vp plus6vp margin; reserve it while writing.
++      Column() {}.height(50)
+     }
+   }
+ 
+@@ -2650,6 +2747,47 @@
+     if (!this.activeQuickStart) return this.activeMessages;
+     return this.activeMessages.filter((message: UIMessage): boolean => message.role === 'assistant' &&
+       message.parts.some((part: UIMessagePart): boolean => part.type === 'reasoning'));
++  }
++
++  private novelTimelineMessages(): NovelMessage[] {
++    if (this.project === null) return [];
++    if (this.activeRunId.length === 0) return this.project.messages;
++    const messages: NovelMessage[] = this.project.messages.slice(0, this.activeHistoryCount);
++    if (!this.activeQuickStart) {
++      for (const message of this.activeRunTimelineMessages()) {
++        if (message.role !== 'user' && message.role !== 'assistant') continue;
++        messages.push(makeNovelMessage({ id: message.id, role: message.role,
++          mode: this.activeRunKind === 'discussion' ? 'discuss' : 'write', uiMessage: message,
++          createdAt: this.activeRunCreatedAt, runKind: this.activeRunKind }));
++      }
++    }
++    return messages;
++  }
++
++  private novelTimelineMessageLive(message: NovelMessage): boolean {
++    return this.activeRunId.length > 0 && !this.activeQuickStart &&
++      this.activeMessages.some((current: UIMessage): boolean => current.id === message.uiMessage.id);
++  }
++
++  private savedTimelineMessage(seed: NovelMessage): NovelMessage {
++    return this.project?.messages.find((message: NovelMessage): boolean => message.id === seed.id) ?? seed;
++  }
++
++  private novelTimelineMessageUi(message: NovelMessage): UIMessage {
++    return this.novelTimelineMessageLive(message) ? this.activeRunMessage(message.uiMessage) :
++      this.projectMessageUi(this.savedTimelineMessage(message));
++  }
++
++  @Builder
++  private novelTimelineMessageHeader(message: NovelMessage): void {
++    if (this.novelTimelineMessageLive(message)) this.activeRunHeader(message.role === 'assistant');
++    else this.novelMessageHeader(this.savedTimelineMessage(message));
++  }
++
++  @Builder
++  private novelTimelineMessageFooter(message: NovelMessage): void {
++    if (this.novelTimelineMessageLive(message)) this.activeRunFooter(this.novelTimelineMessageUi(message));
++    else this.novelMessageFooter(this.savedTimelineMessage(message));
+   }
+ 
+   @Builder
+@@ -2709,9 +2847,7 @@
+       if (this.ghostwriteJob === null && this.ghostwriteReport !== null) {
+         ListItem() { NovelGhostwriteReportCard({ report: this.ghostwriteReport }) }
+       }
+-      ForEach(this.activeRunId.length > 0
+-        ? this.project.messages.slice(0, this.activeHistoryCount)
+-        : this.project.messages, (message: NovelMessage): void => {
++      ForEach(this.novelTimelineMessages(), (message: NovelMessage): void => {
+         if (discussionArchiveAtMessage(this.project?.discussionArchives ?? [], message) !== null) {
+           ListItem() {
+             NovelDiscussionArchiveCard({
+@@ -2724,11 +2860,19 @@
+         if (discussionMessageVisible(this.project?.discussionArchives ?? [], this.expandedArchiveIds, message)) {
+           ListItem() {
+             AgentMessageRow({
+-              message: this.projectMessageUi(message),
++              message: this.novelTimelineMessageUi(message),
+               capabilities: NOVEL_AGENT_MESSAGE_CAPABILITIES,
+-              hostHeader: (): void => { this.novelMessageHeader(message); },
+-              hostFooter: (): void => { this.novelMessageFooter(message); },
+-              streaming: false,
++              hostHeader: (): void => { this.novelTimelineMessageHeader(message); },
++              hostFooter: (): void => { this.novelTimelineMessageFooter(message); },
++              streaming: this.novelTimelineMessageLive(message),
++              textDeltasLive: this.activeTextDeltasLive,
++              isLastAssistant: this.novelTimelineMessageLive(message) &&
++                message.uiMessage.id === this.activeRunTimelineMessages()[this.activeRunTimelineMessages().length - 1]?.id,
++              animateEntrance: false,
++              onTextGrow: (): void => {
++                if (this.novelTimelineMessageLive(message)) this.followNovelStreamingUpdate();
++                else this.requestNovelNativeFollow();
++              },
+               onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void => {
+                 this.continueNovelTool(toolCallId, { kind: 'approved' }, locator);
+               },
+@@ -2784,7 +2928,17 @@
+ 
+   @Builder
+   novelTimelineActiveTail(): void {
+-    ForEach(this.failedMessages, (message: UIMessage): void => {
++    ForEach(this.completedPreview, (message: UIMessage): void => {
++      ListItem() {
++        AgentMessageRow({ message,
++          capabilities: NO_AGENT_MESSAGE_ROW_CAPABILITIES,
++          hostHeader: (): void => { this.completedPreviewHeader(); },
++          hostFooter: (): void => { this.completedPreviewFooter(); },
++          streaming: false, animateEntrance: false,
++        })
++      }
++    }, (message: UIMessage): string => `completed-preview-${message.id}`)
++    ForEach(this.activeRunId.length > 0 ? [] : this.failedMessages, (message: UIMessage): void => {
+       ListItem() {
+         AgentMessageRow({
+           message: this.unsavedDisplayMessage(message),
+@@ -2803,13 +2957,13 @@
+         }
+       }
+       if (this.activeRunTimelineMessages().length > 0) {
+-        ForEach(this.activeRunTimelineMessages(), (message: UIMessage, index: number): void => {
++        ForEach(this.activeQuickStart ? this.activeRunTimelineMessages() : [], (message: UIMessage, index: number): void => {
+           ListItem() {
+             AgentMessageRow({
+               message: this.activeRunMessage(message),
+               capabilities: NOVEL_AGENT_MESSAGE_CAPABILITIES,
+-              hostHeader: (): void => { this.activeRunHeader(index === 0); },
+-              hostFooter: (): void => { this.emptyAgentRowSlot(); },
++              hostHeader: (): void => { this.activeRunHeader(message.role === 'assistant'); },
++              hostFooter: (): void => { this.activeRunFooter(this.activeRunMessage(message)); },
+               streaming: true,
+               textDeltasLive: this.activeTextDeltasLive,
+               isLastAssistant: index === this.activeRunTimelineMessages().length - 1,
+@@ -2842,6 +2996,18 @@
+         }
+       }
+     }
++  }
++
++  @Builder
++  private completedPreviewHeader(): void {
++    Text('生成内容 · 项目尚未刷新').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
++  }
++
++  @Builder
++  private completedPreviewFooter(): void {
++    Text('重新加载项目').fontSize(12).fontColor(ACCENT).constraintSize({ minHeight: 44 })
++      .enabled(!this.busy && !this.hasBlockingNovelRun())
++      .onClick((): void => { this.reload(); })
+   }
+ 
+   @Builder
+@@ -3438,6 +3604,7 @@
+   chatPane(): void {
+     Column() {
+     Column() {
++      Stack({ alignContent: Alignment.BottomEnd }) {
+       // Chat 与 Novel 共享同一 Timeline/AgentMessageRow；Timeline 独占 16vp 水平 gutter。
+       InteractiveMessageTimeline({
+         scroller: this.chatScroller,
+@@ -3457,7 +3624,12 @@
+             this.scheduleNovelScrollToBottom();
+           }
+         },
++        onViewportHeightChange: (height: number): void => {
++          this.novelViewportHeight = height;
++          if (!this.initialScrollArmed) this.requestNovelNativeFollow();
++        },
+         onVisibleRangeChange: (_start: number, _end: number): void => {
++          this.novelLastVisibleIndex = _end;
+           if (this.initialScrollArmed) {
+             this.initialScrollArmed = false;
+             this.scheduleNovelScrollToBottom();
+@@ -3467,23 +3639,40 @@
+           if (event.type === TouchType.Down) {
+             this.userTouchActive = true;
+             this.novelScrollToken++;
++            this.nativeFollow?.cancel();
+           }
+           if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+             this.userTouchActive = false;
+-            this.reconcileNovelUserScroll();
++            if (this.novelUserScrolling) this.reconcileNovelUserScroll();
++            else this.requestNovelNativeFollow();
++          }
++        },
++        onTimelineWillScroll: (offset: number, _state: ScrollState, source: ScrollSource): void => {
++          if (offset !== 0 && (source === ScrollSource.DRAG || source === ScrollSource.FLING)) {
++            this.novelUserScrolling = true;
++            this.nativeFollow?.cancel();
+           }
+         },
+         onTimelineScroll: (_offset: number, state: ScrollState): void => {
+-          if (this.userTouchActive &&
++          if (this.novelUserScrolling &&
+             (state === ScrollState.Scroll || state === ScrollState.Fling)) {
+             this.reconcileNovelUserScroll();
+           }
+         },
+-        onTimelineScrollStop: (): void => { this.reconcileNovelUserScroll(); },
++        onTimelineScrollStop: (): void => {
++          if (this.novelUserScrolling) {
++            this.novelUserScrolling = false;
++            this.reconcileNovelUserScroll();
++          }
++        },
+       })
+-      .overlay(this.novelJumpButton(), { align: Alignment.BottomEnd })
++      .width('100%')
++      .height('100%')
++      .clip(true)
++      this.novelJumpButton()
++      }
+       .layoutWeight(1)
+-      .clip(true)
++      .width('100%')
+ 
+       // 输入器(复用聊天页 ChatInput;meta 行 = 模型 chip + 创作方式 menu,iOS 同款)
+       Column() {

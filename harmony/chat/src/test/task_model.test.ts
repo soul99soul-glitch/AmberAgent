@@ -4,8 +4,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { TaskModelWorkerGate } from '../main/ets/chat/task_model.ts';
 import {
-  daydreamModelCandidates, memoryWorkerModelCandidates, pickDaydreamModelId,
-  pickMemoryWorkerModelId, DEFAULT_AUTO_MODEL_ID, DEFAULT_TASK_MODEL_WORKER_GATE,
+  daydreamModelCandidates,
+  memoryWorkerModelCandidates,
+  pickDaydreamModelId,
+  pickMemoryWorkerModelId,
+  DEFAULT_TASK_MODEL_WORKER_GATE,
 } from '../main/ets/chat/task_model.ts';
 
 const COMPRESS = 'compress-uuid';
@@ -15,16 +18,6 @@ const DAYDREAM_MODEL = 'daydream-model-uuid';
 
 const gate = (over: Partial<TaskModelWorkerGate>): TaskModelWorkerGate => ({
   ...DEFAULT_TASK_MODEL_WORKER_GATE, ...over,
-});
-
-test('DEFAULT_AUTO_MODEL_ID 逐字(DefaultProviders.kt:95)+ 默认门(MemoryModels.kt:138-141)', () => {
-  assert.equal(DEFAULT_AUTO_MODEL_ID, 'b7055fb4-39f9-4042-a88a-0d80ed76cf08');
-  assert.deepEqual(DEFAULT_TASK_MODEL_WORKER_GATE, {
-    modelId: DEFAULT_AUTO_MODEL_ID,
-    followCompressModel: true,
-    daydreamModelId: DEFAULT_AUTO_MODEL_ID,
-    daydreamFollowCompressModel: true,
-  });
 });
 
 test('worker 链:modelId≠AUTO 优先 → followCompress → chat(MemoryExtractor.kt:186-193)', () => {

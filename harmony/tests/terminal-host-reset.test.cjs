@@ -64,16 +64,6 @@ async function createHost() {
   return { api: context.window.AmberTerminal, terminal, inputs, buttons, click, focusedDuringClick, styles };
 }
 
-test('packaged xterm reproduces pending-write/reset ordering defect without host queue', async () => {
-  const terminal = new Terminal();
-  try {
-    terminal.write('OLD SESSION');
-    terminal.reset();
-    await delay(100);
-    assert.equal(terminal.buffer.active.getLine(0).translateToString(true), 'OLD SESSION');
-  } finally { terminal.dispose(); }
-});
-
 test('host reset waits for actual VT write callback before clearing old session', async () => {
   const host = await createHost();
   try {

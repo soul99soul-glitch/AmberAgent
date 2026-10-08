@@ -16,7 +16,7 @@ import type { JsonObject, JsonValue } from './json.ts';
 import type {
   UIMessage, UIMessagePart, UIMessagePartImage, UIMessagePartReasoning, UIMessagePartTool,
 } from './message.ts';
-import { isValidToUpload, toolInputAsJson } from './message.ts';
+import { isValidToUpload, toolInputAsJson, CLAUDE_REDACTED_THINKING_METADATA_KEY } from './message.ts';
 import type { TextGenerationParams } from './provider_model.ts';
 import { reasoningLevelIsEnabled, reasoningLevelEffort } from './provider_model.ts';
 import type { ProviderSettingClaude } from './provider_settings.ts';
@@ -75,13 +75,13 @@ export const toClaudeContentBlock = (
   }
   if (part.type === 'reasoning') {
     const r: UIMessagePartReasoning = part as UIMessagePartReasoning;
-    const block: JsonObject = { type: 'thinking', thinking: r.reasoning };
-    // metadata 全量并入(签名等,Android metadata?.forEach 同语义)
-    if (r.metadata !== null && typeof r.metadata === 'object' && !Array.isArray(r.metadata)) {
-      const meta: JsonObject = r.metadata as JsonObject;
-      for (const k of Object.keys(meta)) block[k] = meta[k];
-    }
-    return block;
+    const redacted = r.metadata?.[CLAUDE_REDACTED_THINKING_METADATA_KEY];
+    if (typeof redacted === 'object' && redacted !== null && !Array.isArray(redacted) &&
+      redacted['type'] === 'redacted_thinking' && typeof redacted['data'] === 'string' &&
+      redacted['data'].trim().length > 0) return redacted;
+    const signature = metadataStr(r, 'signature');
+    if (signature === null || signature.trim().length === 0) return null;
+    return { type: 'thinking', thinking: r.reasoning, signature };
   }
   // 其他 part 类型按 Android else -> null 丢弃
   return null;

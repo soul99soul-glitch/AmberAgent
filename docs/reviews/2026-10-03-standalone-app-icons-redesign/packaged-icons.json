@@ -1,0 +1,18 @@
+{
+  "novel": {
+    "path": "resources/base/media/novel_app_icon.png",
+    "packaged_size": [
+      512,
+      512
+    ],
+    "bytes": 24776
+  },
+  "deepread": {
+    "path": "resources/base/media/deepread_app_icon.png",
+    "packaged_size": [
+      512,
+      512
+    ],
+    "bytes": 29417
+  }
+}

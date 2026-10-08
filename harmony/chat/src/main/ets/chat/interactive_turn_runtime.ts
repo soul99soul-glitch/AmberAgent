@@ -40,11 +40,26 @@ const partContentLength = (part: UIMessagePart): number => {
   return 0;
 };
 
-const assistantContentLength = (messages: UIMessage[]): number => {
+interface AssistantContentMeasurement {
+  message: UIMessage;
+  length: number;
+}
+
+const assistantContentLength = (
+  messages: UIMessage[], cache: Map<string, AssistantContentMeasurement>,
+): number => {
   let length: number = 0;
   for (const message of messages) {
     if (message.role !== 'assistant') continue;
-    for (const part of message.parts) length += partContentLength(part);
+    const previous: AssistantContentMeasurement | undefined = cache.get(message.id);
+    if (previous !== undefined && previous.message === message) {
+      length += previous.length;
+    } else {
+      let measured: number = 0;
+      for (const part of message.parts) measured += partContentLength(part);
+      cache.set(message.id, { message, length: measured });
+      length += measured;
+    }
   }
   return length;
 };
@@ -58,7 +73,9 @@ export const runInteractiveTurn = async (
   hooks: InteractiveTurnHooks = {},
 ): Promise<InteractiveTurnRunResult> => {
   const nowMs: () => number = deps.nowMs ?? ((): number => Date.now());
-  const initialLength: number = assistantContentLength(currentMessages(initialConversation));
+  // UIMessage 不可变；同一 run 内复用历史计量，同 ID 的新对象仍重新计量。
+  const contentMeasurements: Map<string, AssistantContentMeasurement> = new Map();
+  const initialLength: number = assistantContentLength(currentMessages(initialConversation), contentMeasurements);
   const externalOnUpdate: ((messages: UIMessage[]) => void) | undefined = deps.onUpdate;
   let firstParsedDeltaAt: number | null = null;
   let dataEndAt: number | null = null;
@@ -107,7 +124,7 @@ export const runInteractiveTurn = async (
         messages: UIMessage[], onChunk: (chunk: MessageChunk) => void, opts?: StreamOpts,
       ): Promise<void> => {
         resetTransport();
-        requestBaselineLength = assistantContentLength(opts?.baselineMessages ?? latestMessages);
+        requestBaselineLength = assistantContentLength(opts?.baselineMessages ?? latestMessages, contentMeasurements);
         lastAssistantContentLength = requestBaselineLength;
         return source.streamText(messages, onChunk, {
           signal: opts?.signal,
@@ -133,7 +150,7 @@ export const runInteractiveTurn = async (
     onUpdate: (messages: UIMessage[]): void => {
       if (externalOnUpdate !== undefined) externalOnUpdate(messages);
       latestMessages = messages;
-      const contentLength: number = assistantContentLength(messages);
+      const contentLength: number = assistantContentLength(messages, contentMeasurements);
       if (contentLength <= requestBaselineLength
         && (lastAssistantContentLength > requestBaselineLength
           || firstParsedDeltaAt !== null || dataEndAt !== null)) {

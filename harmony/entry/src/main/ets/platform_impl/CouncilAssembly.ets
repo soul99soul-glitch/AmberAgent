@@ -1,3 +1,4 @@
+import { createEntryJevAutoApprovalReview } from './JevAutoApprovalSupport.ets';
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { AgentTool, AgentToolActivityStore, Assistant, ChatModel, ChatStreamProvider,
   ChatToolDefinition, CompactStore, Conversation, ConversationRepository, CreateSkillToolsDeps,
@@ -10,7 +11,7 @@ import { AgentToolDispatcher, cloneMcpServerConfig, createConversationContextToo
   createConversationHistoryTools, createMcpManagementTools, createMemoryTools, createSearchTools,
   createSkillTools, createTerminalApprovalGuard, defaultToolInvocationHooks, makeAgentTool,
   makeCompactPolicy, makeMcpCommonOptions, patchAssistant, PermissionDecisionResolver,
-  ToolInvocationBarrierError } from '@amber/chat-domain';
+  ToolInvocationBarrierError, currentMessages } from '@amber/chat-domain';
 import type { AgentRuntimeSnapshot } from './AgentRuntimePrefs.ets';
 import { createAssistantLocalPrimitives } from './AssistantLocalPrimitives.ets';
 import type { CouncilSeatStore } from './CouncilSeatStore.ets';
@@ -244,7 +245,7 @@ export const createCouncilSeatLoop = async (
     }
   } });
   const firstLive: CouncilLiveScope = await deps.readLiveScope(deps.assistant.id);
-  const options: ToolLoopOptions = { tools: [], dispatcher: new AgentToolDispatcher({ hooks }),
+  const options: ToolLoopOptions = { tools: [], dispatcher: new AgentToolDispatcher({ hooks, autoApprovalReview: createEntryJevAutoApprovalReview(currentMessages(await store.load() ?? conversation)) }),
     captureInvocationMetadata: (part: UIMessagePartTool): JsonObject | null => {
       const metadata: JsonObject = terminalGuard?.captureInvocationMetadata(part) ?? {};
       if (part.toolName === 'mcp_call_tool') {

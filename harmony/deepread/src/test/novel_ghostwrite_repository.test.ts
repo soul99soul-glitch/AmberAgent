@@ -249,6 +249,8 @@ test('ghostwrite commit is atomic, replay-safe, rotates next plan and clears fin
   assert.equal(project.chapters.length, 2);
   assert.equal(project.branchSettings.thisChapterPlan, '');
   assert.equal(project.messages.length, 0);
+  assert.deepEqual(project.chapterPlots.map(pointer => pointer.stale), [false, false]);
+  assert.equal(project.chapterPlots[1].text.includes('正文-two'), true);
   const ledger = await store.readText('amberagent/novel-workspace/commit/.amber/ledger.jsonl');
   assert.equal((ledger ?? '').trim().split('\n').length, 3);
   const cold = createFileNovelRepository(store);
@@ -256,6 +258,28 @@ test('ghostwrite commit is atomic, replay-safe, rotates next plan and clears fin
   assert.equal(reloaded.stage, 'completed');
   assert.equal(reloaded.progress.length, 2);
   assert.equal((await cold.ghostwriteProgress('commit', 'job')).length, 2);
+  assert.deepEqual((await cold.loadProject('commit')).chapterPlots, project.chapterPlots);
+});
+
+test('ghostwrite appends deterministic facts without overwriting author plot', async () => {
+  const store = createMemoryFileStore();
+  const repository = createFileNovelRepository(store);
+  await repository.createProject(projectWithPlan('author-plot'));
+  let status = await repository.workspaceStatus('author-plot');
+  await repository.createProposal('author-plot', status.cas, 'author-plan', [{
+    operation: 'write', path: 'branches/main/plan/plot.md', content: '作者的长线规划。',
+  }], NOW + 1);
+  await repository.resolveProposal('author-plot', 'author-plan', true, 'adopt-author-plan', NOW + 2);
+  status = await repository.workspaceStatus('author-plot');
+  await repository.startGhostwriteJob('author-plot', status.cas, 'job', 'plan', 1, NOW + 3);
+  const job = await repository.claimGhostwriteJob('author-plot', 'job', 'owner', NOW + 4, 1000);
+  const claim = claimRef(job);
+  const prepared = await prepareCommitting(repository, 'author-plot', job, claim, 'one', null, NOW + 5);
+  await repository.commitGhostwriteChapter('author-plot', 'job', claim, prepared.receipt, NOW + 9);
+  assert.equal(await store.readText('amberagent/novel-workspace/author-plot/branches/main/plan/plot.md'), '作者的长线规划。');
+  const project = await createFileNovelRepository(store).loadProject('author-plot');
+  assert.equal(project.chapterPlots[0].text.includes(prepared.candidate.content), true);
+  assert.equal((await repository.workspaceStatus('author-plot')).plotStale, false);
 });
 
 test('ghostwrite progress counts only receipts in the current branch ancestry', async () => {

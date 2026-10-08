@@ -1,0 +1,18 @@
+✔ actual SSE with absent/wrong MIME delivers before HTTP completion: {} (20.00475ms)
+✔ actual SSE with absent/wrong MIME delivers before HTTP completion: {"Content-Type":"text/plain"} (11.585834ms)
+✔ actual SSE with absent/wrong MIME delivers before HTTP completion: {"content-type":"application/octet-stream"} (6.883625ms)
+✔ BOM/initial CRLF and split SSE field prefix identify one continuous stream (6.329792ms)
+✔ recognized HTTP failure holds SSE-looking body until the real error response (6.386667ms)
+✔ unknown status does not become success after body-based SSE identification (6.47375ms)
+✔ ordinary JSON and text containing data: retain HTTP-gated delivery (11.563958ms)
+✔ trusted MIME preserves existing direct delivery before status is known (6.623209ms)
+✔ body-confirmed SSE delivery survives late non-SSE response headers (5.215709ms)
+✔ prefix probe is bounded and never scans later text for an SSE marker (6.234209ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 229.785417

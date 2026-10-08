@@ -83,7 +83,6 @@ export struct SlashCommandPanel {
         .width('100%')
       }
         .align(Alignment.TopStart)
-      .height('auto')
       .constraintSize({ maxHeight: 320 })
       .scrollable(ScrollDirection.Vertical)
       .scrollBar(BarState.Off)
@@ -91,9 +90,6 @@ export struct SlashCommandPanel {
       .backgroundColor(SURFACE)
       .borderRadius(12)
       .border({ width: 1, color: LINE })
-      // The parent Stack is the composer; position above its actual height.
-      .position({ left: 0, bottom: '100%' })
-      .zIndex(20)
       .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 8 }))
         .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       .shadow({ radius: 10, color: '#22000000', offsetY: 3 })

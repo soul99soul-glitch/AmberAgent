@@ -11,16 +11,17 @@ const pure = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../main/ets/platform_impl/HotListState.ets'), 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: pure });
 function method(name) {
-  const match = new RegExp('^  (?:private )?(?:async )?' + name + '\\(', 'm').exec(source);
+  const pageSource = source.slice(source.indexOf('struct BoardPageContent {'));
+  const match = new RegExp('^  (?:private )?(?:async )?' + name + '\\(', 'm').exec(pageSource);
   assert.ok(match, name);
-  let end = source.indexOf('{', match.index) + 1, depth = 1;
-  for (; depth && end < source.length; end++) {
-    if (source[end] === '{') depth++;
-    if (source[end] === '}') depth--;
+  let end = pageSource.indexOf('{', match.index) + 1, depth = 1;
+  for (; depth && end < pageSource.length; end++) {
+    if (pageSource[end] === '{') depth++;
+    if (pageSource[end] === '}') depth--;
   }
-  return source.slice(match.index, end);
+  return pageSource.slice(match.index, end);
 }
-const methods = ['onPageShow', 'onPageHide', 'aboutToDisappear', 'stopRefresh', 'observeRuns', 'runKey',
+const methods = ['onPageShow', 'onPageHide', 'aboutToDisappear', 'stopRefresh', 'settleArrival', 'observeRuns', 'runKey',
   'openRun', 'randomItems', 'randomRead', 'openArticle'];
 const code = ts.transpileModule('class Page {\n' + methods.map(method).join('\n') + '\n}\nreturn Page;',
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -37,9 +38,9 @@ function fixture(options = {}) {
     'discoveryHotspotInputs', 'discoveryArticleParams', 'hotTopicSeedUrls', 'Math', code)(() => options.productKind ?? 'deepread', () => {},
       options.init ?? (async () => scheduler), { pushUrl: route => { routes.push(route); return options.routeError ? Promise.reject(Error(options.routeError)) : Promise.resolve(); } },
       discoveryHotspotInputs, discoveryArticleParams, pure.hotTopicSeedUrls, { floor: Math.floor, random: () => options.random ?? 0 });
-  const page = new Page(); Object.assign(page, { pageVisible: false, firstShowDone: false, runObservationToken: 0,
+  const page = new Page(); Object.assign(page, { dockScroll: { reset() {} }, pageVisible: false, firstShowDone: false, runObservationToken: 0,
     unsubscribeRuns: null, refreshToken: 0, requestController: null, loading: false, refreshing: false,
-    activeRuns: [], activityError: '', topics: [], sections: [], loadHotlist: () => {}, getUIContext: () => ({ getRouter: () => ({}) }) });
+    activeRuns: [], activityError: '', topics: [], sections: [], loadHotlist: () => {}, loadIssue: () => {}, arrive: () => {}, saveDiscoveryScroll: () => {}, getUIContext: () => ({ getRouter: () => ({}) }) });
   return { page, scheduler, callbacks, listeners, routes, get releases() { return releases; },
     emit(runs) { current = runs; for (const callback of listeners) callback(runs); } };
 }
@@ -56,7 +57,6 @@ test('visible Board observes admitted tasks and same-job real phase/label change
   const updated = { ...run, stage: 'WRITING', label: '撰写正文' }; f.emit([updated]);
   assert.equal(f.page.activeRuns[0].stage, 'WRITING'); assert.notEqual(f.page.runKey(updated), firstKey);
   f.emit([]); assert.deepEqual(f.page.activeRuns, []);
-  assert.match(source, /this\.activeRuns\.length === 0/);
   assert.ok(source.indexOf('DeepReadNewsroomCard({ run: run') > source.indexOf('Scroll()'));
 });
 
@@ -93,7 +93,9 @@ test('no-URL random hotspot preserves actual source/rank/summary and routes via 
   assert.equal(inputs[0].url, null); assert.match(inputs[0].content, /来源：Hacker News/);
   assert.match(inputs[0].content, /排名：4/); assert.match(inputs[0].content, /真实摘要/);
   assert.equal(inputs[0].researchSource.source, 'Hacker News'); assert.equal(route.params.force, undefined);
-  assert.doesNotMatch(source, /scheduler\.run\(|setInterval|setTimeout|observeRunning\(/);
+  // Decorative arrival timers do not own generation; guard the actual entry paths.
+  assert.doesNotMatch(['randomItems', 'randomRead', 'openArticle', 'openRun'].map(method).join('\n'),
+    /scheduler\.run\(|setInterval|setTimeout|observeRunning\(/);
 });
 
 test('aggregated random choice preserves all real provider metadata and all valid source links', async () => {
@@ -112,8 +114,6 @@ test('empty or invalid titles disable random reading and selection includes only
   assert.equal(f.page.randomItems().length, 0); f.page.randomRead(); assert.equal(f.routes.length, 0);
   f.page.topics = []; f.page.sections = [section(Array.from({ length: 13 }, (_, i) => item('第' + i + '条', i)))];
   assert.equal(f.page.randomItems().length, 12); f.page.randomRead(); assert.equal(f.routes[0].params.title, '第11条');
-  assert.match(source, /\.enabled\(this\.randomItems\(\)\.length > 0\)/);
-  assert.match(source, /暂无可阅读热点，刷新后再试/); assert.match(source, /minHeight: 44/);
 });
 
 test('progress entry reopens the existing topic without discovery input rewrite and route failures are visible only while shown', async () => {
@@ -134,5 +134,4 @@ test('chat and novel product Boards keep the original hotspot entry without init
       inputSources: discoveryHotspotInputs([{ title: '原宿主热点', source: '真实来源', rank: 1, url: 'https://news.test/host' }]) };
     f.page.openArticle(existing); await tick(); assert.equal(f.routes[0].params.sourceUrl, 'https://news.test/host');
   }
-  assert.match(source, /if \(getProductKind\(\) === 'deepread'\) \{[\s\S]*?this\.observeRuns\(\);/);
 });

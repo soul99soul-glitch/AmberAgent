@@ -145,3 +145,6 @@ export const replyGoogleLoopback: (
   handleId: string, connectionId: string, status: number
 ) => Promise<void>;
 export const closeGoogleLoopback: (handleId: string) => Promise<void>;
+
+/** API20 native VSync request; returns0 when accepted. */
+export const setStreamingFrameRateActive: (active: boolean) => number;

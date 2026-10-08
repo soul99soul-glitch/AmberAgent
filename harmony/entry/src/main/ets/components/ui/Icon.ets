@@ -116,6 +116,7 @@ export struct Icon {
     if (this.name === 'edit') return $r('sys.symbol.square_and_pencil');
     if (this.name === 'trash') return $r('sys.symbol.trash');
     if (this.name === 'check') return $r('sys.symbol.checkmark');
+    if (this.name === 'check_circle') return $r('sys.symbol.checkmark_circle');
     if (this.name === 'close') return $r('sys.symbol.xmark');
     if (this.name === 'plus') return $r('sys.symbol.plus');
     if (this.name === 'chevron_left') return $r('sys.symbol.chevron_left');

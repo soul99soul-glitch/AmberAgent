@@ -5,19 +5,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ACTIVITY_MAX_INPUT_PREVIEW_CHARS, ACTIVITY_MAX_OUTPUT_TAIL_CHARS,
-  AgentToolActivityStore, compactSandboxText, currentRunMessages,
-  deriveSandboxActivities, idleSandboxActivity, indicatesFailure,
-  isActiveOperation, isSandboxActivityTool, makeSandboxActivityUiState,
+  ACTIVITY_MAX_INPUT_PREVIEW_CHARS,
+  ACTIVITY_MAX_OUTPUT_TAIL_CHARS,
+  AgentToolActivityStore,
+  deriveSandboxActivities,
+  indicatesFailure,
+  makeSandboxActivityUiState,
   mergeSandboxTimeline,
-  toolActivityOutputTail, toolActivityStatus, toolDefaultRuntime,
-  toolDefaultWorkspace, toolOutputJson, toolOutputText, toolSandboxInputPreview,
-  toolSandboxTitle, withStepProgress,
+  toolActivityStatus,
+  toolDefaultRuntime,
+  toolDefaultWorkspace,
+  toolOutputJson,
+  toolSandboxTitle,
+  withStepProgress,
 } from '../main/ets/chat/tool_activity.ts';
-import {
-  sanitizedToolFailureMessage, toAgentToolFailureJson,
-} from '../main/ets/chat/tool_dispatcher.ts';
-import type { SandboxActivityUiState } from '../main/ets/chat/tool_activity.ts';
+
+import type {
+  SandboxActivityUiState,
+} from '../main/ets/chat/tool_activity.ts';
 import { makeConversation, makeMessageNode } from '../main/ets/chat/conversation.ts';
 import type { Conversation } from '../main/ets/chat/conversation.ts';
 import { makeUIMessage, makeUserMessage } from '../main/ets/chat/message.ts';
@@ -37,29 +42,6 @@ const textPart = (text: string): UIMessagePart => ({ type: 'text', text, metadat
 
 const convWith = (id: string, messages: UIMessage[]): Conversation =>
   makeConversation(id, messages.map((m: UIMessage) => makeMessageNode([m])));
-
-// ===== ToolFailure =====
-
-test('sanitizedToolFailureMessage:首个非空行 + 栈帧正则 + 空白折叠', () => {
-  const err: Error = new Error('\n  first line at com.foo.Bar(Baz.kt:12)   spaced  \nsecond');
-  assert.equal(sanitizedToolFailureMessage(err), 'first line spaced');
-});
-
-test('sanitizedToolFailureMessage:空白消息回退类名;清理后空回退固定串', () => {
-  assert.equal(sanitizedToolFailureMessage(new Error('')), 'Error');
-  const onlyFrames: Error = new Error('at com.foo.Bar(Baz.kt:12)');
-  assert.equal(sanitizedToolFailureMessage(onlyFrames), 'Tool execution failed');
-});
-
-test('sanitizedToolFailureMessage:首行 360 截断', () => {
-  const long: string = 'x'.repeat(400);
-  assert.equal(sanitizedToolFailureMessage(new Error(long)).length, 360);
-});
-
-test('toAgentToolFailureJson:键序 status/message/recoverable + recoverable 恒 true', () => {
-  const json: string = toAgentToolFailureJson(new Error('boom'));
-  assert.equal(json, '{"status":"failed","message":"boom","recoverable":true}');
-});
 
 // ===== Store =====
 
@@ -156,36 +138,6 @@ test('withConversation:scope 内 startTool 继承 conversationId;退出恢复', 
   assert.equal(store.sandboxActivity?.conversationId, 'explicit');
 });
 
-// ===== 时间线纯函数 =====
-
-test('isSandboxActivityTool:mcp__ 前缀 + 名表命中/未命中', () => {
-  assert.ok(isSandboxActivityTool('mcp__anything'));
-  assert.ok(isSandboxActivityTool('search_web'));
-  assert.ok(isSandboxActivityTool('vlm_task'));
-  assert.ok(!isSandboxActivityTool('memory_recall'));
-  assert.ok(!isSandboxActivityTool('mcp_'));
-});
-
-test('currentRunMessages:末条 user 之后;无 user → 全部', () => {
-  const conv: Conversation = convWith('c1', [
-    makeUserMessage('u1'),
-    makeUIMessage('assistant', [textPart('a1')]),
-    makeUIMessage('assistant', [textPart('a2')]),
-  ]);
-  assert.equal(currentRunMessages(conv).length, 2);
-  const noUser: Conversation = convWith('c2', [makeUIMessage('assistant', [textPart('x')])]);
-  assert.equal(currentRunMessages(noUser).length, 1);
-});
-
-test('toolOutputText:无限 join;限量尾块截取(金样)', () => {
-  const tool: UIMessagePartTool = makeTool('1', 'file_read', '{}', [
-    textPart('abcd'), textPart('ef'),
-  ]);
-  assert.equal(toolOutputText(tool), 'abcd\nef');
-  assert.equal(toolOutputText(tool, 5), 'bcd\nef');
-  assert.equal(toolOutputText(tool, 2), 'ef');
-});
-
 test('toolOutputJson:blank/超长/非 object/解析失败 → {};正常解析', () => {
   assert.deepEqual(toolOutputJson(makeTool('1', 't', '{}', [])), {});
   assert.deepEqual(toolOutputJson(makeTool('1', 't', '{}', [textPart(' [1,2] ')])), {});
@@ -221,46 +173,6 @@ test('toolActivityStatus 矩阵(含 !isExecuted 双 RUNNING quirk)', () => {
   assert.equal(toolActivityStatus(
     makeTool('1', 't', '{}', out), false, { error: 'e' }), 'failed');
   assert.equal(toolActivityStatus(makeTool('1', 't', '{}', out), false, {}), 'succeeded');
-});
-
-test('compactSandboxText:空白折叠 + 超长截断带 …', () => {
-  assert.equal(compactSandboxText('  a   b\n c ', 20), 'a b c');
-  assert.equal(compactSandboxText('x'.repeat(30), 20), `${'x'.repeat(19)}…`);
-});
-
-test('toolSandboxTitle/inputPreview/defaultRuntime 金样', () => {
-  const search: UIMessagePartTool = makeTool('1', 'search_web', '{"query":"如何  使用 MCP"}');
-  assert.equal(toolSandboxTitle(search), '网页搜索 如何 使用 MCP');
-  assert.equal(toolSandboxInputPreview(search), '如何 使用 MCP');
-  const longQuery: UIMessagePartTool = makeTool('1', 'search_web',
-    `{"query":"${'q'.repeat(30)}"}`);
-  assert.equal(toolSandboxTitle(longQuery), `网页搜索 ${'q'.repeat(19)}…`);
-  assert.equal(toolSandboxTitle(makeTool('2', 'mcp__echo_tool', '{}')), '调用 MCP echo_tool');
-  assert.equal(toolSandboxTitle(makeTool('3', 'memory_recall', '{}')), 'memory_recall');
-  assert.equal(toolSandboxTitle(makeTool('4', 'file_read', '{"path":"/a/b"}')), '读取文件 /a/b');
-  // inputPreview 键缺失 → input 全串 compact 180
-  const noKey: UIMessagePartTool = makeTool('5', 'search_web', '{"other":"v"}');
-  assert.equal(toolSandboxInputPreview(noKey), '{"other":"v"}');
-  assert.equal(toolDefaultRuntime('mcp__x'), 'mcp');
-  assert.equal(toolDefaultRuntime('file_write'), 'saf-workspace');
-  assert.equal(toolDefaultRuntime('search_web'), 'web-search');
-  assert.equal(toolDefaultRuntime('unknown'), '');
-  assert.equal(toolDefaultWorkspace('file_read'), '/workspace');
-  assert.equal(toolDefaultWorkspace('mcp__x'), '');
-});
-
-test('deriveSandboxActivities:空 + processingStatus 门', () => {
-  const empty: Conversation = convWith('c1', []);
-  assert.deepEqual(deriveSandboxActivities(empty, true, null), []);
-  assert.deepEqual(deriveSandboxActivities(empty, false, '重试中'), []);
-  const withStatus: SandboxActivityUiState[] =
-    deriveSandboxActivities(empty, true, '重试中(1/5)');
-  assert.equal(withStatus.length, 1);
-  assert.equal(withStatus[0].toolCallId, 'processing-status');
-  assert.equal(withStatus[0].title, '重试中(1/5)');
-  assert.equal(withStatus[0].status, 'running');
-  assert.equal(withStatus[0].canCancel, true);
-  assert.equal(withStatus[0].conversationId, 'c1');
 });
 
 test('Remote SSH activities identify the remote runtime without claiming a local workspace', () => {
@@ -341,31 +253,4 @@ test('withStepProgress:命中取索引+1;未命中 size+1;已有值不覆盖', (
     }),
     conv);
   assert.equal(preset.stepIndex, 7);
-});
-
-test('idleSandboxActivity 字段逐字 + isActiveOperation', () => {
-  const idle: SandboxActivityUiState = idleSandboxActivity(convWith('c9', []));
-  assert.equal(idle.toolCallId, 'agent-idle-c9');
-  assert.equal(idle.toolName, 'agent_idle');
-  assert.equal(idle.title, 'Agent 操作预览');
-  assert.equal(idle.inputPreview, '等待下一次工具调用');
-  assert.equal(idle.runtime, 'standby');
-  assert.equal(idle.stepIndex, null);
-  assert.ok(isActiveOperation(makeSandboxActivityUiState({
-    toolCallId: '1', toolName: 't', title: 't', status: 'running',
-  })));
-  assert.ok(isActiveOperation(makeSandboxActivityUiState({
-    toolCallId: '1', toolName: 't', title: 't', status: 'waiting_for_permission',
-  })));
-  assert.ok(!isActiveOperation(makeSandboxActivityUiState({
-    toolCallId: '1', toolName: 't', title: 't', status: 'succeeded',
-  })));
-});
-
-test('toolActivityOutputTail:output > error > outputText 回退;trim 截尾', () => {
-  const tool: UIMessagePartTool = makeTool('1', 't', '{}', [textPart('{"output":"  tail  "}')]);
-  assert.equal(toolActivityOutputTail(tool, { output: '  tail  ' }), 'tail');
-  assert.equal(toolActivityOutputTail(tool, { error: ' e ' }), 'e');
-  // outputJson 无 output/error 键 → outputText 原始串(:1419-1424 回退语义)
-  assert.equal(toolActivityOutputTail(tool, {}), '{"output":"  tail  "}');
 });

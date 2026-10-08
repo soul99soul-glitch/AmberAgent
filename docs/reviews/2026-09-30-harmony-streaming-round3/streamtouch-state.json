@@ -1,0 +1,33 @@
+{
+  "candidateHap": "/tmp/amber-stream120-native-touch.hap",
+  "candidateSha256": "e0c29a66924cd3f25b3248042b5ecac2b2de4d1273669ffbff00eb7b2aaf1c2e",
+  "controlHap": "/tmp/amber-stream120-native-control.hap",
+  "controlSha256": "a0ef199c2252fdc87e06e925030a7e7ff2d24e67137f783dd0ce6d1e7b46b858",
+  "sourceHashes": {
+    "harmony/entry/src/main/cpp/napi_init.cpp": "c33e779634fd31c20164135c85a9846a823b3b80956f7b8ba4709c04aca0e3e5",
+    "harmony/entry/src/main/cpp/CMakeLists.txt": "5aea3454dfe8558243daa412cc14aa15fc10811ee90e2b440883bff31ab704b8",
+    "harmony/entry/src/main/cpp/types/libamber_native/index.d.ts": "32708c6e809d7943100aaf8e1e82c39e06cb00857712c7eb27a46610105f5a1f",
+    "harmony/entry/src/main/ets/pages/ChatPage.ets": "4649e8937650e12982235f649b1455ebd2320719b64e1c8e5ed72ef2146aaccb",
+    "harmony/entry/src/main/cpp/stream_touch_probe.cpp": "ba097e972965b38e026f9effe7314adbf59be9b8cdac492dcc0739fc0d192614",
+    "harmony/entry/src/main/cpp/stream_touch_probe.h": "9494d513f9ec4ee2c94012b2879dcb0f60a6ad211cbbca09d6860e2f9af045f8",
+    "harmony/entry/src/main/ets/components/StreamTouchProbe.ets": "3b09b8c673329cde1b2216e24d5c409b0a920e1eaacd57c78e4b24b4d777da12",
+    "harmony/chat/src/test/stream_touch_probe.test.cjs": "257d1adfc99b961e53443122f4bbca8c5686cdfe23b5e9ba77576a873d9b87a2"
+  },
+  "tests": 23,
+  "lintErrors": 0,
+  "lintWarnings": 3,
+  "installedTrial": true,
+  "pid": 9325,
+  "restoreInstalled": true,
+  "trialResult": "Five successful same-window DOWN/UP pairs received; RS TouchIdle still occurred about3s after send; sustained motion samples58-60fps. Not effective on this device.",
+  "trace": {
+    "path": "/tmp/streamtouch2.trace",
+    "bytes": 71558204,
+    "sha256": "127a2481234eb4810ae619e372e21c50eca223978ee62dff449d849828f8c5f5"
+  },
+  "restoreLaunched": true,
+  "restoredPid": 15658,
+  "restorePage": "ChatList verified",
+  "restoredTests": 17,
+  "sourceRestoredExactly": true
+}

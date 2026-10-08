@@ -1,3 +1,4 @@
+import { permissionDecisionTraceToJson } from '../tool_permission.ts';
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { JsonObject, JsonValue } from '../json.ts';
 import type { UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartTool } from '../message.ts';
@@ -271,12 +272,14 @@ export const createRecipeLoopAdapter = (deps: RecipeLoopAdapterDeps): RecipeLoop
         const def = port.primitive('recipe_import');
         if (!def) return saveTerminal(parent, checkpoint, port, new RecipeRunError('missing_tool', 'recipe_import is unavailable.'));
         if (parent.approvalState.type === 'pending') return parent;
-        const decision = port.decide(parent, def);
+        const decision = await port.decide(parent, def, signal);
+        if (signal?.aborted) return saveTerminal(parent, checkpoint, port, new RecipeRunError('cancelled', 'Import cancelled.', 'cancelled'));
         if (decision.action === 'deny' || parent.approvalState.type === 'denied') {
           return saveTerminal(parent, checkpoint, port, new RecipeRunError('import_denied', decision.reason));
         }
         if (decision.action === 'ask') {
-          const pending = { ...parent, output: [], approvalState: { type: 'pending' as const } };
+          const pending = { ...parent, output: [], approvalState: { type: 'pending' as const },
+            metadata: { ...parent.metadata, permission_trace: permissionDecisionTraceToJson(decision.trace) } };
           await port.saveParent(pending); return pending;
         }
         let result: RecipeDescriptor;
@@ -310,10 +313,12 @@ export const createRecipeLoopAdapter = (deps: RecipeLoopAdapterDeps): RecipeLoop
           try { step = { ...step, metadata: port.capture(step) }; }
           catch (error) { return saveTerminal(parent, checkpoint, port, failure(error as Error)); }
         }
-        const decision = port.decide(step, def);
+        const decision = await port.decide(step, def, signal);
+        if (signal?.aborted) return saveTerminal(parent, checkpoint, port, new RecipeRunError('step_cancelled', 'Recipe execution was cancelled.', 'cancelled'));
         if (decision.action === 'deny') return saveTerminal(parent, checkpoint, port, new RecipeRunError('step_denied', decision.reason));
         if (decision.action === 'ask') {
-          checkpoint = { ...checkpoint, phase: 'awaiting_approval', pendingStep: { ...step, approvalState: { type: 'pending' } } };
+          checkpoint = { ...checkpoint, phase: 'awaiting_approval', pendingStep: { ...step, approvalState: { type: 'pending' },
+            metadata: { ...step.metadata, permission_trace: permissionDecisionTraceToJson(decision.trace) } } };
           const pending = { ...withCheckpoint(parent, checkpoint), output: [], approvalState: { type: 'pending' as const } };
           await port.saveParent(pending); return pending;
         }

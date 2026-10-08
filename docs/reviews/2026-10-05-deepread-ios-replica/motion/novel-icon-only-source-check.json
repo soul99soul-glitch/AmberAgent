@@ -1,0 +1,12 @@
+{
+  "sourceProduct": "novel",
+  "sourceSnapshotDate": "2026-10-03",
+  "filesChecked": 1487,
+  "changed": [
+    "AppScope/resources/base/media/app_icon.png",
+    "entry/src/main/resources/base/media/app_icon.png",
+    "entry/src/main/resources/phone/media/app_icon.png"
+  ],
+  "priorSignedHapSha256": "b3e1d44b6b9176ed797ab4bf3797d3e1d87a60a5b64fec7f9c6a013ff6fc221b",
+  "rationale": "Icon-only rebuild from accepted standalone snapshot, including phone-qualified icon; reuse previously delivered native payload."
+}

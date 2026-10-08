@@ -153,6 +153,12 @@ const overlaps = (matches: InlineMatch[], start: number, end: number): boolean =
   return false;
 };
 
+const isEscaped = (text: string, index: number): boolean => {
+  let count: number = 0;
+  for (let i: number = index - 1; i >= 0 && text[i] === '\\'; i--) count++;
+  return count % 2 !== 0;
+};
+
 export const parseInline = (text: string): InlineToken[] => {
   if (text.length === 0) return [];
 
@@ -162,6 +168,7 @@ export const parseInline = (text: string): InlineToken[] => {
   // 1. 行内代码 `code`
   const codeRe = /`([^`]+)`/g;
   while ((m = codeRe.exec(text)) !== null) {
+    if (isEscaped(text, m.index)) continue;
     matches.push({
       start: m.index,
       end: m.index + m[0].length,
@@ -169,28 +176,52 @@ export const parseInline = (text: string): InlineToken[] => {
     });
   }
 
-  // 1b. 公式:$$..$$(展示)优先于 $..$(行内);$ 内容不跨行、不含 $
-  const mathDisplayRe = /\$\$([^$\n]+)\$\$/g;
-  while ((m = mathDisplayRe.exec(text)) !== null) {
+  // Escaped labels are literal metadata, so their delimiters must not become math or code.
+  const escapedLinkRe = /\[((?:\\.|[^\]\\])+)\]\(([^)]+)\)/g;
+  while ((m = escapedLinkRe.exec(text)) !== null) {
     const start: number = m.index;
-    const end: number = m.index + m[0].length;
-    if (overlaps(matches, start, end)) continue;
-    matches.push({
-      start,
-      end,
-      token: { type: 'math', latex: m[1], display: true } as InlineMathToken,
-    });
+    const end: number = start + m[0].length;
+    if (!m[1].includes('\\') || isEscaped(text, start) || overlaps(matches, start, end)
+      || (start > 0 && text[start - 1] === '!' && !isEscaped(text, start - 1))) continue;
+    const url: string | null = sanitizeUrl(m[2]);
+    if (url === null) continue;
+    matches.push({ start, end, token: { type: 'link',
+      text: m[1].replace(/\\([\\`*_{}\[\]()<>#!|$])/g, '$1'), url } as InlineLinkToken });
   }
-  const mathInlineRe = /\$([^$\n]+)\$/g;
-  while ((m = mathInlineRe.exec(text)) !== null) {
-    const start: number = m.index;
-    const end: number = m.index + m[0].length;
-    if (overlaps(matches, start, end)) continue;
-    matches.push({
-      start,
-      end,
-      token: { type: 'math', latex: m[1], display: false } as InlineMathToken,
-    });
+
+  // 1b. 标准数学定界符；展示公式可以跨行，代码及转义定界符不参与。
+  for (let pos: number = 0; pos < text.length; pos++) {
+    if (isEscaped(text, pos) || overlaps(matches, pos, pos + 1)) continue;
+    let opening: string = '';
+    let closing: string = '';
+    let display: boolean = false;
+    if (text.startsWith('$$', pos)) {
+      opening = '$$'; closing = '$$'; display = true;
+    } else if (text.startsWith('\\[', pos)) {
+      opening = '\\['; closing = '\\]'; display = true;
+    } else if (text.startsWith('\\(', pos)) {
+      opening = '\\('; closing = '\\)';
+    } else if (text[pos] === '$' && (pos === 0 || text[pos - 1] !== '$')) {
+      opening = '$'; closing = '$';
+    }
+    if (opening.length === 0) continue;
+    let end: number = pos + opening.length;
+    while (end < text.length) {
+      if (!display && text[end] === '\n') break;
+      if (text.startsWith(closing, end) && !isEscaped(text, end) &&
+        !(closing === '$' && (text[end + 1] === '$' || text[end - 1] === '$'))) break;
+      end++;
+    }
+    if (end < text.length && text.startsWith(closing, end) && end > pos + opening.length) {
+      const stop: number = end + closing.length;
+      if (!overlaps(matches, pos, stop)) {
+        matches.push({ start: pos, end: stop,
+          token: { type: 'math', latex: text.substring(pos + opening.length, end), display } as InlineMathToken });
+      }
+      pos = stop - 1;
+    } else {
+      pos += opening.length - 1;
+    }
   }
 
   // 2. 图片 ![alt](url)
@@ -271,6 +302,19 @@ export const parseInline = (text: string): InlineToken[] => {
   return tokens.length > 0 ? tokens : [{ type: 'text', text } as InlineTextToken];
 };
 
+// A blank line inside an unfinished display formula is not a reusable Markdown boundary.
+export const hasUnclosedDisplayMath = (text: string): boolean => {
+  if (!text.includes('$$') && !text.includes('\\[')) return false;
+  for (const token of parseInline(text)) {
+    if (token.type !== 'text') continue;
+    for (let i: number = 0; i < token.text.length; i++) {
+      if (!isEscaped(token.text, i) &&
+        (token.text.startsWith('$$', i) || token.text.startsWith('\\[', i))) return true;
+    }
+  }
+  return false;
+};
+
 // ===== 块级解析 =====
 
 interface CodeBlockRange {
@@ -282,7 +326,7 @@ interface CodeBlockRange {
 
 const findCodeBlocks = (text: string): CodeBlockRange[] => {
   const blocks: CodeBlockRange[] = [];
-  const regex: RegExp = /```([^\n]*)\n([\s\S]*?)```/g;
+  const regex: RegExp = /```([^\n]*)\n([\s\S]*?)(?:```|$)/g;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
     blocks.push({
@@ -383,6 +427,27 @@ const parseMarkdownInternal = (markdown: string): MarkdownBlock[] => {
       }
       i++;
       continue;
+    }
+
+    // 独立展示公式在块级收集，内部空行/减号不拆成段落或列表。
+    const mathOpening: string = line.trim().startsWith('$$') ? '$$'
+      : line.trim().startsWith('\\[') ? '\\[' : '';
+    if (mathOpening.length > 0) {
+      const closing: string = mathOpening === '$$' ? '$$' : '\\]';
+      const formulaLines: string[] = [];
+      let found: boolean = false;
+      for (let end: number = i; end < lines.length; end++) {
+        formulaLines.push(lines[end]);
+        if (!lines[end].trim().endsWith(closing)) continue;
+        const tokens: InlineToken[] = parseInline(formulaLines.join('\n').trim());
+        if (tokens.length === 1 && tokens[0].type === 'math' && tokens[0].display) {
+          blocks.push({ kind: 'paragraph', inlines: tokens } as MarkdownBlockParagraph);
+          i = end + 1;
+          found = true;
+          break;
+        }
+      }
+      if (found) continue;
     }
 
     // 标题 # ~ ######
@@ -502,7 +567,7 @@ const parseMarkdownInternal = (markdown: string): MarkdownBlock[] => {
     const paraLines: string[] = [];
     while (i < lines.length &&
       lines[i].trim().length > 0 &&
-      !/^(#{1,6})\s/.test(lines[i]) &&
+      !/^(#{1,6})\s+(.+)$/.test(lines[i]) &&
       !/^(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i]) &&
       !lines[i].startsWith('>') &&
       !/^\s*[-*]\s+/.test(lines[i]) &&

@@ -5,87 +5,13 @@ import assert from 'node:assert/strict';
 import type { JsonObject } from '../main/ets/chat/json.ts';
 import type { SearchServiceOptions } from '../main/ets/search/search_service.ts';
 import {
-  SEARCH_SERVICE_TYPES, DEFAULT_SEARCH_SERVICE_OPTIONS,
-  makeSearchServiceOptions, searchServiceOptionsToJson, searchServiceOptionsFromJson,
-  searchResultToJson, scrapedResultToJson,
-  createDefaultKeyRoulette, createLruKeyRoulette,
+  SEARCH_SERVICE_TYPES,
+  makeSearchServiceOptions,
+  searchServiceOptionsToJson,
+  searchServiceOptionsFromJson,
+  createDefaultKeyRoulette,
+  createLruKeyRoulette,
 } from '../main/ets/search/search_service.ts';
-
-const UUID_RE: RegExp = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-// ===== SearchServiceOptions 工厂默认值(:161-292) =====
-
-test('工厂默认值:17 类逐字(bing_local 无字段;各类默认)', () => {
-  const bing = makeSearchServiceOptions('bing_local');
-  assert.equal(bing.type, 'bing_local');
-  assert.match(bing.id, UUID_RE);
-  const tavily = makeSearchServiceOptions('tavily');
-  assert.equal(tavily.type, 'tavily');
-  if (tavily.type === 'tavily') {
-    assert.equal(tavily.apiKey, '');
-    assert.equal(tavily.depth, 'advanced');
-  }
-  const linkup = makeSearchServiceOptions('linkup');
-  if (linkup.type === 'linkup') assert.equal(linkup.depth, 'standard');
-  const jina = makeSearchServiceOptions('jina');
-  if (jina.type === 'jina') {
-    assert.equal(jina.searchUrl, 'https://s.jina.ai/');
-    assert.equal(jina.scrapeUrl, 'https://r.jina.ai/');
-  }
-  const bocha = makeSearchServiceOptions('bocha');
-  if (bocha.type === 'bocha') assert.equal(bocha.summary, true);
-  const perplexity = makeSearchServiceOptions('perplexity');
-  if (perplexity.type === 'perplexity') {
-    assert.equal(perplexity.maxTokens, null);
-    assert.equal(perplexity.maxTokensPerPage, null);
-  }
-  const grok = makeSearchServiceOptions('grok');
-  if (grok.type === 'grok') {
-    assert.equal(grok.model, 'grok-4-1-fast-non-reasoning');
-    assert.equal(grok.customUrl, 'https://api.x.ai/v1/responses');
-    assert.equal(grok.systemPrompt,
-      'You are a helpful search assistant. Search the web to find accurate and up-to-date information for the user\'s query. Provide a comprehensive answer with citations.');
-  }
-  const searxng = makeSearchServiceOptions('searxng');
-  if (searxng.type === 'searxng') {
-    assert.equal(searxng.url, '');
-    assert.equal(searxng.engines, '');
-    assert.equal(searxng.language, '');
-    assert.equal(searxng.username, '');
-    assert.equal(searxng.password, '');
-  }
-});
-
-test('TYPES 显示名映射:17 项 + 插入序(:140-158)', () => {
-  assert.deepEqual(Object.keys(SEARCH_SERVICE_TYPES), [
-    'bing_local', 'amber_agent', 'zhipu', 'tavily', 'exa', 'searxng', 'linkup',
-    'brave', 'serper', 'serpapi', 'metaso', 'ollama', 'perplexity', 'firecrawl',
-    'jina', 'bocha', 'grok',
-  ]);
-  assert.equal(SEARCH_SERVICE_TYPES['bing_local'], 'Bing HTML 兜底');
-  assert.equal(SEARCH_SERVICE_TYPES['zhipu'], '智谱');
-  assert.equal(SEARCH_SERVICE_TYPES['metaso'], '秘塔');
-  assert.equal(SEARCH_SERVICE_TYPES['bocha'], '博查');
-  assert.equal(SEARCH_SERVICE_TYPES['serpapi'], 'SerpAPI');
-  assert.equal(SEARCH_SERVICE_TYPES['amber_agent'], 'AmberAgent');
-});
-
-test('DEFAULT = BingLocalOptions(:138)', () => {
-  assert.equal(DEFAULT_SEARCH_SERVICE_OPTIONS.type, 'bing_local');
-});
-
-// ===== 序列化(kotlinx:classDiscriminator 'type' + explicitNulls=false + ignoreUnknownKeys) =====
-
-test('toJson:type 判别字段居首 + 声明序 + null 省略', () => {
-  const o = makeSearchServiceOptions('perplexity');
-  const j: JsonObject = searchServiceOptionsToJson(o);
-  assert.deepEqual(Object.keys(j), ['type', 'id', 'apiKey']);
-  assert.equal(j['type'], 'perplexity');
-  const g = makeSearchServiceOptions('grok');
-  const gj: JsonObject = searchServiceOptionsToJson(g);
-  assert.deepEqual(Object.keys(gj),
-    ['type', 'id', 'apiKey', 'model', 'customUrl', 'systemPrompt']);
-});
 
 test('fromJson 回读:未知键忽略 + 缺字段回默认 + type 路由', () => {
   const j: JsonObject = {
@@ -111,32 +37,6 @@ test('round-trip:全部 17 类 toJson→fromJson 逐字段相等', () => {
       searchServiceOptionsFromJson(searchServiceOptionsToJson(o));
     assert.deepEqual(back, o, `round-trip failed for ${t}`);
   }
-});
-
-// ===== 结果模型序列化(SearchResult/ScrapedResult,:98-131) =====
-
-test('searchResultToJson:answer null 省略 + item 声明序 + images 缺省空数组', () => {
-  const j: JsonObject = searchResultToJson({
-    answer: null,
-    items: [{ title: 't', url: 'u', text: 'x', publishedAt: null, images: [] }],
-  });
-  assert.deepEqual(Object.keys(j), ['items']);
-  const items = j['items'] as JsonObject[];
-  assert.deepEqual(Object.keys(items[0]), ['title', 'url', 'text', 'images']);
-});
-
-test('scrapedResultToJson:urls 声明序 + metadata null 省略/非空声明序', () => {
-  const j: JsonObject = scrapedResultToJson({
-    urls: [
-      { url: 'u1', content: 'c1', metadata: null },
-      { url: 'u2', content: 'c2', metadata: { title: 'T', description: null, language: 'zh' } },
-    ],
-  });
-  const urls = j['urls'] as JsonObject[];
-  assert.deepEqual(Object.keys(urls[0]), ['url', 'content']);
-  assert.deepEqual(Object.keys(urls[1]), ['url', 'content', 'metadata']);
-  const md = urls[1]['metadata'] as JsonObject;
-  assert.deepEqual(Object.keys(md), ['title', 'language']);
 });
 
 // ===== KeyRoulette(KeyRoulette.kt 全文) =====

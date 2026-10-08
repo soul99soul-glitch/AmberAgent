@@ -1,0 +1,62 @@
+[
+  {
+    "product": "novel",
+    "bundleName": "app.amber.novel",
+    "hapPath": "/Users/arquiel/Downloads/AI/amber-harmony-preview/.harmony-standalone/novel/entry/build/default/outputs/default/signed/entry-default-signed.hap",
+    "hapSha256": "a6a1a29559f752204451688040c3fd5f2c024b2d4a6791c9eddb7ac0499d7f3b",
+    "hapBytes": 63077953,
+    "iconSourceSha256": "f30b1498c1e3abf465971582f50ac1744e0db9d5d8056f7a11e1576a4ca04e71",
+    "packagedIcon": [
+      {
+        "path": "resources/base/media/app_icon.png",
+        "bytes": 1109182,
+        "dimensions": [
+          1024,
+          1024
+        ],
+        "sha256": "f30b1498c1e3abf465971582f50ac1744e0db9d5d8056f7a11e1576a4ca04e71"
+      },
+      {
+        "path": "resources/phone/media/app_icon.png",
+        "bytes": 1109182,
+        "dimensions": [
+          1024,
+          1024
+        ],
+        "sha256": "f30b1498c1e3abf465971582f50ac1744e0db9d5d8056f7a11e1576a4ca04e71"
+      }
+    ],
+    "permissions": [
+      "ohos.permission.INTERNET",
+      "ohos.permission.KEEP_BACKGROUND_RUNNING",
+      "ohos.permission.GET_NETWORK_INFO",
+      "ohos.permission.VIBRATE"
+    ]
+  },
+  {
+    "product": "deepread",
+    "bundleName": "app.amber.deepread.reader",
+    "hapPath": "/Users/arquiel/Downloads/AI/amber-harmony-preview/.harmony-standalone/deepread/entry/build/default/outputs/default/signed/entry-default-signed.hap",
+    "hapSha256": "c76700f55309b579d2ea469ba3e242f0c3c940a42fb97c57418128896e8821f9",
+    "hapBytes": 62360621,
+    "iconSourceSha256": "25d0b56afbfdf96d300a871aafb410430ac8efcd53b1d7e7a234fdf008df0b7e",
+    "packagedIcon": [
+      {
+        "path": "resources/base/media/deepread_app_icon.png",
+        "bytes": 9973,
+        "dimensions": [
+          512,
+          512
+        ],
+        "sha256": "0abf0444add210469a71f5883973d2d52c18d7d334b357c70d63775dbceb2924"
+      }
+    ],
+    "permissions": [
+      "ohos.permission.INTERNET",
+      "ohos.permission.KEEP_BACKGROUND_RUNNING",
+      "ohos.permission.GET_NETWORK_INFO",
+      "ohos.permission.VIBRATE",
+      "ohos.permission.ACCELEROMETER"
+    ]
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "path": "harmony/entry/src/main/ets/pages/NovelProjectsPage.ets",
+    "sha256": "71ec99d270a5833d5f225d1890e7f7b9fab0ec8fd013b505cba0ccd6a6a9ced4"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/BoardPage.ets",
+    "sha256": "34f09be905992d8e0b7139305812f0fb295bae1d1ef1b2652849a31592f0934c"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/studio/StudioButton.ets",
+    "sha256": "0993797fec30f88dcc80d2633a7e299dedd034c19581b55260e38afcd122682f"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/studio/StudioHero.ets",
+    "sha256": "d5565128c53e62200fbf59f589caf8be61041d6db90aca15514a51cde8f912d7"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/studio/StudioEmblem.ets",
+    "sha256": "a03d35f706d4b5246634dcfa0413bc73e15cb56c4a81920053db72aca08c41b5"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/components/studio/StudioTabs.ets",
+    "sha256": "c5022c450b466a490b4a050ae20e0a84ed5c598de4ec6429d6571318f01a3386"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets",
+    "sha256": "9d3ce9a65116b8d12093891314abb5b9909846d5c5604e775a05934655b9cd04"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets",
+    "sha256": "a11942716000f17d7d9fad9ea89893920ed85abb40228021efd14779b0a770ed"
+  }
+]

@@ -377,6 +377,44 @@ test('export: 自定义包导出带 design + 扩展段', () => {
 
 // ── tokens.ets accentInk 覆写语义 ──
 
+test('themes: 思考框淡底随内置主题色变化,浅深模式均保持文字可读', () => {
+  for (const dark of [false, true]) {
+    const backgrounds = BUILTIN_PACKS.map((pack) => {
+      packs.applyThemePack(pack, dark);
+      const bg = tokens.parseHexRgb(tokens.ACCENT_LIGHT);
+      assert.ok(tokens.contrastRatio(bg, tokens.parseHexRgb(tokens.INK2)) >= 4.5,
+        `${pack.id} dark=${dark}: 思考文字对比度`);
+      return tokens.ACCENT_LIGHT;
+    });
+    assert.equal(new Set(backgrounds).size, BUILTIN_PACKS.length,
+      `dark=${dark}: 不同强调色不应共用陶土淡底`);
+  }
+});
+
+test('themes: 导入主题淡底随自定义强调色和纸色变化,切换模式后重新派生', () => {
+  const green = parseThemePackImport(fixture).pack;
+  const purple = { ...green, id: 'custom-purple', accent: '#7842AB' };
+  for (const dark of [false, true]) {
+    packs.applyThemePack(green, dark);
+    const greenBg = tokens.ACCENT_LIGHT;
+    const greenRgb = tokens.parseHexRgb(greenBg);
+    assert.ok(((greenRgb >> 8) & 255) > (greenRgb & 255), '绿色淡底应保留绿色倾向');
+    packs.applyThemePack(purple, dark);
+    assert.notEqual(tokens.ACCENT_LIGHT, greenBg, '导入强调色变化应改变淡底');
+    const purpleRgb = tokens.parseHexRgb(tokens.ACCENT_LIGHT);
+    assert.ok((purpleRgb & 255) > ((purpleRgb >> 8) & 255), '紫色淡底应保留紫色倾向');
+    assert.ok(tokens.contrastRatio(purpleRgb, tokens.parseHexRgb(tokens.INK2)) >= 4.5);
+  }
+  packs.applyThemePack(purple, false);
+  const lightBg = tokens.ACCENT_LIGHT;
+  tokens.applyTheme(true);
+  assert.notEqual(tokens.ACCENT_LIGHT, lightBg, '直接切换深色也应重新派生');
+  packs.applyThemePack(purple, false);
+  const otherPaper = { ...purple, light: { ...purple.light, surface: '#EFE7D6' } };
+  packs.applyThemePack(otherPaper, false);
+  assert.notEqual(tokens.ACCENT_LIGHT, lightBg, '同一强调色应适应主题纸色');
+});
+
 test('tokens: setAccentColor 第二参确立/清除 ink 覆写,applyTheme 保持覆写', () => {
   const { setAccentColor, applyTheme, ACCENT_INK } = tokens;
   void ACCENT_INK;

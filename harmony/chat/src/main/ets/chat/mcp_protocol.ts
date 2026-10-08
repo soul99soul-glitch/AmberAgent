@@ -102,7 +102,8 @@ export interface McpServerTool {
   name: string;
   description: string | null;
   // ToolSchema.toSchema(McpManager.kt:511-513):properties ?: {} / required 原样
-  inputSchema: { properties: JsonObject; required: string[] | null };
+  inputSchema: { properties: JsonObject; required: string[] | null; jsonSchema?: JsonObject };
+  annotations?: JsonObject;
 }
 
 interface PendingHandler {
@@ -329,25 +330,43 @@ export class McpClient {
   }
 
   // Client.kt:484-490 listTools() → tools/list(params=null)
-  async listTools(): Promise<McpServerTool[]> {
-    const result: JsonValue = await this.request('tools/list', null);
-    const obj: JsonObject = isObj(result) ? result : {};
-    const raw = Array.isArray(obj['tools']) ? obj['tools'] as JsonValue[] : [];
-    return raw.map((t: JsonValue): McpServerTool => {
-      const o: JsonObject = isObj(t) ? t : {};
-      const schema: JsonObject = isObj(o['inputSchema']) ? o['inputSchema'] : {};
-      const reqRaw = Array.isArray(schema['required']) ? schema['required'] as JsonValue[] : null;
-      return {
-        name: typeof o['name'] === 'string' ? o['name'] as string : '',
-        description: typeof o['description'] === 'string' ? o['description'] as string : null,
-        inputSchema: {
-          properties: isObj(schema['properties']) ? schema['properties'] : {},
-          required: reqRaw === null ? null
-            : reqRaw.filter((x: JsonValue): boolean => typeof x === 'string')
-              .map((x: JsonValue): string => x as string),
-        },
-      };
-    });
+  async listTools(signal?: AbortSignalLike): Promise<McpServerTool[]> {
+    const tools: McpServerTool[] = [];
+    const cursors: Set<string> = new Set();
+    let cursor: string | null = null;
+    do {
+      const result: JsonValue = await this.request('tools/list', cursor === null ? null : { cursor },
+        MCP_DEFAULT_REQUEST_TIMEOUT_MS, signal);
+      const obj: JsonObject = isObj(result) ? result : {};
+      if (!Array.isArray(obj['tools'])) throw new Error('MCP tools/list returned no tools array');
+      const raw: JsonValue[] = obj['tools'];
+      tools.push(...raw.map((t: JsonValue): McpServerTool => {
+        const o: JsonObject = isObj(t) ? t : {};
+        const schema: JsonObject = isObj(o['inputSchema']) ? o['inputSchema'] : {};
+        const reqRaw = Array.isArray(schema['required']) ? schema['required'] as JsonValue[] : null;
+        const tool: McpServerTool = {
+          name: typeof o['name'] === 'string' ? o['name'] as string : '',
+          description: typeof o['description'] === 'string' ? o['description'] as string : null,
+          inputSchema: {
+            properties: isObj(schema['properties']) ? schema['properties'] : {},
+            required: reqRaw === null ? null
+              : reqRaw.filter((x: JsonValue): boolean => typeof x === 'string')
+                .map((x: JsonValue): string => x as string),
+          },
+        };
+        if (Object.keys(schema).some((key: string): boolean =>
+          key !== 'type' && key !== 'properties' && key !== 'required')) tool.inputSchema.jsonSchema = schema;
+        if (isObj(o['annotations'])) tool.annotations = o['annotations'];
+        return tool;
+      }));
+      const next: JsonValue | undefined = obj['nextCursor'];
+      cursor = typeof next === 'string' ? next : null;
+      if (cursor !== null) {
+        if (cursors.has(cursor)) throw new Error('MCP tools/list repeated a pagination cursor');
+        cursors.add(cursor);
+      }
+    } while (cursor !== null);
+    return tools;
   }
 
   // Client.kt:473-474 callTool(request, options);McpManager 传 timeout=120s

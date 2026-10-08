@@ -5,8 +5,8 @@
   "description": "Deep Read domain layer (pure ArkTS, zero SDK deps)",
   "type": "module",
   "scripts": {
-    "test": "tsx --test \"src/test/**/*.test.ts\"",
-    "test:watch": "tsx watch --test \"src/test/**/*.test.ts\""
+    "test": "tsx --tsconfig ../chat/tsconfig.json --test --test-concurrency=4 \"src/test/**/*.test.ts\" \"src/test/**/*.test.cjs\"",
+    "test:watch": "tsx watch --tsconfig ../chat/tsconfig.json --test --test-concurrency=4 \"src/test/**/*.test.ts\" \"src/test/**/*.test.cjs\""
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

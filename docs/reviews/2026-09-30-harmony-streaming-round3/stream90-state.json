@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-01",
+  "target": "90fps automatic scrolling replaces120fps target",
+  "path": "/tmp/amber-stream90.hap",
+  "sha256": "491f3deb812201a91a79c1edd3b645a61941fed07630609cd11c260f8fef4236",
+  "bytes": 59672400,
+  "build": "BUILD SUCCESSFUL in25s634ms",
+  "signing": "AGC signed output",
+  "tests": {
+    "focused": 23,
+    "pass": 23,
+    "fail": 0,
+    "red_log": "stream90-red.log",
+    "green_log": "stream90-green.log",
+    "includes": "60/90/120Hz spring convergence, fixed90 request and release, unsupported90 mode selection, API12 fallback, message grouping cache, stable timeline identity"
+  },
+  "lint": "zero defects",
+  "scope": "Request fixed90 only while native mainList auto-follow moves; stop at rest/touch/exit. Select highest supported rate<=90. Keep48ms content publication and all existing fades.",
+  "device_support_evidence": "stream3-screen-modes.txt confirms1264x1848 and1828x2584 physical90Hz modes",
+  "installed": true,
+  "device_fps_verified": false,
+  "pending_reason": "Only actual sustained90fps measurement remains; installation and launch completed.",
+  "limitations": [
+    "Expected rate does not override system arbitration; priorTouchIdle60Hz cap may still apply.",
+    "No claim that a supported90Hz physical mode means sustained90fps app presentation."
+  ],
+  "source_sha256": {
+    "harmony/entry/src/main/ets/components/NativeTimelineFollow.ets": "e333c0f0dfac678c796ca54b8ab146be8685cae8d80f78bf47bf250c64704bfa",
+    "harmony/chat/src/test/native_timeline_follow.test.cjs": "f9c817fa7fb116d17d2f0f5844463e7002a824d766ac8f08b53eab006282b632",
+    "harmony/chat/src/test/native_timeline_motion.test.ts": "1f9adee3ec409bdcbe036a96effb1ecdff42ac53cc5a2f90afd491aecf1c1453",
+    "harmony/entry/src/main/ets/components/AgentMessageRow.ets": "9adc60975a35d313d277a28710603e052c120e2541ee216a91d78e8b3b1e2b09"
+  },
+  "install_result": "hdc install -r: install bundle successfully; data retained",
+  "launch_result": "aa start succeeded; pid16217; normal ChatListPage screenshot visually confirmed",
+  "install_date": "2026-10-01",
+  "device_serial": "6HK0226627000384"
+}

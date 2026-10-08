@@ -23,7 +23,8 @@ export interface RecipeStore {
 export interface RecipeExecutionPort {
   primitive: (name: string) => AgentTool | null;
   capture: (part: UIMessagePartTool) => JsonObject | null;
-  decide: (part: UIMessagePartTool, tool: AgentTool) => PermissionDecision;
+  decide: (part: UIMessagePartTool, tool: AgentTool,
+    signal?: AbortSignalLike) => PermissionDecision | Promise<PermissionDecision>;
   dispatch: (part: UIMessagePartTool, tool: AgentTool,
     signal?: AbortSignalLike) => Promise<UIMessagePartTool | null>;
   saveParent: (part: UIMessagePartTool) => Promise<void>;

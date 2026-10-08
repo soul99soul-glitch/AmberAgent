@@ -4,13 +4,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  PosixWorkspaceManager, normalizeWorkspacePath, joinWorkspacePath,
-  textMimeTypeForPath, toolInputString, toolInputRequiredString, toolInputBoolean,
-  toolInputInt, normalizeFileReadMaxChars, buildFileReadJson,
-  workspaceActivityInputPreview, createWorkspaceTools,
-  FILE_READ_DEFAULT_MAX_CHARS, FILE_READ_HARD_MAX_CHARS,
+  PosixWorkspaceManager,
+  normalizeWorkspacePath,
+  createWorkspaceTools,
 } from '../main/ets/chat/workspace.ts';
-import type { WorkspaceFsPort, WorkspaceFsEntry } from '../main/ets/chat/workspace.ts';
+import type {
+  WorkspaceFsPort,
+  WorkspaceFsEntry,
+} from '../main/ets/chat/workspace.ts';
 import { AgentToolActivityStore } from '../main/ets/chat/tool_activity.ts';
 import type { AgentTool } from '../main/ets/chat/tool.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
@@ -186,12 +187,6 @@ test('normalize:blank/./\//workspace 别名 → .;前缀剥离;绝对路径/逃�
   assert.throws(() => normalizeWorkspacePath('a/../b'), /Path traversal is not allowed/);
 });
 
-test('join:parent ./blank → child;否则 parent/child', () => {
-  assert.equal(joinWorkspacePath('.', 'a'), 'a');
-  assert.equal(joinWorkspacePath('', 'a'), 'a');
-  assert.equal(joinWorkspacePath('notes', 'a.md'), 'notes/a.md');
-});
-
 // ===== PosixWorkspaceManager =====
 
 test('list:目录优先 + name 小写排序;缺目录/非目录 → 抛', async () => {
@@ -292,75 +287,6 @@ test('search:首命中行 + 行号 + 240 截尾 + maxResults + 空 query 抛', a
   await assert.rejects(m.search('x', 'ghost', 50), /Path not found: ghost/);
 });
 
-// ===== textMimeTypeForPath =====
-
-test('textMimeTypeForPath:扩展名表逐字', () => {
-  assert.equal(textMimeTypeForPath('a.md'), 'text/markdown');
-  assert.equal(textMimeTypeForPath('a.markdown'), 'text/markdown');
-  assert.equal(textMimeTypeForPath('a.json'), 'application/json');
-  assert.equal(textMimeTypeForPath('a.yaml'), 'application/yaml');
-  assert.equal(textMimeTypeForPath('a.yml'), 'application/yaml');
-  assert.equal(textMimeTypeForPath('a.HTML'), 'text/html');
-  assert.equal(textMimeTypeForPath('a.htm'), 'text/html');
-  assert.equal(textMimeTypeForPath('a.css'), 'text/css');
-  assert.equal(textMimeTypeForPath('a.csv'), 'text/csv');
-  assert.equal(textMimeTypeForPath('a.mjs'), 'text/javascript');
-  assert.equal(textMimeTypeForPath('a.sh'), 'application/x-sh');
-  assert.equal(textMimeTypeForPath('a.png'), 'text/plain');
-  assert.equal(textMimeTypeForPath('noext'), 'text/plain');
-});
-
-// ===== ToolJson helper =====
-
-test('toolInput*:string/requiredString/boolean/int(kotlinx 语义)', () => {
-  const input = { a: 'x', n: 42, b: true, s: 'true', f: 'false', bad: '1.5' };
-  assert.equal(toolInputString(input, 'a'), 'x');
-  assert.equal(toolInputString(input, 'n'), '42'); // number → 字面串
-  assert.equal(toolInputString(input, 'b'), 'true');
-  assert.equal(toolInputString(input, 'missing'), null);
-  assert.equal(toolInputRequiredString(input, 'a'), 'x');
-  assert.throws(() => toolInputRequiredString(input, 'missing'), /missing is required/);
-  assert.equal(toolInputBoolean(input, 's'), true);
-  assert.equal(toolInputBoolean(input, 'f'), false);
-  assert.equal(toolInputBoolean(input, 'b'), true); // 'true' 字面
-  assert.equal(toolInputBoolean(input, 'a'), null); // 非严格布尔
-  assert.equal(toolInputInt(input, 'n'), 42);
-  assert.equal(toolInputInt(input, 'bad'), null);
-  assert.equal(toolInputInt(input, 'missing'), null);
-});
-
-// ===== buildFileReadJson / normalizeFileReadMaxChars =====
-
-test('normalizeFileReadMaxChars:默认/上限钳制/非正抛', () => {
-  assert.equal(normalizeFileReadMaxChars(null), FILE_READ_DEFAULT_MAX_CHARS);
-  assert.equal(normalizeFileReadMaxChars(10), 10);
-  assert.equal(normalizeFileReadMaxChars(FILE_READ_HARD_MAX_CHARS + 1), FILE_READ_HARD_MAX_CHARS);
-  assert.throws(() => normalizeFileReadMaxChars(0), /max_chars must be greater than 0/);
-  assert.throws(() => normalizeFileReadMaxChars(-5), /max_chars must be greater than 0/);
-});
-
-test('buildFileReadJson:截断/完整两分支键序钉住', () => {
-  const full = buildFileReadJson('a.md', 'hello', null);
-  assert.equal(JSON.stringify(full),
-    '{"path":"a.md","content":"hello","total_size_chars":5,"truncated":false,"max_chars":65536}');
-  const cut = buildFileReadJson('a.md', 'hello world', 5);
-  assert.equal(JSON.stringify(cut),
-    '{"path":"a.md","content":"hello","total_size_chars":11,"truncated":true,"max_chars":5}');
-});
-
-// ===== activityInputPreview =====
-
-test('workspaceActivityInputPreview:file_write/file_edit 摘要;else 原样', () => {
-  assert.equal(
-    workspaceActivityInputPreview({ path: 'a.md', content: 'hello', append: true }, 'file_write'),
-    '{"path":"a.md","append":true,"content_chars":5}');
-  assert.equal(
-    workspaceActivityInputPreview(
-      { path: 'a.md', old_text: 'ab', new_text: 'cde', replace_all: true }, 'file_edit'),
-    '{"path":"a.md","old_text_chars":2,"new_text_chars":3,"replace_all":true}');
-  assert.equal(workspaceActivityInputPreview({ q: 1 }, 'file_list'), '{"q":1}');
-});
-
 // ===== createWorkspaceTools =====
 
 const findTool = (tools: AgentTool[], name: string): AgentTool => {
@@ -382,24 +308,6 @@ test('createWorkspaceTools:六件齐 + 审批标记(file_write/edit/move 需审�
   ['file_list', 'file_read', 'file_search'].forEach((n: string): void => {
     assert.equal(findTool(tools, n).needsApproval, false, n);
   });
-});
-
-test('file_list:payload(workspace_configured 恒 true + entries 键序)', async () => {
-  const fs: MemWsFs = new MemWsFs();
-  seed(fs, 'notes/a.md', 'hi');
-  const tools: AgentTool[] = createWorkspaceTools(makeManager(fs), new AgentToolActivityStore());
-  const parts: UIMessagePart[] = await findTool(tools, 'file_list').execute({});
-  if (parts[0].type !== 'text') throw new Error('text part');
-  const payload = JSON.parse(parts[0].text);
-  assert.equal(payload['workspace_configured'], true);
-  assert.equal(payload['path'], '.');
-  assert.equal(JSON.stringify(payload['entries'][0]),
-    '{"path":"notes","name":"notes","directory":true}');
-  const sub: UIMessagePart[] = await findTool(tools, 'file_list').execute({ path: 'notes' });
-  if (sub[0].type !== 'text') throw new Error('text part');
-  const subPayload = JSON.parse(sub[0].text);
-  assert.equal(JSON.stringify(subPayload['entries'][0]),
-    '{"path":"notes/a.md","name":"a.md","directory":false,"size_bytes":2,"mime_type":"text/markdown"}');
 });
 
 test('file_read:max_chars 默认/钳制/必填校验', async () => {

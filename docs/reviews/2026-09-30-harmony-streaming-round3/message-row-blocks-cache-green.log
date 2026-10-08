@@ -1,0 +1,43 @@
+▶ groupMessageParts basic grouping
+  ✔ groups consecutive reasoning + tool into a single ThinkingBlock (0.641958ms)
+  ✔ merges consecutive text parts into one ContentBlock (0.075167ms)
+  ✔ flushes thinking before text and text before non-text non-thinking (0.113542ms)
+  ✔ skips blank reasoning parts (0.103625ms)
+  ✔ non-text non-reasoning non-tool parts become standalone ContentBlocks (0.073833ms)
+  ✔ empty parts list returns empty blocks (0.27975ms)
+✔ groupMessageParts basic grouping (1.975334ms)
+▶ groupMessageParts subagent coalescing
+  ✔ coalesces subagent_start/wait/read sharing the same run_id into one SubAgentBlock (0.19975ms)
+  ✔ keeps subagent_start without result as plain ToolStep (no run_id yet) (0.074334ms)
+  ✔ separates two subagent runs with different run_ids (0.079625ms)
+  ✔ lifts SubAgentBlock out of surrounding ThinkingBlock (0.077542ms)
+✔ groupMessageParts subagent coalescing (0.543875ms)
+▶ groupMessageParts council coalescing
+  ✔ coalesces model_council_start/wait/read sharing run_id into one CouncilBlock (0.111459ms)
+  ✔ model_council_make_report is coalesced into the same council run (0.055208ms)
+✔ groupMessageParts council coalescing (0.210958ms)
+▶ groupMessageParts mergeDuplicateRunBlocks
+  ✔ merges SubAgentBlocks split by intervening text into one block (0.064709ms)
+  ✔ merges CouncilBlocks split by intervening text (0.072209ms)
+✔ groupMessageParts mergeDuplicateRunBlocks (0.168625ms)
+▶ groupMessageParts text metadata merge
+  ✔ second text metadata overrides first when non-null (0.088208ms)
+  ✔ second text null metadata keeps first metadata (0.041125ms)
+✔ groupMessageParts text metadata merge (0.165208ms)
+▶ groupMessageParts edge cases (review coverage)
+  ✔ subagent and council in the same message do not interfere (0.063708ms)
+  ✔ merges 3+ consecutive text parts with metadata override chain (0.055667ms)
+  ✔ subagent_cancel extracts run_id from input (0.059125ms)
+✔ groupMessageParts edge cases (review coverage) (0.228167ms)
+✔ one reasoning/body snapshot is grouped once across all six existing render reads (111.994167ms)
+✔ same-id text snapshots invalidate grouping without changing content part indices (3.98ms)
+✔ same-id terminal reasoning metadata and tool approval/output changes invalidate the cache (5.340958ms)
+✔ the actual message Prop watcher owns invalidation, including empty and replacement messages (2.986667ms)
+ℹ tests 23
+ℹ suites 6
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 534.163333

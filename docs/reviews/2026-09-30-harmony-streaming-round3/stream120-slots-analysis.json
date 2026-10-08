@@ -1,0 +1,1911 @@
+{
+  "trace_file": "/tmp/stream120slots.trace",
+  "csv_file": "/tmp/stream120slots.csv",
+  "pid": 48374,
+  "trace_origin_seconds": 164295.113568,
+  "trace_span_seconds": 40.012937,
+  "clock_sync": {
+    "trace_seconds": 164335.126487,
+    "unix_ms": 1790782980712,
+    "line": 893248
+  },
+  "acceptance": {
+    "frozen_markdown_blocks_stop_rerendering_between_active_tail_and_final_state": true,
+    "markdown_parent_no_longer_updates_every_delta": true,
+    "body_ui_p95_under_16_667ms": true,
+    "body_ui_p95_under_8_333ms": false,
+    "stable120_presented_fps": false,
+    "completion_identity_preserved": true,
+    "six_thousand_reasoning_cap_exercised": null
+  },
+  "conclusion": "Independent Markdown blocks are effective: stable prefixes stop updating, parent updates fall to structural changes, and body UI p95 falls to9.807ms. About10.9% of body frames still exceed8.333ms. ENERGY_ASSURANCE still limits delivery to60Hz even during a0.4s moving-scroll run where every measured UI frame fits8.333ms.",
+  "phase_markers": {
+    "H:CustomNodeUpdate name:AgentMessageRow,id:1091": {
+      "count": 392,
+      "first_relative_seconds": 2.164659,
+      "last_relative_seconds": 23.286358,
+      "first_unix_ms": 1790782942863.74
+    },
+    "H:CustomNodeUpdate name:ChatMessageReasoning,id:1118": {
+      "count": 404,
+      "first_relative_seconds": 2.206381,
+      "last_relative_seconds": 23.288829,
+      "first_unix_ms": 1790782942905.462
+    },
+    "H:CustomNodeUpdate name:WidgetMessageContent,id:1666": {
+      "count": 127,
+      "first_relative_seconds": 16.236685,
+      "last_relative_seconds": 22.425026,
+      "first_unix_ms": 1790782956935.766
+    },
+    "H:CustomNodeUpdate name:MarkdownText,id:1673": {
+      "count": 19,
+      "first_relative_seconds": 16.250785,
+      "last_relative_seconds": 22.433098,
+      "first_unix_ms": 1790782956949.866
+    },
+    "H:CustomNodeUpdate name:AgentMessageRow,id:1050": {
+      "count": 2,
+      "first_relative_seconds": 22.421557,
+      "last_relative_seconds": 23.284963,
+      "first_unix_ms": 1790782963120.638
+    }
+  },
+  "phase_statistics": {
+    "early_reasoning": {
+      "relative_window_seconds": [
+        5,
+        10
+      ],
+      "unix_window_ms": [
+        1790782945699.081,
+        1790782950699.081
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 299,
+          "total_ms": 1269.447,
+          "p50_ms": 1.087,
+          "p95_ms": 13.373,
+          "max_ms": 15.011,
+          "over_8_333ms": 85,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.28428
+        },
+        "dirty_nodes": {
+          "count": 307,
+          "total_ms": 511.354,
+          "p50_ms": 0.171,
+          "p95_ms": 5.413,
+          "max_ms": 8.924,
+          "over_8_333ms": 1,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.00326
+        },
+        "reasoning_component": {
+          "count": 101,
+          "total_ms": 104.843,
+          "p50_ms": 1.073,
+          "p95_ms": 1.333,
+          "max_ms": 1.528,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "markdown_parent": {},
+        "markdown_blocks": {},
+        "chat_page": {
+          "count": 97,
+          "total_ms": 174.879,
+          "p50_ms": 1.739,
+          "p95_ms": 2.259,
+          "max_ms": 4.554,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "message_row": {
+          "count": 96,
+          "total_ms": 147.75,
+          "p50_ms": 1.477,
+          "p95_ms": 1.735,
+          "max_ms": 4.766,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "widget": {},
+        "native_text_component": {},
+        "layout": {
+          "count": 302,
+          "total_ms": 463.181,
+          "p50_ms": 0.271,
+          "p95_ms": 5.871,
+          "max_ms": 7.282,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "text_measure": {
+          "count": 103,
+          "total_ms": 292.527,
+          "p50_ms": 2.728,
+          "p95_ms": 4.873,
+          "max_ms": 5.367,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "draw_modifier": {
+          "count": 872,
+          "total_ms": 36.63,
+          "p50_ms": 0.02,
+          "p95_ms": 0.152,
+          "max_ms": 0.317,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "count": 299,
+        "total_ms": 5018.317,
+        "p50_ms": 16.672,
+        "p95_ms": 16.672,
+        "max_ms": 33.344,
+        "over_8_333ms": 299,
+        "over_16_667ms": 299,
+        "over_8_333_fraction": 1.0
+      },
+      "scroll_by_count": 0
+    },
+    "late_reasoning": {
+      "relative_window_seconds": [
+        10,
+        15.9
+      ],
+      "unix_window_ms": [
+        1790782950699.081,
+        1790782956599.081
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 345,
+          "total_ms": 1463.084,
+          "p50_ms": 1.034,
+          "p95_ms": 13.718,
+          "max_ms": 16.276,
+          "over_8_333ms": 96,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.27826
+        },
+        "dirty_nodes": {
+          "count": 353,
+          "total_ms": 572.047,
+          "p50_ms": 0.168,
+          "p95_ms": 5.606,
+          "max_ms": 9.238,
+          "over_8_333ms": 1,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.00283
+        },
+        "reasoning_component": {
+          "count": 114,
+          "total_ms": 133.043,
+          "p50_ms": 1.227,
+          "p95_ms": 1.502,
+          "max_ms": 1.706,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "markdown_parent": {},
+        "markdown_blocks": {},
+        "chat_page": {
+          "count": 107,
+          "total_ms": 193.747,
+          "p50_ms": 1.79,
+          "p95_ms": 2.201,
+          "max_ms": 5.65,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "message_row": {
+          "count": 108,
+          "total_ms": 162.495,
+          "p50_ms": 1.496,
+          "p95_ms": 1.722,
+          "max_ms": 4.651,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "widget": {},
+        "native_text_component": {},
+        "layout": {
+          "count": 350,
+          "total_ms": 561.133,
+          "p50_ms": 0.246,
+          "p95_ms": 6.143,
+          "max_ms": 7.268,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "text_measure": {
+          "count": 116,
+          "total_ms": 356.317,
+          "p50_ms": 3.016,
+          "p95_ms": 5.021,
+          "max_ms": 5.454,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "draw_modifier": {
+          "count": 995,
+          "total_ms": 43.59,
+          "p50_ms": 0.02,
+          "p95_ms": 0.163,
+          "max_ms": 0.353,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "count": 345,
+        "total_ms": 5869.08,
+        "p50_ms": 16.673,
+        "p95_ms": 16.675,
+        "max_ms": 33.345,
+        "over_8_333ms": 345,
+        "over_16_667ms": 345,
+        "over_8_333_fraction": 1.0
+      },
+      "scroll_by_count": 0
+    },
+    "transition": {
+      "relative_window_seconds": [
+        16.1,
+        16.7
+      ],
+      "unix_window_ms": [
+        1790782956799.081,
+        1790782957399.081
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 44,
+          "total_ms": 212.243,
+          "p50_ms": 4.295,
+          "p95_ms": 10.323,
+          "max_ms": 28.377,
+          "over_8_333ms": 6,
+          "over_16_667ms": 1,
+          "over_8_333_fraction": 0.13636
+        },
+        "dirty_nodes": {
+          "count": 46,
+          "total_ms": 81.556,
+          "p50_ms": 0.902,
+          "p95_ms": 5.93,
+          "max_ms": 9.524,
+          "over_8_333ms": 2,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.04348
+        },
+        "reasoning_component": {
+          "count": 14,
+          "total_ms": 12.538,
+          "p50_ms": 0.665,
+          "p95_ms": 1.713,
+          "max_ms": 3.197,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "markdown_parent": {
+          "count": 1,
+          "total_ms": 1.323,
+          "p50_ms": 1.323,
+          "p95_ms": 1.323,
+          "max_ms": 1.323,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "markdown_blocks": {
+          "count": 10,
+          "total_ms": 10.396,
+          "p50_ms": 0.995,
+          "p95_ms": 1.181,
+          "max_ms": 1.772,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "chat_page": {
+          "count": 13,
+          "total_ms": 16.365,
+          "p50_ms": 1.164,
+          "p95_ms": 1.62,
+          "max_ms": 1.839,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "message_row": {
+          "count": 14,
+          "total_ms": 23.701,
+          "p50_ms": 1.372,
+          "p95_ms": 2.294,
+          "max_ms": 5.915,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "widget": {
+          "count": 10,
+          "total_ms": 9.115,
+          "p50_ms": 1.011,
+          "p95_ms": 1.18,
+          "max_ms": 1.197,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "native_text_component": {},
+        "layout": {
+          "count": 46,
+          "total_ms": 56.513,
+          "p50_ms": 0.346,
+          "p95_ms": 2.826,
+          "max_ms": 16.853,
+          "over_8_333ms": 1,
+          "over_16_667ms": 1,
+          "over_8_333_fraction": 0.02174
+        },
+        "text_measure": {
+          "count": 23,
+          "total_ms": 21.511,
+          "p50_ms": 0.887,
+          "p95_ms": 1.659,
+          "max_ms": 3.148,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "draw_modifier": {
+          "count": 327,
+          "total_ms": 38.808,
+          "p50_ms": 0.018,
+          "p95_ms": 0.414,
+          "max_ms": 0.886,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "count": 44,
+        "total_ms": 708.705,
+        "p50_ms": 16.673,
+        "p95_ms": 33.345,
+        "max_ms": 33.345,
+        "over_8_333ms": 44,
+        "over_16_667ms": 29,
+        "over_8_333_fraction": 1.0
+      },
+      "scroll_by_count": 30
+    },
+    "body": {
+      "relative_window_seconds": [
+        16.8,
+        22.2
+      ],
+      "unix_window_ms": [
+        1790782957499.081,
+        1790782962899.081
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 322,
+          "total_ms": 1665.797,
+          "p50_ms": 5.306,
+          "p95_ms": 9.807,
+          "max_ms": 15.164,
+          "over_8_333ms": 35,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.1087
+        },
+        "dirty_nodes": {
+          "count": 328,
+          "total_ms": 643.424,
+          "p50_ms": 1.115,
+          "p95_ms": 5.608,
+          "max_ms": 9.515,
+          "over_8_333ms": 1,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.00305
+        },
+        "reasoning_component": {
+          "count": 111,
+          "total_ms": 14.371,
+          "p50_ms": 0.128,
+          "p95_ms": 0.174,
+          "max_ms": 0.353,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "markdown_parent": {
+          "count": 16,
+          "total_ms": 26.204,
+          "p50_ms": 1.651,
+          "p95_ms": 1.98,
+          "max_ms": 2.023,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "markdown_blocks": {
+          "count": 110,
+          "total_ms": 95.921,
+          "p50_ms": 0.904,
+          "p95_ms": 1.183,
+          "max_ms": 1.502,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "chat_page": {
+          "count": 111,
+          "total_ms": 152.671,
+          "p50_ms": 1.4,
+          "p95_ms": 1.727,
+          "max_ms": 6.517,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "message_row": {
+          "count": 111,
+          "total_ms": 176.816,
+          "p50_ms": 1.614,
+          "p95_ms": 2.082,
+          "max_ms": 2.403,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "widget": {
+          "count": 109,
+          "total_ms": 103.999,
+          "p50_ms": 0.998,
+          "p95_ms": 1.498,
+          "max_ms": 2.2,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "native_text_component": {
+          "count": 16,
+          "total_ms": 4.363,
+          "p50_ms": 0.263,
+          "p95_ms": 0.412,
+          "max_ms": 0.492,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "layout": {
+          "count": 328,
+          "total_ms": 375.511,
+          "p50_ms": 0.222,
+          "p95_ms": 3.834,
+          "max_ms": 8.266,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "text_measure": {
+          "count": 160,
+          "total_ms": 161.27,
+          "p50_ms": 0.902,
+          "p95_ms": 2.288,
+          "max_ms": 3.318,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "draw_modifier": {
+          "count": 1856,
+          "total_ms": 338.023,
+          "p50_ms": 0.046,
+          "p95_ms": 0.572,
+          "max_ms": 6.285,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "count": 322,
+        "total_ms": 5136.251,
+        "p50_ms": 16.675,
+        "p95_ms": 16.681,
+        "max_ms": 16.696,
+        "over_8_333ms": 303,
+        "over_16_667ms": 286,
+        "over_8_333_fraction": 0.94099
+      },
+      "scroll_by_count": 322
+    },
+    "completion": {
+      "relative_window_seconds": [
+        22.35,
+        22.9
+      ],
+      "unix_window_ms": [
+        1790782963049.081,
+        1790782963599.081
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 33,
+          "total_ms": 105.148,
+          "p50_ms": 2.073,
+          "p95_ms": 7.44,
+          "max_ms": 17.643,
+          "over_8_333ms": 1,
+          "over_16_667ms": 1,
+          "over_8_333_fraction": 0.0303
+        },
+        "dirty_nodes": {
+          "count": 33,
+          "total_ms": 25.485,
+          "p50_ms": 0.025,
+          "p95_ms": 4.057,
+          "max_ms": 10.337,
+          "over_8_333ms": 1,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0303
+        },
+        "reasoning_component": {
+          "count": 3,
+          "total_ms": 0.297,
+          "p50_ms": 0.094,
+          "p95_ms": 0.094,
+          "max_ms": 0.123,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "markdown_parent": {
+          "count": 2,
+          "total_ms": 1.878,
+          "p50_ms": 1.049,
+          "p95_ms": 0.829,
+          "max_ms": 1.049,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "markdown_blocks": {
+          "count": 23,
+          "total_ms": 4.942,
+          "p50_ms": 0.191,
+          "p95_ms": 0.285,
+          "max_ms": 0.57,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "chat_page": {
+          "count": 3,
+          "total_ms": 4.426,
+          "p50_ms": 1.201,
+          "p95_ms": 1.201,
+          "max_ms": 2.339,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "message_row": {
+          "count": 4,
+          "total_ms": 4.574,
+          "p50_ms": 1.17,
+          "p95_ms": 1.17,
+          "max_ms": 1.629,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "widget": {
+          "count": 3,
+          "total_ms": 1.814,
+          "p50_ms": 0.681,
+          "p95_ms": 0.681,
+          "max_ms": 0.91,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "native_text_component": {
+          "count": 2,
+          "total_ms": 0.802,
+          "p50_ms": 0.686,
+          "p95_ms": 0.116,
+          "max_ms": 0.686,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "layout": {
+          "count": 35,
+          "total_ms": 18.404,
+          "p50_ms": 0.004,
+          "p95_ms": 3.597,
+          "max_ms": 4.379,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "text_measure": {
+          "count": 12,
+          "total_ms": 4.152,
+          "p50_ms": 0.242,
+          "p95_ms": 0.907,
+          "max_ms": 1.349,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "draw_modifier": {
+          "count": 135,
+          "total_ms": 30.903,
+          "p50_ms": 0.041,
+          "p95_ms": 0.822,
+          "max_ms": 1.414,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "count": 33,
+        "total_ms": 550.312,
+        "p50_ms": 16.676,
+        "p95_ms": 16.676,
+        "max_ms": 16.676,
+        "over_8_333ms": 33,
+        "over_16_667ms": 33,
+        "over_8_333_fraction": 1.0
+      },
+      "scroll_by_count": 14
+    },
+    "low_load_motion": {
+      "relative_window_seconds": [
+        20.9775,
+        21.3791
+      ],
+      "unix_window_ms": [
+        1790782961676.581,
+        1790782962078.181
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 22,
+          "total_ms": 92.754,
+          "p50_ms": 4.564,
+          "p95_ms": 5.884,
+          "max_ms": 7.958,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "dirty_nodes": {
+          "count": 21,
+          "total_ms": 33.447,
+          "p50_ms": 0.927,
+          "p95_ms": 3.891,
+          "max_ms": 5.755,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "reasoning_component": {
+          "count": 8,
+          "total_ms": 0.774,
+          "p50_ms": 0.108,
+          "p95_ms": 0.112,
+          "max_ms": 0.161,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "markdown_parent": {},
+        "markdown_blocks": {
+          "count": 6,
+          "total_ms": 4.565,
+          "p50_ms": 0.774,
+          "p95_ms": 0.801,
+          "max_ms": 0.871,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "chat_page": {
+          "count": 8,
+          "total_ms": 8.9,
+          "p50_ms": 1.124,
+          "p95_ms": 1.352,
+          "max_ms": 1.623,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "message_row": {
+          "count": 8,
+          "total_ms": 10.112,
+          "p50_ms": 1.276,
+          "p95_ms": 1.535,
+          "max_ms": 2.236,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "widget": {
+          "count": 7,
+          "total_ms": 4.579,
+          "p50_ms": 0.631,
+          "p95_ms": 0.761,
+          "max_ms": 1.096,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "native_text_component": {
+          "count": 2,
+          "total_ms": 0.456,
+          "p50_ms": 0.246,
+          "p95_ms": 0.21,
+          "max_ms": 0.246,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "layout": {
+          "count": 21,
+          "total_ms": 16.146,
+          "p50_ms": 0.2,
+          "p95_ms": 2.176,
+          "max_ms": 2.688,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "text_measure": {
+          "count": 9,
+          "total_ms": 6.496,
+          "p50_ms": 0.662,
+          "p95_ms": 1.237,
+          "max_ms": 1.45,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        },
+        "draw_modifier": {
+          "count": 118,
+          "total_ms": 18.554,
+          "p50_ms": 0.043,
+          "p95_ms": 0.565,
+          "max_ms": 0.82,
+          "over_8_333ms": 0,
+          "over_16_667ms": 0,
+          "over_8_333_fraction": 0.0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "count": 21,
+        "total_ms": 350.199,
+        "p50_ms": 16.676,
+        "p95_ms": 16.676,
+        "max_ms": 16.676,
+        "over_8_333ms": 21,
+        "over_16_667ms": 21,
+        "over_8_333_fraction": 1.0
+      },
+      "scroll_by_count": 21
+    }
+  },
+  "reasoning_early_csv_rows_6_to_10": {
+    "samples": [
+      {
+        "row_1_based": 6,
+        "timestamp_unix_ms": 1790782946318,
+        "fps": 56,
+        "refreshrate": 60,
+        "max_gap_ms": 33.34
+      },
+      {
+        "row_1_based": 7,
+        "timestamp_unix_ms": 1790782947326,
+        "fps": 57,
+        "refreshrate": 60,
+        "max_gap_ms": 33.352
+      },
+      {
+        "row_1_based": 8,
+        "timestamp_unix_ms": 1790782948306,
+        "fps": 58,
+        "refreshrate": 60,
+        "max_gap_ms": 33.353
+      },
+      {
+        "row_1_based": 9,
+        "timestamp_unix_ms": 1790782949336,
+        "fps": 59,
+        "refreshrate": 60,
+        "max_gap_ms": 33.33
+      },
+      {
+        "row_1_based": 10,
+        "timestamp_unix_ms": 1790782950312,
+        "fps": 60,
+        "refreshrate": 60,
+        "max_gap_ms": 16.788
+      }
+    ],
+    "mean_fps": 58,
+    "gaps_ms": {
+      "count": 285,
+      "total_ms": 4902.002,
+      "p50_ms": 16.674,
+      "p95_ms": 16.753,
+      "max_ms": 33.353,
+      "over_8_333ms": 285,
+      "over_16_667ms": 219,
+      "over_8_333_fraction": 1.0
+    }
+  },
+  "reasoning_late_csv_rows_11_to_16": {
+    "samples": [
+      {
+        "row_1_based": 11,
+        "timestamp_unix_ms": 1790782951306,
+        "fps": 60,
+        "refreshrate": 60,
+        "max_gap_ms": 16.711
+      },
+      {
+        "row_1_based": 12,
+        "timestamp_unix_ms": 1790782952324,
+        "fps": 60,
+        "refreshrate": 60,
+        "max_gap_ms": 16.707
+      },
+      {
+        "row_1_based": 13,
+        "timestamp_unix_ms": 1790782953306,
+        "fps": 60,
+        "refreshrate": 60,
+        "max_gap_ms": 16.762
+      },
+      {
+        "row_1_based": 14,
+        "timestamp_unix_ms": 1790782954306,
+        "fps": 60,
+        "refreshrate": 60,
+        "max_gap_ms": 16.982
+      },
+      {
+        "row_1_based": 15,
+        "timestamp_unix_ms": 1790782955306,
+        "fps": 56,
+        "refreshrate": 60,
+        "max_gap_ms": 33.348
+      },
+      {
+        "row_1_based": 16,
+        "timestamp_unix_ms": 1790782956319,
+        "fps": 56,
+        "refreshrate": 60,
+        "max_gap_ms": 33.346
+      }
+    ],
+    "mean_fps": 58.667,
+    "gaps_ms": {
+      "count": 346,
+      "total_ms": 5902.241,
+      "p50_ms": 16.674,
+      "p95_ms": 16.706,
+      "max_ms": 33.348,
+      "over_8_333ms": 346,
+      "over_16_667ms": 252,
+      "over_8_333_fraction": 1.0
+    }
+  },
+  "body_csv_rows_19_to_22": {
+    "samples": [
+      {
+        "row_1_based": 19,
+        "timestamp_unix_ms": 1790782959306,
+        "fps": 59,
+        "refreshrate": 60,
+        "max_gap_ms": 33.354
+      },
+      {
+        "row_1_based": 20,
+        "timestamp_unix_ms": 1790782960306,
+        "fps": 59,
+        "refreshrate": 60,
+        "max_gap_ms": 33.372
+      },
+      {
+        "row_1_based": 21,
+        "timestamp_unix_ms": 1790782961306,
+        "fps": 66,
+        "refreshrate": 60,
+        "max_gap_ms": 33.348
+      },
+      {
+        "row_1_based": 22,
+        "timestamp_unix_ms": 1790782962307,
+        "fps": 58,
+        "refreshrate": 60,
+        "max_gap_ms": 33.378
+      }
+    ],
+    "mean_fps": 60.5,
+    "gaps_ms": {
+      "count": 238,
+      "total_ms": 3951.741,
+      "p50_ms": 16.673,
+      "p95_ms": 33.332,
+      "max_ms": 33.378,
+      "over_8_333ms": 231,
+      "over_16_667ms": 171,
+      "over_8_333_fraction": 0.97059
+    }
+  },
+  "low_load_motion_csv_row22": {
+    "samples": [
+      {
+        "row_1_based": 22,
+        "timestamp_unix_ms": 1790782962307,
+        "fps": 58,
+        "refreshrate": 60,
+        "max_gap_ms": 33.378
+      }
+    ],
+    "mean_fps": 58,
+    "gaps_ms": {
+      "count": 57,
+      "total_ms": 983.793,
+      "p50_ms": 16.673,
+      "p95_ms": 16.711,
+      "max_ms": 33.378,
+      "over_8_333ms": 57,
+      "over_16_667ms": 46,
+      "over_8_333_fraction": 1.0
+    }
+  },
+  "markdown_block_lifetimes": {
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:1681": {
+      "active_update_count": 1,
+      "active_first": 16.25211,
+      "active_last": 16.25211,
+      "final_update_count": 1,
+      "final_times": [
+        22.436531
+      ],
+      "elapsed_update_ms": {
+        "count": 2,
+        "total_ms": 1.958,
+        "p50_ms": 1.772,
+        "p95_ms": 0.186,
+        "max_ms": 1.772,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:1707": {
+      "active_update_count": 11,
+      "active_first": 16.301042,
+      "active_last": 16.803532,
+      "final_update_count": 1,
+      "final_times": [
+        22.435486
+      ],
+      "elapsed_update_ms": {
+        "count": 12,
+        "total_ms": 10.868,
+        "p50_ms": 0.984,
+        "p95_ms": 1.181,
+        "max_ms": 1.276,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:1830": {
+      "active_update_count": 9,
+      "active_first": 16.851499,
+      "active_last": 17.236762,
+      "final_update_count": 1,
+      "final_times": [
+        22.434046
+      ],
+      "elapsed_update_ms": {
+        "count": 10,
+        "total_ms": 9.55,
+        "p50_ms": 0.944,
+        "p95_ms": 1.226,
+        "max_ms": 1.502,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:1928": {
+      "active_update_count": 9,
+      "active_first": 17.28499,
+      "active_last": 17.670041,
+      "final_update_count": 1,
+      "final_times": [
+        22.435325
+      ],
+      "elapsed_update_ms": {
+        "count": 10,
+        "total_ms": 9.136,
+        "p50_ms": 0.976,
+        "p95_ms": 1.096,
+        "max_ms": 1.125,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2022": {
+      "active_update_count": 1,
+      "active_first": 17.719258,
+      "active_last": 17.719258,
+      "final_update_count": 1,
+      "final_times": [
+        22.435711
+      ],
+      "elapsed_update_ms": {
+        "count": 2,
+        "total_ms": 0.878,
+        "p50_ms": 0.687,
+        "p95_ms": 0.191,
+        "max_ms": 0.687,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2048": {
+      "active_update_count": 10,
+      "active_first": 17.76817,
+      "active_last": 18.222395,
+      "final_update_count": 1,
+      "final_times": [
+        22.436719
+      ],
+      "elapsed_update_ms": {
+        "count": 11,
+        "total_ms": 10.754,
+        "p50_ms": 1.015,
+        "p95_ms": 1.208,
+        "max_ms": 1.472,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2153": {
+      "active_update_count": 9,
+      "active_first": 18.280772,
+      "active_last": 18.670127,
+      "final_update_count": 1,
+      "final_times": [
+        22.436113
+      ],
+      "elapsed_update_ms": {
+        "count": 10,
+        "total_ms": 9.083,
+        "p50_ms": 0.987,
+        "p95_ms": 1.128,
+        "max_ms": 1.312,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2257": {
+      "active_update_count": 1,
+      "active_first": 18.722284,
+      "active_last": 18.722284,
+      "final_update_count": 1,
+      "final_times": [
+        22.436927
+      ],
+      "elapsed_update_ms": {
+        "count": 2,
+        "total_ms": 1.249,
+        "p50_ms": 0.964,
+        "p95_ms": 0.285,
+        "max_ms": 0.964,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2285": {
+      "active_update_count": 10,
+      "active_first": 18.75204,
+      "active_last": 19.186854,
+      "final_update_count": 1,
+      "final_times": [
+        22.434682
+      ],
+      "elapsed_update_ms": {
+        "count": 11,
+        "total_ms": 9.024,
+        "p50_ms": 0.904,
+        "p95_ms": 1.033,
+        "max_ms": 1.039,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2385": {
+      "active_update_count": 9,
+      "active_first": 19.226844,
+      "active_last": 19.628979,
+      "final_update_count": 1,
+      "final_times": [
+        22.434816
+      ],
+      "elapsed_update_ms": {
+        "count": 10,
+        "total_ms": 6.822,
+        "p50_ms": 0.719,
+        "p95_ms": 0.919,
+        "max_ms": 1.038,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2486": {
+      "active_update_count": 9,
+      "active_first": 19.677787,
+      "active_last": 20.079819,
+      "final_update_count": 1,
+      "final_times": [
+        22.435052
+      ],
+      "elapsed_update_ms": {
+        "count": 10,
+        "total_ms": 7.396,
+        "p50_ms": 0.825,
+        "p95_ms": 0.941,
+        "max_ms": 0.96,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2592": {
+      "active_update_count": 9,
+      "active_first": 20.128121,
+      "active_last": 20.512408,
+      "final_update_count": 1,
+      "final_times": [
+        22.437683
+      ],
+      "elapsed_update_ms": {
+        "count": 10,
+        "total_ms": 8.19,
+        "p50_ms": 0.875,
+        "p95_ms": 1.088,
+        "max_ms": 1.154,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2687": {
+      "active_update_count": 1,
+      "active_first": 20.568453,
+      "active_last": 20.568453,
+      "final_update_count": 1,
+      "final_times": [
+        22.434939
+      ],
+      "elapsed_update_ms": {
+        "count": 2,
+        "total_ms": 1.008,
+        "p50_ms": 0.895,
+        "p95_ms": 0.113,
+        "max_ms": 0.895,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2714": {
+      "active_update_count": 8,
+      "active_first": 20.600679,
+      "active_last": 20.96474,
+      "final_update_count": 1,
+      "final_times": [
+        22.434249
+      ],
+      "elapsed_update_ms": {
+        "count": 9,
+        "total_ms": 6.139,
+        "p50_ms": 0.741,
+        "p95_ms": 0.969,
+        "max_ms": 1.073,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2790": {
+      "active_update_count": 8,
+      "active_first": 21.011822,
+      "active_last": 21.398124,
+      "final_update_count": 1,
+      "final_times": [
+        22.434553
+      ],
+      "elapsed_update_ms": {
+        "count": 9,
+        "total_ms": 5.849,
+        "p50_ms": 0.752,
+        "p95_ms": 0.801,
+        "max_ms": 0.871,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2876": {
+      "active_update_count": 2,
+      "active_first": 21.463814,
+      "active_last": 21.496965,
+      "final_update_count": 1,
+      "final_times": [
+        22.43744
+      ],
+      "elapsed_update_ms": {
+        "count": 3,
+        "total_ms": 2.301,
+        "p50_ms": 0.995,
+        "p95_ms": 0.995,
+        "max_ms": 1.065,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2908": {
+      "active_update_count": 9,
+      "active_first": 21.545374,
+      "active_last": 21.933902,
+      "final_update_count": 1,
+      "final_times": [
+        22.434406
+      ],
+      "elapsed_update_ms": {
+        "count": 10,
+        "total_ms": 6.807,
+        "p50_ms": 0.742,
+        "p95_ms": 1.004,
+        "max_ms": 1.005,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2996": {
+      "active_update_count": 9,
+      "active_first": 21.978552,
+      "active_last": 22.379702,
+      "final_update_count": 1,
+      "final_times": [
+        22.437214
+      ],
+      "elapsed_update_ms": {
+        "count": 10,
+        "total_ms": 6.039,
+        "p50_ms": 0.658,
+        "p95_ms": 0.799,
+        "max_ms": 0.806,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:3092": {
+      "active_update_count": 1,
+      "active_first": 22.417432,
+      "active_last": 22.417432,
+      "final_update_count": 1,
+      "final_times": [
+        22.435904
+      ],
+      "elapsed_update_ms": {
+        "count": 2,
+        "total_ms": 0.737,
+        "p50_ms": 0.53,
+        "p95_ms": 0.207,
+        "max_ms": 0.53,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:2484": {
+      "active_update_count": 0,
+      "active_first": null,
+      "active_last": null,
+      "final_update_count": 1,
+      "final_times": [
+        22.435215
+      ],
+      "elapsed_update_ms": {
+        "count": 1,
+        "total_ms": 0.109,
+        "p50_ms": 0.109,
+        "p95_ms": 0.109,
+        "max_ms": 0.109,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    },
+    "H:CustomNodeUpdate name:MarkdownBlockView,id:1679": {
+      "active_update_count": 0,
+      "active_first": null,
+      "active_last": null,
+      "final_update_count": 1,
+      "final_times": [
+        22.436339
+      ],
+      "elapsed_update_ms": {
+        "count": 1,
+        "total_ms": 0.19,
+        "p50_ms": 0.19,
+        "p95_ms": 0.19,
+        "max_ms": 0.19,
+        "over_8_333ms": 0,
+        "over_16_667ms": 0,
+        "over_8_333_fraction": 0.0
+      }
+    }
+  },
+  "body_markdown_parent_plus_blocks_elapsed_union_ms": 122.125,
+  "body_markdown_parent_plus_blocks_elapsed_ms_per_second": 22.616,
+  "remaining_body_component_update_stats": {
+    "chat_page": {
+      "count": 111,
+      "total_ms": 152.671,
+      "p50_ms": 1.4,
+      "p95_ms": 1.727,
+      "max_ms": 6.517,
+      "over_8_333ms": 0,
+      "over_16_667ms": 0,
+      "over_8_333_fraction": 0.0
+    },
+    "message_row": {
+      "count": 111,
+      "total_ms": 176.816,
+      "p50_ms": 1.614,
+      "p95_ms": 2.082,
+      "max_ms": 2.403,
+      "over_8_333ms": 0,
+      "over_16_667ms": 0,
+      "over_8_333_fraction": 0.0
+    },
+    "widget": {
+      "count": 109,
+      "total_ms": 103.999,
+      "p50_ms": 0.998,
+      "p95_ms": 1.498,
+      "max_ms": 2.2,
+      "over_8_333ms": 0,
+      "over_16_667ms": 0,
+      "over_8_333_fraction": 0.0
+    },
+    "native_text_component": {
+      "count": 16,
+      "total_ms": 4.363,
+      "p50_ms": 0.263,
+      "p95_ms": 0.412,
+      "max_ms": 0.492,
+      "over_8_333ms": 0,
+      "over_16_667ms": 0,
+      "over_8_333_fraction": 0.0
+    }
+  },
+  "reasoning_max_for_each_children": 11,
+  "reasoning_for_each_change_patterns": {
+    "('0', '1')": 1,
+    "('1', '1')": 246,
+    "('1', '2')": 10,
+    "('0', '0')": 15
+  },
+  "reasoning_text_identity_churn": {
+    "measure_count": 219,
+    "distinct_ids": 209,
+    "single_measure_ids": 208,
+    "repeated_ids": {
+      "1123": 11
+    },
+    "window": [
+      5,
+      15.9
+    ]
+  },
+  "energy_assurance_evidence": [
+    {
+      "relative_seconds": 19.352528,
+      "unix_ms": 1790782960051.609,
+      "line": 756552,
+      "pid": 1812,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]"
+    },
+    {
+      "relative_seconds": 22.447396,
+      "unix_ms": 1790782963146.477,
+      "line": 865934,
+      "pid": 1812,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:DISPLAY_SYNC_ENERGY_ASSURANCE), status:1, value:[60-60]"
+    }
+  ],
+  "low_load_display_sync_request_and_actual_rate": [
+    {
+      "relative_seconds": 20.977556,
+      "unix_ms": 1790782961676.637,
+      "line": 815041,
+      "pid": 48374,
+      "name": "H:DisplaySyncId[67] Type[-1] Timestamp[159174790133844] TargetTimestamp[159174806809976]FrameRateRange[60, 120, 120] DrawFPS[60] VSyncRate[60] Rate[1] noSkip[1]"
+    }
+  ],
+  "transition_expensive_stack": [
+    {
+      "relative_seconds": 16.183582,
+      "duration_ms": 28.377,
+      "line": 625169,
+      "name": "H:OnVsyncEvent now:159169996091357"
+    },
+    {
+      "relative_seconds": 16.183586,
+      "duration_ms": 28.373,
+      "line": 625170,
+      "name": "H:UIVsyncTask[timestamp:159169996091357][vsyncID:478411][instanceID:100000]"
+    },
+    {
+      "relative_seconds": 16.193446,
+      "duration_ms": 18.003,
+      "line": 625508,
+      "name": "H:UITaskScheduler::FlushTask"
+    },
+    {
+      "relative_seconds": 16.193448,
+      "duration_ms": 16.853,
+      "line": 625509,
+      "name": "H:FlushLayoutTask"
+    },
+    {
+      "relative_seconds": 16.193503,
+      "duration_ms": 14.557,
+      "line": 625510,
+      "name": "H:CreateTaskMeasure[Column][self:453][parent:436][layoutConstraint:minSize: [[0.00 x 0.00]]maxSize: [[1264.00 x 1848.00]]percentReference: [[1264.00 x 1848.00]]parentIdealSize: [[1264.00 x 1848.00]]selfIdealSize: [[NA x NA]]][layoutPriority:0][pageId:2][depth:8]"
+    },
+    {
+      "relative_seconds": 16.193597,
+      "duration_ms": 14.455,
+      "line": 625515,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, 375.000000"
+    },
+    {
+      "relative_seconds": 16.183918,
+      "duration_ms": 9.524,
+      "line": 625213,
+      "name": "H:FlushDirtyNodeUpdate"
+    },
+    {
+      "relative_seconds": 16.185366,
+      "duration_ms": 5.915,
+      "line": 625327,
+      "name": "H:CustomNodeUpdate name:AgentMessageRow,id:1091"
+    },
+    {
+      "relative_seconds": 16.185369,
+      "duration_ms": 5.907,
+      "line": 625328,
+      "name": "H:JSView: ExecuteRerender"
+    },
+    {
+      "relative_seconds": 16.204476,
+      "duration_ms": 3.148,
+      "line": 625825,
+      "name": "H:TextLayoutAlgorithm::MeasureContent[id:1697][needReCreateParagraph:1][size:0]"
+    },
+    {
+      "relative_seconds": 16.19881,
+      "duration_ms": 2.46,
+      "line": 625708,
+      "name": "H:CustomNode:BuildItem [MarkdownText][self:1673][parent:1672][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 16.19614,
+      "duration_ms": 1.902,
+      "line": 625666,
+      "name": "H:CustomNode:BuildItem [WidgetMessageContent][self:1666][parent:1665][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 16.191812,
+      "duration_ms": 1.607,
+      "line": 625478,
+      "name": "H:CustomNodeUpdate name:ChatMessageReasoning,id:1118"
+    },
+    {
+      "relative_seconds": 16.191815,
+      "duration_ms": 1.602,
+      "line": 625479,
+      "name": "H:JSView: ExecuteRerender"
+    },
+    {
+      "relative_seconds": 16.201318,
+      "duration_ms": 1.431,
+      "line": 625782,
+      "name": "H:CustomNode:BuildItem [MarkdownBlockView][self:1679][parent:1678][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 16.183933,
+      "duration_ms": 1.429,
+      "line": 625214,
+      "name": "H:CustomNodeUpdate name:ChatPage,id:434"
+    },
+    {
+      "relative_seconds": 16.183937,
+      "duration_ms": 1.423,
+      "line": 625215,
+      "name": "H:JSView: ExecuteRerender"
+    },
+    {
+      "relative_seconds": 16.19472,
+      "duration_ms": 1.065,
+      "line": 625591,
+      "name": "H:TextLayoutAlgorithm::MeasureContent[id:1668][needReCreateParagraph:1][size:0]"
+    },
+    {
+      "relative_seconds": 16.202787,
+      "duration_ms": 0.998,
+      "line": 625804,
+      "name": "H:CustomNode:BuildItem [MarkdownBlockView][self:1681][parent:1680][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 16.210311,
+      "duration_ms": 0.887,
+      "line": 625911,
+      "name": "H:FlushRenderTask 2"
+    },
+    {
+      "relative_seconds": 16.193739,
+      "duration_ms": 0.751,
+      "line": 625520,
+      "name": "H:TextLayoutAlgorithm::MeasureContent[id:1123][needReCreateParagraph:1][size:0]"
+    },
+    {
+      "relative_seconds": 16.198077,
+      "duration_ms": 0.729,
+      "line": 625702,
+      "name": "H:CustomNode:OnAppear"
+    }
+  ],
+  "representative_late_body_expensive_stack": [
+    {
+      "relative_seconds": 20.077332,
+      "duration_ms": 11.721,
+      "line": 781711,
+      "name": "H:OnVsyncEvent now:159173889940301"
+    },
+    {
+      "relative_seconds": 20.077336,
+      "duration_ms": 11.715,
+      "line": 781712,
+      "name": "H:UIVsyncTask[timestamp:159173889940301][vsyncID:478672][instanceID:100000]"
+    },
+    {
+      "relative_seconds": 20.080663,
+      "duration_ms": 6.72,
+      "line": 781852,
+      "name": "H:UITaskScheduler::FlushTask"
+    },
+    {
+      "relative_seconds": 20.080665,
+      "duration_ms": 5.958,
+      "line": 781853,
+      "name": "H:FlushLayoutTask"
+    },
+    {
+      "relative_seconds": 20.080709,
+      "duration_ms": 5.205,
+      "line": 781854,
+      "name": "H:CreateTaskMeasure[Column][self:453][parent:436][layoutConstraint:minSize: [[0.00 x 0.00]]maxSize: [[1264.00 x 1848.00]]percentReference: [[1264.00 x 1848.00]]parentIdealSize: [[1264.00 x 1848.00]]selfIdealSize: [[NA x NA]]][layoutPriority:0][pageId:2][depth:8]"
+    },
+    {
+      "relative_seconds": 20.080781,
+      "duration_ms": 5.122,
+      "line": 781859,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -3385.723877"
+    },
+    {
+      "relative_seconds": 20.07782,
+      "duration_ms": 2.84,
+      "line": 781754,
+      "name": "H:FlushDirtyNodeUpdate"
+    },
+    {
+      "relative_seconds": 20.082967,
+      "duration_ms": 1.907,
+      "line": 781985,
+      "name": "H:TextLayoutAlgorithm::MeasureContent[id:2520][needReCreateParagraph:1][size:1]"
+    },
+    {
+      "relative_seconds": 20.077933,
+      "duration_ms": 1.882,
+      "line": 781768,
+      "name": "H:CustomNodeUpdate name:MarkdownText,id:1673"
+    },
+    {
+      "relative_seconds": 20.077936,
+      "duration_ms": 1.878,
+      "line": 781769,
+      "name": "H:JSView: ExecuteRerender"
+    },
+    {
+      "relative_seconds": 20.080915,
+      "duration_ms": 1.832,
+      "line": 781874,
+      "name": "H:CustomNode:BuildItem [MarkdownBlockView][self:2592][parent:2591][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 20.087397,
+      "duration_ms": 1.358,
+      "line": 782111,
+      "name": "H:RSModifierManager Draw num:[9]"
+    },
+    {
+      "relative_seconds": 20.079819,
+      "duration_ms": 0.825,
+      "line": 781834,
+      "name": "H:CustomNodeUpdate name:MarkdownBlockView,id:2486"
+    },
+    {
+      "relative_seconds": 20.079821,
+      "duration_ms": 0.821,
+      "line": 781835,
+      "name": "H:JSView: ExecuteRerender"
+    },
+    {
+      "relative_seconds": 20.08776,
+      "duration_ms": 0.552,
+      "line": 782128,
+      "name": "H:RSModifier::Draw"
+    },
+    {
+      "relative_seconds": 20.086628,
+      "duration_ms": 0.536,
+      "line": 782070,
+      "name": "H:FlushRenderTask 1"
+    },
+    {
+      "relative_seconds": 20.085184,
+      "duration_ms": 0.522,
+      "line": 782010,
+      "name": "H:CustomNode:BuildItem [NativeMarkdownText][self:2608][parent:2607][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    }
+  ],
+  "representative_reasoning_expensive_stack": [
+    {
+      "relative_seconds": 11.099049,
+      "duration_ms": 16.276,
+      "line": 445620,
+      "name": "H:OnVsyncEvent now:159164910416993"
+    },
+    {
+      "relative_seconds": 11.099057,
+      "duration_ms": 16.267,
+      "line": 445622,
+      "name": "H:UIVsyncTask[timestamp:159164910416993][vsyncID:478106][instanceID:100000]"
+    },
+    {
+      "relative_seconds": 11.099683,
+      "duration_ms": 9.238,
+      "line": 445695,
+      "name": "H:FlushDirtyNodeUpdate"
+    },
+    {
+      "relative_seconds": 11.108926,
+      "duration_ms": 5.864,
+      "line": 445918,
+      "name": "H:UITaskScheduler::FlushTask"
+    },
+    {
+      "relative_seconds": 11.099704,
+      "duration_ms": 5.65,
+      "line": 445700,
+      "name": "H:CustomNodeUpdate name:ChatPage,id:434"
+    },
+    {
+      "relative_seconds": 11.09971,
+      "duration_ms": 5.641,
+      "line": 445703,
+      "name": "H:JSView: ExecuteRerender"
+    },
+    {
+      "relative_seconds": 11.108929,
+      "duration_ms": 5.312,
+      "line": 445919,
+      "name": "H:FlushLayoutTask"
+    },
+    {
+      "relative_seconds": 11.109002,
+      "duration_ms": 4.693,
+      "line": 445920,
+      "name": "H:CreateTaskMeasure[Column][self:453][parent:436][layoutConstraint:minSize: [[0.00 x 0.00]]maxSize: [[1264.00 x 1848.00]]percentReference: [[1264.00 x 1848.00]]parentIdealSize: [[1264.00 x 1848.00]]selfIdealSize: [[NA x NA]]][layoutPriority:0][pageId:2][depth:8]"
+    },
+    {
+      "relative_seconds": 11.109129,
+      "duration_ms": 4.554,
+      "line": 445925,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, 375.000000"
+    },
+    {
+      "relative_seconds": 11.109447,
+      "duration_ms": 4.184,
+      "line": 445944,
+      "name": "H:TextLayoutAlgorithm::MeasureContent[id:1480][needReCreateParagraph:1][size:0]"
+    },
+    {
+      "relative_seconds": 11.10536,
+      "duration_ms": 1.636,
+      "line": 445860,
+      "name": "H:CustomNodeUpdate name:AgentMessageRow,id:1091"
+    },
+    {
+      "relative_seconds": 11.105363,
+      "duration_ms": 1.631,
+      "line": 445861,
+      "name": "H:JSView: ExecuteRerender"
+    },
+    {
+      "relative_seconds": 11.107677,
+      "duration_ms": 1.22,
+      "line": 445880,
+      "name": "H:CustomNodeUpdate name:ChatMessageReasoning,id:1118"
+    },
+    {
+      "relative_seconds": 11.10768,
+      "duration_ms": 1.214,
+      "line": 445881,
+      "name": "H:JSView: ExecuteRerender"
+    },
+    {
+      "relative_seconds": 11.114247,
+      "duration_ms": 0.541,
+      "line": 446118,
+      "name": "H:FlushRenderTask 5"
+    }
+  ],
+  "component_creation_events": [
+    {
+      "relative_seconds": 1.020802,
+      "unix_ms": 1790782941719.883,
+      "line": 22308,
+      "pid": 48374,
+      "name": "H:CustomNode:BuildItem [AgentMessageRow][self:1050][parent:1048][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 1.023265,
+      "unix_ms": 1790782941722.346,
+      "line": 22453,
+      "pid": 48374,
+      "name": "H:CustomNode:BuildItem [MarkdownText][self:1069][parent:1068][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 1.271832,
+      "unix_ms": 1790782941970.913,
+      "line": 31655,
+      "pid": 48374,
+      "name": "H:CustomNode:BuildItem [AgentMessageRow][self:1091][parent:1089][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    },
+    {
+      "relative_seconds": 16.19881,
+      "unix_ms": 1790782956897.891,
+      "line": 625708,
+      "pid": 48374,
+      "name": "H:CustomNode:BuildItem [MarkdownText][self:1673][parent:1672][frameRound:0][reuseId:-1][parentCustomNode:-1]"
+    }
+  ],
+  "completion_list_geometry": [
+    {
+      "relative_seconds": 22.380358,
+      "unix_ms": 1790782963079.439,
+      "line": 862858,
+      "pid": 48374,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -6059.077637"
+    },
+    {
+      "relative_seconds": 22.399896,
+      "unix_ms": 1790782963098.977,
+      "line": 863785,
+      "pid": 48374,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -6075.979492"
+    },
+    {
+      "relative_seconds": 22.41922,
+      "unix_ms": 1790782963118.301,
+      "line": 864661,
+      "pid": 48374,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -6090.539062"
+    },
+    {
+      "relative_seconds": 22.425924,
+      "unix_ms": 1790782963125.005,
+      "line": 865103,
+      "pid": 48374,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -6109.431152"
+    },
+    {
+      "relative_seconds": 22.438053,
+      "unix_ms": 1790782963137.134,
+      "line": 865538,
+      "pid": 48374,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -6109.431152"
+    },
+    {
+      "relative_seconds": 22.713713,
+      "unix_ms": 1790782963412.794,
+      "line": 874935,
+      "pid": 48374,
+      "name": "H:ListLayoutAlgorithm::MeasureListItem:1, -6193.000000"
+    }
+  ],
+  "max_scroll_by_all": {
+    "relative_seconds": 21.463166,
+    "line": 831160,
+    "offset": -85.247971,
+    "name": "H:ScrollBy, offset:-85.247971, id:503, tag:List"
+  },
+  "max_scroll_by_completion": {
+    "relative_seconds": 22.432886,
+    "line": 865399,
+    "offset": -21.411791,
+    "name": "H:ScrollBy, offset:-21.411791, id:503, tag:List"
+  },
+  "scroll_by_over200_count": 0,
+  "limitations": [
+    "Reasoning has at most10 blocks. Trace contains no character lengths or key strings, and no positive evidence of6000-character cap/head trimming is present. Do not claim this run validates that cap.",
+    "Markdown parent and block durations are elapsed synchronous slice time. Their union avoids double counting, but no sched events were captured, so they are not isolated CPU execution time.",
+    "At final streaming=false all existing MarkdownBlockViews update once; this is not prefix work on every delta and there is no component recreation.",
+    "The historical user row id1050 does not update in the body window. The trace does not prove repeated history traversal or any particular duplicate JS calculation.",
+    "The low-load moving window is about0.4s and proves policy-limited60Hz independent of immediate UI overload, not sustained120fps capability for the whole run.",
+    "Native reasoning Text identities change every delta; measurement remains required after content changes, so stable identity alone must be benchmarked before claiming its5ms shaping cost is eliminated.",
+    "No devices, emulators, settings, or production source files were changed in this analysis."
+  ]
+}

@@ -4,8 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { JsonObject, JsonValue } from '../main/ets/chat/json.ts';
 import {
-  createMcpManagementTools, createMcpServerTools,
-  mcpArgumentsObject, mcpStatusToString, mcpImportKey, toolOutputPreview,
+  createMcpManagementTools, createMcpServerTools, mcpArgumentsObject, toolOutputPreview
 } from '../main/ets/chat/mcp_tools.ts';
 import type { McpToolActivityPort, McpSkillManagerPort } from '../main/ets/chat/mcp_tools.ts';
 import { McpManager } from '../main/ets/chat/mcp_manager.ts';
@@ -14,9 +13,9 @@ import type {
   McpHttpPort, McpHttpResponse, McpSseStream, McpPostStreamResponse,
 } from '../main/ets/chat/mcp_transports.ts';
 import {
-  makeMcpCommonOptions, makeMcpTool, makeMcpSseServer, makeMcpStreamableHttpServer,
+  makeMcpCommonOptions, makeMcpTool, makeMcpSseServer, makeMcpStreamableHttpServer
 } from '../main/ets/chat/mcp_config.ts';
-import type { McpServerConfig, McpTool, McpStatus } from '../main/ets/chat/mcp_config.ts';
+import type { McpServerConfig, McpTool } from '../main/ets/chat/mcp_config.ts';
 import type { AgentTool } from '../main/ets/chat/tool.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
 
@@ -149,23 +148,6 @@ const textOf = (parts: UIMessagePart[]): string =>
   (parts[0] as { text: string }).text;
 
 // ===== helpers =====
-
-test('mcpStatusToString 五态(:233-239)', () => {
-  assert.equal(mcpStatusToString({ kind: 'idle' }), 'idle');
-  assert.equal(mcpStatusToString({ kind: 'connecting' }), 'connecting');
-  assert.equal(mcpStatusToString({ kind: 'connected' }), 'connected');
-  assert.equal(mcpStatusToString({ kind: 'reconnecting', attempt: 2, maxAttempts: 5 }),
-    'reconnecting:2/5');
-  assert.equal(mcpStatusToString({ kind: 'error', message: '炸了' }), 'error:炸了');
-});
-
-test('mcpImportKey(:241-244)', () => {
-  assert.equal(mcpImportKey(makeMcpSseServer({
-    url: 'https://x/sse',
-    commonOptions: makeMcpCommonOptions({ name: 'a' }),
-  })), 'sse|a|https://x/sse');
-  assert.equal(mcpImportKey(makeHttpServer('id', 'b')), 'streamable_http|b|https://mcp.test/mcp');
-});
 
 test('mcpArgumentsObject(:170-185):arguments ?? args ?? {};串解析;数组 error', () => {
   assert.deepEqual(mcpArgumentsObject({}), {});

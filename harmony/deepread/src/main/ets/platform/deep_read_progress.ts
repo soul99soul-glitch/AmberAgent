@@ -1,3 +1,5 @@
+import { isComplete } from '../domain/helpers.ts';
+import { synthesisTemplate } from '../domain/synthesis_templates.ts';
 // deepReadProgressSnapshot — 进度百分比快照(照搬 Android DeepReadProgress.kt)
 //
 // 供 UI 胶囊与通知共用:准备 6% → 收集 10% → 规划 24% → 写作按段递增
@@ -34,10 +36,10 @@ const writingProgress = (output: DeepReadOutput): DeepReadProgressSnapshot => {
 };
 
 const stageLabel = (stage: DeepReadGenerationStage): string => {
-  if (stage === 'OVERVIEW') return '撰写概览';
-  if (stage === 'NARRATIVE') return '撰写时间轴叙事';
-  if (stage === 'ANALYSIS') return '撰写深度分析';
-  return '整理扩展阅读';
+  if (stage === 'OVERVIEW') return '撰写结论与导语';
+  if (stage === 'NARRATIVE') return '梳理关键判断与脉络';
+  if (stage === 'ANALYSIS') return '分析立场与影响';
+  return '整理来源';
 };
 
 const sectionsReady = (output: DeepReadOutput): boolean =>
@@ -48,14 +50,18 @@ export const deepReadProgressSnapshot = (
   output: DeepReadOutput | null, running: boolean,
 ): DeepReadProgressSnapshot => {
   if (output === null) return { percent: running ? 6 : 0, label: running ? '正在准备' : '未开始' };
-  if (output.generationPhase === 'COMPLETE' || (output.generationComplete && sectionsReady(output))) {
+  if (isComplete(output) || output.generationPhase === 'COMPLETE' || (output.generationComplete && sectionsReady(output))) {
     return { percent: 100, label: '已完成' };
   }
   if (output.generationPhase === 'VERIFYING') return { percent: 96, label: '正在补漏' };
   if (sectionsReady(output)) return { percent: 94, label: '正在收尾' };
   if (output.generationPhase === 'COLLECTING') return { percent: 10, label: '正在收集资料' };
   if (output.generationPhase === 'PLANNING') return { percent: 24, label: '正在规划结构' };
-  if (output.generationPhase === 'WRITING') return writingProgress(output);
+  if (output.generationPhase === 'WRITING') {
+    const template = synthesisTemplate(output.templateArticle?.template ?? output.templateSnapshot?.id ?? output.templateId);
+    if (template !== null) return { percent: 56, label: `正在生成${template.name}` };
+    return writingProgress(output);
+  }
   // IDLE
   if (!running) return { percent: 0, label: '未开始' };
   if (STAGE_ORDER.some((s: DeepReadGenerationStage): boolean =>

@@ -15,13 +15,15 @@ import { tryFallbackAfterStageFailure } from './try_fallback.ts';
 import type { SourcePrefetcher, DeepReadSource } from '../research/source_prefetcher.ts';
 import { buildEvidencePack } from '../research/evidence_pack.ts';
 import type { DeepReadEvidencePack, DeepReadArticlePlan } from '../research/evidence_pack.ts';
-import { generateArticlePlan } from '../research/article_plan.ts';
+import { synthesisTemplate, parseSynthesisPick, synthesisPickPrompt, synthesisPrompt, parseSynthesisArticle } from '../domain/synthesis_templates.ts';
+import { makeSystemMessage, makeUserMessage, latestAssistantText } from './message.ts';
+import { generateArticlePlan, fallbackPlan } from '../research/article_plan.ts';
 import type { ScoredImageCandidate } from '../research/image_scorer.ts';
 import type { AiClient } from '../platform/ai_client.ts';
 import type { AbortSignalLike } from '../platform/runtime_api.ts';
-import type { DeepReadTemplateSnapshot, DeepReadOutput } from '../domain/models.ts';
+import type { DeepReadTemplateSnapshot, DeepReadOutput, ReadingLink } from '../domain/models.ts';
 import { sourceInputs, mergeCollectedSources, generationSources } from '../domain/input_sources.ts';
-import type { DeepReadCollectionIssue } from '../domain/input_sources.ts';
+import type { DeepReadCollectionIssue, DeepReadInputSource } from '../domain/input_sources.ts';
 import { makeEmptyDeepReadOutput } from '../domain/models.ts';
 import {
   statusOf, sectionsReady, isComplete, withInferredSectionStates, hasReadableArticle, hasDisplayableDeepReadOutput, withSectionStatus,
@@ -107,6 +109,41 @@ const sourceUrlsForRun = (seedUrl: string | null, seedUrls: string[] | undefined
   Array.from(new Set([seedUrl ?? '', ...(seedUrls ?? cachedOutput?.inputSourceUrls ?? [])]
     .map(url => url.trim()).filter(url => url.length > 0)));
 
+const numberedSourceLinks = (sources: DeepReadSource[]): ReadingLink[] => sources.map(source => ({
+  sourceId: source.sourceId, title: source.title, url: source.url, source: source.source, publishedAt: source.publishedAt,
+}));
+
+const stableGenerationSources = (inputs: DeepReadInputSource[]): DeepReadSource[] => {
+  const usableInputs = inputs.filter(source => source.status === 'ready' && source.content.trim().length > 0);
+  return generationSources(inputs).map((source, index) => {
+    const input = usableInputs[index];
+    const sourceId = (input.kind === 'web' || input.kind === 'search') && source.url.length > 0
+      ? `url:${source.url}` : `input:${input.id}`;
+    return { ...source, sourceId };
+  });
+};
+
+const sameNumberedSource = (left: ReadingLink, right: ReadingLink): boolean => {
+  const localIdentity = left.sourceId?.startsWith('input:') || right.sourceId?.startsWith('input:');
+  // The old prefetch counter restarts on cold launch: src-1 is not a web identity.
+  if (!localIdentity && left.url.length > 0 && right.url.length > 0) return left.url === right.url;
+  if (left.sourceId !== undefined && right.sourceId !== undefined) {
+    return left.sourceId === right.sourceId || (left.url === right.url &&
+      (`input:${left.sourceId}` === right.sourceId || left.sourceId === `input:${right.sourceId}`));
+  }
+  return left.url === right.url && left.title === right.title && left.source === right.source;
+};
+
+// A continuation can collect/reorder inputs, but existing citations keep their
+// article-owned numbers. Only a forced replacement starts a new source list.
+const stableSourceLinks = (existing: ReadingLink[], incoming: ReadingLink[]): ReadingLink[] => {
+  const result = existing.slice();
+  for (const source of incoming) {
+    if (!result.some(saved => sameNumberedSource(saved, source))) result.push(source);
+  }
+  return result;
+};
+
 export const createRunContext = async (
   deps: RunManagerDeps,
   topicId: string,
@@ -116,6 +153,7 @@ export const createRunContext = async (
   signal?: AbortSignalLike,
   seedUrls?: string[],
   templateSnapshot?: DeepReadTemplateSnapshot,
+  deferPlanning: boolean = false,
 ): Promise<{ ok: true; context: RunContext } | { ok: false; error: string }> => {
   // 0. 取消一旦发生,不再进入任何抓取/规划(避免取消后仍工作)
   if (isAborted(signal)) return { ok: false, error: 'aborted' };
@@ -165,13 +203,23 @@ export const createRunContext = async (
   if (deps.repository !== undefined && canSaveInputCollection) {
     await deps.repository.save(topicId, topicTitle, { ...(cachedOutput ?? makeEmptyDeepReadOutput()), ...inputFields });
   }
-  prefetchedSources = generationSources(inputSources);
+  prefetchedSources = deps.writerMode === 'structured' ? stableGenerationSources(inputSources) : generationSources(inputSources);
   if (prefetchedSources.length === 0) {
     return { ok: false, error: '未获取到可用于深度阅读的资料，请检查来源或搜索配置后重试。' };
   }
 
   // 2. evidence pack
   const evidencePack = buildEvidencePack(prefetchedSources);
+  const sourceLinks = deps.writerMode === 'structured'
+    ? stableSourceLinks(force ? [] : cachedOutput?.sources ?? [], numberedSourceLinks(prefetchedSources)) : [];
+  if (deps.writerMode === 'structured') {
+    const sourceNumbers: Record<string, number> = {};
+    for (const source of prefetchedSources) {
+      const link = numberedSourceLinks([source])[0];
+      sourceNumbers[source.sourceId] = sourceLinks.findIndex(saved => sameNumberedSource(saved, link)) + 1;
+    }
+    evidencePack.sourceNumbers = sourceNumbers;
+  }
 
   // 3. image candidates 池(传给 writer)
   const imageCandidates: ScoredImageCandidate[] = prefetchedSources.flatMap(s => s.imageCandidates);
@@ -179,6 +227,7 @@ export const createRunContext = async (
   // 4. writer(初始 output 从 repository 取或空)
   const initialOutput: DeepReadOutput = {
     ...(force ? makeEmptyDeepReadOutput() : withInferredSectionStates(cachedOutput ?? makeEmptyDeepReadOutput())), ...inputFields,
+    ...(deps.writerMode === 'structured' ? { sources: sourceLinks } : {}),
   };
   const writer = createSectionWriterTools({
     topicId, topicTitle, imageCandidates, initialOutput,
@@ -187,8 +236,9 @@ export const createRunContext = async (
 
   // 5. article plan(1 次 LLM;失败 → fallbackPlan;signal 贯穿真实取消)
   if (isAborted(signal)) return { ok: false, error: 'aborted' };
-  deps.onProgress?.('PLANNING', '规划结构');
-  const articlePlan = await generateArticlePlan(deps.aiClient, deps.model, topicTitle, evidencePack, deps.playbookMarkdown, signal);
+  if (!deferPlanning) deps.onProgress?.('PLANNING', '规划结构');
+  const articlePlan = deferPlanning ? fallbackPlan(topicTitle, evidencePack)
+    : await generateArticlePlan(deps.aiClient, deps.model, topicTitle, evidencePack, deps.playbookMarkdown, signal);
   if (isAborted(signal)) return { ok: false, error: 'aborted' };
 
   return {
@@ -208,6 +258,85 @@ export const createRunContext = async (
   };
 };
 
+// Existing magazine prose always continues as magazine; an auto preference is not permission to replace it.
+const requestedSynthesis = (deps: RunManagerDeps, cached: DeepReadOutput | null, force: boolean,
+  snapshot?: DeepReadTemplateSnapshot): boolean => {
+  if (!force && cached?.templateArticle !== undefined) return true;
+  if (!force && cached !== null && (cached.summary.trim().length > 0 || (cached.bottomLine?.trim().length ?? 0) > 0 || (cached.timeline?.length ?? 0) > 0
+    || (cached.corePoints?.length ?? 0) > 0 || (cached.analysis.coreDispute?.trim().length ?? 0) > 0
+    || (cached.analysis.implications?.trim().length ?? 0) > 0 || cached.analysis.perspectives.length > 0
+    || cached.analysis.quotes.length > 0 || (cached.impacts?.length ?? 0) > 0 || (cached.watch?.length ?? 0) > 0
+    || hasAnyReady(cached))) return false;
+  const selected = !force && cached?.templateSnapshot !== undefined ? cached.templateSnapshot
+    : snapshot ?? deps.templateSnapshot ?? cached?.templateSnapshot;
+  return synthesisTemplate(selected?.id ?? cached?.templateId) !== null;
+};
+
+const generateSynthesis = async (deps: RunManagerDeps, context: RunContext, topicId: string, topicTitle: string,
+  force: boolean, signal?: AbortSignalLike): Promise<RunResult | null> => {
+  const retained = deps.repository?.get(topicId, topicTitle) ?? null;
+  const preserve = retained !== null && (hasReadableArticle(retained) || hasAnyReady(retained));
+  let output = context.writer.current();
+  let selected = synthesisTemplate(!force && retained?.templateArticle !== undefined
+    ? retained.templateArticle.template : output.templateSnapshot?.id ?? output.templateId);
+  const aborted = (): RunResult => ({ ok: false, output: deps.repository?.get(topicId, topicTitle) ?? output, error: 'aborted' });
+  let persistenceFailed = false;
+  const save = async (next: DeepReadOutput): Promise<void> => {
+    if (isAborted(signal)) throw makeAbortedError();
+    try { await persist(deps, topicId, topicTitle, next); } catch (error) { persistenceFailed = true; throw error; }
+    output = next;
+  };
+  try {
+    if (selected?.id === 'deepread_auto') {
+      deps.onProgress?.('PLANNING', '选择生成模板');
+      if (!preserve) await save({ ...output, generationPhase: 'PLANNING', generationComplete: false });
+      const messages = await deps.collectRun([makeSystemMessage('你是深度阅读编辑。只返回合法 JSON。'),
+        makeUserMessage(synthesisPickPrompt(topicTitle, context.evidencePack.allSources))], '选择生成模板', signal, []);
+      if (isAborted(signal)) return aborted();
+      selected = parseSynthesisPick(latestAssistantText(messages));
+    }
+    if (selected === null) {
+      // Persist the auto decision before classic planning, so a retry never picks a second time.
+      const snapshot: DeepReadTemplateSnapshot = { id: 'none', name: '默认排版', kind: 'native', html: null,
+        capturedAt: output.templateSnapshot?.capturedAt ?? Date.now() };
+      output = { ...output, templateSnapshot: snapshot, templateId: snapshot.id };
+      if (!preserve) await save(output);
+      context.writer = createSectionWriterTools({ topicId, topicTitle, imageCandidates: context.evidencePack.allSources.flatMap(source => source.imageCandidates), initialOutput: output });
+      if (deps.onWriterCreated) deps.onWriterCreated(context.writer);
+      deps.onProgress?.('PLANNING', '规划结构');
+      context.articlePlan = await generateArticlePlan(deps.aiClient, deps.model, topicTitle, context.evidencePack, deps.playbookMarkdown, signal);
+      return null;
+    }
+    const snapshot: DeepReadTemplateSnapshot = { id: selected.id, name: selected.name, kind: 'synthesis', html: null,
+      capturedAt: output.templateSnapshot?.capturedAt ?? Date.now() };
+    output = { ...output, templateSnapshot: snapshot, templateId: selected.id,
+      generationPhase: 'WRITING', generationComplete: false, sectionStates: {}, sectionQualities: {} };
+    deps.onProgress?.('WRITING', `生成${selected.name}`);
+    if (!preserve) await save(output);
+    const messages = await deps.collectRun([makeSystemMessage('你是深度阅读编辑，只基于来源事实，返回指定结构的中文 JSON。'),
+      makeUserMessage(synthesisPrompt(selected, topicTitle, context.evidencePack.allSources))], `生成${selected.name}`, signal, []);
+    if (isAborted(signal)) return aborted();
+    const article = parseSynthesisArticle(latestAssistantText(messages), selected, topicTitle, context.evidencePack.allSources);
+    if (article === null) throw new Error(`模型没有按「${selected.name}」模板返回完整内容，请重试。`);
+    const completed: DeepReadOutput = { ...output, templateArticle: article, summary: article.lede,
+      sources: article.sources.map(source => ({ title: source.title, url: source.url ?? '', source: source.site, publishedAt: null })),
+      generationPhase: 'COMPLETE', generationComplete: true, sectionStates: {}, sectionQualities: {} };
+    if (isAborted(signal)) return aborted();
+    deps.onProgress?.('VERIFYING', '校验并保存');
+    await save(completed);
+    deps.onProgress?.('COMPLETE', '已完成');
+    return { ok: true, output: completed, error: null };
+  } catch (error) {
+    if (persistenceFailed) throw error;
+    if (isAborted(signal) || isAbortErrorName(error)) return aborted();
+    const message = error instanceof Error ? error.message : String(error);
+    if (preserve && retained !== null) return { ok: false, output: retained, error: message };
+    const failed = withSectionStatus({ ...output, templateArticle: undefined, generationPhase: 'IDLE', generationComplete: false }, 'OVERVIEW', 'FAILED', message);
+    await save(failed);
+    return { ok: false, output: failed, error: message };
+  }
+};
+
 // ===== generateStages(照搬 Android :194-289) =====
 
 export const generateStages = async (
@@ -225,7 +354,7 @@ export const generateStages = async (
 ): Promise<RunResult> => {
   // 重生成只在完整新稿保存成功时替换旧稿;阶段缓存仍用于首次生成和续跑。
   const cachedOutput = force ? deps.repository?.get(topicId, topicTitle) ?? null : null;
-  const previousOutput = cachedOutput !== null && hasAnyReady(withInferredSectionStates(cachedOutput)) ? cachedOutput : null;
+  const previousOutput = cachedOutput !== null && (hasReadableArticle(cachedOutput) || hasAnyReady(withInferredSectionStates(cachedOutput))) ? cachedOutput : null;
   // 统一 aborted 结果(返回取消前已持久化的当前态,不写新状态)
   const abortedResult = (): RunResult => ({
     ok: false,
@@ -235,7 +364,8 @@ export const generateStages = async (
   if (isAborted(signal)) return abortedResult();
 
   // createRunContext(空 prefetch → failure)
-  const ctxResult = await createRunContext(deps, topicId, topicTitle, seedUrl, force, signal, seedUrls, templateSnapshot);
+  const synthesis = requestedSynthesis(deps, deps.repository?.get(topicId, topicTitle) ?? null, force, templateSnapshot);
+  const ctxResult = await createRunContext(deps, topicId, topicTitle, seedUrl, force, signal, seedUrls, templateSnapshot, synthesis);
   if (ctxResult.ok === false) {
     // ArkTS 对 discriminated union 的 narrow 较弱,显式提取 error
     const failMsg: string = (ctxResult as { ok: false; error: string }).error;
@@ -260,6 +390,11 @@ export const generateStages = async (
     return { ok: false, output: failedOutput, error: failMsg };
   }
   const context = (ctxResult as { ok: true; context: RunContext }).context;
+  if (synthesis) {
+    const result = await generateSynthesis(deps, context, topicId, topicTitle, force, signal);
+    if (result !== null) return result;
+    if (isAborted(signal)) return abortedResult();
+  }
 
   // 持久化守卫:signal 已取消时绝不落盘(避免取消后仍写 RUNNING/COLLECTING)
   let persistenceFailed = false;
@@ -294,7 +429,12 @@ export const generateStages = async (
       await runStage(deps, context, topicId, topicTitle, 'ANALYSIS', signal, saveGuarded);
     }
     if (stages.includes('EXTENDED_READING')) {
-      await runStage(deps, context, topicId, topicTitle, 'EXTENDED_READING', signal, saveGuarded);
+      if (context.writerMode === 'structured') {
+        if (isAborted(signal)) throw makeAbortedError();
+        await saveGuarded(context.writer.writeSources(context.writer.current().sources ?? numberedSourceLinks(context.evidencePack.allSources)));
+      } else {
+        await runStage(deps, context, topicId, topicTitle, 'EXTENDED_READING', signal, saveGuarded);
+      }
     }
 
     // finish 判定
@@ -449,6 +589,9 @@ export const run = async (
       if (missing.length > 0) stagesToRun = missing;
     }
   }
+  if (!force && deps.writerMode === 'structured' && stagesToRun.length === 1 && stagesToRun[0] === 'EXTENDED_READING') {
+    return runSection(deps, topicId, topicTitle, 'EXTENDED_READING', seedUrl, opts.signal, opts.seedUrls);
+  }
   return generateStages(deps, topicId, topicTitle, stagesToRun, seedUrl, force, 'PLANNING', true, opts.signal, opts.seedUrls, opts.templateSnapshot);
 };
 
@@ -463,6 +606,24 @@ export const runSection = async (
 ): Promise<RunResult> => {
   if (isAborted(signal)) {
     return { ok: false, output: deps.repository?.get(topicId, topicTitle) ?? makeEmptyDeepReadOutput(), error: 'aborted' };
+  }
+  const cachedOutput = deps.repository?.get(topicId, topicTitle) ?? null;
+  if (requestedSynthesis(deps, cachedOutput, false)) {
+    return generateStages(deps, topicId, topicTitle, STAGE_ORDER, seedUrl, false, 'WRITING', false, signal, seedUrls);
+  }
+  // Repair the retained legacy source status from saved research without
+  // collecting, planning or adding a model charge.
+  if (stage === 'EXTENDED_READING' && deps.writerMode === 'structured') {
+    const cached = deps.repository?.get(topicId, topicTitle) ?? makeEmptyDeepReadOutput();
+    const sources = stableGenerationSources(cached.inputSources ?? []);
+    const links = stableSourceLinks(cached.sources ?? [], numberedSourceLinks(sources));
+    const retainedLinks = links.length > 0 ? links : [...cached.references, ...cached.extendedReading];
+    const writer = createSectionWriterTools({ topicId, topicTitle, imageCandidates: [], initialOutput: withInferredSectionStates(cached) });
+    const updated = writer.writeSources(retainedLinks);
+    const output = sectionsReady(updated) ? finishIfPossible(writer) : updated;
+    if (isAborted(signal)) return { ok: false, output: cached, error: 'aborted' };
+    await persist(deps, topicId, topicTitle, output);
+    return { ok: statusOf(output, stage) === 'READY', output, error: output.sectionStates[stage]?.errorMessage ?? null };
   }
   // 有有效资料后由 runStage 标记 RUNNING;预抓失败不留下假的运行状态。
   return generateStages(

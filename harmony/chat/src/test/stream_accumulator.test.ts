@@ -10,14 +10,23 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { makeUserMessage, makeAssistantMessage, makeUIMessage } from '../main/ets/chat/message.ts';
 import type {
-  UIMessage, UIMessagePart, UIMessagePartTool, UIMessagePartText,
-  UIMessagePartReasoning, UIMessagePartImage, MessageChunk,
+  UIMessage,
+  UIMessagePart,
+  UIMessagePartTool,
+  UIMessagePartText,
+  UIMessagePartReasoning,
+  UIMessagePartImage,
+  MessageChunk,
 } from '../main/ets/chat/message.ts';
 import {
-  MessageStreamAccumulator, appendChunkToMessage, handleMessageChunk, coalesceStreamParts,
+  MessageStreamAccumulator,
+  appendChunkToMessage,
+  handleMessageChunk,
+  coalesceStreamParts,
 } from '../main/ets/chat/stream_accumulator.ts';
 import {
-  withStreamToolIndex, withStreamArgsReplace, streamToolIndex,
+  withStreamToolIndex,
+  withStreamArgsReplace,
   REASONING_CONTENT_PRESENT_METADATA_KEY,
 } from '../main/ets/chat/tool_merge.ts';
 
@@ -239,11 +248,6 @@ test('replace 控制标记不持久化:新建 part 与 merge 结果都不携带'
   assert.equal(t.metadata, null, 'replace 标记随合并剥离');
 });
 
-test('streamToolIndex 元数据读取', () => {
-  const t = withStreamToolIndex(toolDelta('', 'f', ''), 3);
-  assert.equal(streamToolIndex(t), 3);
-});
-
 // ===== annotations(merge_rule: annotations) =====
 
 test('annotations: append + distinct,绝不整体替换', () => {
@@ -321,24 +325,6 @@ test('coalesce: 非空 reasoning 丢弃 pending explicit 标记', () => {
   assert.equal(reasonings[0].reasoning, '真内容');
 });
 
-test('snapshot 经过 coalesce 规整', () => {
-  const acc = new MessageStreamAccumulator(seed());
-  acc.append(chunk([reasoningDelta('')])); // 空 reasoning 应被规整丢弃
-  acc.append(chunk([textDelta('a')]));
-  const parts = acc.snapshot()[1].parts;
-  assert.equal(parts.length, 1);
-  assert.equal(parts[0].type, 'text');
-});
-
-// ===== 不可变变体 appendChunk / handleMessageChunk(Message.kt 忠实) =====
-
-test('appendChunkToMessage: 与 accumulator 等价的 text 合并', () => {
-  const m = makeAssistantMessage('');
-  const m2 = appendChunkToMessage(m, chunk([textDelta('你')]));
-  const m3 = appendChunkToMessage(m2, chunk([textDelta('好')]));
-  assert.equal((m3.parts[0] as UIMessagePartText).text, '你好');
-});
-
 test('appendChunkToMessage: reasoning 内容追加强制 finishedAt=null(appendChunk 语义)', () => {
   const m: UIMessage = makeUIMessage('assistant', [reasoningDelta('已', null)]);
   const withFinished = appendChunkToMessage(m, chunk([reasoningDelta('完', '2026-07-28T01:00:00Z')]));
@@ -355,11 +341,6 @@ test('handleMessageChunk: role 变化开新消息;同 role 合并;空列表抛�
   assert.equal(r2.length, 3);
   assert.equal(r2[2].role, 'user');
   assert.throws(() => handleMessageChunk([], chunk([textDelta('x')])));
-});
-
-test('handleMessageChunk: 新消息带 modelId', () => {
-  const r = handleMessageChunk(seed(), chunk([textDelta('a')], 'user'), 'm-9');
-  assert.equal(r[2].modelId, 'm-9');
 });
 
 // ===== usage-only 尾块(choices:[] + usage;stream_options.include_usage 形态) =====

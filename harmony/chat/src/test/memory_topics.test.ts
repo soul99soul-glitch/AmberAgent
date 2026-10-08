@@ -64,7 +64,8 @@ test('saved source → topic/documents → edit invalidation/refresh → source-
   assert.throws(() => deleteMemoryRecord(persisted, topic.id, now));
   assert.throws(() => encodeMemoryFrontmatter(topic));
   assert.throws(() => decodeMemoryFrontmatter('---\nkind: "topic"\n---\n派生摘要'));
-  assert.throws(() => parseMemoryCandidates('{"candidates":[{"content":"伪主题","kind":"topic"}]}', 'c', [], now));
+  assert.deepEqual(parseMemoryCandidates('{"candidates":[{"content":"伪主题","kind":"topic"}]}', 'c', [], now), []);
+  assert.equal(parseMemoryCandidates('{"candidates":[{"content":"伪主题","kind":"topic"},{"content":"正常源记忆","kind":"user"}]}', 'c', [], now).length, 1);
 
   const edited = updateMemoryRecordContent(persisted, 1, '用户修改后的源正文', now + 10).records;
   assert.equal(edited[3].archived, true);

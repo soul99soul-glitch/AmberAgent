@@ -1,0 +1,298 @@
+[
+  {
+    "trace": "stream120final2",
+    "touch_up": [
+      0.8009249999886379,
+      7043,
+      "B|1812|H:StateMachine state change: TouchDown -> TouchUp|M0538"
+    ],
+    "touch_idle": [
+      3.80191099998774,
+      189737,
+      "B|1812|H:StateMachine state change: TouchUp -> TouchIdle|M0538"
+    ],
+    "idle_delay_s": 3.000985999999102,
+    "first60cap": [
+      3.802769999980228,
+      189878,
+      "B|1812|H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]|M0538"
+    ],
+    "clock_add_remove_near_switch": [
+      [
+        3.808961000002455,
+        190230,
+        "B|56835|H:RemoveDisplaySync Id:263|I39"
+      ],
+      [
+        3.819262000004528,
+        191346,
+        "B|56835|H:AddDisplaySync Id:263|I39"
+      ]
+    ],
+    "rate_changes": [
+      {
+        "t": 3.2082740000041667,
+        "line": 147862,
+        "value": [
+          "263",
+          "60, 120, 120",
+          "120",
+          "120"
+        ]
+      },
+      {
+        "t": 3.8331599999801256,
+        "line": 191973,
+        "value": [
+          "263",
+          "60, 120, 120",
+          "60",
+          "60"
+        ]
+      },
+      {
+        "t": 3.849839999980759,
+        "line": 192605,
+        "value": [
+          "263",
+          "60, 120, 120",
+          "30",
+          "30"
+        ]
+      },
+      {
+        "t": 3.866576999978861,
+        "line": 193245,
+        "value": [
+          "263",
+          "60, 120, 120",
+          "60",
+          "60"
+        ]
+      }
+    ]
+  },
+  {
+    "trace": "stream120final",
+    "touch_up": [
+      0.8370580000046175,
+      6280,
+      "B|1812|H:StateMachine state change: TouchDown -> TouchUp|M0538"
+    ],
+    "touch_idle": [
+      3.838240000011865,
+      168169,
+      "B|1812|H:StateMachine state change: TouchUp -> TouchIdle|M0538"
+    ],
+    "idle_delay_s": 3.0011820000072476,
+    "first60cap": [
+      3.935077000001911,
+      174678,
+      "B|1812|H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_FIRST_UI_ANIMATION_FRAME_ENERGY_ASSURANCE), status:1, value:[60-60]|M0538"
+    ],
+    "clock_add_remove_near_switch": [
+      [
+        3.336716999998316,
+        135564,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        3.3417279999994207,
+        135750,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        3.3864980000071228,
+        138374,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        3.3922120000061113,
+        138681,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        3.630212999996729,
+        154511,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        3.6423160000122152,
+        155093,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        3.6780980000039563,
+        157278,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        3.6837780000059865,
+        157580,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        3.7287390000128653,
+        160691,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        3.7338290000043344,
+        160953,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        3.777826000005007,
+        163937,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        3.7844699999841396,
+        164322,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        3.826748999999836,
+        167076,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        3.8271090000052936,
+        167143,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        3.874695000005886,
+        170364,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        3.8754009999975096,
+        170420,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        3.921382000000449,
+        173690,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        3.9270050000050105,
+        173923,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        3.9694449999951757,
+        176369,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        3.9754979999852367,
+        176498,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        4.017958999989787,
+        178130,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        4.025824999989709,
+        178179,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        4.068047000007937,
+        179722,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        4.076502999989316,
+        179983,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        4.117166000010911,
+        181605,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        4.125969999993686,
+        181861,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        4.163912999996683,
+        183349,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        4.175882000010461,
+        183704,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        4.213002000004053,
+        185168,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        4.225838999991538,
+        185505,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        4.25994200000423,
+        186796,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        4.260257999994792,
+        186841,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        4.309287999989465,
+        188597,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        4.309697999997297,
+        188646,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ],
+      [
+        4.3569640000059735,
+        190391,
+        "B|56835|H:AddDisplaySync Id:71|I39"
+      ],
+      [
+        4.359312999993563,
+        190494,
+        "B|56835|H:RemoveDisplaySync Id:71|I39"
+      ]
+    ],
+    "rate_changes": [
+      {
+        "t": 3.3416919999872334,
+        "line": 135749,
+        "value": [
+          "71",
+          "60, 120, 120",
+          "120",
+          "120"
+        ]
+      },
+      {
+        "t": 3.9754179999872576,
+        "line": 176495,
+        "value": [
+          "71",
+          "60, 120, 120",
+          "60",
+          "60"
+        ]
+      }
+    ]
+  }
+]

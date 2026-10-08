@@ -1,0 +1,47 @@
+[
+  {
+    "path": "/tmp/stream3fullbefore.trace",
+    "bytes": 77254862,
+    "sha256": "52c43cefe09837f65f3252aa615854d622651318d38ef1730c9bb062f95c8fd9"
+  },
+  {
+    "path": "/tmp/stream3after.trace",
+    "bytes": 50659566,
+    "sha256": "8be3ba9dab986f782b31ce5bb6786c18126d44646e9856f46ccb8d3d2e371080"
+  },
+  {
+    "path": "/tmp/stream3clock.trace",
+    "bytes": 90050254,
+    "sha256": "da0eadf40061a9732297e6186ccff356504541ae38f5c6b63dc0c3388ed5a101"
+  },
+  {
+    "path": "/tmp/stream3final.trace",
+    "bytes": 119599773,
+    "sha256": "e88fd91d7191d66a70b9f533eabd12b867c106f7765e20acb00f8ec7c55bcc73"
+  },
+  {
+    "path": "/tmp/stream3delivery.trace",
+    "bytes": 124589704,
+    "sha256": "61ab24b42246d7ea1a2bbe02a46b0f3af17ba51dd73778c94384e636347034ed"
+  },
+  {
+    "path": "/tmp/stream3blocks.trace",
+    "bytes": 89328216,
+    "sha256": "f676d7f6571deed08436c7699053e323f2995e2821af98348f3f36fba1d54b5e"
+  },
+  {
+    "path": "/tmp/stream120slots.trace",
+    "bytes": 115026033,
+    "sha256": "1cdc20799741317f34980b0eafe6102301abc927ef97ee123667432073b3c10d"
+  },
+  {
+    "path": "/tmp/stream120final.trace",
+    "bytes": 102766952,
+    "sha256": "b9ff5fbd9ce7cdca82beb8ff341bfa98ee47a602feccd6cd667e5e95996dc61a"
+  },
+  {
+    "path": "/tmp/stream120final2.trace",
+    "bytes": 61335226,
+    "sha256": "a831f393a0441d992663a853cd0150a4f24a1f304d63c330669136429109d6e0"
+  }
+]

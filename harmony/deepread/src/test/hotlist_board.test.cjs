@@ -42,7 +42,7 @@ const extractMethod = name => {
   return boardSource.slice(start, end);
 };
 const methods = ['applyProjection', 'loadHotlist', 'stopRefresh', 'onPageShow',
-  'showTopicActions', 'openArticle'].map(extractMethod).join('\n');
+  'showTopicActions', 'topicSheetDuration', 'openArticle'].map(extractMethod).join('\n');
 const selection = boardSource.match(/const seeds: string\[\] = hotTopicSeedUrls\(tp\);[\s\S]*?this\.showTopicActions\(first, seeds, discoveryHotspotInputs\(hotspots\)\);/)[0];
 const plain = value => JSON.parse(JSON.stringify(value));
 const item = (title, rank = 1, url = 'https://example.test/' + rank) => ({ rank, title, url, heat: '' });
@@ -116,7 +116,7 @@ function harness(options = {}) {
     rawSections: [], enabledSourceIds: [], focusKeywords: [], focusMode: 'all',
     refreshMinutes: 60, wifiOnly: false, translateTitles: false, cacheLoaded: false,
     pageVisible: true, firstShowDone: true, refreshToken: 0, requestController: null,
-    runObservationToken: 0, unsubscribeRuns: null, observeRuns: () => {},
+    runObservationToken: 0, unsubscribeRuns: null, observeRuns: () => {}, loadIssue: () => {}, arrive: () => {}, saveDiscoveryScroll: () => {},
     loading: false, refreshing: false, sections: [], topics: [], lastUpdatedAt: 0,
     hotlistError: '', hotlistNote: '', sheetItem: null,
   });
@@ -252,11 +252,12 @@ test('真实 Board 聚合项携带全部热点来源资料，含无 URL 条目�
 test('真实 Board 系统返回先关闭话题 sheet，随后才允许页面返回', () => {
   const animations = [];
   const context = {
-    module: { exports: {} }, Curve: { EaseIn: 'EaseIn' },
+    module: { exports: {} }, Curve: { EaseIn: 'EaseIn' }, getProductKind: () => 'agent',
     animateTo: (options, action) => { animations.push(plain(options)); action(); },
   };
   vm.runInNewContext(compile(`module.exports = class BoardBackFixture {
     ${extractMethod('onBackPress')}
+    ${extractMethod('topicSheetDuration')}
   };`), context);
   const page = new context.module.exports();
   const controller = { aborted: false };

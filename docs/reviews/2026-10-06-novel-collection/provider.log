@@ -1,0 +1,13 @@
+{"task": "writing", "stream": true, "model": "QA-Collect", "format": "text"}
+{"task": "analysis-first", "stream": true, "model": "QA-Collect", "format": "invalid"}
+{"task": "analysis-correction", "stream": true, "model": "QA-Collect", "format": "valid"}
+{"task": "writing", "stream": true, "model": "QA-Collect", "format": "text"}
+{"task": "analysis-first", "stream": true, "model": "QA-Collect", "format": "invalid"}
+{"task": "analysis-correction", "stream": true, "model": "QA-Collect", "format": "invalid"}
+{"task": "analysis-first", "stream": true, "model": "QA-Collect", "format": "invalid"}
+{"task": "analysis-correction", "stream": true, "model": "QA-Collect", "format": "valid"}
+{"task": "writing", "stream": true, "model": "QA-Collect", "format": "text"}
+{"task": "analysis-first", "stream": true, "model": "QA-Collect", "format": "invalid"}
+{"task": "analysis-correction", "stream": true, "model": "QA-Collect", "format": "invalid"}
+{"task": "analysis-first", "stream": true, "model": "QA-Collect", "format": "invalid"}
+{"task": "analysis-correction", "stream": true, "model": "QA-Collect", "format": "valid"}

@@ -1,0 +1,44 @@
+✔ hotlist toggle persists the source key and updates only its displayed switch (28.028667ms)
+✔ storage failure restores the prior switch and reports failure instead of leaving fake success (4.153542ms)
+✔ standalone settings save updates owned search fields while preserving newly edited services and unowned options (35.401208ms)
+✔ a selected service removed before save leaves an actionable error and does not apply reading settings (3.789ms)
+✔ fresh deepread settings use the same default font as the real reader and save that choice (15.2805ms)
+✔ fresh agent settings use the same default font as the real reader and save that choice (16.296542ms)
+✔ Settings initializes the explicit tab root marker {"standaloneTabRoot":true} before stack cleanup (4.485208ms)
+✔ Settings initializes the explicit tab root marker {} before stack cleanup (2.000333ms)
+✔ Settings initializes the explicit tab root marker {"standaloneTabRoot":false} before stack cleanup (2.676208ms)
+✔ host Settings ignores the standalone marker on a nested route (1.797292ms)
+✔ search drafts survive a child return and a newly mounted form while service credentials follow the real catalog (6.78175ms)
+✔ a template chosen in the child replaces stale parent selection, while unchanged persistence keeps the parent draft (3.09125ms)
+✔ independent model selection stages the real pair and applies it only with Save (7.876917ms)
+✔ template route receives staged reading preferences without a persistence side effect (1.566875ms)
+✔ a staged model persistence failure leaves Save visibly unsuccessful and preserves the staged pair for retry (2.140583ms)
+✔ Settings root defers the initial animation frame and keeps scroll/back-return semantics (4.349625ms)
+✔ Settings deferred entrance cancels on hide and does not replay (5.487875ms)
+✔ Settings deferred entrance cancels on disappear and does not replay (5.308917ms)
+✔ Settings deferred entrance cancels on reduceMotion and does not replay (3.470333ms)
+✔ Settings deferred entrance cancels on appBackgrounded and does not replay (3.509875ms)
+✔ Settings deferred entrance cancels on activeTab and does not replay (2.084333ms)
+✔ auto describes the current Chat choice without copying legacy API configuration (36.697167ms)
+✔ a missing fixed provider/model is unavailable and does not silently use the Chat choice (9.629583ms)
+✔ fixed selection persists the provider ID and model configuration UUID to the new slot (9.325917ms)
+✔ unavailable choices are rejected and store failures remain failures (7.960417ms)
+✔ settings save failure retains the prior selection and keeps the selector open with a visible error (17.270959ms)
+✔ settings updates its label and closes only after the provider/model pair has saved (7.016ms)
+✔ template generation uses one captured DeepRead runtime and never the independent legacy client (10.532834ms)
+✔ unavailable runtime gives template generation a visible error without replacing the existing draft (7.311875ms)
+✔ switching to edit while template A generates keeps the new draft intact after A returns (8.081292ms)
+✔ switching to new while template A generates keeps the new draft intact after A returns (5.299458ms)
+✔ root replacement restores all unsubmitted fields, refreshes credentials, and leaves the reader on persisted preferences (82.145084ms)
+✔ Save applies the recovered fields through existing stores and clears the unsubmitted session draft (23.389292ms)
+✔ a new process session and host or nested settings do not inherit the standalone root draft (35.532709ms)
+✔ freshly deleted preferred services stay actionable and a persisted child template replaces the prior session baseline (15.923667ms)
+✔ a staged model removed from the fresh catalog remains an explicit unavailable draft after root replacement (15.153583ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 334.581041

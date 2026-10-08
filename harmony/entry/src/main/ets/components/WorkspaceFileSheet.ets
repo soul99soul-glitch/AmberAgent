@@ -44,8 +44,9 @@ function extBadgeColor(name: string): string {
 @Component
 export struct WorkspaceFileSheet {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
-  @Prop files: WorkspaceFileInfo[] = [];
+  @Prop @Watch('recompute') files: WorkspaceFileInfo[] = [];
   @Prop show: boolean = false;
+  @Prop showUploadPlaceholder: boolean = true;
   onDismiss: () => void = (): void => {};
   onOpenFile: (file: WorkspaceFileInfo) => void = (_f: WorkspaceFileInfo): void => {};
   onDeleteFile: (file: WorkspaceFileInfo) => void = (_f: WorkspaceFileInfo): void => {};
@@ -56,7 +57,7 @@ export struct WorkspaceFileSheet {
   @State visibleFiles: WorkspaceFileInfo[] = [];
   @State pendingDelete: WorkspaceFileInfo | null = null;
 
-  // files 变化 → 重算可见列表(在父级 @State 更新前由 aboutToReuse/事件触发)
+  // 父级归档/删除后更新 files 引用，保持列表与磁盘刷新结果一致。
   private recompute(): void {
     const filtered: WorkspaceFileInfo[] = searchFiles(this.files, this.query);
     this.visibleFiles = sortFiles(filtered, this.sortBy);
@@ -66,8 +67,7 @@ export struct WorkspaceFileSheet {
     this.recompute();
   }
 
-  // 父级 files 引用变更时 ArkUI 不会自动触发 @Prop watcher,故提供手动刷新入口
-  // (页面在注入 files 后调用 sheet.refresh())
+  // 保留已有手动刷新入口；正常刷新由 files watcher 驱动。
   refresh(): void {
     this.recompute();
   }
@@ -329,7 +329,8 @@ export struct WorkspaceFileSheet {
           .layoutWeight(1)
           .padding({ left: 12, right: 12, bottom: 8 })
 
-          // 上传按钮(占位:无真实文件选择器)
+          // 旧宿主占位开关；真实 Chat 文件面板不展示无功能入口。
+          if (this.showUploadPlaceholder) {
           Row() {
             Row() {
               Icon({ name: 'upload', iconSize: BODY, color: INK3 })
@@ -344,6 +345,7 @@ export struct WorkspaceFileSheet {
           .width('100%')
           .justifyContent(FlexAlign.Center)
           .padding({ top: 4, bottom: 16 })
+          }
         }
         .width('100%')
         .height('78%')

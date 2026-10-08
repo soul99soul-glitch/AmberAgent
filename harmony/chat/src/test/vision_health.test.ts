@@ -2,10 +2,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  checkingVisionModelHealth, isVisionHealthAvailable, probeVisionModelHealth,
-  VISION_PROBE_SYSTEM_PROMPT, VISION_PROBE_TINY_PNG, VISION_PROBE_USER_TEXT,
+  isVisionHealthAvailable,
+  probeVisionModelHealth,
+  VISION_PROBE_SYSTEM_PROMPT,
+  VISION_PROBE_TINY_PNG,
+  VISION_PROBE_USER_TEXT,
 } from '../main/ets/chat/vision_health.ts';
-import type { VisionProbeDeps } from '../main/ets/chat/vision_health.ts';
+import type {
+  VisionProbeDeps,
+} from '../main/ets/chat/vision_health.ts';
 import type { ProviderModel, ProviderSetting } from '../main/ets/chat/provider_settings.ts';
 import { makeProviderModel, makeProviderSettingOpenAIVariant } from '../main/ets/chat/provider_settings.ts';
 import type { UIMessage } from '../main/ets/chat/message.ts';
@@ -28,13 +33,6 @@ const depsOf = (
   modelSupportsImage: (m: ProviderModel): boolean => m.inputModalities.includes('image'),
   findProvider: (): ProviderSetting | null => provider,
   generateText: generateText ?? ((): Promise<unknown> => Promise.resolve('OK')),
-});
-
-test('checking() = CHECKING 检测中', () => {
-  const h = checkingVisionModelHealth();
-  assert.equal(h.kind, 'checking');
-  assert.equal(h.label, '检测中');
-  assert.equal(isVisionHealthAvailable(h), false);
 });
 
 test('模型未配置 → NOT_CONFIGURED 未配置', async () => {

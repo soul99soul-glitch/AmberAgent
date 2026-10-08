@@ -54,7 +54,7 @@ test('actual topic source/model/document chain is durable, idempotent, guarded a
     customBodies: [{ key: 'configured_body', value: 'true' }] }) };
   const calls = [], candidateChains = []; let model = async () => response();
   const response = () => ({ choices: [{ message: domain.makeAssistantMessage(JSON.stringify({ topics: [
-    { title: '工程', summary: '两条已存事实的主题', memberIds: [1, 2] }] })) }] });
+    { title: '工程', summary: '两条已存事实的主题', memberIds: [1, 2] }], profile: [], duplicates: [] })) }] });
   const appContainer = { getChatKvStore: () => kv, TASK_COMPRESS_MODEL_KEY: 'compress_model',
     readTaskModelReference: async key => {
       assert.equal(key, 'compress_model'); return domain.taskModelReferenceFromId('compress-choice');
@@ -127,7 +127,7 @@ test('actual topic source/model/document chain is durable, idempotent, guarded a
     model = async () => { modelEntered.resolve(); return late.promise; };
     const actualOpsFactory = store.getMemoryTopicStoreOps;
     store.getMemoryTopicStoreOps = () => { const actual = actualOpsFactory(); return { ...actual,
-      applyTopics: (...args) => { const promise = actual.applyTopics(...args); queued.resolve(); return promise; } }; };
+      applyOptimization: (...args) => { const promise = actual.applyOptimization(...args); queued.resolve(); return promise; } }; };
     const active = coordinator.run(true); await modelEntered.promise;
     const barrier = { entered: deferred(), release: deferred() }; writeBarrier = barrier;
     const touch = store.getMemoryReadRepository().touchMemories([1]); await barrier.entered.promise;
@@ -162,5 +162,69 @@ test('actual topic source/model/document chain is durable, idempotent, guarded a
     assert.equal(current.filter(row => row.kind !== 'topic').length, 2);
     const expiredView = current.find(row => row.id === topic.id);
     assert.equal(expiredView.archived, true); assert.deepEqual(expiredView.memberIds, []);
+
+    // The real coordinator persists all P1 outputs from a single provider response.
+    const preferences = [10, 11, 12].map(id => domain.makeMemoryRecord({ id,
+      content: '用户喜欢清楚简洁的解释' + id, scope: 'long_term', kind: 'user',
+      createdAt: 1000, updatedAt: 1000 }));
+    const duplicates = [20, 21].map(id => domain.makeMemoryRecord({ id,
+      content: id === 20 ? '用户喜欢每日散步锻炼身体' : '用户喜欢每日散步锻炼身体。',
+      scope: 'long_term', kind: 'note', createdAt: id * 1000, updatedAt: id * 1000 }));
+    await fsp.writeFile(sourcePath, JSON.stringify(preferences.concat(duplicates)));
+    model = async () => ({ choices: [{ message: domain.makeAssistantMessage(JSON.stringify({
+      topics: [{ title: '表达偏好', summary: '偏好清楚简洁的解释', memberIds: [10, 11] }],
+      profile: [{ text: '偏好清楚简洁的解释', memoryIds: [10, 11, 12] }], duplicates: [[20, 21]],
+    })) }] });
+    const beforeCombined = calls.length;
+    const combined = await coordinator.run(true);
+    assert.equal(combined.status, 'completed', combined.error);
+    assert.equal(calls.length, beforeCombined + 1);
+    assert.equal(combined.profileUpdated, true); assert.equal(combined.mergedCount, 1);
+    const optimized = await ops.snapshotForTopics();
+    assert.equal(optimized.find(row => row.id === 20).archived, true);
+    assert.ok(optimized.find(row => row.id === 21).supersedesIds.includes(20));
+    const profile = await ops.snapshotProfile();
+    assert.equal(profile.items[0].text, '偏好清楚简洁的解释');
+    assert.equal(JSON.parse(await fsp.readFile(path.join(directory, 'memory/profile.json'), 'utf8')).items[0].text,
+      profile.items[0].text);
+    assert.match(await ops.readDocument('index.md'), /用户画像/);
+    assert.match(await ops.readDocument('index.md'), /偏好清楚简洁的解释/);
+
+    // Real source queue: extraction history, profile invalidation, citation idempotence and restore.
+    const extraction = store.getMemoryExtractionStoreOps();
+    const beforeDeniedCommit = await fsp.readFile(sourcePath, 'utf8');
+    await assert.rejects(extraction.applyActions([], Date.now(), async () => {
+      throw new Error('Source changed before commit');
+    }), /Source changed before commit/);
+    assert.equal(await fsp.readFile(sourcePath, 'utf8'), beforeDeniedCommit);
+    const appliedActions = await extraction.applyActions([{ action: 'invalidate', content: '',
+      evidence: '我不再喜欢这种解释', sourceMessageId: 'user-update', sourceConversationId: 'test-chat',
+      scope: 'long_term', kind: 'user', confidence: 1, expiresAt: null,
+      targetId: 10, targetUpdatedAt: 1000 }], Date.now());
+    assert.equal(appliedActions.invalidated.length, 1);
+    assert.equal(await ops.snapshotProfile(), null);
+    assert.equal(fs.existsSync(path.join(directory, 'memory/profile.json')), false);
+    assert.doesNotMatch(await ops.readDocument('index.md'), /## 用户画像/);
+    const readRepository = store.getMemoryReadRepository();
+    await readRepository.reinforceMemories([11], 'assistant-1');
+    await readRepository.reinforceMemories([11], 'assistant-1');
+    await readRepository.touchMemories([11]);
+    assert.equal((await library.getAllRecords()).find(row => row.id === 11).reinforcementCount, 1);
+    await readRepository.reinforceMemories([11], 'assistant-2');
+    assert.equal((await library.getAllRecords()).find(row => row.id === 11).reinforcementCount, 2);
+    await library.restoreMemory(10);
+    const restored = (await library.getAllRecords()).find(row => row.id === 10);
+    assert.equal(restored.archived, false); assert.equal(restored.invalidatedAt, null);
+    assert.equal((await library.getRecentEvents(1))[0].type, 'memory_restored');
+    await library.restoreMemory(20);
+    assert.equal(domain.nearDuplicateCandidates(await library.getAllRecords(), Date.now())
+      .some(pair => [pair.a.id, pair.b.id].includes(20) && [pair.a.id, pair.b.id].includes(21)), false,
+      'Restored semantic duplicate must not be archived again');
+    const beforeSourceAddition = await library.getAllRecords();
+    await library.addMemory({ content: '新的用户表达偏好需要下次重新整理', scope: 'long_term', kind: 'user' });
+    const lateProfile = await ops.applyOptimization(beforeSourceAddition, [],
+      {profile: [{text: '偏好清楚简洁的解释', memoryIds: [10,11,12]}], duplicates: []}, Date.now());
+    assert.equal(lateProfile.profileUpdated, false, 'New sources not seen by the model cannot be marked evaluated');
+
   } finally { await fsp.rm(directory, { recursive: true, force: true }); }
 });

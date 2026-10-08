@@ -1,0 +1,218 @@
+{
+  "pid": 9325,
+  "clock": [
+    206993.926534,
+    1790825639370
+  ],
+  "touch": [
+    {
+      "time": "2026-10-01T11:33:30.063+08:00",
+      "trace": 206964.619827,
+      "line": 112,
+      "event": "B|1812|H:StateMachine state change: TouchIdle -> TouchDown|M0538"
+    },
+    {
+      "time": "2026-10-01T11:33:30.167+08:00",
+      "trace": 206964.723591,
+      "line": 5798,
+      "event": "B|1812|H:StateMachine state change: TouchDown -> TouchUp|M0538"
+    },
+    {
+      "time": "2026-10-01T11:33:33.167+08:00",
+      "trace": 206967.724479,
+      "line": 167339,
+      "event": "B|1812|H:StateMachine state change: TouchUp -> TouchIdle|M0538"
+    }
+  ],
+  "native_motion_start": {
+    "time": "2026-10-01T11:33:30.233+08:00",
+    "trace": 206964.79001,
+    "line": 11411,
+    "event": "B|9325|H:ScrollTo with animation, position:27474.000000, duration:160.000000, smooth:0, canOverScroll:0, id:624, tag:List|I39"
+  },
+  "native_motion_stop": {
+    "time": "2026-10-01T11:33:41.431+08:00",
+    "trace": 206975.987972,
+    "line": 523510,
+    "event": "B|9325|H:OnScrollStop, id:624, tag:List|I39"
+  },
+  "native_dispatch_count": 99,
+  "energy_transitions": [
+    {
+      "time": "2026-10-01T11:33:33.169+08:00",
+      "trace": 206967.72617,
+      "line": 167729,
+      "event": "B|1812|H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[120-120]|M0538"
+    },
+    {
+      "time": "2026-10-01T11:33:33.269+08:00",
+      "trace": 206967.826118,
+      "line": 174629,
+      "event": "B|1812|H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]|M0538"
+    },
+    {
+      "time": "2026-10-01T11:33:40.563+08:00",
+      "trace": 206975.120384,
+      "line": 484487,
+      "event": "B|1812|H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[120-120]|M0538"
+    },
+    {
+      "time": "2026-10-01T11:33:40.663+08:00",
+      "trace": 206975.219988,
+      "line": 491942,
+      "event": "B|1812|H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]|M0538"
+    }
+  ],
+  "samples": [
+    {
+      "time": "2026-10-01T11:33:29.989+08:00",
+      "fps": 0,
+      "refresh": 120
+    },
+    {
+      "time": "2026-10-01T11:33:30.993+08:00",
+      "fps": 54,
+      "refresh": 120
+    },
+    {
+      "time": "2026-10-01T11:33:32.000+08:00",
+      "fps": 43,
+      "refresh": 120
+    },
+    {
+      "time": "2026-10-01T11:33:32.992+08:00",
+      "fps": 113,
+      "refresh": 120
+    },
+    {
+      "time": "2026-10-01T11:33:33.992+08:00",
+      "fps": 85,
+      "refresh": 120
+    },
+    {
+      "time": "2026-10-01T11:33:35.011+08:00",
+      "fps": 71,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:35.994+08:00",
+      "fps": 59,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:36.995+08:00",
+      "fps": 59,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:37.992+08:00",
+      "fps": 60,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:39.089+08:00",
+      "fps": 60,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:39.995+08:00",
+      "fps": 58,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:40.994+08:00",
+      "fps": 80,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:41.994+08:00",
+      "fps": 50,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:43.025+08:00",
+      "fps": 30,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:43.995+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:45.001+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:45.993+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:46.990+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:47.992+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:48.992+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:49.994+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:50.997+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:52.005+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:52.989+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:53.992+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:54.991+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:55.992+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:57.010+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:57.990+08:00",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:33:58.989+08:00",
+      "fps": 0,
+      "refresh": 60
+    }
+  ]
+}

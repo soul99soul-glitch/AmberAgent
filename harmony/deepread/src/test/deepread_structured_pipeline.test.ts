@@ -32,11 +32,11 @@ const fixture = (reply = normalReply) => {
   return { deps, requests, saved: () => saved!, set: (output: DeepReadOutput) => { saved = output; } };
 };
 
-test('text-only model completes plan plus four JSON stages, preserving earlier structured content', async () => {
+test('text-only model completes plan plus three JSON stages and local sources, preserving earlier structured content', async () => {
   const f = fixture(); const result = await run(f.deps, 'article', '来源产品');
-  assert.equal(result.ok, true); assert.equal(isComplete(result.output), true); assert.equal(f.requests.length, 5);
+  assert.equal(result.ok, true); assert.equal(isComplete(result.output), true); assert.equal(f.requests.length, 4);
   assert.equal(result.output.summary, overview.summary); assert.equal(result.output.timeline?.length, 1);
-  assert.equal(result.output.analysis.coreDispute, analysis.analysis.core_dispute); assert.equal(result.output.extendedReading[0].url, extended.extended_reading[0].url);
+  assert.equal(result.output.analysis.coreDispute, analysis.analysis.core_dispute); assert.equal(result.output.sources?.[0].url, extended.extended_reading[0].url);
   assert.match(requestPrompt(f.requests[3]), /"timeline"/); assert.match(requestPrompt(f.requests[3]), /来源记录产品公布/);
   assert.equal(isComplete(f.saved()), true);
 });
@@ -47,7 +47,7 @@ test('bad stage JSON receives one correction instead of treating free text as a 
     return normalReply(request);
   });
   const result = await run(f.deps, 'article', '来源产品');
-  assert.equal(isComplete(result.output), true); assert.equal(bad, 2); assert.equal(f.requests.length, 6);
+  assert.equal(isComplete(result.output), true); assert.equal(bad, 2); assert.equal(f.requests.length, 5);
   assert.equal(result.output.sectionQualities.ANALYSIS, 'STANDARD');
 });
 
@@ -70,28 +70,28 @@ test('cold structured continuation only requests the failed stage and preserves 
 });
 
 test('manual text without external links can complete with a validated source-backed diagram', async () => {
-  const f = fixture(request => requestPrompt(request).includes('目标段落：扩展阅读')
-    ? JSON.stringify({ extended_reading: [], references: [], diagram: { type: 'process_flow', title: '产品反馈路径',
-      nodes: [{ id: 'release', label: '产品公布' }, { id: 'feedback', label: '用户反馈' }], edges: [{ from: 'release', to: 'feedback' }] } })
+  const f = fixture(request => requestPrompt(request).includes('目标段落：时间轴叙事')
+    ? JSON.stringify({ ...narrative, diagram: { type: 'stakeholder_map', title: '产品反馈关系',
+      nodes: [{ id: 'release', label: '产品方' }, { id: 'feedback', label: '用户' }, { id: 'review', label: '评测方' }], edges: [{ from: 'release', to: 'feedback' }] } })
     : normalReply(request));
   f.set({ ...makeEmptyDeepReadOutput(), inputText: '产品公布后开始收集用户反馈。'.repeat(40), inputUrlsText: '',
     inputSources: [{ id: 'manual', kind: 'text', title: '原文', url: null, content: '产品公布后开始收集用户反馈。'.repeat(40), status: 'ready', error: null, truncated: false, note: null }] });
   f.deps.prefetcher.collect = async () => [];
   const result = await run(f.deps, 'article', '原文分析');
   assert.equal(result.ok, true); assert.equal(isComplete(result.output), true);
-  assert.equal(result.output.extendedReading.length, 0); assert.equal(result.output.diagram?.nodes.length, 2);
+  assert.equal(result.output.extendedReading.length, 0); assert.equal(result.output.diagram?.nodes.length, 3);
   assert.equal(result.output.inputText, f.saved().inputText);
 });
 
-test('invalid extended JSON cannot complete through a fabricated hero or invalid diagram', async () => {
-  const f = fixture(request => requestPrompt(request).includes('目标段落：扩展阅读')
-    ? JSON.stringify({ extended_reading: [], hero_image_url: 'https://invented.example/image.png',
-      diagram: { type: 'unsupported', title: '无依据', nodes: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] } }) : normalReply(request));
+test('invalid optional hero and diagram never enter an otherwise valid editorial article', async () => {
+  const f = fixture(request => requestPrompt(request).includes('目标段落：概览')
+    ? JSON.stringify({ ...overview, hero_image_url: 'https://invented.example/image.png' })
+    : requestPrompt(request).includes('目标段落：时间轴叙事')
+      ? JSON.stringify({ ...narrative, diagram: { type: 'unsupported', title: '无依据', nodes: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] } }) : normalReply(request));
   const result = await run(f.deps, 'article', '来源产品');
-  assert.equal(isComplete(result.output), false); assert.equal(statusOf(result.output, 'EXTENDED_READING'), 'FAILED');
+  assert.equal(isComplete(result.output), true); assert.equal(statusOf(result.output, 'EXTENDED_READING'), 'READY');
   assert.equal(result.output.heroImageUrl, null); assert.equal(result.output.diagram, null);
-  assert.match(result.output.sectionStates.EXTENDED_READING.errorMessage ?? '', /JSON/);
-  assert.equal(f.requests.length, 6);
+  assert.equal(f.requests.length, 4);
 });
 
 test('structured stages persist explicit template capture, continuation keeps it and force uses the next explicit capture', async () => {

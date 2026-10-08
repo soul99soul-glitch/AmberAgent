@@ -1,0 +1,31 @@
+✔ streaming completion retains the exact row instance, reveal progress and current controls (36.218458ms)
+✔ a tool continuation and all terminal assistant messages retain their own identities (7.317292ms)
+✔ regeneration keeps the new branch instance through commit and reads latest branch metadata (6.386833ms)
+✔ resuming tools on a formerly streamed row keeps its row and Markdown stream identity (7.727333ms)
+✔ same-id edits and tool approvals refresh content without revision-key remounts (4.998542ms)
+✔ loading older history preserves identities and streaming projection never clones historical messages (8.777708ms)
+✔ ChatPage uses one ForEach and reads current rows for compact markers and message actions (0.314042ms)
+✔ one reasoning/body snapshot is grouped once across all six existing render reads (360.084417ms)
+✔ same-id text snapshots invalidate grouping without changing content part indices (7.372125ms)
+✔ same-id terminal reasoning metadata and tool approval/output changes invalidate the cache (5.681958ms)
+✔ the actual message Prop watcher owns invalidation, including empty and replacement messages (7.54975ms)
+✔ layout requests coalesce, sample after layout and move in bounded native frames (75.82575ms)
+✔ touch/cancel prevents a queued old frame from moving the list (26.237292ms)
+✔ growing geometry retargets the active spring; late terminal layout starts another frame (56.337791ms)
+✔ new structural row outside measured range anchors once without a frame loop (69.749917ms)
+✔ busy layout frames advance scrolling without waiting for onIdle (21.141125ms)
+✔ active native follow requests a steady supported90Hz motion range and releases it at rest (17.773458ms)
+✔ API12 uses its known current refresh rate and cancellation releases the vote (20.472125ms)
+✔ 90Hz selection uses supported modes and does not request an absent intermediate mode (31.42125ms)
+✔ API12 high refresh fallback avoids guessing an unsupported90Hz mode (4.726292ms)
+✔ native follow converges monotonically at 60/90/120Hz without overshoot (0.480333ms)
+✔ a growing target preserves momentum and converges independently of frame rate (0.127083ms)
+✔ zero delta is inert; a shrinking layout does not retain upward overshoot (0.321875ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 770.712875

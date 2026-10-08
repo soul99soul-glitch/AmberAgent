@@ -1,0 +1,37 @@
+✔ archive projection uses exact discussion IDs; prose, partial and other discussion remain visible (36.511459ms)
+✔ archive expansion is local, immutable and only toggles an actual archive (20.392375ms)
+✔ clone freezes author CAS, preserves original receipt and opens the returned new candidate (9.434583ms)
+✔ clone confirmation rejects another branch and write failure stays visible without opening collection (4.94575ms)
+✔ collection feedback separates persisted manuscript success from analysis warnings and ignores old owner (7.911083ms)
+✔ actual reload failure after clone does not open an empty collection sheet from the old project (8.651917ms)
+✔ collection analysis failure gives a quiet retry path and stored format diagnostics read naturally (5.85925ms)
+✖ manual reanalysis clears prior collection failure and invalidates its late feedback (8.127541ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 7
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 340.621583
+
+✖ failing tests:
+
+test at harmony/entry/src/test/novel_archive_clone_ui.test.cjs:31:1
+✖ manual reanalysis clears prior collection failure and invalidates its late feedback (8.127541ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + '正文已收录。资料分析未完成'
+  - ''
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/test/novel_archive_clone_ui.test.cjs:39:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '正文已收录。资料分析未完成',
+    expected: '',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

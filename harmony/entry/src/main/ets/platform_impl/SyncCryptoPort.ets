@@ -76,7 +76,9 @@ const decryptGcm = (ciphertext: Uint8Array, key: Uint8Array, iv: Uint8Array): Ui
 const iteratedDeriveKey = (
   passphrase: string, salt: Uint8Array, iterations: number,
 ): Uint8Array => {
-  const pass: Uint8Array = util.TextEncoder.create('utf-8').encodeInto(passphrase);
+  // encodeInto('') returns undefined by the API contract; an empty password is zero bytes.
+  const pass: Uint8Array = passphrase.length === 0 ? new Uint8Array(0)
+    : util.TextEncoder.create('utf-8').encodeInto(passphrase);
   let block = sha256Bytes(concatBytes(salt, pass));
   const n = Math.max(1, Math.min(iterations, 100_000));
   for (let i = 1; i < n; i++) {

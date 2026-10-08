@@ -111,14 +111,18 @@ struct MemoryTopicsPage {
   }
 
   private statusText(): string {
-    if (this.runState.running) return '正在归组主题…';
-    if (this.runState.status === 'completed') return `归组完成 · ${this.runState.topicCount} 个主题`;
+    if (this.runState.running) return '正在整理主题、画像与同义重复…';
+    if (this.runState.status === 'completed') {
+      return `整理完成 · ${this.runState.topicCount} 个主题`
+        + (this.runState.profileUpdated ? ' · 用户画像已更新' : '')
+        + (this.runState.mergedCount > 0 ? ` · ${this.runState.mergedCount} 条重复已归档` : '');
+    }
     if (this.runState.status === 'missing_model') return '未配置可用的整理模型';
-    if (this.runState.status === 'cancelled') return this.runState.sourceSaved ? '已取消 · 源记录已保存' : '已取消，本次主题未写入';
-    if (this.runState.status === 'timed_out') return this.runState.sourceSaved ? '整理超时 · 源记录已保存' : '整理超时，本次主题未写入';
-    if (this.runState.status === 'failed') return '主题整理失败';
+    if (this.runState.status === 'cancelled') return this.runState.sourceSaved ? '已取消 · 记忆已保存' : '已取消，本次整理未写入';
+    if (this.runState.status === 'timed_out') return this.runState.sourceSaved ? '整理超时 · 记忆已保存' : '整理超时，本次整理未写入';
+    if (this.runState.status === 'failed') return '记忆整理失败';
     if (this.runState.status === 'skipped') return '本次未执行整理';
-    return '尚未运行主题整理';
+    return '尚未运行记忆整理';
   }
 
   private sourceLabel(item: MemoryRecord): string {
@@ -133,9 +137,9 @@ struct MemoryTopicsPage {
   // 整理设置:iOS 药丸开关行 + 任务模型导航行
   @Builder
   private SettingsCard(): void {
-    CardToggleRow({ label: '启用整理模型', desc: '使用已配置的白日梦 / 记忆任务模型归组已保存的源记忆。',
+    CardToggleRow({ label: '启用整理模型', desc: '使用已配置的白日梦 / 记忆任务模型整理主题、用户画像和同义重复。',
       checked: this.modelEnabled, onToggle: (): void => { this.changeGate(true, !this.modelEnabled); } })
-    CardToggleRow({ label: '允许写入派生主题', desc: '保存主题摘要和成员关联；源记忆的内容与身份保持。',
+    CardToggleRow({ label: '允许写入整理结果', desc: '生成主题和用户画像，并归档已确认的同义重复；原文保留，可在全部记忆中恢复。',
       checked: this.writeEnabled, onToggle: (): void => { this.changeGate(false, !this.writeEnabled); } })
     CardRow({ label: '配置任务模型', desc: '白日梦 / 记忆提取使用的模型', iconName: 'cpu',
       plateStyle: 'accent', plateSize: 28, isLast: true,

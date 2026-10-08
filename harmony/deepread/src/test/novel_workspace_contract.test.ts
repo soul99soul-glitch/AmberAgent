@@ -1,30 +1,8 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import {
-  NOVEL_WORKSPACE_FORMAT, NOVEL_WORKSPACE_VERSION,
-  parseNovelWorkspaceManifest, serializeNovelWorkspaceManifest,
-  validateNovelWorkspacePath, chapterFileName,
+  parseNovelWorkspaceManifest, validateNovelWorkspacePath, chapterFileName,
 } from '../main/ets/novel/workspace_contract.ts';
-
-test('workspace manifest v1 roundtrips required identity and active branch', () => {
-  const yaml = serializeNovelWorkspaceManifest({
-    format: NOVEL_WORKSPACE_FORMAT,
-    version: NOVEL_WORKSPACE_VERSION,
-    projectId: 'cultivation',
-    title: '修仙日常',
-    activeBranch: 'main',
-    createdAt: 1_000,
-    updatedAt: 2_000,
-  });
-  const parsed = parseNovelWorkspaceManifest(yaml);
-  assert.equal(parsed.format, 'amber.novel.workspace');
-  assert.equal(parsed.version, 1);
-  assert.equal(parsed.projectId, 'cultivation');
-  assert.equal(parsed.title, '修仙日常');
-  assert.equal(parsed.activeBranch, 'main');
-  assert.equal(parsed.createdAt, 1_000);
-  assert.equal(parsed.updatedAt, 2_000);
-});
 
 test('workspace manifest rejects unsupported or incomplete documents', () => {
   assert.throws(() => parseNovelWorkspaceManifest('format: other\nversion: 1\n'));

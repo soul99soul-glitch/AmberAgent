@@ -1,0 +1,4 @@
+a3f19ae639599b91dffb4ece9b507412357fd69539c0d0911032fbd18e8f08dc  harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets == staging
+6fe64fbf935c015f7142fb7ba112ba0b10f555a5788999975259130ccf429260  harmony/deepread/src/main/ets/novel/suggestion_engine.ts == staging
+8e11629887a23a610d7b16941b8666b902d129e8cbbcdbed270bc04603cbefec  harmony/deepread/src/main/ets/novel/discussion_archive.ts == staging
+09837b83b3ed9576159661927aacb78b814b0d8694867e8a2e36990b083ec0c7  novel-collect-final-signed.hap

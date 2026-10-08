@@ -1,0 +1,39 @@
+# Library, composer and settings implementation
+
+2026-10-05. This worker changed only the assigned reading library, composer, reading settings and two subordinate settings pages, their small presentation components and focused tests. Existing unrelated dirty work was preserved. Shared palette, paper background, tab bar, article and template implementations belong to the other agents.
+
+## Current iOS reference
+
+The source of truth is the current working tree under `amberagent-ios/iosApp/DeepReadApp`: `Sources/UI/DeepReadLibraryView.swift`, `Sources/UI/DeepReadComposerView.swift`, `Sources/Settings/DeepReadSettingsView.swift` and `Sources/Discovery/DeepReadDiscoverySettingsView.swift`. The current Settings and Composer screenshot references were inspected. See `ios-spec.md` for exact geometry and colors.
+
+## Implemented behavior and layout
+
+- `DeepReadHistoryPage.ets`: independent root has a native large title, square-and-pencil create action, search field, pill filters, 18-unit page gutters, 12-unit card spacing and 16-unit card padding. Cards use real generation state, creation date, serif title, source counts and a persisted failure message. Existing full-history/full-text queries, repository subscription, active-only task rows, scheduler subscription and error/retry behavior remain in the same controller. Host UI remains in its existing branch.
+- Library sheet binding sits on the stable root Stack outside `ForEach(themeEpoch)`, preserving its input State owner when theme content remounts. Embedded keyboard restoration checks whether RESIZE is still owned; a Library hide that already restored OFFSET cannot be overwritten by the later sheet disappearance. The new regression test executes this lifecycle order.
+- The library and Settings roots call `markWantRoutingReady()` with the current UIContext Router, show the shared three-tab pill, and preserve pushed-page Back navigation. Transient AppStorage values preserve library query/filter/scroll and Settings scroll across root replacement. The tab arrival animation plays only on the newly created root; returning from an article does not replay it.
+- `DeepReadComposerSheet.ets` now owns the single existing input/import/template/save controller. `DeepReadComposePage.ets` is an Entry route wrapper. Both discovery and library can embed the sheet through `embedded`, `onDismiss` and async `onCreated(topicId, title)` callbacks. The caller closes only after article navigation succeeds. File imports retain truncation/error information and removal, multi-source inputs and per-reading captured templates remain intact. A route failure leaves the committed draft visible and opens that same draft on retry instead of writing a second entry.
+- The independent compose sheet follows the current iOS form hierarchy: cancellation header, topic card, supplemental text/links/file import, compact generation-template menu, user-facing error and primary start button. The iOS-only single-source close-reading/original-only modes were deliberately not invented; the current Harmony generation route does not provide those capabilities.
+- `DeepReadSettingsForm.ets` extracts the independent visual form from the pre-existing 1,085-line Settings page. Its order is appearance, article generation, multi-source search, free sources, reading and typography, discovery sources, save and additional existing application settings. The five iOS accent swatches persist the existing DisplaySetting accent and update the real theme epoch. Reader font/size and the generation-template default persist to the keys already consumed by the Article and Composer.
+- The new search controls read and update the existing `SearchSettings` object. A save merges only the selected service ID, result size and six free/fallback flags into the current stored preferences, preserving changed credentials, enable lists and unowned search options. A service deleted before save reports an error. Provider management stays connected to the existing unified provider/model configuration.
+- Fresh standalone Settings now defaults to serif, matching the actual Article reader when no font preference exists. The host keeps its previous system-font default. Save confirmation clears after three seconds and immediately when a staged setting is edited.
+- `DeepReadDiscoverySettingsPage.ets` independent visual order is refresh, focus and categorized source switches, matching the iOS source settings. Existing storage keys and explicit Save behavior are retained. `DeepReadSearchSettingsPage.ets` uses the same independent card-form treatment. Both preserve the host branch.
+
+## Verification
+
+Focused actual-method/domain tests passed: **74/74**. Command:
+
+```sh
+node --test harmony/entry/src/test/deepread_history_ui.test.cjs harmony/entry/src/test/ui_send_provider_lifecycle.test.cjs harmony/deepread/src/test/deepread_ios_settings_replica.test.cjs harmony/deepread/src/test/deepread_compose_capture_ui.test.cjs harmony/deepread/src/test/deepread_hotlist_toggle.test.cjs harmony/deepread/src/test/deepread_model_selection.test.cjs
+```
+
+The tests cover live library lifecycle, late reads and callbacks, full-text/status filtering, transient tab state, current Router registration, source URL counting, the true reader/settings default-font contract, search merge ownership and stale selection, template capture and routing failure retry. New tests check execution behavior rather than markup-only snapshots. The committed-draft retry test also executes the actual Host start-button enabled expression, so the host cannot silently disable opening a saved draft after a navigation failure. UI-07 received only the new product-kind platform dependency; its original refresh assertions remain intact.
+
+Targeted nine-file ArkTS lint passed with **0 errors / 14 performance warnings** (`library-settings-lint.log`). Final compositor lint passed with **0 errors / 1 performance warning** (`composer-final-lint.log`); the final library page lint reported **no defects** (`library-final-lint.log`). The 74-test final run is saved in `library-settings-tests.log`. The root agent owns integrated build, signing and simulator screenshots; this worker did not claim separate device evidence.
+
+## Material differences retained
+
+The current Harmony data/status contract has running, complete, failed and incomplete filters. It does not expose iOS queued/unsupported statuses as independent library categories. Single-source close reading and original-only reading require a runtime implementation outside this presentation task. Provider/search editors remain the existing shared configuration routes. Appearance row reflects the currently supported generation-template name; a separate reader layout/style model was not fabricated. Discovery-source preferences retain the existing explicit save control. These differences must not be described as complete iOS behavior parity.
+
+## Device integration follow-up: explicit root marker
+
+The device confirmed that article tab navigation initializes the replacement page while router length is still two, then clears the old stack. Library and Settings now accept a typed optional `standaloneTabRoot?: boolean` on their own route parameters. Their actual `aboutToAppear()` and `onPageShow()` recognize a standalone root when the current length is at most one or that explicit marker is true. This is evaluated only for the deepread product. An ordinary pushed nested page without the marker retains Back and has no root tab bar. No cross-await AppStorage navigation flag was introduced. The focused Library/Settings test run passed 20/20 after this change, including initialization at length two with a true marker, missing/false markers, and host product isolation. Final two-page lint reported no defects (`library-settings-root-marker-lint.log`).

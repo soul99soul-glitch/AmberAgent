@@ -1,0 +1,300 @@
+{
+  "date": "2026-10-01",
+  "pid": 25171,
+  "method": "SP_daemon actual presentation samples aligned to hitrace realtime clock; complete one-second windows only; native List animation dispatch/stop markers bound motion span, not per-frame ScrollBy",
+  "trace_clock": {
+    "monotonic": 174177.14659,
+    "realtime_ms": 1790792822719
+  },
+  "native_list_animation": {
+    "dispatches": 92,
+    "first": {
+      "trace_seconds": 174148.920622,
+      "local_time": "2026-10-01T02:26:34.493",
+      "line": 70793,
+      "event": "B|25171|H:ScrollTo with animation, position:9287.000000, duration:160.000000, smooth:0, canOverScroll:0, id:618, tag:List|I39"
+    },
+    "last": {
+      "trace_seconds": 174156.854731,
+      "local_time": "2026-10-01T02:26:42.427",
+      "line": 478308,
+      "event": "B|25171|H:ScrollTo with animation, position:14722.000000, duration:160.000000, smooth:0, canOverScroll:0, id:618, tag:List|I39"
+    },
+    "last_stop": {
+      "trace_seconds": 174157.018304,
+      "local_time": "2026-10-01T02:26:42.590",
+      "line": 484719,
+      "event": "B|25171|H:OnScrollStop, id:618, tag:List|I39"
+    },
+    "scroll_edge_calls": [
+      {
+        "trace_seconds": 174148.861078,
+        "local_time": "2026-10-01T02:26:34.433",
+        "line": 65983,
+        "event": "B|25171|H:ScrollToEdge scrollEdgeType:1, id:618, tag:List|I39"
+      }
+    ]
+  },
+  "energy_vote_transitions": [
+    {
+      "trace_seconds": 174151.857611,
+      "local_time": "2026-10-01T02:26:37.430",
+      "line": 269739,
+      "event": "[120-120]"
+    },
+    {
+      "trace_seconds": 174151.906936,
+      "local_time": "2026-10-01T02:26:37.479",
+      "line": 273366,
+      "event": "[60-60]"
+    },
+    {
+      "trace_seconds": 174153.015952,
+      "local_time": "2026-10-01T02:26:38.588",
+      "line": 324246,
+      "event": "[120-120]"
+    },
+    {
+      "trace_seconds": 174153.082114,
+      "local_time": "2026-10-01T02:26:38.654",
+      "line": 329316,
+      "event": "[60-60]"
+    }
+  ],
+  "touch_transitions": [
+    {
+      "trace_seconds": 174147.968517,
+      "local_time": "2026-10-01T02:26:33.540",
+      "line": 22826,
+      "event": "B|1812|H:StateMachine state change: TouchUp -> TouchDown|M0538"
+    },
+    {
+      "trace_seconds": 174148.076605,
+      "local_time": "2026-10-01T02:26:33.649",
+      "line": 23179,
+      "event": "B|1812|H:StateMachine state change: TouchDown -> TouchUp|M0538"
+    },
+    {
+      "trace_seconds": 174148.238462,
+      "local_time": "2026-10-01T02:26:33.810",
+      "line": 32137,
+      "event": "B|1812|H:StateMachine state change: TouchUp -> TouchDown|M0538"
+    },
+    {
+      "trace_seconds": 174148.278485,
+      "local_time": "2026-10-01T02:26:33.850",
+      "line": 35505,
+      "event": "B|1812|H:StateMachine state change: TouchDown -> TouchUp|M0538"
+    },
+    {
+      "trace_seconds": 174148.800382,
+      "local_time": "2026-10-01T02:26:34.372",
+      "line": 61935,
+      "event": "B|1812|H:StateMachine state change: TouchUp -> TouchDown|M0538"
+    },
+    {
+      "trace_seconds": 174148.856543,
+      "local_time": "2026-10-01T02:26:34.428",
+      "line": 65528,
+      "event": "B|1812|H:StateMachine state change: TouchDown -> TouchUp|M0538"
+    },
+    {
+      "trace_seconds": 174151.857081,
+      "local_time": "2026-10-01T02:26:37.429",
+      "line": 269615,
+      "event": "B|1812|H:StateMachine state change: TouchUp -> TouchIdle|M0538"
+    }
+  ],
+  "steady_60hz": {
+    "sample_end_local": [
+      "2026-10-01T02:26:40.297",
+      "2026-10-01T02:26:41.263",
+      "2026-10-01T02:26:42.269"
+    ],
+    "fps": [
+      60,
+      60,
+      59
+    ],
+    "mean_fps": 59.666666666666664,
+    "intervals": 176,
+    "intervals_gt25ms": 1,
+    "interval_p50_ms": 16.6708595,
+    "interval_p95_ms": 16.687656,
+    "interval_max_ms": 33.336875
+  },
+  "early_complete_120hz_samples": [
+    {
+      "fps": 104,
+      "timestamp": "1790792796261"
+    },
+    {
+      "fps": 120,
+      "timestamp": "1790792797261"
+    }
+  ],
+  "sample_summary": [
+    {
+      "timestamp": "1790792793261",
+      "fps": 112,
+      "refreshrate": 120
+    },
+    {
+      "timestamp": "1790792794261",
+      "fps": 45,
+      "refreshrate": 120
+    },
+    {
+      "timestamp": "1790792795261",
+      "fps": 94,
+      "refreshrate": 120
+    },
+    {
+      "timestamp": "1790792796261",
+      "fps": 104,
+      "refreshrate": 120
+    },
+    {
+      "timestamp": "1790792797261",
+      "fps": 120,
+      "refreshrate": 120
+    },
+    {
+      "timestamp": "1790792798263",
+      "fps": 97,
+      "refreshrate": 120
+    },
+    {
+      "timestamp": "1790792799262",
+      "fps": 76,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792800297",
+      "fps": 60,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792801263",
+      "fps": 60,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792802269",
+      "fps": 59,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792803263",
+      "fps": 50,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792804275",
+      "fps": 32,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792805277",
+      "fps": 20,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792806266",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792807265",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792808270",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792809263",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792810287",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792811270",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792812282",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792813263",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792814261",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792815265",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792816278",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792817266",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792818263",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792819273",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792820271",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792821265",
+      "fps": 0,
+      "refreshrate": 60
+    },
+    {
+      "timestamp": "1790792822273",
+      "fps": 0,
+      "refreshrate": 60
+    }
+  ],
+  "limitations": [
+    "Only one short generation; different text from previous baseline; no controlled effect-size claim",
+    "Native dispatch/stop span is not per-frame displacement measurement; do not claim all jumps removed",
+    "No final-package manual drag or jump-to-top device test in this capture; covered by host tests only",
+    "50fps sample straddles final List stop;32/20fps samples follow stop; all excluded from steady automatic scrolling",
+    "No continuous120fps achieved"
+  ],
+  "trace": {
+    "path": "/tmp/streamnative.trace",
+    "sha256": "2a400a79f4124305247bb2f435e303fc4a7e131b6690f66c6cfefff577b8405a",
+    "bytes": 68894449
+  }
+}

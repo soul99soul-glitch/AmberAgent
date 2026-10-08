@@ -44,7 +44,7 @@ export type MemoryEventType =
   | 'extraction_started' | 'extraction_skipped' | 'candidate_created'
   | 'candidate_accepted' | 'candidate_ignored' | 'memory_created'
   | 'durable_memory_created' | 'memory_updated' | 'memory_archived'
-  | 'memory_expired' | 'extraction_failed' | 'dream_planned'
+  | 'memory_expired' | 'memory_restored' | 'memory_invalidated' | 'extraction_failed' | 'dream_planned'
   | 'dream_applied' | 'dream_failed';
 
 export const memoryEventTypeFromWireName = (value: string | null): MemoryEventType => {
@@ -59,6 +59,8 @@ export const memoryEventTypeFromWireName = (value: string | null): MemoryEventTy
     case 'memory_updated':
     case 'memory_archived':
     case 'memory_expired':
+    case 'memory_restored':
+    case 'memory_invalidated':
     case 'extraction_failed':
     case 'dream_planned':
     case 'dream_applied':
@@ -86,6 +88,11 @@ export interface MemoryRecord {
   createdAt: number;
   updatedAt: number;
   lastUsedAt: number | null;
+  reinforcementCount?: number;
+  lastReinforcedAt?: number | null;
+  lastReinforcementSource?: string | null;
+  invalidatedAt?: number | null;
+  evidence?: string | null;
   topicTitle: string | null;
   memberIds: number[];
 }
@@ -108,6 +115,11 @@ export const makeMemoryRecord = (
   createdAt: opts.createdAt ?? 0,
   updatedAt: opts.updatedAt ?? 0,
   lastUsedAt: opts.lastUsedAt ?? null,
+  reinforcementCount: opts.reinforcementCount ?? 0,
+  lastReinforcedAt: opts.lastReinforcedAt ?? null,
+  lastReinforcementSource: opts.lastReinforcementSource ?? null,
+  invalidatedAt: opts.invalidatedAt ?? null,
+  evidence: opts.evidence ?? null,
   topicTitle: opts.topicTitle ?? null,
   memberIds: opts.memberIds ?? [],
 });
@@ -123,6 +135,7 @@ export interface MemoryCandidate {
   expiresAt: number | null;
   confidence: number;
   reason: string;
+  evidence?: string | null;
   sensitive: boolean;
   status: MemoryCandidateStatus;
   createdAt: number;
@@ -143,6 +156,7 @@ export const makeMemoryCandidate = (
     expiresAt: opts.expiresAt ?? null,
     confidence: opts.confidence ?? 0.5,
     reason: opts.reason ?? '',
+    evidence: opts.evidence ?? null,
     sensitive: opts.sensitive ?? false,
     status: opts.status ?? 'pending',
     createdAt,

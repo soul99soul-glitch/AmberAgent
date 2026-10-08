@@ -1,0 +1,12 @@
+{
+  "novel": {
+    "real_hap_sha256": "48dc556bdbe7de80c09271813ccfba5f874aed606d7db4d40db8bb6b1da9ab4d",
+    "bytes": 59179566,
+    "emulator_hap_sha256": "9aa8fbd46839d81feb03e13f1057286e20c9bf9c800568df769d09395c72e174"
+  },
+  "deepread": {
+    "real_hap_sha256": "254d16e71ad01e18c174aac044fa84512b99d817ff892a14398215e8c866e00d",
+    "bytes": 59191646,
+    "emulator_hap_sha256": "f8a210e052068891258b4415b8af124d017a0ee273bdc550ae786cbc9f837704"
+  }
+}

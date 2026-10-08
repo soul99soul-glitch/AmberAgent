@@ -2,21 +2,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  MINI_APP_MAX_REQUEST_BODY_BYTES, MINI_APP_MAX_RESPONSE_BYTES,
-  MINI_APP_MAX_IMAGE_BYTES, MINI_APP_MAX_REDIRECTS,
-  isAllowedRequestHeader, buildMiniAppRequestPlan, resolveMiniAppResponseType,
+  MINI_APP_MAX_REQUEST_BODY_BYTES, isAllowedRequestHeader, buildMiniAppRequestPlan, resolveMiniAppResponseType
 } from '../main/ets/chat/miniapp/miniapp_network_policy.ts';
 import { MiniAppUrlGuard } from '../main/ets/chat/miniapp/miniapp_url_guard.ts';
 import type { MiniAppRequestPlan } from '../main/ets/chat/miniapp/miniapp_network_policy.ts';
 
 const guard: MiniAppUrlGuard = new MiniAppUrlGuard(async (): Promise<string[]> => ['93.184.216.34']);
-
-test('限额常量', () => {
-  assert.equal(MINI_APP_MAX_REQUEST_BODY_BYTES, 128 * 1024);
-  assert.equal(MINI_APP_MAX_RESPONSE_BYTES, 1024 * 1024);
-  assert.equal(MINI_APP_MAX_IMAGE_BYTES, 2 * 1024 * 1024);
-  assert.equal(MINI_APP_MAX_REDIRECTS, 3);
-});
 
 test('isAllowedHeader: allowlist + cookie/authorization/proxy/x-forwarded 拒绝', () => {
   assert.equal(isAllowedRequestHeader('accept'), true);

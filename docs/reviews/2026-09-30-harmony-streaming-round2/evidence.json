@@ -1,0 +1,98 @@
+{
+  "request": "Revisit the iOS implementation after physical-device jank and text appearing all at once.",
+  "confirmed_conditions": [
+    "RcpHttpClient buffered pending Native dataReceive chunks until dataEnd when HTTP status was not available and SSE MIME was absent or wrong. Red test 4/8 before fix, 10/10 after.",
+    "NativeTimelineFollow waited for onIdle, which ArkUI defers on busy layout frames. Busy-frame regression red before fix; now onFrame advances.",
+    "Previous implementation replaced changed Span nodes and had no appended-range fade. NativeMarkdownText now retains a TextController and MutableStyledString; append and style-retyping patches are tested.",
+    "Actual AgentMessageRow -> WidgetMessageContent bindings did update mid-stream on the simulator; no stale binding reproduced.",
+    "Markdown style retyping previously replaced the changed tail at full opacity. A red regression reproduced the jump; patch now preserves unchanged-text alpha and fades only the actual changed suffix. Seven native inline tests pass; final normal signed app includes this fix and was verified in a live DeepSeek Flash chat on the physical device."
+  ],
+  "ios_reference": {
+    "MessageBubbleView.swift": "1022-1051: liveStreaming unit-tail animation, coalesced text; 2000-2005 TextKit1; 2165+ parse backpressure",
+    "ParagraphUIView.swift": "337-371 append existing textStorage; 444-480 appended range fade; 614-661 display-link alpha updates",
+    "fade": "min(500ms, max(1000/30ms, 6000ms / added UTF16 length))",
+    "difference": "Current iOS main chat does not pace incoming text with a character budget. This patch does not invent that behavior."
+  },
+  "verification": {
+    "chat_tests": {
+      "passed": 176,
+      "failed": 0
+    },
+    "transport_tests": {
+      "passed": 10,
+      "failed": 0
+    },
+    "chat_tsc": "passed",
+    "lint": "0 errors; native and Markdown group no defects; scroll driver no defects",
+    "probe_build": "AGC signed package successfully built and installed on emulator 127.0.0.1:5555 and physical 6HK0226627000384 HOP-AL00",
+    "physical_network_probe": {
+      "path": "RcpHttpClient -> OpenAIChatApi -> runChatTurn 48ms gate -> AgentMessageRow -> WidgetMessageContent -> MarkdownText -> NativeMarkdownText",
+      "source": "localhost HTTP response replay, not live external provider",
+      "characters": 1464,
+      "publications": 122,
+      "intermediate_visible_characters": 504,
+      "final_marker_visible": true
+    },
+    "physical_following_frame_callback_intervals": {
+      "samples": 808,
+      "p95_ms": 16.7,
+      "max_ms": 17,
+      "over_32_ms": 0,
+      "note": "Callback intervals during one controlled replay, not system compositor FPS or a before/after benchmark."
+    },
+    "physical_reading_pause": {
+      "completed_without_forcing_bottom": true,
+      "samples": 1112,
+      "p95_ms": 16.7,
+      "max_ms": 18,
+      "over_32_ms": 0
+    },
+    "final_normal_app": {
+      "build": "BUILD SUCCESSFUL in 42 s 664 ms; CompileArkTS, SignHap and SignApp passed",
+      "package": "/tmp/amber-stream2-normal-final.hap",
+      "sha256": "d08091dfb5e30a28b2a45970ce3875f124115abaa709e9df503fa019961fdeb0",
+      "size_bytes": 59271054,
+      "physical": "6HK0226627000384 HOP-AL00 install -r successful; EntryAbility started; normal ChatListPage visually verified",
+      "emulator": "127.0.0.1:5555 install -r successful; EntryAbility started; normal ChatListPage visually verified",
+      "data": "No uninstall or app data clearing",
+      "build_note": "Earlier concurrent output collision made SignApp fail despite successful SignHap; exclusive retry succeeded. Existing app-symbol.zip warning remains."
+    },
+    "remaining_boundaries": [
+      "User reported provider response headers were not captured; MIME buffering is a reproduced condition, not proven sole cause.",
+      "No claim that Harmony styled string shares TextKit glyph-cache internals.",
+      "No system-level compositor trace or broad all-model UX acceptance."
+    ],
+    "live_provider_chat": {
+      "provider_model": "DeepSeek / deepseek-flash, existing device configuration",
+      "prompt": "Controlled request for a roughly 1200-character Chinese essay with four Markdown headings, bold, italic, a list and inline code; no tools; final marker STREAM-END",
+      "conversation_title": "雨后城市的散文",
+      "observation": "First and second screenshots show incomplete text and fading appended ranges while replying. Later screenshot shows completed formatted text and STREAM-END. This run did not wait until response completion to display the whole answer.",
+      "capture": "Six sequential screenshots and UI dumps; not a continuous video or compositor trace",
+      "sample_dump_elapsed_seconds": [
+        3.4,
+        7.2,
+        11.1,
+        14.9,
+        18.9,
+        22.6
+      ],
+      "note": "Screenshots precede each corresponding UI dump, so screenshot content and dump tail can differ during fast streaming."
+    },
+    "cleanup": {
+      "production_probe_page_removed": true,
+      "normal_entry_restored": true,
+      "probe_server_stopped": true,
+      "hdc_forward_list": "Empty after normal app verification"
+    }
+  },
+  "files_sha256": {
+    "harmony/entry/src/main/ets/components/MarkdownText.ets": "8fe43a1fcff3a4cfc957a3a7205a099f7bab056f21b705bd3d240b48afe434b5",
+    "harmony/entry/src/main/ets/components/NativeMarkdownText.ets": "bff82673b52edeb4a1f27ce0ce578ccff56b3bdbf8601d8fb88eca49aaa3341c",
+    "harmony/entry/src/main/ets/components/NativeMarkdownInline.ts": "446debf2da94b085b0dc4bc64ada3529c79f8bd2efa8b8d0516f9caa96d251b5",
+    "harmony/entry/src/main/ets/components/NativeTimelineFollow.ets": "4d2e0f8cff2aa7e132ad44cf9ca7960c980982a94eccf2ddde0f1d9e94d1f873",
+    "harmony/entry/src/main/ets/platform_impl/RcpHttpClient.ets": "b4995598c06cc886057b5728a0831490274d265d94d7baf94086f18e695758fd",
+    "harmony/chat/src/test/native_markdown_inline.test.ts": "0038bffd57303b1602456718ecf7a9130e23f5a150ad614518930cf17a90467d",
+    "harmony/chat/src/test/native_timeline_follow.test.cjs": "0a777be634f67a10bd858854560ea2337e5f76bf2a635d3d33d3aab324ad9bda",
+    "harmony/entry/src/test/rcp_stream_delivery.test.cjs": "0cace91f6b3ef8915c8225153ef426e3153a7f6c20d9a6b8733ee63901bf278c"
+  }
+}

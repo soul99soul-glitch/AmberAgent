@@ -1,3 +1,4 @@
+import { permissionDecisionTraceToJson } from '../tool_permission.ts';
 // webmount/goal — wm_run_goal 有界目标编排(E12 冻结合同 C)
 //
 // 复用既有 ordered host loop:goal adapter 实现 RecipeLoopAdapter,经
@@ -508,14 +509,16 @@ export const createWebMountGoalAdapter = (deps: WebMountGoalHostPorts): RecipeLo
         return finishGoal(parent, checkpoint, port, 'handback',
           `Primitive ${step.toolName} is unavailable in the current tool scope.`);
       }
-      const permission = port.decide(step, definition);
+      const permission = await port.decide(step, definition, signal);
+      if (abortedOf(signal)) return finishGoal(parent, checkpoint, port, 'cancelled', 'Goal execution was cancelled.');
       if (permission.action === 'deny') {
         return finishGoal(parent, checkpoint, port, 'failed', permission.reason);
       }
       if (permission.action === 'ask') {
         checkpoint = {
           ...checkpoint, phase: 'awaiting_approval',
-          pendingStep: { ...step, approvalState: { type: 'pending' } },
+          pendingStep: { ...step, approvalState: { type: 'pending' },
+            metadata: { ...step.metadata, permission_trace: permissionDecisionTraceToJson(permission.trace) } },
         };
         parent = withCheckpoint({ ...parent, approvalState: { type: 'pending' } }, checkpoint);
         await port.saveParent(parent);

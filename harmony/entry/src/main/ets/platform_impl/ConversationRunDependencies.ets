@@ -5,11 +5,12 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   ChatTurnDeps, ChatStreamProvider, CompactPolicy, CompactResult, Conversation,
   ConversationSummary, DisplaySetting, MemoryRecallRuntimeGate, MemoryRecallSelection,
+  MemoryRecord, MemoryScope, MemoryProfileSelection,
   MessageTransformer, MiniAppRecord, PreparedContext, RecentChatItem,
   SubAgentRuntimeSetting, UIMessage, MessageChunk, StreamOpts, JevPreparedToolResults,
 } from '@amber/chat-domain';
 import {
-  asChatStreamProvider, buildAgentSoulPrompt, buildMemoryRecallPrompt,
+  asChatStreamProvider, buildAgentSoulPrompt, buildMemoryContext,
   buildRecentChatsPrompt, conversationWithMessagesAsNodes, createDocumentTransformer,
   createMiniAppOutputTransformer, createMiniAppPromptTransformer,
   createPlaceholderTransformer, createTemplateTransformer, createReasoningLevelMetadataTransformer,
@@ -18,6 +19,7 @@ import {
   makeCompactPolicy, makeGenerationRetrySetting, makeSubAgentRuntimeSetting,
   makeTextGenerationParams, prepareContext, RECENT_CHATS_PROMPT_LIMIT,
   regexOutputTransformer, createThinkTagTransformer, toChatModel, toText,
+  recallMemorySelections, memoryRecallScoreToDebugText, selectMemoryProfile, createMemoryCitationTransformer,
 } from '@amber/chat-domain';
 import {
   prepareProviderApi, getAgentCronTools, getAgentTaskTools, getChatKvStore,
@@ -34,7 +36,7 @@ import { createEntryDocumentReader } from './DocumentSupport.ets';
 import { imageGenToolAvailable } from './ImageGenTool.ets';
 import { jevNoulBatch } from './JevSupport.ets';
 import type { JevNoulBatchResult } from './JevSupport.ets';
-import { getMemoryReadRepository } from './MemoryStore.ets';
+import { getMemoryReadRepository, getMemoryLibraryOps, getMemoryTopicStoreOps } from './MemoryStore.ets';
 import { getMiniAppPlatform, getMiniAppRepositorySync } from './MiniAppPlatform.ets';
 import type { MiniAppPlatform } from './MiniAppPlatform.ets';
 import { createEntryOcrTransformer, loadOcrSeed } from './OcrSupport.ets';
@@ -166,10 +168,10 @@ const memoryReranker = (query: string):
     const kept: MemoryRecallSelection[] = selections.filter(
       (selection: MemoryRecallSelection): boolean =>
         (batch.probabilities[`${selection.record.id}`] ?? 1) >= 0.5);
-    return kept.length > 0 ? kept : selections;
+    return kept;
   };
 
-const memorySystemBlocks = (ctx: DetachedConversationContext): Promise<string[]> => {
+const memorySystemBlocks = async (ctx: DetachedConversationContext): Promise<string[]> => {
   const runtime = ctx.seed.agentRuntime;
   const gate: MemoryRecallRuntimeGate = {
     enableCoreMemory: runtime.enableCoreMemory,
@@ -178,9 +180,44 @@ const memorySystemBlocks = (ctx: DetachedConversationContext): Promise<string[]>
     memoryRecall: runtime.memoryRecall,
   };
   const conversation: Conversation = ctx.conversation;
-  return buildMemoryRecallPrompt(gate, currentMessages(conversation), getMemoryReadRepository(),
-    Date.now(), memoryReranker(latestUserQuery(conversation)))
-    .then((prompt: string): string[] => prompt.length > 0 ? [prompt] : []);
+  const now: number = Date.now();
+  let selections: MemoryRecallSelection[] = await recallMemorySelections(
+    gate, currentMessages(conversation), getMemoryReadRepository(), now);
+  try { selections = await memoryReranker(latestUserQuery(conversation))(selections); }
+  catch (_error) { /* Keep local selections when the optional reranker fails. */ }
+  const scopes: MemoryScope[] = [];
+  if (gate.enableCoreMemory) scopes.push('core');
+  if (gate.enableShortTermMemory) scopes.push('short_term');
+  if (gate.enableLongTermMemory) scopes.push('long_term');
+  const maxChars: number = Math.min(Math.max(gate.memoryRecall.maxPromptChars, 256), 12000);
+  let profile: MemoryProfileSelection = { prompt: '', coveredIds: [] };
+  if (selections.length > 0) {
+    try {
+      profile = selectMemoryProfile(await getMemoryTopicStoreOps().snapshotProfile(),
+        await getMemoryLibraryOps().getAllRecords(), scopes,
+        selections.map((selection: MemoryRecallSelection): number => selection.record.id), now, maxChars);
+    } catch (_error) { /* Individual records remain usable if the optional profile is unavailable. */ }
+  }
+  const records: MemoryRecord[] = [];
+  const details: Record<number, string> = {};
+  let recordPrompt: string = '';
+  for (const selection of selections) {
+    if (profile.coveredIds.includes(selection.record.id)) continue;
+    details[selection.record.id] = memoryRecallScoreToDebugText(selection.score);
+    const candidate: string = buildMemoryContext(records.concat([selection.record]), gate.memoryRecall.debug, details, now);
+    const separatorChars: number = profile.prompt.length > 0 && candidate.length > 0 ? 2 : 0;
+    if (profile.prompt.length + separatorChars + candidate.length > maxChars) continue;
+    records.push(selection.record);
+    recordPrompt = candidate;
+  }
+  const injectedIds: number[] = profile.coveredIds.concat(records.map((record: MemoryRecord): number => record.id));
+  for (const id of injectedIds) {
+    if (!ctx.recalledMemoryIds.includes(id)) ctx.recalledMemoryIds.push(id);
+  }
+  const blocks: string[] = [];
+  if (profile.prompt.length > 0) blocks.push(profile.prompt);
+  if (recordPrompt.length > 0) blocks.push(recordPrompt);
+  return blocks;
 };
 
 export const buildConversationCompressProvider = (seed: PreparedConversationSeed): ChatStreamProvider => {
@@ -266,6 +303,7 @@ export const buildConversationTurnDeps = (ctx: DetachedConversationContext): Cha
         repository: getMiniAppRepositorySync(),
       }),
       regexOutputTransformer,
+      createMemoryCitationTransformer(ctx.runId, currentMessages(ctx.conversation), (): number[] => ctx.recalledMemoryIds),
     ],
     provider: asChatStreamProvider(rt.api, () => rt.params),
     store: { save: (conversation: Conversation): Promise<void> => ctx.save(conversation) },

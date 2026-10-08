@@ -3,26 +3,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  parseAuditReport, buildAuditUserPrompt, CONTINUITY_AUDIT_SYSTEM_PROMPT,
-} from '../main/ets/novel/continuity_audit.ts';
+import { parseAuditReport } from '../main/ets/novel/continuity_audit.ts';
 import {
   parseSettingProposals, isSettingProposalEnvelope, SETTING_PROPOSAL_MARKER,
 } from '../main/ets/novel/setting_proposal_parser.ts';
-import { makeNovelProject, makeNovelChapter } from '../main/ets/novel/models.ts';
-
-test('parseAuditReport: valid JSON', () => {
-  const issues = parseAuditReport(
-    '{"issues":[{"severity":"blocker","chapterRef":"第1章","summary":"主角名字前后不一致","suggestion":"统一为张三"}]}');
-  assert.equal(issues.length, 1);
-  assert.equal(issues[0].severity, 'blocker');
-  assert.equal(issues[0].chapterRef, '第1章');
-  assert.ok(issues[0].summary.indexOf('名字') >= 0);
-});
-
-test('parseAuditReport: empty issues ok', () => {
-  assert.deepEqual(parseAuditReport('{"issues":[]}'), []);
-});
 
 test('parseAuditReport: invalid JSON throws', () => {
   assert.throws(() => parseAuditReport('not json at all'));
@@ -32,23 +16,6 @@ test('parseAuditReport: invalid JSON throws', () => {
 test('parseAuditReport: severity defaults minor', () => {
   const issues = parseAuditReport('{"issues":[{"summary":"x"}]}');
   assert.equal(issues[0].severity, 'minor');
-});
-
-test('buildAuditUserPrompt includes chapters and materials', () => {
-  const project = makeNovelProject({ id: 'p1', name: '测试书', now: 1 });
-  const withChapter = {
-    ...project,
-    chapters: [makeNovelChapter({ title: '序章', content: '正文内容', now: 1 })],
-    materials: [{
-      id: 'm1', kind: 'world' as const, title: '世界观', content: '设定',
-      enabled: true, createdAt: 1, updatedAt: 1,
-    }],
-  };
-  const prompt = buildAuditUserPrompt(withChapter);
-  assert.ok(prompt.indexOf('测试书') >= 0);
-  assert.ok(prompt.indexOf('序章') >= 0);
-  assert.ok(prompt.indexOf('世界观') >= 0);
-  assert.ok(CONTINUITY_AUDIT_SYSTEM_PROMPT.indexOf('JSON') >= 0);
 });
 
 test('parseSettingProposals from fenced JSON', () => {

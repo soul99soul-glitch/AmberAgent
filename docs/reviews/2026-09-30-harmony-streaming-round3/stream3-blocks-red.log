@@ -1,0 +1,132 @@
+✔ thinking text preserves raw line breaks and Markdown symbols, matching the iOS plain text view (70.248959ms)
+✔ only overflow animates and repeated geometry does not restart the glide (12.649834ms)
+✔ a growing target retargets from the visible offset and large catch-up is speed-limited (9.23825ms)
+✔ content measuring before a still-growing card viewport does not start a false overflow glide (8.638125ms)
+✔ touch cancels native motion; an upward browse pauses until the user returns to bottom (12.0285ms)
+✔ stop is idempotent and a detached thinking scroll cannot restart (6.715125ms)
+✔ reasoning freezes completed text blocks while preserving every original newline (9.225084ms)
+✖ a 6000-character thought with 200 short lines uses bounded native text blocks (7.623875ms)
+✖ the stream-to-body handoff preserves the 6000-character window until explicit reopen (11.534541ms)
+✔ window boundaries, blank lines and long unbroken paragraphs retain exact raw text (11.325958ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 8
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 690.033875
+
+✖ failing tests:
+
+test at src/test/reasoning_native_follow.test.cjs:127:1
+✖ a 6000-character thought with 200 short lines uses bounded native text blocks (7.623875ms)
+  AssertionError [ERR_ASSERTION]: 193 native Text nodes recreate the long-thought layout bottleneck
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/reasoning_native_follow.test.cjs:131:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at src/test/reasoning_native_follow.test.cjs:141:1
+✖ the stream-to-body handoff preserves the 6000-character window until explicit reopen (11.534541ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + '0:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '1:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '2:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '3:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '4:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '5:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '6:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '7:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '8:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '9:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '10:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '11:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '12:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '13:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '14:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '15:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '16:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '17:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '18:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '19:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '20:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '21:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '22:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '23:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '24:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '25:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '26:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '27:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '28:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '29:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '30:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '31:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '32:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '33:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '34:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '35:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '36:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '37:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '38:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '39:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '40:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '41:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '42:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '43:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '44:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '45:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '46:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '47:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '48:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '49:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '50:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '51:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '52:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '53:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '54:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '55:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '56:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '57:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '58:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '59:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '60:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '61:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '62:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '63:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '64:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '65:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '66:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '67:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '68:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '69:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '70:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '71:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  +   '72:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  - '… 已省略前 2389 字，以保持流式思考界面流畅。\n' +
+  -   '\n' +
+  -   'zzzzzzzzz\n' +
+      '73:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+      '74:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+      '75:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+      '76:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+      '77:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n' +
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/reasoning_native_follow.test.cjs:148:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '0:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n1:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n2:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n3:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n4:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n5:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n6:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n7:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n8:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n9:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n10:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n11:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n12:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n13:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n14:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n15:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n16:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n17:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n18:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n19:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n20:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n21:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n22:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n23:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n24:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n25:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n26:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n27:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n28:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n29:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n30:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n31:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n32:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n33:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n34:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n35:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n36:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n37:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n38:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n39:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n40:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n41:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n42:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n43:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n44:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n45:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n46:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n47:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n48:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n49:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n50:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n51:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n52:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n53:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n54:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n55:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n56:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n57:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n58:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n59:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n60:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n61:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n62:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n63:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n64:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n65:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n66:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n67:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n68:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n69:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n70:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n71:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n72:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n73:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n74:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n75:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n76:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n77:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n78:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n79:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n80:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n81:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n82:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n83:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n84:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n85:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n86:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n87:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n88:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n89:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n90:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n91:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n92:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n93:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n94:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n95:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n96:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n97:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n98:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n99:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n100:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n101:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n102:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n103:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n104:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n105:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n106:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n107:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n108:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n109:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n110:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n111:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n112:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n113:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n114:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n115:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n116:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n117:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n118:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n119:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n120:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n121:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n122:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n123:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n124:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n125:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n126:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n127:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n128:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n129:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n130:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n131:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n132:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n133:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n134:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n135:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n136:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n137:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n138:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n139:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n140:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n141:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n142:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n143:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n144:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n145:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n146:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n147:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n148:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n149:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n150:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n151:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n152:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n153:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n154:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n155:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n156:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n157:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n158:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n159:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n160:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n161:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n162:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n163:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n164:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n165:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n166:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n167:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n168:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n169:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n170:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n171:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n172:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n173:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n174:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n175:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n176:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n177:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n178:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n179:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n180:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n181:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n182:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n183:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n184:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n185:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n186:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n187:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n188:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n189:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n190:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n191:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n192:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n193:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n194:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n195:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n196:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n197:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n198:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n199:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n200:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n201:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n202:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n203:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n204:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n205:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n206:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n207:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n208:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n209:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n210:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n211:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n212:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n213:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n214:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n215:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n216:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n217:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n218:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n219:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n220:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n221:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n222:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n223:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n224:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n225:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n226:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n227:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n228:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n229:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n230:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n231:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n232:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n233:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n234:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n235:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n236:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n237:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n238:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n239:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n240:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n241:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n242:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n243:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n244:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n245:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n246:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n247:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n248:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n249:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
+    expected: '… 已省略前 2389 字，以保持流式思考界面流畅。\n\nzzzzzzzzz\n73:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n74:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n75:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n76:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n77:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n78:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n79:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n80:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n81:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n82:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n83:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n84:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n85:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n86:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n87:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n88:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n89:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n90:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n91:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n92:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n93:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n94:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n95:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n96:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n97:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n98:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n99:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n100:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n101:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n102:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n103:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n104:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n105:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n106:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n107:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n108:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n109:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n110:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n111:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n112:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n113:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n114:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n115:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n116:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n117:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n118:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n119:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n120:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n121:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n122:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n123:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n124:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n125:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n126:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n127:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n128:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n129:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n130:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n131:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n132:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n133:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n134:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n135:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n136:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n137:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n138:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n139:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n140:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n141:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n142:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n143:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n144:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n145:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n146:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n147:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n148:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n149:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n150:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n151:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n152:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n153:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n154:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n155:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n156:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n157:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n158:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n159:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n160:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n161:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n162:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n163:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n164:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n165:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n166:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n167:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n168:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n169:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n170:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n171:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n172:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n173:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n174:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n175:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n176:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n177:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n178:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n179:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n180:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n181:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n182:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n183:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n184:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n185:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n186:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n187:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n188:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n189:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n190:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n191:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n192:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n193:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n194:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n195:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n196:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n197:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n198:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n199:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n200:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n201:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n202:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n203:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n204:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n205:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n206:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n207:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n208:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n209:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n210:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n211:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n212:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n213:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n214:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n215:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n216:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n217:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n218:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n219:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n220:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n221:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n222:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n223:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n224:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n225:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n226:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n227:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n228:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n229:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n230:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n231:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n232:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n233:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n234:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n235:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n236:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n237:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n238:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n239:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n240:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n241:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n242:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n243:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n244:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n245:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n246:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n247:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n248:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n249:zzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

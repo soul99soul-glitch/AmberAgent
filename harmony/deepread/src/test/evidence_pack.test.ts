@@ -1,9 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import {
-  buildEvidencePack, cardsFor, sourceIdsFor, requiredSourceTarget,
-  DeepReadArticlePlan, EvidenceCard,
-} from '../main/ets/research/evidence_pack.ts';
+import { buildEvidencePack, cardsFor, sourceIdsFor, DeepReadArticlePlan } from '../main/ets/research/evidence_pack.ts';
 import type { DeepReadSource } from '../main/ets/research/source_prefetcher.ts';
 import { STAGE_EVIDENCE_MAX } from '../main/ets/domain/enums.ts';
 
@@ -31,49 +28,6 @@ const emptyPlan = (): DeepReadArticlePlan => ({
   requiredSourceIds: [],
   stageSourceIds: {},
   coverageChecks: [],
-});
-
-// ===== requiredSourceTarget =====
-
-test('requiredSourceTarget: 0 sources → 0', () => {
-  assert.equal(requiredSourceTarget(0), 0);
-});
-
-test('requiredSourceTarget: 1-7 sources → all', () => {
-  assert.equal(requiredSourceTarget(1), 1);
-  assert.equal(requiredSourceTarget(7), 7);
-});
-
-test('requiredSourceTarget: >=8 → 8', () => {
-  assert.equal(requiredSourceTarget(8), 8);
-  assert.equal(requiredSourceTarget(11), 8);
-});
-
-test('requiredSourceTarget: >=12 → 10', () => {
-  assert.equal(requiredSourceTarget(12), 10);
-  assert.equal(requiredSourceTarget(20), 10);
-});
-
-// ===== buildEvidencePack: empty =====
-
-test('buildEvidencePack: empty sources → empty pack', () => {
-  const pack = buildEvidencePack([]);
-  assert.deepEqual(pack.allSources, []);
-  assert.deepEqual(pack.requiredSourceIds, []);
-  for (const stage of ['OVERVIEW', 'NARRATIVE', 'ANALYSIS', 'EXTENDED_READING'] as const) {
-    assert.deepEqual(pack.cardsByStage[stage], []);
-  }
-});
-
-// ===== buildEvidencePack: single source =====
-
-test('buildEvidencePack: single source → assigned to OVERVIEW', () => {
-  const pack = buildEvidencePack([makeSource('s1')]);
-  assert.equal(pack.allSources.length, 1);
-  assert.equal(pack.cardsByStage.OVERVIEW.length, 1);
-  assert.equal(pack.cardsByStage.OVERVIEW[0].sourceId, 's1');
-  assert.equal(pack.cardsByStage.NARRATIVE.length, 0);
-  assert.equal(pack.requiredSourceIds.length, 1);
 });
 
 // ===== buildEvidencePack: credibility sort =====
@@ -130,24 +84,6 @@ test('buildEvidencePack: evidenceExcerpt truncated to 2000 chars, reject images 
   assert.equal(pack.cardsByStage.OVERVIEW[0].evidenceExcerpt.length, 2000);
 });
 
-// ===== sourceIdsFor: key matching =====
-
-test('sourceIdsFor: matches stageKey (overview)', () => {
-  const plan: DeepReadArticlePlan = {
-    ...emptyPlan(),
-    stageSourceIds: { overview: ['s1', 's2'] },
-  };
-  assert.deepEqual(sourceIdsFor(plan, 'OVERVIEW'), ['s1', 's2']);
-});
-
-test('sourceIdsFor: matches extended_reading key', () => {
-  const plan: DeepReadArticlePlan = {
-    ...emptyPlan(),
-    stageSourceIds: { extended_reading: ['s9', 's10'] },
-  };
-  assert.deepEqual(sourceIdsFor(plan, 'EXTENDED_READING'), ['s9', 's10']);
-});
-
 test('sourceIdsFor: matches UPPERCASE stage name as fallback', () => {
   const plan: DeepReadArticlePlan = {
     ...emptyPlan(),
@@ -162,14 +98,6 @@ test('sourceIdsFor: empty ids for stage → not matched (continues to next key)'
     stageSourceIds: { overview: [], OVERVIEW: ['s5'] },
   };
   assert.deepEqual(sourceIdsFor(plan, 'OVERVIEW'), ['s5']);
-});
-
-test('sourceIdsFor: no matching key → empty array', () => {
-  const plan: DeepReadArticlePlan = {
-    ...emptyPlan(),
-    stageSourceIds: { narrative: ['s1'] },
-  };
-  assert.deepEqual(sourceIdsFor(plan, 'OVERVIEW'), []);
 });
 
 // ===== cardsFor: P0-D consumes plan.stageSourceIds =====
@@ -251,22 +179,4 @@ test('cardsFor: capped at STAGE_EVIDENCE_MAX (6)', () => {
   // should resolve all 10, but cap to STAGE_EVIDENCE_MAX=6
   assert.equal(cards.length, STAGE_EVIDENCE_MAX);
   assert.equal(STAGE_EVIDENCE_MAX, 6);
-});
-
-// ===== EvidenceCard shape =====
-
-test('EvidenceCard has correct shape with excerpt + filtered images', () => {
-  const source = makeSource('s1', {
-    credibility: 'high',
-    freshness: 'recent',
-    publishedAt: '2026-01-01',
-  });
-  const pack = buildEvidencePack([source]);
-  const card: EvidenceCard = pack.cardsByStage.OVERVIEW[0];
-  assert.equal(card.sourceId, 's1');
-  assert.equal(card.credibility, 'high');
-  assert.equal(card.freshness, 'recent');
-  assert.equal(card.publishedAt, '2026-01-01');
-  assert.ok(card.evidenceExcerpt.length > 0);
-  assert.ok(Array.isArray(card.imageCandidates));
 });

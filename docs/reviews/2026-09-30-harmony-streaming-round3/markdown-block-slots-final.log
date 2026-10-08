@@ -1,0 +1,14 @@
+✔ 48ms append leaves frozen slots untouched and updates the live tail on the same slot (134.707583ms)
+✔ completed tables retain their widths and avoid another width scan on every tail update (8.691ms)
+✔ closing a tail and appending a block preserves all existing slot identities (8.022333ms)
+✔ retyping a block keeps the slot but publishes the new AST and table geometry (2.805917ms)
+✔ replacement and truncation remove obsolete blocks without leaving stale captured data (5.71925ms)
+✔ real incremental Markdown cache emits zero frozen-prefix writes across repeated streaming snapshots (25.435458ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 789.204708

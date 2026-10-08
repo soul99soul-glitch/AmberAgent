@@ -1,0 +1,11 @@
+--- /tmp/amber-novel-stream-20261006/before/ChatMessageReasoning.ets
++++ harmony/entry/src/main/ets/components/ChatMessageReasoning.ets
+@@ -319,7 +319,7 @@
+         }
+         .align(Alignment.TopStart).width('100%')
+         .constraintSize({ maxHeight: this.loading ? 180 : 260 })
+-        .scrollBar(BarState.Auto)
++        .scrollBar(BarState.Off)
+         .onAppear((): void => {
+           this.thinkingReady = true;
+           this.requestThinkingFollow();

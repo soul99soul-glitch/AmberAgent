@@ -1,0 +1,21 @@
+✔ one new line follows its measured growth without the composer navigation inset (0.822291ms)
+✔ measured target settles through the spring instead of hitting the native boundary early (3.588917ms)
+✔ an already settled list and an unmeasured tail retain their existing semantics (0.061875ms)
+✔ layout requests coalesce, sample after layout and move in bounded native frames (37.392209ms)
+✔ touch/cancel prevents a queued old frame from moving the list (5.976ms)
+✔ growing geometry retargets the active spring; late terminal layout starts another frame (5.155833ms)
+✔ new structural row outside measured range anchors once without a frame loop (4.21025ms)
+✔ busy layout frames advance scrolling without waiting for onIdle (3.265ms)
+✔ active native follow requests display frames above the default 30fps vote and releases them at rest (4.980125ms)
+✔ API12 uses its known current refresh rate and cancellation releases the vote (2.983875ms)
+✔ native follow converges monotonically at 60/120Hz without overshoot (0.752542ms)
+✔ a growing target preserves momentum and converges independently of frame rate (0.116791ms)
+✔ zero delta is inert; a shrinking layout does not retain upward overshoot (0.595417ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 471.399708

@@ -1,0 +1,55 @@
+✖ a retained active message row reads each current snapshot, including reasoning and body growth (31.488625ms)
+✔ composer shows the effective novel default while preserving a missing or disabled fixed choice (52.111875ms)
+✔ model selection persists only writing and closes after commit; Back cannot interrupt the pending sheet (18.588083ms)
+✔ failed model persistence stays in the sheet, unavailable choices do not save, and stale sessions cannot close new sheets (48.268583ms)
+✔ a failed defaults read never enables a model write and exposes a retryable configuration error (14.518083ms)
+✔ closing and reopening project control retains all unsaved plan fields without publishing or crossing branches (9.489917ms)
+✔ failed plan saves keep the draft; successful saves refresh the baseline so later official edits remain visible (13.227833ms)
+✔ model sheet uses matching enter and exit motion, reduced opacity, and no hidden/background animation (10.467833ms)
+✔ a new workspace page restores disk drafts and formal apply removes the saved draft (27.449084ms)
+✔ failed restore disables draft editing and formal application until a successful retry (10.090375ms)
+✔ old sheet reads cannot overwrite a later sheet and failed autosave keeps editable input for retry (11.814375ms)
+✔ a failed clear never resurrects a withdrawn disk draft and successful retry allows later formal edits (11.885458ms)
+✔ reopening an autosave failure retries the retained snapshot before a new page reads it (12.907417ms)
+✔ classified quick-start proposals retain the existing editable adoption and rejection paths (18.555917ms)
+✔ plan and story edits preserve structured branch settings and invalidate only the changed plan (197.7875ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 14
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 921.166458
+
+✖ failing tests:
+
+test at harmony/entry/src/test/novel_workspace_composer_ui.test.cjs:10:1
+✖ a retained active message row reads each current snapshot, including reasoning and body growth (31.488625ms)
+  AssertionError [ERR_ASSERTION]: ForEach retains the seed; the row must resolve the latest same-ID message
+  + actual - expected
+  
+    {
+      id: 'assistant',
+      parts: [
+        {
+  +       reasoning: 'first',
+  -       reasoning: 'first second',
+          type: 'reasoning'
+        }
+      ],
+      role: 'assistant'
+    }
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/test/novel_workspace_composer_ui.test.cjs:27:12)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.start (node:internal/test_runner/test:1262:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { id: 'assistant', role: 'assistant', parts: [ [Object] ] },
+    expected: { id: 'assistant', role: 'assistant', parts: [ [Object] ] },
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

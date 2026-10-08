@@ -319,6 +319,41 @@ describe('SubAgentTools order and schemas', () => {
 });
 
 describe('SubAgentTools delegation to manager', () => {
+  it('stopping the parent wait does not cancel the independent child', async () => {
+    const h = await createTools({ parentToolsProvider: () => [textTool('file_read')],
+      configure: runner => { runner.scripts.push(abortablePendingScript()); } });
+    const started = await h.manager.start('parent', builtinInput(), [textTool('file_read')]);
+    const id = started['run_id'] as string;
+    const controller = new AbortController();
+    const run = h.tools.getTools().find(tool => tool.name === 'subagent_wait')!.execute(
+      { run_id: id, wait_timeout_ms: 60000 }, controller.signal);
+    controller.abort();
+    try {
+      await assert.rejects(run, { name: 'AbortError' });
+      assert.equal(h.manager.snapshot(id)?.status, 'running');
+      assert.equal(h.runner.calls[0].signal?.aborted, false);
+    } finally {
+      await h.manager.cancel(id);
+    }
+  });
+
+  it('a timed-out parent wait removes its abort listener while the child remains running', async () => {
+    const h = await createTools({ parentToolsProvider: () => [textTool('file_read')],
+      configure: runner => { runner.scripts.push(abortablePendingScript()); } });
+    const started = await h.manager.start('parent', builtinInput(), [textTool('file_read')]);
+    const id = started['run_id'] as string;
+    const listeners = new Set<() => void>();
+    const signal: AbortSignalLike = { aborted: false,
+      addEventListener: (_type, listener) => { listeners.add(listener); },
+      removeEventListener: (_type, listener) => { listeners.delete(listener); } };
+    try {
+      assert.equal((await h.manager.wait(id, 400, signal))['status'], 'running');
+      assert.equal(listeners.size, 0);
+      await assert.rejects(h.manager.wait(id, 60000, { aborted: true }), { name: 'AbortError' });
+      assert.equal(h.manager.snapshot(id)?.status, 'running');
+    } finally { await h.manager.cancel(id); }
+  });
+
   it('subagent_start delegates to manager.start with parent conversation id and profiled parent tools', async () => {
     const { tools, runner, parentToolsCalls } = await createTools({
       parentToolsProvider: (): AgentTool[] => [textTool('file_read')],
@@ -355,7 +390,7 @@ describe('SubAgentTools delegation to manager', () => {
   });
 
   it('subagent_wait defaults wait_timeout_ms to 10000 (manager clamps 0..60000, polls 200ms)', async () => {
-    const { tools, runner, sleeps } = await createTools({
+    const { tools, runner, sleeps, manager } = await createTools({
       configure: (r: FakeRunner): void => { r.scripts.push(abortablePendingScript()); },
       parentToolsProvider: (): AgentTool[] => [textTool('file_read')],
     });
@@ -368,10 +403,11 @@ describe('SubAgentTools delegation to manager', () => {
     // 10000ms / 200ms poll = 50 sleeps
     assert.equal(sleeps.length, 50);
     assert.equal(sleeps.every((ms: number): boolean => ms === 200), true);
+    await manager.cancel('run-1');
   });
 
   it('subagent_wait passes an explicit wait_timeout_ms through (400ms => 2 polls)', async () => {
-    const { tools, runner, sleeps } = await createTools({
+    const { tools, runner, sleeps, manager } = await createTools({
       configure: (r: FakeRunner): void => { r.scripts.push(abortablePendingScript()); },
       parentToolsProvider: (): AgentTool[] => [textTool('file_read')],
     });
@@ -381,6 +417,7 @@ describe('SubAgentTools delegation to manager', () => {
     const payload = await jsonOf(wait, { run_id: 'run-1', wait_timeout_ms: 400 });
     assert.equal(payload['status'], 'running');
     assert.equal(sleeps.length, 2);
+    await manager.cancel('run-1');
   });
 
   it('subagent_cancel delegates to manager.cancel by run_id', async () => {

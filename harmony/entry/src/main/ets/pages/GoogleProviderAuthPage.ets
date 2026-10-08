@@ -1,3 +1,4 @@
+import { DeepReadSubpageDock, DeepReadDockLayout } from '../components/deepread/DeepReadSubpageDock.ets';
 import { router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { picker, fileIo } from '@kit.CoreFileKit';
@@ -16,6 +17,12 @@ import {
 import { PageTitleBar, BtnFill, BtnGhost, PageSpacer } from '../components/PageTemplate.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
 import { BG, INK, INK3, ERROR, TEXT_STYLES, MOTION_OVERLAY } from '../design/tokens.ets';
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
+import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
+import {
+  DeepReadSettingsHeader, DeepReadSettingsSection, DeepReadSettingsGroup,
+  DeepReadSettingsNote, DeepReadSettingsRow, DeepReadSettingsPicker, DeepReadSettingsButton,
+} from '../components/deepread/DeepReadSettingsVisual.ets';
 
 interface GoogleProviderAuthRoute { providerId?: string; }
 
@@ -23,6 +30,7 @@ interface GoogleProviderAuthRoute { providerId?: string; }
 @Component
 struct GoogleProviderAuthPage {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State provider: ProviderSettingGoogle | null = null;
   @State mode: GooglePageAuthMode = 'api_key';
   @State clientId: string = '';
@@ -327,16 +335,157 @@ struct GoogleProviderAuthPage {
 
   @Builder
   field(label: string, value: string, placeholder: string, change: (value: string) => void, secret: boolean = false) {
+    if (getProductKind() === 'deepread') {
+      Column() {
+        Text(label).fontSize(13).fontColor(D.muted).width('100%').padding({ top: 12, left: 16, right: 16 })
+        TextInput({ text: value, placeholder }).type(secret ? InputType.Password : InputType.Normal)
+          .fontSize(16).fontColor(D.ink).placeholderColor(D.muted).backgroundColor(Color.Transparent)
+          .height(46).padding({ left: 16, right: 16 }).enabled(!this.busy)
+          .onChange((text: string): void => { change(text); this.changed(); })
+      }.width('100%')
+    } else {
     FlatTextField({ label: label, value: value, placeholder: placeholder, obscure: secret,
       mono: true, fieldEnabled: !this.busy,
       onChange: (value: string): void => { change(value); this.changed(); } })
       .margin({ bottom: 12 })
+    }
+  }
+
+  private modeIndex(): number {
+    return this.mode === 'service_account' ? 1 : this.mode === 'gemini_code_assist_oauth' ? 2
+      : this.mode === 'antigravity_oauth' ? 3 : 0;
+  }
+
+  private selectModeIndex(index: number): void {
+    const modes: GooglePageAuthMode[] = ['api_key', 'service_account', 'gemini_code_assist_oauth', 'antigravity_oauth'];
+    this.selectMode(modes[index] ?? 'api_key');
+  }
+
+  @Builder
+  DeepReadAuthFields(): void {
+    if (this.mode === 'service_account') {
+      DeepReadSettingsRow({ label: this.busy ? '正在导入…' : '导入服务账号 JSON', valueAccent: true, chevron: false,
+        onTap: (): void => { this.importServiceAccount(); } })
+      this.field('服务账号邮箱', this.email, 'name@project.iam.gserviceaccount.com', (value: string): void => { this.email = value; })
+      this.field('Google Cloud 项目', this.projectId, 'project-id', (value: string): void => { this.projectId = value; })
+      this.field('区域', this.location, 'us-central1 或 global', (value: string): void => { this.location = value; })
+      DeepReadSettingsRow({ label: '私钥', value: this.clearPrivateKey ? '保存后移除' : this.hasPrivateKey ? '已导入' : '未提供',
+        chevron: false, last: !this.hasPrivateKey || this.clearPrivateKey })
+      if (this.hasPrivateKey && !this.clearPrivateKey) {
+        DeepReadSettingsRow({ label: '移除私钥', destructive: true, chevron: false, last: true,
+          onTap: (): void => {
+            if (!this.busy) { this.discardPendingPrivateKey(); this.clearPrivateKey = true; this.changed(); }
+          } })
+      }
+    } else if (this.isOAuth()) {
+      this.field('Client ID', this.clientId, '已登记的 client_id', (value: string): void => { this.clientId = value; })
+      this.field('回调地址', this.redirectUri, 'http://127.0.0.1:PORT/PATH', (value: string): void => { this.redirectUri = value; })
+      this.field('Client Secret（选填）', this.clientSecret, this.provider !== null && this.provider.oauthClientSecretRef.length > 0
+        ? '已保存；留空保留' : '留空不提供',
+        (value: string): void => { this.clientSecret = value; this.clearClientSecret = false; }, true)
+      if (this.provider !== null && this.provider.oauthClientSecretRef.length > 0 && !this.clearClientSecret) {
+        DeepReadSettingsRow({ label: '移除 Client Secret', destructive: true, chevron: false, last: true,
+          onTap: (): void => { if (!this.busy) { this.clientSecret = ''; this.clearClientSecret = true; this.changed(); } } })
+      }
+    }
+  }
+
+  @Builder
+  DeepReadAuthStatus(): void {
+    DeepReadSettingsRow({ label: '授权状态', value: this.statusLabel(), chevron: false,
+      last: this.status === null || this.status.projectId.length === 0 })
+    if (this.status !== null && this.status.projectId.length > 0) {
+      DeepReadSettingsRow({ label: '已开通项目', value: this.status.projectId, chevron: false, last: true })
+    }
+  }
+
+  @Builder
+  DeepReadAuthActions(): void {
+    if (this.status !== null && this.status.validationUrl !== null) {
+      DeepReadSettingsRow({ label: '打开验证页',
+        onTap: (): void => {
+          if (this.status !== null && this.status.validationUrl !== null) {
+            this.openBrowser(this.status.validationUrl).catch((): void => { this.message = '无法打开验证页。'; });
+          }
+        } })
+    }
+    if (this.authBusy) {
+      DeepReadSettingsRow({ label: '取消当前授权', chevron: false,
+        onTap: (): void => { this.cancelAttempt(); this.message = '当前授权已取消。'; this.refreshStatus(); } })
+    }
+    if (this.status !== null && this.status.phase === 'onboarding_required') {
+      DeepReadSettingsRow({ label: '重试服务开通', chevron: false,
+        onTap: (): void => { this.retryOnboarding(); } }).enabled(!this.busy && !this.authBusy && !this.dirty)
+    }
+    DeepReadSettingsRow({ label: '退出当前授权', destructive: true, chevron: false, last: true,
+      onTap: (): void => { this.logout(); } })
+  }
+
+  @Builder
+  DeepReadPage(): void {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column() {
+        DeepReadSettingsHeader({ title: 'Google 认证', onBack: (): void => { this.back(); } })
+        Scroll() {
+          Column() {
+            if (this.provider !== null) {
+              DeepReadSettingsSection({ title: '认证方式' })
+              DeepReadSettingsGroup({ content: (): void => { this.DeepReadAuthMode(); } }).enabled(!this.busy)
+              if (this.mode === 'api_key') {
+                DeepReadSettingsNote({ text: 'API Key 与 Vertex 设置在模型服务页填写。切换认证方式后需保存。' })
+              } else {
+                DeepReadSettingsSection({ title: this.mode === 'service_account' ? '服务账号' : 'OAuth 配置' })
+                DeepReadSettingsGroup({ content: (): void => { this.DeepReadAuthFields(); } })
+                DeepReadSettingsNote({ text: this.mode === 'service_account'
+                  ? '私钥仅存于本机安全存储。请确认项目、区域及服务权限。'
+                  : this.mode === 'gemini_code_assist_oauth'
+                    ? '使用已登记的 Client ID 和精确回调地址。Code Assist 需 Standard 或 Enterprise 资格。'
+                    : '使用已登记的 Client ID 和精确回调地址。Antigravity 资格以服务器返回为准。' })
+                if (this.clearClientSecret) { DeepReadSettingsNote({ text: '保存后移除 Client Secret。' }) }
+              }
+              Column() {
+                DeepReadSettingsButton({ label: this.busy ? '正在保存…' : '保存认证配置', disabled: this.busy,
+                  onTap: (): void => { this.save(); } })
+              }.width('100%').padding({ left: 16, right: 16, top: 20 })
+              DeepReadSettingsSection({ title: '已保存配置' })
+              DeepReadSettingsGroup({ content: (): void => { this.DeepReadAuthStatus(); } })
+              if (this.status !== null && this.status.message.length > 0) {
+                DeepReadSettingsNote({ text: this.status.message })
+              }
+              if (this.isOAuth()) {
+                Column() {
+                  DeepReadSettingsButton({ label: this.authBusy ? '等待授权…' : '登录 Google',
+                    disabled: this.busy || this.authBusy || this.dirty,
+                    onTap: (): void => { this.login(); } })
+                }.width('100%').padding({ left: 16, right: 16, top: 20, bottom: 12 })
+                DeepReadSettingsGroup({ content: (): void => { this.DeepReadAuthActions(); } }).enabled(!this.busy)
+              }
+            }
+            if (this.message.length > 0) {
+              Text(this.message).fontSize(13).lineHeight(19).fontColor(this.message.indexOf('失败') >= 0 ? D.danger : D.muted)
+                .width('100%').padding({ left: 16, right: 16, top: 12 })
+            }
+          }.width('100%').padding({ left: D.gutter, right: D.gutter, bottom: DeepReadDockLayout.bottomInset(this.navBarHeight) })
+        }.align(Alignment.TopStart).layoutWeight(1).width('100%').scrollBar(BarState.Off)
+      }.width('100%').height('100%').backgroundColor(D.paper)
+      DeepReadSubpageDock({ onBeforeLeave: (): boolean => { return !this.busy; } }).align(Alignment.Bottom).hitTestBehavior(HitTestMode.Transparent)
+    }.width('100%').height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  DeepReadAuthMode(): void {
+    DeepReadSettingsPicker({ label: '认证方式', options: ['API Key', 'Vertex 服务账号', 'Gemini Code Assist', 'Antigravity'],
+      selected: this.modeIndex(), last: true, onSelect: (index: number): void => { this.selectModeIndex(index); } })
   }
 
   build() {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
+      if (getProductKind() === 'deepread') {
+        this.DeepReadPage()
+      } else {
       PageTitleBar({ title: 'Google 认证', onBack: (): void => { this.back(); } })
       Scroll() {
         Column() {
@@ -414,10 +563,11 @@ struct GoogleProviderAuthPage {
           PageSpacer()
         }.width('100%').alignItems(HorizontalAlign.Start).padding({ left: 16, right: 16, top: 12 })
       }.layoutWeight(1).width('100%')
+      }
     
       }, (e: number): string => `theme-${e}`)
 }
-      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(BG)
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').height('100%').backgroundColor(getProductKind() === 'deepread' ? D.paper : BG)
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 }

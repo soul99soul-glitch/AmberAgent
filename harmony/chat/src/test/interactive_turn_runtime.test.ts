@@ -153,7 +153,7 @@ test('interactive runtime: regenerate 用截断 seed 作基线，新答案短于
   };
   const result = await runInteractiveTurn(
     initial,
-    { ...baseDeps(true, (): number => clock), provider },
+    { ...baseDeps(true, (): number => clock), provider, flushIntervalMs: 0 },
     (runtimeDeps): Promise<Conversation> => runRegenerateAtWithTools(
       initial,
       targetNodeId,
@@ -167,4 +167,35 @@ test('interactive runtime: regenerate 用截断 seed 作基线，新答案短于
   assert.equal(result.transport, 'live');
   assert.equal(result.firstParsedDeltaAt, 10);
   assert.equal(result.dataEndAt, 20);
+});
+
+test('interactive runtime: unchanged historical message parts are measured once, replacements still update transport', async () => {
+  let historyReads = 0;
+  const history = makeAssistantMessage('历史');
+  const parts = history.parts;
+  Object.defineProperty(history, 'parts', { get: () => { historyReads++; return parts; } });
+  const initial = makeConversation('cached-runtime', [toMessageNode(history)]);
+  let clock = 100;
+  const frames: InteractiveTurnSnapshot[] = [];
+  const result = await runInteractiveTurn(initial, baseDeps(true, () => clock), async (runtime) => {
+    let finish = (): void => {};
+    const source = { streamText: (_messages: UIMessage[], _chunk: (chunk: MessageChunk) => void, opts?: StreamOpts) =>
+      new Promise<void>((resolve) => { finish = () => { opts?.onDataEnd?.(); resolve(); }; }) };
+    const provider = runtime.wrapStreamProvider!(source);
+    const pending = provider.streamText([history], () => {});
+    const tail = makeAssistantMessage('增');
+    runtime.onUpdate!([history, tail]);
+    clock = 150;
+    const grown = { ...tail, parts: makeAssistantMessage('增长').parts };
+    runtime.onUpdate!([history, grown]);
+    clock = 160;
+    finish(); await pending;
+    return makeConversation(initial.id, [toMessageNode(history), toMessageNode(grown)]);
+  }, { onSnapshot: (snapshot) => { frames.push(snapshot); } });
+  assert.equal(historyReads, 1, 'unchanged history must not rescan parts at baseline and every flush');
+  assert.equal(result.transport, 'live');
+  assert.equal(result.firstParsedDeltaAt, 100);
+  assert.equal(result.dataEndAt, 160);
+  assert.equal(frames.at(-1)?.messages[1].parts[0].type === 'text'
+    ? (frames.at(-1)!.messages[1].parts[0] as { text: string }).text : '', '增长');
 });

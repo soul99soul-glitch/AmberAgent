@@ -1,0 +1,247 @@
+{
+  "pid": 59941,
+  "clock": [
+    205372.494502,
+    1790824017938
+  ],
+  "native_motion_start": {
+    "time": "2026-10-01T11:06:28.816",
+    "trace": 205343.3731,
+    "line": 11785,
+    "event": "B|59941|H:ScrollTo with animation, position:18742.000000, duration:160.000000, smooth:0, canOverScroll:0, id:619, tag:List|I39"
+  },
+  "native_motion_stop": {
+    "time": "2026-10-01T11:06:38.403",
+    "trace": 205352.960141,
+    "line": 501708,
+    "event": "B|59941|H:OnScrollStop, id:619, tag:List|I39"
+  },
+  "native_dispatch_count": 94,
+  "energy_transitions": [
+    {
+      "time": "2026-10-01T11:06:31.757",
+      "trace": 205346.314451,
+      "line": 191813,
+      "event": "[120-120]"
+    },
+    {
+      "time": "2026-10-01T11:06:31.963",
+      "trace": 205346.519648,
+      "line": 207088,
+      "event": "[60-60]"
+    }
+  ],
+  "touch": [
+    {
+      "time": "2026-10-01T11:06:28.649",
+      "trace": 205343.205819,
+      "line": 180,
+      "event": "B|1812|H:StateMachine state change: TouchIdle -> TouchDown|M0538"
+    },
+    {
+      "time": "2026-10-01T11:06:28.756",
+      "trace": 205343.313217,
+      "line": 6557,
+      "event": "B|1812|H:StateMachine state change: TouchDown -> TouchUp|M0538"
+    },
+    {
+      "time": "2026-10-01T11:06:31.757",
+      "trace": 205346.314002,
+      "line": 191730,
+      "event": "B|1812|H:StateMachine state change: TouchUp -> TouchIdle|M0538"
+    },
+    {
+      "time": "2026-10-01T11:06:37.141",
+      "trace": 205351.697599,
+      "line": 403633,
+      "event": "B|1812|H:StateMachine state change: TouchIdle -> TouchDown|M0538"
+    },
+    {
+      "time": "2026-10-01T11:06:37.165",
+      "trace": 205351.721725,
+      "line": 406102,
+      "event": "B|1812|H:StateMachine state change: TouchDown -> TouchUp|M0538"
+    },
+    {
+      "time": "2026-10-01T11:06:40.166",
+      "trace": 205354.72289,
+      "line": 551871,
+      "event": "B|1812|H:StateMachine state change: TouchUp -> TouchIdle|M0538"
+    }
+  ],
+  "ranges": {
+    "120, 120, 120": 668
+  },
+  "range_examples": [
+    {
+      "time": "2026-10-01T11:06:28.780",
+      "trace": 205343.337285,
+      "line": 8917,
+      "event": "B|59941|H:DisplaySyncId[254] Type[-1] Timestamp[200202035479604] TargetTimestamp[200202043831426]FrameRateRange[120, 120, 120] DrawFPS[120] VSyncRate[120] Rate[1] noSkip[1]|I39"
+    }
+  ],
+  "samples": [
+    {
+      "time": "2026-10-01T11:06:28.565",
+      "fps": 0,
+      "refresh": 120
+    },
+    {
+      "time": "2026-10-01T11:06:29.568",
+      "fps": 9,
+      "refresh": 120
+    },
+    {
+      "time": "2026-10-01T11:06:30.580",
+      "fps": 84,
+      "refresh": 120
+    },
+    {
+      "time": "2026-10-01T11:06:31.568",
+      "fps": 90,
+      "refresh": 120
+    },
+    {
+      "time": "2026-10-01T11:06:32.568",
+      "fps": 111,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:33.568",
+      "fps": 80,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:34.574",
+      "fps": 44,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:35.568",
+      "fps": 47,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:36.568",
+      "fps": 50,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:37.568",
+      "fps": 47,
+      "refresh": 120
+    },
+    {
+      "time": "2026-10-01T11:06:38.567",
+      "fps": 87,
+      "refresh": 120
+    },
+    {
+      "time": "2026-10-01T11:06:39.569",
+      "fps": 120,
+      "refresh": 120
+    },
+    {
+      "time": "2026-10-01T11:06:40.575",
+      "fps": 32,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:41.586",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:42.566",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:43.572",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:44.577",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:45.569",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:46.569",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:47.568",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:48.568",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:49.587",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:50.575",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:51.572",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:52.593",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:53.572",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:54.580",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:55.568",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:56.568",
+      "fps": 0,
+      "refresh": 60
+    },
+    {
+      "time": "2026-10-01T11:06:57.570",
+      "fps": 0,
+      "refresh": 60
+    }
+  ],
+  "conclusion": "Fixed request does not maintain120Hz afterTouchIdle on this device; actual request120/120/120 verified in668 frame events, system60/60 policy appears while native List animation continues",
+  "limitations": [
+    "One real generation with different output length/content; not a controlled performance regression comparison",
+    "An additional touch event at11:06:37.141 preceded refresh recovery; not injected by capture script",
+    "SP samples near transitions mix frame-rate phases; do not read a single refresh column as the full interval rate",
+    "The120fps sample at11:06:39.569 is after the recorded List animation ended; not proof of steady120fps scrolling"
+  ],
+  "raw_trace": {
+    "path": "/tmp/streamfixed120.trace",
+    "sha256": "b1500d51b86e950f1d002eb07e99f71046ee409cfe9301c86fa44ea03882b41f",
+    "bytes": 71380221
+  }
+}

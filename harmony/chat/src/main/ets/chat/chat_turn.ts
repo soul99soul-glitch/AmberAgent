@@ -25,6 +25,8 @@ import type { MessageChunk, UIMessage, UIMessagePart } from './message.ts';
 import { isEmptyInputMessage } from './message.ts';
 import { makeUIMessage, finishAssistantMessage } from './message.ts';
 import { MessageStreamAccumulator } from './stream_accumulator.ts';
+import { StreamSnapshotGate } from './stream_snapshot_gate.ts';
+import { ProviderResponseError } from './provider_response_error.ts';
 import type { Assistant } from './assistant.ts';
 import { assembleInternalMessages } from './context_assembly.ts';
 import { fitMessagesToTokenBudget } from './context_compact.ts';
@@ -35,6 +37,7 @@ import {
   applyInputTransformers, applyOnGenerationFinish, applyVisualTransformersStreamingTail,
 } from './transformer_pipeline.ts';
 import { nowIso } from './ids.ts';
+import { waitForGenerationRetry } from './generation_retry_wait.ts';
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import {
   decideGenerationRetry, makeGenerationRetrySetting, RETRY_STATUS_TEMPLATE,
@@ -100,7 +103,7 @@ export interface ChatTurnDeps {
   // 上下文组装(D-018):agentSoul 静态块前缀;contextMessageSize 截断(0=不截断)
   agentSoul?: string;
   contextMessageSize?: number;
-  // 流式 UI 刷新节流(Android STREAM_UI_FLUSH_INTERVAL_MS);0 = 每个 chunk 都刷新
+  // 流式快照发布窗口(iOS 48ms);0 = 每个 chunk 都刷新
   flushIntervalMs?: number;
   nowMs?: () => number;
   onUpdate?: (messages: UIMessage[]) => void;
@@ -134,8 +137,8 @@ export interface ChatTurnDeps {
   //   动态块序最前(memory → loopBudget → generativeUi → recentChats),
   //   组装时拼在 extraSystemBlocks 之前;每次组装调用时取数
   memorySystemBlocks?: () => Promise<string[]>;
-  // 发送边界最终预算:组装完 system/agentSoul/memory/动态块之后、transforms 之前
-  //   对 assembled 再 fit 一次 — prepare 阶段的 fit 不含这些后置块,超长
+  // 发送边界最终预算:组装完 system/agentSoul/memory/动态块并执行 input transforms 后
+  //   对物化后的请求 fit — prepare 阶段的 fit 不含这些后置块和展开附件,超长
   //   soul/memory/工具 prompt 仍会把最终请求顶出上下文窗
   finalTokenBudget?: number;
   // D-077b:动态 system 块供给(GenerationHandler.kt:726-736 — memory/generativeUi/
@@ -213,20 +216,18 @@ export const runChatTurn = async (
       ...(deps.extraSystemBlocks !== undefined ? await deps.extraSystemBlocks() : []),
     ],
   });
-  // 发送边界兜底 fit:后置 system 块参与总预算后才不超窗(system 本身按 Android
-  // 语义保留不裁,普通历史从最旧侧收)
-  const assembled: UIMessage[] = deps.finalTokenBudget !== undefined
-    ? fitMessagesToTokenBudget(assembledBase, deps.finalTokenBudget)
-    : assembledBase;
-  const internalMessages: UIMessage[] = await applyInputTransformers(
-    assembled, deps.inputTransformers, ctx);
-  // D-071a:视觉兜底重建闭包(prepareInternalMessages(forceImageToText = true),
-  //   GenerationHandler.kt:613/:648);模型不支持图像时整条兜底不启用
+  // 物化文档/OCR/模板后再按最终预算裁剪历史；保留 system 和最新输入的既有语义。
+  const prepareInternalMessages = async (forceImageToText: boolean = false): Promise<UIMessage[]> => {
+    const transformed: UIMessage[] = await applyInputTransformers(
+      assembledBase, deps.inputTransformers, forceImageToText ? { ...ctx, forceImageToText: true } : ctx);
+    return deps.finalTokenBudget !== undefined
+      ? fitMessagesToTokenBudget(transformed, deps.finalTokenBudget) : transformed;
+  };
+  const internalMessages: UIMessage[] = await prepareInternalMessages();
   const visionFallback: VisionFallbackHook | undefined =
     deps.modelSupportsImageInput === undefined ? undefined : {
       modelSupportsImageInput: deps.modelSupportsImageInput,
-      rebuildInternalMessages: (): Promise<UIMessage[]> => applyInputTransformers(
-        assembled, deps.inputTransformers, { ...ctx, forceImageToText: true }),
+      rebuildInternalMessages: (): Promise<UIMessage[]> => prepareInternalMessages(true),
     };
 
   // 3. 生成一步(D-057 抽取出共享核心;单跑行为与 D-050 逐字节一致)
@@ -256,15 +257,15 @@ export const generateAssistantOnce = async (
   const provider: ChatStreamProvider = deps.wrapStreamProvider !== undefined
     ? deps.wrapStreamProvider(baseProvider) : baseProvider;
   const ctx: TransformerContext = { assistant: deps.assistant };
-  // 流式 UI 刷新节流(Android STREAM_UI_FLUSH_INTERVAL_MS);0 = 每个 chunk 都刷新
-  const flushIntervalMs: number = deps.flushIntervalMs ?? 50;
+  // 流式快照发布窗口(iOS 48ms);0 = 每个 chunk 都刷新
+  const flushIntervalMs: number = deps.flushIntervalMs ?? 48;
   const nowMs: () => number = deps.nowMs ?? ((): number => Date.now());
   const streamOpts: StreamOpts = {
     signal: deps.abortSignal,
     baselineMessages: seedMessages,
   };
   // D-040:streamOutput=false 且 provider 支持 → 非流式单次补全(Android
-  //   GenerationHandler.kt:255);chunk 以 message 形式进同一 accumulator
+  //   GenerationHandler.kt:255);单次 reply 是本轮新增内容，不能替换 seed 中已执行的工具。
   const useNonStream: boolean = deps.assistant.streamOutput === false
     && provider.generateText !== undefined;
   // D-050 重试循环(runProviderCallWithRetry:774-820 忠实):
@@ -277,72 +278,57 @@ export const generateAssistantOnce = async (
     }));
   let attempt: number = 1;
   let lastAccumulator: MessageStreamAccumulator = new MessageStreamAccumulator(seedMessages);
-  let lastFlushAt: number = 0;
   const isAborted = (): boolean =>
     deps.abortSignal !== undefined && deps.abortSignal.aborted;
-  const waitForRetry = (delayMs: number): Promise<void> => {
-    const signal: AbortSignalLike | undefined = deps.abortSignal;
-    if (signal === undefined || signal.addEventListener === undefined) return sleep(delayMs);
-    if (signal.aborted) return Promise.resolve();
-    return new Promise<void>((resolve, reject): void => {
-      let settled: boolean = false;
-      const finish = (): void => {
-        if (settled) return;
-        settled = true;
-        signal.removeEventListener?.('abort', finish);
-        resolve();
-      };
-      signal.addEventListener?.('abort', finish);
-      if (signal.aborted) {
-        finish();
-        return;
-      }
-      sleep(delayMs).then(finish).catch((error: Error): void => {
-        if (settled) return;
-        settled = true;
-        signal.removeEventListener?.('abort', finish);
-        reject(error);
-      });
-    });
-  };
   while (true) {
     // 首次尝试必跑(abort 检查在 catch 与 sleep 后 — provider 抛错时
     //   signal.aborted=true 的既有语义不回归,D-035)
     const accumulator: MessageStreamAccumulator = new MessageStreamAccumulator(seedMessages);
     lastAccumulator = accumulator;
-    lastFlushAt = 0;
     // D-071a:provider 调用闭包 — 视觉兜底重跑与首轮共用**同一 accumulator**
     //   (GenerationHandler.kt:601-665:fallback 生成接续写入同一消息流)
     const callProvider = async (msgs: UIMessage[]): Promise<void> => {
       if (useNonStream && provider.generateText !== undefined) {
-        const chunk: MessageChunk = await provider.generateText(msgs, streamOpts);
-        accumulator.append(chunk);
-        if (deps.onUpdate !== undefined) {
+        const appendResponse = (chunk: MessageChunk): void => {
+          accumulator.append({
+            ...chunk,
+            choices: chunk.choices.map((choice) => ({
+              ...choice, delta: choice.delta ?? choice.message, message: null,
+            })),
+          });
+        };
+        const publish = (): void => {
           const snapshot: UIMessage[] = accumulator.snapshot();
-          deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
+          deps.onRawFlushSnapshot?.(snapshot);
+          deps.onUpdate?.(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
+        };
+        try {
+          appendResponse(await provider.generateText(msgs, streamOpts));
+          publish();
+        } catch (error) {
+          if (error instanceof ProviderResponseError && error.partialChunk !== null) {
+            appendResponse(error.partialChunk);
+            publish();
+          }
+          throw error;
         }
       } else {
-        await provider.streamText(msgs, (chunk: MessageChunk): void => {
-          accumulator.append(chunk);
-          // D-063:节流检查移出 onUpdate 门(Android :519-526 不依赖 UI 监听者)
-          const now: number = nowMs();
-          if (lastFlushAt === 0 || now - lastFlushAt >= flushIntervalMs) {
-            lastFlushAt = now;
-            if (deps.onRawFlushSnapshot !== undefined || deps.onUpdate !== undefined) {
-              const snapshot: UIMessage[] = accumulator.snapshot();
-              if (deps.onRawFlushSnapshot !== undefined) {
-                deps.onRawFlushSnapshot(snapshot);
-              }
-              if (deps.onUpdate !== undefined) {
-                deps.onUpdate(applyVisualTransformersStreamingTail(
-                  snapshot, deps.outputTransformers, ctx));
-              }
-            }
-          }
-        }, streamOpts);
-        // D-063(:540-543):流终 raw 快照观察点(成功收流后、终态前)
-        if (deps.onRawFlushSnapshot !== undefined) {
-          deps.onRawFlushSnapshot(accumulator.snapshot());
+        const gate: StreamSnapshotGate = new StreamSnapshotGate(flushIntervalMs, nowMs, (): void => {
+          const snapshot: UIMessage[] = accumulator.snapshot();
+          deps.onRawFlushSnapshot?.(snapshot);
+          deps.onUpdate?.(applyVisualTransformersStreamingTail(
+            snapshot, deps.outputTransformers, ctx));
+        });
+        try {
+          await provider.streamText(msgs, (chunk: MessageChunk): void => {
+            accumulator.append(chunk);
+            if (deps.onRawFlushSnapshot !== undefined || deps.onUpdate !== undefined) gate.changed();
+          }, streamOpts);
+        } finally {
+          // Success, stop, failure and vision retry drain the latest tail before
+          // proceeding; a queued timer cannot publish over the terminal/reset UI.
+          const publishedTail: boolean = gate.finish();
+          if (!publishedTail) deps.onRawFlushSnapshot?.(accumulator.snapshot());
         }
       }
     };
@@ -379,7 +365,7 @@ export const generateAssistantOnce = async (
             .replace('%4$s', decision.reason),
         );
       }
-      await waitForRetry(decision.delayMs);
+      await waitForGenerationRetry(decision.delayMs, sleep, deps.abortSignal);
       attempt++;
       // 重试等待中点停止(含即时 sleep):不发起新尝试,失败尝试的部分输出不入列。
       if (isAborted()) {

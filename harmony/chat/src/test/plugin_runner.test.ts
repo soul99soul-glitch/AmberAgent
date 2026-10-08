@@ -1,3 +1,4 @@
+import { jevAutoApprovalReason } from '../main/ets/chat/jev_auto_approval.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeAgentTool } from '../main/ets/chat/tool.ts';
@@ -230,4 +231,24 @@ test('import is pinned and always explicitly approved; wrapper execute cannot by
   assert.equal(result(p)['status'], 'succeeded'); assert.equal(f.counts().applies, 1);
   const guarded = await tools.find((t) => t.name === 'plugin__sample__run')!.execute({ value: 'x' });
   assert.equal(JSON.parse((guarded[0] as { text: string }).text).error_code, 'plugin_adapter_required');
+});
+
+test('auto approval review pauses the actual JS host primitive, preserves checkpoint target and manual continuation', async () => {
+  const f = fixture(descriptor({ kind: 'javascript', source: 'return tools.file_write(input);', hostTools: ['file_write'] }));
+  let evaluations = 0;
+  const dispatcher = new AgentToolDispatcher({ autoApprovalReview: async () => { evaluations++; return ['外发数据']; } });
+  f.port.capture = () => ({ terminal_target: { profileId: 'pinned' } });
+  f.port.decide = (p, def, signal) => dispatcher.resolveReviewedDecision(def, p, true, true, [], 'normal', signal);
+  f.port.dispatch = (p, def, signal) => dispatcher.execute(p, def, true, true, [], 'normal', undefined, signal);
+  f.js.reply = async (id) => ({ type: 'finished', sessionId: id, resultJson: 'null', logs: [] });
+  let p = await f.adapter.advance(await f.adapter.prepare(parent(), f.defs), f.port);
+  assert.equal(p.approvalState.type, 'pending'); assert.equal(checkpoint(p).phase, 'awaiting_approval');
+  assert.equal(jevAutoApprovalReason(p), '自动批准复核：外发数据');
+  assert.equal(f.writes.length, 0); assert.equal(evaluations, 1);
+  const step = checkpoint(p).pendingStep!;
+  assert.deepEqual(step.metadata!['terminal_target'], { profileId: 'pinned' });
+  assert.match(JSON.stringify(step.metadata!['permission_trace']), /jev_auto_approval.*外发数据/);
+  assert.equal(checkpoint(f.saved.at(-1)!).phase, 'awaiting_approval');
+  p = await f.adapter.advance({ ...p, approvalState: { type: 'approved' } }, f.port);
+  assert.equal(result(p)['status'], 'succeeded'); assert.equal(f.writes.length, 1); assert.equal(evaluations, 1);
 });

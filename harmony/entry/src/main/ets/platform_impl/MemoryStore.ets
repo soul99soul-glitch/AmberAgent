@@ -1,3 +1,4 @@
+import { Context } from '@kit.AbilityKit';
 // MemoryStore — 记忆记录 JSON 文件存储(D-085b,读路径 + touch)
 // Android 基准:MemoryRepository.kt(Room)→ 本文件以 JSON 文件持久化;
 //   DAO 无 ORDER BY → 数组序即插入序;id 自增语义留待写路径切片(addMemory 等)。
@@ -12,7 +13,7 @@ import type {
   AssistantMemory, MemoryAddParams, MemoryCandidate, MemoryEvent, MemoryEventType,
   MemoryExportFs, MemoryImportExportDeps, MemoryReadRepository, MemoryRecord, MemoryScope,
   MemoryToolDeps, MemoryToolWriteRequest, MemoryDerivedDocument, MemoryTopicApplyResult,
-  MemoryTopicSuggestion,
+  MemoryTopicSuggestion, MemoryExtractionAction, MemoryExtractionApplyResult, MemoryProfile, MemoryProfilePassOutput, MemorySemanticMerge,
 } from '@amber/chat-domain';
 import type {
   MemoryDreamPlan, MemoryDreamPlanDaoPort, MemoryDreamPlanEntity,
@@ -22,13 +23,17 @@ import type {
 import {
   appendMemoryRecord, deleteMemoryRecord, filterActiveMemoryRecords, memoriesOfAssistant,
   memoryRecordToAssistantMemory, touchMemoryRecords, updateMemoryRecordContent,
-  upsertMemoryRecord,
-  applyMemoryTopicSuggestions, makeMemoryRecord, pruneMemoryTopics,
+  upsertMemoryRecord, applyMemoryExtractionActions, reinforceMemoryRecords, restoreMemoryRecord, isMemoryActive, makeMemoryEvent,
+  applyMemoryTopicSuggestions, makeMemoryRecord, pruneMemoryTopics, memoryProfileSources, buildMemoryProfile,
+  nearDuplicateCandidates, planConfirmedMemoryMerges, remapMemoryProfileItems, invalidateMemoryTopicsForSource,
 } from '@amber/chat-domain';
 import { writeTextFileAtomic, readGuardedJson } from './AtomicJsonFile.ets';
 import type { GuardedJsonRead } from './AtomicJsonFile.ets';
 import { publishBasicNotification, cancelNotification } from './NotificationNotifier.ets';
 import { listMemoryDocuments, readMemoryDocument, syncMemoryDocuments } from './MemoryDocumentStore.ets';
+
+import { refreshMemoryProfile, writeMemoryProfile } from './MemoryOptimizationStore.ets';
+import type { MemoryOptimizationApplyResult } from './MemoryOptimizationStore.ets';
 
 const MEMORY_FOLDER: string = 'memory';
 const MEMORY_FILE: string = 'memory_records.json';
@@ -124,7 +129,10 @@ const saveRecords = async (records: MemoryRecord[], topicResult: MemoryTopicAppl
   const next: MemoryRecord[] = pruneMemoryTopics(records, Date.now()).records;
   await writeAll(next);
   publishMemoryRevision();
-  try { await syncMemoryDocuments(next, Date.now()); }
+  try {
+    const profile: MemoryProfile | null = await refreshMemoryProfile(next, Date.now());
+    await syncMemoryDocuments(next, Date.now(), profile);
+  }
   catch (error) {
     throw new MemoryDocumentRefreshError(error instanceof Error ? error.message : String(error), topicResult);
   }
@@ -132,7 +140,7 @@ const saveRecords = async (records: MemoryRecord[], topicResult: MemoryTopicAppl
 
 const syncProjection = async (records: MemoryRecord[], now: number,
   topicResult: MemoryTopicApplyResult | null = null): Promise<void> => {
-  try { await syncMemoryDocuments(records, now); }
+  try { await syncMemoryDocuments(records, now, await refreshMemoryProfile(records, now)); }
   catch (error) {
     throw new MemoryDocumentRefreshError(error instanceof Error ? error.message : String(error), topicResult, false);
   }
@@ -154,6 +162,11 @@ export const getMemoryReadRepository = (): MemoryReadRepository => ({
     const all: MemoryRecord[] = await readAll();
     return filterActiveMemoryRecords(all, scopes, now);
   },
+  reinforceMemories: (ids: number[], sourceId: string): Promise<void> => enqueueWrite(async (): Promise<void> => {
+    const all: MemoryRecord[] = await readAllForWrite();
+    const next: MemoryRecord[] = reinforceMemoryRecords(all, ids, Date.now(), sourceId);
+    if (next.some((row: MemoryRecord, index: number): boolean => row !== all[index])) await saveRecords(next);
+  }),
   touchMemories: (ids: number[]): Promise<void> => {
     if (ids.length === 0) return Promise.resolve(); // MemoryRepository.kt:150
     return enqueueWrite(async (): Promise<void> => {
@@ -205,6 +218,9 @@ const updatePinned = (id: number, pinned: boolean): Promise<MemoryRecord> =>
       archived: row.archived, createdAt: row.createdAt, updatedAt: Date.now(),
       lastUsedAt: row.lastUsedAt,
       topicTitle: row.topicTitle, memberIds: row.memberIds,
+      evidence: row.evidence, invalidatedAt: row.invalidatedAt,
+      reinforcementCount: row.reinforcementCount, lastReinforcedAt: row.lastReinforcedAt,
+      lastReinforcementSource: row.lastReinforcementSource,
     };
     const next: MemoryRecord[] = [...all];
     next[index] = updated;
@@ -214,7 +230,7 @@ const updatePinned = (id: number, pinned: boolean): Promise<MemoryRecord> =>
 
 // getMemoriesOfAssistant(DAO :16-17)— 桶精确匹配,插入序
 const listMemoriesOfAssistant = async (assistantId: string): Promise<AssistantMemory[]> =>
-  memoriesOfAssistant(await readAll(), assistantId);
+  memoriesOfAssistant((await readAll()).filter((row: MemoryRecord): boolean => isMemoryActive(row, Date.now())), assistantId);
 
 // memoryBucket(ChatService.kt:2400-2405)— else → long_term 桶(逐字)
 const memoryBucket = (scope: string): string => {
@@ -299,11 +315,21 @@ const countEventsSince = async (type: MemoryEventType, createdAfter: number): Pr
 const getAllActiveRecords = async (now: number): Promise<MemoryRecord[]> => {
   const all: MemoryRecord[] = await readAll();
   return all.filter((r: MemoryRecord): boolean =>
-    !r.archived && (r.expiresAt === null || r.expiresAt > now));
+    r.kind !== 'topic' && isMemoryActive(r, now));
 };
 
 // runMemoryExtraction 的存储面 deps(模型解析/generateText/locale 由 ChatPage 供给)
+const applyExtractionActions = (actions: MemoryExtractionAction[], now: number, beforeCommit?: () => Promise<void>): Promise<MemoryExtractionApplyResult> =>
+  enqueueWrite(async (): Promise<MemoryExtractionApplyResult> => {
+    const all: MemoryRecord[] = await readAllForWrite();
+    if (beforeCommit !== undefined) await beforeCommit();
+    const out: MemoryExtractionApplyResult = applyMemoryExtractionActions(all, actions, Math.max(now, Date.now()));
+    if (out.changed) await saveRecords(out.records);
+    return out;
+  });
+
 export interface MemoryExtractionStoreOps {
+  applyActions: (actions: MemoryExtractionAction[], now: number, beforeCommit?: () => Promise<void>) => Promise<MemoryExtractionApplyResult>;
   addCandidates: (candidates: MemoryCandidate[]) => Promise<void>;
   addCandidate: (candidate: MemoryCandidate) => Promise<void>;
   addMemory: (params: MemoryAddParams) => Promise<MemoryRecord>;
@@ -313,6 +339,7 @@ export interface MemoryExtractionStoreOps {
 }
 
 export const getMemoryExtractionStoreOps = (): MemoryExtractionStoreOps => ({
+  applyActions: applyExtractionActions,
   addCandidates,
   addCandidate,
   addMemory,
@@ -462,7 +489,28 @@ export const getMemoryDreamStoreOps = (): MemoryDreamStoreOps => ({
 
 // ===== D-089:记忆库面(MemoryPage 三桶列表 + CRUD + 事件) =====
 
+interface MemoryChangeEventFields {
+  type: MemoryEventType;
+  memoryId: number;
+  message: string;
+  createdAt: number;
+}
+
+const restoreMemory = (id: number): Promise<void> => enqueueWrite(async (): Promise<void> => {
+  const all: MemoryRecord[] = await readAllForWrite();
+  const now: number = Date.now();
+  const next: MemoryRecord[] = restoreMemoryRecord(all, id, now);
+  await saveRecords(next);
+  const events: MemoryEvent[] = await requireArrayForWrite<MemoryEvent>(memoryPath(EVENTS_FILE));
+  const fields: MemoryChangeEventFields = {
+    type: 'memory_restored', memoryId: id, message: '用户恢复记忆', createdAt: now,
+  };
+  await writeJsonArray<MemoryEvent>(memoryPath(EVENTS_FILE), [...events, makeMemoryEvent(fields)]);
+});
+
 export interface MemoryLibraryOps {
+  getAllRecords: () => Promise<MemoryRecord[]>;
+  restoreMemory: (id: number) => Promise<void>;
   // getMemoriesOfAssistant(DAO :16-17)— 桶精确匹配,插入序(含 archived,
   //   Android Flow 不过滤,UI 全量展示)
   listBucket: (bucket: string) => Promise<AssistantMemory[]>;
@@ -477,6 +525,8 @@ export interface MemoryLibraryOps {
 }
 
 export const getMemoryLibraryOps = (): MemoryLibraryOps => ({
+  getAllRecords: readAllForWrite,
+  restoreMemory,
   listBucket: listMemoriesOfAssistant,
   listBucketRecords: async (bucket: string): Promise<MemoryRecord[]> =>
     (await readAll()).filter((record: MemoryRecord): boolean => record.assistantId === bucket),
@@ -487,7 +537,60 @@ export const getMemoryLibraryOps = (): MemoryLibraryOps => ({
   getRecentEvents,
 });
 
+const applyMemoryOptimization = (baseline: MemoryRecord[], suggestions: MemoryTopicSuggestion[],
+  pass: MemoryProfilePassOutput | null, now: number, beforeCommit?: () => Promise<void>): Promise<MemoryOptimizationApplyResult> =>
+  enqueueWrite(async (): Promise<MemoryOptimizationApplyResult> => {
+    const live: MemoryRecord[] = await readAllForWrite();
+    if (beforeCommit !== undefined) await beforeCommit();
+    const commitNow: number = Math.max(now, Date.now());
+    const scopes: MemoryScope[] = ['core', 'short_term', 'long_term'];
+    const baselineSources: MemoryRecord[] = memoryProfileSources(baseline, scopes, commitNow);
+    const liveSources: MemoryRecord[] = memoryProfileSources(live, scopes, commitNow);
+    const profileSourcesUnchanged: boolean = baselineSources.length === liveSources.length && baselineSources.every((source: MemoryRecord): boolean =>
+      liveSources.some((row: MemoryRecord): boolean => row.id === source.id && row.content === source.content
+        && row.updatedAt === source.updatedAt && row.scope === source.scope && row.kind === source.kind));
+    const merges: MemorySemanticMerge[] = pass === null ? [] : planConfirmedMemoryMerges(
+      nearDuplicateCandidates(baseline, now), pass.duplicates, live, commitNow);
+    let next: MemoryRecord[] = live;
+    for (const merge of merges) {
+      next = next.map((row: MemoryRecord): MemoryRecord => row.id === merge.winner.id ? merge.winner
+        : row.id === merge.loser.id ? merge.loser : row);
+      next = invalidateMemoryTopicsForSource(next, merge.loser.id, commitNow);
+    }
+    const topic: MemoryTopicApplyResult = applyMemoryTopicSuggestions(next, baseline, suggestions, commitNow);
+    let profile: MemoryProfile | null = null;
+    if (pass !== null && profileSourcesUnchanged) {
+      profile = buildMemoryProfile(remapMemoryProfileItems(pass.profile, merges),
+        memoryProfileSources(topic.records, scopes, commitNow), commitNow);
+    }
+    const out: MemoryOptimizationApplyResult = { records: topic.records, topicIds: topic.topicIds,
+      changed: topic.changed || merges.length > 0, staleCount: topic.staleCount,
+      rejectedReasons: topic.rejectedReasons, profileUpdated: profile !== null,
+      mergedIds: merges.map((merge: MemorySemanticMerge): number => merge.loser.id) };
+    if (out.changed) await saveRecords(out.records, out);
+    if (profile !== null) {
+      await writeMemoryProfile(profile);
+      publishMemoryRevision();
+    }
+    await syncProjection(out.records, commitNow, out);
+    if (merges.length > 0) {
+      const events: MemoryEvent[] = await requireArrayForWrite<MemoryEvent>(memoryPath(EVENTS_FILE));
+      const additions: MemoryEvent[] = merges.map((merge: MemorySemanticMerge): MemoryEvent => {
+        const fields: MemoryChangeEventFields = {
+        type: 'memory_archived', memoryId: merge.loser.id, createdAt: commitNow,
+        message: `模型确认完全同义，合并至 #${merge.winner.id}；原文保留，可恢复。`,
+      };
+        return makeMemoryEvent(fields);
+      });
+      await writeJsonArray<MemoryEvent>(memoryPath(EVENTS_FILE), events.concat(additions));
+    }
+    return out;
+  });
+
 export interface MemoryTopicStoreOps {
+  snapshotProfile: () => Promise<MemoryProfile | null>;
+  applyOptimization: (baseline: MemoryRecord[], suggestions: MemoryTopicSuggestion[], pass: MemoryProfilePassOutput | null,
+    now: number, beforeCommit?: () => Promise<void>) => Promise<MemoryOptimizationApplyResult>;
   snapshotForTopics: () => Promise<MemoryRecord[]>;
   applyTopics: (baseline: MemoryRecord[], suggestions: MemoryTopicSuggestion[], now: number,
     beforeCommit?: () => Promise<void>) => Promise<MemoryTopicApplyResult>;
@@ -506,6 +609,9 @@ const refreshDocuments = async (): Promise<void> => {
 
 export const getMemoryTopicStoreOps = (): MemoryTopicStoreOps => {
   const ops: MemoryTopicStoreOps = {
+  snapshotProfile: (): Promise<MemoryProfile | null> => enqueueWrite(async (): Promise<MemoryProfile | null> =>
+    refreshMemoryProfile(await readAllForWrite(), Date.now())),
+  applyOptimization: applyMemoryOptimization,
   snapshotForTopics: (): Promise<MemoryRecord[]> => enqueueWrite(async (): Promise<MemoryRecord[]> => {
     const records: MemoryRecord[] = await readAllForWrite();
     return pruneMemoryTopics(records, Date.now()).records;

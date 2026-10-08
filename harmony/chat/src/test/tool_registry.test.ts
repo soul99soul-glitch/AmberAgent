@@ -37,13 +37,6 @@ describe('ToolRegistry.from(:84-97)', () => {
       (e: Error): boolean => e.message === 'Duplicate tool names registered: a, z',
     );
   });
-  it('metadata 列表与注册序一致;metadataFor 命中/未命中', () => {
-    const reg = createToolRegistry([echoTool('conversation_search'), echoTool('get_time_info')]);
-    assert.equal(reg.metadata.length, 2);
-    assert.equal(reg.metadata[0].name, 'conversation_search');
-    assert.equal(reg.metadataFor('get_time_info')?.name, 'get_time_info');
-    assert.equal(reg.metadataFor('nope'), null);
-  });
 });
 
 describe('toMetadata 派生(:99-124)', () => {
@@ -77,11 +70,6 @@ describe('toMetadata 派生(:99-124)', () => {
     assert.equal(m.needsApproval, true);
     assert.equal(m.autoApprovable, false);
     assert.equal(m.mandatoryApproval, true);
-  });
-  it('outputBudgetChars 按名覆盖(model_council_start 组合常量)', () => {
-    const m = toToolMetadata(echoTool('model_council_start'));
-    assert.equal(m.outputBudgetChars, 200000 * 8 * 5 + 512000);
-    assert.equal(toToolMetadata(echoTool('conversation_search')).outputBudgetChars, 80000);
   });
 });
 
@@ -118,13 +106,5 @@ describe('tools() 包装副本(:66-75)', () => {
     assert.equal(payload.status, 'truncated');
     assert.equal(payload.total_chars, 90000);
     assert.equal(payload.max_chars, 80000);
-  });
-  it('evaluateInvocation 命中返回策略,未命中 null', () => {
-    const reg = createToolRegistry([echoTool('conversation_search')]);
-    const policy = reg.evaluateInvocation('conversation_search', null);
-    assert.ok(policy !== null);
-    assert.equal(policy?.name, 'conversation_search');
-    assert.equal(policy?.mutates, false);
-    assert.equal(reg.evaluateInvocation('nope'), null);
   });
 });

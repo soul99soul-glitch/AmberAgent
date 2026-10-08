@@ -998,3 +998,48 @@ describe('SubAgentManager roster and runtime settings surface', () => {
     assert.equal(harness.manager.runtimeMode(), 'smart_dynamic');
   });
 });
+
+describe('SubAgentManager dynamic English name allocation', () => {
+  it('assigns distinct names to parallel starts while transcript initialization is awaiting', async () => {
+    const harness = await createManager(makeSetting({ maxConcurrentRuns: 10 }), (runner): void => {
+      for (let i: number = 0; i < 10; i++) runner.scripts.push(abortablePendingScript());
+    });
+    const payloads: JsonObject[] = await Promise.all(
+      Array.from({ length: 10 }, (): Promise<JsonObject> =>
+        harness.manager.start('parent', dynamicInput(), [])));
+    try {
+      const names: string[] = payloads.map((payload: JsonObject): string => String(payload['subagent_name']));
+      names.forEach((name: string): void => { assert.match(name, /^[A-Z][a-z]+$/); });
+      assert.equal(new Set(names.map((name: string): string => name.toLowerCase())).size, 10);
+      payloads.forEach((payload: JsonObject): void => {
+        const runId: string = payloadRunId(payload);
+        assert.equal(harness.manager.snapshot(runId)?.definition.name, payload['subagent_name']);
+        assert.equal(harness.taskStore.read(runId)?.title, payload['subagent_name']);
+      });
+    } finally {
+      await Promise.all(payloads.map((payload: JsonObject): Promise<JsonObject> =>
+        harness.manager.cancel(payloadRunId(payload))));
+    }
+  });
+
+  it('preserves an explicit English name, distinguishes a simultaneous duplicate, and reuses it after completion', async () => {
+    const harness = await createManager(makeSetting({ maxConcurrentRuns: 2 }), (runner): void => {
+      runner.scripts.push(abortablePendingScript(), abortablePendingScript(), abortablePendingScript());
+    });
+    const input: JsonObject = dynamicInput();
+    (input['custom_subagent'] as JsonObject)['name'] = 'Grace_5';
+    const first: JsonObject = await harness.manager.start('parent', input, []);
+    const second: JsonObject = await harness.manager.start('other-parent', input, []);
+    try {
+      assert.equal(first['subagent_name'], 'Grace');
+      assert.notEqual(second['subagent_name'], 'Grace');
+      await harness.manager.cancel(payloadRunId(first));
+      const third: JsonObject = await harness.manager.start('parent', input, []);
+      try { assert.equal(third['subagent_name'], 'Grace'); }
+      finally { await harness.manager.cancel(payloadRunId(third)); }
+    } finally {
+      await harness.manager.cancel(payloadRunId(first));
+      await harness.manager.cancel(payloadRunId(second));
+    }
+  });
+});

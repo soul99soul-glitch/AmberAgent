@@ -1,10 +1,11 @@
-// Foreground topic grouping; does not reserve Chat runs or alter chatGenerating.
+// One foreground model pass for topics, profile and confirmed duplicates.
 import { batteryInfo } from '@kit.BasicServicesKit';
 import type { AbortSignalLike } from '@amber/deepread-domain';
-import type { MemoryRecord, MemoryTopicApplyResult, MessageChunk, OpenAIChatApi } from '@amber/chat-domain';
+import type { MemoryProfilePassOutput, MemoryRecord, MessageChunk, OpenAIChatApi } from '@amber/chat-domain';
 import {
-  buildMemoryTopicPrompt, decodeMemoryTopicSuggestions, isMemoryTopicSource,
-  makeTextGenerationParams, makeUserMessage, toChatModel, toText,
+  buildMemoryProfilePassPrompt, buildMemoryTopicPrompt, decodeMemoryTopicSuggestions, isMemoryTopicSource,
+  makeTextGenerationParams, makeUserMessage, memoryProfileSources, toChatModel, toText,
+  nearDuplicateCandidates, parseMemoryProfilePassOutput,
 } from '@amber/chat-domain';
 import type { ChatProviderChoice } from '../di/AppContainer.ets';
 import { prepareProviderApi, getChatKvStore } from '../di/AppContainer.ets';
@@ -14,6 +15,7 @@ import { sharedKvMutex } from './AtomicJsonFile.ets';
 import { EntryAbortController } from './EntryAbortController.ets';
 import { resolveMemoryDaydreamChoice } from './MemoryDreamOps.ets';
 import { getMemoryTopicStoreOps, MemoryDocumentRefreshError } from './MemoryStore.ets';
+import type { MemoryOptimizationApplyResult } from './MemoryOptimizationStore.ets';
 
 export type MemoryTopicRunStatus = 'idle' | 'running' | 'completed' | 'skipped'
   | 'missing_model' | 'cancelled' | 'timed_out' | 'failed';
@@ -24,16 +26,20 @@ export interface MemoryTopicRunResult {
   documentError: string;
   topicCount: number;
   staleCount: number;
+  profileUpdated: boolean;
+  mergedCount: number;
 }
 export interface MemoryTopicRunState extends MemoryTopicRunResult { running: boolean; }
 interface TopicDailyBudget { day: number; count: number; }
 const BUDGET_KEY: string = 'memory_topic_daily_runs_v1';
 const result = (status: MemoryTopicRunStatus, error: string = ''): MemoryTopicRunResult => ({
   status, error, sourceSaved: false, documentError: '', topicCount: 0, staleCount: 0,
+  profileUpdated: false, mergedCount: 0,
 });
 const runState = (value: MemoryTopicRunResult, running: boolean): MemoryTopicRunState => ({
   running, status: value.status, error: value.error, sourceSaved: value.sourceSaved,
   documentError: value.documentError, topicCount: value.topicCount, staleCount: value.staleCount,
+  profileUpdated: value.profileUpdated, mergedCount: value.mergedCount,
 });
 
 class TopicGateError extends Error {
@@ -129,19 +135,30 @@ export class MemoryTopicCoordinator {
     const timer: number = setTimeout((): void => { this.timedOut = true; this.controller?.abort(); }, worker.timeoutMs);
     let chunk: MessageChunk;
     try {
-      chunk = await awaitAbortable(api.generateText([makeUserMessage(buildMemoryTopicPrompt(baseline, Date.now()))],
+      const promptNow: number = Date.now();
+      const sources: MemoryRecord[] = memoryProfileSources(baseline, ['short_term', 'long_term'], promptNow);
+      const prompt: string = buildMemoryTopicPrompt(baseline, promptNow) + '\n\n'
+        + buildMemoryProfilePassPrompt(sources, nearDuplicateCandidates(baseline, promptNow))
+        + '\n以上任务必须在同一次响应内完成，只返回一个 JSON 对象，包含三个数组：'
+        + '{"topics":[],"profile":[],"duplicates":[]}。无建议的数组返回 []；不要输出多段 JSON。';
+      chunk = await awaitAbortable(api.generateText([makeUserMessage(prompt)],
         makeTextGenerationParams({ model: toChatModel(choice.model), reasoningLevel: worker.daydreamReasoningLevel,
           customBody: choice.model.customBodies }),
         { signal }), signal);
     } finally { clearTimeout(timer); }
     await this.checkWriteGate(signal);
     const message = chunk.choices.length > 0 ? chunk.choices[0].message : null;
-    const suggestions = decodeMemoryTopicSuggestions(message === null ? '' : toText(message));
-    const applied: MemoryTopicApplyResult = await getMemoryTopicStoreOps().applyTopics(baseline, suggestions, Date.now(),
+    const raw: string = message === null ? '' : toText(message);
+    const suggestions = decodeMemoryTopicSuggestions(raw);
+    const profilePass: MemoryProfilePassOutput | null = parseMemoryProfilePassOutput(raw);
+    if (profilePass === null) throw new Error('整理结果的画像或同义去重格式无效，本次结果未写入');
+    const applied: MemoryOptimizationApplyResult = await getMemoryTopicStoreOps().applyOptimization(
+      baseline, suggestions, profilePass, Date.now(),
       async (): Promise<void> => { await this.checkWriteGate(signal); });
     const completed: MemoryTopicRunResult = result('completed', applied.rejectedReasons.join('；'));
     completed.sourceSaved = applied.changed; completed.topicCount = applied.topicIds.length;
     completed.staleCount = applied.staleCount;
+    completed.profileUpdated = applied.profileUpdated; completed.mergedCount = applied.mergedIds.length;
     return completed;
   }
   async run(manual: boolean): Promise<MemoryTopicRunResult> {

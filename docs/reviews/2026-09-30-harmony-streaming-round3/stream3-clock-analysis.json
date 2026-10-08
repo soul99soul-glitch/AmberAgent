@@ -1,0 +1,387 @@
+{
+  "trace_file": "/tmp/stream3clock.trace",
+  "csv_file": "/tmp/stream3clock.csv",
+  "pid": 10979,
+  "trace_origin_seconds": 161251.733563,
+  "conclusion": "DisplaySync removes the 30 fps app scheduling cap. The body is approximately 60 fps in this capture. The 39-46 fps interval is long reasoning, whose single native Text repeatedly rebuilds its whole paragraph and requires up to 20 ms of measurement. System UI_ANIMATION_ENERGY_ASSURANCE votes limit the screen to 60 despite explicit 120 fps app requests.",
+  "phase_markers": {
+    "H:CustomNodeUpdate name:ChatMessageReasoning,id:1004": {
+      "count": 324,
+      "first_relative_seconds": 1.823212,
+      "last_relative_seconds": 18.019355
+    },
+    "H:CustomNodeUpdate name:WidgetMessageContent,id:1019": {
+      "count": 100,
+      "first_relative_seconds": 13.041804,
+      "last_relative_seconds": 17.994714
+    },
+    "H:CustomNodeUpdate name:MarkdownText,id:1024": {
+      "count": 100,
+      "first_relative_seconds": 13.05773,
+      "last_relative_seconds": 18.004046
+    }
+  },
+  "phase_statistics": {
+    "reasoning": {
+      "relative_window_seconds": [
+        4.3,
+        12.9
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 509,
+          "total_ms": 3504.455,
+          "p50_ms": 0.91,
+          "p95_ms": 23.95,
+          "max_ms": 27.718,
+          "over_16_667ms": 128
+        },
+        "dirty_nodes": {
+          "count": 519,
+          "total_ms": 562.254,
+          "p50_ms": 0.092,
+          "p95_ms": 3.916,
+          "max_ms": 6.603,
+          "over_16_667ms": 0
+        },
+        "reasoning_component": {
+          "count": 169,
+          "total_ms": 56.84,
+          "p50_ms": 0.339,
+          "p95_ms": 0.447,
+          "max_ms": 0.616,
+          "over_16_667ms": 0
+        },
+        "markdown_component": {},
+        "layout": {
+          "count": 516,
+          "total_ms": 2536.108,
+          "p50_ms": 0.197,
+          "p95_ms": 19.421,
+          "max_ms": 22.406,
+          "over_16_667ms": 74
+        },
+        "text_measure": {
+          "count": 169,
+          "total_ms": 2210.921,
+          "p50_ms": 13.971,
+          "p95_ms": 19.148,
+          "max_ms": 20.081,
+          "over_16_667ms": 38
+        },
+        "execute_js": {
+          "count": 70,
+          "total_ms": 20.685,
+          "p50_ms": 0.27,
+          "p95_ms": 0.447,
+          "max_ms": 1.091,
+          "over_16_667ms": 0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "17": 500,
+        "33": 9
+      }
+    },
+    "body": {
+      "relative_window_seconds": [
+        13.7,
+        17.9
+      ],
+      "main_thread": {
+        "on_vsync": {
+          "count": 259,
+          "total_ms": 1641.459,
+          "p50_ms": 5.88,
+          "p95_ms": 13.509,
+          "max_ms": 18.557,
+          "over_16_667ms": 6
+        },
+        "dirty_nodes": {
+          "count": 262,
+          "total_ms": 844.095,
+          "p50_ms": 3.52,
+          "p95_ms": 7.972,
+          "max_ms": 10.806,
+          "over_16_667ms": 0
+        },
+        "reasoning_component": {
+          "count": 88,
+          "total_ms": 11.413,
+          "p50_ms": 0.128,
+          "p95_ms": 0.179,
+          "max_ms": 0.2,
+          "over_16_667ms": 0
+        },
+        "markdown_component": {
+          "count": 84,
+          "total_ms": 480.119,
+          "p50_ms": 5.748,
+          "p95_ms": 8.469,
+          "max_ms": 10.234,
+          "over_16_667ms": 0
+        },
+        "layout": {
+          "count": 262,
+          "total_ms": 280.74,
+          "p50_ms": 0.221,
+          "p95_ms": 3.224,
+          "max_ms": 5.568,
+          "over_16_667ms": 0
+        },
+        "text_measure": {
+          "count": 145,
+          "total_ms": 110.151,
+          "p50_ms": 0.693,
+          "p95_ms": 1.909,
+          "max_ms": 2.506,
+          "over_16_667ms": 0
+        },
+        "execute_js": {
+          "count": 1274,
+          "total_ms": 79.023,
+          "p50_ms": 0.027,
+          "p95_ms": 0.163,
+          "max_ms": 15.183,
+          "over_16_667ms": 0
+        }
+      },
+      "vsync_advertised_periods_ms": {
+        "17": 231,
+        "8": 28
+      }
+    }
+  },
+  "reasoning_csv_rows_6_to_13": [
+    {
+      "row_1_based": 6,
+      "fps": 46,
+      "refreshrate": 60
+    },
+    {
+      "row_1_based": 7,
+      "fps": 42,
+      "refreshrate": 60
+    },
+    {
+      "row_1_based": 8,
+      "fps": 43,
+      "refreshrate": 60
+    },
+    {
+      "row_1_based": 9,
+      "fps": 44,
+      "refreshrate": 60
+    },
+    {
+      "row_1_based": 10,
+      "fps": 39,
+      "refreshrate": 60
+    },
+    {
+      "row_1_based": 11,
+      "fps": 40,
+      "refreshrate": 60
+    },
+    {
+      "row_1_based": 12,
+      "fps": 44,
+      "refreshrate": 60
+    },
+    {
+      "row_1_based": 13,
+      "fps": 39,
+      "refreshrate": 60
+    }
+  ],
+  "body_csv_rows_14_to_19": [
+    {
+      "row_1_based": 14,
+      "fps": 60,
+      "refreshrate": 60
+    },
+    {
+      "row_1_based": 15,
+      "fps": 58,
+      "refreshrate": 60
+    },
+    {
+      "row_1_based": 16,
+      "fps": 57,
+      "refreshrate": 60
+    },
+    {
+      "row_1_based": 17,
+      "fps": 64,
+      "refreshrate": 60
+    },
+    {
+      "row_1_based": 18,
+      "fps": 61,
+      "refreshrate": 60
+    },
+    {
+      "row_1_based": 19,
+      "fps": 58,
+      "refreshrate": 60
+    }
+  ],
+  "reasoning_text_1013_per_second": {
+    "4": {
+      "count": 18,
+      "total_ms": 123.333,
+      "p50_ms": 7.832,
+      "p95_ms": 8.658,
+      "max_ms": 9.565,
+      "over_16_667ms": 0
+    },
+    "5": {
+      "count": 19,
+      "total_ms": 186.41,
+      "p50_ms": 10.117,
+      "p95_ms": 11.044,
+      "max_ms": 11.625,
+      "over_16_667ms": 0
+    },
+    "6": {
+      "count": 21,
+      "total_ms": 240.961,
+      "p50_ms": 11.738,
+      "p95_ms": 12.88,
+      "max_ms": 13.262,
+      "over_16_667ms": 0
+    },
+    "7": {
+      "count": 20,
+      "total_ms": 255.027,
+      "p50_ms": 13.677,
+      "p95_ms": 14.736,
+      "max_ms": 15.216,
+      "over_16_667ms": 0
+    },
+    "8": {
+      "count": 19,
+      "total_ms": 277.649,
+      "p50_ms": 14.98,
+      "p95_ms": 16.134,
+      "max_ms": 16.596,
+      "over_16_667ms": 0
+    },
+    "9": {
+      "count": 20,
+      "total_ms": 309.538,
+      "p50_ms": 16.0,
+      "p95_ms": 17.548,
+      "max_ms": 18.078,
+      "over_16_667ms": 5
+    },
+    "10": {
+      "count": 14,
+      "total_ms": 241.312,
+      "p50_ms": 16.881,
+      "p95_ms": 18.745,
+      "max_ms": 18.961,
+      "over_16_667ms": 9
+    },
+    "11": {
+      "count": 17,
+      "total_ms": 274.958,
+      "p50_ms": 17.881,
+      "p95_ms": 19.582,
+      "max_ms": 19.622,
+      "over_16_667ms": 11
+    },
+    "12": {
+      "count": 21,
+      "total_ms": 375.868,
+      "p50_ms": 18.222,
+      "p95_ms": 19.864,
+      "max_ms": 20.081,
+      "over_16_667ms": 14
+    }
+  },
+  "reasoning_text_1013_steady": {
+    "count": 160,
+    "total_ms": 2203.447,
+    "p50_ms": 14.299,
+    "p95_ms": 19.239,
+    "max_ms": 20.081,
+    "over_16_667ms": 38
+  },
+  "reasoning_measure_mode": {
+    "H:TextLayoutAlgorithm::MeasureContent[id:1013][needReCreateParagraph:1][size:0]": 160
+  },
+  "explicit_display_sync_request": [
+    {
+      "relative_seconds": 13.540364,
+      "line": 493319,
+      "pid": 10979,
+      "name": "H:DisplaySyncId[51] Type[-1] Timestamp[156123972936333] TargetTimestamp[156123981271996]FrameRateRange[60, 120, 120] DrawFPS[120] VSyncRate[120] Rate[1] noSkip[1]"
+    }
+  ],
+  "system_60hz_vote_reason": [
+    {
+      "relative_seconds": 13.549709,
+      "line": 494041,
+      "pid": 1812,
+      "name": "H:ProcessLtpoVote: isDragScene_: [0], refreshRate: [60], lastLTPORefreshRate_: [60], desc: [[16793600] UI_ANIMATION;OTHER_DISPLAY_SYNC;]"
+    },
+    {
+      "relative_seconds": 13.549713,
+      "line": 494042,
+      "pid": 1812,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]"
+    },
+    {
+      "relative_seconds": 13.549753,
+      "line": 494050,
+      "pid": 1812,
+      "name": "H:Process voter:VOTER_LTPO(pid:0), value:[60-60]"
+    },
+    {
+      "relative_seconds": 13.549782,
+      "line": 494056,
+      "pid": 1812,
+      "name": "H:FrameRateReport: RS(1812) = 60, APP(-1) = 60"
+    },
+    {
+      "relative_seconds": 13.549946,
+      "line": 494081,
+      "pid": 1812,
+      "name": "H:HgmSoftVSyncManager::UniProcessData multiAppFrameRate: pid = 10979, linkerId = 47154445942784, appFrameRate = 60, appRange = (0, 144, 120)"
+    }
+  ],
+  "system_first_60hz_transition": [
+    {
+      "relative_seconds": 4.213368,
+      "line": 214719,
+      "pid": 1812,
+      "name": "H:ProcessLtpoVote: isDragScene_: [1], refreshRate: [60], lastLTPORefreshRate_: [60], desc: [[16448] SCROLLABLE_MULTI_TASK;UI_ANIMATION;]"
+    },
+    {
+      "relative_seconds": 4.213372,
+      "line": 214724,
+      "pid": 1812,
+      "name": "H:Deliver voter:VOTER_LTPO(pid:0 extInfo:UI_ANIMATION_ENERGY_ASSURANCE), status:1, value:[60-60]"
+    },
+    {
+      "relative_seconds": 4.213424,
+      "line": 214739,
+      "pid": 1812,
+      "name": "H:MarkVoteChange: 120 60"
+    },
+    {
+      "relative_seconds": 4.213563,
+      "line": 214763,
+      "pid": 1812,
+      "name": "H:HgmSoftVSyncManager::UniProcessData multiAppFrameRate: pid = 10979, linkerId = 47154445942784, appFrameRate = 60, appRange = (0, 144, 120)"
+    }
+  ],
+  "limitations": [
+    "Text MeasureContent slices have no nested shaping/detection trace events. The trace proves repeated full paragraph recreation and cost growth, but cannot attribute it to copyOption, text detection, shaping, or a particular native internal algorithm.",
+    "No sched category: elapsed main-thread slices are not isolated CPU execution time.",
+    "Native Text 1013 has needReCreateParagraph:1 for all 160 stable-window measurements; measurement p50 rises from roughly 8 ms at second 4 to 19 ms at second 12. This supports whole growing-text layout as the bottleneck.",
+    "The exact OEM energy-assurance policy is not visible beyond its trace vote name. No unsupported claim is made about thermal, battery, or supportedRefreshRates availability.",
+    "CSV per-second intervals are approximate and cross phase boundaries. Trace-derived phase windows are used for attribution; the 118/113 fps transient periods are not representative steady-state body or thinking samples."
+  ]
+}

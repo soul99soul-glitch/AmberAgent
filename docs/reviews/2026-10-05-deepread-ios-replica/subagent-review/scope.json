@@ -1,0 +1,7 @@
+{
+  "head": "b2d054bd7a81c64795497098d54cf30ad049e04f",
+  "installedDeepReadHapSha256": "c76700f55309b579d2ea469ba3e242f0c3c940a42fb97c57418128896e8821f9",
+  "productionDrift": [],
+  "baseline": "/tmp/amber-deepread-motion-baseline-20261005",
+  "review": "current DeepRead WIP and direct shared calling chain, read-only"
+}

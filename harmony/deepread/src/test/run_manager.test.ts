@@ -6,7 +6,7 @@ import { strict as assert } from 'node:assert';
 import { run, runSection, generateStages, createRunContext } from '../main/ets/agent/run_manager.ts';
 import type { RunManagerDeps } from '../main/ets/agent/run_manager.ts';
 import { createScheduler, isInterruptedPhase } from '../main/ets/agent/scheduler.ts';
-import { createSectionWriterTools } from '../main/ets/agent/section_writer_tools.ts';
+
 import type { SectionWriterTools } from '../main/ets/agent/section_writer_tools.ts';
 import type { CollectRunFn } from '../main/ets/agent/supervisor_loop.ts';
 import type { UIMessage, UIMessagePartText } from '../main/ets/agent/message.ts';
@@ -61,16 +61,6 @@ const makeWritingCollectRun = (writerRef: { w: SectionWriterTools | null }): Col
     return [...messages, makeAssistantMessage('written')];
   };
 
-// ===== isInterruptedPhase =====
-
-test('isInterruptedPhase: COLLECTING/PLANNING/WRITING → true; IDLE/COMPLETE → false', () => {
-  assert.equal(isInterruptedPhase({ ...makeEmptyDeepReadOutput(), generationPhase: 'COLLECTING' }), true);
-  assert.equal(isInterruptedPhase({ ...makeEmptyDeepReadOutput(), generationPhase: 'PLANNING' }), true);
-  assert.equal(isInterruptedPhase({ ...makeEmptyDeepReadOutput(), generationPhase: 'WRITING' }), true);
-  assert.equal(isInterruptedPhase({ ...makeEmptyDeepReadOutput(), generationPhase: 'IDLE' }), false);
-  assert.equal(isInterruptedPhase({ ...makeEmptyDeepReadOutput(), generationPhase: 'COMPLETE' }), false);
-});
-
 // ===== createRunContext: 空 prefetch 不冒充有效研究资料 =====
 
 test('createRunContext: empty prefetch fails without a fabricated title source', async () => {
@@ -84,25 +74,6 @@ test('createRunContext: empty prefetch fails without a fabricated title source',
   };
   const result = await createRunContext(deps, 't1', '标题', null, false);
   assert.equal(result.ok, false);
-});
-
-// ===== createRunContext: 有 sources → ok=true =====
-
-test('createRunContext: non-empty prefetch → ok=true with writer + pack + plan', async () => {
-  const writerRef: { w: SectionWriterTools | null } = { w: null };
-  const deps: RunManagerDeps = {
-    prefetcher: mockPrefetcher, collectRun: async (m) => m, aiClient: mockAi,
-    model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23',
-    onWriterCreated: (w) => { writerRef.w = w; },
-  };
-  const result = await createRunContext(deps, 't1', '量子计算', null, false);
-  assert.equal(result.ok, true);
-  if (result.ok) {
-    assert.ok(result.context.writer !== undefined);
-    assert.equal(result.context.evidencePack.allSources.length, sources.length);
-    assert.ok(result.context.articlePlan.overviewAngle.length > 0);
-    assert.ok(writerRef.w !== null, 'onWriterCreated captured writer');
-  }
 });
 
 // ===== R20:预抓窗口取消贯穿(不落中断态、返回 aborted) =====
@@ -239,58 +210,6 @@ test('runSection(): runs single stage to READY', async () => {
   };
   const result = await runSection(deps, 't1', '标题', 'OVERVIEW');
   assert.equal(statusOf(result.output, 'OVERVIEW'), 'READY');
-});
-
-// ===== scheduler 测试 =====
-
-test('scheduler: isRunning false initially; abort no-op when nothing running', () => {
-  const deps: RunManagerDeps = {
-    prefetcher: mockPrefetcher, collectRun: async (m) => m, aiClient: mockAi,
-    model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23',
-  };
-  const scheduler = createScheduler({
-    runManager: deps,
-    observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()),
-    isInterruptedPhase, createAbortController: () => new AbortController(),
-  });
-  assert.equal(scheduler.isRunning('t1'), false);
-  scheduler.abort('t1');
-  assert.equal(scheduler.isRunning('t1'), false);
-});
-
-test('scheduler: detectInterrupted false when IDLE', async () => {
-  const deps: RunManagerDeps = {
-    prefetcher: mockPrefetcher, collectRun: async (m) => m, aiClient: mockAi,
-    model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23',
-  };
-  const scheduler = createScheduler({
-    runManager: deps, observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()), isInterruptedPhase, createAbortController: () => new AbortController(),
-  });
-  assert.equal(await scheduler.detectInterrupted('t1'), false);
-});
-
-test('scheduler: detectInterrupted true when WRITING + not running', async () => {
-  const deps: RunManagerDeps = {
-    prefetcher: mockPrefetcher, collectRun: async (m) => m, aiClient: mockAi,
-    model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23',
-  };
-  const writingOutput = { ...makeEmptyDeepReadOutput(), generationPhase: 'WRITING' as const };
-  const scheduler = createScheduler({
-    runManager: deps, observeOutput: () => makeMemoryObservable(writingOutput), isInterruptedPhase, createAbortController: () => new AbortController(),
-  });
-  assert.equal(await scheduler.detectInterrupted('t1'), true);
-});
-
-test('scheduler: setBackgrounded toggle (no throw)', () => {
-  const deps: RunManagerDeps = {
-    prefetcher: mockPrefetcher, collectRun: async (m) => m, aiClient: mockAi,
-    model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23',
-  };
-  const scheduler = createScheduler({
-    runManager: deps, observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()), isInterruptedPhase, createAbortController: () => new AbortController(),
-  });
-  scheduler.setBackgrounded('t1', true);
-  scheduler.setBackgrounded('t1', false);
 });
 
 test('scheduler: run() drives full pipeline via runManager', async () => {

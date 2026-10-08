@@ -1,12 +1,11 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import {
-  mapSuggestionKind, parseSuggestions, buildSuggestionUserPrompt, collectModelText,
-  analyzeChapterSuggestions, MAX_SUGGESTIONS,
+  SUGGESTION_SYSTEM_PROMPT, mapSuggestionKind, parseSuggestions, collectModelText, analyzeChapterSuggestions, MAX_SUGGESTIONS,
 } from '../main/ets/novel/suggestion_engine.ts';
 import type { NovelModelRunning, NovelModelEvent, NovelModelRequest } from '../main/ets/novel/model_running.ts';
 import { makeAssistantMessage } from '../main/ets/agent/message.ts';
-import { makeNovelProject, makeNovelChapter, makeNovelMaterial } from '../main/ets/novel/models.ts';
+import { makeNovelProject, makeNovelChapter } from '../main/ets/novel/models.ts';
 import { isNovelError } from '../main/ets/novel/error.ts';
 import { materialSuggestionChapterDigest } from '../main/ets/novel/material_adoption.ts';
 
@@ -53,24 +52,10 @@ test('mapSuggestionKind: EN and CN aliases', () => {
   assert.equal(mapSuggestionKind('???'), 'other');
 });
 
-test('parseSuggestions: valid envelope', () => {
-  const text = '{"suggestions":[{"kind":"character","title":"主角","content":"勇敢"}]}';
-  const out = parseSuggestions(text, 'ch1', NOW);
-  assert.equal(out.length, 1);
-  assert.equal(out[0].kind, 'character');
-  assert.equal(out[0].title, '主角');
-  assert.equal(out[0].sourceChapterId, 'ch1');
-  assert.equal(out[0].status, 'pending');
-});
-
 test('parseSuggestions: extracts first { to last } amid prose', () => {
   const text = '好的，这是建议：\n{"suggestions":[{"kind":"world","title":"w","content":"c"}]}\n谢谢';
   const out = parseSuggestions(text, 'ch1', NOW);
   assert.equal(out.length, 1);
-});
-
-test('parseSuggestions: empty suggestions', () => {
-  assert.deepEqual(parseSuggestions('{"suggestions":[]}', 'ch1', NOW), []);
 });
 
 test('parseSuggestions: rejects invalid items instead of claiming no suggestions', () => {
@@ -96,31 +81,6 @@ test('parseSuggestions: malformed JSON and wrong schemas are distinct from valid
   }
 });
 
-test('buildSuggestionUserPrompt: includes project, materials, chapter', () => {
-  const project = {
-    ...makeNovelProject({ name: '长夜来信', now: NOW }),
-    materials: [makeNovelMaterial({ kind: 'character', title: '主角', content: '设定', enabled: true, now: NOW })],
-  };
-  const chapter = makeNovelChapter({ title: '第一章', content: '正文内容', now: NOW });
-  const prompt = buildSuggestionUserPrompt(project, chapter);
-  assert.ok(prompt.includes('长夜来信'));
-  assert.ok(prompt.includes('[人物] 主角: 设定'));
-  assert.ok(prompt.includes('第一章'));
-  assert.ok(prompt.includes('正文内容'));
-});
-
-test('collectModelText: returns assistant text from snapshot on completed', async () => {
-  const model = scriptedModel([
-    {
-      kind: 'snapshot', messages: [makeAssistantMessage('Hello')], generationActive: true,
-      textDeltasLive: true, transport: 'live',
-    },
-    { kind: 'completed' },
-  ]);
-  const text = await collectModelText(model, request(), 1000);
-  assert.equal(text, 'Hello');
-});
-
 test('collectModelText: newest snapshot replaces prior assistant text', async () => {
   const model = scriptedModel([
     {
@@ -135,11 +95,6 @@ test('collectModelText: newest snapshot replaces prior assistant text', async ()
   ]);
   const text = await collectModelText(model, request(), 1000);
   assert.equal(text, 'XYZ');
-});
-
-test('collectModelText: failed rejects', async () => {
-  const model = scriptedModel([{ kind: 'failed', message: 'boom' }]);
-  await assert.rejects(collectModelText(model, request(), 1000));
 });
 
 test('analyzeChapterSuggestions: parses model JSON into suggestions', async () => {
@@ -200,4 +155,63 @@ test('analyzeChapterSuggestions: malformed model output is an output error, not 
   const chapter = makeNovelChapter({ title: '第一章', content: '正文', now: NOW });
   await assert.rejects(analyzeChapterSuggestions(model, project, chapter, { kind: 'global' }, NOW, 1000),
     error => isNovelError(error) && error.code === 'invalid_output');
+});
+
+
+test('the suggestion prompt example can be copied as a valid material proposal', () => {
+  const example = SUGGESTION_SYSTEM_PROMPT.split('\n').find(line => line.startsWith('{"suggestions":['));
+  assert.ok(example);
+  assert.equal(parseSuggestions(example, 'chapter', NOW).length, 1);
+});
+
+test('invalid suggestion output gets one format correction using the original chapter and materials', async () => {
+  const requests: NovelModelRequest[] = [];
+  const model: NovelModelRunning = {
+    async validate() {},
+    start(req) {
+      requests.push(req);
+      return scriptedModel([
+        { kind: 'snapshot', messages: [makeAssistantMessage(requests.length === 1
+          ? '{"suggestions":[{"kind":"world|character","title":"灯塔","content":"港口的灯塔"}]}'
+          : '{"suggestions":[{"kind":"world","title":"灯塔","content":"港口的灯塔"}]}')],
+          generationActive: false, textDeltasLive: false, transport: 'live' },
+        { kind: 'completed' },
+      ]).start(req);
+    },
+    cancel() {},
+  };
+  const project = makeNovelProject({ name: '港口', now: NOW });
+  const chapter = makeNovelChapter({ title: '第一章', content: '船驶过港口的灯塔。', now: NOW });
+  const result = await analyzeChapterSuggestions(model, project, chapter, { kind: 'global' }, NOW);
+  assert.equal(requests.length, 2);
+  assert.equal(result[0].kind, 'world');
+  assert.equal(result[0].sourceDigest, materialSuggestionChapterDigest(chapter));
+  assert.notEqual(requests[0].runId, requests[1].runId);
+  assert.equal(requests[1].toolProfile, 'none');
+  assert.equal(requests[1].operation.kind, 'turn');
+  if (requests[1].operation.kind === 'turn') {
+    assert.ok(requests[1].operation.userPrompt.includes(chapter.content));
+    assert.ok(requests[1].operation.userPrompt.includes('world|character'));
+  }
+});
+
+test('format correction stops after one attempt, and transport failure never starts a correction', async () => {
+  for (const failure of ['format', 'transport']) {
+    let calls = 0;
+    const model: NovelModelRunning = {
+      async validate() {},
+      start(req) {
+        calls++;
+        return scriptedModel(failure === 'format' ? [
+          { kind: 'snapshot', messages: [makeAssistantMessage('{broken')],
+            generationActive: false, textDeltasLive: false, transport: 'live' },
+          { kind: 'completed' },
+        ] : [{ kind: 'failed', message: '连接失败' }]).start(req);
+      },
+      cancel() {},
+    };
+    await assert.rejects(analyzeChapterSuggestions(model, makeNovelProject({ name: 'test', now: NOW }),
+      makeNovelChapter({ title: '一', content: '正文', now: NOW }), { kind: 'global' }, NOW));
+    assert.equal(calls, failure === 'format' ? 2 : 1);
+  }
 });

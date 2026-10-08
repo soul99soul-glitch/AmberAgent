@@ -1,0 +1,65 @@
+--- /tmp/amber-novel-stream-20261006/before/NovelWorkspacePage.ets
++++ harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets
+@@ -2641,6 +2641,22 @@
+   @Builder
+   emptyAgentRowSlot(): void {}
+ 
++  // ForEach retains its first item; read the current immutable snapshot as Amber does.
++  private activeRunMessage(seed: UIMessage): UIMessage {
++    const current: UIMessage = this.activeMessages.find((message: UIMessage): boolean => message.id === seed.id) ?? seed;
++    if (!this.activeQuickStart) return current;
++    // Quick start generates structured JSON. Show its live thinking, then the saved overview.
++    return makeUIMessage(current.role, current.parts.filter((part: UIMessagePart): boolean => part.type === 'reasoning'), {
++      id: current.id, createdAt: current.createdAt, finishedAt: current.finishedAt, modelId: current.modelId,
++    });
++  }
++
++  private activeRunTimelineMessages(): UIMessage[] {
++    if (!this.activeQuickStart) return this.activeMessages;
++    return this.activeMessages.filter((message: UIMessage): boolean => message.role === 'assistant' &&
++      message.parts.some((part: UIMessagePart): boolean => part.type === 'reasoning'));
++  }
++
+   @Builder
+   novelTimelineRows(): void {
+     if (this.project !== null) {
+@@ -2790,17 +2806,18 @@
+           Text('正在整理角色、设定与开篇方向；完成后可逐项确认。')
+             .fontSize(14).fontColor(INK3).lineHeight(21).width('100%').padding(16)
+         }
+-      } else if (this.activeMessages.length > 0) {
+-        ForEach(this.activeMessages, (message: UIMessage, index: number): void => {
++      }
++      if (this.activeRunTimelineMessages().length > 0) {
++        ForEach(this.activeRunTimelineMessages(), (message: UIMessage, index: number): void => {
+           ListItem() {
+             AgentMessageRow({
+-              message,
++              message: this.activeRunMessage(message),
+               capabilities: NOVEL_AGENT_MESSAGE_CAPABILITIES,
+               hostHeader: (): void => { this.activeRunHeader(index === 0); },
+               hostFooter: (): void => { this.emptyAgentRowSlot(); },
+               streaming: true,
+               textDeltasLive: this.activeTextDeltasLive,
+-              isLastAssistant: index === this.activeMessages.length - 1,
++              isLastAssistant: index === this.activeRunTimelineMessages().length - 1,
+               onTextGrow: (): void => { this.followNovelStreamingUpdate(); },
+               onApproveTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void => {
+                 this.continueNovelTool(toolCallId, { kind: 'approved' }, locator);
+@@ -2815,7 +2832,7 @@
+             })
+           }
+         }, (message: UIMessage): string => message.id)
+-      } else {
++      } else if (!this.activeQuickStart) {
+         ListItem() {
+           AgentMessageRow({
+             message: this.activeStatusUi(),
+@@ -3435,6 +3452,7 @@
+         cachedItems: 5,
+         showOlderLoader: false,
+         showDivider: false,
++        showScrollBar: false,
+         rows: (): void => { this.novelTimelineRows(); },
+         activeTail: (): void => { this.novelTimelineActiveTail(); },
+         hostTail: (): void => { this.emptyTimelineSlot(); },

@@ -14,9 +14,9 @@ const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.AiClient';
 const DEFAULT_MAX_STEPS: number = 8;
 
-interface AiConfig {
-  baseUrl: string;
-  apiKey: string;
+export interface AiConfig {
+  readonly baseUrl: string;
+  readonly apiKey: string;
 }
 
 interface OpenAiTextContent {
@@ -255,13 +255,16 @@ const assistantFromParsed = (parsed: ParsedAssistant): UIMessage => {
 class OpenAiCompatibleAiClient implements AiClient {
   private http: HttpClient;
   private storage: Storage;
+  private readonly config: AiConfig | null;
 
-  constructor(http: HttpClient, storage: Storage) {
+  constructor(http: HttpClient, storage: Storage, config?: AiConfig) {
     this.http = http;
     this.storage = storage;
+    this.config = config === undefined ? null : { baseUrl: config.baseUrl, apiKey: config.apiKey };
   }
 
   private async getConfig(): Promise<AiConfig> {
+    if (this.config !== null) return this.config;
     const baseUrl: string = await this.storage.get<string>('ai_base_url', 'https://api.deepseek.com');
     const apiKey: string = await this.storage.get<string>('ai_api_key', '');
     return { baseUrl: baseUrl, apiKey: apiKey };
@@ -420,6 +423,6 @@ class OpenAiCompatibleAiClient implements AiClient {
   }
 }
 
-export const createOpenAiCompatibleAiClient = (http: HttpClient, storage: Storage): AiClient => {
-  return new OpenAiCompatibleAiClient(http, storage);
+export const createOpenAiCompatibleAiClient = (http: HttpClient, storage: Storage, config?: AiConfig): AiClient => {
+  return new OpenAiCompatibleAiClient(http, storage, config);
 };

@@ -15,10 +15,17 @@ test('Council seats persist each approval/effect and feed actual search results 
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'e11-council-consumer-'));
   const entry = path.resolve(__dirname, '../../../entry/src/main/ets/platform_impl');
   const loaded = new Map();
+  const reviewCalls = []; const jevKv = chat.createMemoryKeyValueStore();
+  await chat.saveJevSettings(jevKv, chat.makeJevSettings({ mode: 'active', autoApproval: { mode: 'active', allowTaskText: true, allowToolMetadata: true } }));
   const unavailable = () => { throw new Error('Unavailable native host in controlled fixture'); };
   const imports = { '@amber/chat-domain': chat, '@amber/deepread-domain': deepread,
     './EntryLocalToolPorts.ets': { sha256HexUtf8: s => crypto.createHash('sha256').update(s).digest('hex') },
     '@kit.ArkTS': { util: {} },
+    '../di/AppContainer.ets': { getChatKvStore: () => jevKv },
+    './JevSupport.ets': { jevEvaluatePurpose: async (_purpose, state) => {
+      reviewCalls.push(state); return { ok: true, shadow: false, reason: '', evaluation: { model: 'controlled-judge', usage: null,
+        answers: { destructive: { kind: 'noul', probability: .9 }, exfiltration: { kind: 'noul', probability: 0 },
+          offTask: { kind: 'noul', probability: 0 }, authorized: { kind: 'noul', probability: 0 } } } }; } },
     '@kit.LocalizationKit': { i18n: {} },
     './AtomicJsonFile.ets': { sharedKvMutex: {} },
     './JsSandboxTool.ets': { createJavascriptExecuteTool: () => chat.makeAgentTool({ name: 'javascript_execute', description: '', execute: unavailable }) },
@@ -112,7 +119,7 @@ test('Council seats persist each approval/effect and feed actual search results 
         const conversation = chat.makeConversation(`seat-${req.key.seatId}`, [], { assistantId: 'frozen-assistant' });
         const assistant = chat.makeAssistant({ id: 'frozen-assistant', toolProfile: 'minimal', localTools: ['workspace_files', 'ask_user'] });
         const runtime = load('./AgentRuntimePrefs.ets').defaultAgentRuntimeSnapshot();
-        runtime.autoApproveAllToolCalls = false; runtime.autoApproveHighRiskToolCalls = false;
+        runtime.autoApproveAllToolCalls = req.key.seatId === 'jev'; runtime.autoApproveHighRiskToolCalls = req.key.seatId === 'jev';
         runtime.speculativeToolExecution.enabled = false;
         let liveAssistant = assistant;
         const deps = { assistant, runtime, activityStore: new chat.AgentToolActivityStore(),
@@ -212,6 +219,22 @@ test('Council seats persist each approval/effect and feed actual search results 
     const aSaved = await executions.get('a').store.load(); assert.match(JSON.stringify(aSaved), /a-must-not-write/);
     assert.doesNotMatch(JSON.stringify(aSaved), /b-write/);
     await assert.rejects(runner.generate(req('a', 'full')), /interrupted/i);
+
+
+    // Actual Assembly -> Entry gate -> saved seat pending -> original requestApproval -> effect once.
+    scripts.set('jev', [{ calls: [call('jev-call', 'file_write', { path: 'jev-write' })] }, { text: '复核后完成' }]);
+    const reviewReq = req('jev', 'full'); let reviewApprovals = 0;
+    reviewReq.requestApproval = async request => {
+      const saved = await executions.get('jev').store.load();
+      const part = chat.currentMessages(saved).find(m => m.id === request.messageId).parts[request.partIndex];
+      assert.equal(part.approvalState.type, 'pending'); assert.equal(part.output.length, 0);
+      assert.match(JSON.stringify(part.metadata.permission_trace), /jev_auto_approval.*破坏性/);
+      assert.deepEqual(effects, ['approved', 'b-write']); reviewApprovals++;
+      return { kind: 'approved', reason: '', answer: null };
+    };
+    const reviewedSeat = await runner.generate(reviewReq);
+    assert.equal(reviewedSeat.text, '复核后完成'); assert.equal(reviewApprovals, 1); assert.equal(reviewCalls.length, 1); assert.match(JSON.stringify(reviewCalls[0].user_requests), /搜索并汇总/);
+    assert.deepEqual(effects, ['approved', 'b-write', 'jev-write']);
 
     const partial = stores.createCouncilSeatStore(disk, { runId: '../unsafe', round: 1, seatId: '../../escape' });
     disk.partial = true;

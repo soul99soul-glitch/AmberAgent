@@ -7,14 +7,20 @@
 //   CenteredTitleBar / PlainSection / CardGroup r18+发丝描边 +
 //   收藏行(标题/摘要/日期 + 44 热区删除钮)/ sans 两行居中空态;
 //   逻辑(列表/取消收藏确认/删除失败 toast)零改动。
+// 2026-09-30:节点收藏可点回原消息；旧文本收藏保留并打开来源会话。
 
 import type { FavoriteEntry } from '../platform_impl/FavoriteStore.ets';
-import { promptAction } from '@kit.ArkUI';
-import { listFavorites, removeFavorite } from '../platform_impl/FavoriteStore.ets';
+import { promptAction, router } from '@kit.ArkUI';
+import { listFavorites, removeFavorite, resolveFavoriteSource } from '../platform_impl/FavoriteStore.ets';
 import { BG, INK, INK3, INK4, ERROR, LINE, lineHeightForSize } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { CenteredTitleBar, PlainSection, CardGroup, PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
+
+interface FavoriteChatParams {
+  conversationId: string;
+  nodeId: string;
+}
 
 @Entry
 @Component
@@ -22,20 +28,36 @@ struct FavoritePage {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State items: FavoriteEntry[] = [];
   @State loaded: boolean = false;
+  private pageVisible: boolean = false;
 
   aboutToAppear(): void {
+    this.pageVisible = true;
     this.reload();
   }
 
   onPageShow(): void {
+    this.pageVisible = true;
     this.reload();
   }
+  onPageHide(): void { this.pageVisible = false; }
+  aboutToDisappear(): void { this.pageVisible = false; }
 
   private reload(): void {
     listFavorites().then((list: FavoriteEntry[]): void => {
+      if (!this.pageVisible) return;
       this.items = list;
       this.loaded = true;
     }).catch((): void => { this.loaded = true; });
+  }
+
+  private openSource(favorite: FavoriteEntry): void {
+    resolveFavoriteSource(favorite).then((source): void => {
+      if (!this.pageVisible) return;
+      const params: FavoriteChatParams = { conversationId: source.conversationId, nodeId: source.nodeId };
+      router.pushUrl({ url: 'pages/ChatPage', params });
+    }).catch((error: Error): void => {
+      if (this.pageVisible) promptAction.showToast({ message: error.message, duration: 1800 });
+    });
   }
 
   private fmtDate(ms: number): string {
@@ -86,13 +108,21 @@ struct FavoritePage {
             .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
             .margin({ top: 2 })
             .width('100%')
-          Text(this.fmtDate(f.createdAt))
-            .fontSize(12).lineHeight(lineHeightForSize(12))
-            .fontFamily(FONT_MONO_MEDIUM).fontColor(INK4)
-            .margin({ top: 5 })
+          Row() {
+            Text(this.fmtDate(f.createdAt))
+              .fontSize(12).lineHeight(lineHeightForSize(12))
+              .fontFamily(FONT_MONO_MEDIUM).fontColor(INK4)
+            Blank()
+            Text((f.nodeId ?? '').length > 0 ? '查看原消息 ›' : '打开来源会话 ›')
+              .fontSize(12).lineHeight(lineHeightForSize(12))
+              .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+          }
+          .width('100%').margin({ top: 5 })
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
+        .accessibilityText(`${f.title}，查看收藏来源`)
+        .onClick((): void => { this.openSource(f); })
         Row() {
           Icon({ name: 'trash', iconSize: 15, color: ERROR })
         }
@@ -131,7 +161,7 @@ struct FavoritePage {
           Text('暂无收藏')
             .fontSize(15).fontWeight(600).lineHeight(lineHeightForSize(15))
             .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK3)
-          Text('在消息动作行点 star 收藏一段回答')
+          Text('在消息菜单或操作行收藏消息')
             .fontSize(13).lineHeight(lineHeightForSize(13))
             .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
             .margin({ top: 8 })

@@ -1,0 +1,31 @@
+--- before/novel_workspace_composer_ui.test.cjs
++++ after/novel_workspace_composer_ui.test.cjs
+@@ -8,23 +8,21 @@
+ const source = fs.readFileSync(path.join(__dirname, '../main/ets/pages/NovelWorkspacePage.ets'), 'utf8');
+ 
+ test('a retained active message row reads each current snapshot, including reasoning and body growth', () => {
+-  const builder = source.slice(source.indexOf('  novelTimelineActiveTail()'),
+-    source.indexOf('  private unsavedMessageHeader()'));
+-  const row = builder.slice(builder.indexOf('ForEach(this.active'));
++  const row = source.slice(source.indexOf('ForEach(this.novelTimelineMessages()'));
+   const binding = row.match(/AgentMessageRow\(\{\s*message(?:\s*:\s*([^\n]+?))?,/);
+   assert.ok(binding, 'active row binding must exist');
+   const page = actualPage('pages/NovelWorkspacePage.ets',
+-    source.includes('  private activeRunMessage(') ? ['activeRunMessage'] : [], { makeUIMessage: () => { throw Error('unexpected quick start'); } });
+-  page.activeQuickStart = false;
++    source.includes('  private activeRunMessage(') ? ['activeRunMessage', 'novelTimelineMessageUi', 'novelTimelineMessageLive', 'savedTimelineMessage'] : [], { makeUIMessage: () => { throw Error('unexpected quick start'); } });
++  page.activeQuickStart = false; page.activeRunId = 'run';
+   const seed = { id: 'assistant', role: 'assistant', parts: [{ type: 'reasoning', reasoning: 'first' }] };
+   const read = new Function('message', 'return ' + (binding[1] || 'message'));
+   page.activeMessages = [seed];
+-  assert.strictEqual(read.call(page, seed), seed);
++  assert.strictEqual(read.call(page, { id: seed.id, uiMessage: seed }), seed);
+   for (const parts of [[{ type: 'reasoning', reasoning: 'first second' }],
+     [{ type: 'reasoning', reasoning: 'first second', finishedAt: 'done' }, { type: 'text', text: 'chapter grows' }]]) {
+     const current = { ...seed, parts };
+     page.activeMessages = [current];
+-    assert.strictEqual(read.call(page, seed), current,
++    assert.strictEqual(read.call(page, { id: seed.id, uiMessage: seed }), current,
+       'ForEach retains the seed; the row must resolve the latest same-ID message');
+   }
+ });

@@ -92,6 +92,15 @@ export function selectProducts(args) {
 export function prepareProduct(product, root = repositoryRoot) {
   const definition = products[product];
   if (!definition) throw new Error(`Unknown product: ${product}`);
+  // DeepRead is now maintained in its own multi-platform repository.
+  const relocatedDeepRead = path.resolve(root, '../DeepRead/harmony');
+  if (product === 'deepread' && fs.existsSync(relocatedDeepRead)) {
+    const app = readConfiguration(path.join(relocatedDeepRead, 'AppScope/app.json5'));
+    if (app.app.bundleName !== definition.bundleName) {
+      throw new Error(`Unexpected DeepRead bundle identity in ${relocatedDeepRead}`);
+    }
+    return relocatedDeepRead;
+  }
   const source = path.join(root, 'harmony');
   const outputParent = path.join(root, '.harmony-standalone');
   const output = path.join(outputParent, product);
@@ -120,6 +129,20 @@ export function prepareProduct(product, root = repositoryRoot) {
     const appFile = path.join(stage, 'AppScope/app.json5');
     const app = readConfiguration(appFile);
     app.app.bundleName = definition.bundleName;
+    const iconName = `${product}_app_icon`;
+    app.app.icon = `$media:${iconName}`;
+    const iconSource = path.join(source, 'products', product, 'app_icon.png');
+    for (const mediaDirectory of ['AppScope/resources/base/media', 'entry/src/main/resources/base/media']) {
+      copySource(iconSource, path.join(stage, mediaDirectory, `${iconName}.png`));
+    }
+    // The start window draws the raw resource, so it needs its own corner mask.
+    // Embed the original iOS artwork unchanged; only its presentation is clipped.
+    const startIconName = `${product}_start_icon`;
+    fs.writeFileSync(path.join(stage, 'entry/src/main/resources/base/media', `${startIconName}.svg`),
+      `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">\n` +
+      `  <defs><clipPath id="icon-corners"><rect width="256" height="256" rx="56" ry="56"/></clipPath></defs>\n` +
+      `  <image width="256" height="256" clip-path="url(#icon-corners)" href="data:image/png;base64,${fs.readFileSync(iconSource).toString('base64')}"/>\n` +
+      `</svg>\n`);
     writeConfiguration(appFile, app);
     setString(path.join(stage, 'AppScope/resources/base/element/string.json'), 'app_name', definition.name);
     const entryStrings = path.join(stage, 'entry/src/main/resources/base/element/string.json');
@@ -134,11 +157,19 @@ export function prepareProduct(product, root = repositoryRoot) {
 
     const moduleFile = path.join(stage, 'entry/src/main/module.json5');
     const module = readConfiguration(moduleFile);
+    for (const ability of module.module.abilities) {
+      if (ability.name !== 'EntryAbility') continue;
+      ability.icon = `$media:${iconName}`;
+      ability.startWindowIcon = `$media:${startIconName}`;
+    }
     const permissions = new Set([
       'ohos.permission.INTERNET', 'ohos.permission.GET_NETWORK_INFO',
       'ohos.permission.KEEP_BACKGROUND_RUNNING', 'ohos.permission.VIBRATE',
     ]);
     module.module.requestPermissions = module.module.requestPermissions.filter((item) => permissions.has(item.name));
+    if (product === 'deepread') {
+      module.module.requestPermissions.push({ name: 'ohos.permission.ACCELEROMETER' });
+    }
     module.module.extensionAbilities = (module.module.extensionAbilities ?? []).filter((item) =>
       product === 'novel' && item.name === 'NovelPolishWorkAbility');
     writeConfiguration(moduleFile, module);

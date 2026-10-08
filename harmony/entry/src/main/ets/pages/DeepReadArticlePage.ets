@@ -2,10 +2,20 @@
 import { router, promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Icon } from '../components/ui/Icon.ets';
+import { DeepReadNewsroomDesk } from '../components/deepread/DeepReadNewsroomDesk.ets';
+import { DeepReadArticleToolbar } from '../components/deepread/DeepReadArticleToolbar.ets';
+import { DeepReadArticleHostToolbar } from '../components/deepread/DeepReadArticleHostToolbar.ets';
+import { DeepReadArticleStatusPanel } from '../components/deepread/DeepReadArticleStatusPanel.ets';
+import { DeepReadArticleHostRecovery } from '../components/deepread/DeepReadArticleHostRecovery.ets';
+import { DeepReadArticlePressMoment } from '../components/deepread/DeepReadArticlePressMoment.ets';
+import { loadDeepReadAppearance, readerCanvas } from '../platform_impl/DeepReadAppearance.ets';
+import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
+import { StudioButton } from '../components/studio/StudioButton.ets';
+import { getProductKind } from '../platform_impl/ProductIdentity.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   DeepReadCacheEntry, DeepReadGenerationStage, DeepReadOutput,
-  DeepReadRepository, DeepReadScheduler, RunResult, DeepReadInputSource,
+  DeepReadRepository, DeepReadScheduler, RunResult, DeepReadInputSource, DeepReadActiveRun,
 } from '@amber/deepread-domain';
 import { makeEmptyDeepReadOutput, hasDisplayableDeepReadOutput, firstFailureMessage, firstFailedStage, isComplete, isCacheEntryExpired, deepReadProgressSnapshot, STAGE_ORDER } from '@amber/deepread-domain';
 import type { DeepReadProgressSnapshot } from '@amber/deepread-domain';
@@ -13,6 +23,7 @@ import { DeepReadNativeArticleBody } from '../components/DeepReadNativeArticleBo
 import { FONT_SERIF } from '../design/fonts.ets';
 import { DeepReadConfirmationDialog } from '../components/DeepReadConfirmationDialog.ets';
 import { DeepReadExportPanel } from '../components/DeepReadExportPanel.ets';
+import { DeepReadSourcesContent } from './DeepReadSourcesPage.ets';
 import { DeepReadGoogleSearchHost } from '../components/DeepReadGoogleSearchHost.ets';
 import { getDeepReadScheduler, getRepository, getChatKvStore, getAppContainer, getDeepReadArtifactStore } from '../di/AppContainer.ets';
 import type { DeepReadArtifactStatus } from '../platform_impl/DeepReadArtifactStore.ets';
@@ -47,8 +58,29 @@ interface ArticleParams {
 @Entry
 @Component
 struct DeepReadArticlePage {
-  @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
+  @StorageProp('themeEpoch') @Watch('clearEditorialMotion') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
+  @StorageProp('appBackgrounded') @Watch('clearEditorialMotion') appBackgrounded: boolean = false;
+  @StorageProp('reduceMotion') reduceMotion: boolean = false;
+  @StorageProp('darkMode') darkMode: boolean = false;
+  @StorageProp('deepread.appearance.readerLayout') readerLayout: string = 'classic';
+  @StorageProp('deepread.appearance.readerStyle') readerStyle: string = 'classic';
+  @StorageProp('deepreadAppearanceEpoch') @Watch('appearanceChanged') appearanceEpoch: number = 0;
+  @State private pageVisible: boolean = true;
+  @State private runStartsUnreadable: boolean = false;
+  @State private newsroomStage: string = 'COLLECTING';
+  @State private newsroomLabel: string = '收集来源';
+  @State private completionStamp: number = 0;
+  @State private completionInscription: string = '付印';
+  @State private completionCaption: string = '文章已排版完成';
+  private publicationRequest: number = 0;
+  private observedRunStart: number = 0;
+  private observedRunCycle: number = -1;
+  private observedRunFirstDraft: boolean = false;
+  private publishedRunStart: number = 0;
+  private motionCycle: number = 0;
+  private unsubscribeActivity: (() => void) | null = null;
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State topicId: string = '';
   @State title: string = '';
   // 种子链接(热榜条目 url;run 的 seedUrl — 来源收集直接抓该页而非仅按标题搜索)
@@ -86,7 +118,10 @@ struct DeepReadArticlePage {
   @State fontSerif: boolean = false;
   // G5-S1:重新生成确认对话框
   @State showRegenerateDialog: boolean = false;
-  @State showExport: boolean = false;
+  @State private articlePanel: string = '';
+  @State private articlePanelSession: number = 0;
+  private articleScroller: Scroller = new Scroller();
+  private pendingAppearanceRefresh: boolean = false;
   private pageAlive: boolean = false;
   private pageToken: number = 0;
   private unsubscribeOutput: (() => void) | null = null;
@@ -95,10 +130,12 @@ struct DeepReadArticlePage {
 
   aboutToAppear(): void {
     this.pageAlive = true;
+    this.pageVisible = true;
+    this.clearEditorialMotion();
     this.webSession++;
     this.webAttached = false;
     this.webInitialized = false;
-    this.showExport = false;
+    this.articlePanel = '';
     this.workspaceSaving = false;
     this.workspaceSaveOwner = ++this.workspaceRequest;
     const token: number = ++this.pageToken;
@@ -144,7 +181,13 @@ struct DeepReadArticlePage {
 
   aboutToDisappear(): void {
     this.pageAlive = false;
-    this.showExport = false;
+    this.pageVisible = false;
+    this.clearEditorialMotion();
+    if (this.unsubscribeActivity !== null) {
+      this.unsubscribeActivity();
+      this.unsubscribeActivity = null;
+    }
+    this.articlePanel = '';
     this.webAttached = false;
     this.webInitialized = false;
     this.pageToken++;
@@ -158,9 +201,68 @@ struct DeepReadArticlePage {
     }
   }
 
+  onPageHide(): void {
+    this.pageVisible = false;
+    this.clearEditorialMotion();
+  }
+
+  onPageShow(): void {
+    if (!this.pageVisible) this.clearEditorialMotion();
+    this.pageVisible = true;
+    if (this.pendingAppearanceRefresh) {
+      this.pendingAppearanceRefresh = false;
+      this.refreshTemplateWeb();
+    }
+  }
+
+  private clearEditorialMotion(): void {
+    this.motionCycle++;
+    this.publicationRequest++;
+    this.observedRunCycle = -1;
+    this.completionStamp = 0;
+  }
+
+  private editorialActive(): boolean {
+    return getProductKind() === 'deepread' && this.pageAlive && this.pageVisible && !this.appBackgrounded;
+  }
+
+  private celebratePublished(result: RunResult, cycle: number, firstDraft: boolean = false): void {
+    if (!this.editorialActive() || cycle !== this.motionCycle || this.cancelled
+      || !result.ok || result.output === null || !isComplete(result.output)) return;
+    if (this.observedRunCycle === cycle && this.observedRunStart > 0) {
+      if (this.publishedRunStart === this.observedRunStart) return;
+      this.publishedRunStart = this.observedRunStart;
+    }
+    const request: number = ++this.publicationRequest;
+    const show: (count: number) => void = (count: number): void => {
+      if (!this.editorialActive() || cycle !== this.motionCycle || request !== this.publicationRequest || this.cancelled) return;
+      this.completionInscription = firstDraft && count === 1 ? '首篇' : firstDraft && count === 10 ? '十篇'
+        : firstDraft && count === 100 ? '百篇' : '付印';
+      this.completionCaption = this.completionInscription === '付印' ? '文章已排版完成' : `你的第 ${count} 篇深度阅读`;
+      this.completionStamp++;
+    };
+    if (!firstDraft) { show(0); return; }
+    // RdbRepository.listHistory(0) means all retained rows, so failed rows do not truncate milestone counts.
+    getRepository().listHistory(0).then((entries: DeepReadCacheEntry[]): void => {
+      show(entries.filter((entry: DeepReadCacheEntry): boolean => isComplete(entry.output)).length);
+    }).catch((): void => { show(0); });
+  }
+
+  private async celebrateObservedRun(run: DeepReadActiveRun, token: number): Promise<void> {
+    const cycle: number = this.observedRunCycle;
+    if (run.stage !== 'COMPLETE' || run.startedAt !== this.observedRunStart || cycle !== this.motionCycle) return;
+    try {
+      const entry: DeepReadCacheEntry | null = await getRepository().get(this.topicId);
+      if (!this.pageAlive || token !== this.pageToken || run.startedAt !== this.observedRunStart
+        || entry === null || !isComplete(entry.output)) return;
+      // Scheduler publishes COMPLETE only after its final repository save has succeeded.
+      this.celebratePublished({ ok: true, output: entry.output, error: null }, cycle, this.observedRunFirstDraft);
+    } catch (_) { /* Decorative read failure does not change the saved article or its recovery status. */ }
+  }
+
   onBackPress(): boolean {
-    if (this.showExport) {
-      this.showExport = false;
+    if (this.articlePanel.length > 0) {
+      this.closeArticlePanel(this.articlePanelSession);
       return true;
     }
     if (!this.showRegenerateDialog) return false;
@@ -175,7 +277,67 @@ struct DeepReadArticlePage {
   private openExport(): void {
     if (!this.pageAlive || this.running || !this.hasReadableOutput()
       || this.output === null) return;
-    this.showExport = true;
+    this.openArticlePanel('export');
+  }
+
+  private openSources(): void {
+    if (!this.pageAlive || this.topicId.length === 0) return;
+    if (getProductKind() !== 'deepread') {
+      router.pushUrl({ url: 'pages/DeepReadSourcesPage', params: { topicId: this.topicId } });
+      return;
+    }
+    this.openArticlePanel('sources');
+  }
+
+  private openArticlePanel(kind: string): void {
+    if (!this.pageAlive || !this.pageVisible || this.articlePanel.length > 0) return;
+    this.articlePanelSession++;
+    this.articlePanel = kind;
+  }
+
+  private isArticlePanelActive(kind: string, session: number): boolean {
+    return this.pageAlive && this.articlePanel === kind && session === this.articlePanelSession;
+  }
+
+  private isExportActive(session: number): boolean {
+    return this.pageVisible && this.isArticlePanelActive('export', session);
+  }
+
+  private closeArticlePanel(session: number): void {
+    if (session === this.articlePanelSession) this.articlePanel = '';
+  }
+
+  private articlePanelTransition(): TransitionEffect {
+    if (getProductKind() !== 'deepread' || this.appBackgrounded) return TransitionEffect.IDENTITY;
+    if (this.reduceMotion) return TransitionEffect.OPACITY.animation({ duration: 160 });
+    return TransitionEffect.asymmetric(
+      TransitionEffect.move(TransitionEdge.BOTTOM).combine(TransitionEffect.OPACITY)
+        .animation({ duration: 320, curve: Curve.EaseOut }),
+      TransitionEffect.move(TransitionEdge.BOTTOM).combine(TransitionEffect.OPACITY)
+        .animation({ duration: 250, curve: Curve.EaseIn }));
+  }
+
+  @Builder
+  ArticlePanel(kind: string, session: number): void {
+    Column() {
+      if (kind === 'sources') {
+        DeepReadSourcesContent({ topicId: this.topicId,
+          isActive: (): boolean => this.isArticlePanelActive('sources', session),
+          onClose: (): void => { this.closeArticlePanel(session); } })
+      } else {
+        DeepReadExportPanel({ topicId: this.topicId, title: this.title,
+          fontScale: this.fontScale, fontSerif: this.fontSerif,
+          customTemplateHtml: this.output?.templateSnapshot?.html ?? '',
+          isActive: (): boolean => this.isExportActive(session),
+          onClose: (): void => { this.closeArticlePanel(session); } })
+      }
+    }.width('100%').height('100%').transition(this.articlePanelTransition())
+  }
+
+  private openAppearanceSettings(): void {
+    router.pushUrl({ url: 'pages/DeepReadAppearancePage' }).catch((error: Error): void => {
+      if (this.pageAlive) promptAction.showToast({ message: '无法打开版式与样式：' + error.message, duration: 1400 });
+    });
   }
 
   private async loadArticle(token: number, force: boolean): Promise<void> {
@@ -208,6 +370,7 @@ struct DeepReadArticlePage {
     }
     this.scheduler = await getDeepReadScheduler();
     if (!this.pageAlive || token !== this.pageToken) return;
+    this.runStartsUnreadable = !this.hasReadableOutput();
     this.subscribeToUpdates(repository, token);
 
     const isRunning: boolean = this.scheduler.isRunning(this.topicId);
@@ -285,11 +448,12 @@ struct DeepReadArticlePage {
 
   // 字号与字体为阅读偏好，文章模板由持久快照决定。
   private async loadDisplaySettings(token: number = this.pageToken): Promise<void> {
+    if (getProductKind() === 'deepread') await loadDeepReadAppearance(getAppContainer().storage);
     const scalePct: number = Number(await getAppContainer().storage.get<number>('deepread_font_scale', 100));
     const fontMode: string | null = await getChatKvStore().get('deepread_font_mode');
     if (!this.pageAlive || token !== this.pageToken) return;
     this.fontScale = Math.max(FONT_SCALE_MIN, Math.min(FONT_SCALE_MAX, (Number.isFinite(scalePct) ? scalePct : 100) / 100));
-    this.fontSerif = fontMode === 'serif';
+    this.fontSerif = fontMode === 'serif' || (fontMode === null && getProductKind() === 'deepread');
   }
 
   // D1-1:WebView 模板判定(editorial_slant 或存在的自定义模板;自定义被删回退 false)
@@ -306,6 +470,21 @@ struct DeepReadArticlePage {
       this.applyOutput(entry.output, token);
     });
     if (this.scheduler === null) return;
+    if (this.unsubscribeActivity !== null) this.unsubscribeActivity();
+    this.unsubscribeActivity = this.scheduler.observeActiveRuns().subscribe((runs: DeepReadActiveRun[]): void => {
+      if (!this.pageAlive || token !== this.pageToken) return;
+      const run: DeepReadActiveRun | undefined = runs.find((item: DeepReadActiveRun): boolean => item.topicId === this.topicId);
+      if (run === undefined) return;
+      this.newsroomStage = run.stage ?? 'COLLECTING';
+      this.newsroomLabel = run.label ?? '准备资料';
+      if (run.startedAt > 0 && run.stage !== 'COMPLETE' && this.editorialActive()) {
+        if (run.startedAt !== this.observedRunStart) this.observedRunFirstDraft = !this.hasReadableOutput();
+        this.observedRunStart = run.startedAt;
+        this.observedRunCycle = this.motionCycle;
+      } else if (run.stage === 'COMPLETE' && run.startedAt > 0 && run.startedAt === this.observedRunStart) {
+        this.celebrateObservedRun(run, token);
+      }
+    });
     if (this.unsubscribeRunning !== null) this.unsubscribeRunning();
     this.unsubscribeRunning = this.scheduler.observeRunning(this.topicId).subscribe((running: boolean): void => {
       if (!this.pageAlive || token !== this.pageToken) return;
@@ -319,11 +498,17 @@ struct DeepReadArticlePage {
   // 实际发起 run(force=false 时 run_manager 走缓存/续跑;不隐式 clear)
   private async runNow(token: number, force: boolean): Promise<void> {
     if (this.scheduler === null) return;
+    const firstDraft: boolean = !this.hasReadableOutput();
+    this.runStartsUnreadable = firstDraft;
     this.awaitingContinue = false;
     this.running = true;
     this.cancelled = false;
     this.errorMsg = '';
     this.currentStage = force ? this.progressLabel('收集来源', 1) : this.phaseLabel(this.output);
+    this.clearEditorialMotion();
+    this.newsroomStage = 'COLLECTING';
+    this.newsroomLabel = '收集来源';
+    const cycle: number = this.motionCycle;
     const result: RunResult = await this.scheduler.run(this.topicId, this.title,
       { force, seedUrl: this.sourceUrl.length > 0 ? this.sourceUrl : null, seedUrls: this.seedUrls,
         templateSnapshot: this.output?.templateSnapshot });
@@ -338,11 +523,13 @@ struct DeepReadArticlePage {
       }
     }
     this.running = false;
+    this.celebratePublished(result, cycle, firstDraft);
   }
 
   // UI-F30:显式继续(部分/取消缓存),不 REPLACE 已在执行的轮次
   private continueGeneration(): void {
     const token: number = ++this.pageToken;
+    this.runStartsUnreadable = !this.hasReadableOutput();
     this.subscribeToUpdates(getRepository(), token);
     this.runNow(token, false).catch((e: Error): void => {
       if (this.pageAlive && token === this.pageToken) {
@@ -389,10 +576,10 @@ struct DeepReadArticlePage {
   }
 
   private stageLabel(stage: DeepReadGenerationStage): string {
-    if (stage === 'OVERVIEW') return '撰写概览';
-    if (stage === 'NARRATIVE') return '撰写时间轴叙事';
-    if (stage === 'ANALYSIS') return '撰写深度分析';
-    return '整理扩展阅读';
+    if (stage === 'OVERVIEW') return '撰写结论与导语';
+    if (stage === 'NARRATIVE') return '梳理关键判断与脉络';
+    if (stage === 'ANALYSIS') return '分析立场与影响';
+    return '整理来源';
   }
 
   private openLink(url: string): void {
@@ -421,6 +608,7 @@ struct DeepReadArticlePage {
 
   generateArticle(): void {
     const token: number = ++this.pageToken;
+    this.runStartsUnreadable = !this.hasReadableOutput();
     this.errorMsg = '';
     this.cancelled = false;
     this.awaitingContinue = false;
@@ -453,9 +641,25 @@ struct DeepReadArticlePage {
       .catch((): void => { promptAction.showToast({ message: '字号设置保存失败', duration: 1400 }); });
   }
 
+  private appearanceChanged(): void {
+    if (!this.pageAlive || resolveDeepReadArticleTemplate(this.output).template.kind === 'custom') return;
+    if (this.pageVisible) this.refreshTemplateWeb();
+    else this.pendingAppearanceRefresh = true;
+  }
+
+  private readerBackground(): string {
+    if (getProductKind() !== 'deepread') return BG;
+    return resolveDeepReadArticleTemplate(this.output).template.kind === 'custom' ? D.paper
+      : readerCanvas(this.readerStyle, this.darkMode).background;
+  }
+
   private renderOptions(): DeepReadRenderOptions {
+    const standalone: boolean = getProductKind() === 'deepread';
     return { fontScale: this.fontScale, fontSerif: this.fontSerif,
-      background: BG, foreground: INK, muted: INK3, surface: SURFACE, border: LINE, accent: ACCENT };
+      readerLayout: standalone ? this.readerLayout : 'classic', readerStyle: standalone ? this.readerStyle : 'classic', dark: this.darkMode,
+      background: standalone ? D.paper : BG, foreground: standalone ? D.ink : INK,
+      muted: standalone ? D.muted : INK3, surface: standalone ? D.card : SURFACE,
+      border: standalone ? D.rule : LINE, accent: standalone ? D.accent : ACCENT };
   }
 
   private editorialHtml(): string {
@@ -464,7 +668,9 @@ struct DeepReadArticlePage {
 
   private handleWebNavigation(request: WebResourceRequest): boolean {
     const url: string = request.getRequestUrl();
-    if (url === 'about:blank' || url.startsWith('about:blank#') || url.startsWith('#')) return false;
+    const documentUrl: string = 'https://amber-deepread.invalid/article';
+    if (url === documentUrl || url.startsWith(documentUrl + '#') ||
+      url === 'about:blank' || url.startsWith('about:blank#') || url.startsWith('#')) return false;
     if (this.pageAlive && request.isMainFrame() && request.isRequestGesture() && /^https?:\/\//i.test(url)) {
       this.openLink(url);
     }
@@ -475,7 +681,9 @@ struct DeepReadArticlePage {
     if (!this.pageAlive || !this.webAttached || !this.webInitialized) return;
     try {
       const html: string = this.editorialHtml();
-      this.webController.loadData(html, 'text/html', 'UTF-8', ' ', ' ');
+      // A valid base URL gives relative source citations a same-document target.
+      const documentUrl: string = 'https://amber-deepread.invalid/article';
+      this.webController.loadData(html, 'text/html', 'UTF-8', documentUrl, documentUrl);
       this.webRenderError = '';
     } catch (error) {
       hilog.warn(DOMAIN, TAG, 'Template render failed: %{public}s', String(error));
@@ -545,6 +753,12 @@ struct DeepReadArticlePage {
     this.errorMsg = '';
     this.cancelled = false;
     this.awaitingContinue = false;
+    this.clearEditorialMotion();
+    this.newsroomStage = 'WRITING';
+    this.newsroomLabel = this.stageLabel(stage);
+    const cycle: number = this.motionCycle;
+    const firstDraft: boolean = !this.hasReadableOutput();
+    this.runStartsUnreadable = firstDraft;
     const token: number = ++this.pageToken;
     this.subscribeToUpdates(getRepository(), token);
     getDeepReadScheduler().then((sched: DeepReadScheduler): Promise<RunResult> => {
@@ -563,6 +777,7 @@ struct DeepReadArticlePage {
         this.errorMsg = this.cancelled ? '生成已取消' : result.error ?? '该段重试失败';
       }
       this.running = false;
+      this.celebratePublished(result, cycle, firstDraft);
     }).catch((e: Error): void => {
       if (this.pageAlive && token === this.pageToken) {
         this.errorMsg = e.message;
@@ -582,6 +797,20 @@ struct DeepReadArticlePage {
 
   private hasReadableOutput(): boolean {
     return this.output !== null && hasDisplayableDeepReadOutput(this.output);
+  }
+
+  private showNewsroom(): boolean {
+    return getProductKind() === 'deepread' && this.running && this.runStartsUnreadable;
+  }
+
+  private readingTransition(): TransitionEffect {
+    if (getProductKind() !== 'deepread') return TransitionEffect.IDENTITY;
+    return TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: this.reduceMotion ? 0 : 24 }))
+      .animation({ duration: this.editorialActive() ? 500 : 0, curve: Curve.EaseOut });
+  }
+
+  private sourceFailureCount(): number {
+    return (this.output?.inputSources ?? []).filter((source: DeepReadInputSource): boolean => source.status === 'failed').length;
   }
 
   private applyWorkspaceStatus(status: DeepReadArtifactStatus | null): void {
@@ -650,86 +879,42 @@ struct DeepReadArticlePage {
 
   @Builder
   RecoveryPanel(): void {
-    Column() {
-      if (this.workspaceError.length > 0 && !this.running) {
-        Row() {
-          Text(this.workspaceError)
-            .fontSize(META).fontColor(ERROR).layoutWeight(1)
-            .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(this.workspaceSaving ? '保存中' : '重试保存').fontSize(META).fontColor(INK)
-            .constraintSize({ minHeight: 44 }).padding({ left: 12, right: 12 })
-            .onClick((): void => { this.retryWorkspaceSave(); })
-        }.width('100%').alignItems(VerticalAlign.Center)
-      }
-      if (this.webRenderError.length > 0 && this.isWebTemplate()) {
-        Row() {
-          Text(this.webRenderError).fontSize(META).fontColor(ERROR).layoutWeight(1)
-            .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text('原生阅读').fontSize(META).fontColor(INK).constraintSize({ minHeight: 44 })
-            .padding({ left: 12, right: 12 }).onClick((): void => { this.switchToNativeReading(); })
-        }.width('100%').alignItems(VerticalAlign.Center)
-      }
-      if (this.running) {
-        Row() {
-          LoadingProgress().width(24).height(24).color(ACCENT).margin({ right: 10 })
-          Text(this.output !== null && isComplete(this.output)
-            ? '重新生成中，原文章已保留' : this.output?.generationPhase === 'IDLE'
-              ? '准备中' : `${this.progress.label} ${this.progress.percent}%`)
-            .fontSize(META).fontColor(INK2).layoutWeight(1)
-            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text('取消生成').fontSize(META).fontColor(ERROR).constraintSize({ minHeight: 44 })
-            .padding({ left: 12, right: 12 }).onClick((): void => { this.cancelGeneration(); })
-        }.width('100%').alignItems(VerticalAlign.Center)
-      } else {
-        if (this.awaitingContinue || (this.cancelled && this.output !== null && !isComplete(this.output))) {
-          Text(this.continuationNotice())
-            .fontSize(META).fontColor(INK3).width('100%').margin({ bottom: 4 })
-          Row() {
-            Text('继续生成').fontSize(BODY2).fontColor(INK).constraintSize({ minHeight: 44 })
-              .padding({ left: 12, right: 12 }).onClick((): void => { this.continueGeneration(); })
-            Blank()
-          }.width('100%')
-        }
-        if (this.visibleError().length > 0 && !this.cancelled) {
-          Row() {
-            Text(this.visibleError()).fontSize(META).fontColor(ERROR).layoutWeight(1)
-              .maxLines(4).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(this.output !== null && firstFailedStage(this.output) !== null ? '重试此节' : '重试')
-              .fontSize(META).fontColor(INK).constraintSize({ minHeight: 44 })
-              .padding({ left: 12, right: 12 }).onClick((): void => { this.retryGeneration(); })
-          }.width('100%').alignItems(VerticalAlign.Center)
-        } else if (this.basicDraftNotice().length > 0) {
-          Row() {
-            Text(this.basicDraftNotice()).fontSize(META).fontColor(INK3).layoutWeight(1)
-            Text('继续生成').fontSize(META).fontColor(INK).constraintSize({ minHeight: 44 })
-              .padding({ left: 12, right: 12 }).onClick((): void => { this.continueGeneration(); })
-          }.width('100%')
-        }
-        if (this.output !== null) {
-          Row() {
-            if (this.historyExpired) {
-              Text('内容已过 24 小时').fontSize(META).fontColor(INK3).layoutWeight(1)
-            } else {
-              Text(this.currentStage).fontSize(META).fontColor(INK3).layoutWeight(1)
-            }
-            if (isComplete(this.output) && this.workspaceError.length === 0) {
-              Text(this.workspaceSaving ? '保存中' : '保存到工作区').fontSize(META).fontColor(INK)
-                .constraintSize({ minHeight: 44 }).padding({ left: 10, right: 10 })
-                .onClick((): void => { this.retryWorkspaceSave(); })
-            }
-            Text('重新生成').fontSize(META).fontColor(INK).constraintSize({ minHeight: 44 })
-              .padding({ left: 12, right: 12 }).onClick((): void => { this.showRegenerateDialog = true; })
-          }.width('100%').alignItems(VerticalAlign.Center)
-        }
-      }
-    }.width('100%').alignItems(HorizontalAlign.Start)
-      .padding({ left: 20, right: 12, top: 4, bottom: 4 }).backgroundColor(SURFACE2)
+    if (getProductKind() === 'deepread') {
+      DeepReadArticleStatusPanel({ active: this.editorialActive(), running: this.running, cancelled: this.cancelled,
+        awaitingContinue: this.awaitingContinue,
+        statusLabel: this.running ? this.newsroomLabel : this.output !== null && isComplete(this.output)
+          && this.visibleError().length > 0 ? '已保留原文' : this.cancelled ? '生成已取消'
+            : this.awaitingContinue ? '文章尚未完成' : this.currentStage,
+        error: this.cancelled ? '' : this.visibleError(), workspaceError: this.workspaceError,
+        webError: this.isWebTemplate() ? this.webRenderError : '', saving: this.workspaceSaving,
+        notice: this.awaitingContinue || (this.cancelled && this.output !== null && !isComplete(this.output))
+          ? this.continuationNotice() : this.basicDraftNotice(),
+        templateMessage: this.templateMessage, complete: this.output !== null && isComplete(this.output),
+        readable: this.hasReadableOutput(), sourceFailureCount: this.sourceFailureCount(),
+        onCancel: (): void => { this.cancelGeneration(); },
+        onContinue: (): void => { this.continueGeneration(); },
+        onRetry: (): void => { this.retryGeneration(); },
+        onSave: (): void => { this.retryWorkspaceSave(); },
+        onNative: (): void => { this.switchToNativeReading(); } })
+    } else {
+      DeepReadArticleHostRecovery({ output: this.output, running: this.running, cancelled: this.cancelled,
+        awaitingContinue: this.awaitingContinue, workspaceError: this.workspaceError, workspaceSaving: this.workspaceSaving,
+        webError: this.isWebTemplate() ? this.webRenderError : '', continuationNotice: this.continuationNotice(),
+        error: this.visibleError(), failedSection: this.output !== null && firstFailedStage(this.output) !== null,
+        draftNotice: this.basicDraftNotice(), currentStage: this.currentStage, historyExpired: this.historyExpired,
+        progressLabel: `${this.progress.label} ${this.progress.percent}%`,
+        onSave: (): void => { this.retryWorkspaceSave(); }, onNative: (): void => { this.switchToNativeReading(); },
+        onCancel: (): void => { this.cancelGeneration(); }, onContinue: (): void => { this.continueGeneration(); },
+        onRetry: (): void => { this.retryGeneration(); },
+        onRegenerate: (): void => { this.showRegenerateDialog = true; } })
+    }
   }
 
   @Builder
   TemplateWeb(session: number, epoch: number): void {
     Web({ src: 'about:blank', controller: this.webController })
-      .width('100%').layoutWeight(1).backgroundColor(BG)
+      .width('100%').layoutWeight(1).backgroundColor(this.readerBackground())
+      .transition(this.readingTransition())
       .javaScriptAccess(false).fileAccess(false).domStorageAccess(false).multiWindowAccess(false)
       .onControllerAttached((): void => { this.attachTemplateWeb(session, epoch); })
       .onPageEnd((event: OnPageEndEvent): void => { this.onTemplatePageEnd(event.url, session, epoch); })
@@ -745,38 +930,28 @@ struct DeepReadArticlePage {
       // Epoch remount ensures every child consumes the current theme tokens.
       ForEach([this.themeEpoch], (_epoch: number): void => {
         Column() {
-          Row() {
-            Row() {
-              Icon({ name: 'back', iconSize: 20, color: INK3 })
-            }.width(44).height(44).justifyContent(FlexAlign.Center)
-              .onClick((): void => { this.handleBack(); })
-            Text('深度阅读').fontSize(18).fontWeight(FontWeight.Bold).fontColor(INK)
-              .fontFamily(FONT_SERIF).margin({ left: 4 }).layoutWeight(1)
-            if ((this.output?.inputSources?.length ?? 0) > 0) {
-              Text('资料').fontSize(META).fontColor(INK).width(44).height(44).textAlign(TextAlign.Center)
-                .onClick((): void => { router.pushUrl({ url: 'pages/DeepReadSourcesPage', params: { topicId: this.topicId } }); })
-            }
-            if (this.output !== null && this.hasReadableOutput() && !this.running) {
-              Text('导出').fontSize(META).fontColor(INK).width(44).height(44)
-                .textAlign(TextAlign.Center).onClick((): void => { this.openExport(); })
-            }
-            Row() {
-              Text('A-').fontSize(13).fontColor(this.fontScale <= FONT_SCALE_MIN ? INK3 : INK)
-                .width(44).height(44).textAlign(TextAlign.Center)
-                .onClick((): void => { this.zoomOut(); })
-              Text('A+').fontSize(15).fontColor(this.fontScale >= FONT_SCALE_MAX ? INK3 : INK)
-                .width(44).height(44).textAlign(TextAlign.Center)
-                .onClick((): void => { this.zoomIn(); })
-            }.borderRadius(8).backgroundColor(SURFACE2)
-          }.width('100%').padding({ left: 8, right: 12, top: this.statusBarHeight + 2, bottom: 8 })
-            .backgroundColor(BG)
-          if (this.output !== null) {
-            Text('本篇版式：' + this.templateName + (this.nativeReadingOverride ? ' · 当前使用原生阅读' : ''))
-              .fontSize(META).fontColor(INK3).width('100%').padding({ left: 20, right: 20, bottom: 8 })
-            if (this.templateMessage.length > 0) {
-              Text(this.templateMessage).fontSize(META).fontColor(INK3).width('100%')
-                .padding({ left: 20, right: 20, bottom: 8 })
-            }
+          if (getProductKind() === 'deepread') {
+            DeepReadArticleToolbar({ fontScale: this.fontScale, canvasColor: this.readerBackground(), hasSources: (this.output?.inputSources?.length ?? 0) > 0,
+              canShare: this.hasReadableOutput() && !this.running, hasArticle: this.output !== null,
+              running: this.running,
+              canStyle: resolveDeepReadArticleTemplate(this.output).template.kind !== 'custom',
+              onBack: (): void => { this.handleBack(); },
+              onSources: (): void => { this.openSources(); },
+              onShare: (): void => { this.openExport(); },
+              onZoomIn: (): void => { this.zoomIn(); }, onZoomOut: (): void => { this.zoomOut(); },
+              onTemplates: (): void => { this.openAppearanceSettings(); },
+              onRegenerate: (): void => { this.showRegenerateDialog = true; },
+              onSave: (): void => { this.retryWorkspaceSave(); } })
+          } else {
+            DeepReadArticleHostToolbar({ fontScale: this.fontScale,
+              hasSources: (this.output?.inputSources?.length ?? 0) > 0,
+              canShare: this.hasReadableOutput() && !this.running, hasArticle: this.output !== null,
+              templateName: this.templateName, templateMessage: this.templateMessage,
+              nativeReadingOverride: this.nativeReadingOverride,
+              onBack: (): void => { this.handleBack(); },
+              onSources: (): void => { this.openSources(); },
+              onShare: (): void => { this.openExport(); },
+              onZoomIn: (): void => { this.zoomIn(); }, onZoomOut: (): void => { this.zoomOut(); } })
           }
           if (!this.confirmed) {
             Column() {
@@ -786,63 +961,102 @@ struct DeepReadArticlePage {
                 Text('将围绕该话题收集资料并生成一篇深度文章')
                   .fontSize(BODY2).fontColor(INK2).margin({ top: 10 }).textAlign(TextAlign.Center)
                 Text('深度阅读会消耗更多 tokens').fontSize(LABEL).fontColor(INK3).margin({ top: 6 })
-                Text('开始使用').fontSize(BODY).fontColor(ACCENT).constraintSize({ minHeight: 44 })
-                  .padding({ left: 28, right: 28 }).margin({ top: 24 })
-                  .onClick((): void => {
-                    getChatKvStore().put('deepread_first_use_confirmed', 'true').then((): void => {
-                      if (!this.pageAlive) return;
-                      this.confirmed = true;
-                      const token: number = ++this.pageToken;
-                      this.loadArticle(token, false).catch((error: Error): void => {
-                        if (!this.pageAlive || token !== this.pageToken) return;
-                        this.errorMsg = error.message;
-                        this.running = false;
+                if (getProductKind() === 'deepread') {
+                  Column() {
+                    StudioButton({ label: '开始使用', iconName: 'hi_book_open', primary: true,
+                      onTap: (): void => {
+                        getChatKvStore().put('deepread_first_use_confirmed', 'true').then((): void => {
+                          if (!this.pageAlive) return;
+                          this.confirmed = true;
+                          const token: number = ++this.pageToken;
+                          this.loadArticle(token, false).catch((error: Error): void => {
+                            if (!this.pageAlive || token !== this.pageToken) return;
+                            this.errorMsg = error.message;
+                            this.running = false;
+                          });
+                        }).catch((error: Error): void => {
+                          if (this.pageAlive) promptAction.showToast({ message: error.message });
+                        });
+                      } })
+                  }.width(184).margin({ top: 24 })
+                } else {
+                  Text('开始使用').fontSize(BODY).fontColor(ACCENT).constraintSize({ minHeight: 44 })
+                    .padding({ left: 28, right: 28 }).margin({ top: 24 })
+                    .onClick((): void => {
+                      getChatKvStore().put('deepread_first_use_confirmed', 'true').then((): void => {
+                        if (!this.pageAlive) return;
+                        this.confirmed = true;
+                        const token: number = ++this.pageToken;
+                        this.loadArticle(token, false).catch((error: Error): void => {
+                          if (!this.pageAlive || token !== this.pageToken) return;
+                          this.errorMsg = error.message;
+                          this.running = false;
+                        });
+                      }).catch((error: Error): void => {
+                        if (this.pageAlive) promptAction.showToast({ message: error.message });
                       });
-                    }).catch((error: Error): void => {
-                      if (this.pageAlive) promptAction.showToast({ message: error.message });
-                    });
-                  })
+                    })
+                }
               }.alignItems(HorizontalAlign.Center).width('86%')
                 .padding({ left: 20, right: 20, top: 32, bottom: 32 })
                 .backgroundColor(SURFACE).borderRadius(16)
               Blank()
             }.width('100%').layoutWeight(1)
-          } else if (this.hasReadableOutput() && this.output !== null) {
+          } else if (this.hasReadableOutput() && this.output !== null && !this.showNewsroom()) {
             this.RecoveryPanel()
             if (this.isWebTemplate()) {
               this.TemplateWeb(this.webSession, _epoch)
             } else {
-              Scroll() {
+              Scroll(this.articleScroller) {
                 DeepReadNativeArticleBody({ title: this.title, output: this.output,
                   fontScale: this.fontScale, fontSerif: this.fontSerif,
                   onOpenLink: (url: string): void => { this.openLink(url); } })
-              }.align(Alignment.TopStart).width('100%').layoutWeight(1).backgroundColor(BG)
+              }.align(Alignment.TopStart).width('100%').layoutWeight(1).backgroundColor(this.readerBackground())
+                .transition(this.readingTransition())
             }
+          } else if (this.running && getProductKind() === 'deepread') {
+            this.RecoveryPanel()
+            Column() {
+              DeepReadNewsroomDesk({ title: this.title, stage: this.newsroomStage, detail: this.newsroomLabel,
+                active: this.editorialActive() })
+            }.width('100%').layoutWeight(1)
+              .transition(TransitionEffect.OPACITY.animation({ duration: this.editorialActive() ? 500 : 0 }))
+          } else if (getProductKind() === 'deepread') {
+            this.RecoveryPanel()
+            Column({ space: 10 }) {
+              Icon({ name: 'doc', iconSize: 44, color: D.muted })
+              Text('文章尚未生成').fontSize(22).fontWeight(FontWeight.Medium).fontColor(D.ink)
+              Text('检查来源与模型设置后重试。').fontSize(15).fontColor(D.muted).lineHeight(22)
+                .textAlign(TextAlign.Center)
+            }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).padding(24)
           } else {
             Column() {
               Blank()
-              Text(this.running ? '正在生成文章' : this.awaitingContinue ? '文章尚未完成'
-                : this.cancelled ? '生成已取消' : '生成失败')
-                .fontSize(TITLE).fontColor(INK2).width('100%').textAlign(TextAlign.Center)
-                .margin({ bottom: 20 })
+              if (!this.running || getProductKind() !== 'deepread') {
+                Text(this.running ? '正在生成文章' : this.awaitingContinue ? '文章尚未完成'
+                  : this.cancelled ? '生成已取消' : '生成失败')
+                  .fontSize(TITLE).fontColor(INK2).width('100%').textAlign(TextAlign.Center)
+                  .margin({ bottom: 20 })
+              }
               this.RecoveryPanel()
               Blank()
             }.width('100%').layoutWeight(1)
           }
-        }.width('100%').height('100%').backgroundColor(BG)
+        }.width('100%').height('100%').backgroundColor(this.readerBackground())
+          .padding({ bottom: getProductKind() === 'deepread' ? this.navBarHeight : 0 })
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         DeepReadGoogleSearchHost({ topicId: this.topicId })
+        if (getProductKind() === 'deepread') {
+          DeepReadArticlePressMoment({ trigger: this.completionStamp, inscription: this.completionInscription,
+            caption: this.completionCaption, active: this.editorialActive() })
+        }
         DeepReadConfirmationDialog({ show: this.showRegenerateDialog, dialogTitle: '重新生成?',
           message: '新文章完整生成并保存后将替换当前文章，失败或取消会保留原文章',
           confirmText: '重新生成', dismissText: '取消',
           onConfirm: (): void => { this.showRegenerateDialog = false; this.generateArticle(); },
           onDismiss: (): void => { this.showRegenerateDialog = false; } })
-        if (this.showExport) {
-          DeepReadExportPanel({ topicId: this.topicId, title: this.title,
-            fontScale: this.fontScale, fontSerif: this.fontSerif,
-            customTemplateHtml: this.output?.templateSnapshot?.html ?? '',
-            isActive: (): boolean => this.pageAlive && this.showExport,
-            onClose: (): void => { this.showExport = false; } })
+        if (this.articlePanel.length > 0) {
+          this.ArticlePanel(this.articlePanel, this.articlePanelSession)
         }
       }, (epoch: number): string => `theme-${epoch}`)
     }.width('100%').height('100%')

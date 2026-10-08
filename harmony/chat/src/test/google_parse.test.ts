@@ -30,7 +30,7 @@ test('parseGoogleMessagePart:text;thought=true → reasoning part', () => {
   assert.equal(r.finishedAt, null);
 });
 
-test('parseGoogleMessagePart:functionCall → tool part(args 序列化;thoughtSignature metadata;args 缺失 → "null")', () => {
+test('parseGoogleMessagePart:functionCall → tool part(args 序列化;thoughtSignature metadata;args 缺失 → 空对象)', () => {
   const t = parseGoogleMessagePart({
     functionCall: { name: 'search', args: { q: 'x' } },
     thoughtSignature: 'sig-1',
@@ -43,7 +43,7 @@ test('parseGoogleMessagePart:functionCall → tool part(args 序列化;thoughtSi
   const noArgs = parseGoogleMessagePart({
     functionCall: { name: 'ping' },
   }) as UIMessagePartTool;
-  assert.equal(noArgs.input, 'null');
+  assert.equal(noArgs.input, '{}');
   assert.deepEqual(noArgs.metadata, { thoughtSignature: null });
 });
 
@@ -129,7 +129,7 @@ test('parseGoogleResponseBody:blockReason 抛错;无 candidates 抛错;content �
   assert.equal(chunk.choices.length, 1);
   assert.equal(chunk.choices[0].delta, null);
   assert.equal(toText(chunk.choices[0].message!), '完整回答');
-  assert.equal(chunk.choices[0].finishReason, null, 'generateText choice finishReason 恒 null(Android :273)');
+  assert.equal(chunk.choices[0].finishReason, 'STOP', '保留与流式一致的真实终态');
   assert.equal(chunk.usage!.promptTokens, 10);
 });
 

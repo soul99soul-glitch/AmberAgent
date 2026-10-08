@@ -1,0 +1,3 @@
+{"case":"browser rejected","notices":["无法打开浏览器，已复制链接"],"clipboardWrites":0}
+{"case":"synchronous browser exception","notices":["无法打开浏览器，已复制链接"],"clipboardWrites":0}
+{"case":"actual source body expression","inputText":"来源 A 的正文\n\n来源 B 的正文","shownA":"来源 A 的正文\n\n来源 B 的正文","shownB":"来源 A 的正文\n\n来源 B 的正文","expectedA":"来源 A 的正文","expectedB":"来源 B 的正文"}

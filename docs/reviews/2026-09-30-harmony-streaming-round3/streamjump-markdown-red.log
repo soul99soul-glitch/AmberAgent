@@ -1,0 +1,68 @@
+✔ real component fade-only publication never calls setStyledString or setStyle (37.729584ms)
+✔ API 12/13 and unavailable capability do not request API 14 range geometry (25.040125ms)
+✔ range mask uses cached pixel rectangles, invalidates on size/content changes, and preserves alpha (6.969709ms)
+✔ font, layout and content changes clear geometry while preserving the existing fade clock (5.455583ms)
+✔ native styles and link gestures are still present on the single Text surface (6.153375ms)
+✖ API15+ binds initial styled content before the first Text layout, older APIs wait for attachment (19.63225ms)
+✔ NativeInlineRenderer appends only new text and publishes stable surface (0.769292ms)
+✔ NativeInlineRenderer replaces only incompatible tail after Markdown retyping, without replaying old text (0.248792ms)
+✔ NativeInlineRenderer onFrame fades appended unit only, content unchanged and completion keeps fade running (0.100792ms)
+✔ NativeInlineRenderer append units retain their own clocks and never replay earlier ranges (0.163834ms)
+✔ NativeInlineRenderer clamps fade to iOS 0.5s for 1/12 chars and scales 36/600 chars (0.122541ms)
+✔ NativeInlineRenderer retype keeps only surviving prefix fades and never splits emoji (0.129167ms)
+✔ style-only correction keeps existing opacity and does not replay already visible text (0.171959ms)
+✔ fade frames publish rendering only, never rebind native text (0.222083ms)
+✔ drawing ranges are detached snapshots and track retyping and final fade retirement (0.112625ms)
+✖ a newly mounted streaming paragraph fades in for 500ms even when its first snapshot is large (1.477958ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 14
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 368.211542
+
+✖ failing tests:
+
+test at src/test/native_markdown_draw.test.cjs:185:1
+✖ API15+ binds initial styled content before the first Text layout, older APIs wait for attachment (19.63225ms)
+  AssertionError [ERR_ASSERTION]: API 15: first native measure should already have all accepted text when supported
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_markdown_draw.test.cjs:193:12)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src/test/native_markdown_inline.test.ts:1:6853
+✖ a newly mounted streaming paragraph fades in for 500ms even when its first snapshot is large (1.477958ms)
+  AssertionError [ERR_ASSERTION]: new 120-char block must not turn fully opaque in 50ms
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_markdown_inline.test.ts:171:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

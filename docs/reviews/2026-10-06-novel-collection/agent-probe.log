@@ -1,0 +1,19 @@
+Suggestion JSON fence: accepted by current production parser
+Archive JSON fence: 归档摘要不是有效 JSON，请重试或手动整理讨论
+Collection result: prose saved before suggestion failure
+Copied schema placeholder: 资料建议解析失败：第 1 条建议需要有效类别、标题和正文
+Persisted suggestionWarning: 资料建议解析失败：第 1 条建议需要有效类别、标题和正文
+Observed real helper request options: [
+  {
+    "systemPrompt": "整理小说讨论，输出严格 JSON：{\"summary\":\"累计讨论摘要\",\"decisions\":[\"可供作者逐项确认的决定\"]}。累计摘要必须保留已有归档背景，区分作者已经确认的内容、建议和未决问题，不能把助手建议冒充作者决定。摘要最多 2000 字，决定最多 12 条。",
+    "maxOutputTokens": 3072,
+    "toolProfile": "none",
+    "taskOptions": null
+  },
+  {
+    "systemPrompt": "你是小说资料整理助手。阅读刚收录的章节，结合已有资料，产出需要新建或更新的\"活资料\"。\n只输出严格 JSON，不要任何额外文字。格式：\n{\"suggestions\":[{\"kind\":\"world|character|relationship|outline|requirement|other\",\"title\":\"资料标题\",\"content\":\"合并新事实后的完整最新资料\",\"aliases\":[],\"tags\":[],\"customKind\":\"\",\"injectionMode\":\"smart\"}]}\n若无需要更新，输出 {\"suggestions\":[]}。",
+    "maxOutputTokens": 4096,
+    "toolProfile": "none",
+    "taskOptions": null
+  }
+]

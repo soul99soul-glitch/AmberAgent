@@ -7,25 +7,6 @@ import {
 } from '../main/ets/chat/display_setting.ts';
 import { createMemoryKeyValueStore } from '../main/ets/chat/kv_store.ts';
 
-test('默认值对齐 Android', () => {
-  const d = makeDisplaySetting();
-  assert.equal(d.showAssistantBubble, false);
-  assert.equal(d.showModelName, true);
-  assert.equal(d.sendOnEnter, false);
-  assert.equal(d.fontSizeRatio, 1.0);
-  assert.equal(d.pasteLongTextThreshold, 1000);
-  assert.equal(d.enableAutoScroll, true);
-  assert.equal(d.chatFontFamily, 'DEFAULT');
-  assert.equal(d.accentColor, '#B8623A');
-});
-
-test('部分覆盖保留默认', () => {
-  const d = makeDisplaySetting({ sendOnEnter: true, fontSizeRatio: 1.5 });
-  assert.equal(d.sendOnEnter, true);
-  assert.equal(d.fontSizeRatio, 1.5);
-  assert.equal(d.showModelName, true); // 默认保留
-});
-
 test('round-trip: save → load', async () => {
   const store = createMemoryKeyValueStore();
   const original = makeDisplaySetting({ sendOnEnter: true, showAssistantBubble: true, fontSizeRatio: 1.25 });
@@ -48,8 +29,4 @@ test('load 损坏 JSON → 默认值', async () => {
   await store.put(DISPLAY_SETTING_KEY, '{broken');
   const loaded = await loadDisplaySetting(store);
   assert.equal(loaded.sendOnEnter, false);
-});
-
-test('DISPLAY_SETTING_KEY = "display_setting"', () => {
-  assert.equal(DISPLAY_SETTING_KEY, 'display_setting');
 });

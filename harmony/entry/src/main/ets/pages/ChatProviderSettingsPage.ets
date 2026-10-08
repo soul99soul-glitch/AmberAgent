@@ -1,4 +1,8 @@
+import { DeepReadSubpageDock, DeepReadDockLayout } from '../components/deepread/DeepReadSubpageDock.ets';
 import { getProductKind } from '../platform_impl/ProductIdentity.ets';
+import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
+import { DeepReadSettingsHeader, DeepReadSettingsSection, DeepReadSettingsGroup, DeepReadSettingsRow,
+  DeepReadSettingsNote } from '../components/deepread/DeepReadSettingsVisual.ets';
 // ChatProviderSettingsPage — Provider 设置(D-047:三变体列表 + 编辑)
 // Android 基准:SettingProviderConfigPage.kt
 //   OpenAIEndpointFields(:531-561) / GoogleAuthConsole(:436-487)
@@ -17,7 +21,7 @@ import {
 import { FONT_MONO, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router, promptAction } from '@kit.ArkUI';
-import type { ProviderSetting } from '@amber/chat-domain';
+import type { ProviderSetting, ProviderModel } from '@amber/chat-domain';
 import { setPendingProvider } from './ChatProviderDetailPage.ets';
 import {
   loadProviders, saveProviders, providerFromImportJson, makeProviderSettingOpenAIVariant,
@@ -48,8 +52,13 @@ interface ProviderRow {
 @Component
 struct ChatProviderSettingsPage {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
+  @StorageProp('reduceMotion') reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') appBackgrounded: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State loaded: boolean = false;
+  @State loadError: string = '';
+  @State unconfiguredExpanded: boolean = false;
   @State filterQuery: string = '';
   @State sheetShow: boolean = false;
   @State rows: ProviderRow[] = [];
@@ -98,25 +107,22 @@ struct ChatProviderSettingsPage {
 
   private load(): void {
     const seq: number = ++this.loadSeq;
-    loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): void => {
+    this.loaded = false;
+    this.loadError = '';
+    loadProviders(getChatKvStore()).then(async (list: ProviderSetting[] | null): Promise<void> => {
       if (seq !== this.loadSeq) return;
       if (list === null) {
-        // 首装播种:await 落库完成才放行交互,避免与详情新增写入竞态互相覆盖
+        await saveProviders(getChatKvStore(), DEFAULT_PROVIDERS);
+        if (seq !== this.loadSeq) return;
         this.all = DEFAULT_PROVIDERS;
-        this.rebuildRows();
-        saveProviders(getChatKvStore(), this.all).then((): void => {
-          if (seq === this.loadSeq) this.loaded = true;
-        }).catch((): void => {
-          if (seq === this.loadSeq) this.loaded = true;
-        });
-        return;
+      } else {
+        this.all = list;
       }
-      this.all = list;
       this.rebuildRows();
       this.loaded = true;
-    }).catch((): void => {
-      // 读取失败也要退出加载态(否则页面永远 loading)
-      if (seq === this.loadSeq) this.loaded = true;
+    }).catch((error: Error): void => {
+      if (seq !== this.loadSeq) return;
+      this.loadError = `无法读取模型服务：${error.message}`;
     });
   }
 
@@ -156,6 +162,7 @@ struct ChatProviderSettingsPage {
 
   // D3-2:从文件导入 provider(详情页导出 JSON 的逆通道;新 id + 空 apiKey)
   private async importProvider(): Promise<void> {
+    if (!this.loaded) return;
     try {
       const ctx: common.UIAbilityContext =
         AppStorage.get<common.UIAbilityContext>('abilityContext') as common.UIAbilityContext;
@@ -165,7 +172,8 @@ struct ChatProviderSettingsPage {
       const uris: string[] = await new picker.DocumentViewPicker(ctx).select(options);
       if (uris.length === 0) return;
       const p: ProviderSetting = providerFromImportJson(fileIo.readTextSync(uris[0]));
-      const next: ProviderSetting[] = [...this.all, p];
+      const latest: ProviderSetting[] | null = await loadProviders(getChatKvStore());
+      const next: ProviderSetting[] = [...(latest ?? []), p];
       await saveProviders(getChatKvStore(), next);
       this.all = next;
       this.rebuildRows();
@@ -341,20 +349,123 @@ struct ChatProviderSettingsPage {
     })
   }
 
+  private configured(row: ProviderRow): boolean {
+    return row.auth === 'key' || row.auth === 'google_ready'
+      || row.auth === 'google_service_account_configured' || row.auth === 'google_configured'
+      || row.auth === 'google_authorizing';
+  }
+
+  private readingRows(configured: boolean): ProviderRow[] {
+    return this.filteredRows().filter((row: ProviderRow): boolean => this.configured(row) === configured);
+  }
+
+  @Builder
+  DeepReadRows(configured: boolean): void {
+    ForEach(this.readingRows(configured), (row: ProviderRow, index: number): void => {
+      DeepReadSettingsRow({ label: row.name,
+        detail: `${row.modelsCount} 个模型 · ${row.enabled ? '已启用' : '已停用'}`,
+        value: this.chipLabel(row.auth), last: index === this.readingRows(configured).length - 1,
+        onTap: (): void => { router.pushUrl({ url: 'pages/ChatProviderDetailPage', params: { providerId: row.id } }); } })
+    }, (row: ProviderRow): string => `${row.id}:${row.viewVersion}`)
+  }
+
+  @Builder
+  DeepReadPage(): void {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column() {
+        DeepReadSettingsHeader({ title: '模型服务' })
+        Scroll() {
+          Column() {
+            if (!this.loaded) {
+              DeepReadSettingsNote({ text: this.loadError.length > 0 ? this.loadError : '正在读取模型服务…' })
+              if (this.loadError.length > 0) {
+                DeepReadSettingsGroup({ content: (): void => { this.DeepReadRetry(); } })
+              }
+            } else {
+              Row({ space: 8 }) {
+                Icon({ name: 'search', iconSize: 17, color: D.muted })
+                TextInput({ text: this.filterQuery, placeholder: '搜索模型服务' })
+                  .fontSize(17).fontColor(D.ink).placeholderColor(D.muted)
+                  .backgroundColor(Color.Transparent).padding(0).layoutWeight(1)
+                  .onChange((value: string): void => { this.filterQuery = value; })
+              }.width('100%').height(48).padding({ left: 16, right: 16 }).backgroundColor(D.card).borderRadius(D.radius)
+              DeepReadSettingsNote({ text: '配置服务地址与凭据，再添加需要的模型。' })
+              DeepReadSettingsSection({ title: '已配置' })
+              if (this.readingRows(true).length > 0) {
+                DeepReadSettingsGroup({ content: (): void => { this.DeepReadRows(true); } })
+              } else {
+                DeepReadSettingsNote({ text: this.filterQuery.trim().length > 0 ? '没有匹配的已配置服务。' : '还没有配置服务。' })
+              }
+              if (this.readingRows(false).length > 0) {
+                DeepReadSettingsSection({ title: '待配置' })
+                DeepReadSettingsGroup({ content: (): void => { this.DeepReadUnconfigured(); } })
+              }
+              DeepReadSettingsSection({ title: '添加服务' })
+              DeepReadSettingsGroup({ content: (): void => { this.DeepReadAdd(); } })
+              DeepReadSettingsNote({ text: `${this.all.length} 个服务 · ${this.totalModelCount()} 个模型 · ${this.onlineCount()} 个已启用` })
+            }
+          }.width('100%').padding({ left: D.gutter, right: D.gutter, top: 12, bottom: DeepReadDockLayout.bottomInset(this.navBarHeight) })
+        }.align(Alignment.TopStart).layoutWeight(1).scrollBar(BarState.Off)
+      }.width('100%').height('100%').backgroundColor(D.paper)
+      DeepReadSubpageDock().align(Alignment.Bottom).hitTestBehavior(HitTestMode.Transparent)
+    }.width('100%').height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  DeepReadRetry(): void {
+    DeepReadSettingsRow({ label: '重新读取', valueAccent: true, last: true,
+      onTap: (): void => { this.load(); } })
+  }
+
+  private toggleUnconfigured(): void {
+    if (!this.loaded) return;
+    if (this.reduceMotion || this.appBackgrounded) {
+      this.unconfiguredExpanded = !this.unconfiguredExpanded;
+      return;
+    }
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
+      this.unconfiguredExpanded = !this.unconfiguredExpanded;
+    });
+  }
+
+  @Builder
+  DeepReadUnconfigured(): void {
+    DeepReadSettingsRow({ label: `${this.readingRows(false).length} 个待配置服务`,
+      value: this.unconfiguredExpanded ? '收起' : '展开', picker: true, last: !this.unconfiguredExpanded,
+      onTap: (): void => { this.toggleUnconfigured(); } })
+    if (this.unconfiguredExpanded) {
+      Column() { this.DeepReadRows(false); }.width('100%')
+        .transition(TransitionEffect.OPACITY.animation({ duration: this.reduceMotion || this.appBackgrounded ? 0 : 160 }))
+    }
+  }
+
+  @Builder
+  DeepReadAdd(): void {
+    DeepReadSettingsRow({ label: '添加模型服务', action: true,
+      onTap: (): void => { this.sheetShow = true; } })
+    DeepReadSettingsRow({ label: '从文件导入', last: true,
+      onTap: (): void => { this.importProvider().catch((): void => {}); } })
+  }
+
   build() {
     Stack() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
+    if (getProductKind() === 'deepread') {
+      this.DeepReadPage()
+    } else {
     Column() {
       CenteredTitleBar({
         title: '服务商',
         actionIcon: 'plus',
-        onAction: (): void => { this.sheetShow = true; },
+        onAction: (): void => { if (this.loaded) this.sheetShow = true; },
       })
 
       if (!this.loaded) {
         Column() {
-          Text('加载中…')
+          Text(this.loadError.length > 0 ? this.loadError : '加载中…')
+            .onClick((): void => { if (this.loadError.length > 0) this.load(); })
             .fontSize(TEXT_STYLES.body.size)
             .fontWeight(TEXT_STYLES.body.weight)
             .lineHeight(TEXT_STYLES.body.lineHeight)
@@ -453,7 +564,7 @@ struct ChatProviderSettingsPage {
             }
 
             FooterNote({
-              text: `${this.all.length} 个服务商 · ${this.totalModelCount()} 个模型 · ${this.onlineCount()} 个在线`,
+              text: `${this.all.length} 个服务商 · ${this.totalModelCount()} 个模型 · ${this.onlineCount()} 个已启用`,
             })
 
             Column().height(18)
@@ -469,12 +580,20 @@ struct ChatProviderSettingsPage {
     }
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    }
     ProviderTemplatePickerSheet({
             show: this.sheetShow,
             existingIds: JSON.stringify(this.all.map((p: ProviderSetting): string => p.id)),
             onPickPreset: (p: ProviderSetting): void => {
               this.sheetShow = false;
-              setPendingProvider(p);
+              if (getProductKind() === 'deepread') {
+                const draft: ProviderSetting = JSON.parse(JSON.stringify(p)) as ProviderSetting;
+                draft.id = newId();
+                draft.models = draft.models.map((model: ProviderModel): ProviderModel => { model.id = newId(); return model; });
+                setPendingProvider(draft);
+              } else {
+                setPendingProvider(p);
+              }
               const params: Record<string, string> = {};
               params['isNew'] = '1';
               router.pushUrl({ url: 'pages/ChatProviderDetailPage', params: params });

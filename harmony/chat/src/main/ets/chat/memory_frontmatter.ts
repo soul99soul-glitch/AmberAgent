@@ -65,6 +65,11 @@ export const encodeMemoryFrontmatter = (
   out += `supersedes_ids: [${record.supersedesIds.join(', ')}]\n`;
   out += `pinned: ${record.pinned}\n`;
   out += `archived: ${record.archived}\n`;
+  out += `reinforcement_count: ${record.reinforcementCount ?? 0}\n`;
+  if (record.lastReinforcedAt != null) out += `last_reinforced_at: ${quote(formatTime(record.lastReinforcedAt, nowFn))}\n`;
+  if (record.invalidatedAt != null) out += `invalidated_at: ${quote(formatTime(record.invalidatedAt, nowFn))}\n`;
+  if (record.evidence != null) out += `evidence_json: ${quote(JSON.stringify(record.evidence))}\n`;
+  if (record.lastReinforcementSource != null) out += `last_reinforcement_source: ${quote(record.lastReinforcementSource)}\n`;
   out += '---\n';
   out += '\n';
   out += `${record.content}\n`;
@@ -171,5 +176,10 @@ export const decodeMemoryFrontmatter = (
     lastUsedAt: null,
     topicTitle: null,
     memberIds: [],
+    reinforcementCount: Math.max(0, Number.parseInt(frontmatter.get('reinforcement_count') ?? '0', 10) || 0),
+    lastReinforcedAt: frontmatter.has('last_reinforced_at') ? parseInstant(frontmatter.get('last_reinforced_at') as string) : null,
+    invalidatedAt: frontmatter.has('invalidated_at') ? parseInstant(frontmatter.get('invalidated_at') as string) : null,
+    evidence: frontmatter.has('evidence_json') ? JSON.parse(frontmatter.get('evidence_json') as string) as string : null,
+    lastReinforcementSource: frontmatter.get('last_reinforcement_source') ?? null,
   };
 };

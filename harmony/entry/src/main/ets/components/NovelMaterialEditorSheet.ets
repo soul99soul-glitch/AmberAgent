@@ -1,4 +1,4 @@
-import { ACCENT, ERROR, INK, INK3, LINE, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
+import { ACCENT, ERROR, INK, INK3, LINE, MOTION_OVERLAY, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
 import { MATERIAL_KIND_LABELS, normalizeNovelMaterialFields } from '@amber/deepread-domain';
 import type { NovelMaterial, NovelMaterialFields, NovelMaterialKind } from '@amber/deepread-domain';
 import { NovelMaterialMetadataFields } from './NovelMaterialMetadataFields.ets';
@@ -27,6 +27,8 @@ const KINDS: NovelMaterialKind[] = ['world', 'character', 'relationship', 'outli
 
 @Component
 export struct NovelMaterialEditorSheet {
+  @StorageProp('reduceMotion') private reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') private appBackgrounded: boolean = false;
   @Prop @Watch('resetDraft') draftKey: string = '';
   @Prop @Watch('cancel') closeRequest: number = 0;
   @Prop initialDraft: NovelMaterialEditorDraft = emptyMaterialEditorDraft();
@@ -158,6 +160,10 @@ export struct NovelMaterialEditorSheet {
         }.width('100%').border({ width: { top: 1 }, color: { top: LINE } })
       }.width('100%').height('88%').alignItems(HorizontalAlign.Start).backgroundColor(SURFACE)
         .borderRadius({ topLeft: 20, topRight: 20 }).padding({ left: 20, right: 20, top: 18, bottom: this.bottomPadding + 16 })
+        .transition(TransitionEffect.translate({ y: this.reduceMotion || this.appBackgrounded ? 0 : 160 })
+          .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
     }.width('100%').height('100%')
+      .transition(TransitionEffect.OPACITY
+        .animation({ duration: this.appBackgrounded ? 0 : MOTION_OVERLAY, curve: Curve.EaseOut }))
   }
 }

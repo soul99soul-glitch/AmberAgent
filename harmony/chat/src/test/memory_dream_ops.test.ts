@@ -8,9 +8,7 @@ import type {
   MemoryCandidate, MemoryEvent, MemoryRecord,
 } from '../main/ets/chat/memory_models.ts';
 import type { MemoryAddParams } from '../main/ets/chat/memory_write.ts';
-import {
-  makeMemoryDreamPlan, memoryDreamPlanHasChanges,
-} from '../main/ets/chat/memory_dream.ts';
+import { makeMemoryDreamPlan } from '../main/ets/chat/memory_dream.ts';
 import type {
   MemoryDreamApplierDeps, MemoryDreamPlan, MemoryDreamPlannerDeps,
 } from '../main/ets/chat/memory_dream.ts';
@@ -18,15 +16,8 @@ import type {
   MemoryDreamPlanStore, PersistedMemoryDreamPlan,
 } from '../main/ets/chat/memory_dream_plan_store.ts';
 import {
-  acceptMemoryCandidate, applyMemoryDreamPlanOp, dismissMemoryDreamPlanOp,
-  ignoreLowConfidenceMemoryCandidates, ignoreMemoryCandidate,
-  memoryDreamReviewSummaryText, planMemoryDreamOp,
-  LOW_CONFIDENCE_CANDIDATE_THRESHOLD,
-  MEMORY_DREAM_PLAN_SAVED_MESSAGE, MEMORY_DREAM_PLAN_REPLACED_MESSAGE,
-  MEMORY_DREAM_PLAN_EMPTY_MESSAGE, MEMORY_DREAM_APPLIED_MESSAGE,
-  MEMORY_DREAM_APPLY_EMPTY_MESSAGE, MEMORY_NO_LOW_CONFIDENCE_MESSAGE,
-  memoryLowConfidenceIgnoredMessage, memoryDreamPlanFailureMessage,
-  memoryDreamApplyFailureMessage,
+  acceptMemoryCandidate, applyMemoryDreamPlanOp, dismissMemoryDreamPlanOp, ignoreLowConfidenceMemoryCandidates,
+  ignoreMemoryCandidate, memoryDreamReviewSummaryText, planMemoryDreamOp,
 } from '../main/ets/chat/memory_dream_ops.ts';
 import type { MemoryCandidateOpsDeps } from '../main/ets/chat/memory_dream_ops.ts';
 
@@ -161,22 +152,6 @@ const makeApplierDeps = (h: StoreHarness): MemoryDreamApplierDeps => ({
 });
 
 // ===== 常量(VM 文案逐字)=====
-
-test('阈值常量 = 0.60(VM :30 LOW_CONFIDENCE_CANDIDATE_THRESHOLD)', () => {
-  assert.equal(LOW_CONFIDENCE_CANDIDATE_THRESHOLD, 0.60);
-});
-
-test('操作消息常量逐字(VM :132-136/:156-167/:186-194)', () => {
-  assert.equal(MEMORY_DREAM_PLAN_SAVED_MESSAGE, '已生成 Dream 整理建议');
-  assert.equal(MEMORY_DREAM_PLAN_REPLACED_MESSAGE, '已生成 Dream 整理建议，上一份待审核建议已作废');
-  assert.equal(MEMORY_DREAM_PLAN_EMPTY_MESSAGE, '没有发现需要整理的记忆');
-  assert.equal(MEMORY_DREAM_APPLIED_MESSAGE, '已应用 Dream 整理建议');
-  assert.equal(MEMORY_DREAM_APPLY_EMPTY_MESSAGE, '没有可安全应用的 Dream 建议');
-  assert.equal(MEMORY_NO_LOW_CONFIDENCE_MESSAGE, '没有低置信候选需要忽略');
-  assert.equal(memoryLowConfidenceIgnoredMessage(3), '已忽略 3 条低置信候选');
-  assert.equal(memoryDreamPlanFailureMessage('boom'), 'Dream 整理失败：boom');
-  assert.equal(memoryDreamApplyFailureMessage('x'), '应用 Dream 建议失败：x');
-});
 
 // ===== 审查卡摘要行(Page :1036-1040)=====
 

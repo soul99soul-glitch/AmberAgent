@@ -1,5 +1,6 @@
+import { hasSynthesisBody } from './synthesis_article.ts';
 // Deep Read 纯函数辅助 — HarmonyOS port of Android DeepReadModels.kt helpers
-import { DeepReadOutput, DeepReadSectionState } from './models.ts';
+import { DeepReadOutput, DeepReadSectionState, DeepReadUncertainty } from './models.ts';
 import { STAGE_ORDER, DeepReadGenerationStage, DeepReadSectionStatus, IMAGE_CONFIDENCE } from './enums.ts';
 
 export const statusOf = (o: DeepReadOutput, stage: DeepReadGenerationStage): DeepReadSectionStatus => {
@@ -7,6 +8,7 @@ export const statusOf = (o: DeepReadOutput, stage: DeepReadGenerationStage): Dee
 };
 
 export const sectionsReady = (o: DeepReadOutput): boolean => {
+  if (o.templateArticle !== undefined) return hasSynthesisBody(o.templateArticle);
   // 严格:4 个 stage 都必须存在且 READY (Android DeepReadModels.kt:109-110)
   return STAGE_ORDER.every(s => o.sectionStates[s]?.status === 'READY');
 };
@@ -69,7 +71,7 @@ export const withPhase = (
 export const withInferredSectionStates = (o: DeepReadOutput): DeepReadOutput => {
   // Android DeepReadModels.kt:115-141
   // sectionStates 已填充 → no-op (同引用早返回)
-  if (Object.keys(o.sectionStates).length > 0) return o;
+  if (o.templateArticle !== undefined || Object.keys(o.sectionStates).length > 0) return o;
 
   const legacyComplete = o.generationComplete;
 
@@ -83,7 +85,7 @@ export const withInferredSectionStates = (o: DeepReadOutput): DeepReadOutput => 
     (o.analysis.implications?.trim().length ?? 0) > 0 ||
     o.analysis.perspectives.some(p => p.viewpoint.trim().length > 0) ||
     o.analysis.quotes.some(q => q.text.trim().length > 0);
-  const readingReady = o.extendedReading.length > 0 || o.references.length > 0;
+  const readingReady = (o.sources?.length ?? 0) > 0 || o.extendedReading.length > 0 || o.references.length > 0;
 
   const stageReady: Record<DeepReadGenerationStage, boolean> = {
     OVERVIEW: overviewReady,
@@ -176,7 +178,9 @@ export const hasEnoughChinese = (text: string): boolean => {
 
 // 拼接文章全文本用于语言检查 — 对应 Android articleTextForQualityCheck()
 const articleTextForQualityCheck = (o: DeepReadOutput): string => {
-  const parts: string[] = [o.summary];
+  const parts: string[] = [o.summary, o.bottomLine ?? ''];
+  parts.push(...(o.impacts ?? []).map(impact => `${impact.target} ${impact.effect}`));
+  parts.push(...(o.watch ?? []));
   parts.push(...o.keyEntities);
   if (o.timeline) parts.push(...o.timeline.map(t => t.event));
   if (o.corePoints) parts.push(...o.corePoints.map(p => `${p.point} ${p.supporting ?? ''}`));
@@ -188,6 +192,7 @@ const articleTextForQualityCheck = (o: DeepReadOutput): string => {
 };
 
 export const hasReadableArticle = (o: DeepReadOutput): boolean => {
+  if (o.templateArticle !== undefined) return hasSynthesisBody(o.templateArticle);
   // Android DeepReadModels.kt:309-322 — 注意:Android 用 AND 逻辑(三项都满足)
   if (o.summary.trim().length < 80) return false;
   // Android :311 检查 visibleTextForLanguageCheck() 全文,不只 summary
@@ -205,7 +210,13 @@ export const hasReadableArticle = (o: DeepReadOutput): boolean => {
 
 /** Presentation gate only: partial content stays visible without claiming completion or research quality. */
 export const hasDisplayableDeepReadOutput = (o: DeepReadOutput): boolean => {
-  return o.summary.trim().length > 0 || o.keyEntities.some(entity => entity.trim().length > 0)
+  if (o.templateArticle !== undefined && hasSynthesisBody(o.templateArticle)) return true;
+  return (o.bottomLine?.trim().length ?? 0) > 0
+    || (o.impacts?.some(impact => impact.effect.trim().length > 0) ?? false)
+    || (o.watch?.some(item => item.trim().length > 0) ?? false)
+    || normalizedDeepReadUncertainties(o).some(item => item.claim.trim().length > 0)
+    || (o.sources?.some(link => link.title.trim().length > 0 || link.url.trim().length > 0) ?? false)
+    || o.summary.trim().length > 0 || o.keyEntities.some(entity => entity.trim().length > 0)
     || (o.timeline?.some(event => event.event.trim().length > 0 || isHttpUrl(event.imageUrl ?? '')) ?? false)
     || (o.corePoints?.some(point => point.point.trim().length > 0 || !!point.supporting?.trim()
       || isHttpUrl(point.imageUrl ?? '')) ?? false)
@@ -220,4 +231,18 @@ export const hasDisplayableDeepReadOutput = (o: DeepReadOutput): boolean => {
       || (o.diagram.reason?.trim().length ?? 0) > 0
       || o.diagram.nodes.some(node => node.label.trim().length > 0 || !!node.note?.trim())
       || (o.diagram.caption?.trim().length ?? 0) > 0));
+};
+
+/** Old articles store plain strings; consumers always receive claim/status objects. */
+export const normalizedDeepReadUncertainties = (o: DeepReadOutput): DeepReadUncertainty[] => {
+  const result: DeepReadUncertainty[] = [];
+  for (const item of o.uncertainties ?? []) {
+    if (typeof item === 'string') {
+      if (item.trim().length > 0) result.push({ claim: item, status: '' });
+    } else if (item !== null && typeof item.claim === 'string' && item.claim.trim().length > 0) {
+      const status = item.status === 'single_source' || item.status === 'conflicting' || item.status === 'pending_official' ? item.status : '';
+      result.push({ claim: item.claim, status });
+    }
+  }
+  return result;
 };

@@ -17,7 +17,7 @@
 
 import type { JsonObject, JsonValue } from './json.ts';
 import type { UIMessagePart, UIMessagePartText } from './message.ts';
-import type { AgentTool } from './tool.ts';
+import type { AgentTool, InputSchemaObj } from './tool.ts';
 
 // ===== ToolRisk(:156-160) =====
 
@@ -177,6 +177,7 @@ export const isPrivateNetworkTarget = (url: string | null): boolean => {
 // ===== category(:424-457) =====
 
 export const toolCategory = (name: string): string => {
+  if (['provider_list', 'provider_configure', 'provider_models'].includes(name)) return 'provider';
   if (name.startsWith('plugin_') || name === 'plugins_list') return 'plugin';
   if (name.startsWith('recipe_') || name === 'recipes_list') return 'recipe';
   if (name.startsWith('external_file_')) return 'external_file';
@@ -243,6 +244,7 @@ const hasMutatingNameHint = (name: string): boolean => {
 };
 
 export const toolMutatesState = (name: string): boolean => {
+  if (name === 'provider_configure') return true;
   if (name === 'memory_tool') return true;
   if (name === 'deep_read_open') return true;
   if (name === 'run_plan_update') return false;
@@ -276,6 +278,8 @@ const OFFICEPRO_HIGH_RISK: string[] = [
 ];
 
 export const toolRiskProfile = (name: string): RiskProfile => {
+  if (['provider_configure', 'provider_models'].includes(name)) return { risk: 'sensitive', explicit: true };
+  if (name === 'provider_list') return { risk: 'normal', explicit: true };
   if (name === 'http_request') return { risk: 'high', explicit: true };
   if (name === 'memory_tool') return { risk: 'high', explicit: true };
   if (name === 'mcp_call_tool') return { risk: 'sensitive', explicit: true };
@@ -667,9 +671,9 @@ export const enforceOutputBudget = (
 // ===== display_title 提示注入(ToolRegistry.kt:131-154) =====
 
 export const withDisplayTitleHint = (
-  schema: { type: 'object'; properties: JsonObject; required: string[] | null } | null,
+  schema: InputSchemaObj | null,
   toolName: string,
-): { type: 'object'; properties: JsonObject; required: string[] | null } | null => {
+): InputSchemaObj | null => {
   if (schema === null) return null;
   if (toolName === 'subagent_start') return schema;
   const properties: JsonObject = { ...schema.properties };
@@ -677,5 +681,9 @@ export const withDisplayTitleHint = (
     type: 'string',
     description: 'Optional short user-facing action title in Chinese, 4-14 chars, describing this specific step (e.g. 写入第一卷, 合并最终文件).',
   };
+  if (schema.jsonSchema !== undefined) {
+    return { type: 'object', properties, required: schema.required,
+      jsonSchema: { ...schema.jsonSchema, properties } };
+  }
   return { type: 'object', properties, required: schema.required };
 };

@@ -1,0 +1,100 @@
+✔ layout requests coalesce, sample after layout and move in bounded native frames (42.417291ms)
+✔ touch/cancel prevents a queued old frame from moving the list (5.707958ms)
+✔ growing geometry retargets the active spring; late terminal layout starts another frame (4.95875ms)
+✔ new structural row outside measured range anchors once without a frame loop (4.411333ms)
+✔ busy layout frames advance scrolling without waiting for onIdle (3.454125ms)
+✖ active native follow prefers120Hz with LTPO headroom and releases its request at rest (6.222959ms)
+✔ API12 uses its known current refresh rate and cancellation releases the vote (3.5845ms)
+✖ LTPO ceiling uses supported modes without assuming120Hz on lower-refresh screens (3.679833ms)
+✖ API12 can request its already-known120Hz rate without reading newer display properties (3.25525ms)
+✖ LTPO120→90→60Hz changes retain bounded native motion without restarting the clock (3.560459ms)
+✖ a dropped frame does not repay lost display time with a large catch-up step (2.624792ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 6
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 390.075958
+
+✖ failing tests:
+
+test at harmony/chat/src/test/native_timeline_follow.test.cjs:102:1
+✖ active native follow prefers120Hz with LTPO headroom and releases its request at rest (6.222959ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  90 !== 120
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:107:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 90,
+    expected: 120,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at harmony/chat/src/test/native_timeline_follow.test.cjs:128:1
+✖ LTPO ceiling uses supported modes without assuming120Hz on lower-refresh screens (3.679833ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  90 !== 120
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:132:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 90,
+    expected: 120,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at harmony/chat/src/test/native_timeline_follow.test.cjs:139:1
+✖ API12 can request its already-known120Hz rate without reading newer display properties (3.25525ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  60 !== 120
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:142:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 60,
+    expected: 120,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at harmony/chat/src/test/native_timeline_follow.test.cjs:148:1
+✖ LTPO120→90→60Hz changes retain bounded native motion without restarting the clock (3.560459ms)
+  AssertionError [ERR_ASSERTION]: 120Hz native tick moved 12vp
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:154:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at harmony/chat/src/test/native_timeline_follow.test.cjs:163:1
+✖ a dropped frame does not repay lost display time with a large catch-up step (2.624792ms)
+  AssertionError [ERR_ASSERTION]: one delivered120Hz frame must stay within6vp even after50ms of missing frames, got 36
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_follow.test.cjs:168:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

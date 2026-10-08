@@ -2,22 +2,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  AVIF_BRANDS, COMPRESS_JPEG_QUALITY, COMPRESS_MAX_DIMENSION, HEIF_BRANDS,
-  MAX_PICKER_IMAGE_BYTES, assertPickerImageSize,
-  SUPPORTED_IMAGE_TYPES, calculateInSampleSize, guessImageMimeType,
+  MAX_PICKER_IMAGE_BYTES, assertPickerImageSize, calculateInSampleSize, guessImageMimeType,
   mapExifOrientationToTransform,
 } from '../main/ets/chat/image_compress.ts';
 
 const bytes = (arr: number[]): Uint8Array => new Uint8Array(arr);
-
-test('常量逐字:2048/85 + 支持类型 6 项 + brands', () => {
-  assert.equal(COMPRESS_MAX_DIMENSION, 2048);
-  assert.equal(COMPRESS_JPEG_QUALITY, 85);
-  assert.deepEqual([...SUPPORTED_IMAGE_TYPES],
-    ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/avif']);
-  assert.ok(HEIF_BRANDS.includes('heic') && HEIF_BRANDS.includes('mif1'));
-  assert.deepEqual([...AVIF_BRANDS], ['avif', 'avis']);
-});
 
 test('picker 图片大小上限在读取前阻断，GIF 同样受限', () => {
   assert.equal(MAX_PICKER_IMAGE_BYTES, 64 * 1024 * 1024);

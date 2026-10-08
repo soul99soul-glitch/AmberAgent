@@ -1,17 +1,12 @@
-// GeneratedImageCarousel — AI 生成图片轮播(第三梯队)
-// Android 基准: GeneratedImageCarousel.kt(297 行)— LazyRow + AsyncImage + 复制/下载/分享
-//   依赖 Coil AsyncImage(鸿蒙用 ArkUI Image)
-//
-// 功能(MVP):
-//   ✅ 水平滚动图片轮播(Swiper)
-//   ✅ 复制图片 URL
-//   ❌ 下载到本地(后续迭代,需平台文件 API)
-//   ❌ 分享(后续迭代,需系统 share sheet)
-
+// GeneratedImageCarousel — 生成图轮播、全屏预览及图片操作。
 import { INK3, ACCENT, SURFACE2, META } from '../design/tokens.ets';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { promptAction } from '@kit.ArkUI';
 import { saveImageToAlbum } from '../platform_impl/ImageSaveSupport.ets';
+import { shareImage } from '../platform_impl/ImageShareSupport.ets';
+import { common } from '@kit.AbilityKit';
+import { newId } from '@amber/chat-domain';
+import { ImagePreviewDialog } from './ui/ImagePreviewDialog.ets';
 
 @Component
 export struct GeneratedImageCarousel {
@@ -22,6 +17,24 @@ export struct GeneratedImageCarousel {
   @Prop showModify: boolean = false;
   onModify: (url: string) => void = (_url: string): void => {};
   @State currentIndex: number = 0;
+  @State previewOpen: boolean = false;
+  @State sharing: boolean = false;
+  private shareAnchorId: string = `generated-image-share-${newId()}`;
+
+  @Builder
+  private ImagePreview(): void {
+    ImagePreviewDialog({ images: this.imageUrls, initialIndex: this.currentIndex,
+      onDismiss: (): void => { this.previewOpen = false; } })
+  }
+
+  private async shareCurrentImage(): Promise<void> {
+    if (this.sharing || this.currentIndex >= this.imageUrls.length) return;
+    this.sharing = true;
+    try {
+      const context: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      await shareImage(this.imageUrls[this.currentIndex], context, this.shareAnchorId);
+    } finally { this.sharing = false; }
+  }
 
   private copyUrl(url: string): void {
     const board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -43,6 +56,10 @@ export struct GeneratedImageCarousel {
               .objectFit(ImageFit.Contain)
               .backgroundColor(SURFACE2)
               .borderRadius(12)
+              .onClick((): void => {
+                this.currentIndex = i;
+                this.previewOpen = true;
+              })
           }, (url: string, i: number): string => `img-${url}`)
         }
         .indicator(true)
@@ -54,27 +71,30 @@ export struct GeneratedImageCarousel {
         // 操作行
         if (this.showActions) {
           Row() {
-            Text(`图片 ${this.currentIndex + 1}/${this.imageUrls.length}`)
-              .fontSize(META).fontColor(INK3)
-              .layoutWeight(1)
+            Text(`${this.currentIndex + 1}/${this.imageUrls.length}`)
+              .fontSize(META).fontColor(INK3).layoutWeight(1)
             if (this.showModify) {
               Text('修改').fontSize(META).fontColor(ACCENT)
-                .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
                 .onClick((): void => {
                   if (this.currentIndex < this.imageUrls.length) {
                     this.onModify(this.imageUrls[this.currentIndex]);
                   }
                 })
             }
+            Text(this.sharing ? '准备中' : '分享').fontSize(META).fontColor(ACCENT).height(44)
+              .padding({ left: 8, right: 8 }).textAlign(TextAlign.Center).id(this.shareAnchorId)
+              .enabled(!this.sharing)
+              .onClick((): void => { this.shareCurrentImage(); })
             Text('保存').fontSize(META).fontColor(ACCENT)
-              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
               .onClick((): void => {
                 if (this.currentIndex < this.imageUrls.length) {
                   saveImageToAlbum(this.imageUrls[this.currentIndex]).catch((): void => {});
                 }
               })
             Text('复制链接').fontSize(META).fontColor(ACCENT)
-              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
               .onClick((): void => {
                 if (this.currentIndex < this.imageUrls.length) {
                   this.copyUrl(this.imageUrls[this.currentIndex]);
@@ -87,6 +107,9 @@ export struct GeneratedImageCarousel {
       }
       .width('100%')
       .margin({ bottom: 4 })
+      .bindContentCover(this.previewOpen, this.ImagePreview(), {
+        onWillDismiss: (): void => { this.previewOpen = false; },
+      })
     }
   }
 }

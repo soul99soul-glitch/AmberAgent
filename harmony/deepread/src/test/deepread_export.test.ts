@@ -117,3 +117,98 @@ test('text prose formatter applies only to Markdown body fields and leaves liter
   assert.ok(deepReadToMarkdown(entry).includes('**完整概览**'));
   assert.equal(deepReadToMarkdown(entry).includes('PLAIN:'), false);
 });
+
+test('new hierarchy exports conclusion before judgments and timeline without isolated entity tags', () => {
+  const entry = fullEntry();
+  entry.output.bottomLine = '这是一句话结论';
+  entry.output.sources = [{ title: '编号来源', url: 'https://evidence.example/1', source: null, publishedAt: null }];
+  entry.output.corePoints![0].sources = [1];
+  entry.output.timeline![0].why = '转折点改变了市场走向';
+  for (const serialize of [deepReadToMarkdown, deepReadToText]) {
+    const result = serialize(entry);
+    assert.ok(result.includes('这是一句话结论'));
+    assert.ok(result.indexOf('这是一句话结论') < result.indexOf('完整概览'));
+    assert.ok(result.indexOf('关键判断') < result.indexOf('时间轴'));
+    assert.ok(result.includes('要点正文甲 [1]'));
+    assert.ok(result.includes('转折：转折点改变了市场走向'));
+    assert.ok(!result.includes('关键实体'));
+    assert.ok(!result.includes('实体乙'));
+  }
+});
+
+test('perspective evidence, implications, watch and classified uncertainties remain in both exports', () => {
+  const entry = fullEntry();
+  entry.output.bottomLine = '结论';
+  entry.output.analysis.perspectives[0].interest = '降低公众成本';
+  entry.output.analysis.perspectives[0].quote = '我们会持续公开进展';
+  entry.output.analysis.perspectives[0].quoteBy = '王甲，发言人';
+  entry.output.analysis.perspectives[0].sources = [1, 2];
+  entry.output.impacts = [{ target: '公众', horizon: 'short', effect: '短期成本下降' },
+    { target: '行业', horizon: 'long', effect: '长期结构变化' }];
+  entry.output.watch = ['下一季度的价格变化'];
+  entry.output.uncertainties = [{ claim: '单一报道的数字', status: 'single_source' },
+    { claim: '各报道统计矛盾', status: 'conflicting' }, { claim: '官方尚未证实的日期', status: 'pending_official' }, '旧格式待确认信息'];
+  for (const serialize of [deepReadToMarkdown, deepReadToText]) {
+    const result = serialize(entry);
+    for (const text of ['各方立场', '诉求：降低公众成本', '我们会持续公开进展', '王甲，发言人',
+      '观点正文甲 [1][2]', '影响与走向', '公众（短期）', '行业（长期）', '短期成本下降', '长期结构变化',
+      '影响正文甲', '引述5', '出处5', '接下来关注', '下一季度的价格变化', '待核实', '【单一来源】单一报道的数字',
+      '【来源矛盾】各报道统计矛盾', '【待官方确认】官方尚未证实的日期', '旧格式待确认信息']) {
+      assert.ok(result.includes(text), text);
+    }
+  }
+});
+
+test('unified numbered sources preserve URL-less positions and deduplicate legacy source lists', () => {
+  const entry = fullEntry();
+  entry.output.sources = [{ title: '粘贴文本来源', url: '', source: '文本', publishedAt: null },
+    entry.output.references[0], { title: '危险[来源]', url: 'javascript:alert(1)', source: null, publishedAt: null }];
+  entry.output.extendedReading.unshift(entry.output.references[0]);
+  for (const serialize of [deepReadToMarkdown, deepReadToText]) {
+    const result = serialize(entry);
+    assert.ok(result.includes('[1] 粘贴文本来源'));
+    assert.ok(result.includes('[2] '));
+    assert.equal(result.split('参考标题甲').length - 1, 1);
+    assert.ok(result.includes('延伸标题11'));
+    assert.ok(!result.includes('参考资料'));
+    assert.ok(!result.includes('延伸阅读'));
+  }
+  const markdown = deepReadToMarkdown(entry);
+  assert.ok(markdown.includes('[参考标题甲](<https://ref.example/a?q=(甲)>)'));
+  assert.ok(!markdown.includes('](<javascript:'));
+  assert.ok(markdown.includes('危险\\[来源\\]'));
+});
+
+
+test('empty new fields do not hide legacy entity data and impact-only drafts have no empty stance chapter', () => {
+  const entry = fullEntry();
+  entry.output.bottomLine = '';
+  entry.output.sources = [];
+  entry.output.impacts = [];
+  entry.output.watch = [];
+  entry.output.uncertainties = [];
+  assert.ok(deepReadToText(entry).includes('实体乙'));
+  entry.output.analysis = { coreDispute: null, perspectives: [], implications: '旧稿只有影响', quotes: [] };
+  const legacyText = deepReadToText(entry);
+  assert.ok(legacyText.includes('旧稿只有影响'));
+  assert.ok(!legacyText.includes('各方立场'));
+  entry.output.impacts = [{ target: '行业', horizon: 'long', effect: '新稿已有结构化影响' }];
+  const newText = deepReadToText(entry);
+  assert.ok(!newText.includes('关键实体'));
+  assert.ok(newText.includes('旧稿只有影响'));
+  assert.ok(newText.includes('新稿已有结构化影响'));
+});
+
+test('new literal source and perspective metadata cannot inject executable Markdown links', () => {
+  const entry = fullEntry();
+  const literal = '[伪造链接](javascript:alert(1))';
+  entry.output.analysis.perspectives[0].interest = literal;
+  entry.output.analysis.perspectives[0].quote = literal;
+  entry.output.analysis.perspectives[0].quoteBy = literal;
+  entry.output.sources = [{ title: literal, url: 'javascript:alert(1)', source: literal, publishedAt: null }];
+  const markdown = deepReadToMarkdown(entry);
+  assert.ok(!markdown.includes('[伪造链接](javascript:'));
+  assert.ok(!markdown.includes('](<javascript:'));
+  assert.ok(markdown.includes('\\[伪造链接\\]\\(javascript:alert\\(1\\)\\)'));
+  assert.ok(deepReadToText(entry).includes(literal));
+});

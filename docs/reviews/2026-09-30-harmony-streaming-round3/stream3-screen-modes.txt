@@ -1,0 +1,43 @@
+
+-------------------------------[ability]-------------------------------
+
+
+----------------------------------RenderService----------------------------------
+-- ScreenInfo
+screen[0]: id=0, powerStatus=POWER_STATUS_OFF, backlight=6580, screenType=EXTERNAL_TYPE, render resolution=1828x2584, physical resolution=1828x2584, isVirtual=false, skipFrameInterval=1, expectedRefreshRate=-1, skipFrameStrategy=0
+supportedMode[0]: 1828x2584, refreshRate=120
+supportedMode[1]: 1828x2584, refreshRate=90
+supportedMode[2]: 1828x2584, refreshRate=72
+supportedMode[3]: 1828x2584, refreshRate=60
+supportedMode[4]: 1828x2584, refreshRate=45
+supportedMode[5]: 1828x2584, refreshRate=40
+supportedMode[6]: 1828x2584, refreshRate=36
+supportedMode[7]: 1828x2584, refreshRate=30
+activeMode: 1828x2584, refreshRate=120
+name=, phyWidth=116, phyHeight=162, supportLayers=12, virtualDispCount=0, propertyCount=3, type=DISP_INTF_UNKNOW, supportWriteBack=false
+prop[0]: name=Support Tunnel Num, propid=6, value=3
+prop[1]: name=Support HardWareCursor Num, propid=8, value=0
+prop[2]: name=Support Tunnel type, propid=7, value=16783360
+isSamplingOn=0, samplingScale=1.00, samplingTranslateX=0.00, samplingTranslateY=0.00
+enableVisibleRect=0, mainScreenVisibleRect=[0,0,0,0]
+-- ScreenInfo
+screen[1]: id=5, powerStatus=POWER_STATUS_SUSPEND, backlight=2073, screenType=EXTERNAL_TYPE, render resolution=1264x1848, physical resolution=1264x1848, isVirtual=false, skipFrameInterval=1, expectedRefreshRate=-1, skipFrameStrategy=0
+supportedMode[0]: 1264x1848, refreshRate=120
+supportedMode[1]: 1264x1848, refreshRate=90
+supportedMode[2]: 1264x1848, refreshRate=72
+supportedMode[3]: 1264x1848, refreshRate=60
+supportedMode[4]: 1264x1848, refreshRate=45
+supportedMode[5]: 1264x1848, refreshRate=40
+supportedMode[6]: 1264x1848, refreshRate=36
+supportedMode[7]: 1264x1848, refreshRate=30
+activeMode: 1264x1848, refreshRate=60
+name=, phyWidth=82, phyHeight=118, supportLayers=12, virtualDispCount=0, propertyCount=3, type=DISP_INTF_UNKNOW, supportWriteBack=false
+prop[0]: name=Support Tunnel Num, propid=6, value=3
+prop[1]: name=Support HardWareCursor Num, propid=8, value=0
+prop[2]: name=Support Tunnel type, propid=7, value=16783360
+isSamplingOn=0, samplingScale=1.00, samplingTranslateX=0.00, samplingTranslateY=0.00
+enableVisibleRect=0, mainScreenVisibleRect=[0,0,0,0]
+===================
+foldScreenIds_ size is 2
+foldScreenId:5, isConnected:1, isPowerOn:1
+foldScreenId:0, isConnected:1, isPowerOn:0

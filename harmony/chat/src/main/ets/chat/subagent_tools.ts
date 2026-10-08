@@ -23,6 +23,7 @@
 //   - JsonElement.runId()/intOrNull/contentOrNull → 本文件输入助手
 
 import type { JsonObject, JsonValue } from './json.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { UIMessage, UIMessagePart } from './message.ts';
 import { toText } from './message.ts';
 import type { AgentTool } from './tool.ts';
@@ -323,9 +324,9 @@ export class SubAgentTools {
           description: 'Maximum wait time in ms. Default 10000; CAPPED at 60000. Pass 60000 for the longest single wait. If the subagent is still running after the wait, call this tool again with the same run_id — do not reason between calls.',
         },
       }, ['run_id']),
-      execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
         const waitMs: number = intOrNull(input, 'wait_timeout_ms') ?? 10000;
-        const payload: JsonObject = await deps.manager.wait(runIdOf(input), waitMs);
+        const payload: JsonObject = await deps.manager.wait(runIdOf(input), waitMs, signal);
         return textPart(payload);
       },
     });

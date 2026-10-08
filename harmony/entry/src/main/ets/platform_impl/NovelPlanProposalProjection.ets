@@ -9,6 +9,7 @@
 // 不构造新的可批准伪目标;授权判定仍归 workspaceToolPath/固定 patch/CAS。
 
 import type { JsonObject, JsonValue, UIMessagePartTool } from '@amber/chat-domain';
+import { indicatesFailure, toolOutputJson, toolOutputText } from '@amber/chat-domain';
 
 export interface NovelChapterPlanPatchView {
   operation: 'write' | 'delete';
@@ -16,9 +17,14 @@ export interface NovelChapterPlanPatchView {
   content: string | null;
 }
 
+export type NovelChapterPlanProposalStatus =
+  'pending' | 'approved' | 'running' | 'accepted' | 'rejected' | 'failed' | 'unknown';
+
 export interface NovelChapterPlanProposalView {
   proposalId: string;
   patches: NovelChapterPlanPatchView[];
+  status: NovelChapterPlanProposalStatus;
+  resultText: string;
 }
 
 const PLAN_PATH: string = 'plan/this-chapter.md';
@@ -72,5 +78,32 @@ export const parseNovelChapterPlanProposal = (
     }
   }
   if (targetPath === null) return null;
-  return { proposalId: proposalId, patches: patches };
+  const output: JsonObject = toolOutputJson(part);
+  let status: NovelChapterPlanProposalStatus = 'unknown';
+  let resultText: string = '';
+  if (part.approvalState.type === 'denied') {
+    status = 'rejected';
+    resultText = part.approvalState.reason ?? '';
+  } else if (part.output.length > 0) {
+    resultText = toolOutputText(part);
+    if (indicatesFailure(output) && (output['proposal_id'] === undefined || output['proposal_id'] === proposalId)) {
+      status = 'failed';
+      const message: JsonValue | undefined = output['message'] ?? output['error'];
+      resultText = typeof message === 'string' ? message : '本章计划未能应用，请查看提案内容后重试。';
+    } else if (output['proposal_id'] === proposalId && output['status'] === 'accepted') {
+      status = 'accepted';
+      resultText = '';
+    } else if (output['proposal_id'] === proposalId && output['status'] === 'rejected') {
+      status = 'rejected';
+      resultText = '';
+    }
+  } else if (part.approvalState.type === 'pending') {
+    status = 'pending';
+  } else if (part.approvalState.type === 'approved') {
+    status = 'approved';
+    resultText = '已批准，等待执行后写入本章计划。';
+  } else {
+    status = 'running';
+  }
+  return { proposalId: proposalId, patches: patches, status: status, resultText: resultText };
 };

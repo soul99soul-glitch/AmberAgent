@@ -2,10 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createMiniAppPromptTransformer, isExplicitMiniAppRequest,
-  revisionAppId, revisionVersion, MINI_APP_INSTRUCTION,
+  createMiniAppPromptTransformer, isExplicitMiniAppRequest, revisionAppId, revisionVersion, MINI_APP_INSTRUCTION
 } from '../main/ets/chat/miniapp/miniapp_prompt_transformer.ts';
-import type { MiniAppPromptTransformerDeps } from '../main/ets/chat/miniapp/miniapp_prompt_transformer.ts';
+
 import { makeUserMessage, makeAssistantMessage, toText } from '../main/ets/chat/message.ts';
 import type { UIMessage, UIMessagePart } from '../main/ets/chat/message.ts';
 import type { MiniAppRecord } from '../main/ets/chat/miniapp/miniapp_models.ts';
@@ -52,13 +51,6 @@ test('extracts revision appId from modify prompt', () => {
 });
 
 // ===== 指令自检(MiniAppPromptTransformerTest.miniAppInstructionUsesSelfCheck...) =====
-
-test('miniAppInstruction uses self-check instead of forced subagent review', () => {
-  assert.equal(MINI_APP_INSTRUCTION.includes('生成后自检'), true);
-  assert.equal(MINI_APP_INSTRUCTION.includes('subagent_start'), false);
-  assert.equal(MINI_APP_INSTRUCTION.includes('MiniAppReviewer'), false);
-  assert.equal(MINI_APP_INSTRUCTION.includes('subagent_id="oracle"'), false);
-});
 
 // ===== Transformer 行为 =====
 

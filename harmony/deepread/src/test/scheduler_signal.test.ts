@@ -253,6 +253,7 @@ test('decideReentryAction: running wins; partial/cancel cache needs explicit con
   // 完整缓存 → 仅展示
   const complete = { ...empty, generationPhase: 'COMPLETE' as const, generationComplete: true };
   assert.equal(decideReentryAction(false, complete), 'complete');
+  assert.equal(decideReentryAction(true, complete), 'subscribe', 'active force run wins over retained completed article');
   // 部分进度(有 sectionStates/phase)→ 显式继续,不自动 REPLACE
   const partial = { ...empty, generationPhase: 'WRITING' as const, sectionStates: { OVERVIEW: { status: 'READY' as const, errorMessage: null } } };
   assert.equal(decideReentryAction(false, partial), 'subscribe');

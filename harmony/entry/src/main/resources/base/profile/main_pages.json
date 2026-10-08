@@ -1,6 +1,7 @@
 {
   "src": [
     "pages/BoardPage",
+    "pages/DeepReadRootPage",
     "pages/ChatAgentPermissionsPage",
     "pages/ChatListPage",
     "pages/ChatMcpSettingsPage",
@@ -23,6 +24,7 @@
     "pages/MemoryTopicsPage",
     "pages/MemoryTopicDetailPage",
     "pages/MemoryRecordPage",
+    "pages/MemoryRecordsPage",
     "pages/MemoryDocumentPage",
     "pages/MiniAppListPage",
     "pages/MiniAppRunnerPage",
@@ -69,6 +71,7 @@
     "pages/StandaloneSettingsPage",
     "pages/DeepReadComposePage",
     "pages/NovelStandaloneSettingsPage",
+    "pages/NovelAppearancePage",
     "pages/DeepReadSourcesPage",
     "pages/NovelProjectSetupPage",
     "pages/NovelBranchHistoryPage",
@@ -79,6 +82,8 @@
     "pages/NovelChapterContractPage",
     "pages/NovelPolishPage",
     "pages/DeepReadSearchSettingsPage",
-    "pages/DeepReadDiscoverySettingsPage"
+    "pages/DeepReadSearchServiceEditorPage",
+    "pages/DeepReadDiscoverySettingsPage",
+    "pages/DeepReadAppearancePage"
   ]
 }

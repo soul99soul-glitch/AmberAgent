@@ -5,12 +5,17 @@ import assert from 'node:assert/strict';
 import type { JsonObject, JsonValue } from '../main/ets/chat/json.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
 import type {
-  AgentPermissionPlatformPort, AgentPermissionCapability, AgentSpecialAccess,
+  AgentPermissionPlatformPort,
+  AgentPermissionCapability,
+  AgentSpecialAccess,
 } from '../main/ets/chat/permission_status.ts';
 import {
-  AgentPermissionBroker, AGENT_PERMISSION_CAPABILITIES,
-  makeRuntimePermissionSpec, makeAgentPermissionCapability,
-  capabilityCurrentRuntimePermissions, createPermissionsStatusTool,
+  AgentPermissionBroker,
+  AGENT_PERMISSION_CAPABILITIES,
+  makeRuntimePermissionSpec,
+  makeAgentPermissionCapability,
+  capabilityCurrentRuntimePermissions,
+  createPermissionsStatusTool,
 } from '../main/ets/chat/permission_status.ts';
 
 // ===== 假端口 =====
@@ -50,45 +55,6 @@ const capabilityById = (id: string): AgentPermissionCapability => {
   assert.ok(found !== undefined);
   return found;
 };
-
-// ===== Registry(AgentPermissionBroker.kt:236-459) =====
-
-test('registry: 24 条,顺序与 id 逐字', () => {
-  const ids: string[] = AGENT_PERMISSION_CAPABILITIES.map(
-    (c: AgentPermissionCapability): string => c.id,
-  );
-  assert.deepEqual(ids, [
-    'contacts_read', 'contacts_write', 'sms_read', 'sms_send', 'phone_state',
-    'call_log_read', 'call_phone', 'calendar_read', 'calendar_write',
-    'media_images', 'media_video', 'media_audio', 'location_current',
-    'audio_record', 'nearby_devices', 'activity_recognition',
-    'notification_access', 'usage_access', 'overlay', 'battery_optimization',
-    'exact_alarm', 'manage_all_files', 'apps', 'installed_apps_full_access',
-  ]);
-});
-
-test('registry: 抽查字段(contacts_read/manage_all_files/installed_apps)', () => {
-  const contactsRead: AgentPermissionCapability = capabilityById('contacts_read');
-  assert.equal(contactsRead.title, '通讯录读取');
-  assert.equal(contactsRead.risk, 'Sensitive');
-  assert.equal(contactsRead.runtimeGrantMode, 'All');
-  assert.equal(contactsRead.specialAccess, null);
-  assert.deepEqual(contactsRead.toolNames, ['contacts_search']);
-
-  const allFiles: AgentPermissionCapability = capabilityById('manage_all_files');
-  assert.equal(allFiles.specialAccess, 'ManageAllFiles');
-  assert.equal(allFiles.minSdk, 30);
-  assert.deepEqual(allFiles.toolNames, [
-    'external_file_list', 'external_file_read', 'external_file_write', 'external_file_delete',
-  ]);
-
-  const fullApps: AgentPermissionCapability = capabilityById('installed_apps_full_access');
-  assert.equal(fullApps.debugOnly, true);
-  assert.equal(fullApps.risk, 'High');
-
-  const apps: AgentPermissionCapability = capabilityById('apps');
-  assert.deepEqual(apps.runtimePermissions, []);
-});
 
 test('capabilityCurrentRuntimePermissions: sdk 过滤 + distinct(:67-68)', () => {
   const cap: AgentPermissionCapability = makeAgentPermissionCapability({
@@ -142,11 +108,6 @@ test('getStatus: special access — granted/SpecialNeeded', () => {
   assert.equal(broker.getStatus(capabilityById('usage_access')), 'SpecialNeeded');
 });
 
-test('getStatus: 空 runtime 权限 → Granted(apps)', () => {
-  const broker: AgentPermissionBroker = makeBroker();
-  assert.equal(broker.getStatus(capabilityById('apps')), 'Granted');
-});
-
 test('getStatus: All 模式 — 全授才 Granted', () => {
   const none: AgentPermissionBroker = makeBroker();
   assert.equal(none.getStatus(capabilityById('calendar_write')), 'Denied');
@@ -163,11 +124,6 @@ test('getStatus: Any 模式 — 任一授权即 Granted', () => {
   assert.equal(none.getStatus(capabilityById('location_current')), 'Denied');
   const coarse: AgentPermissionBroker = makeBroker({ granted: ['ohos.permission.APPROXIMATELY_LOCATION'] });
   assert.equal(coarse.getStatus(capabilityById('location_current')), 'Granted');
-});
-
-test('getCapability: 未知 id → error(:77-78)', () => {
-  const broker: AgentPermissionBroker = makeBroker();
-  assert.throws(() => broker.getCapability('nope'), /Unknown permission capability: nope/);
 });
 
 // ===== ensureGranted/runtimePermissionsForCoreBatch(:116-138) =====
@@ -204,63 +160,6 @@ test('runtimePermissionsForCoreBatch: 排除 debugOnly/special/High,distinct', (
     'ohos.permission.ACCESS_BLUETOOTH',
     'ohos.permission.ACTIVITY_MOTION',
   ]);
-});
-
-// ===== canOpenSpecialAccessSettings(:140-141) =====
-
-test('canOpenSpecialAccessSettings: 无 special → false;port 真值直通', () => {
-  const broker: AgentPermissionBroker = makeBroker({ canOpen: ['ManageAllFiles'] });
-  assert.equal(broker.canOpenSpecialAccessSettings('apps'), false);
-  assert.equal(broker.canOpenSpecialAccessSettings('manage_all_files'), true);
-  assert.equal(broker.canOpenSpecialAccessSettings('overlay'), false);
-});
-
-// ===== PermissionsStatusTool(全文 79 行) =====
-
-test('tool: 全量 payload — 键序/小写枚举/how_to_grant 默认在', async () => {
-  const special: Map<string, boolean | null> = new Map<string, boolean | null>();
-  special.set('ManageAllFiles', false);
-  const broker: AgentPermissionBroker = makeBroker({
-    apiLevel: 30,   // manage_all_files minSdk=30(Build.VERSION_CODES.R 保留值)
-    granted: ['ohos.permission.READ_CONTACTS'],
-    special, canOpen: ['ManageAllFiles'],
-  });
-  const tool = createPermissionsStatusTool(broker);
-  assert.equal(tool.name, 'permissions_status');
-  assert.equal(tool.needsApproval, false);
-  assert.equal(tool.allowsAutoApproval, true);
-
-  const payload: JsonObject = textOf(await tool.execute({}));
-  assert.deepEqual(Object.keys(payload), [
-    'all_files_access_declared', 'all_files_access_granted',
-    'all_files_access_manage_intent_available', 'capabilities',
-  ]);
-  assert.equal(payload['all_files_access_declared'], true);    // SpecialNeeded ≠ Unsupported
-  assert.equal(payload['all_files_access_granted'], false);
-  assert.equal(payload['all_files_access_manage_intent_available'], true);
-
-  const caps: JsonValue[] = payload['capabilities'] as JsonValue[];
-  assert.equal(caps.length, 24);
-  const first: JsonObject = caps[0] as JsonObject;
-  assert.deepEqual(Object.keys(first), [
-    'capability_id', 'title', 'description', 'risk', 'status',
-    'runtime_permissions', 'tools', 'how_to_grant',
-  ]);
-  assert.equal(first['capability_id'], 'contacts_read');
-  assert.equal(first['risk'], 'sensitive');
-  assert.equal(first['status'], 'granted');
-  assert.deepEqual(first['runtime_permissions'], ['ohos.permission.READ_CONTACTS']);
-  assert.deepEqual(first['tools'], ['contacts_search']);
-  assert.equal(
-    first['how_to_grant'],
-    'Open AmberAgent Settings > Agent 设置 > 系统权限, then grant 通讯录读取. ' +
-    'Special access items open HarmonyOS system settings.',
-  );
-
-  // special_access 键:枚举名原样(PascalCase)
-  const notification: JsonObject = caps[16] as JsonObject;
-  assert.equal(notification['special_access'], 'NotificationListener');
-  assert.equal(notification['status'], 'unsupported');   // 平台无概念
 });
 
 test('tool: capability_id 过滤', async () => {

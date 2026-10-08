@@ -1,0 +1,37 @@
+✔ one new line follows its measured growth without the composer navigation inset (0.4435ms)
+✔ measured target settles through the spring instead of hitting the native boundary early (4.651875ms)
+✔ an already settled list and an unmeasured tail retain their existing semantics (0.06825ms)
+✖ normal text growth keeps a measurable target when only the suggestion spacer leaves the viewport (1.226833ms)
+✔ a visible suggestion spacer uses its measured rectangle without adding its height twice (0.318459ms)
+✔ unmeasured structural messages and missing viewport geometry preserve the existing null result (0.067917ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 332.728625
+
+✖ failing tests:
+
+test at harmony/chat/src/test/native_timeline_bottom_target.test.cjs:63:1
+✖ normal text growth keeps a measurable target when only the suggestion spacer leaves the viewport (1.226833ms)
+  AssertionError [ERR_ASSERTION]: visible message bottom + actual 52vp spacer must replace the null edge-jump target
+  
+  null !== 1092
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/chat/src/test/native_timeline_bottom_target.test.cjs:67:10)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 1092,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

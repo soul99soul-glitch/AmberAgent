@@ -1,0 +1,12 @@
+共 2 个文件,分 1 批(每批最多 80)
+--- 批 1/1 (2 文件) ---
+[32mThe configuration file /Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/code-linter.json5 is in use.[0m
+[32mWorking...[=>------------------------------------------------]2%[0m[32mWorking...[==>-----------------------------------------------]5%[0m[32mCurrently active product: default[0m                                     
+[32mWorking...[==>-----------------------------------------------]5%[0m[32mWorking...[=========>----------------------------------------]20%[0m[32mWorking...[=================>--------------------------------]35%[0m[32mWorking...[========================>-------------------------]50%[0m[32mWorking...[================================>-----------------]64%[0m[32mWorking...[=====================================>------------]75%[0m[32mWorking...[==========================================>-------]84%[0m[32mWorking...[===============================================>--]95%[0m[32mWorking...[================================================>-]97%[0m[32mFinished...[==================================================]100%[0m
+[33mCodeLinter found some defects in your code.[0m
+/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/main/ets/pages/ChatPage.ets(3)
+809:36      warn        Prioritize structured clone for deep clone operations.    @performance/bad-deep-clone-check
+2278:9      warn        Avoid frequent state variable reads inside loop logic     @performance/hp-arkui-no-state-var-access-in-loop
+4783:11     warn        Use transition for component transition animation         @performance/hp-arkui-use-transition-to-replace-animateto
+-Defects: 3; Errors: 0; Warns: 3; Suggestions: 0;
+

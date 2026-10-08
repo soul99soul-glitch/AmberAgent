@@ -1,0 +1,46 @@
+[
+  {
+    "path": "harmony/deepread/src/main/ets/novel/repository.ts",
+    "sha256": "fa8223f3547ec37b8e6adb3729e70bcb44d522b83c97014d263ab5e95d7e8a43"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/creation.ts",
+    "sha256": "35dcd530785b5948dd0827dbec5b05f8acfa20ae18e866f46853b7549bb45bf5"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/ghostwrite.ts",
+    "sha256": "67f2f0ef1837150b1e9f4ea8d436e43ee5b122719b5c1289312b782a786234ef"
+  },
+  {
+    "path": "harmony/deepread/src/main/ets/novel/polish.ts",
+    "sha256": "5c17e46dd3536f01cf1d17b23ec4ec9686bd32cb738f399c05a3bd570ccf2b52"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets",
+    "sha256": "7c84bf0bbc5681b36ac353f9633c6acdd473ad8cb5b55f2d99fbb212fd43d645"
+  },
+  {
+    "path": "harmony/entry/src/main/ets/platform_impl/RdbRepository.ets",
+    "sha256": "50d49195340a32be880e8e7fe4ad11d3a342b881eb932056dc5460898818b5a8"
+  },
+  {
+    "path": "harmony/tests/chat-overlay-lifecycle.test.cjs",
+    "sha256": "1db630d628a97679cd2fe3951edaa2de80e3c7cb07225a8687905e8bdd6b9ba7"
+  },
+  {
+    "path": "harmony/tests/novel-editor-lifecycle.test.cjs",
+    "sha256": "9ddcfea8be14ee3e79fe4f2b23d8229b94900d45724f1064e439181190e06608"
+  },
+  {
+    "path": "harmony/chat/src/test/memory_topic_store.test.cjs",
+    "sha256": "6cde0f734afeab2090e8b8cc92af9f6a6eb34b599d58878196670d6f251341eb"
+  },
+  {
+    "path": "harmony/chat/src/test/rdb_repository.test.cjs",
+    "sha256": "6bed581d5787ce7553cc4765a2fd07404568d0c12478305380329df2b8823314"
+  },
+  {
+    "path": "harmony/deepread/src/test/novel_audit_regressions.test.ts",
+    "sha256": "6b63f41fa8112e7abc9b8ba27190f9c53eed1915cf575f33d15234ea0ed65bf5"
+  }
+]

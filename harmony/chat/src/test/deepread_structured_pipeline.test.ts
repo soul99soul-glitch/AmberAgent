@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { IncomingHttpHeaders } from 'node:http';
 import {
-  run, isComplete, statusOf,
+  run, runSection, isComplete, statusOf,
 } from '@amber/deepread-domain';
 import type {
   DeepReadOutput, HttpClient, HttpResponse, RunManagerDeps, UIMessage,
@@ -168,11 +168,11 @@ const assertWireConfig = (requests: WireRequest[]): void => {
   }
 };
 
-test('RunManager structured reasoning-only model: five real HTTP SSE calls preserve configuration and complete persisted article', async t => {
+test('RunManager structured reasoning-only model: four real HTTP SSE calls preserve configuration and complete persisted article', async t => {
   const f = await fixture(t, normalScripts());
   const result = await run(f.deps, 'article', '来源产品');
   assert.equal(result.ok, true, result.error ?? '');
-  assert.equal(f.requests.length, 5);
+  assert.equal(f.requests.length, 4);
   assert.equal(f.nonStreamingCalls(), 0);
   assertWireConfig(f.requests);
   assert.deepEqual(f.params.model.abilities, ['reasoning']);
@@ -181,8 +181,9 @@ test('RunManager structured reasoning-only model: five real HTTP SSE calls prese
   assert.equal(result.output.summary, OVERVIEW.summary);
   assert.deepEqual(result.output.timeline?.map(item => ({ date: item.date, event: item.event, is_highlight: item.isHighlight })), NARRATIVE.timeline);
   assert.equal(result.output.analysis.coreDispute, ANALYSIS.analysis.core_dispute);
-  assert.equal(result.output.extendedReading[0].url, SOURCE_URL);
-  assert.ok(prompt(f.requests[3]).includes(JSON.stringify(NARRATIVE.timeline)), 'Actual analysis HTTP body contains prior timeline JSON');
+  assert.equal(result.output.sources?.[0].url, SOURCE_URL);
+  assert.ok(prompt(f.requests[3]).includes(JSON.stringify(NARRATIVE.timeline[0].event)), 'Actual analysis HTTP body contains prior timeline event');
+  assert.ok(prompt(f.requests[3]).includes('\"timeline\"'), 'Actual analysis HTTP body contains the structured prior timeline');
   assert.ok(prompt(f.requests[3]).includes(OVERVIEW.summary));
   assert.ok(f.rawSnapshots.some(messages => messages.some(message => message.parts.some(part => part.type === 'reasoning'))));
   assert.ok(!JSON.stringify(result.output).includes('仅供界面的模型思考'));
@@ -197,14 +198,59 @@ test('bad analysis JSON over real HTTP gets one JSON correction and no tool fall
   const f = await fixture(t, scripts);
   const result = await run(f.deps, 'article', '来源产品');
   assert.equal(result.ok, true, result.error ?? '');
-  assert.equal(f.requests.length, 6);
+  assert.equal(f.requests.length, 5);
   assertWireConfig(f.requests);
-  assert.match(prompt(f.requests[4]), /上一次没有合法且完整的本段 JSON/);
+  assert.match(prompt(f.requests[4]), /不是完整、可解析的 JSON/);
   assert.match(prompt(f.requests[4]), /自由文本不能作为完成的结构化分析/);
   assert.equal(result.output.sectionQualities.ANALYSIS, 'STANDARD');
   assert.equal(result.output.analysis.coreDispute, ANALYSIS.analysis.core_dispute);
   assert.ok(!JSON.stringify(result.output).includes(scripts[3].text));
   assert.ok(f.current() !== null && isComplete(f.current()!));
+});
+
+test('concise analysis with the current impact hierarchy completes through real HTTP without a false JSON failure', async t => {
+  const scripts = normalScripts().slice(0, 3);
+  const analysis = { analysis: { core_dispute: '开放权重能改变竞争格局吗？',
+    perspectives: [{ holder: '开发者', viewpoint: '希望自行部署并核验模型。' },
+      { holder: '企业', viewpoint: '重视数据控制与部署成本。' },
+      { holder: '评测者', viewpoint: '等待独立测试核对发布主张。' }] },
+    impacts: [{ target: '开发者', horizon: 'short', effect: '开放权重使开发者可以自行部署并检查模型，实际成本与能力仍需根据独立测试判断。' }],
+    watch: ['关注独立评测是否支持发布主张。'], uncertainties: [] };
+  scripts.push({ text: JSON.stringify(analysis) }, { text: JSON.stringify(analysis) });
+  const f = await fixture(t, scripts);
+  const result = await run(f.deps, 'article', '开放模型');
+  assert.equal(statusOf(result.output, 'ANALYSIS'), 'READY', result.output.sectionStates.ANALYSIS?.errorMessage ?? '');
+  assert.equal(isComplete(result.output), true);
+  assert.equal(f.requests.length, 4, 'the valid section needs no JSON repair');
+  assert.deepEqual(result.output.analysis.perspectives.map(p => p.viewpoint), analysis.analysis.perspectives.map(p => p.viewpoint));
+  assert.equal(result.output.impacts?.[0].effect, analysis.impacts[0].effect);
+  const partial = { ...result.output, generationComplete: false, analysis: { coreDispute: null, perspectives: [], implications: null, quotes: [] },
+    impacts: [], sectionStates: { ...result.output.sectionStates, ANALYSIS: { status: 'FAILED' as const, errorMessage: '旧判定拒绝' } } };
+  const retry = await fixture(t, [{ text: JSON.stringify(PLAN) }, { text: JSON.stringify(analysis) }]);
+  await retry.deps.repository?.save('article', '开放模型', partial);
+  const repaired = await runSection(retry.deps, 'article', '开放模型', 'ANALYSIS');
+  assert.equal(isComplete(repaired.output), true);
+  assert.equal(retry.requests.length, 2, 'section repair only asks for the plan and failed analysis');
+  assert.equal(repaired.output.summary, partial.summary);
+  assert.deepEqual(repaired.output.timeline, partial.timeline);
+  assert.deepEqual(repaired.output.corePoints, partial.corePoints);
+});
+
+test('valid but empty analysis reports its missing content rather than invalid JSON over HTTP', async t => {
+  const scripts = normalScripts().slice(0, 3).concat([
+    { text: JSON.stringify({ analysis: {}, impacts: [{ target: '读者', horizon: 'short', effect: '这一条虽然有完整的影响描述，但没有分析中的争议或任何当事方立场，不能单独掩盖分析为空。' }], watch: [] }) },
+    { text: JSON.stringify({ analysis: {}, impacts: [], watch: [] }) },
+  ]);
+  const f = await fixture(t, scripts);
+  const result = await run(f.deps, 'article', '来源产品');
+  assert.equal(statusOf(result.output, 'ANALYSIS'), 'FAILED');
+  assert.match(result.output.sectionStates.ANALYSIS?.errorMessage ?? '', /分析内容不足/);
+  assert.match(prompt(f.requests[4]), /分析内容/);
+  assert.equal(result.output.summary, OVERVIEW.summary);
+  const priorNarrative = f.saved.find(output => statusOf(output, 'NARRATIVE') === 'READY');
+  assert.ok(priorNarrative);
+  assert.deepEqual(result.output.timeline, priorNarrative.timeline);
+  assert.equal(isComplete(result.output), false);
 });
 
 test('abort during analysis HTTP SSE keeps persisted earlier stages and never marks the partial ready', async t => {

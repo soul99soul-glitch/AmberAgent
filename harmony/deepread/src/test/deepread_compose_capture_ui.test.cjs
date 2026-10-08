@@ -15,13 +15,14 @@ function fixture() {
   const saved = [], routes = [];
   const storage = { get: async (_key, fallback) => JSON.stringify(templates), set: async () => {} };
   const repository = { upsert: async entry => saved.push(entry) };
-  const env = { ...template, ...models, ...inputs, ...helpers, ...progress,
-    newId: () => 'created', getRepository: () => repository, getAppContainer: () => ({ storage }),
+  const env = { loadDeepReadAppearance: async () => {}, ...template, ...models, ...inputs, ...helpers, ...progress,
+    DeepReadHaptics: { success() {} }, newId: () => 'created', getRepository: () => repository, getAppContainer: () => ({ storage }), getProductKind: () => 'agent',
     getChatKvStore: () => ({ get: async key => key === 'deepread_first_use_confirmed' ? 'true' : defaultId }), router: { replaceUrl: async value => routes.push(value) },
   };
-  const compose = actualPage('pages/DeepReadComposePage.ets', ['loadTemplates', 'createArticle'], env);
+  const compose = actualPage('components/deepread/DeepReadComposerSheet.ets', ['loadTemplates', 'createArticle'], env);
   Object.assign(compose, { alive: true, busy: false, title: '作者主题', text: '真实补充资料', urls: '', files: [],
-    templateId: 'none', templateChoices: [], pickerToken: 0, templateLoadToken: 0, templatesLoading: false, error: '' });
+    templateId: 'none', templateChoices: [], pickerToken: 0, templateLoadToken: 0, templatesLoading: false, error: '',
+    pendingTopicId: '', pendingTitle: '', onCreated: async (topicId, title) => routes.push({ params: { topicId, title } }) });
   return { compose, saved, routes, storage, repository, env,
     templates(value) { templates = value; }, default(value) { defaultId = value; } };
 }
@@ -57,7 +58,30 @@ test('file picker operations do not invalidate the separate template-load owner'
   const pending = f.compose.loadTemplates(); await Promise.resolve();
   f.compose.pickerToken++;
   finish(JSON.stringify([oldTemplate])); await pending;
-  assert.equal(f.compose.templateChoices.length, 3); assert.equal(f.compose.templatesLoading, false);
+  assert.equal(f.compose.templateChoices.length, template.BUILTIN_TEMPLATES.length + 1); assert.equal(f.compose.templatesLoading, false);
+});
+test('route failure keeps the committed reading visible and retry opens the same draft without another write', async () => {
+  const f = fixture(); let attempts = 0;
+  f.compose.onCreated = async (topicId, title) => {
+    attempts++;
+    if (attempts === 1) throw Error('页面打开失败');
+    f.routes.push({ params: { topicId, title } });
+  };
+  await f.compose.createArticle();
+  assert.equal(f.saved.length, 1); assert.equal(f.routes.length, 0); assert.match(f.compose.error, /页面打开失败/);
+  assert.equal(f.compose.pendingTopicId, f.saved[0].topicId);
+  const source = fs.readFileSync(path.join(entryRoot, 'components/deepread/DeepReadComposerSheet.ets'), 'utf8');
+  const success = /DeepReadSettingsButton\(\{ icon: 'spark', success: ([^,]+),/.exec(source);
+  assert.ok(success, 'the standalone primary button binds the real committed-draft success');
+  assert.equal(new Function('return ' + success[1]).call(f.compose), true);
+  const host = source.slice(source.indexOf('  HostCompose(): void'), source.indexOf('  TopicCard(): void'));
+  const button = host.slice(host.indexOf("Text(this.busy ? '处理中…'"));
+  const enabled = /\.enabled\(([^\n]+)\)\.onClick/.exec(button);
+  assert.ok(enabled, 'test executes the production Host start-button gate');
+  assert.equal(new Function('return ' + enabled[1]).call(f.compose), true, 'a committed draft must remain openable after route failure');
+  await f.compose.createArticle();
+  assert.equal(f.saved.length, 1); assert.equal(f.routes.length, 1); assert.equal(attempts, 2);
+  assert.equal(f.routes[0].params.topicId, f.saved[0].topicId); assert.equal(f.routes[0].params.title, f.saved[0].title);
 });
 test('Reading reuses the captured layout after settings change or custom template deletion', async () => {
   const f = fixture(); f.compose.templateId = oldTemplate.id; await f.compose.createArticle();
@@ -105,11 +129,14 @@ for (const [force, active] of [[true, false], [false, false], [true, true]]) {
     const scheduler = { isRunning: () => active, run: async (_id, _title, options) => { seen = f.saved.at(-1)?.output;
       assert.equal(options.templateSnapshot.html, oldTemplate.html);
       return { ok: true, output: null }; } };
-    const page = actualPage('pages/DeepReadArticlePage.ets', ['loadArticle', 'saveDiscoveryInputs', 'loadDisplaySettings', 'applyOutput', 'runNow'],
-      { ...f.env, getDeepReadScheduler: async () => scheduler, FONT_SCALE_MIN: 0.7, FONT_SCALE_MAX: 1.8 });
+    const page = actualPage('pages/DeepReadArticlePage.ets', ['loadArticle', 'saveDiscoveryInputs', 'loadDisplaySettings', 'applyOutput', 'runNow',
+      'clearEditorialMotion', 'celebratePublished', 'editorialActive', 'hasReadableOutput'],
+      { ...f.env, loadDeepReadAppearance: async () => {}, getDeepReadScheduler: async () => scheduler, getProductKind: () => 'deepread',
+        FONT_SCALE_MIN: 0.7, FONT_SCALE_MAX: 1.8 });
     Object.assign(page, { pageAlive: true, pageToken: 4, topicId: existing.topicId, title: existing.title,
       sourceUrl: '', seedUrls: [], discoveryInputs: [inputs.makeInputSource('text', '新热点来源', 'NEW_PROVIDER\n排名：2')],
       running: false, nativeReadingOverride: false, phaseLabel: () => '', progressLabel: () => '',
+      motionCycle: 0, completionStamp: 0, pageVisible: true, appBackgrounded: false,
       refreshTemplateWeb() {}, refreshWorkspaceStatus: async () => {}, subscribeToUpdates() {} });
     await page.loadArticle(4, force);
     assert.equal(existing.output.inputText, 'OLD_PROVIDER\n排名：1');

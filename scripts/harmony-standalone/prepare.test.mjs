@@ -6,13 +6,16 @@ import test from 'node:test';
 import { prepareProduct, readConfiguration, selectProducts } from './prepare.mjs';
 
 function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'amber-standalone-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'amber-standalone-'));
+  const root = path.join(parent, 'amber');
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
   const files = {
     'build-profile.json5': `{ app: { products: [{ name: 'default', signingConfig: 'host' }], signingConfigs: [{ material: { storePassword: 'private-host-password', profile: '/private/host.p7b' } }] }, modules: [{name:'entry',srcPath:'./entry'}] }`,
     'AppScope/app.json5': JSON.stringify({ app: { bundleName: 'app.amber.deepread', versionCode: 2 } }),
     'AppScope/resources/base/element/string.json': JSON.stringify({ string: [{ name: 'app_name', value: 'Amber' }] }),
     'AppScope/resources/base/media/app_icon.svg': '<svg />',
+    'products/novel/app_icon.png': 'novel-icon-fixture',
+    'products/deepread/app_icon.png': 'deepread-icon-fixture',
     'entry/src/main/resources/base/element/string.json': JSON.stringify({ string: [{ name: 'EntryAbility_label', value: 'Amber' }] }),
     'entry/src/main/resources/base/profile/main_pages.json': JSON.stringify({ src: ['pages/Index', 'pages/NovelWorkspacePage'] }),
     'entry/src/main/module.json5': JSON.stringify({ module: {
@@ -44,9 +47,22 @@ test('both products have isolated identity and permissions while host configurat
     assert.equal(readConfiguration(path.join(output, 'AppScope/app.json5')).app.bundleName, bundle);
     const manifest = readConfiguration(path.join(output, 'entry/src/main/module.json5')).module;
     assert.equal(manifest.extensionAbilities.length, product === 'novel' ? 1 : 0);
-    assert.equal(manifest.requestPermissions.length, 4);
+    assert.equal(manifest.requestPermissions.length, product === 'deepread' ? 5 : 4);
+    assert.equal(manifest.requestPermissions.some((permission) =>
+      permission.name === 'ohos.permission.ACCELEROMETER'), product === 'deepread');
     assert.equal(manifest.requestPermissions.some((permission) => permission.name.endsWith('READ_CALENDAR')), false);
-    assert.deepEqual(JSON.parse(JSON.stringify(manifest.abilities)), [{ name: 'EntryAbility', backgroundModes: ['dataTransfer'] }]);
+    assert.deepEqual(JSON.parse(JSON.stringify(manifest.abilities)), [{ name: 'EntryAbility', backgroundModes: ['dataTransfer'],
+      icon: `$media:${product}_app_icon`, startWindowIcon: `$media:${product}_start_icon` }]);
+    assert.equal(readConfiguration(path.join(output, 'AppScope/app.json5')).app.icon, `$media:${product}_app_icon`);
+    for (const directory of ['AppScope/resources/base/media', 'entry/src/main/resources/base/media']) {
+      assert.equal(fs.readFileSync(path.join(output, directory, `${product}_app_icon.png`), 'utf8'), `${product}-icon-fixture`);
+    }
+    const startIcon = fs.readFileSync(path.join(output,
+      `entry/src/main/resources/base/media/${product}_start_icon.svg`), 'utf8');
+    assert.match(startIcon, /<rect[^>]+rx="56"/);
+    assert.match(startIcon, /clip-path="url\(#icon-corners\)"/);
+    const embedded = startIcon.match(/data:image\/png;base64,([A-Za-z0-9+/=]+)/)[1];
+    assert.equal(Buffer.from(embedded, 'base64').toString(), `${product}-icon-fixture`);
     assert.equal(readConfiguration(path.join(output, 'entry/src/main/resources/base/element/string.json')).string.find((item) => item.name === 'product_kind').value, product);
     assert.equal(fs.readFileSync(path.join(output, 'AppScope/resources/base/media/app_icon.svg'), 'utf8'), '<svg />');
     assert.equal(fs.readFileSync(path.join(output, 'entry/oh-package.json5'), 'utf8'), files['entry/oh-package.json5']);
@@ -127,4 +143,19 @@ test('CLI accepts only supported products', () => {
   assert.deepEqual(selectProducts(['--product', 'all']), ['novel', 'deepread']);
   assert.deepEqual(selectProducts(['--product', 'deepread']), ['deepread']);
   assert.throws(() => selectProducts(['--product', 'host']), /Usage/);
+});
+
+test('DeepRead preparation returns the relocated project without replacing its source or signing', (t) => {
+  const { root } = fixture(t);
+  const relocated = path.resolve(root, '../DeepRead/harmony');
+  fs.mkdirSync(path.join(relocated, 'AppScope'), { recursive: true });
+  fs.writeFileSync(path.join(relocated, 'AppScope/app.json5'), JSON.stringify({ app: { bundleName: 'app.amber.deepread.reader' } }));
+  fs.writeFileSync(path.join(relocated, 'build-profile.json5'), 'local-signing-kept');
+  assert.equal(prepareProduct('deepread', root), relocated);
+  assert.equal(fs.readFileSync(path.join(relocated, 'build-profile.json5'), 'utf8'), 'local-signing-kept');
+  assert.equal(fs.existsSync(path.join(root, '.harmony-standalone/deepread')), false);
+  assert.throws(() => {
+    fs.writeFileSync(path.join(relocated, 'AppScope/app.json5'), JSON.stringify({ app: { bundleName: 'wrong.product' } }));
+    prepareProduct('deepread', root);
+  }, /Unexpected DeepRead bundle identity/);
 });

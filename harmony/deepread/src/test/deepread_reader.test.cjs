@@ -24,7 +24,7 @@ const compile = text => ts.transpileModule(text, {
 }).outputText;
 function harness(overrides = {}) {
   const actions = [], writes = [], opened = [];
-  const context = {
+  const context = { loadDeepReadAppearance: async () => {},
     console, Promise, String, Number, Math, JSON, Error,
     makeEmptyDeepReadOutput: () => ({ summary: '' }),
     FONT_SCALE_MIN: Number(source.match(/FONT_SCALE_MIN: number = ([0-9.]+)/)[1]),
@@ -47,21 +47,23 @@ function harness(overrides = {}) {
     promptAction: { showToast() {} },
     getRepository: () => overrides.repository ?? ({}),
     getDeepReadScheduler: overrides.getScheduler,
+    getProductKind: () => 'deepread',
     module: { exports: {} },
   };
   const names = ['hasReadableOutput', 'retryGeneration', 'applyOutput', 'zoomIn', 'zoomOut',
     'persistFontScale', 'handleWebNavigation', 'cancelGeneration', 'retryFirstFailure',
     'loadDisplaySettings', 'loadArticle', 'phaseLabel', 'progressLabel', 'stageLabel', 'partialError',
     'loadTemplateHtml', 'switchToNativeReading', 'isWebTemplate', 'continuationNotice',
-    'openExport', 'onBackPress'];
+    'openExport', 'openSources', 'openArticlePanel', 'isArticlePanelActive', 'isExportActive', 'closeArticlePanel', 'onBackPress', 'clearEditorialMotion', 'celebratePublished', 'editorialActive', 'showNewsroom'];
   vm.runInNewContext(compile(`module.exports = class ReaderHarness { ${names.map(method).join('\n')} };`), context);
   const page = new context.module.exports();
   Object.assign(page, {
     pageAlive: true, pageToken: 4, topicId: 'topic', title: 'title', sourceUrl: '', seedUrls: [], discoveryInputs: [],
+    motionCycle: 0, completionStamp: 0, pageVisible: true, appBackgrounded: false,
     output: { summary: '旧稿', analysis: { quotes: [] }, sectionStates: readyStates(), generationComplete: true,
       templateSnapshot: { id: 'editorial_slant', name: '杂志 · 立场', kind: 'editorial', html: null, capturedAt: 1 } },
-    running: false, errorMsg: '', cancelled: false, awaitingContinue: false,
-    showExport: false, showRegenerateDialog: false,
+    running: false, errorMsg: '', cancelled: false, awaitingContinue: false, runStartsUnreadable: false,
+    articlePanel: '', articlePanelSession: 0, showRegenerateDialog: false,
     fontScale: 1, scheduler: { abort: id => actions.push(['abort', id]) },
     generateArticle: () => actions.push('regenerate'), continueGeneration: () => actions.push('continue'),
     refreshTemplateWeb: () => actions.push('refresh'),
@@ -126,6 +128,8 @@ test('Web external navigation requires a live, main-frame user gesture', () => {
   });
   assert.equal(page.handleWebNavigation(request('about:blank')), false);
   assert.equal(page.handleWebNavigation(request('#section')), false);
+  assert.equal(page.handleWebNavigation(request('https://amber-deepread.invalid/article#dr-source-1')), false);
+  assert.equal(page.handleWebNavigation(request('https://amber-deepread.invalid/article', true, false)), false);
   // Diagnostic baseline: engine evidence decides whether local data navigation
   // needs a different rule. This assertion records the current interception.
   assert.equal(page.handleWebNavigation(request('data:text/html,local-preview', true, false)), true);
@@ -160,7 +164,6 @@ test('leaving during scheduler resolution prevents a section retry from starting
   assert.equal(starts, 0);
 });
 
-
 test('native gallery excludes hero, chapter images, duplicates, and rejected assets', () => {
   const body = fs.readFileSync(path.resolve(__dirname,
     '../../../entry/src/main/ets/components/DeepReadNativeArticleBody.ets'), 'utf8');
@@ -171,7 +174,7 @@ test('native gallery excludes hero, chapter images, duplicates, and rejected ass
     for (; depth; end++) { if (body[end] === '{') depth++; if (body[end] === '}') depth--; }
     return body.slice(start, end);
   };
-  const context = { module: { exports: {} }, IMAGE_CONFIDENCE: { REJECT: 'reject' } };
+  const context = { loadDeepReadAppearance: async () => {}, module: { exports: {} }, IMAGE_CONFIDENCE: { REJECT: 'reject' } };
   vm.runInNewContext(compile(`module.exports = class NativeBody {
     ${extract('imageUrl')} ${extract('galleryAssets')}
   };`), context);
@@ -186,7 +189,6 @@ test('native gallery excludes hero, chapter images, duplicates, and rejected ass
   };
   assert.deepEqual(Array.from(component.galleryAssets(), asset => asset.url), ['https://image.test/other.jpg']);
 });
-
 
 test('COMPLETE phase alone preserves partial failure and loads as resumable history', async () => {
   const incomplete = { summary: '保留内容', analysis: { quotes: [] }, generationPhase: 'COMPLETE',
@@ -203,6 +205,24 @@ test('COMPLETE phase alone preserves partial failure and loads as resumable hist
   assert.equal(page.awaitingContinue, true);
   assert.equal(page.running, false);
   assert.equal(page.partialError(), '分析中断');
+});
+
+test('loading an active job snapshots the existing readable cache and does not launch or replace its pipeline', async () => {
+  for (const [summary, complete, newsroom] of [['', false, true], ['旧的部分稿', false, false], ['旧的完整稿', true, false]]) {
+    const cached = { summary, analysis: { quotes: [] }, generationPhase: 'WRITING',
+      generationComplete: complete, sectionStates: readyStates() };
+    const { page } = harness({ repository: { get: async () => ({ output: cached }) },
+      getScheduler: async () => ({ isRunning: () => true }) });
+    page.output = null;
+    let launched = 0;
+    page.runNow = async () => { launched++; };
+    await page.loadArticle(4, false);
+    assert.equal(page.running, true);
+    assert.equal(page.runStartsUnreadable, newsroom);
+    assert.equal(page.showNewsroom(), newsroom);
+    assert.equal(page.output, cached);
+    assert.equal(launched, 0, 'the admitted job is only observed');
+  }
 });
 
 test('font preference round trip uses the actual PreferencesStorage numeric adapter at both bounds', async () => {
@@ -263,13 +283,13 @@ test('Article passes raw HTML with Chinese, CSS colors and percent text to loadD
   assert.equal(calls.length, 2);
   for (const call of calls) {
     assert.equal(call[0], html);
-    assert.deepEqual(call.slice(1), ['text/html', 'UTF-8', ' ', ' ']);
+    assert.deepEqual(call.slice(1), ['text/html', 'UTF-8', 'https://amber-deepread.invalid/article', 'https://amber-deepread.invalid/article']);
   }
   assert.equal(page.webRenderError, '');
 });
 
 test('Article main-document errors expose manual native recovery while preserving article and selected template', () => {
-  const context = { module: { exports: {} }, DOMAIN: 0x0001, TAG: 'DeepRead.Article',
+  const context = { loadDeepReadAppearance: async () => {}, module: { exports: {} }, DOMAIN: 0x0001, TAG: 'DeepRead.Article',
     hilog: { info() {}, warn() {} }, String, Error };
   vm.runInNewContext(compile(`module.exports = class ErrorHook { ${method('onTemplateError')} };`), context);
   const onTemplateError = context.module.exports.prototype.onTemplateError;
@@ -305,13 +325,9 @@ test('Article main-document errors expose manual native recovery while preservin
   }
 });
 
-test('Article Web error callbacks invoke the native-recovery error consumer', () => {
-  assert.match(source, /\.onErrorReceive\([\s\S]*?this\.onTemplateError\s*\(/);
-});
-
 test('Article waits for the current initial blank document once, while stale session/theme callbacks cannot affect a remount', () => {
   const names = ['attachTemplateWeb', 'onTemplatePageEnd', 'detachTemplateWeb', 'refreshTemplateWeb', 'onTemplateError'];
-  const context = { module: { exports: {} }, DOMAIN: 0x0001, TAG: 'DeepRead.Article',
+  const context = { loadDeepReadAppearance: async () => {}, module: { exports: {} }, DOMAIN: 0x0001, TAG: 'DeepRead.Article',
     hilog: { info() {}, warn() {} }, String, Error };
   vm.runInNewContext(compile(`module.exports = class WebCallbacks { ${names.map(method).join('\n')} };`), context);
   const { page } = harness();
@@ -381,7 +397,6 @@ test('Article waits for the current initial blank document once, while stale ses
   assert.equal(calls.length, 5);
 });
 
-
 test('cancelled empty metadata makes no saved-content promise', () => {
   const { page } = harness();
   page.cancelled = true;
@@ -391,29 +406,67 @@ test('cancelled empty metadata makes no saved-content promise', () => {
   assert.equal(page.continuationNotice(), '生成已取消，已保存的进度仍可用');
 });
 
-
 test('a failed section without a provider error string still exposes a retry notice', () => {
   const { page } = harness();
   page.output.generationComplete = false;
   page.output.sectionStates.ANALYSIS = { status: 'FAILED', errorMessage: null };
-  assert.equal(page.partialError(), '撰写深度分析失败');
+  assert.equal(page.partialError(), '分析立场与影响失败');
 });
 
 test('export opens only for readable idle content and Back closes it before leaving', () => {
   const { page } = harness();
   page.running = true; page.openExport();
-  assert.equal(page.showExport, false);
+  assert.equal(page.articlePanel, '');
   page.running = false; page.output.summary = ''; page.openExport();
-  assert.equal(page.showExport, false);
+  assert.equal(page.articlePanel, '');
   page.output.summary = '已保存正文'; page.pageAlive = false; page.openExport();
-  assert.equal(page.showExport, false);
+  assert.equal(page.articlePanel, '');
   page.pageAlive = true; page.output.generationComplete = false; page.openExport();
-  assert.equal(page.showExport, true, 'saved partial content can export text and Markdown');
-  page.showExport = false;
+  assert.equal(page.articlePanel, 'export', 'saved partial content can export text and Markdown');
+  page.articlePanel = '';
   page.output.generationComplete = true;
   page.pageAlive = true; page.openExport();
-  assert.equal(page.showExport, true);
+  assert.equal(page.articlePanel, 'export');
   assert.equal(page.onBackPress(), true);
-  assert.equal(page.showExport, false);
+  assert.equal(page.articlePanel, '');
   assert.equal(page.onBackPress(), false);
+});
+
+
+test('closing and reopening export invalidates the departing panel before its exit animation finishes', () => {
+  const { page } = harness();
+  page.openExport();
+  const first = page.articlePanelSession;
+  assert.equal(page.isExportActive(first), true);
+  page.openExport();
+  assert.equal(page.articlePanelSession, first, 'an already open panel keeps its snapshot');
+  page.onBackPress();
+  assert.equal(page.isExportActive(first), false);
+  page.openExport();
+  const second = page.articlePanelSession;
+  assert.ok(second > first);
+  assert.equal(page.isExportActive(first), false, 'late file/share work from the exiting panel stays cancelled');
+  page.closeArticlePanel(first);
+  assert.equal(page.articlePanel, 'export', 'an old close callback cannot dismiss the reopened panel');
+  page.pageVisible = false;
+  assert.equal(page.isExportActive(second), false);
+  page.pageVisible = true;
+  assert.equal(page.isExportActive(second), true);
+  page.closeArticlePanel(second);
+  assert.equal(page.isExportActive(second), false);
+});
+
+test('sources and export share one modal owner, and an old close cannot dismiss a different reopened panel', () => {
+  const { page } = harness();
+  page.openSources();
+  const sourcesSession = page.articlePanelSession;
+  assert.equal(page.articlePanel, 'sources');
+  assert.equal(page.isArticlePanelActive('sources', sourcesSession), true);
+  page.openExport(); assert.equal(page.articlePanel, 'sources', 'the open modal blocks a second presentation');
+  assert.equal(page.onBackPress(), true); assert.equal(page.articlePanel, '');
+  assert.equal(page.isArticlePanelActive('sources', sourcesSession), false);
+  page.openExport(); assert.equal(page.articlePanel, 'export');
+  page.closeArticlePanel(sourcesSession); assert.equal(page.articlePanel, 'export');
+  assert.equal(page.onBackPress(), true); assert.equal(page.articlePanel, '');
+  assert.equal(page.onBackPress(), false, 'only another Back can leave the article');
 });

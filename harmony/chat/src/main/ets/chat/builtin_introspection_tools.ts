@@ -82,6 +82,7 @@ export const isResidentTool = (name: string, category: string | null): boolean =
 //   null → 'null'
 const inputSchemaToKotlinString = (schema: InputSchemaObj | null): string => {
   if (schema === null) return '';
+  if (schema.jsonSchema !== undefined) return JSON.stringify(schema.jsonSchema);
   const req: string = schema.required === null
     ? 'null'
     : `[${schema.required.join(', ')}]`;
@@ -325,6 +326,9 @@ const searchAliases = (metadata: ToolMetadata): string[] => {
   }
   if (name.startsWith('mcp_') || category === 'mcp') {
     out.push('mcp', 'MCP', '外部工具');
+  }
+  if (category === 'provider') {
+    out.push('服务商', '提供商', '接口配置', 'API key', '密钥', 'provider', '模型配置');
   }
   return out;
 };

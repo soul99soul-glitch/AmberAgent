@@ -9,13 +9,11 @@ import type {
 } from '../main/ets/chat/memory_models.ts';
 import { buildMemoryDreamPrompt } from '../main/ets/chat/memory_dream_prompt.ts';
 import type {
-  MemoryDreamApplierDeps, MemoryDreamPlan, MemoryDreamPlannerDeps, MemoryMergeSuggestion,
-  MemorySupersedeSuggestion,
+  MemoryDreamApplierDeps, MemoryDreamPlan, MemoryDreamPlannerDeps, MemoryMergeSuggestion, MemorySupersedeSuggestion
 } from '../main/ets/chat/memory_dream.ts';
 import {
-  dreamPlanOnlyApplicable, isAnyDreamEnabled, isDreamMaintenanceEnabled, isDreamModelEnabled,
-  makeMemoryDreamPlan, memoryDreamPlanHasChanges, memoryDreamPlanSummaryText,
-  mergeDreamPlanWith, parseDreamModelPlanJson, planDreamMaintenance, runMemoryDreamApply,
+  dreamPlanOnlyApplicable, isAnyDreamEnabled, isDreamMaintenanceEnabled, isDreamModelEnabled, makeMemoryDreamPlan,
+  memoryDreamPlanHasChanges, mergeDreamPlanWith, parseDreamModelPlanJson, planDreamMaintenance, runMemoryDreamApply,
   runMemoryDreamPlan,
 } from '../main/ets/chat/memory_dream.ts';
 import type { MemoryAddParams } from '../main/ets/chat/memory_write.ts';
@@ -73,21 +71,6 @@ test('hasChanges: notes 不计(MemoryDreamPlanner.kt:296-301)', () => {
   })), true);
 });
 
-test('summaryText: PersistedMemoryDreamPlan.summary 逐字(MemoryDreamPlanStore.kt:30-33)', () => {
-  const plan: MemoryDreamPlan = makeMemoryDreamPlan({
-    mergeSuggestions: [{ targetMemoryId: 1, duplicateMemoryIds: [2], mergedContent: null, reason: '' }],
-    promoteMemoryIds: [3, 4],
-    archiveMemoryIds: [5],
-    ignoreCandidateIds: ['c1', 'c2', 'c3'],
-    supersedeSuggestions: [{
-      oldMemoryIds: [6], newContent: '新内容甲乙丙丁戊', scope: 'long_term',
-      kind: 'user', confidence: 0.8, reason: '',
-    }],
-    notes: ['x'],
-  });
-  assert.equal(memoryDreamPlanSummaryText(plan), '合并 1 · 提升 2 · 归档 1 · 替换 1 · 忽略候选 3');
-});
-
 // ===== planDreamMaintenance =====
 
 test('maintenance: 过期短期记忆归档(expiresAt <= now 且未归档)', () => {
@@ -97,42 +80,43 @@ test('maintenance: 过期短期记忆归档(expiresAt <= now 且未归档)', () 
   const alreadyArchived: MemoryRecord = record({ id: 3, expiresAt: NOW - 1, archived: true, content: '归档内容壬癸子丑' });
   const plan: MemoryDreamPlan = planDreamMaintenance([expired, future, alreadyArchived], [], NOW);
   assert.deepEqual(plan.archiveMemoryIds, [1]);
-  assert.deepEqual(plan.notes, ['发现 1 条过期短期项目记忆，可归档。']);
+  assert.deepEqual(plan.notes, ['发现 1 条过期或闲置记忆，可归档。']);
 });
 
-test('maintenance: 重复组 — normalize 分组 + 组排序 pinned>long_term>confidence>updatedAt + 逐字 reason', () => {
-  // 组内容长度 <8 → 跳过;归一化忽略非字母数字且小写
+test('maintenance: same scope/kind duplicate groups rank confidence then updatedAt', () => {
+  // Short rows are skipped; exact matching trims outer whitespace only.
   const short: MemoryRecord = record({ id: 9, content: '短' });
   const short2: MemoryRecord = record({ id: 10, content: '短!' });
-  // 组一:同内容(normalize 等价),四条以不同维度排序
+  // Exact duplicates rank confidence and update time within the same scope/kind.
   const a: MemoryRecord = record({ id: 1, content: 'Alpha beta 内容', confidence: 0.99, updatedAt: NOW + 5 });
-  const b: MemoryRecord = record({ id: 2, content: 'alpha-beta 内容', confidence: 0.99, pinned: true });
-  const c: MemoryRecord = record({ id: 3, content: 'ALPHA BETA 内容', scope: 'long_term', confidence: 0.5 });
-  const d: MemoryRecord = record({ id: 4, content: 'Alpha beta 内容!', confidence: 0.99, updatedAt: NOW + 9 });
+  const b: MemoryRecord = record({ id: 2, content: '  Alpha beta 内容  ', confidence: 1 });
+  const c: MemoryRecord = record({ id: 3, content: 'Alpha beta 内容', confidence: 0.5 });
+  const d: MemoryRecord = record({ id: 4, content: 'Alpha beta 内容', confidence: 0.99, updatedAt: NOW + 9 });
   const plan: MemoryDreamPlan = planDreamMaintenance([a, b, c, d, short, short2], [], NOW);
   assert.equal(plan.mergeSuggestions.length, 1);
   const merge: MemoryMergeSuggestion = plan.mergeSuggestions[0];
-  // pinned 优先 → id=2 target;余下 long_term(id=3) 先于 confidence 平局按 updatedAt(id=4 > id=1)
+  // Highest confidence wins; remaining equal confidence sorts by newest update.
   assert.equal(merge.targetMemoryId, 2);
-  assert.deepEqual(merge.duplicateMemoryIds, [3, 4, 1]);
-  assert.equal(merge.mergedContent, 'alpha-beta 内容');
+  assert.deepEqual(merge.duplicateMemoryIds, [4, 1, 3]);
+  assert.equal(merge.mergedContent, '  Alpha beta 内容  ');
   assert.equal(merge.reason, '内容高度重复，保留可信度或层级更高的一条。');
   assert.deepEqual(plan.notes, ['发现 1 组可能重复的记忆，可合并后归档副本。']);
 });
 
-test('maintenance: promote 门 — short_term+project+expiresAt null+confidence>=0.82+lastUsedAt 非空', () => {
-  const base = { id: 1, expiresAt: null, confidence: 0.82, lastUsedAt: NOW, kind: 'project' as const };
+test('maintenance: promote requires actual reinforcement and 14-day durability', () => {
+  const base = { id: 1, expiresAt: null, confidence: 0.82, lastUsedAt: NOW, kind: 'project' as const,
+    createdAt: NOW - 20 * 86400000, reinforcementCount: 2, lastReinforcedAt: NOW };
   // 内容互异,避免意外落入重复组
   const ok: MemoryRecord = record({ ...base, content: '可提升的内容甲' });
-  const lowConf: MemoryRecord = record({ ...base, id: 2, confidence: 0.81, content: '低置信内容乙' });
-  const noUse: MemoryRecord = record({ ...base, id: 3, lastUsedAt: null, content: '未使用内容丙' });
-  const userKind: MemoryRecord = record({ ...base, id: 4, kind: 'user', content: '用户类内容丁' });
+  const lowConf: MemoryRecord = record({ ...base, id: 2, reinforcementCount: 1, content: '单次引用内容乙' });
+  const noUse: MemoryRecord = record({ ...base, id: 3, reinforcementCount: 0, lastReinforcedAt: null, content: '未使用内容丙' });
+  const userKind: MemoryRecord = record({ ...base, id: 4, createdAt: NOW - 86400000, content: '新记忆内容丁' });
   const longTerm: MemoryRecord = record({ ...base, id: 5, scope: 'long_term', content: '长期内容戊' });
   const archived: MemoryRecord = record({ ...base, id: 6, archived: true, content: '已归档内容己' });
   const plan: MemoryDreamPlan = planDreamMaintenance(
     [ok, lowConf, noUse, userKind, longTerm, archived], [], NOW);
   assert.deepEqual(plan.promoteMemoryIds, [1]);
-  assert.deepEqual(plan.notes, ['发现 1 条反复使用的短期项目记忆，可提升为长期记忆。']);
+  assert.deepEqual(plan.notes, ['发现 1 条反复使用的短期记忆，经至少两次实际引用或确认且跨越 14 天，可提升为长期记忆。']);
 });
 
 test('maintenance: 噪声候选 — trim<12 / confidence<0.45 / 与活动记忆 normalize 重复', () => {
@@ -151,6 +135,7 @@ test('maintenance: notes 顺序 重复→提升→过期→噪声 且各 id 列�
   const dup2: MemoryRecord = record({ id: 2, content: '重复的内容甲乙丙丁' });
   const promotable: MemoryRecord = record({
     id: 3, content: '可提升内容甲乙丙丁', expiresAt: null, confidence: 0.9, lastUsedAt: NOW,
+    createdAt: NOW - 20 * 86400000, reinforcementCount: 2, lastReinforcedAt: NOW,
   });
   const expired: MemoryRecord = record({ id: 4, content: '过期内容甲乙丙丁', expiresAt: NOW - 1 });
   const noisy: MemoryCandidate = candidate({ id: 'c1', content: '短' });
@@ -158,8 +143,8 @@ test('maintenance: notes 顺序 重复→提升→过期→噪声 且各 id 列�
     [dup1, dup2, promotable, expired], [noisy, noisy], NOW);
   assert.deepEqual(plan.notes, [
     '发现 1 组可能重复的记忆，可合并后归档副本。',
-    '发现 1 条反复使用的短期项目记忆，可提升为长期记忆。',
-    '发现 1 条过期短期项目记忆，可归档。',
+    '发现 1 条反复使用的短期记忆，经至少两次实际引用或确认且跨越 14 天，可提升为长期记忆。',
+    '发现 1 条过期或闲置记忆，可归档。',
     // note 用 distinct 前的 size(Planner.kt:183;同一候选两次 → 2)
     '发现 2 条低价值或重复候选，可忽略。',
   ]);
@@ -317,12 +302,14 @@ const plannerDeps = (opts: {
 test('runMemoryDreamPlan: 双源合并 → source=merged + DREAM_PLANNED 消息逐字', async () => {
   const events: MemoryEvent[] = [];
   const expired: MemoryRecord = record({ id: 1, expiresAt: NOW - 1 });
-  const generated: string = JSON.stringify({ promote: [1] });
+  const reinforced: MemoryRecord = record({ id: 2, content: '独立的可提升记忆',
+    createdAt: NOW - 20 * 86400000, reinforcementCount: 2, lastReinforcedAt: NOW });
+  const generated: string = JSON.stringify({ promote: [1, 2] });
   const plan: MemoryDreamPlan = await runMemoryDreamPlan(plannerDeps({
-    records: [expired], generated, events,
+    records: [expired, reinforced], generated, events,
   }));
   assert.deepEqual(plan.archiveMemoryIds, [1]);
-  assert.deepEqual(plan.promoteMemoryIds, [1]);
+  assert.deepEqual(plan.promoteMemoryIds, [2]);
   assert.equal(events.length, 1);
   assert.equal(events[0].type, 'dream_planned');
   assert.equal(events[0].message,
@@ -333,7 +320,7 @@ test('runMemoryDreamPlan: 仅模型有变更 → source=model;仅本地 → main
   const events1: MemoryEvent[] = [];
   await runMemoryDreamPlan(plannerDeps({
     records: [record({ id: 1 })],
-    generated: JSON.stringify({ promote: [1] }), events: events1,
+    generated: JSON.stringify({ archive: [1] }), events: events1,
   }));
   assert.ok(events1[0].message.endsWith('source=model'));
 
@@ -427,10 +414,10 @@ test('onlyApplicable: supersede oldIds 过滤(canBeSuperseded)+ 去重 + newCont
   assert.equal(s.confidence, 1);
 });
 
-test('onlyApplicable: merge 重定向 — managed 过滤 + superseded 排除 + 比较器 long_term>pinned>confidence>updatedAt', () => {
+test('onlyApplicable: merge redirects by confidence and excludes pinned/core/superseded records', () => {
   const recs: MemoryRecord[] = [
     record({ id: 1, confidence: 0.99, updatedAt: NOW }),
-    record({ id: 2, scope: 'long_term', confidence: 0.1 }),
+    record({ id: 2, confidence: 1 }),
     record({ id: 3, pinned: true, confidence: 0.5 }),
     record({ id: 4, archived: true }),
     record({ id: 5, scope: 'core' }),
@@ -442,7 +429,7 @@ test('onlyApplicable: merge 重定向 — managed 过滤 + superseded 排除 + �
       kind: 'user', confidence: 0.8, reason: '',
     }],
     mergeSuggestions: [
-      // long_term(2) 最先 → target;pinned(3) 次之;再 confidence(1)
+      // id 2 has the highest confidence; protected records are excluded.
       { targetMemoryId: 1, duplicateMemoryIds: [2, 3, 4, 5], mergedContent: null, reason: '' },
       // 与 supersede 目标(6)重叠 → 6 被排除后 <2 → 丢弃
       { targetMemoryId: 6, duplicateMemoryIds: [4], mergedContent: null, reason: '' },
@@ -453,12 +440,12 @@ test('onlyApplicable: merge 重定向 — managed 过滤 + superseded 排除 + �
   const merge: MemoryMergeSuggestion = out.mergeSuggestions[0];
   assert.equal(merge.targetMemoryId, 2);
   // duplicates 保 candidates 原序(target+duplicates 拼接序),非排序序(Applier.kt:141-143 filterNot)
-  assert.deepEqual(merge.duplicateMemoryIds, [1, 3]);
+  assert.deepEqual(merge.duplicateMemoryIds, [1]);
 });
 
 test('onlyApplicable: promote/archive 过滤 + ignore distinct + notes 透传', () => {
   const recs: MemoryRecord[] = [
-    record({ id: 1 }), // short_term 未归档 → promote/archive 均可
+    record({ id: 1, createdAt: NOW - 20 * 86400000, reinforcementCount: 2, lastReinforcedAt: NOW }),
     record({ id: 2, scope: 'long_term' }),
     record({ id: 3, archived: true }),
     record({ id: 4, pinned: true }),
@@ -469,10 +456,10 @@ test('onlyApplicable: promote/archive 过滤 + ignore distinct + notes 透传', 
     ignoreCandidateIds: ['c1', 'c1', 'c2'],
     notes: ['keep'],
   });
-  const out: MemoryDreamPlan = dreamPlanOnlyApplicable(plan, recs);
+  const out: MemoryDreamPlan = dreamPlanOnlyApplicable(plan, recs, NOW);
   assert.deepEqual(out.promoteMemoryIds, [1]);
-  // archive:pinned(4) 排除
-  assert.deepEqual(out.archiveMemoryIds, [1]);
+  // Already promoted and pinned records cannot also be archived by the same plan.
+  assert.deepEqual(out.archiveMemoryIds, []);
   assert.deepEqual(out.ignoreCandidateIds, ['c1', 'c2']);
   assert.deepEqual(out.notes, ['keep']);
 });
@@ -582,15 +569,16 @@ test('apply: merge mergedContent 过短 → 保留 target.content', async () => 
     '既有记忆内容甲乙丙丁');
 });
 
-test('apply: promote — short_term → long_term/__long_term__/expiresAt null + 逐字事件', async () => {
+test('apply: reinforced short_term promotes while preserving expiry', async () => {
   const h: ApplyHarness = applyHarness([
-    record({ id: 7, assistantId: 'asst-1', expiresAt: NOW + 1000 }),
+    record({ id: 7, assistantId: 'asst-1', expiresAt: NOW + 1000,
+      createdAt: NOW - 20 * 86400000, reinforcementCount: 2, lastReinforcedAt: NOW }),
   ]);
-  await runMemoryDreamApply(makeMemoryDreamPlan({ promoteMemoryIds: [7] }), h.deps);
+  await runMemoryDreamApply(makeMemoryDreamPlan({ promoteMemoryIds: [7] }), { ...h.deps, now: () => NOW });
   const promoted: MemoryRecord = h.records[0];
   assert.equal(promoted.scope, 'long_term');
   assert.equal(promoted.assistantId, '__long_term__');
-  assert.equal(promoted.expiresAt, null);
+  assert.equal(promoted.expiresAt, NOW + 1000);
   assert.equal(h.events[0].type, 'memory_updated');
   assert.equal(h.events[0].message, 'Promoted by dream cleanup.');
   assert.equal(h.events[1].message,
@@ -662,6 +650,6 @@ test('dream prompt: 模板块逐字 + 记录/候选行格式 + 归档记录不�
   assert.ok(prompt.startsWith('Review AmberAgent memories and produce a reviewable JSON diff.'));
   assert.ok(prompt.indexOf('"delete_suggestions": ["candidate_id"]') >= 0);
   assert.ok(prompt.indexOf('- delete_suggestions may only contain pending candidate ids, never formal memory ids.') >= 0);
-  assert.ok(prompt.indexOf('Memories:\n- #1 [long_term/user] 用户喜欢咖啡\n') >= 0);
+  assert.ok(prompt.indexOf('Memories:\n- #1 [long_term/user] 用户喜欢咖啡 (记录日期=2026-07-28; reinforcement_count=0)\n') >= 0);
   assert.ok(prompt.endsWith('Pending candidates:\n- #c1 [short_term/project] 项目截止周五'));
 });

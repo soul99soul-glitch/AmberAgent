@@ -57,6 +57,7 @@ const panelFixture = (overrides = {}) => {
   const renders = [];
   vm.runInNewContext(compile(`class Panel { ${source.slice(start, end)} } exports.Panel = Panel;`), {
     exports, Error, String, BG: '#111111', INK: '#eeeeee', INK3: '#bbbbbb', SURFACE: '#222222', LINE: '#444444',
+    getProductKind: () => 'agent',
     PDF_DOCUMENT_URL: 'https://export.test/article', PRINT_CSS: '<style>PRINT</style>',
     isDeepReadPdfSupported: () => true,
     renderCapturedDeepReadTemplateHtml: (...args) => { renders.push(args); return '<head></head><article>BODY</article>'; },
@@ -65,7 +66,7 @@ const panelFixture = (overrides = {}) => {
   return { panel: Object.assign(new exports.Panel(), {
     currentActive: () => true, ready: true, complete: true, snapshot: { title: '文章', output: { summary: '已保存正文',
       templateSnapshot: { id: 'saved-custom', name: '保存版式', kind: 'custom', html: '<article>SAVED{{content}}</article>', capturedAt: 10 } } },
-    busy: false, fontScale: 1.8, fontSerif: true, customTemplateHtml: '<article>{{content}}</article>',
+    busy: false, fontScale: 1.8, fontSerif: true, darkMode: false, customTemplateHtml: '<article>{{content}}</article>',
     accentColorStore: '#ffaa00', pdfPreviewId: 0, pdfPreview: false, errorMessage: '', ...overrides,
   }), renders };
 };
@@ -78,7 +79,8 @@ test('PDF passes the saved template snapshot with full reading scale, serif and 
   assert.equal(renders[0][1], panel.snapshot.output);
   assert.notEqual(renders[0][1].templateSnapshot.html, panel.customTemplateHtml);
   assert.deepEqual({ ...renders[0][2] }, {
-    fontScale: 1.8, fontSerif: true, background: '#111111', foreground: '#eeeeee', muted: '#bbbbbb',
+    fontScale: 1.8, fontSerif: true, readerLayout: 'classic', readerStyle: 'classic', dark: false,
+    background: '#111111', foreground: '#eeeeee', muted: '#bbbbbb',
     surface: '#222222', border: '#444444', accent: '#ffaa00',
   });
   assert.ok(panel.pdfHtml.includes('PRINT'));

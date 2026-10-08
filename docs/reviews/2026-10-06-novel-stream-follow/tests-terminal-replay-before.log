@@ -1,0 +1,34 @@
+✔ novel stream growth requests native motion instead of jumping to the edge for every snapshot (84.506459ms)
+✔ terminal generation keeps the visible body until persisted messages replace it (19.850875ms)
+✔ late completion cannot change the follow mode of a newly attached run (10.831167ms)
+✔ a paused reader stays in place when generation completes (10.716916ms)
+✖ a terminal event replayed during subscribe does not restore the obsolete subscription (14.921583ms)
+✔ the measured tail accounts for archived discussion, proposal cards, and quick-start or failed rows (7.235959ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 841.721833
+
+✖ failing tests:
+
+test at harmony/entry/src/test/novel_stream_follow.test.cjs:104:1
+✖ a terminal event replayed during subscribe does not restore the obsolete subscription (14.921583ms)
+  AssertionError [ERR_ASSERTION]: a cached terminal is not an active subscription
+  + actual - expected
+  
+  + [Function (anonymous)]
+  - null
+  
+      at TestContext.<anonymous> (/Users/arquiel/Downloads/AI/amber-harmony-preview/harmony/entry/src/test/novel_stream_follow.test.cjs:114:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
