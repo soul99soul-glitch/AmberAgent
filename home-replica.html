@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23b9863a'/%3E%3C/svg%3E">
+<title>Amber · 首页高保真原型</title>
+<style>
+  :root {
+    --stage:#c8c2b5;
+    --frame:#f1eeea;
+    --bg:#ece8e4;
+    --card:#f6f5f3;
+    --fg:#161514;
+    --fg2:#716d67;
+    --sec:#55524d;
+    --card-shadow:0 1px 2px rgba(58,52,44,.09),0 5px 14px -6px rgba(58,52,44,.05);
+    --sep:rgba(22,20,16,.045);
+    --press:rgba(70,58,40,.06);
+    --hover-card:#f0eeea;
+    --active-card:#efe9df;
+    --av-active:#e8ddc6;
+    --av-active-ink:#6f5019;
+    --av-idle:#edebe7;
+    --av-idle-ink:#8f8b85;
+    --fab:#b9863a;
+    --fab-ink:#231602;
+    --focus:rgba(185,134,58,.55);
+    --glass-bg:linear-gradient(180deg,rgba(255,255,255,.78),rgba(255,255,255,.58));
+    --glass-edge:inset 0 0 0 .5px rgba(255,255,255,.5);
+    --glass-hi:inset 0 1px 0 rgba(255,255,255,.9);
+    --glass-shadow:0 10px 28px rgba(40,36,28,.1),0 2px 8px rgba(40,36,28,.06);
+    --ambient:rgba(185,134,58,.06);
+    --frame-shadow:0 22px 48px rgba(28,27,25,.13),0 8px 22px rgba(28,27,25,.08),inset 0 0 0 .5px rgba(255,255,255,.7);
+    --stage-scale:1;
+  }
+
+  html[data-theme="paper"] {
+    --stage:#cec5b2;
+    --frame:#f6f0e4;
+    --bg:#efe7d6;
+    --card:#fffdf7;
+    --fg:#1b1813;
+    --fg2:#746d62;
+    --sec:#5b5449;
+    --sep:rgba(38,30,20,.05);
+    --press:rgba(89,66,35,.055);
+    --hover-card:#f7f1e6;
+    --active-card:#f4ead8;
+    --av-active:#eadcbc;
+    --av-idle:#f0ebe2;
+    --av-idle-ink:#918a80;
+    --card-shadow:0 1px 2px rgba(76,59,34,.09),0 5px 14px -6px rgba(76,59,34,.06);
+  }
+
+  html[data-mode="dark"] {
+    --stage:#181619;
+    --frame:#2a282d;
+    --bg:#0e0d10;
+    --card:#1f1d23;
+    --fg:#f4f1ed;
+    --fg2:#aaa5ad;
+    --sec:#c3bec5;
+    --card-shadow:0 1px 2px rgba(0,0,0,.58),0 8px 20px -8px rgba(0,0,0,.76);
+    --sep:rgba(255,255,255,.055);
+    --press:rgba(255,255,255,.055);
+    --hover-card:#29262d;
+    --active-card:#302a25;
+    --av-active:#443824;
+    --av-active-ink:#e0ba72;
+    --av-idle:#2b2930;
+    --av-idle-ink:#aaa5ad;
+    --fab:#b9863a;
+    --fab-ink:#211402;
+    --glass-bg:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,.08));
+    --glass-edge:inset 0 0 0 .5px rgba(255,255,255,.16);
+    --glass-hi:inset 0 1px 0 rgba(255,255,255,.16);
+    --glass-shadow:0 10px 28px rgba(0,0,0,.3),0 2px 8px rgba(0,0,0,.22);
+    --ambient:rgba(185,134,58,.055);
+    --frame-shadow:0 22px 54px rgba(0,0,0,.4),0 8px 22px rgba(0,0,0,.24),inset 0 0 0 .5px rgba(255,255,255,.08);
+  }
+
+  * { box-sizing:border-box; }
+
+  html,
+  body {
+    width:100%;
+    min-height:100%;
+    margin:0;
+  }
+
+  body {
+    display:grid;
+    min-height:100svh;
+    place-items:center;
+    overflow:hidden;
+    background:var(--stage);
+    color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC",system-ui,sans-serif;
+    font-weight:400;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  button,
+  input { font:inherit; }
+
+  button,
+  a { -webkit-tap-highlight-color:transparent; }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible {
+    outline:0;
+    box-shadow:0 0 0 3px var(--focus);
+  }
+
+  .phone {
+    position:relative;
+    width:432px;
+    height:924px;
+    padding:6px;
+    overflow:hidden;
+    border-radius:60px;
+    background:var(--frame);
+    box-shadow:var(--frame-shadow);
+    transform:scale(var(--stage-scale));
+    transition:background .22s ease,box-shadow .22s ease;
+  }
+
+  .screen {
+    position:relative;
+    display:flex;
+    width:420px;
+    height:912px;
+    flex-direction:column;
+    overflow:hidden;
+    border-radius:55px;
+    background:var(--bg);
+    isolation:isolate;
+    transition:background .22s ease,color .22s ease;
+  }
+
+  .screen::before {
+    position:absolute;
+    z-index:-1;
+    inset:-80px -70px auto;
+    height:320px;
+    background:radial-gradient(circle at 78% 24%,var(--ambient),transparent 58%);
+    content:"";
+    pointer-events:none;
+  }
+
+  .ph {
+    display:block;
+    width:1em;
+    height:1em;
+    flex:0 0 auto;
+    fill:currentColor;
+  }
+
+  .status-bar {
+    display:flex;
+    height:76px;
+    flex:0 0 76px;
+    align-items:flex-end;
+    padding:0 43px 14px 47px;
+    color:var(--fg);
+    font-size:17px;
+    font-weight:600;
+    letter-spacing:-.01em;
+    line-height:20px;
+  }
+
+  .status-left,
+  .status-right {
+    display:flex;
+    align-items:center;
+  }
+
+  .status-left { gap:7px; }
+  .status-right { gap:6px; margin-left:auto; }
+
+  .time,
+  .battery { font-variant-numeric:tabular-nums; }
+
+  .silent { width:15px; height:15px; }
+
+  .signal {
+    display:flex;
+    width:17px;
+    height:13px;
+    align-items:flex-end;
+    gap:1.5px;
+  }
+
+  .signal span {
+    width:3px;
+    border-radius:2px 2px .8px .8px;
+    background:currentColor;
+  }
+
+  .signal span:nth-child(1) { height:4px; }
+  .signal span:nth-child(2) { height:8px; }
+  .signal span:nth-child(3) { height:13px; }
+
+  .wifi { width:16px; height:16px; }
+
+  .battery-wrap {
+    position:relative;
+    display:flex;
+    align-items:center;
+  }
+
+  .battery {
+    display:grid;
+    width:21px;
+    height:12px;
+    place-items:center;
+    border-radius:4px;
+    background:#000;
+    color:#fff;
+    font-size:9px;
+    font-weight:600;
+    letter-spacing:-.02em;
+    line-height:12px;
+  }
+
+  .battery-wrap::after {
+    width:2px;
+    height:4.5px;
+    margin-left:1px;
+    border-radius:0 1px 1px 0;
+    background:#cfcfcf;
+    content:"";
+  }
+
+  .app-header {
+    display:flex;
+    height:42px;
+    flex:0 0 42px;
+    align-items:center;
+    padding:0 16px;
+  }
+
+  .brand {
+    min-width:0;
+    flex:1 1 auto;
+    margin:0;
+    overflow:hidden;
+    color:var(--fg);
+    font-size:32px;
+    font-weight:700;
+    letter-spacing:-.02em;
+    line-height:1;
+    white-space:nowrap;
+    transition:width .28s cubic-bezier(.2,.8,.2,1),opacity .18s ease,flex-basis .28s cubic-bezier(.2,.8,.2,1);
+  }
+
+  .header-actions {
+    display:flex;
+    min-width:0;
+    flex:0 1 auto;
+    align-items:center;
+    gap:10px;
+    transition:flex .28s cubic-bezier(.2,.8,.2,1),gap .28s cubic-bezier(.2,.8,.2,1);
+  }
+
+  .glass {
+    background:var(--glass-bg);
+    box-shadow:var(--glass-edge),var(--glass-hi),var(--glass-shadow);
+    -webkit-backdrop-filter:blur(14px) saturate(1.5);
+    backdrop-filter:blur(14px) saturate(1.5);
+  }
+
+  .search-control {
+    position:relative;
+    height:42px;
+    min-width:0;
+    flex:0 0 78px;
+    transition:flex-basis .32s cubic-bezier(.2,.8,.2,1),flex-grow .32s cubic-bezier(.2,.8,.2,1);
+  }
+
+  .search-launch,
+  .search-form {
+    position:absolute;
+    top:2px;
+    right:0;
+    height:38px;
+    border:0;
+    border-radius:999px;
+    color:var(--fg2);
+  }
+
+  .search-launch {
+    display:flex;
+    width:78px;
+    align-items:center;
+    justify-content:center;
+    gap:7px;
+    padding:0 14px 0 12px;
+    cursor:pointer;
+    font-size:13px;
+    font-weight:600;
+    letter-spacing:.02em;
+    white-space:nowrap;
+    transition:color .18s ease,opacity .14s ease,transform .09s ease;
+  }
+
+  .search-launch:hover { color:var(--fg); }
+  .search-launch:active { transform:scale(.96); }
+  .search-launch .ph { width:14px; height:14px; }
+
+  .search-form {
+    display:grid;
+    width:100%;
+    grid-template-columns:0fr;
+    overflow:hidden;
+    opacity:0;
+    pointer-events:none;
+    transition:grid-template-columns .32s cubic-bezier(.2,.8,.2,1),opacity .14s ease;
+  }
+
+  .search-form-inner {
+    display:flex;
+    min-width:0;
+    align-items:center;
+    overflow:hidden;
+    padding:0 6px 0 12px;
+    gap:7px;
+  }
+
+  .search-form .ph {
+    width:14px;
+    height:14px;
+    color:var(--fg2);
+  }
+
+  .search-input {
+    min-width:0;
+    height:34px;
+    flex:1;
+    padding:0;
+    border:0;
+    outline:0;
+    background:transparent;
+    color:var(--fg);
+    font-size:13px;
+    font-weight:400;
+    letter-spacing:.01em;
+  }
+
+  .search-input::placeholder { color:var(--fg2); opacity:.82; }
+
+  .search-input::-webkit-search-cancel-button,
+  .search-input::-webkit-search-decoration {
+    display:none;
+    -webkit-appearance:none;
+  }
+
+  .search-input:focus-visible { box-shadow:none; }
+
+  .search-form:focus-within {
+    box-shadow:var(--glass-edge),var(--glass-hi),var(--glass-shadow),0 0 0 3px var(--focus);
+  }
+
+  .search-cancel {
+    height:30px;
+    flex:0 0 auto;
+    padding:0 8px;
+    border:0;
+    border-radius:999px;
+    background:transparent;
+    color:var(--fg2);
+    cursor:pointer;
+    font-size:12px;
+    font-weight:600;
+    letter-spacing:.02em;
+    transition:color .18s ease,background .18s ease,transform .09s ease;
+  }
+
+  .search-cancel:hover { color:var(--fg); background:var(--press); }
+  .search-cancel:active { transform:scale(.95); }
+
+  .settings-button,
+  .avatar {
+    display:grid;
+    flex:0 0 auto;
+    place-items:center;
+    overflow:hidden;
+    transition:width .28s cubic-bezier(.2,.8,.2,1),flex-basis .28s cubic-bezier(.2,.8,.2,1),opacity .18s ease,transform .28s cubic-bezier(.2,.8,.2,1);
+  }
+
+  .settings-button {
+    width:38px;
+    height:38px;
+    flex-basis:38px;
+    padding:0;
+    border:0;
+    border-radius:50%;
+    color:var(--fab);
+    cursor:pointer;
+  }
+
+  .settings-button .ph { width:20px; height:20px; }
+  .settings-button:active { transform:scale(.92); }
+
+  .avatar {
+    width:42px;
+    height:42px;
+    flex-basis:42px;
+    border-radius:50%;
+    background:var(--av-idle);
+    color:var(--av-idle-ink);
+  }
+
+  .avatar .ph { width:22px; height:22px; transform:translateY(2px); }
+
+  .app-header.searching .brand {
+    width:0;
+    flex:0 1 0;
+    opacity:0;
+  }
+
+  .app-header.searching .header-actions {
+    flex:1 1 auto;
+    gap:0;
+  }
+
+  .app-header.searching .search-control {
+    flex:1 1 auto;
+  }
+
+  .app-header.searching .search-launch {
+    opacity:0;
+    pointer-events:none;
+  }
+
+  .app-header.searching .search-form {
+    grid-template-columns:1fr;
+    opacity:1;
+    pointer-events:auto;
+  }
+
+  .app-header.searching .settings-button,
+  .app-header.searching .avatar {
+    width:0;
+    flex-basis:0;
+    opacity:0;
+    transform:scale(.72);
+    pointer-events:none;
+  }
+
+  .control-card {
+    margin:20px 16px 0;
+    overflow:hidden;
+    flex:0 0 auto;
+    border-radius:22px;
+    background:var(--card);
+    box-shadow:var(--card-shadow);
+  }
+
+  .continue-row {
+    display:flex;
+    min-width:0;
+    align-items:center;
+    gap:14px;
+    padding:18px 16px;
+    color:var(--fg);
+    text-decoration:none;
+    transition:background .18s ease,transform .09s ease;
+  }
+
+  .continue-row:hover { background:var(--hover-card); }
+  .continue-row:active { transform:scale(.985); }
+
+  .continue-icon {
+    display:grid;
+    width:44px;
+    height:44px;
+    flex:0 0 44px;
+    place-items:center;
+    border-radius:15px;
+    background:var(--av-active);
+    color:var(--av-active-ink);
+  }
+
+  .continue-icon .ph { width:22px; height:22px; }
+
+  .continue-copy {
+    display:flex;
+    min-width:0;
+    flex:1;
+    flex-direction:column;
+    gap:7px;
+  }
+
+  .continue-title {
+    overflow:hidden;
+    font-size:15px;
+    font-weight:600;
+    letter-spacing:.005em;
+    line-height:17px;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .continue-meta {
+    overflow:hidden;
+    color:var(--fg2);
+    font-size:11px;
+    font-weight:400;
+    letter-spacing:.01em;
+    line-height:13px;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .continue-cta {
+    display:grid;
+    height:32px;
+    flex:0 0 auto;
+    place-items:center;
+    padding:0 18px;
+    border-radius:999px;
+    background:var(--fg);
+    color:var(--bg);
+    font-size:13px;
+    font-weight:600;
+    letter-spacing:.02em;
+    transition:background .18s ease;
+  }
+
+  .continue-row:hover .continue-cta { background:var(--fg2); }
+
+  .card-separator {
+    height:1px;
+    margin:0 16px;
+    background:var(--sep);
+  }
+
+  .feature-row {
+    display:flex;
+    align-items:stretch;
+    padding:13px 0 15px;
+  }
+
+  .feature {
+    display:flex;
+    min-width:0;
+    flex:1;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+    gap:6px;
+    color:var(--fg2);
+    text-decoration:none;
+    transition:color .18s ease,background .18s ease,transform .09s ease;
+  }
+
+  .feature:hover { color:var(--fg); background:var(--press); }
+  .feature:active { transform:scale(.92); }
+  .feature .ph { width:20px; height:20px; }
+
+  .feature-label {
+    max-width:100%;
+    overflow:hidden;
+    font-size:11px;
+    font-weight:600;
+    letter-spacing:.01em;
+    line-height:13px;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .conversations {
+    display:flex;
+    min-height:0;
+    flex:1 1 auto;
+    flex-direction:column;
+  }
+
+  .section-title {
+    flex:0 0 auto;
+    margin:26px 0 0;
+    padding:0 16px;
+    color:var(--sec);
+    font-size:11px;
+    font-weight:600;
+    letter-spacing:.01em;
+    line-height:13px;
+  }
+
+  .conversation-scroll {
+    min-height:0;
+    flex:1 1 auto;
+    overflow-y:auto;
+    padding:12px 16px 112px;
+    overscroll-behavior:contain;
+    scrollbar-width:none;
+  }
+
+  .conversation-scroll::-webkit-scrollbar { display:none; }
+
+  .conversation-card {
+    position:relative;
+    overflow:hidden;
+    margin:0;
+    padding:0;
+    border-radius:22px;
+    background:var(--card);
+    box-shadow:var(--card-shadow);
+    list-style:none;
+  }
+
+  .conversation-row {
+    position:relative;
+    height:72px;
+    overflow:hidden;
+  }
+
+  .conversation-row[hidden] { display:none; }
+
+  .conversation-row:not(:last-child)::after {
+    position:absolute;
+    z-index:2;
+    right:16px;
+    bottom:0;
+    left:70px;
+    height:1px;
+    background:var(--sep);
+    content:"";
+    pointer-events:none;
+  }
+
+  .conversation-row.active::after { background:transparent; }
+
+  .conversation-link {
+    display:flex;
+    width:100%;
+    height:72px;
+    align-items:center;
+    color:var(--fg);
+    text-decoration:none;
+    transform-origin:center;
+    transition:background .18s ease,transform .09s ease;
+  }
+
+  .conversation-link:hover { background:var(--press); }
+  .conversation-link:active { transform:scale(.98); }
+  .conversation-row.active .conversation-link { background:var(--active-card); }
+
+  .conversation-avatar {
+    display:grid;
+    width:40px;
+    height:40px;
+    flex:0 0 40px;
+    margin-left:17px;
+    place-items:center;
+    border-radius:50%;
+    background:var(--av-idle);
+    color:var(--av-idle-ink);
+  }
+
+  .conversation-avatar .ph { width:20px; height:20px; }
+
+  .conversation-row.active .conversation-avatar {
+    background:var(--av-active);
+    color:var(--av-active-ink);
+  }
+
+  .conversation-copy {
+    display:flex;
+    min-width:0;
+    flex:1;
+    flex-direction:column;
+    gap:7px;
+    margin-left:13px;
+    padding-right:16px;
+  }
+
+  .conversation-title {
+    overflow:hidden;
+    font-size:16px;
+    font-weight:600;
+    letter-spacing:-.005em;
+    line-height:18px;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .conversation-meta {
+    overflow:hidden;
+    color:var(--fg2);
+    font-size:11px;
+    font-weight:400;
+    letter-spacing:.01em;
+    line-height:13px;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-variant-numeric:tabular-nums;
+  }
+
+  .empty-state {
+    display:none;
+    min-height:144px;
+    place-items:center;
+    padding:32px 20px;
+    color:var(--fg2);
+    font-size:13px;
+    font-weight:400;
+    letter-spacing:.01em;
+    text-align:center;
+  }
+
+  .conversation-card[data-empty="true"] .empty-state { display:grid; }
+
+  .fab {
+    position:absolute;
+    z-index:5;
+    right:21px;
+    bottom:67px;
+    display:grid;
+    width:56px;
+    height:56px;
+    place-items:center;
+    border-radius:50%;
+    background:radial-gradient(circle at 31% 25%,rgba(255,255,255,.3),transparent 37%),var(--fab);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),inset 0 -6px 12px rgba(7,25,13,.16),0 8px 20px rgba(146,104,30,.32);
+    color:var(--fab-ink);
+    text-decoration:none;
+    transition:transform .09s ease,box-shadow .18s ease;
+  }
+
+  .fab:hover {
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),inset 0 -6px 12px rgba(7,25,13,.16),0 10px 24px rgba(146,104,30,.38);
+  }
+
+  .fab:active { transform:scale(.91); }
+  .fab .ph { width:22px; height:22px; }
+
+  .cascade {
+    opacity:0;
+    animation:enter .48s cubic-bezier(.2,.8,.2,1) forwards;
+    animation-delay:var(--delay,0ms);
+  }
+
+  @keyframes enter {
+    from { opacity:0; transform:translateY(8px); }
+    to { opacity:1; transform:translateY(0); }
+  }
+
+  @media (prefers-reduced-motion:reduce) {
+    *,
+    *::before,
+    *::after {
+      scroll-behavior:auto !important;
+      animation-duration:.01ms !important;
+      animation-delay:0ms !important;
+      transition-duration:.01ms !important;
+    }
+
+    .cascade { opacity:1; }
+  }
+</style>
+</head>
+<body>
+<svg aria-hidden="true" width="0" height="0" style="position:absolute;overflow:hidden">
+  <symbol id="i-bell-simple-slash" viewBox="0 0 256 256"><path d="M221.84,192v0a1.85,1.85,0,0,1-3,.28L83.27,43.19a4,4,0,0,1,.8-6A79.55,79.55,0,0,1,129.17,24C173,24.66,207.8,61.1,208,104.92c.14,34.88,8.31,61.54,13.82,71A15.89,15.89,0,0,1,221.84,192ZM160,216H96.22A8.19,8.19,0,0,0,88,223.47,8,8,0,0,0,96,232h63.74a8.19,8.19,0,0,0,8.26-7.47A8,8,0,0,0,160,216ZM53.84,34.62A8,8,0,1,0,42,45.38L58.79,63.85A79.42,79.42,0,0,0,47.93,104c0,35.09-8.15,62-13.7,71.73a16.42,16.42,0,0,0,.09,16.68A15.78,15.78,0,0,0,47.91,200H182.62l19.45,21.38a8,8,0,0,0,11.85-10.76Z"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 256 256"><path d="M244.35,92.8l-104,125.43A15.93,15.93,0,0,1,128,224h0a15.93,15.93,0,0,1-12.31-5.77L11.65,92.8A15.65,15.65,0,0,1,8.11,80.91,15.93,15.93,0,0,1,14.28,70.1,186.67,186.67,0,0,1,128,32,186.67,186.67,0,0,1,241.72,70.1a15.93,15.93,0,0,1,6.17,10.81A15.65,15.65,0,0,1,244.35,92.8Z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 256 256"><path d="M168,112a56,56,0,1,1-56-56A56,56,0,0,1,168,112Zm61.66,117.66a8,8,0,0,1-11.32,0l-50.06-50.07a88,88,0,1,1,11.32-11.31l50.06,50.06A8,8,0,0,1,229.66,229.66ZM112,184a72,72,0,1,0-72-72A72.08,72.08,0,0,0,112,184Z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 256 256"><path d="M216,130.16q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.6,107.6,0,0,0-10.88-26.25,8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.29,107.29,0,0,0-26.25-10.86,8,8,0,0,0-7.06,1.48L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.6,107.6,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.49,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06ZM128,168a40,40,0,1,1,40-40A40,40,0,0,1,128,168Z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 256 256"><path d="M230.93,220a8,8,0,0,1-6.93,4H32a8,8,0,0,1-6.92-12c15.23-26.33,38.7-45.21,66.09-54.16a72,72,0,1,1,73.66,0c27.39,8.95,50.86,27.83,66.09,54.16A8,8,0,0,1,230.93,220Z"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 256 256"><path d="M227.32,73.37,182.63,28.69a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31l83.67-83.66,3.48,13.9-36.8,36.79a8,8,0,0,0,11.31,11.32l40-40a8,8,0,0,0,2.11-7.6l-6.9-27.61L227.32,96A16,16,0,0,0,227.32,73.37ZM192,108.69,147.32,64l24-24L216,84.69Z"/></symbol>
+  <symbol id="i-book-open" viewBox="0 0 256 256"><path d="M240,56V200a8,8,0,0,1-8,8H160a24,24,0,0,0-24,23.94,7.9,7.9,0,0,1-5.12,7.55A8,8,0,0,1,120,232a24,24,0,0,0-24-24H24a8,8,0,0,1-8-8V56a8,8,0,0,1,8-8H88a32,32,0,0,1,32,32v87.73a8.17,8.17,0,0,0,7.47,8.25,8,8,0,0,0,8.53-8V80a32,32,0,0,1,32-32h64A8,8,0,0,1,240,56Z"/></symbol>
+  <symbol id="i-notebook" viewBox="0 0 256 256"><path d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32ZM80,208H48V48H80Zm96-56H112a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Zm0-32H112a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Z"/></symbol>
+  <symbol id="i-chat-circle-dots" viewBox="0 0 256 256"><path d="M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24ZM84,140a12,12,0,1,1,12-12A12,12,0,0,1,84,140Zm44,0a12,12,0,1,1,12-12A12,12,0,0,1,128,140Zm44,0a12,12,0,1,1,12-12A12,12,0,0,1,172,140Z"/></symbol>
+  <symbol id="i-squares-four" viewBox="0 0 256 256"><path d="M120,56v48a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V56A16,16,0,0,1,56,40h48A16,16,0,0,1,120,56Zm80-16H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm-96,96H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm96,0H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Z"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 256 256"><path d="M128,24h0A104,104,0,1,0,232,128,104.12,104.12,0,0,0,128,24Zm78.36,64H170.71a135.28,135.28,0,0,0-22.3-45.6A88.29,88.29,0,0,1,206.37,88ZM216,128a87.61,87.61,0,0,1-3.33,24H174.16a157.44,157.44,0,0,0,0-48h38.51A87.61,87.61,0,0,1,216,128ZM128,43a115.27,115.27,0,0,1,26,45H102A115.11,115.11,0,0,1,128,43ZM102,168H154a115.11,115.11,0,0,1-26,45A115.27,115.27,0,0,1,102,168Zm-3.9-16a140.84,140.84,0,0,1,0-48h59.88a140.84,140.84,0,0,1,0,48Zm50.35,61.6a135.28,135.28,0,0,0,22.3-45.6h35.66A88.29,88.29,0,0,1,148.41,213.6Z"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 256 256"><path d="M235.54,150.21a104.84,104.84,0,0,1-37,52.91A104,104,0,0,1,32,120,103.09,103.09,0,0,1,52.88,57.48a104.84,104.84,0,0,1,52.91-37,8,8,0,0,1,10,10,88.08,88.08,0,0,0,109.8,109.8,8,8,0,0,1,10,10Z"/></symbol>
+  <symbol id="i-wine" viewBox="0 0 256 256"><path d="M205.33,103.67,183.56,29.74A8,8,0,0,0,175.89,24H80.11a8,8,0,0,0-7.67,5.74L50.67,103.67a63.46,63.46,0,0,0,17.42,64.67A87.41,87.41,0,0,0,120,191.63V232H88a8,8,0,1,0,0,16h80a8,8,0,1,0,0-16H136V191.63a87.39,87.39,0,0,0,51.91-23.29A63.48,63.48,0,0,0,205.33,103.67ZM86.09,40h83.82L190,108.19c.09.3.17.6.25.9-21.42,7.68-45.54-1.6-58.63-8.23C106.43,88.11,86.43,86.49,71.68,88.93Z"/></symbol>
+  <symbol id="i-sword" viewBox="0 0 256 256"><path d="M216,32H152a8,8,0,0,0-6.34,3.12l-64,83.21L72,108.69a16,16,0,0,0-22.64,0l-8.69,8.7a16,16,0,0,0,0,22.63l22,22-32,32a16,16,0,0,0,0,22.63l8.69,8.68a16,16,0,0,0,22.62,0l32-32,22,22a16,16,0,0,0,22.64,0l8.69-8.7a16,16,0,0,0,0-22.63l-9.64-9.64,83.21-64A8,8,0,0,0,224,104V40A8,8,0,0,0,216,32Zm-8,68.06-81.74,62.88L115.32,152l50.34-50.34a8,8,0,0,0-11.32-11.31L104,140.68,93.07,129.74,155.94,48H208Z"/></symbol>
+  <symbol id="i-crown" viewBox="0 0 256 256"><path d="M248,80a28,28,0,1,0-51.12,15.77l-26.79,33L146,73.4a28,28,0,1,0-36.06,0L85.91,128.74l-26.79-33a28,28,0,1,0-26.6,12L47,194.63A16,16,0,0,0,62.78,208H193.22A16,16,0,0,0,209,194.63l14.47-86.85A28,28,0,0,0,248,80ZM128,40a12,12,0,1,1-12,12A12,12,0,0,1,128,40ZM24,80A12,12,0,1,1,36,92,12,12,0,0,1,24,80ZM220,92a12,12,0,1,1,12-12A12,12,0,0,1,220,92Z"/></symbol>
+  <symbol id="i-list" viewBox="0 0 256 256"><path d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32ZM192,184H64a8,8,0,0,1,0-16H192a8,8,0,0,1,0,16Zm0-48H64a8,8,0,0,1,0-16H192a8,8,0,0,1,0,16Zm0-48H64a8,8,0,0,1,0-16H192a8,8,0,0,1,0,16Z"/></symbol>
+  <symbol id="i-scales" viewBox="0 0 256 256"><path d="M239.43,133l-32-80A8,8,0,0,0,200,48a8.27,8.27,0,0,0-1.73.21L136,62V40a8,8,0,0,0-16,0V65.58L54.27,80.21A8,8,0,0,0,48.57,85l-32,80a7.92,7.92,0,0,0-.57,3c0,23.31,24.54,32,40,32s40-8.69,40-32a7.92,7.92,0,0,0-.57-3L66.92,93.77,120,82V208H104a8,8,0,0,0,0,16h48a8,8,0,0,0,0-16H136V78.42L187,67.1,160.57,133a7.92,7.92,0,0,0-.57,3c0,23.31,24.54,32,40,32s40-8.69,40-32A7.92,7.92,0,0,0,239.43,133Zm-160,35H32.62L56,109.54Zm97.24-32L200,77.54,223.38,136Z"/></symbol>
+  <symbol id="i-music-notes" viewBox="0 0 256 256"><path d="M212.92,17.71a7.89,7.89,0,0,0-6.86-1.46l-128,32A8,8,0,0,0,72,56V166.1A36,36,0,1,0,88,196V102.25l112-28V134.1A36,36,0,1,0,216,164V24A8,8,0,0,0,212.92,17.71Z"/></symbol>
+  <symbol id="i-map-pin" viewBox="0 0 256 256"><path d="M128,16a88.1,88.1,0,0,0-88,88c0,75.3,80,132.17,83.41,134.55a8,8,0,0,0,9.18,0C136,236.17,216,179.3,216,104A88.1,88.1,0,0,0,128,16Zm0,56a32,32,0,1,1-32,32A32,32,0,0,1,128,72Z"/></symbol>
+  <symbol id="i-pill" viewBox="0 0 256 256"><path d="M216.43,39.6a53.27,53.27,0,0,0-75.33,0L39.6,141.09a53.26,53.26,0,0,0,75.32,75.31L216.43,114.91A53.32,53.32,0,0,0,216.43,39.6Zm-11.32,64-50.75,50.74-52.69-52.68,50.75-50.75a37.26,37.26,0,0,1,52.69,52.69ZM189.68,82.34a8,8,0,0,1,0,11.32l-24,24a8,8,0,1,1-11.31-11.32l24-24A8,8,0,0,1,189.68,82.34Z"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 256 256"><path d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM51.31,160l90.35-90.35,16.68,16.69L68,176.68ZM48,179.31,76.69,208H48Zm48,25.38L79.31,188l90.35-90.35h0l16.68,16.69Z"/></symbol>
+</svg>
+
+<main class="phone" aria-label="Amber iOS 首页高保真原型">
+  <section class="screen">
+    <div class="status-bar cascade" style="--delay:20ms" aria-label="状态栏">
+      <div class="status-left">
+        <span class="time">21:14</span>
+        <svg class="ph silent" aria-label="静音"><use href="#i-bell-simple-slash"/></svg>
+      </div>
+      <div class="status-right" aria-label="蜂窝网络、无线网络、电池百分之七十三">
+        <span class="signal" aria-hidden="true"><span></span><span></span><span></span></span>
+        <svg class="ph wifi" aria-hidden="true"><use href="#i-wifi"/></svg>
+        <span class="battery-wrap"><span class="battery">73</span></span>
+      </div>
+    </div>
+
+    <header class="app-header cascade" style="--delay:60ms">
+      <h1 class="brand">Amber</h1>
+      <div class="header-actions">
+        <div class="search-control">
+          <button class="search-launch glass" type="button" aria-expanded="false" aria-controls="search-form">
+            <svg class="ph" aria-hidden="true"><use href="#i-search"/></svg>
+            <span>搜索</span>
+          </button>
+          <form class="search-form glass" id="search-form" role="search" inert>
+            <div class="search-form-inner">
+              <svg class="ph" aria-hidden="true"><use href="#i-search"/></svg>
+              <input class="search-input" type="search" inputmode="search" autocomplete="off" placeholder="搜索会话" aria-label="搜索会话">
+              <button class="search-cancel" type="button">取消</button>
+            </div>
+          </form>
+        </div>
+        <button class="settings-button glass" type="button" aria-label="设置">
+          <svg class="ph" aria-hidden="true"><use href="#i-gear"/></svg>
+        </button>
+        <div class="avatar" role="img" aria-label="用户头像占位">
+          <svg class="ph" aria-hidden="true"><use href="#i-user"/></svg>
+        </div>
+      </div>
+    </header>
+
+    <section class="control-card cascade" style="--delay:100ms" aria-label="快捷控制">
+      <a class="continue-row" href="chat.html">
+        <span class="continue-icon">
+          <svg class="ph" aria-hidden="true"><use href="#i-pen"/></svg>
+        </span>
+        <span class="continue-copy">
+          <span class="continue-title">继续小说创作</span>
+          <span class="continue-meta">上次写到第三章，等你确认下一步走向</span>
+        </span>
+        <span class="continue-cta">继续</span>
+      </a>
+      <div class="card-separator" aria-hidden="true"></div>
+      <nav class="feature-row" aria-label="功能入口">
+        <a class="feature" href="board.html"><svg class="ph" aria-hidden="true"><use href="#i-book-open"/></svg><span class="feature-label">深度阅读</span></a>
+        <a class="feature" href="chat.html"><svg class="ph" aria-hidden="true"><use href="#i-notebook"/></svg><span class="feature-label">小说创作</span></a>
+        <a class="feature" href="council.html"><svg class="ph" aria-hidden="true"><use href="#i-chat-circle-dots"/></svg><span class="feature-label">模型议会</span></a>
+        <a class="feature" href="miniapps.html"><svg class="ph" aria-hidden="true"><use href="#i-squares-four"/></svg><span class="feature-label">小应用</span></a>
+        <a class="feature" href="webmount.html"><svg class="ph" aria-hidden="true"><use href="#i-globe"/></svg><span class="feature-label">WebMount</span></a>
+      </nav>
+    </section>
+
+    <section class="conversations" aria-labelledby="conversation-heading">
+      <h2 class="section-title cascade" id="conversation-heading" style="--delay:140ms">会话</h2>
+      <div class="conversation-scroll cascade" style="--delay:180ms">
+        <ul class="conversation-card" data-empty="false">
+          <li class="conversation-row active" data-title="赵光义晚年有怀念赵匡胤的记录吗">
+            <a class="conversation-link" href="chat.html?conversation=1" aria-current="page">
+              <span class="conversation-avatar"><svg class="ph" aria-hidden="true"><use href="#i-moon"/></svg></span>
+              <span class="conversation-copy"><span class="conversation-title">赵光义晚年有怀念赵匡胤的记录吗</span><span class="conversation-meta">20小时前 · 4 条</span></span>
+            </a>
+          </li>
+          <li class="conversation-row" data-title="梁圣和牢梁的区别是什么">
+            <a class="conversation-link" href="chat.html?conversation=2">
+              <span class="conversation-avatar"><svg class="ph" aria-hidden="true"><use href="#i-wine"/></svg></span>
+              <span class="conversation-copy"><span class="conversation-title">梁圣和牢梁的区别是什么</span><span class="conversation-meta">21小时前 · 2 条</span></span>
+            </a>
+          </li>
+          <li class="conversation-row" data-title="赵匡胤的打仗风格是什么样的？">
+            <a class="conversation-link" href="chat.html?conversation=3">
+              <span class="conversation-avatar"><svg class="ph" aria-hidden="true"><use href="#i-sword"/></svg></span>
+              <span class="conversation-copy"><span class="conversation-title">赵匡胤的打仗风格是什么样的？</span><span class="conversation-meta">23小时前 · 34 条</span></span>
+            </a>
+          </li>
+          <li class="conversation-row" data-title="赵匡胤在位 16 年也不短了，但是为…">
+            <a class="conversation-link" href="chat.html?conversation=4">
+              <span class="conversation-avatar"><svg class="ph" aria-hidden="true"><use href="#i-crown"/></svg></span>
+              <span class="conversation-copy"><span class="conversation-title">赵匡胤在位 16 年也不短了，但是为…</span><span class="conversation-meta">1天前 · 26 条</span></span>
+            </a>
+          </li>
+          <li class="conversation-row" data-title="明朝十六帝的顺序。">
+            <a class="conversation-link" href="chat.html?conversation=5">
+              <span class="conversation-avatar"><svg class="ph" aria-hidden="true"><use href="#i-list"/></svg></span>
+              <span class="conversation-copy"><span class="conversation-title">明朝十六帝的顺序。</span><span class="conversation-meta">2天前 · 12 条</span></span>
+            </a>
+          </li>
+          <li class="conversation-row" data-title="秦皇汉武，唐宗宋祖，到底谁应该被…">
+            <a class="conversation-link" href="chat.html?conversation=6">
+              <span class="conversation-avatar"><svg class="ph" aria-hidden="true"><use href="#i-scales"/></svg></span>
+              <span class="conversation-copy"><span class="conversation-title">秦皇汉武，唐宗宋祖，到底谁应该被…</span><span class="conversation-meta">2天前 · 6 条</span></span>
+            </a>
+          </li>
+          <li class="conversation-row" data-title="巫师三的经典 bgm 都有哪些">
+            <a class="conversation-link" href="chat.html?conversation=7">
+              <span class="conversation-avatar"><svg class="ph" aria-hidden="true"><use href="#i-music-notes"/></svg></span>
+              <span class="conversation-copy"><span class="conversation-title">巫师三的经典 bgm 都有哪些</span><span class="conversation-meta">2天前 · 4 条</span></span>
+            </a>
+          </li>
+          <li class="conversation-row" data-title="中国各朝各代的都城都在哪">
+            <a class="conversation-link" href="chat.html?conversation=8">
+              <span class="conversation-avatar"><svg class="ph" aria-hidden="true"><use href="#i-map-pin"/></svg></span>
+              <span class="conversation-copy"><span class="conversation-title">中国各朝各代的都城都在哪</span><span class="conversation-meta">3天前 · 2 条</span></span>
+            </a>
+          </li>
+          <li class="conversation-row" data-title="痛风药影响精子质量吗">
+            <a class="conversation-link" href="chat.html?conversation=9">
+              <span class="conversation-avatar"><svg class="ph" aria-hidden="true"><use href="#i-pill"/></svg></span>
+              <span class="conversation-copy"><span class="conversation-title">痛风药影响精子质量吗</span><span class="conversation-meta">4天前 · 4 条</span></span>
+            </a>
+          </li>
+          <li class="empty-state" aria-live="polite">没有匹配的会话</li>
+        </ul>
+      </div>
+    </section>
+
+    <a class="fab cascade" style="--delay:220ms" href="chat.html" aria-label="新建对话">
+      <svg class="ph" aria-hidden="true"><use href="#i-pencil"/></svg>
+    </a>
+  </section>
+</main>
+
+<span id="theme-status" role="status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)"></span>
+
+<script>
+  (() => {
+    const root = document.documentElement;
+    const header = document.querySelector('.app-header');
+    const launch = document.querySelector('.search-launch');
+    const form = document.querySelector('.search-form');
+    const input = document.querySelector('.search-input');
+    const cancel = document.querySelector('.search-cancel');
+    const card = document.querySelector('.conversation-card');
+    const rows = [...document.querySelectorAll('.conversation-row')];
+    const themeStatus = document.querySelector('#theme-status');
+
+    const fitPhone = () => {
+      const scale = Math.min(1, (window.innerWidth - 24) / 432, (window.innerHeight - 24) / 924);
+      root.style.setProperty('--stage-scale', Math.max(.4, scale).toFixed(4));
+    };
+
+    const filterRows = () => {
+      const query = input.value.trim().toLocaleLowerCase('zh-CN');
+      let visible = 0;
+      rows.forEach((row) => {
+        const match = row.dataset.title.toLocaleLowerCase('zh-CN').includes(query);
+        row.hidden = !match;
+        if (match) visible += 1;
+      });
+      card.dataset.empty = String(visible === 0);
+    };
+
+    const openSearch = () => {
+      header.classList.add('searching');
+      launch.setAttribute('aria-expanded', 'true');
+      form.removeAttribute('inert');
+      window.setTimeout(() => input.focus(), 170);
+    };
+
+    const closeSearch = () => {
+      input.value = '';
+      filterRows();
+      header.classList.remove('searching');
+      launch.setAttribute('aria-expanded', 'false');
+      form.setAttribute('inert', '');
+      launch.focus({ preventScroll:true });
+    };
+
+    const themes = [
+      { name:'默认主题', theme:null, mode:null },
+      { name:'暖纸主题', theme:'paper', mode:null },
+      { name:'深色主题', theme:null, mode:'dark' }
+    ];
+    let themeIndex = 0;
+
+    const cycleTheme = () => {
+      themeIndex = (themeIndex + 1) % themes.length;
+      const next = themes[themeIndex];
+      if (next.theme) root.dataset.theme = next.theme;
+      else delete root.dataset.theme;
+      if (next.mode) root.dataset.mode = next.mode;
+      else delete root.dataset.mode;
+      themeStatus.textContent = next.name;
+    };
+
+    launch.addEventListener('click', openSearch);
+    cancel.addEventListener('click', closeSearch);
+    input.addEventListener('input', filterRows);
+    form.addEventListener('submit', (event) => event.preventDefault());
+    window.addEventListener('resize', fitPhone, { passive:true });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && header.classList.contains('searching')) closeSearch();
+      if (event.key.toLocaleLowerCase() === 't' && document.activeElement !== input) cycleTheme();
+    });
+
+    window.setAmberTheme = (name = 'default') => {
+      const index = themes.findIndex((item) => item.theme === name || item.mode === name || (name === 'default' && !item.theme && !item.mode));
+      themeIndex = index >= 0 ? index : 0;
+      const selected = themes[themeIndex];
+      if (selected.theme) root.dataset.theme = selected.theme;
+      else delete root.dataset.theme;
+      if (selected.mode) root.dataset.mode = selected.mode;
+      else delete root.dataset.mode;
+      themeStatus.textContent = selected.name;
+    };
+
+    fitPhone();
+  })();
+</script>
+</body>
+</html>
