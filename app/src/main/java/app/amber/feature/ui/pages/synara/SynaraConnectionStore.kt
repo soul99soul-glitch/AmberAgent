@@ -26,6 +26,7 @@ class SynaraConnectionStore(
                 port = prefs[PORT] ?: SynaraConnection.DEFAULT_PORT,
                 token = prefs[TOKEN] ?: "",
                 useHttps = prefs[USE_HTTPS] ?: false,
+                mcpCredential = prefs[MCP_CREDENTIAL] ?: "",
             )
         }
         .distinctUntilChanged()
@@ -36,6 +37,7 @@ class SynaraConnectionStore(
             prefs[PORT] = connection.port.coerceIn(1, 65535)
             prefs[TOKEN] = connection.token.trim()
             prefs[USE_HTTPS] = connection.useHttps
+            prefs[MCP_CREDENTIAL] = connection.mcpCredential.trim()
         }
     }
 
@@ -44,5 +46,6 @@ class SynaraConnectionStore(
         val PORT = intPreferencesKey("port")
         val TOKEN = stringPreferencesKey("token")
         val USE_HTTPS = booleanPreferencesKey("use_https")
+        val MCP_CREDENTIAL = stringPreferencesKey("mcp_credential")
     }
 }

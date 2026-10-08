@@ -130,8 +130,22 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                 },
             )
 
+            OutlinedTextField(
+                value = draft.mcpCredential,
+                onValueChange = { cred -> vm.updateDraft { it.copy(mcpCredential = cred) } },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("External MCP Credential") },
+                placeholder = { Text("syn_mcp_v1_...") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                supportingText = {
+                    Text("Mac 运行 scripts/synara-external-mcp-setup.py 后粘贴；用于 Agent 调 Synara 任务 API")
+                },
+            )
+
             Text(
-                text = "目标：${runCatching { draft.httpBaseUrl() }.getOrDefault("—")}",
+                text = "目标：${runCatching { draft.httpBaseUrl() }.getOrDefault("—")}\n" +
+                    "MCP：${runCatching { draft.externalMcpUrl() }.getOrDefault("—")}",
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
                 color = workspace.muted,
@@ -201,10 +215,19 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                 Text("用 Chrome 打开（备用）")
             }
 
+            OutlinedButton(
+                onClick = { vm.installExternalMcp() },
+                enabled = !ui.checking && draft.isConfigured && draft.hasMcpCredential,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("写入 Amber MCP 设置")
+            }
+
             Text(
                 text = "Mac 侧快速启动（桌面已打开时）：\n" +
                     "  python3 scripts/synara-lan-bridge.py\n" +
-                    "终端会打印带 token 的完整 URL。",
+                    "  python3 scripts/synara-external-mcp-setup.py\n" +
+                    "把打印的 syn_mcp_v1_… 粘到上方，或 Settings→MCP→Import JSON。",
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
                 color = workspace.muted,

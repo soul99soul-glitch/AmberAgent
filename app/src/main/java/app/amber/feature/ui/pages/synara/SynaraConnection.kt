@@ -15,14 +15,22 @@ data class SynaraConnection(
     val port: Int = DEFAULT_PORT,
     val token: String = "",
     val useHttps: Boolean = false,
+    /** Paired External MCP credential (`syn_mcp_v1_...`). Not the desktop AUTH_TOKEN. */
+    val mcpCredential: String = "",
 ) {
     val isConfigured: Boolean
         get() = host.isNotBlank() && port in 1..65535 && token.isNotBlank()
+
+    val hasMcpCredential: Boolean
+        get() = mcpCredential.trim().startsWith(MCP_CREDENTIAL_PREFIX)
 
     fun httpBaseUrl(): String {
         val scheme = if (useHttps) "https" else "http"
         return "$scheme://${host.trim()}:$port"
     }
+
+    /** Streamable HTTP endpoint for Synara External MCP (task A2A API). */
+    fun externalMcpUrl(): String = httpBaseUrl().trimEnd('/') + "/mcp/external"
 
     /** HTTP page URL (token in query for SPA bootstrap). */
     fun workspaceUrl(): String {
@@ -37,6 +45,42 @@ data class SynaraConnection(
     fun wsBootstrapUrl(): String {
         val scheme = if (useHttps) "wss" else "ws"
         return "$scheme://${host.trim()}:$port/ws?token=${token.trim().encodeUrlComponent()}"
+    }
+
+    /** Synara 0.7+ HTTP negotiate endpoint (plain HTTP, before feature WS). */
+    fun negotiateUrl(
+        clientBuild: String = "amber-companion",
+        protocolEpoch: Int = 1,
+        minRevision: Int = 1,
+        maxRevision: Int = 1,
+        requiredCapabilities: List<String> = DEFAULT_REQUIRED_CAPABILITIES,
+    ): String {
+        val base = httpBaseUrl().trimEnd('/') + "/ws/negotiate"
+        val caps = requiredCapabilities.joinToString("&") {
+            "x-synara-required-capability=${it.encodeUrlComponent()}"
+        }
+        return "$base?" +
+            "x-synara-client-build=${clientBuild.encodeUrlComponent()}" +
+            "&x-synara-protocol-epoch=$protocolEpoch" +
+            "&x-synara-protocol-min-revision=$minRevision" +
+            "&x-synara-protocol-max-revision=$maxRevision" +
+            "&$caps"
+    }
+
+    /** Feature WS after HTTP negotiate (Synara 0.7+). */
+    fun featureWsUrl(
+        protocolEpoch: Int,
+        protocolRevision: Int,
+        serverInstanceId: String,
+        clientBuild: String = "amber-companion",
+    ): String {
+        val scheme = if (useHttps) "wss" else "ws"
+        return "$scheme://${host.trim()}:$port/ws" +
+            "?token=${token.trim().encodeUrlComponent()}" +
+            "&x-synara-client-build=${clientBuild.encodeUrlComponent()}" +
+            "&x-synara-protocol-epoch=$protocolEpoch" +
+            "&x-synara-protocol-revision=$protocolRevision" +
+            "&x-synara-server-instance=${serverInstanceId.encodeUrlComponent()}"
     }
 
     fun healthUrl(): String = httpBaseUrl().trimEnd('/') + "/health"
@@ -54,6 +98,13 @@ data class SynaraConnection(
 
     companion object {
         const val DEFAULT_PORT = 3773
+        const val MCP_CREDENTIAL_PREFIX = "syn_mcp_v1_"
+        const val MCP_SERVER_NAME = "Synara"
+        val DEFAULT_REQUIRED_CAPABILITIES = listOf(
+            "orchestration.cursor-safe-streams",
+            "orchestration.thread-detail-snapshot",
+            "rpc.typed-errors",
+        )
     }
 }
 

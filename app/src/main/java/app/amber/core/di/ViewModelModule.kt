@@ -70,7 +70,7 @@ val viewModelModule = module {
     }
     viewModelOf(::LiveCompanionVM)
     single { SynaraConnectionStore(androidContext()) }
-    viewModel { SynaraVM(store = get()) }
+    viewModel { SynaraVM(store = get(), settingsStore = get()) }
     single { ZCodeUrlStore(androidContext()) }
     viewModel<ShareHandlerVM> {
         ShareHandlerVM(

@@ -2,6 +2,9 @@ package app.amber.feature.ui.pages.synara
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.amber.core.ai.mcp.McpCommonOptions
+import app.amber.core.ai.mcp.McpServerConfig
+import app.amber.core.settings.prefs.SettingsAggregator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -33,6 +36,7 @@ data class SynaraUiState(
 
 class SynaraVM(
     private val store: SynaraConnectionStore,
+    private val settingsStore: SettingsAggregator,
 ) : ViewModel() {
     private val client = OkHttpClient.Builder()
         .connectTimeout(4, TimeUnit.SECONDS)
@@ -75,6 +79,69 @@ class SynaraVM(
         }
     }
 
+    /**
+     * Upserts a Streamable HTTP MCP server pointing at Synara External MCP.
+     * Credential comes from Mac-side `scripts/synara-external-mcp-setup.py` (prefix syn_mcp_v1_).
+     */
+    fun installExternalMcp() {
+        val draft = _ui.value.draft
+        val hostError = draft.validationError()
+        if (hostError != null) {
+            _ui.update { it.copy(lastCheckOk = false, lastCheckMessage = hostError) }
+            return
+        }
+        val credential = draft.mcpCredential.trim()
+        if (!credential.startsWith(SynaraConnection.MCP_CREDENTIAL_PREFIX)) {
+            _ui.update {
+                it.copy(
+                    lastCheckOk = false,
+                    lastCheckMessage = "请粘贴 External MCP credential（以 syn_mcp_v1_ 开头）",
+                )
+            }
+            return
+        }
+        viewModelScope.launch {
+            store.save(draft)
+            val settings = settingsStore.settingsFlow.first { !it.init }
+            val url = draft.externalMcpUrl()
+            val headers = listOf("Authorization" to "Bearer $credential")
+            val existing = settings.mcpServers.firstOrNull {
+                it.commonOptions.name.equals(SynaraConnection.MCP_SERVER_NAME, ignoreCase = true) ||
+                    (it is McpServerConfig.StreamableHTTPServer && it.url == url)
+            }
+            val nextServer = when (existing) {
+                is McpServerConfig.StreamableHTTPServer -> existing.copy(
+                    url = url,
+                    commonOptions = existing.commonOptions.copy(
+                        enable = true,
+                        name = SynaraConnection.MCP_SERVER_NAME,
+                        headers = headers,
+                    ),
+                )
+                else -> McpServerConfig.StreamableHTTPServer(
+                    commonOptions = McpCommonOptions(
+                        enable = true,
+                        name = SynaraConnection.MCP_SERVER_NAME,
+                        headers = headers,
+                    ),
+                    url = url,
+                )
+            }
+            val mcpServers = if (existing != null) {
+                settings.mcpServers.map { if (it.id == existing.id) nextServer else it }
+            } else {
+                settings.mcpServers + nextServer
+            }
+            settingsStore.update(settings.copy(mcpServers = mcpServers))
+            _ui.update {
+                it.copy(
+                    lastCheckOk = true,
+                    lastCheckMessage = "已写入 MCP「${SynaraConnection.MCP_SERVER_NAME}」· $url\n请在当前 Assistant 勾选该服务器",
+                )
+            }
+        }
+    }
+
     fun testConnection() {
         val draft = _ui.value.draft
         val error = draft.validationError()
@@ -114,16 +181,44 @@ class SynaraVM(
             if (!status.equals("ok", ignoreCase = true)) {
                 error("health 未就绪（status=${status.ifBlank { "empty" }}）")
             }
-            probeAuthenticatedWebSocket(connection)
+            // Synara 0.7+: negotiate over HTTP, then open feature /ws with compatibility params.
+            // Plain /ws?token= alone returns 426 WS_NEGOTIATION_REQUIRED.
+            val negotiateBody = client.newCall(
+                Request.Builder()
+                    .url(connection.negotiateUrl())
+                    .get()
+                    .header("Accept", "application/json")
+                    .build(),
+            ).execute().use { response ->
+                val body = response.body.string()
+                if (!response.isSuccessful) {
+                    error("negotiate HTTP ${response.code}: ${body.take(180)}")
+                }
+                body
+            }
+            val negotiated = JSONObject(negotiateBody)
+            val protocolEpoch = negotiated.optInt("protocolEpoch", 0)
+            val revision = negotiated.optInt("negotiatedRevision", 0)
+            val serverInstanceId = negotiated.optString("serverInstanceId")
+            if (protocolEpoch <= 0 || revision <= 0 || serverInstanceId.isBlank()) {
+                error("negotiate 响应不完整")
+            }
+            probeAuthenticatedWebSocket(
+                connection.featureWsUrl(
+                    protocolEpoch = protocolEpoch,
+                    protocolRevision = revision,
+                    serverInstanceId = serverInstanceId,
+                ),
+            )
             "健康检查和 Auth Token 验证通过 · ${connection.httpBaseUrl()}"
         }
     }
 
-    private suspend fun probeAuthenticatedWebSocket(connection: SynaraConnection) = withTimeout(5_000L) {
+    private suspend fun probeAuthenticatedWebSocket(wsUrl: String) = withTimeout(5_000L) {
         suspendCancellableCoroutine { continuation ->
             lateinit var socket: WebSocket
             socket = client.newWebSocket(
-                Request.Builder().url(connection.wsBootstrapUrl()).build(),
+                Request.Builder().url(wsUrl).build(),
                 object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: Response) {
                         if (continuation.isActive) continuation.resume(Unit)

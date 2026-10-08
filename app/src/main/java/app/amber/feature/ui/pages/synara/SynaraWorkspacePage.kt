@@ -13,9 +13,11 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.ScriptHandler
@@ -74,25 +77,35 @@ fun SynaraWorkspacePage(connection: SynaraConnection) {
         }
     }
 
-    if (validationError != null) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(text = validationError, color = MaterialTheme.colorScheme.error)
+    // RouteActivity is edge-to-edge; keep Synara chrome below the status bar
+    // (same pattern as MiniAppRunnerPage). Status-bar strip stays black to match SPA.
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+    ) {
+        if (validationError != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(text = validationError, color = MaterialTheme.colorScheme.error)
+            }
+        } else {
+            SynaraAndroidWebView(
+                connection = connection,
+                pageUrl = pageUrl,
+                onWebViewReady = { webViewRef = it },
+                onCanGoBack = { canGoBack = it },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding(),
+            )
         }
-        return
     }
-
-    SynaraAndroidWebView(
-        connection = connection,
-        pageUrl = pageUrl,
-        onWebViewReady = { webViewRef = it },
-        onCanGoBack = { canGoBack = it },
-        modifier = Modifier.fillMaxSize(),
-    )
 }
 
 @SuppressLint("SetJavaScriptEnabled")
