@@ -59,6 +59,13 @@ object PerfFlags {
     const val STREAMING_IMMEDIATE_CONTENT_REVEAL = false
 
     /**
+     * 正文流式对齐 iOS 发布节拍：显示内容即最新快照（不经逐帧节奏器与呈现闸门），
+     * 每次快照都解析（冻结已完成块、只解析活跃尾块，补全未闭合语法），不渲染未解析的
+     * 原样尾巴；流式与完成态同一块渲染器，新增文字按批整体淡入。
+     */
+    const val STREAMING_PUBLISH_CADENCE_MARKDOWN = true
+
+    /**
      * Streaming bottom-follow A/B — route chunk and visible-frame follow
      * requests through one conflated stream, then snap/settle at most once per
      * frame. Default keeps the legacy direct requestScroll path.

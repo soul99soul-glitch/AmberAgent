@@ -346,7 +346,10 @@ internal fun MessagePartsBlock(
                                         if (isStreamingText) singleTextDrained = false
                                     }
                                     val streamingMarkdownContent: (@Composable () -> Unit)? =
-                                        if ((isStreamingText || !singleTextDrained) && !deferStreamingParse) {
+                                        // iOS 发布节拍下流式与完成态同一 MarkdownBlock，不经单 Text、结尾不换渲染器。
+                                        if ((isStreamingText || !singleTextDrained) && !deferStreamingParse &&
+                                            !app.amber.feature.ui.components.richtext.streamingPublishCadenceEnabled()
+                                        ) {
                                             {
                                                 StreamingSingleTextMarkdown(
                                                     text = part.text,

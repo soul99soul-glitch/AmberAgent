@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Offset
@@ -96,6 +97,23 @@ enum class ReasoningCardState(val expanded: Boolean) {
     Preview(true),
     Expanded(true),
 }
+
+/**
+ * 思考框跟随一帧的滚动量：速度 = min(上限, 剩余 / [REASONING_FOLLOW_EASE_SECONDS])，
+ * 且不低于 [REASONING_FOLLOW_MIN_DP_PER_SECOND]。新增一行时起步平缓、临近底部减速，
+ * 不再每行以 540dp/s 急起急停；大段追赶仍受同一上限约束（iOS 推理卡同口径）。
+ */
+internal fun reasoningFollowStep(remaining: Float, seconds: Float, density: Float): Float {
+    if (remaining <= 0f) return 0f
+    val speed = (remaining / REASONING_FOLLOW_EASE_SECONDS).coerceIn(
+        REASONING_FOLLOW_MIN_DP_PER_SECOND * density,
+        REASONING_PREVIEW_FOLLOW_DP_PER_SECOND * density,
+    )
+    return minOf(remaining, speed * seconds)
+}
+
+private const val REASONING_FOLLOW_EASE_SECONDS = 0.28f
+private const val REASONING_FOLLOW_MIN_DP_PER_SECOND = 24f
 
 internal fun reasoningCardStateAfterToggle(nextExpanded: Boolean): ReasoningCardState =
     if (nextExpanded) ReasoningCardState.Expanded else ReasoningCardState.Collapsed
@@ -232,12 +250,8 @@ private fun ReasoningContent(
                     val now = withFrameNanos { it }
                     val seconds = ((now - lastNanos) / 1_000_000_000f).coerceAtMost(0.1f)
                     lastNanos = now
-                    scrollBy(
-                        minOf(
-                            (scrollState.maxValue - scrollState.value).toFloat(),
-                            REASONING_PREVIEW_FOLLOW_DP_PER_SECOND * density * seconds,
-                        ),
-                    )
+                    val remaining = (scrollState.maxValue - scrollState.value).toFloat()
+                    scrollBy(reasoningFollowStep(remaining, seconds, density))
                 }
             }
         }
@@ -245,6 +259,7 @@ private fun ReasoningContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (loading) Modifier.preferredFrameRate(120f) else Modifier)
             .nestedScroll(scrollConnection)
             .let { contentModifier ->
                 if (isPreview) {

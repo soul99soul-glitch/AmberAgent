@@ -617,7 +617,7 @@ internal fun ChatListNormal(
                                             state = state,
                                             lazyIndex = planIndex,
                                             followBottomPx = bottomPinBufferPx,
-                                        ).animateContentSize(
+                                        ).streamingFrameRate(active = true).animateContentSize(
                                             animationSpec = spring(
                                                 dampingRatio = Spring.DampingRatioNoBouncy,
                                                 stiffness = Spring.StiffnessMedium,

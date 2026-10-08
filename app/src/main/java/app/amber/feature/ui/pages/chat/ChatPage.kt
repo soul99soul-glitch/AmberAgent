@@ -388,6 +388,7 @@ fun ChatPage(
 
     val compactInTimelineActive = isCompacting || compactLifecycleState.isActive
     val activeGeneration = loadingJob != null || pendingUserMessages.isNotEmpty() || compactInTimelineActive
+    PreferStreamingFrameRate(active = loadingJob != null)
     // Preserve the deep-link first-visible index at the same point as before. This
     // snapshot is used only when the LazyListState is first created; live plans are
     // collected and built inside the list content below.
@@ -946,7 +947,7 @@ private fun ChatPageContent(
         shelfOpen = false
     }
     CompositionLocalProvider(LocalTimelineHighlight provides timelineHighlight) {
-    Box(modifier = Modifier.fillMaxSize().amberCanvas()) {
+    Box(modifier = Modifier.fillMaxSize().amberCanvas().streamingFrameRate(loadingJob != null)) {
         Scaffold(
             modifier = Modifier.amberTraceMeasure("Amber ChatPage measure"),
             topBar = {

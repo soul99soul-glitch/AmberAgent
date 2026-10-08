@@ -1127,10 +1127,10 @@ internal class StreamingMarkdownParseCache {
                 return@traceMarkdown parsed
             }
 
-            val finalizedTailBlocks = tailParse.tree.children.mapIndexed { index, child ->
+            val finalizedTailBlocks = tailParse.tree.children.map { child ->
                 val blockContent = tail.substring(child.startOffset, child.endOffset)
                 MarkdownTopLevelBlockSnapshot(
-                    key = "active:${child.type}:${prefix.length + child.startOffset}:$index",
+                    key = markdownBlockKey(child, prefix.length),
                     parseResult = MarkdownParseCache.getOrParsePreprocessed(blockContent),
                     preserveParagraphBottomPadding = child.type == MdNodeType.Paragraph &&
                         child.nextSibling() != null &&
@@ -1152,7 +1152,7 @@ internal class StreamingMarkdownParseCache {
      *
      * Unlike [parse], this does NOT promote any active-tail block into
      * [stableTopLevelBlocks]. The active children stay with their
-     * `"active:type:offset:idx"` keys, which match the final streaming frame,
+     * source-position keys, which match the final streaming frame,
      * so Compose reuses the warm compositions instead of cold-rebuilding them.
      * No subtree destruction → no height collapse → no viewport jump.
      *
@@ -1197,7 +1197,7 @@ internal class StreamingMarkdownParseCache {
                 return@traceMarkdown parseMarkdownUncached(content)
             }
             // Existing stable blocks + full active tail, without promoting
-            // any active child to stable → active-tail keys stay "active:…"
+            // any active child to stable; source-position keys stay unchanged.
             if (BuildConfig.DEBUG) {
                 android.util.Log.d(
                     "AmberChatScroll",
@@ -1252,15 +1252,12 @@ internal class StreamingMarkdownParseCache {
         // progress — the batch fade is a purely visual layer.
         val newlyStableChildren = activeChildren.dropLast(1)
 
-        // Streamdown principle: stable block keys are INDEX-based, not content
-        // hashes. Promoted blocks are frozen at promotion time and only ever
-        // APPEND, so "type:index" keeps the same Compose instance across every
-        // subsequent tick — a hash key would unmount/remount on any late
-        // content correction of an already-promoted block.
-        val nextStableBlocks = blocks + newlyStableChildren.mapIndexed { stableIndex, child ->
+        // The absolute source position stays unchanged when an active block is
+        // promoted. A separate stable key would recreate its cells and layout.
+        val nextStableBlocks = blocks + newlyStableChildren.map { child ->
             val blockContent = activePreprocessed.substring(child.startOffset, child.endOffset)
             MarkdownTopLevelBlockSnapshot(
-                key = "stable:${child.type}:${blocks.size + stableIndex}",
+                key = markdownBlockKey(child, prefix.length),
                 parseResult = MarkdownParseCache.getOrParsePreprocessed(blockContent),
                 preserveParagraphBottomPadding = child.type == MdNodeType.Paragraph &&
                     child.nextSibling() != null &&
@@ -1459,22 +1456,39 @@ internal fun MarkdownBlockLegacy(
             }
         }
     }
-    val bufferStreaming = streaming && !content.shouldBypassStreamingDisplayBuffer()
-    val renderContent = rememberStreamingDisplayText(
-        content = content,
-        streaming = bufferStreaming,
-        onVisibleFrame = onStreamingVisibleFrame,
-    )
-    val displayDrainingAfterStream = !streaming &&
-        renderContent != content &&
-        content.startsWith(renderContent)
-    val presentationInputActive = streaming || displayDrainingAfterStream
-    val presentation = rememberStreamingMarkdownPresentation(
-        content = renderContent,
-        inputActive = presentationInputActive,
-    )
-    val semanticContent = presentation.semanticContent
-    val parseAsStreamingState = presentationInputActive || presentation.motionActive
+    // 普通聊天显示最新已解析快照。议会等明确暂缓解析的调用保持原呈现路径，
+    // 否则关闭原样尾巴的同时跳过解析，会让新内容一直不可见。
+    // 实例生命周期内固定，完成态继续沿用同一条路径。
+    val publishCadence = remember {
+        streamingPublishCadenceEnabled() && !deferStreamingParse
+    }
+    val renderContent: String
+    val semanticContent: String
+    val parseAsStreamingState: Boolean
+    if (publishCadence) {
+        renderContent = content
+        semanticContent = content
+        parseAsStreamingState = streaming
+        val updatedOnVisible by rememberUpdatedState(onStreamingVisibleFrame)
+        SideEffect { if (streaming) updatedOnVisible?.invoke() }
+    } else {
+        val bufferStreaming = streaming && !content.shouldBypassStreamingDisplayBuffer()
+        renderContent = rememberStreamingDisplayText(
+            content = content,
+            streaming = bufferStreaming,
+            onVisibleFrame = onStreamingVisibleFrame,
+        )
+        val displayDrainingAfterStream = !streaming &&
+            renderContent != content &&
+            content.startsWith(renderContent)
+        val presentationInputActive = streaming || displayDrainingAfterStream
+        val presentation = rememberStreamingMarkdownPresentation(
+            content = renderContent,
+            inputActive = presentationInputActive,
+        )
+        semanticContent = presentation.semanticContent
+        parseAsStreamingState = presentationInputActive || presentation.motionActive
+    }
     ReportStreamingVisualActive(
         active = parseAsStreamingState,
         onActiveChange = onStreamingVisualActiveChange,
@@ -1496,11 +1510,7 @@ internal fun MarkdownBlockLegacy(
     // 监听内容变化，重新解析AST树
     // 这里在后台线程解析AST树, 防止频繁更新的时候掉帧
     //
-    // TD.Rust.1+ streaming parse throttle (review #8): on streaming content,
-    // allow one AST refresh roughly every MARKDOWN_STREAMING_PARSE_THROTTLE_MS
-    // so token bursts do not re-parse on every frame. The visible text still
-    // advances continuously via rememberStreamingDisplayText; only the AST
-    // refresh rate is capped.
+    // 普通聊天每次快照解析；旧呈现路径保留 AST 节流和未解析尾部显示。
     val updatedContent by rememberUpdatedState(semanticContent)
     val updatedParseAsStreaming by rememberUpdatedState(parseAsStreamingState)
     val updatedDeferStreamingParse by rememberUpdatedState(deferStreamingParse)
@@ -1530,12 +1540,17 @@ internal fun MarkdownBlockLegacy(
         }
         lastMotionContent.value = renderContent
     }
-    val streamingLiveSuffix = streamingLiveSuffixFor(
-        renderContent = renderContent,
-        activeBaseOffset = data.activeBaseOffset,
-        parsedPreprocessed = data.preprocessed,
-        syntheticSuffixStart = data.syntheticSuffixStart,
-    )
+    // 发布节拍模式只渲染解析结果：未解析的原样尾巴不上屏（下一拍解析即接上）。
+    val streamingLiveSuffix = if (publishCadence) {
+        EMPTY_STREAMING_LIVE_SUFFIX
+    } else {
+        streamingLiveSuffixFor(
+            renderContent = renderContent,
+            activeBaseOffset = data.activeBaseOffset,
+            parsedPreprocessed = data.preprocessed,
+            syntheticSuffixStart = data.syntheticSuffixStart,
+        )
+    }
     SideEffect {
         StreamingRenderProbe.liveSuffixLength = streamingLiveSuffix.text.length
         if (!parseAsStreamingState) {
@@ -1564,6 +1579,7 @@ internal fun MarkdownBlockLegacy(
                 }
                 val nowMs = SystemClock.uptimeMillis()
                 if (
+                    publishCadence ||
                     lastStreamingParseAtMs == 0L ||
                     nowMs - lastStreamingParseAtMs >= MARKDOWN_STREAMING_PARSE_THROTTLE_MS
                 ) {
@@ -1571,20 +1587,21 @@ internal fun MarkdownBlockLegacy(
                     emit(triple)
                 }
             }
-            .collectLatest { (latestContent, parseAsStreaming, latestDeferStreamingParse) ->
+            // 发布节拍：在途解析完成后取最新快照，不被下一拍取消，也不积压旧快照。
+            .collectMarkdownParses(sequential = publishCadence) { (latestContent, parseAsStreaming, latestDeferStreamingParse) ->
                 if (
                     latestContent == lastParsedContent &&
                     parseAsStreaming == lastParsedStreaming &&
                     latestDeferStreamingParse == lastDeferred
                 ) {
-                    return@collectLatest
+                    return@collectMarkdownParses
                 }
                 if (parseAsStreaming && latestDeferStreamingParse) {
                     lastDeferred = latestDeferStreamingParse
                     StreamingRenderProbe.record {
                         "parse_deferred len=${latestContent.length}"
                     }
-                    return@collectLatest
+                    return@collectMarkdownParses
                 }
                 try {
                     val parsed = withContext(Dispatchers.Default) {
@@ -1592,7 +1609,7 @@ internal fun MarkdownBlockLegacy(
                             streamingParseCache.parse(content = latestContent)
                         } else {
                             // finalParse preserves the streaming-phase key structure
-                            // (stable blocks unchanged, active tail keys stay "active:…")
+                            // (completed and active blocks keep their source-position keys)
                             // so Compose reuses warm compositions — no rebuild, no
                             // height collapse, no viewport jump.
                             val result = streamingParseCache.finalParse(latestContent)
@@ -1628,6 +1645,7 @@ internal fun MarkdownBlockLegacy(
     TraceMarkdownComposable("Amber MarkdownBlock render") {
       CompositionLocalProvider(
           LocalMarkdownFillWidth provides fillWidth,
+          LocalStreamingPublishCadence provides publishCadence,
       ) {
         if (data.hasHtmlBlocks) {
             MarkdownNew(
@@ -1644,58 +1662,31 @@ internal fun MarkdownBlockLegacy(
                         .amberTraceMeasure("Amber MarkdownBlock measure")
                 ) {
                     val nodeModifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
-                    val children = data.tree.children
-                    // Streamdown-style rendering: EVERY frame (streaming tick,
-                    // final freeze, settled full parse) renders through the same
-                    // stable + active structure with the same key schemes, so
-                    // transitions (empty ↔ non-empty stable list, cache reset,
-                    // streaming → settled) never re-key existing blocks. The
-                    // stable list being empty simply means all children are
-                    // active — identical code path, zero branch flip.
-                    data.stableTopLevelBlocks.fastForEach { block ->
+                    val blocks = remember(data) { data.renderBlocks() }
+                    val inheritedOffset = LocalMarkdownSourceOffsetBase.current
+                    val inheritedSyntheticStart = LocalMarkdownSyntheticSuffixStart.current
+                    blocks.fastForEach { block ->
                         key(block.key) {
+                            val childLiveSuffix = if (block.lastActive) {
+                                streamingLiveSuffix
+                            } else {
+                                EMPTY_STREAMING_LIVE_SUFFIX
+                            }
                             CompositionLocalProvider(
-                                LocalStreamingTailActive provides null,
-                                LocalStreamingMarkdownMotionScope provides null,
+                                LocalStreamingTailActive provides if (block.stable) null else streamingTailActive,
+                                LocalMarkdownSourceOffsetBase provides if (block.stable) inheritedOffset else data.activeBaseOffset,
+                                LocalMarkdownSyntheticSuffixStart provides if (block.stable) inheritedSyntheticStart else data.syntheticSuffixStart,
+                                LocalStreamingMarkdownMotionScope provides if (block.lastActive) streamingMotionScope else null,
                             ) {
                                 val blockModifier = if (block.preserveParagraphBottomPadding) {
                                     nodeModifier.padding(bottom = LocalTextStyle.current.fontSize.toDp())
                                 } else {
                                     nodeModifier
                                 }
-                                block.parseResult.tree.children.fastForEach { child ->
-                                    MarkdownNode(
-                                        node = child,
-                                        content = block.parseResult.preprocessed,
-                                        modifier = blockModifier,
-                                        onClickCitation = onClickCitation,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    val activeLastIndex = children.lastIndex
-                    children.fastForEachIndexed { index, activeChild ->
-                        key("active:${activeChild.type}:${data.activeBaseOffset + activeChild.startOffset}:$index") {
-                            val childLiveSuffix = if (index == activeLastIndex) {
-                                streamingLiveSuffix
-                            } else {
-                                EMPTY_STREAMING_LIVE_SUFFIX
-                            }
-                            CompositionLocalProvider(
-                                LocalStreamingTailActive provides streamingTailActive,
-                                LocalMarkdownSourceOffsetBase provides data.activeBaseOffset,
-                                LocalMarkdownSyntheticSuffixStart provides data.syntheticSuffixStart,
-                                LocalStreamingMarkdownMotionScope provides if (index == activeLastIndex) {
-                                    streamingMotionScope
-                                } else {
-                                    null
-                                },
-                            ) {
                                 MarkdownNode(
-                                    node = activeChild,
-                                    content = data.preprocessed,
-                                    modifier = nodeModifier,
+                                    node = block.node,
+                                    content = block.content,
+                                    modifier = blockModifier,
                                     onClickCitation = onClickCitation,
                                     liveSuffix = childLiveSuffix.text,
                                     liveSuffixSourceOffset = childLiveSuffix.sourceOffset,
@@ -2956,11 +2947,13 @@ private fun Paragraph(
         // (keyed by the source offsets the suffix had before promotion) — no
         // snap to opaque and no catch-up brightness ramp sweeping the writing
         // head at every tick.
+        val publishCadence = LocalStreamingPublishCadence.current
         val staticLength = staticAnnotated.length
         var settledCatchupStart by remember { mutableIntStateOf(staticLength) }
         var prevStaticLength by remember { mutableIntStateOf(staticLength) }
         var settledCatchupSuffixOffset by remember { mutableIntStateOf(-1) }
-        LaunchedEffect(staticLength) {
+        LaunchedEffect(staticLength, publishCadence) {
+            if (publishCadence) return@LaunchedEffect
             if (staticLength > prevStaticLength && prevStaticLength > 0) {
                 settledCatchupStart = prevStaticLength
                 // The promoted text is exactly the suffix head that just left:
@@ -2974,7 +2967,13 @@ private fun Paragraph(
                 prevStaticLength = staticLength
             }
         }
-        val annotatedString = remember(
+        // iOS 发布节拍：解析结果每长一截，新增区间整体淡入（appendedTailAsUnit 同口径）。
+        val batchFade = if (publishCadence) {
+            rememberPublishBatchFade(staticLength, LocalStreamingTailActive.current != null)
+        } else null
+        val annotatedString = if (publishCadence) {
+            staticAnnotated
+        } else remember(
             combined,
             staticLength,
             revealNowNanos,
@@ -2994,7 +2993,9 @@ private fun Paragraph(
 
         Text(
             text = annotatedString,
-            modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current),
+            modifier = Modifier.fillWidthIf(LocalMarkdownFillWidth.current)
+                .then(batchFade?.drawingModifier() ?: Modifier),
+            onTextLayout = batchFade?.onTextLayout ?: { },
             inlineContent = inlineContents,
             softWrap = true,
             overflow = TextOverflow.Visible,

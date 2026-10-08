@@ -182,7 +182,7 @@ class StreamingMarkdownRepairTest {
         val streaming = cache.parse(content)
         val streamingStableKeys = streaming.stableTopLevelBlocks.map { it.key }
         val activeTail = streaming.tree.children.single()
-        val activeTailKey = "active:${activeTail.type}:${streaming.activeBaseOffset + activeTail.startOffset}:0"
+        val activeTailKey = markdownBlockKey(activeTail, streaming.activeBaseOffset)
 
         val finalized = cache.finalizeComplete(content)
 

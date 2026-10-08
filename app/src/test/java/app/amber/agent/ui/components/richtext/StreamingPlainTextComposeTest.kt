@@ -127,7 +127,9 @@ class StreamingPlainTextComposeTest {
                 }
             }
         }
-        compose.mainClock.advanceTimeBy(3500)
+        // 跟随改为 iOS 缓动口径 min(540dp/s, 剩余/0.28s)：大段追赶仍 540dp/s，最后 ~150dp
+        // 减速收尾，比恒速多 ~1s 到底（设计行为，见 reasoningFollowStep），故等待 3.5s → 4.5s。
+        compose.mainClock.advanceTimeBy(4500)
         val body = compose.onNode(hasScrollAction(), useUnmergedTree = true)
         fun scrollRange() = body.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
         assertTrue("initial generation follows", scrollRange().maxValue() - scrollRange().value() < 2f)
