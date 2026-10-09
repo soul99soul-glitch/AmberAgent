@@ -7,7 +7,7 @@ import type {
   UIMessagePartDocument, UIMessagePartReasoning, UIMessagePartTool,
 } from '@amber/chat-domain';
 import {
-  ASK_USER_TOOL_NAME, buildAskUserAnswerPayload, groupMessageParts,
+  ASK_USER_TOOL_NAME, buildAskUserAnswerPayload, groupMessageParts, mightContainMiniApp,
   parseAskUserQuestions,
   streamToolIndex,
 } from '@amber/chat-domain';
@@ -28,6 +28,7 @@ import { WidgetMessageContent } from './WidgetMessageContent.ets';
 import { ChatMessageActionFooter, resolveActionFooterMode } from './ChatMessageActionFooter.ets';
 import { ContentAttachmentChip, urlBasename } from './ContentAttachmentChip.ets';
 import { MiniAppChatCard } from './MiniAppChatCard.ets';
+import { MiniAppStreamingCard } from './MiniAppStreamingCard.ets';
 import { UIAvatar } from './UIAvatar.ets';
 import { ChatUserBubble } from './ChatUserBubble.ets';
 import { ImagePreviewDialog } from './ui/ImagePreviewDialog.ets';
@@ -337,6 +338,13 @@ export struct AgentMessageRow {
     return false;
   }
 
+  // iOS shouldRenderMiniAppStreamingCard:只接管活动流式尾部的小应用 JSON;
+  //   结束后由 MiniAppOutputTransformer 换成 mini_app part,解析失败则回到普通 Markdown。
+  private isLiveMiniAppStream(blocks: MessagePartBlock[], index: number, partIndex: number): boolean {
+    return this.streaming && this.isLastTextBlock(blocks, index) &&
+      mightContainMiniApp(this.contentTextAt(partIndex));
+  }
+
   // 思考内容开关关闭时:整块只剩 reasoning 则整块隐藏(工具步骤不受影响)
   private hasVisibleThinkingSteps(block: MessagePartBlock): boolean {
     if (this.showThinkingContent) return true;
@@ -484,6 +492,8 @@ export struct AgentMessageRow {
             .width('100%')
             .justifyContent(FlexAlign.End)
             .alignItems(VerticalAlign.Bottom)
+          } else if (this.isLiveMiniAppStream(this.getBlocks(), bi, block.index)) {
+            MiniAppStreamingCard({ text: this.contentTextAt(block.index) })
           } else {
             Column() {
               if (this.enableGenerativeWidgets) {

@@ -1395,6 +1395,9 @@ export {
   mightContainMiniApp, revisionChangeNote, createMiniAppOutputTransformer,
 } from './chat/miniapp/miniapp_output_transformer.ts';
 export type { MiniAppOutputTransformerDeps } from './chat/miniapp/miniapp_output_transformer.ts';
+export {
+  MiniAppStreamingCodePreview, MINI_APP_STREAM_PREVIEW_LIMIT,
+} from './chat/miniapp/miniapp_streaming_preview.ts';
 
 // E2 Remote SSH shared domain and platform contracts.
 export type {
