@@ -644,6 +644,9 @@ struct MiniAppRunnerPage {
       })
       .onInterceptRequest((event: OnInterceptRequestEvent): WebResourceResponse | null => {
         const url: string = event.request.getRequestUrl();
+        // ArkWeb 把 loadData 的主文档也以 data:text/html URL 送进拦截器;data: 无网络,
+        //   放行后仍受 shell CSP 约束(内联 data URI 图片/字体同理)
+        if (url.startsWith('data:')) return null;
         if (!url.startsWith('https://')) {
           // 非 https 子资源一律空响应(Android blockedResponse 语义)
           return this.blockedResponse();
