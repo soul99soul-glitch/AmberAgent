@@ -239,6 +239,21 @@ export {
 } from './chat/tool_approval.ts';
 export { createTimeTool } from './chat/builtin_time_tool.ts';
 export { createHealthSummaryTool } from './chat/builtin_local_tools.ts';
+export { createPersonalContextTools, createContactsPickTool, createPhotosPickTool } from './chat/personal_context_tools.ts';
+export type { PersonalContextPort, PersonalContextDeps, PickResult, PickStatus, PickedContact, PickedPhoto } from './chat/personal_context_tools.ts';
+export { createWeatherReadTool } from './chat/weather_tool.ts';
+export type { WeatherPort, WeatherHttpResult, DeviceLocationResult, WeatherLanguage, WeatherToolOptions } from './chat/weather_tool.ts';
+export {
+  createDeviceScheduleTools, DeviceScheduleError, DEVICE_SCHEDULE_TOOL_NAMES, ALARM_WEEKDAY_ORDER,
+  parseIsoDateTime, formatIsoDateTime, encodeReminderEventDescription, decodeReminderEventDescription,
+  encodeReminderEventTitle, decodeReminderEventTitle, reminderEventWindow,
+} from './chat/device_schedule_tools.ts';
+export type {
+  DeviceSchedulePort, DeviceScheduleErrorCode, DeviceRecurrenceFrequency, DeviceRecurrenceRule,
+  DeviceCalendarEvent, DeviceCalendarEventDraft, DeviceReminder, DeviceReminderDraft,
+  DeviceNotificationRequest, DeviceScheduledNotification, DeviceAlarmKind, DeviceAlarmRequest, DeviceAlarm,
+  ReminderEventMeta, DecodedReminderDescription, ReminderEventWindow,
+} from './chat/device_schedule_tools.ts';
 export type { HealthReadPort } from './chat/builtin_local_tools.ts';
 
 // ===== D-058:内置工具首批 + ToolRegistry 包装层 =====
@@ -398,6 +413,28 @@ export {
 export type { ConversationExportOptions, ConversationExportJson, ChatMessageArchiveSource } from './chat/conversation_export.ts';
 export { parseGenerativeWidgets, widgetDocument, widgetActionPrompt, sanitizeWidgetHtml } from './chat/generative_widget.ts';
 export type { GenerativeWidget, GenerativeWidgetAction, GenerativeWidgetSegment } from './chat/generative_widget.ts';
+export type { ThreeSceneSpec, ThreeSceneObject, ThreeSceneObjectType } from './chat/three_scene.ts';
+export { GENERATIVE_WIDGET_INSTRUCTION } from './chat/generative_widget_prompt.ts';
+export { parseSmartUi, validateSmartUiNode, validateSmartUiState } from './chat/smart_ui/protocol.ts';
+export type {
+  SmartUiDocument, SmartUiNode, SmartUiState, SmartUiScalar, SmartUiOption, SmartUiDiagnostic,
+  SmartUiDraftAction, SmartUiVisibilityCondition, SmartUiNodeType, SmartUiValueType,
+  SmartUiVariant, SmartUiLayout, SmartUiTone,
+  SmartUiDocumentStatus, SmartUiDiagnosticSeverity,
+} from './chat/smart_ui/protocol.ts';
+export {
+  appendSmartUiDraft, createSmartUiController, limitSmartUiDraftPrompt,
+  SMART_UI_MAX_INPUT_VALUE_CHARS, SMART_UI_MAX_DRAFT_PROMPT_CHARS,
+} from './chat/smart_ui/interaction.ts';
+export type {
+  SmartUiStateAccessor, SmartUiStateValue, SmartUiStateReconciliation, SmartUiStateChange, SmartUiController,
+  SmartUiAssetDiagnostic,
+} from './chat/smart_ui/interaction.ts';
+export { parseResponseContent, validateResponseContentReferences, stripDeclaredResponseBlocks, applySvgValidation } from './chat/response_content.ts';
+export type {
+  ResponseContentSegment, ResponseContentDiagnostic, VisualArtifact, ResponseContentAssetRegistry,
+  ResponseContentStatus, ResponseContentSegmentType, VisualArtifactType,
+} from './chat/response_content.ts';
 export {
   runCronTaskOnce, fireDueCronTasks, isCronTaskDue,
 } from './chat/agent_cron_run_executor.ts';
@@ -458,6 +495,24 @@ export {
   webMountGoalRequestHash, webMountGoalRequestHashJson,
 } from './chat/webmount/goal.ts';
 export type { WebMountGoalCandidate, WebMountGoalHostPorts } from './chat/webmount/goal.ts';
+export {
+  parseWebMountGetRequest, buildWebMountGetScript, buildWebMountVisualSnapshotScript,
+  buildWebMountFindRefScript, planWebMountAct, buildWebMountActStepArgs, webMountActPlainWaitMs,
+  webMountActStepMutates, webMountActStepTarget, classifyWebMountStepOutput, webMountTargetSelector,
+  parseWebMountCookieNames, webMountCookieExpiryValues, webMountClearTargets,
+  webMountRedactCredentials, webMountPngSize, webMountVisualReadSystemPrompt, webMountVisualReadUserText,
+  webMountJsonLiteral, webMountActApprovalClass, webMountActHasTap, webMountActHasTapText,
+  WEBMOUNT_ACT_MAX_STEPS, WEBMOUNT_VISUAL_READ_DEFAULT_QUESTION, WEBMOUNT_VISUAL_READ_MAX_QUESTION,
+  WEBMOUNT_VISUAL_READ_MAX_ANALYSIS,
+  checkWebMountActSnapshot, webMountActNeedsSnapshot, webMountActStepChangesPage, webMountActTapSelector,
+  webMountThrownErrorCode, webMountVisionTargetSize, webMountWwwTwin,
+  WEBMOUNT_VISION_MAX_EDGE, WEBMOUNT_FIND_REF_BASE,
+} from './chat/webmount/parity.ts';
+export type {
+  WebMountActPlan, WebMountActStep, WebMountClearTargets, WebMountGetRequest, WebMountImageSize,
+  WebMountRedaction, WebMountStepOutcome, WebMountActApprovalClass,
+  WebMountActSnapshotCheck, WebMountVisionScale,
+} from './chat/webmount/parity.ts';
 export type {
   WebMountDocumentToken, WebMountElement, WebMountObservation,
   WebMountOAuthApplication, WebMountOAuthApplicationDraft, WebMountOAuthState, WebMountOAuthStatus,
@@ -1116,11 +1171,16 @@ export {
   idleSandboxActivity, withStepProgress, isActiveOperation,
   ACTIVITY_MAX_INPUT_PREVIEW_CHARS, ACTIVITY_MAX_OUTPUT_TAIL_CHARS,
   MAX_SANDBOX_TIMELINE_ITEMS, MAX_SANDBOX_OUTPUT_TAIL_CHARS,
-  MAX_SANDBOX_JSON_PARSE_CHARS,
+  MAX_SANDBOX_JSON_PARSE_CHARS, toolStaticDisplayTitle, toolDisplayTitle,
 } from './chat/tool_activity.ts';
 export type {
   ToolActivityStatus, SandboxActivityUiState, SandboxActivityUiStateOpts,
 } from './chat/tool_activity.ts';
+export {
+  buildToolApprovalSummary, toolStaticLabel, toolInputDisplayTitle, modelSlotLabel, modelSlotActionTitle,
+  isDestructiveTool, formatApprovalTime, formatDurationSeconds, wmActStepsText,
+} from './chat/tool_display.ts';
+export type { ToolApprovalSummary, ToolApprovalLine, ToolApprovalWarningLevel } from './chat/tool_display.ts';
 
 // ===== D-128:agent_prompt_config(subagent 数据面 + 提示词配置仓库 + 工具) =====
 export type {
@@ -1396,8 +1456,9 @@ export {
 } from './chat/miniapp/miniapp_output_transformer.ts';
 export type { MiniAppOutputTransformerDeps } from './chat/miniapp/miniapp_output_transformer.ts';
 export {
-  MiniAppStreamingCodePreview, MINI_APP_STREAM_PREVIEW_LIMIT,
+  MiniAppStreamingCodePreview, MINI_APP_STREAM_PREVIEW_LIMIT, miniAppStatusProjection,
 } from './chat/miniapp/miniapp_streaming_preview.ts';
+export type { MiniAppStatusProjection } from './chat/miniapp/miniapp_streaming_preview.ts';
 
 // E2 Remote SSH shared domain and platform contracts.
 export type {
@@ -1514,10 +1575,20 @@ export { freezeNovelRuntimeConfiguration, readNovelRuntimeConfiguration } from '
 export type { NovelFrozenRuntimeConfiguration } from './chat/novel_runtime_snapshot.ts';
 export { createProviderManagementTools } from './chat/provider_tools.ts';
 export type { ProviderManagementToolsDeps } from './chat/provider_tools.ts';
-export { collectConversationArtifacts, artifactSourceNodeIndex, widgetArtifactExport } from './chat/conversation_artifacts.ts';
+export { createModelSlotTool, MODEL_SLOTS, resolveModelSlotTarget } from './chat/model_slot_tool.ts';
+export type { ModelSlotPort, ModelSlotToolDeps } from './chat/model_slot_tool.ts';
+export { createMcpDescribeTool } from './chat/mcp_describe_tool.ts';
+export type { McpDescribeToolDeps } from './chat/mcp_describe_tool.ts';
+export {
+  collectConversationArtifacts, artifactSourceNodeIndex, widgetArtifactExport,
+  svgArtifactExport, sceneArtifactExport, uiSnapshotArtifactExport,
+} from './chat/conversation_artifacts.ts';
 export type {
   ConversationArtifactIndex, ConversationArtifactSource, ConversationImageArtifact,
   ConversationDocumentArtifact, ConversationMiniAppArtifact, ConversationWidgetArtifact, WidgetArtifactExport,
+  ConversationDeclaredArtifactProtocol, ConversationDeclaredArtifactSource,
+  ConversationSvgValidationProof, ConversationSvgArtifact, ConversationSceneArtifact,
+  ConversationUiDefinition, ConversationUiSnapshotArtifact, ArtifactFileExport, SceneArtifactExport,
 } from './chat/conversation_artifacts.ts';
 
 export { createNovelProjectOperationTools, executeNovelProjectOperation } from './chat/novel_project_operations.ts';
@@ -1544,3 +1615,15 @@ export { invalidateMemoryTopicsForSource } from './chat/memory_topics.ts';
 export { parseStoredMemoryProfile } from './chat/memory_profile.ts';
 
 export { extractionMessagesContaminated } from './chat/memory_extractor.ts';
+
+export type { SmartUiTextBinding, SmartUiTextBindingPath } from './chat/smart_ui/protocol.ts';
+export { SMART_UI_MAX_TEXT_BINDINGS } from './chat/smart_ui/protocol.ts';
+export { smartUiDefinitionFingerprint, smartUiDraftKey, smartUiConversationKeyPrefix,
+  restoreSmartUiDraft, serializeSmartUiDraft } from './chat/smart_ui/persistence.ts';
+export type { SmartUiDraftSource, SmartUiDraftRestore } from './chat/smart_ui/persistence.ts';
+export { createSmartUiDraftStore } from './chat/smart_ui/store.ts';
+export type { SmartUiDraftStore, SmartUiDraftSaveResult } from './chat/smart_ui/store.ts';
+export { projectWeatherReadTool, resolveWeatherBinding, annotateSmartUiWeatherBindings,
+  weatherBindingRef } from './chat/smart_ui/binding.ts';
+export type { SmartUiWeatherProjection, SmartUiToolSource } from './chat/smart_ui/binding.ts';
+export { resolveGenerativeWidgetInstruction } from './chat/generative_widget_prompt.ts';

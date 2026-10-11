@@ -11,6 +11,7 @@ import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { HttpClient, HttpRequest, HttpResponse, AbortSignalLike } from '@amber/deepread-domain';
 import { httpResponseStatusFromHeaders, isEventStreamResponse } from '@amber/deepread-domain';
+import { modelEnterpriseCaPathForUrl } from './ModelEnterpriseCa.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Http';
@@ -45,6 +46,21 @@ interface StreamOpts {
   shouldStop?: () => boolean;
 }
 
+interface OhosHttpError {
+  code?: number;
+  message?: string;
+}
+
+const formatHttpError = (error: OhosHttpError | null | undefined): string => {
+  if (error === null || error === undefined) return String(error);
+  const code: number | undefined = error.code;
+  const message: string | undefined = error.message;
+  if (code !== undefined && message !== undefined) return `${code}: ${message}`;
+  if (message !== undefined) return message;
+  if (code !== undefined) return `${code}`;
+  return String(error);
+};
+
 class OhosHttpClient implements HttpClient {
   fetch(req: HttpRequest, opts?: FetchOpts): Promise<HttpResponse> {
     const url: string = req.url;
@@ -64,6 +80,8 @@ class OhosHttpClient implements HttpClient {
       readTimeout: 120000,
       usingCache: false,
     };
+    const enterpriseCaPath: string | undefined = modelEnterpriseCaPathForUrl(url);
+    if (enterpriseCaPath !== undefined) options.caPath = enterpriseCaPath;
     if (req.body !== undefined && req.body !== null &&
       (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
       options.extraData = req.body;
@@ -119,10 +137,9 @@ class OhosHttpClient implements HttpClient {
             safeUrl, status, bodyText.length);
           resolve({ status, headers, body: bodyText });
         })
-        .catch((e: Error): void => {
+        .catch((e: OhosHttpError): void => {
           if (settled) return;
-          const errText: string = e !== null && e !== undefined && e.message !== undefined
-            ? `${e.message}` : JSON.stringify(e);
+          const errText: string = formatHttpError(e);
           hilog.error(DOMAIN, TAG, 'fetch FAILED: %{public}s err=%{public}s', safeUrl, errText);
           fail(new Error(`${safeUrl} fetch failed: ${errText}`));
         });
@@ -147,6 +164,8 @@ class OhosHttpClient implements HttpClient {
       readTimeout: 120000,
       usingCache: false,
     };
+    const enterpriseCaPath: string | undefined = modelEnterpriseCaPathForUrl(url);
+    if (enterpriseCaPath !== undefined) options.caPath = enterpriseCaPath;
     if (req.body !== undefined && req.body !== null &&
       (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
       options.extraData = req.body;
@@ -189,7 +208,7 @@ class OhosHttpClient implements HttpClient {
           opts.onDataEnd();
           return true;
         } catch (e) {
-          fail(new Error(`${safeUrl} dataEnd callback failed: ${String(e)}`),
+          fail(new Error(`${safeUrl} dataEnd callback failed: ${formatHttpError(e)}`),
             'fetchStream dataEnd callback failed: %{public}s');
           return false;
         }
@@ -210,7 +229,7 @@ class OhosHttpClient implements HttpClient {
         try {
           opts.onChunk(chunk, end);
         } catch (e) {
-          fail(new Error(`${safeUrl} stream callback failed: ${String(e)}`),
+          fail(new Error(`${safeUrl} stream callback failed: ${formatHttpError(e)}`),
             'fetchStream callback failed: %{public}s');
           return false;
         }
@@ -324,9 +343,9 @@ class OhosHttpClient implements HttpClient {
           status = code;
           settleWhenReady();
         })
-        .catch((e: Error): void => {
+        .catch((e: OhosHttpError): void => {
           if (settled) return;
-          fail(new Error(`${safeUrl} stream failed: ${String(e)}`),
+          fail(new Error(`${safeUrl} stream failed: ${formatHttpError(e)}`),
             'fetchStream FAILED: %{public}s');
         });
     });

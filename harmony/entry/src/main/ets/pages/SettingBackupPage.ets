@@ -23,6 +23,7 @@ import {
 } from '../platform_impl/ConversationRunGuard.ets';
 import { clearConversationDeletedMarker } from '../platform_impl/EntryCompactStore.ets';
 import { getConversationRecapService } from '../platform_impl/ConversationRecapSupport.ets';
+import { getChatSmartUiDraftStore } from '../platform_impl/SmartUiDraftSupport.ets';
 import type { Conversation, ConversationSummary, JsonObject } from '@amber/chat-domain';
 import {
   createSyncBackup, restoreSyncBackup, inspectSyncArchive,
@@ -346,6 +347,11 @@ struct SettingBackupPage {
         // memory/managedfiles 的损坏隔离保护——恢复不携带这些 store 的数据)。
         // 会话已落库，故此处失败不得泛报「恢复失败」隐去已写。
         for (const id of ids) {
+          const uiCleanup = await getChatSmartUiDraftStore(kv).cleanupConversation(id);
+          if (!uiCleanup.available || uiCleanup.error !== null) {
+            compactFailed = true;
+            compactErr = uiCleanup.error ?? '智能 UI 草稿清理不可用';
+          }
           try {
             await getConversationRecapService().invalidate(id);
           } catch (e) {
@@ -372,8 +378,8 @@ struct SettingBackupPage {
         settingsNote = note !== null ? note : '（备份不含所选 settings 类别）';
       }
       if (compactFailed) {
-        this.statusMsg = `${convNote}，但回顾或压缩状态清理失败：${compactErr}${settingsNote}`;
-        this.toast('会话已恢复，回顾或压缩状态清理失败');
+        this.statusMsg = `${convNote}，但附属状态清理失败：${compactErr}${settingsNote}`;
+        this.toast('会话已恢复，附属状态清理失败');
       } else if (settingsNote.indexOf('失败') >= 0) {
         this.statusMsg = `${convNote}${settingsNote}`;
         this.toast('settings 覆盖失败');

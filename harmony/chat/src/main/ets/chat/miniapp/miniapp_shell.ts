@@ -59,15 +59,121 @@ const guardScript: string = [
   '</script>',
 ].join('\n');
 
+// Trusted interaction gate. Inline previews keep vertical scrolling in the
+// chat as the default. A real click on a canvas arms its native owner; only
+// then are the canvas' own pointer/touch handlers allowed to see events.
+// The script is injected before generated HTML scripts so a generated canvas
+// cannot register a handler ahead of the gate.
+export const CANVAS_INTERACTION_JS: string = [
+  '<script>',
+  '(function () {',
+  '  var active = false;',
+  '  var root = document.documentElement;',
+  '  var supportsPointer = typeof window.PointerEvent === "function";',
+  '  var supportsTouch = "ontouchstart" in window;',
+  '  var startPoint = null;',
+  '  var moved = false;',
+  '  var canvasTarget = function (target) {',
+  '    return target && target.closest ? target.closest("canvas") : null;',
+  '  };',
+  '  var controlTarget = function (target) {',
+  '    return target && target.closest ? target.closest("button,input,textarea,select,[contenteditable=\\"true\\"]") : null;',
+  '  };',
+  '  var notify = function (focused) {',
+  '    try {',
+  '      if (window.AmberNative && typeof window.AmberNative.postInteraction === "function") {',
+  '        window.AmberNative.postInteraction(JSON.stringify({ type: "canvasFocus", focused: !!focused, sessionToken: window.__AMBER_MINIAPP_SESSION_TOKEN__ || "" }));',
+  '      }',
+  '    } catch (_) {}',
+  '  };',
+  '  var pointOf = function (event) {',
+  '    var source = event.touches && event.touches.length > 0 ? event.touches[0] :',
+  '      (event.changedTouches && event.changedTouches.length > 0 ? event.changedTouches[0] : event);',
+  '    return { x: Number(source.clientX || 0), y: Number(source.clientY || 0) };',
+  '  };',
+  '  var resetTracking = function () { startPoint = null; moved = false; };',
+  '  var trackStart = function (event) {',
+  '    if (!active && canvasTarget(event.target) !== null) { startPoint = pointOf(event); moved = false; }',
+  '  };',
+  '  var trackMove = function (event) {',
+  '    if (startPoint === null || active) return;',
+  '    var point = pointOf(event);',
+  '    if (Math.abs(point.x - startPoint.x) > 10 || Math.abs(point.y - startPoint.y) > 10) moved = true;',
+  '  };',
+  '  var trackEnd = function (event) {',
+  '    if (startPoint !== null && (event.type === "pointercancel" || event.type === "touchcancel")) moved = true;',
+  '  };',
+  '  var setCanvasStyle = function (canvas) {',
+  '    if (canvas && canvas.style) canvas.style.setProperty("touch-action", active ? "none" : "pan-y", "important");',
+  '  };',
+  '  var syncAncestors = function () {',
+  '    if (root && root.style) root.style.setProperty("touch-action", "pan-y", "important");',
+  '    if (document.body && document.body.style) document.body.style.setProperty("touch-action", "pan-y", "important");',
+  '  };',
+  '  var syncCanvases = function () {',
+  '    syncAncestors();',
+  '    document.querySelectorAll("canvas").forEach(setCanvasStyle);',
+  '  };',
+  '  window.__amberSetCanvasInteraction = function (focused) {',
+  '    active = !!focused;',
+  '    resetTracking();',
+  '    if (root && root.classList) root.classList.toggle("amber-canvas-active", active);',
+  '    syncCanvases();',
+  '  };',
+  '  var gate = function (event) {',
+  '    var canvas = canvasTarget(event.target);',
+  '    if (canvas === null) {',
+  '      if (active && (event.type === "pointerdown" || event.type === "touchstart" || event.type === "mousedown")) notify(false);',
+  '      return;',
+  '    }',
+  '    if (active) return;',
+  '    if (event.type === "click") {',
+  '      event.stopImmediatePropagation();',
+  '      event.stopPropagation();',
+  '      if (event.isTrusted === true && startPoint !== null && !moved) notify(true);',
+  '      resetTracking();',
+  '      return;',
+  '    }',
+  '    event.stopImmediatePropagation();',
+  '    event.stopPropagation();',
+  '  };',
+  '  var trackingTypes = supportsPointer ? ["pointerdown", "pointermove", "pointerup", "pointercancel"] :',
+  '    (supportsTouch ? ["touchstart", "touchmove", "touchend", "touchcancel"] : ["mousedown", "mousemove", "mouseup"]);',
+  '  trackingTypes.forEach(function (type) {',
+  '    var listener = type.endsWith("down") || type === "touchstart" ? trackStart :',
+  '      (type.endsWith("move") ? trackMove : trackEnd);',
+  '    document.addEventListener(type, listener, true);',
+  '  });',
+  '  ["pointerdown", "pointermove", "pointerup", "pointercancel",',
+  '    "touchstart", "touchmove", "touchend", "touchcancel",',
+  '    "mousedown", "mousemove", "mouseup", "click"].forEach(function (type) {',
+  '    document.addEventListener(type, gate, true);',
+  '  });',
+  '  document.addEventListener("focusin", function (event) {',
+  '    if (active && controlTarget(event.target) !== null) notify(false);',
+  '  }, true);',
+  '  try {',
+  '    new MutationObserver(syncCanvases).observe(document.documentElement || document, { childList: true, subtree: true });',
+  '  } catch (_) {}',
+  '  window.__amberSetCanvasInteraction(false);',
+  '})();',
+  '</script>',
+].join('\n');
+
 // MiniAppShell.kt:60-69 逐字(CSP meta + token + guard + bridge + html)
-export const injectMiniAppShell = (html: string, bridgeScript: string, sessionToken: string): string => {
-  const prefix: string = [
+export const injectMiniAppShell = (
+  html: string, bridgeScript: string, sessionToken: string, inlineInteraction: boolean = false): string => {
+  const prefixParts: string[] = [
     '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: https:; connect-src \'none\'; font-src data:;">',
     tokenScript(sessionToken),
     guardScript,
-    '<script>',
-    bridgeScript,
-    '</script>',
-  ].join('\n');
-  return `${prefix}\n${html}`;
+  ];
+  if (inlineInteraction) prefixParts.push(CANVAS_INTERACTION_JS);
+  prefixParts.push('<script>', bridgeScript, '</script>');
+  const prefix: string = prefixParts.join('\n');
+  // Keep the doctype first so the app's CSS uses standards mode, with guards before app scripts.
+  const head = /^\s*(?:<!doctype[^>]*>\s*)?(?:<html\b[^>]*>\s*)?<head\b[^>]*>/i.exec(html);
+  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
+  const insertAt = head !== null ? head[0].length : (doctype === null ? 0 : doctype[0].length);
+  return html.slice(0, insertAt) + '\n' + prefix + '\n' + html.slice(insertAt);
 };

@@ -51,6 +51,10 @@ test('mightContainMiniApp', () => {
   assert.equal(mightContainMiniApp(miniAppJson), true);
   assert.equal(mightContainMiniApp('plain text'), false);
   assert.equal(mightContainMiniApp('{"html":"x"}'), false);
+  assert.equal(
+    mightContainMiniApp('```amber-ui v=1 id=controls\n{"title":"x","description":"y","html":"z"}\n```'),
+    false,
+  );
 });
 
 test('revisionChangeNote 提取用户意见并跳过修订指令段', () => {

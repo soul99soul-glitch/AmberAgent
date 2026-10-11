@@ -14,6 +14,7 @@ import {
 import { removeFavoritesOfConversation } from './FavoriteStore.ets';
 import { deleteConversationCompactData } from './EntryCompactStore.ets';
 import { getConversationRecapService } from './ConversationRecapSupport.ets';
+import { getChatSmartUiDraftStore } from './SmartUiDraftSupport.ets';
 import { writeTextFileAtomic, readGuardedJson } from './AtomicJsonFile.ets';
 import type { GuardedJsonRead } from './AtomicJsonFile.ets';
 import type {
@@ -245,6 +246,11 @@ export const cleanupDeletedConversation = async (
   }
   await deleteChatFiles(getDeleteChatFilesDeps(), safeUris);
   await clearPendingQueueStorage(kv, conv.id);
+  const uiCleanup = await getChatSmartUiDraftStore(kv).cleanupConversation(conv.id);
+  if (!uiCleanup.available || uiCleanup.error !== null) {
+    hilog.warn(0x0001, 'ManagedFileStore', 'smart UI draft cleanup: %{public}s',
+      uiCleanup.error ?? 'KV entry enumeration unavailable');
+  }
   // compact/events 清理是幂等安全动作,先于 favorites 执行,避免收藏读损时被跳过
   await deleteConversationCompactData(kv, conv.id);
   await getConversationRecapService().invalidate(conv.id);

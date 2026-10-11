@@ -318,22 +318,24 @@ struct ChatTaskModelsPage {
   @Builder
   private TaskRow(task: string, last: boolean): void {
     Column() {
-      Row({ space: 12 }) {
-        Row() { Icon({ name: taskText(TASK_ICONS, task), iconSize: 15, color: this.accentColor }) }
-          .width(28).height(28).borderRadius(7).backgroundColor(accentSoftBg(this.accentColor))
-          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-        Column({ space: 2 }) {
+      // 标题行(图标座 + 标题 + 当前模型 + 箭头)+ 整宽简述:简述不再被右侧值挤压
+      Column({ space: 4 }) {
+        Row({ space: 12 }) {
+          Row() { Icon({ name: taskText(TASK_ICONS, task), iconSize: 15, color: this.accentColor }) }
+            .width(28).height(28).borderRadius(7).backgroundColor(accentSoftBg(this.accentColor))
+            .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
           Text(taskText(TASK_TITLES, task)).fontSize(16).fontWeight(FontWeight.Medium)
             .fontFamily(FONT_SANS_MEDIUM).fontColor(this.colors.ink).maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(taskText(TASK_DESCRIPTIONS, task)).fontSize(12).fontColor(this.colors.secondary)
-            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Text(this.slot(task).current).fontSize(TEXT_STYLES.meta.size).fontFamily(FONT_MONO_MEDIUM)
-          .fontColor(this.colors.muted).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          .textAlign(TextAlign.End).constraintSize({ maxWidth: '38%' })
-        Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
-      }.width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
+            .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+          Text(this.slot(task).current).fontSize(TEXT_STYLES.meta.size).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(this.colors.muted).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .textAlign(TextAlign.End).constraintSize({ maxWidth: '50%' })
+          Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
+        }.width('100%').alignItems(VerticalAlign.Center)
+        Text(taskText(TASK_DESCRIPTIONS, task)).fontSize(12).fontColor(this.colors.secondary)
+          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%').padding({ left: 40 })
+      }.width('100%').alignItems(HorizontalAlign.Start)
       .enabled(!this.saving).onClick((): void => { this.openPicker(task); })
       Column({ space: 6 }) {
         Text(this.slot(task).detail).fontSize(12).fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL)
@@ -351,30 +353,31 @@ struct ChatTaskModelsPage {
             Blank()
           }.width('100%').alignItems(VerticalAlign.Center)
         }
-      }.width('100%').padding({ left: 40 })
+      }.width('100%').padding({ left: 40 }).margin({ top: 6 })
       if (!last) Row().width('100%').height(1).backgroundColor(this.colors.line).margin({ top: 8 })
-    }.width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
+    }.width('100%').padding({ left: 14, right: 14, top: 12, bottom: 10 })
   }
   @Builder
   private ChatModelCard(): void {
     // iOS ModelDefaultsView 聊天段:当前聊天模型(进入选择器固定 Provider+模型)
-    Row({ space: 12 }) {
-      Row() { Icon({ name: 'cpu', iconSize: 15, color: this.accentColor }) }
-        .width(28).height(28).borderRadius(7).backgroundColor(accentSoftBg(this.accentColor))
-        .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-      Column({ space: 2 }) {
+    Column({ space: 4 }) {
+      Row({ space: 12 }) {
+        Row() { Icon({ name: 'cpu', iconSize: 15, color: this.accentColor }) }
+          .width(28).height(28).borderRadius(7).backgroundColor(accentSoftBg(this.accentColor))
+          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
         Text('聊天模型').fontSize(16).fontWeight(FontWeight.Medium).fontFamily(FONT_SANS_MEDIUM)
-          .fontColor(this.colors.ink).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text('来自已启用服务商的聊天模型;已有会话保留当时的模型记录')
-          .fontSize(12).fontColor(this.colors.secondary).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-      Text(this.chatModelLabel.length > 0 ? this.chatModelLabel : '未选择')
-        .fontSize(TEXT_STYLES.meta.size).fontFamily(FONT_MONO_MEDIUM)
-        .fontColor(this.colors.muted).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        .textAlign(TextAlign.End).constraintSize({ maxWidth: '38%' })
-      Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
-    }.width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
-    .padding({ left: 14, right: 14, top: 10, bottom: 10 }).enabled(!this.saving)
+          .fontColor(this.colors.ink).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
+        Text(this.chatModelLabel.length > 0 ? this.chatModelLabel : '未选择')
+          .fontSize(TEXT_STYLES.meta.size).fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(this.colors.muted).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .textAlign(TextAlign.End).constraintSize({ maxWidth: '50%' })
+        Icon({ name: 'chevron_right', iconSize: 16, color: this.colors.muted })
+      }.width('100%').alignItems(VerticalAlign.Center)
+      Text('来自已启用服务商的聊天模型；已有会话保留当时的模型记录')
+        .fontSize(12).fontColor(this.colors.secondary).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%').padding({ left: 40 })
+    }.width('100%').alignItems(HorizontalAlign.Start).constraintSize({ minHeight: 52 })
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 }).enabled(!this.saving)
     .onClick((): void => { router.pushUrl({ url: 'pages/ChatModelPickerPage' }); })
   }
 
@@ -437,17 +440,25 @@ struct ChatTaskModelsPage {
       Column() {
         CenteredTitleBar({ title: '模型与提示词' })
         Scroll() {
-          Column({ space: 10 }) {
-            if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
+          // 与其它二级页同构:PlainSection/FooterNote 自带 16 内边距 → 页级不再加左右 padding,
+          //   卡片单独包 16 边距(避免组标双重内缩到 32)
+          Column() {
+            if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%')
+              .wordBreak(WordBreak.BREAK_ALL).padding({ left: 16, right: 16, top: 10 })
             if (!this.loaded) Text('加载中…').fontSize(14).fontColor(this.colors.secondary).width('100%')
+              .padding({ left: 16, right: 16, top: 10 })
             else {
               PlainSection({ label: '聊天' })
-              CardGroup({ radius: 18, stroke: true, content: (): void => { this.ChatModelCard(); } })
+              Column() {
+                CardGroup({ radius: 18, stroke: true, content: (): void => { this.ChatModelCard(); } })
+              }.width('100%').padding({ left: 16, right: 16 })
               PlainSection({ label: '辅助任务' })
-              CardGroup({ radius: 18, stroke: true, content: (): void => { this.TaskCard(); } })
+              Column() {
+                CardGroup({ radius: 18, stroke: true, content: (): void => { this.TaskCard(); } })
+              }.width('100%').padding({ left: 16, right: 16 })
               FooterNote({ text: '固定选择绑定服务商配置与模型 UUID。旧 UUID 保持兼容，重新选择后固定；辅助任务的聊天回退以实际运行轮次为准。' })
             }
-          }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
+          }.width('100%').padding({ top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
         }.width('100%').layoutWeight(1).align(Alignment.TopStart)
       }.width('100%').height('100%').backgroundColor(this.colors.background)
       if (this.editingPrompt.length > 0) this.PromptEditor(this.editingPrompt)

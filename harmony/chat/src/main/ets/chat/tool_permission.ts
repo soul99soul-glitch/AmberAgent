@@ -15,6 +15,7 @@ import { newId as defaultNewId } from './ids.ts';
 import type { AgentTool } from './tool.ts';
 import type { ToolInvocationPolicy } from './tool_policy.ts';
 import { toolInvocationPolicyFromText } from './tool_policy.ts';
+import { webMountActHasTapText } from './webmount/parity.ts';
 
 // ===== ToolInvocationContext(ToolInvocationContext.kt 全文 9 行) =====
 
@@ -188,7 +189,8 @@ export class PermissionDecisionResolver {
     // E12 窄准入(冻结合同):wm_tap 合成页面交互、wm_fetch_replay 携带页面凭据
     //   访问网络 — 任何设置组合(含双 auto)都必须显式人工批准;approved/denied
     //   仍由上面的 approval_state 分支保持权威。与 ask_user 特例同构,不改其他工具语义。
-    if ((tool.toolName === 'wm_tap' || tool.toolName === 'wm_fetch_replay') && policy.needsApproval) {
+    if ((tool.toolName === 'wm_tap' || tool.toolName === 'wm_fetch_replay'
+      || (tool.toolName === 'wm_act' && webMountActHasTapText(tool.input))) && policy.needsApproval) {
       return decision(
         'ask',
         'WebMount touch/replay always requires explicit human approval.',

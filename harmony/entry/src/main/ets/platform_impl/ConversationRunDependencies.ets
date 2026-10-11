@@ -10,7 +10,7 @@ import type {
   SubAgentRuntimeSetting, UIMessage, MessageChunk, StreamOpts, JevPreparedToolResults,
 } from '@amber/chat-domain';
 import {
-  asChatStreamProvider, buildAgentSoulPrompt, buildMemoryContext,
+  asChatStreamProvider, buildAgentSoulPrompt, buildMemoryContext, resolveGenerativeWidgetInstruction,
   buildRecentChatsPrompt, conversationWithMessagesAsNodes, createDocumentTransformer,
   createMiniAppOutputTransformer, createMiniAppPromptTransformer,
   createPlaceholderTransformer, createTemplateTransformer, createReasoningLevelMetadataTransformer,
@@ -20,6 +20,7 @@ import {
   makeTextGenerationParams, prepareContext, RECENT_CHATS_PROMPT_LIMIT,
   regexOutputTransformer, createThinkTagTransformer, toChatModel, toText,
   recallMemorySelections, memoryRecallScoreToDebugText, selectMemoryProfile, createMemoryCitationTransformer,
+  annotateSmartUiWeatherBindings,
 } from '@amber/chat-domain';
 import {
   prepareProviderApi, getAgentCronTools, getAgentTaskTools, getChatKvStore,
@@ -46,6 +47,15 @@ import { ensureSearchSdk } from './SearchSdkInit.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'Chat.RunDependencies';
+
+const logProviderCompletion = (
+  ctx: DetachedConversationContext, characters: number, finishReason: string, outcome: string,
+): void => {
+  // Metadata only: original message text stays in the existing conversation store.
+  hilog.info(DOMAIN, TAG, '%{public}s', JSON.stringify({
+    runId: ctx.runId, conversationId: ctx.conversation.id, characters, finishReason, outcome,
+  }));
+};
 
 export const prepareConversationSeed = async (
   conversation: Conversation,
@@ -80,6 +90,7 @@ export const prepareConversationSeed = async (
     ocrSeed: ocr,
     miniAppSetting: await loadMiniAppSetting(kv),
     userNickname: display.userNickname,
+    generativeWidgetsEnabled: display.enableGenerativeWidgets,
     webmountGlobalEnabled: (await kv.get('webmount_global_enabled')) === 'true',
     webmountEvalEnabled: (await kv.get('webmount_eval_enabled')) === 'true',
     imageGenConfigured: await imageGenToolAvailable().catch((): boolean => false),
@@ -126,7 +137,9 @@ const latestUserQuery = (conversation: Conversation, fallback: string = ''): str
 };
 
 const extraSystemBlocks = async (ctx: DetachedConversationContext): Promise<string[]> => {
-  if (!ctx.seed.agentRuntime.enableRecentChatsReference) return [];
+  const blocks: string[] = ctx.seed.generativeWidgetsEnabled
+    ? [resolveGenerativeWidgetInstruction('declared-content-v1')] : [];
+  if (!ctx.seed.agentRuntime.enableRecentChatsReference) return blocks;
   let recent: ConversationSummary[] = await getChatRepository().listRecent(RECENT_CHATS_PROMPT_LIMIT);
   if (recent.length > 1) {
     const query: string = latestUserQuery(ctx.conversation, ctx.conversation.title);
@@ -149,7 +162,8 @@ const extraSystemBlocks = async (ctx: DetachedConversationContext): Promise<stri
       .format(new Date(summary.updateAt)),
   }));
   const prompt: string = buildRecentChatsPrompt(items);
-  return prompt.length > 0 ? [prompt] : [];
+  if (prompt.length > 0) blocks.push(prompt);
+  return blocks;
 };
 
 const memoryReranker = (query: string):
@@ -280,7 +294,8 @@ const prepareMessages = (ctx: DetachedConversationContext):
         },
         onCompactActiveChange: (active: boolean): void => { changeCompactCount(active ? 1 : -1); },
       });
-    return prepared.messages;
+    return ctx.seed.generativeWidgetsEnabled
+      ? annotateSmartUiWeatherBindings(prepared.messages) : prepared.messages;
   };
 };
 
@@ -306,6 +321,61 @@ export const buildConversationTurnDeps = (ctx: DetachedConversationContext): Cha
       createMemoryCitationTransformer(ctx.runId, currentMessages(ctx.conversation), (): number[] => ctx.recalledMemoryIds),
     ],
     provider: asChatStreamProvider(rt.api, () => rt.params),
+    wrapStreamProvider: (provider: ChatStreamProvider): ChatStreamProvider => ({
+      streamText: async (messages: UIMessage[], onChunk: (chunk: MessageChunk) => void,
+        opts?: StreamOpts): Promise<void> => {
+        let characters: number = 0;
+        let finishReason: string = 'unknown';
+        let outcome: string = 'finished';
+        try {
+          await provider.streamText(messages, (chunk: MessageChunk): void => {
+            for (const choice of chunk.choices) {
+              if (choice.finishReason !== null && choice.finishReason !== 'unknown') finishReason = choice.finishReason;
+              const message: UIMessage | null = choice.delta ?? choice.message;
+              if (message !== null) {
+                for (const part of message.parts) {
+                  if (part.type === 'text') characters += part.text.length;
+                }
+              }
+            }
+            onChunk(chunk);
+          }, opts);
+        } catch (error) {
+          outcome = ctx.signal.aborted ? 'cancelled' : 'failed';
+          throw error instanceof Error ? error : new Error(String(error));
+        } finally {
+          if (ctx.signal.aborted) outcome = 'cancelled';
+          logProviderCompletion(ctx, characters, finishReason, outcome);
+        }
+      },
+      generateText: provider.generateText === undefined ? undefined :
+        async (messages: UIMessage[], opts?: StreamOpts): Promise<MessageChunk> => {
+          let result: MessageChunk | null = null;
+          let outcome: string = 'finished';
+          try {
+            result = await provider.generateText!(messages, opts);
+            return result;
+          } catch (error) {
+            outcome = ctx.signal.aborted ? 'cancelled' : 'failed';
+            throw error instanceof Error ? error : new Error(String(error));
+          } finally {
+            let characters: number = 0;
+            let finishReason: string = 'unknown';
+            if (result !== null) {
+              for (const choice of result.choices) {
+                if (choice.finishReason !== null && choice.finishReason !== 'unknown') finishReason = choice.finishReason;
+                const message: UIMessage | null = choice.message ?? choice.delta;
+                if (message !== null) {
+                  for (const part of message.parts) {
+                    if (part.type === 'text') characters += part.text.length;
+                  }
+                }
+              }
+            }
+            logProviderCompletion(ctx, characters, finishReason, ctx.signal.aborted ? 'cancelled' : outcome);
+          }
+        },
+    }),
     store: { save: (conversation: Conversation): Promise<void> => ctx.save(conversation) },
     contextMessageSize: rt.contextMessageSize,
     prepareContextMessages: prepareMessages(ctx),

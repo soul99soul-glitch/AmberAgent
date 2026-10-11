@@ -13,10 +13,13 @@ const tool = (approvalState, output = []) => ({ type: 'tool', toolCallId: 'tool-
 
 async function fixture(initialParts) {
   const { groupMessageParts } = await import('../main/ets/chat/message_grouping.ts');
+  const { mightContainMiniApp } = await import('../main/ets/chat/miniapp/miniapp_output_transformer.ts');
+  const { miniAppStatusProjection } = await import('../main/ets/chat/miniapp/miniapp_streaming_preview.ts');
   const file = path.resolve(__dirname, '../../../entry/src/main/ets/components/AgentMessageRow.ets');
   const source = fs.readFileSync(file, 'utf8');
-  const names = ['getBlocks', 'onMessageChanged', 'thinkingStepsAt', 'reasoningPartAt', 'toolPartAt',
-    'contentTextAt', 'isLastTextBlock'];
+  const names = ['getBlocks', 'onMessageChanged', 'captureMiniAppStreamText', 'thinkingStepsAt',
+    'reasoningPartAt', 'toolPartAt', 'contentTextAt', 'isLastTextBlock', 'isLiveMiniAppStream',
+    'miniAppStatusPartAt', 'miniAppPartAt', 'miniAppTextAt'];
   const methods = names.map(name => source.match(new RegExp(`  private ${name}\\([^]*?\\n  \\}`))?.[0] ?? '').join('\n');
   let groupCalls = 0;
   let messageReads = 0;
@@ -25,9 +28,16 @@ async function fixture(initialParts) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(`class Probe {${methods}}; exports.Probe = Probe;`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
-  }).outputText, { exports, groupMessageParts: parts => { groupCalls++; return groupMessageParts(parts); } });
+  }).outputText, {
+    exports,
+    groupMessageParts: parts => { groupCalls++; return groupMessageParts(parts); },
+    mightContainMiniApp,
+    miniAppStatusProjection,
+  });
   const probe = new exports.Probe();
   probe.cachedBlocks = null;
+  probe.lastMiniAppStreamText = '';
+  probe.lastMiniAppStreamMessageId = '';
   Object.defineProperty(probe, 'message', { get() { messageReads++; return message; } });
   function publish(parts, id = 'same-message-id') {
     message = { id, role: 'assistant' };
@@ -48,8 +58,8 @@ test('one reasoning/body snapshot is grouped once across all six existing render
   assert.equal(f.probe.contentTextAt(1), 'live body');
   assert.equal(f.probe.isLastTextBlock(f.probe.getBlocks(), 1), true);
   assert.equal(f.groupCalls(), 1);
-  assert.equal(f.messageReads(), 6, 'cache hits must still register the V1 message dependency');
-  assert.equal(f.partsReads(), 6, 'read current parts even when the derived blocks are cached');
+  assert.equal(f.messageReads(), 11, 'cache hits must still register the V1 message dependency');
+  assert.equal(f.partsReads(), 9, 'read current parts even when the derived blocks are cached');
   assert.equal(f.probe.getBlocks(), blocks);
 });
 
@@ -86,4 +96,20 @@ test('the actual message Prop watcher owns invalidation, including empty and rep
   f.publish([text('replacement')], 'replacement-id');
   assert.equal(f.probe.contentTextAt(0), 'replacement');
   assert.equal(f.groupCalls(), 3);
+});
+
+test('stream raw text survives terminal status replacement for the same MiniApp card', async () => {
+  const raw = JSON.stringify({ title: 'Amber Debug', description: 'd', html: '<!doctype html><html><body><svg></svg></body></html>' });
+  const part = { type: 'mini_app', appId: 'app-1', title: 'Amber Debug', description: 'd',
+    iconEmoji: null, category: 'custom', permissions: [], htmlHash: null, version: 1, metadata: null };
+  const f = await fixture([text(raw)]);
+  f.probe.streaming = true;
+  assert.equal(f.probe.miniAppPartAt(0), null);
+  assert.equal(f.probe.miniAppTextAt(0), raw);
+  assert.equal(f.probe.lastMiniAppStreamText, raw);
+  f.publish([text('已生成小应用：Amber Debug'), part]);
+  f.probe.streaming = false;
+  assert.equal(f.probe.miniAppPartAt(0), part);
+  assert.equal(f.probe.miniAppTextAt(0), raw);
+  assert.equal(f.probe.lastMiniAppStreamText, raw);
 });

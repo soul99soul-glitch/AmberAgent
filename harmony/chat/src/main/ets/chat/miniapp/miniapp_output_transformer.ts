@@ -18,6 +18,7 @@ import type { MiniAppGeneratedOutput, MiniAppRecord } from './miniapp_models.ts'
 import { isExplicitMiniAppRequest, revisionAppId, revisionVersion } from './miniapp_prompt_transformer.ts';
 import type { MiniAppRepository } from './miniapp_repository.ts';
 import { miniAppToCardRef } from './miniapp_repository.ts';
+import { stripDeclaredResponseBlocks } from '../response_content.ts';
 
 export interface MiniAppOutputTransformerDeps {
   enabled: () => boolean;
@@ -25,8 +26,10 @@ export interface MiniAppOutputTransformerDeps {
 }
 
 // MiniAppOutputTransformer.kt:86-88
-export const mightContainMiniApp = (text: string): boolean =>
-  text.includes('"html"') && text.includes('"title"') && text.includes('"description"');
+export const mightContainMiniApp = (text: string): boolean => {
+  const candidate: string = stripDeclaredResponseBlocks(text);
+  return candidate.includes('"html"') && candidate.includes('"title"') && candidate.includes('"description"');
+};
 
 // MiniAppOutputTransformer.kt:90-99(修订 change note 提取)
 export const revisionChangeNote = (text: string): string => {
@@ -111,8 +114,9 @@ export const createMiniAppOutputTransformer = (deps: MiniAppOutputTransformerDep
       }
       if (textPartIndex < 0) return messages;
       const textPart: UIMessagePartText = message.parts[textPartIndex] as UIMessagePartText;
-      if (!mightContainMiniApp(textPart.text)) return messages;
-      const output: MiniAppGeneratedOutput | null = parser.parseOrNull(textPart.text);
+      const candidate: string = stripDeclaredResponseBlocks(textPart.text);
+      if (!mightContainMiniApp(candidate)) return messages;
+      const output: MiniAppGeneratedOutput | null = parser.parseOrNull(candidate);
       if (output === null) return messages;
       const appId: string | null = revisionAppId(lastUserText);
       const version: number | null = revisionVersion(lastUserText);

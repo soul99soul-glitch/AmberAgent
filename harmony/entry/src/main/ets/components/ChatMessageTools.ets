@@ -5,9 +5,12 @@
 //   + 失败检测 + 拒绝原因 + 点击胶囊查看输出详情 + 工具类型分类
 // 降级(跳过): shimmer / FaviconRow / ZoomableAsyncImage / TTS replay / workspace-file 卡片
 
-import type { UIMessagePartTool, UIMessagePartText, UIMessagePartImage } from '@amber/chat-domain';
-import { toolActivityStatus, toolOutputJson, jevAutoApprovalReason } from '@amber/chat-domain';
-import { MOTION_OVERLAY, INK2, INK3, SURFACE, LINE, ERROR, META, LABEL } from '../design/tokens.ets';
+import type { UIMessagePartTool, UIMessagePartText, UIMessagePartImage, ToolApprovalSummary } from '@amber/chat-domain';
+import {
+  toolActivityStatus, toolOutputJson, jevAutoApprovalReason, toolDisplayTitle, toolStaticDisplayTitle,
+  buildToolApprovalSummary, toolInputAsJson,
+} from '@amber/chat-domain';
+import { MOTION_OVERLAY, INK2, INK3, SURFACE, LINE, ERROR, META, LABEL, RADIUS } from '../design/tokens.ets';
 import { GeneratedImageCarousel } from './GeneratedImageCarousel.ets';
 import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshApprovalProtocolLabel } from './SSHApprovalSummary.ets';
 import { SSHUIColors } from './SSHUIColors.ets';
@@ -16,13 +19,17 @@ import { pluginApprovalView } from './PluginApprovalSummary.ets';
 import { JevApprovalFacts } from './JevApprovalFacts.ets';
 import { NovelChapterPlanProposalCard } from './NovelChapterPlanProposalCard.ets';
 import { parseNovelChapterPlanProposal } from '../platform_impl/NovelPlanProposalProjection.ets';
+import { ToolApprovalSummaryCard } from './ToolApprovalSummary.ets';
 import {
   AgentToolCallCapsule,
   ToolStatus,
-  ToolKind,
-  getToolKind,
-  toolKindLabel,
+  toolIconName,
 } from './AgentToolCapsule.ets';
+
+// photos_pick 缩略图:边长 / 间距(内容左缘与胶囊标题对齐 = CONTENT_INSET)
+const PHOTO_THUMB_SIZE: number = 64;
+const PHOTO_THUMB_GAP: number = 6;
+const CONTENT_INSET: number = 32;
 
 @Component
 export struct ChatMessageTools {
@@ -52,8 +59,9 @@ export struct ChatMessageTools {
   }
 
   // F15:复用 chat-domain tool_activity 既有结构化判定
-  //   (toolActivityStatus → indicatesFailure:exit_code≠0 / error / failed /
-  //    status∈{failed,error,denied});不再扫描正文是否含 error/exception/failed
+  //   (toolActivityStatus → ok===false(cancelled/empty_selection → 已取消)/
+  //    indicatesFailure:exit_code≠0 / error / failed / status∈{failed,error,denied};
+  //    超长输出嗅探开头 {"ok":false);不再扫描正文是否含 error/exception/failed
   //   字样 —— 搜索/源码/日志正文可合法包含这些词(UI-F15 原始误报)。
   private resolveStatus(): ToolStatus {
     const activity: string = toolActivityStatus(this.part, this.streaming, toolOutputJson(this.part));
@@ -64,22 +72,27 @@ export struct ChatMessageTools {
     return ToolStatus.Running;
   }
 
-  // 工具显示标题(简化版 toolDisplayTitle)
+  // 胶囊标题:display_title → 静态中文标签 → 沙盒标题 → recipe/plugin 前缀 → 原名。
+  //   状态不再拼进标题(状态图标 + 无障碍文本已表达)。
   private toolTitle(): string {
-    const name: string = this.part.toolName;
-    const kind: ToolKind = getToolKind(name);
-    const kindLabel: string = toolKindLabel(kind);
-    const status: ToolStatus = this.resolveStatus();
+    return toolDisplayTitle(this.part);
+  }
 
-    // 状态动词
-    let statusVerb: string = '';
-    if (status === ToolStatus.Running) statusVerb = '执行中';
-    else if (status === ToolStatus.WaitingApproval) statusVerb = '待授权';
-    else if (status === ToolStatus.Succeeded) statusVerb = '成功';
-    else if (status === ToolStatus.Failed) statusVerb = '失败';
-    else statusVerb = '已取消';
+  // 授权界面用的标题:不取模型 display_title,以工具真实身份为准
+  private approvalTitle(): string {
+    return toolStaticDisplayTitle(this.part);
+  }
 
-    return `${kindLabel} ${name} · ${statusVerb}`;
+  private isPending(): boolean {
+    return this.part.approvalState.type === 'pending';
+  }
+
+  // 通用待授权摘要:recipe/plugin/SSH/本章计划提案已有专用卡片时不重复展示
+  private genericApprovalSummary(): ToolApprovalSummary | null {
+    if (!this.isPending()) return null;
+    if (this.packageApprovalView() !== null || isSSHApprovalTool(this.part.toolName)) return null;
+    if (parseNovelChapterPlanProposal(this.part) !== null) return null;
+    return buildToolApprovalSummary(this.part.toolName, toolInputAsJson(this.part));
   }
 
   // output 首条文本(预览)
@@ -153,12 +166,23 @@ export struct ChatMessageTools {
       if (this.part.approvalState.type === 'pending') {
         NovelChapterPlanProposalCard({ view: parseNovelChapterPlanProposal(this.part) })
       }
+      // 通用待授权摘要(日历/提醒/通知/闹钟/模型槽位/WebMount… + 未知工具标量参数兜底)
+      if (this.genericApprovalSummary() !== null) {
+        ToolApprovalSummaryCard({
+          summary: this.genericApprovalSummary()!,
+          heading: this.approvalTitle(),
+          iconName: toolIconName(this.part.toolName),
+          canOpen: this.canOpenPreview,
+          onOpen: (): void => { this.onOpenPreview(); },
+        })
+      }
       // 工具胶囊(pill)
       AgentToolCallCapsule({
         toolName: this.part.toolName,
         title: this.toolTitle(),
         status: this.resolveStatus(),
         showApproval: this.part.approvalState.type === 'pending' && (this.canApprove || this.canDeny),
+        approvalSubject: this.approvalTitle(),
         canOpen: this.canOpenPreview,
         canApprove: this.canApprove,
         canDeny: this.canDeny,
@@ -174,7 +198,7 @@ export struct ChatMessageTools {
           Text(jevAutoApprovalReason(this.part)).fontSize(LABEL).fontColor(INK2)
             .lineHeight(18).width('100%')
         }
-        .width('100%').padding({ left: 32, top: 4 })
+        .width('100%').padding({ left: CONTENT_INSET, top: 4 })
       }
 
       // denied → 拒绝原因
@@ -183,7 +207,7 @@ export struct ChatMessageTools {
           .fontSize(LABEL)
           .fontColor(ERROR)
           .width('100%')
-          .margin({ top: 4, left: 32 })
+          .margin({ top: 4, left: CONTENT_INSET })
       }
 
       // generate_image:图片轮播(「修改」= edit 流程,回传宿主)
@@ -194,7 +218,30 @@ export struct ChatMessageTools {
           showModify: true,
           onModify: (url: string): void => { this.onModifyImage(url); },
         })
-          .margin({ top: 4, left: 32 })
+          .margin({ top: 4, left: CONTENT_INSET })
+      }
+
+      // photos_pick:所选照片缩略图(点击打开详情)
+      if (this.part.toolName === 'photos_pick' && this.hasImageOutput()) {
+        Scroll() {
+          Row({ space: PHOTO_THUMB_GAP }) {
+            ForEach(this.getImageUrls(), (url: string, idx: number): void => {
+              Image(url)
+                .width(PHOTO_THUMB_SIZE).height(PHOTO_THUMB_SIZE)
+                .objectFit(ImageFit.Cover)
+                .borderRadius(RADIUS)
+                .border({ width: 0.5, color: LINE })
+                .clip(true)
+                .onClick((): void => { if (this.canOpenPreview) this.onOpenPreview(); })
+                .accessibilityText(`所选照片 ${idx + 1}`)
+            }, (url: string, idx: number): string => `photo-${idx}-${url.length}`)
+          }
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .align(Alignment.Start)
+        .width('100%')
+        .padding({ left: CONTENT_INSET, top: 4 })
       }
 
       // 无详情入口的宿主保留结果；Chat 只在点击胶囊后展示。
@@ -222,10 +269,11 @@ export struct ChatMessageTools {
               .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
                 .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
             }
+            // 与上方输出文本同一左缘(卡片 padding 已提供缩进,不再叠加左 padding)
             Text(this.outputExpanded ? '收起' : '展开')
               .fontSize(LABEL)
               .fontColor(INK3)
-              .padding({ left: 12, right: 12, top: 10, bottom: 6 })
+              .padding({ right: 12, top: 10, bottom: 6 })
               .margin({ top: 2 })
               .onClick((): void => {
                 this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
@@ -235,6 +283,7 @@ export struct ChatMessageTools {
               .accessibilityText(this.outputExpanded ? '收起工具输出' : '展开工具输出')
           }
           .width('100%')
+          .alignItems(HorizontalAlign.Start)
           .padding({ left: 12, right: 12, top: 8, bottom: 8 })
           .backgroundColor(SURFACE)
           .borderRadius(8)
@@ -242,7 +291,7 @@ export struct ChatMessageTools {
           .clip(true)
         }
         .width('100%')
-        .padding({ left: 32, top: 4 })
+        .padding({ left: CONTENT_INSET, top: 4 })
       }
     }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)

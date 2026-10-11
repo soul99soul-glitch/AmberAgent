@@ -52,7 +52,7 @@ struct ChatAgentPermissionsPage {
     if (checked) {
       AlertDialog.show({
         title: '确认开启高风险自动批准？',
-        message: '开启后，如果全局自动批准也开启，AmberAgent 可以无人值守执行原本需要审批的工具，包括发送短信、直接拨号、写入文件/联系人/日历、录音、终端/屏幕动作和 SubAgent 内部工具。ask_user 仍会等待你的回答。只有在你完全信任当前设备、模型和会话上下文时才建议开启。',
+        message: '开启后，如果全局自动批准也开启，AmberAgent 可以无人值守执行原本需要审批的工具，包括发送短信、直接拨号、写入文件/联系人/日历、管理提醒与闹钟、网页批量操作与清除站点数据、录音、终端/屏幕动作和 SubAgent 内部工具。ask_user 仍会等待你的回答。只有在你完全信任当前设备、模型和会话上下文时才建议开启。',
         primaryButton: {
           value: '取消',
           action: (): void => {
@@ -93,7 +93,7 @@ struct ChatAgentPermissionsPage {
   SystemAccessGroup(): void {
     CardRow({
       label: '系统权限',
-      desc: '日历、通知、文件、通讯录等系统能力的授权状态与申请',
+      desc: '日历、位置、通知、文件等系统能力的授权与申请',
       iconName: 'ph_lock',
       isLast: true,
       onRowClick: (): void => { router.pushUrl({ url: 'pages/SettingSystemAccessPage' }); },
@@ -111,7 +111,7 @@ struct ChatAgentPermissionsPage {
     })
     CardToggleRow({
       label: '高风险自动批准',
-      desc: '配合全局自动批准，允许短信、拨号、文件写入、终端/屏幕动作、SubAgent 内部工具等审批工具无人值守执行。',
+      desc: '配合全局自动批准，允许短信、拨号、文件写入、日历/提醒/闹钟、网页批量操作与清除站点数据、终端/屏幕动作、SubAgent 内部工具等无人值守执行。',
       checked: this.autoApproveHighRisk,
       isLast: true,
       onToggle: (): void => { this.onHighRiskToggle(!this.autoApproveHighRisk); },
@@ -134,7 +134,7 @@ struct ChatAgentPermissionsPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      CenteredTitleBar({ title: '权限与批准', subtitle: '管理 Agent 使用文件、记忆和网页会话前是否需要确认' })
+      CenteredTitleBar({ title: '权限与批准', subtitle: '管理 Agent 操作文件、日历提醒、记忆和网页会话前是否需要确认' })
       if (!this.loaded) {
         Text('加载中…')
           .fontSize(TEXT_STYLES.body.size)

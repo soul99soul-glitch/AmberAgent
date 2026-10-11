@@ -65,10 +65,12 @@
       //   声明会导致整包安装失败(9568289),故保持不声明并在权限页如实标注
       // HDR 提亮(uiEffect hdrBrightnessRatio,API 24+;normal 档,声明即授权)
       { "name": "ohos.permission.HDR_BRIGHTNESS", "reason": "$string:reason_hdr_brightness" },
-      // { "name": "ohos.permission.WRITE_CALENDAR", "reason": "$string:reason_calendar",
-      //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
-      // { "name": "ohos.permission.APPROXIMATELY_LOCATION", "reason": "$string:reason_location",
-      //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      { "name": "ohos.permission.WRITE_CALENDAR", "reason": "$string:reason_calendar",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      { "name": "ohos.permission.APPROXIMATELY_LOCATION", "reason": "$string:reason_location",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      // 闹钟/定时通知(reminderAgentManager;system_grant,声明即授权)
+      { "name": "ohos.permission.PUBLISH_AGENT_REMINDER", "reason": "$string:reason_calendar" },
       // { "name": "ohos.permission.LOCATION", "reason": "$string:reason_location",
       //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
       // { "name": "ohos.permission.ACCESS_BLUETOOTH", "reason": "$string:reason_bluetooth",

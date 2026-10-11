@@ -33,12 +33,13 @@ function composer(options = {}) {
   let choicePromise = gate.promise;
   const source = read('ChatPage');
   const names = ['send', 'sendWithoutAnswer', 'clearAcceptedComposer', 'sendParts', 'sendEdit',
-    'gateModelConfigured', 'guardImagesForSend', 'submitConversationRun', 'cancelEdit', 'startEditMessage'];
+    'gateModelConfigured', 'guardImagesForSend', 'reloadOcrSeed', 'submitConversationRun', 'cancelEdit', 'startEditMessage'];
   for (const n of ['prepareComposerSend', 'finishComposerPreflight', 'composerSendCurrent']) {
     if (new RegExp('^  (?:private )?(?:async )?' + n + '\\(', 'm').test(source)) names.push(n);
   }
   const page = actualPage('ChatPage', names, {
     resolveEffectiveChatChoice: () => choicePromise,
+    loadOcrSeed: async () => null, getChatKvStore: () => ({}),
     toText: message => message.parts.map(part => part.text ?? '').join(''),
     firstImageBlockingIssueForSend: async () => null,
     encodeImageDetailed: () => {}, probeEntryOcrHealth: async () => ({}),

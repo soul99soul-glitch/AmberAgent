@@ -8,10 +8,11 @@ import type {
 } from '@amber/chat-domain';
 import {
   ASK_USER_TOOL_NAME, buildAskUserAnswerPayload, groupMessageParts, mightContainMiniApp,
+  miniAppStatusProjection,
   parseAskUserQuestions,
   streamToolIndex,
 } from '@amber/chat-domain';
-import type { ToolApprovalPartLocator } from '@amber/chat-domain';
+import type { ToolApprovalPartLocator, UIMessagePartMiniApp } from '@amber/chat-domain';
 import { MarkdownText } from './MarkdownText.ets';
 import { ChatMessageReasoning } from './ChatMessageReasoning.ets';
 import { ChatMessageTools } from './ChatMessageTools.ets';
@@ -25,13 +26,31 @@ import { ChatMessageAvatar } from './ChatMessageAvatar.ets';
 import { ChatMessageSubAgentStep } from './ChatMessageSubAgentStep.ets';
 import { ChatMessageCouncilStep } from './ChatMessageCouncilStep.ets';
 import { WidgetMessageContent } from './WidgetMessageContent.ets';
+import { parseResponseContent, applySvgValidation } from '@amber/chat-domain';
+import type {
+  SmartUiDocument, SmartUiDraftSource, SmartUiScalar, SmartUiStateAccessor, SmartUiStateValue,
+  SmartUiWeatherProjection, VisualArtifact,
+} from '@amber/chat-domain';
 import { ChatMessageActionFooter, resolveActionFooterMode } from './ChatMessageActionFooter.ets';
 import { ContentAttachmentChip, urlBasename } from './ContentAttachmentChip.ets';
 import { MiniAppChatCard } from './MiniAppChatCard.ets';
-import { MiniAppStreamingCard } from './MiniAppStreamingCard.ets';
 import { UIAvatar } from './UIAvatar.ets';
 import { ChatUserBubble } from './ChatUserBubble.ets';
 import { ImagePreviewDialog } from './ui/ImagePreviewDialog.ets';
+
+const EMPTY_SMART_UI_ACCESSOR: SmartUiStateAccessor = {
+  get: (_sourceKey: string, _stateId: string): SmartUiScalar | undefined => undefined,
+  set: (_sourceKey: string, _stateId: string, _value: SmartUiScalar): void => {},
+};
+
+interface MessageSvgValidation {
+  partIndex: number;
+  start: number;
+  id: string;
+  snapshot: string;
+  ok: boolean;
+  error: string;
+}
 
 export interface AgentMessageRowHostCapabilities {
   copy: boolean;
@@ -107,6 +126,13 @@ export struct AgentMessageRow {
   // LaTeX 渲染开关(DisplaySetting.enableLatexRendering,传递 MarkdownText)
   @Prop enableLatexRendering: boolean = true;
   @Prop enableGenerativeWidgets: boolean = true;
+  @Prop smartUiConversationId: string = '';
+  @Prop smartUiNodeId: string = '';
+  @Prop smartUiStateAccessor: SmartUiStateAccessor = EMPTY_SMART_UI_ACCESSOR;
+  @Prop smartUiStateRevision: number = 0;
+  @Prop smartUiProjections: SmartUiWeatherProjection[] = [];
+  smartUiValuesFor: (sourceKey: string) => SmartUiStateValue[] = (_sourceKey: string): SmartUiStateValue[] => [];
+  @State svgValidationResults: MessageSvgValidation[] = [];
   // 同一 message id 可同时出现在已提交行与工具续跑预览中；预览使用独立键命名空间。
   @Prop streamKeyTag: string = '';
   onSwitch: (idx: number) => void = (_idx: number): void => {};
@@ -135,6 +161,18 @@ export struct AgentMessageRow {
   // generate_image 修改回调(edit 流程,宿主 ChatPage 注入)
   onModifyGeneratedImage: (url: string) => void = (_url: string): void => {};
   onWidgetAction: (prompt: string) => void = (_prompt: string): void => {};
+  onSmartUiStateChange: (sourceKey: string, stateId: string, value: SmartUiScalar) => void =
+    (_sourceKey: string, _stateId: string, _value: SmartUiScalar): void => {};
+  onSmartUiDraft: (prompt: string) => void = (_prompt: string): void => {};
+  onSmartUiAssetView: (messageId: string, partIndex: number, ref: string, sourceStart: number) => void =
+    (_messageId: string, _partIndex: number, _ref: string, _sourceStart: number): void => {};
+  onSmartUiSourceReplaced: (sourcePrefix: string) => void = (_sourcePrefix: string): void => {};
+  onSmartUiDocument: (sourceKey: string, document: SmartUiDocument, streaming: boolean,
+    source: SmartUiDraftSource, complete: boolean) => void =
+    (_sourceKey: string, _document: SmartUiDocument, _streaming: boolean,
+      _source: SmartUiDraftSource, _complete: boolean): void => {};
+  onSmartUiAssetArea: (partIndex: number, ref: string, sourceStart: number, area: Area) => void =
+    (_partIndex: number, _ref: string, _sourceStart: number, _area: Area): void => {};
   onOpenCouncilRun: (runId: string, tools: UIMessagePartTool[]) => void =
     (_runId: string, _tools: UIMessagePartTool[]): void => {};
   // F44:文档附件打开(宿主未提供路径时 capabilities.openDocument=false → 纯展示)
@@ -155,6 +193,9 @@ export struct AgentMessageRow {
   // D-105:ask_user 草稿态(题 id → 文本/单选值;:102;题 id → 多选集;:104)
   @State askAnswers: Record<string, string> = {};
   @State askMultiAnswers: Record<string, string[]> = {};
+  // MiniApp 流式原文在终态 transformer 替换 text part 后仍供同一卡片继续渲染。
+  @State lastMiniAppStreamText: string = '';
+  private lastMiniAppStreamMessageId: string = '';
   // D-053:本会话内见过流式(Android sawStreamingMessage:123 —
   //   流式结束后保持 Preview 不自动折叠)
   @State sawStream: boolean = false;
@@ -188,10 +229,28 @@ export struct AgentMessageRow {
 
   private onMessageChanged(): void {
     this.cachedBlocks = null;
+    this.captureMiniAppStreamText();
   }
 
   private onStreamingChange(_propName: string): void {
-    if (this.streaming) this.sawStream = true;
+    if (this.streaming) {
+      this.sawStream = true;
+      this.captureMiniAppStreamText();
+    }
+  }
+
+  private captureMiniAppStreamText(): void {
+    if (this.lastMiniAppStreamMessageId !== this.message.id) {
+      this.lastMiniAppStreamMessageId = this.message.id;
+      this.lastMiniAppStreamText = '';
+    }
+    for (let index: number = this.message.parts.length - 1; index >= 0; index--) {
+      const part: UIMessagePart = this.message.parts[index];
+      if (part.type === 'text' && mightContainMiniApp(part.text)) {
+        this.lastMiniAppStreamText = part.text;
+        return;
+      }
+    }
   }
 
   // loading = messageLoading && finishedAt == null(ChatMessageReasoning.kt:107)
@@ -338,8 +397,8 @@ export struct AgentMessageRow {
     return false;
   }
 
-  // iOS shouldRenderMiniAppStreamingCard:只接管活动流式尾部的小应用 JSON;
-  //   结束后由 MiniAppOutputTransformer 换成 mini_app part,解析失败则回到普通 Markdown。
+  // iOS shouldRenderMiniAppStreamingCard:活动流式尾部与终态 status+part 共用 MiniAppChatCard;
+  //   解析失败仍回到普通 Markdown,持久化 transformer 不在 UI 层改写。
   private isLiveMiniAppStream(blocks: MessagePartBlock[], index: number, partIndex: number): boolean {
     return this.streaming && this.isLastTextBlock(blocks, index) &&
       mightContainMiniApp(this.contentTextAt(partIndex));
@@ -364,6 +423,70 @@ export struct AgentMessageRow {
     return '';
   }
 
+  private responseAssets(): VisualArtifact[] {
+    const assets: VisualArtifact[] = [];
+    const blocks: MessagePartBlock[] = this.getBlocks();
+    const validations: MessageSvgValidation[] = this.svgValidationResults;
+    for (let index: number = 0; index < blocks.length; index++) {
+      const block: MessagePartBlock = blocks[index];
+      if (block.kind !== 'content' || block.part.type !== 'text') continue;
+      let segments = parseResponseContent(block.part.text,
+        this.streaming && this.isLastTextBlock(blocks, index));
+      for (const result of validations) {
+        if (result.partIndex === block.index) segments = applySvgValidation(
+          segments, result.start, result.id, result.snapshot, result.ok, result.error);
+      }
+      for (const segment of segments) {
+        if (segment.artifact !== null) assets.push(segment.artifact);
+      }
+    }
+    return assets;
+  }
+
+  private validatedArtifact(partIndex: number, start: number, id: string,
+    snapshot: string, ok: boolean, error: string): void {
+    const previous: MessageSvgValidation | undefined = this.svgValidationResults.find(
+      (result: MessageSvgValidation): boolean => result.partIndex === partIndex && result.start === start && result.id === id);
+    if (previous?.snapshot === snapshot && previous.ok === ok && previous.error === error) return;
+    const result: MessageSvgValidation = { partIndex, start, id, snapshot, ok, error };
+    this.svgValidationResults = this.svgValidationResults.filter(
+      (item: MessageSvgValidation): boolean => item.partIndex !== partIndex || item.start !== start || item.id !== id).concat([result]);
+  }
+
+  private miniAppStatusPartAt(blocks: MessagePartBlock[], index: number): UIMessagePartMiniApp | null {
+    if (index + 1 >= blocks.length) return null;
+    const block: MessagePartBlock = blocks[index];
+    const next: MessagePartBlock = blocks[index + 1];
+    if (block.kind !== 'content' || block.part.type !== 'text' ||
+      next.kind !== 'content' || next.part.type !== 'mini_app') return null;
+    const status = miniAppStatusProjection(block.part.text);
+    if (status === null) return null;
+    const part: UIMessagePartMiniApp = next.part;
+    if (part.title.trim() !== status.title) return null;
+    if (status.version !== null && part.version !== status.version) return null;
+    return part;
+  }
+
+  private isMergedMiniAppPart(blocks: MessagePartBlock[], index: number): boolean {
+    if (index <= 0) return false;
+    return this.miniAppStatusPartAt(blocks, index - 1) !== null;
+  }
+
+  private miniAppPartAt(index: number): UIMessagePartMiniApp | null {
+    const blocks: MessagePartBlock[] = this.getBlocks();
+    const block: MessagePartBlock = blocks[index];
+    return block.kind === 'content' && block.part.type === 'mini_app'
+      ? block.part : this.miniAppStatusPartAt(blocks, index);
+  }
+
+  private miniAppTextAt(index: number): string {
+    const blocks: MessagePartBlock[] = this.getBlocks();
+    const block: MessagePartBlock = blocks[index];
+    if (block.kind === 'content' && block.part.type === 'text' &&
+      this.isLiveMiniAppStream(blocks, index, block.index)) return block.part.text;
+    return this.lastMiniAppStreamText;
+  }
+
   @Builder
   UserTextContent(partIndex: number): void {
     MarkdownText({
@@ -376,6 +499,25 @@ export struct AgentMessageRow {
       codeBlockAutoCollapse: this.codeBlockAutoCollapse,
       showLineNumbers: this.showLineNumbers,
       streamKey: `${this.streamKeyTag}${this.message.id}#${partIndex}`,
+    })
+  }
+
+  @Builder
+  private MiniAppCard(index: number): void {
+    MiniAppChatCard({
+      // Builder arguments capture values; read the current message through the stable index.
+      part: this.miniAppPartAt(index),
+      streamText: this.miniAppTextAt(index),
+      onContentGrow: (): void => { this.onTextGrow(); },
+      canRun: this.capabilities.runMiniApp,
+      canModify: this.capabilities.modifyMiniApp,
+      canOpenList: this.capabilities.openMiniAppList,
+      onRun: (appId: string): void => { this.onRunMiniApp(appId); },
+      onOpenList: (): void => { this.onOpenMiniAppList(); },
+      onModify: (prompt: string): boolean => {
+        this.onModifyMiniApp(prompt);
+        return true;
+      },
     })
   }
 
@@ -492,13 +634,24 @@ export struct AgentMessageRow {
             .width('100%')
             .justifyContent(FlexAlign.End)
             .alignItems(VerticalAlign.Bottom)
-          } else if (this.isLiveMiniAppStream(this.getBlocks(), bi, block.index)) {
-            MiniAppStreamingCard({ text: this.contentTextAt(block.index) })
+          } else if (this.isLiveMiniAppStream(this.getBlocks(), bi, block.index) ||
+            this.miniAppStatusPartAt(this.getBlocks(), bi) !== null) {
+            this.MiniAppCard(bi)
           } else {
             Column() {
               if (this.enableGenerativeWidgets) {
               WidgetMessageContent({
                 content: this.contentTextAt(block.index),
+                assets: this.responseAssets(), messageStreaming: this.streaming,
+                smartUiSourcePrefix: JSON.stringify([this.smartUiConversationId, this.message.id, block.index]),
+                smartUiNodeId: this.smartUiNodeId,
+                smartUiStateAccessor: this.smartUiStateAccessor,
+                smartUiStateRevision: this.smartUiStateRevision,
+                smartUiProjections: this.smartUiProjections,
+                smartUiValuesFor: (sourceKey: string): SmartUiStateValue[] => this.smartUiValuesFor(sourceKey),
+                onArtifactValidation: (start: number, id: string, snapshot: string, ok: boolean, error: string): void => {
+                  this.validatedArtifact(block.index, start, id, snapshot, ok, error);
+                },
                 fontSize: this.bodyFontSize(),
                 fontColor: INK,
                 streaming: this.streaming && this.textDeltasLive &&
@@ -510,6 +663,30 @@ export struct AgentMessageRow {
                 streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
                 onVisibleGrow: (): void => { this.onTextGrow(); },
                 onAction: (prompt: string): void => { this.onWidgetAction(prompt); },
+                onSmartUiStateChange: (sourceKey: string, stateId: string, value: SmartUiScalar): void => {
+                  this.onSmartUiStateChange(sourceKey, stateId, value);
+                },
+                onSmartUiDraft: (prompt: string): void => { this.onSmartUiDraft(prompt); },
+                onSmartUiAssetView: (ref: string, sourceStart: number): void => {
+                  this.onSmartUiAssetView(this.message.id, block.index, ref, sourceStart);
+                },
+                onSmartUiSourceReplaced: (sourcePrefix: string): void => {
+                  this.onSmartUiSourceReplaced(sourcePrefix);
+                },
+                onSmartUiDocument: (sourceKey: string, document: SmartUiDocument, streaming: boolean,
+                  sourceStart: number, blockId: string, complete: boolean): void => {
+                  this.onSmartUiDocument(sourceKey, document, streaming, {
+                    conversationId: this.smartUiConversationId,
+                    nodeId: this.smartUiNodeId,
+                    messageId: this.message.id,
+                    blockId,
+                    blockIndex: block.index,
+                    sourceStart,
+                  }, complete);
+                },
+                onSmartUiAssetArea: (ref: string, sourceStart: number, area: Area): void => {
+                  this.onSmartUiAssetArea(block.index, ref, sourceStart, area);
+                },
               })
               } else {
                 MarkdownText({
@@ -557,19 +734,8 @@ export struct AgentMessageRow {
             openable: this.capabilities.openDocument,
             onOpen: (): void => { this.onOpenDocument(block.part as UIMessagePartDocument); },
           })
-        } else if (block.part.type === 'mini_app') {
-          MiniAppChatCard({
-            part: block.part,
-            canRun: this.capabilities.runMiniApp,
-            canModify: this.capabilities.modifyMiniApp,
-            canOpenList: this.capabilities.openMiniAppList,
-            onRun: (appId: string): void => { this.onRunMiniApp(appId); },
-            onOpenList: (): void => { this.onOpenMiniAppList(); },
-            onModify: (prompt: string): boolean => {
-              this.onModifyMiniApp(prompt);
-              return true;
-            },
-          })
+        } else if (block.part.type === 'mini_app' && !this.isMergedMiniAppPart(this.getBlocks(), bi)) {
+          this.MiniAppCard(bi)
         }
       } else if (block.kind === 'subagent') {
         ChatMessageSubAgentStep({

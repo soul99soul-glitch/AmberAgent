@@ -48,8 +48,10 @@ const RESIDENT_EXACT_TOOLS: string[] = [
   'terminal_job_wait', 'terminal_job_stop',
   'terminal_session_start', 'terminal_session_exec', 'terminal_session_read',
   'terminal_session_stop',
-  'mcp_list', 'mcp_call_tool',
+  'mcp_list', 'mcp_call_tool', 'mcp_describe_tool',
   'generate_image',
+  // Users configure providers by pasting keys/docs in chat; keep these discoverable without tool_search.
+  'provider_list', 'provider_configure', 'provider_models', 'settings_set_model_slot',
 ];
 
 const RESIDENT_CONTEXT_TOOLS: string[] = [
@@ -329,6 +331,19 @@ const searchAliases = (metadata: ToolMetadata): string[] => {
   }
   if (category === 'provider') {
     out.push('服务商', '提供商', '接口配置', 'API key', '密钥', 'provider', '模型配置');
+  }
+  // 设备日程工具族(device_schedule_tools.ts;Harmony 扩展,Kotlin 表无此项)
+  if (name.startsWith('calendar_')) {
+    out.push('日历', '日程', '会议', '行程', 'calendar', 'meeting', 'appointment');
+  }
+  if (name.startsWith('reminder')) {
+    out.push('提醒事项', '待办', '待办事项', '提醒', 'todo', 'reminder', 'reminders');
+  }
+  if (name.startsWith('notification_')) {
+    out.push('通知', '定时通知', '本地通知', '推送', 'notification', 'notify');
+  }
+  if (name.startsWith('alarm')) {
+    out.push('闹钟', '定时', '倒计时', '计时器', '叫醒', 'alarm', 'timer', 'countdown');
   }
   return out;
 };

@@ -1,13 +1,13 @@
 // SettingSystemAccessPage — 系统访问(权限)设置页
-// 通讯录 / 日历 / 通知 / 文件 四项:
-//   - 通讯录/日历:checkAccessToken 查真状态,未授权点击发起 requestPermissionsFromUser
+// 日历 / 位置 / 通知 / 剪贴板 / 通讯录 / 照片 / 文件 / 相机:
+//   - 日历(READ+WRITE 同组)/位置(APPROXIMATELY_LOCATION):checkAccessToken 查真状态,
+//     未授权点击发起 requestPermissionsFromUser
 //   - 通知:isNotificationEnabled 查真状态,未授权点击发起 requestEnableNotification
-//   - 文件:鸿蒙文档访问走系统 picker,免权限 → 显示「无需授权」
+//   - 通讯录/照片/文件/相机:走系统选择器或系统应用,免权限 → 显示「无需授权」
 //
 // 2026-09-27 二级页 iOS 对齐(无截图,沿用规范):仅换视觉骨架
 //   CenteredTitleBar / PlainSection / CardGroup r18+发丝描边 / 权限行
 //   (accent 图标座 + StatusChip 软底状态药丸)+ FooterNote;逻辑零改动。
-import { router } from '@kit.ArkUI';
 import { abilityAccessCtrl, bundleManager, common, Permissions } from '@kit.AbilityKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { ACCENT, BG, INK, INK3, LINE, accentSoftBg, lineHeightForSize } from '../design/tokens.ets';
@@ -29,6 +29,10 @@ function makePerm(key: string, name: string, desc: string, status: string): Perm
 }
 
 const atManager = abilityAccessCtrl.createAtManager();
+
+// 日历/提醒工具(DeviceSchedulePort)读写同组申请;天气工具仅需大致位置
+const CALENDAR_PERMS: Array<Permissions> = ['ohos.permission.READ_CALENDAR', 'ohos.permission.WRITE_CALENDAR'];
+const LOCATION_PERMS: Array<Permissions> = ['ohos.permission.APPROXIMATELY_LOCATION'];
 
 // 应用级 accessTokenId(权限查询入参)
 const appAccessTokenId = (): number => {
@@ -66,7 +70,11 @@ struct SettingSystemAccessPage {
   }
 
   private async loadPermissions(): Promise<void> {
-    const calendar: boolean = await checkPermGranted('ohos.permission.READ_CALENDAR');
+    // 日历工具(日程/提醒)读写同组申请:两项都授予才算已授权
+    const calendarRead: boolean = await checkPermGranted(CALENDAR_PERMS[0]);
+    const calendarWrite: boolean = await checkPermGranted(CALENDAR_PERMS[1]);
+    const calendar: boolean = calendarRead && calendarWrite;
+    const location: boolean = await checkPermGranted(LOCATION_PERMS[0]);
     let notifEnabled: boolean = false;
     try {
       notifEnabled = await notificationManager.isNotificationEnabled();
@@ -74,12 +82,14 @@ struct SettingSystemAccessPage {
       notifEnabled = false;
     }
     this.items = [
-      makePerm('contacts', '通讯录', '调试 Profile 需加入 ACL 权限(AGC 后台)后解禁', 'acl'),
-      makePerm('calendar', '日历', '读取日程用于提醒', calendar ? 'granted' : 'denied'),
+      makePerm('calendar', '日历与提醒', '允许 Agent 查看和管理日程、提醒事项', calendar ? 'granted' : 'denied'),
+      makePerm('location', '位置', '用于天气查询的大致位置', location ? 'granted' : 'denied'),
       makePerm('notifications', '通知', '消息生成完成时推送通知', notifEnabled ? 'granted' : 'denied'),
-      makePerm('pasteboard', '剪贴板', '读取接口受 ACL 管控;调试 Profile 需加入 ACL 权限(AGC 后台)后解禁', 'acl'),
+      makePerm('pasteboard', '剪贴板', '读取受系统管控，当前版本暂不可用；写入剪贴板不受影响', 'acl'),
+      makePerm('contacts', '通讯录', '通过系统选择器选择，无需授权', 'exempt'),
+      makePerm('photos', '照片', '通过系统选择器选择，无需授权', 'exempt'),
       makePerm('files', '文件与附件', '通过系统文件选择器按需选取', 'exempt'),
-      makePerm('camera', '相机', '拍照走系统相机应用,无需授权', 'exempt'),
+      makePerm('camera', '相机', '拍照走系统相机应用，无需授权', 'exempt'),
     ];
     this.loaded = true;
   }
@@ -104,6 +114,8 @@ struct SettingSystemAccessPage {
     if (key === 'files') return 'folder';
     if (key === 'pasteboard') return 'doc';
     if (key === 'camera') return 'hi_camera';
+    if (key === 'location') return 'globe';
+    if (key === 'photos') return 'image';
     return 'person';
   }
 
@@ -118,14 +130,17 @@ struct SettingSystemAccessPage {
         .catch((): void => { this.loadPermissions(); });
       return;
     }
-    const perms: Array<Permissions> = ['ohos.permission.READ_CALENDAR'];
+    let perms: Array<Permissions> = [];
+    if (p.key === 'calendar') {
+      perms = CALENDAR_PERMS;
+    } else if (p.key === 'location') {
+      perms = LOCATION_PERMS;
+    } else {
+      return;
+    }
     atManager.requestPermissionsFromUser(ctx, perms)
       .then((): void => { this.loadPermissions(); })
       .catch((): void => { this.loadPermissions(); });
-  }
-
-  private done(): void {
-    router.back();
   }
 
   // ── 卡片内容(@Builder:组件构造必须在 builder 上下文,铁律 4b)──
@@ -194,11 +209,7 @@ struct SettingSystemAccessPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      CenteredTitleBar({
-        title: '系统访问',
-        actionText: '完成',
-        onAction: (): void => { this.done(); },
-      })
+      CenteredTitleBar({ title: '系统访问' })
 
       if (!this.loaded) {
         Text('加载中…')
@@ -214,7 +225,7 @@ struct SettingSystemAccessPage {
             }
             .width('100%').padding({ left: 16, right: 16 })
 
-            FooterNote({ text: '点击未授权项可发起申请;文件访问由系统选择器提供,无需授权。' })
+            FooterNote({ text: '点击未授权项可发起申请；通讯录、照片、文件经系统选择器提供。' })
             PageSpacer()
           }
           .width('100%')

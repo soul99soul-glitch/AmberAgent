@@ -6,10 +6,14 @@
 // 降级(跳过): HighlightCodeBlock(用 JsonTree 替代) / ZoomableAsyncImage / FaviconRow /
 //   memory delete(需 MemoryRepository) / MarkdownBlock answer(用 MarkdownText)
 
-import type { UIMessagePartTool, JsonValue } from '@amber/chat-domain';
-import { toolInputAsJson, toolOutputJson, maskSensitiveJsonObject, maskSensitiveJsonText } from '@amber/chat-domain';
+import type { UIMessagePartTool, UIMessagePartImage, JsonValue } from '@amber/chat-domain';
+import {
+  toolInputAsJson, toolOutputJson, maskSensitiveJsonObject, maskSensitiveJsonText, toolDisplayTitle,
+} from '@amber/chat-domain';
 import type { JsonObject } from '@amber/chat-domain';
-import { INK, INK2, INK3, INK4, ACCENT, SURFACE, SURFACE2, LINE, ACCENT_LIGHT, BODY, META, LABEL } from '../design/tokens.ets';
+import {
+  INK, INK2, INK3, INK4, ACCENT, SURFACE, SURFACE2, LINE, ACCENT_LIGHT, BODY, BODY2, META, LABEL, RADIUS,
+} from '../design/tokens.ets';
 import { JsonTree } from './ui/JsonTree.ets';
 import { MarkdownText } from './MarkdownText.ets';
 import { Icon } from './ui/Icon.ets';
@@ -21,6 +25,16 @@ import { RecipeApprovalView, recipeApprovalView } from './RecipeApprovalSummary.
 import { pluginApprovalView } from './PluginApprovalSummary.ets';
 import { JevApprovalFacts } from './JevApprovalFacts.ets';
 import { common } from '@kit.AbilityKit';
+
+// 原始输出文本兜底:折叠态只渲染前 N 字符 + 行数上限;展开后仍有硬上限,
+//   超出提示用「复制」获取全文(单个 Text 渲染数十万字符会卡死布局)
+const RAW_OUTPUT_COLLAPSED_CHARS: number = 4000;
+const RAW_OUTPUT_COLLAPSED_LINES: number = 40;
+const RAW_OUTPUT_EXPANDED_CHARS: number = 60000;
+const RAW_OUTPUT_EXPANDED_LINES: number = 100000;
+// photos_pick 缩略图
+const PHOTO_THUMB_SIZE: number = 72;
+const PHOTO_THUMB_GAP: number = 8;
 
 // 搜索结果项
 interface SearchResultItem {
@@ -36,6 +50,7 @@ export struct ChatMessageToolPreviewSheet {
   @Prop jevSubjectHash: string = '';
   onDismiss: () => void = (): void => {};
   @State sshColors: SSHUIColors = new SSHUIColors();
+  @State rawOutputExpanded: boolean = false;
   @StorageProp('darkMode') @Watch('refreshSSHColors') darkMode: boolean = false;
   @StorageProp('themePackId') @Watch('refreshSSHColors') themePackId: string = '';
 
@@ -71,12 +86,53 @@ export struct ChatMessageToolPreviewSheet {
     }
   }
 
+  // 按 part 实例记忆:build 内多处读取,避免对大输出重复 JSON 解析脱敏
+  private outputTextSource: UIMessagePartTool | null = null;
+  private outputTextCache: string = '';
+
   private getOutputText(): string {
+    if (this.outputTextSource === this.part) return this.outputTextCache;
     const texts: string[] = [];
     for (const part of this.part.output) {
       if (part.type === 'text') texts.push(maskSensitiveJsonText(part.text));
     }
-    return texts.join('\n');
+    this.outputTextCache = texts.join('\n');
+    this.outputTextSource = this.part;
+    return this.outputTextCache;
+  }
+
+  private getImageUrls(): string[] {
+    const urls: string[] = [];
+    for (const p of this.part.output) {
+      if (p.type === 'image') urls.push((p as UIMessagePartImage).url);
+    }
+    return urls;
+  }
+
+  private rawOutputLimit(): number {
+    return this.rawOutputExpanded ? RAW_OUTPUT_EXPANDED_CHARS : RAW_OUTPUT_COLLAPSED_CHARS;
+  }
+
+  // 截断后的原始输出(展开态仍有硬上限)
+  private rawOutputShown(): string {
+    const text: string = this.getOutputText();
+    const limit: number = this.rawOutputLimit();
+    return text.length > limit ? `${text.slice(0, limit)}\n…` : text;
+  }
+
+  // 折叠态是否还有未显示内容(字符超限,或行数超过折叠行数)
+  private rawOutputCanExpand(): boolean {
+    const text: string = this.getOutputText();
+    if (text.length > RAW_OUTPUT_COLLAPSED_CHARS) return true;
+    let lines: number = 1;
+    for (let i: number = 0; i < text.length && lines <= RAW_OUTPUT_COLLAPSED_LINES; i++) {
+      if (text.charCodeAt(i) === 10) lines++;
+    }
+    return lines > RAW_OUTPUT_COLLAPSED_LINES;
+  }
+
+  private rawOutputTruncatedWhenExpanded(): boolean {
+    return this.getOutputText().length > RAW_OUTPUT_EXPANDED_CHARS;
   }
 
   private openSearchSource(url: string): void {
@@ -150,11 +206,12 @@ export struct ChatMessageToolPreviewSheet {
     Column() {
       // 标题行
       Row() {
-        Text(`工具详情: ${this.part.toolName}`)
+        Text(toolDisplayTitle(this.part))
           .fontSize(BODY)
           .fontWeight(FontWeight.Medium)
           .fontColor(INK)
           .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          .accessibilityText(`工具详情：${toolDisplayTitle(this.part)}`)
         Row() {
           Icon({ name: 'close', iconSize: 18, color: INK2 })
         }.width(44).height(44).justifyContent(FlexAlign.Center)
@@ -165,8 +222,19 @@ export struct ChatMessageToolPreviewSheet {
 
       Scroll() {
         Column() {
+          // 显示标题之外保留原始工具名(排障/对照日志)
+          if (toolDisplayTitle(this.part) !== this.part.toolName) {
+            Text(this.part.toolName)
+              .fontSize(LABEL).fontColor(INK3).fontFamily('JetBrainsMono')
+              .width('100%').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .padding({ left: 16, right: 16, bottom: 4 })
+              .copyOption(CopyOptions.LocalDevice)
+          }
           JevApprovalFacts({ part: this.part, subjectHash: this.jevSubjectHash })
             .padding({ left: 16, right: 16 })
+          if (this.part.toolName === 'photos_pick' && this.getImageUrls().length > 0) {
+            this.RenderPhotoThumbs()
+          }
           if (this.packageApprovalView() !== null) {
             this.RenderRecipePreview(this.packageApprovalView()!)
           } else if (isSSHApprovalTool(this.part.toolName)) {
@@ -248,7 +316,7 @@ export struct ChatMessageToolPreviewSheet {
       if (this.searchAnswer().length > 0) {
         Column() {
           Text('AI 回答').fontSize(LABEL).fontColor(INK3)
-          MarkdownText({ content: this.searchAnswer(), fontSize: 13, fontColor: INK2 })
+          MarkdownText({ content: this.searchAnswer(), fontSize: BODY2, fontColor: INK2 })
         }
         .width('100%')
         .padding(12)
@@ -321,7 +389,7 @@ export struct ChatMessageToolPreviewSheet {
       if (this.getOutputText().length > 0) {
         MarkdownText({
           content: this.getOutputText(),
-          fontSize: 13,
+          fontSize: BODY2,
           fontColor: INK2,
         })
           .width('100%')
@@ -368,9 +436,7 @@ export struct ChatMessageToolPreviewSheet {
           JsonTree({ json: JSON.stringify(this.getOutputJson(), null, 2) })
             .width('100%').padding(12).backgroundColor(SURFACE2).borderRadius(8)
         } else {
-          Text(this.getOutputText())
-            .fontSize(LABEL).fontColor(INK2).fontFamily('JetBrainsMono')
-            .width('100%').padding(12).backgroundColor(SURFACE2).borderRadius(8)
+          this.RenderRawOutputText()
         }
       }
       .width('100%').padding({ left: 16, right: 16 }).margin({ bottom: 16 })
@@ -386,16 +452,61 @@ export struct ChatMessageToolPreviewSheet {
         .fontColor(INK3)
         .width('100%')
         .padding({ left: 16, right: 16, top: 8, bottom: 4 })
-      Text(this.getOutputText())
-        .fontSize(LABEL)
-        .fontColor(INK2)
-        .fontFamily('JetBrainsMono')
-        .width('100%')
-        .padding(12)
-        .backgroundColor(SURFACE2)
-        .borderRadius(8)
-        .margin({ left: 16, right: 16, bottom: 16 })
+      Column() {
+        this.RenderRawOutputText()
+      }
+      .width('100%').padding({ left: 16, right: 16 }).margin({ bottom: 16 })
     }
     .width('100%')
+  }
+
+  // 原始文本输出:折叠态限字符 + 行数,可展开;展开态仍有硬上限
+  @Builder
+  RenderRawOutputText(): void {
+    Column() {
+      Text(this.rawOutputShown())
+        .fontSize(LABEL).fontColor(INK2).fontFamily('JetBrainsMono')
+        .width('100%')
+        .maxLines(this.rawOutputExpanded ? RAW_OUTPUT_EXPANDED_LINES : RAW_OUTPUT_COLLAPSED_LINES)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .wordBreak(WordBreak.BREAK_ALL)
+        .copyOption(CopyOptions.LocalDevice)
+      if (this.rawOutputCanExpand()) {
+        Text(this.rawOutputExpanded ? '收起' : '展开全部')
+          .fontSize(LABEL).fontColor(ACCENT)
+          .padding({ top: 8, bottom: 4, right: 12 })
+          .onClick((): void => { this.rawOutputExpanded = !this.rawOutputExpanded; })
+          .accessibilityText(this.rawOutputExpanded ? '收起工具输出' : '展开全部工具输出')
+      }
+      if (this.rawOutputExpanded && this.rawOutputTruncatedWhenExpanded()) {
+        Text('输出过长，已截断显示；点「复制」获取完整内容')
+          .fontSize(LABEL).fontColor(INK3).width('100%').padding({ top: 4 })
+      }
+    }
+    .width('100%').alignItems(HorizontalAlign.Start)
+    .padding(12).backgroundColor(SURFACE2).borderRadius(8)
+  }
+
+  // photos_pick:所选照片缩略图行
+  @Builder
+  RenderPhotoThumbs(): void {
+    Scroll() {
+      Row({ space: PHOTO_THUMB_GAP }) {
+        ForEach(this.getImageUrls(), (url: string, idx: number): void => {
+          Image(url)
+            .width(PHOTO_THUMB_SIZE).height(PHOTO_THUMB_SIZE)
+            .objectFit(ImageFit.Cover)
+            .borderRadius(RADIUS)
+            .border({ width: 0.5, color: LINE })
+            .clip(true)
+            .accessibilityText(`所选照片 ${idx + 1}`)
+        }, (url: string, idx: number): string => `sheet-photo-${idx}-${url.length}`)
+      }
+    }
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
+    .align(Alignment.Start)
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 8, bottom: 4 })
   }
 }

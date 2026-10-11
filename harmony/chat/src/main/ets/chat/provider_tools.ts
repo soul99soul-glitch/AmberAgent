@@ -262,7 +262,7 @@ export const createProviderManagementTools = (deps: ProviderManagementToolsDeps)
   makeAgentTool({
     name: 'provider_list', description: 'List configured AI providers and models (服务商、接口配置、API key 状态). Credentials and custom headers are omitted.',
     parameters: () => makeInputSchemaObj({}),
-    systemPrompt: () => 'When the user supplies API keys and API documentation to configure AI providers, use provider_list, provider_configure and provider_models. Read the documentation first; do not guess model IDs, protocols or endpoints. Never repeat API keys in replies. Configuration success is not a successful chat request.',
+    systemPrompt: () => 'When the user supplies API keys and API documentation to configure AI providers, use provider_list, provider_configure and provider_models. Read the documentation first; do not guess model IDs, protocols or endpoints. To switch which model is used (chat, title, OCR, compress, suggestion, image generation), call settings_set_model_slot with models[].id from provider_list/provider_configure. Never repeat API keys in replies. Configuration success is not a successful chat request.',
     execute: async (): Promise<UIMessagePart[]> => {
       try { return textResult({ status: 'ok', providers: ((await loadProviders(deps.store)) ?? []).map(providerSummary) }); }
       catch (error) { return safeFailure(error as object, 'Unable to load provider settings'); }
@@ -290,7 +290,7 @@ export const createProviderManagementTools = (deps: ProviderManagementToolsDeps)
           }
           await saveProviders(deps.store, providers);
           return textResult({ status: 'ok', providers: configured.map(providerSummary),
-            message: 'Provider settings saved. Models are available for selection on the next turn. No chat request was tested.' });
+            message: 'Provider settings saved. To use one of these models, call settings_set_model_slot with its models[].id (takes effect next turn). No chat request was tested.' });
         });
       } catch (error) { return safeFailure(error as object, 'Unable to save provider settings'); }
     },

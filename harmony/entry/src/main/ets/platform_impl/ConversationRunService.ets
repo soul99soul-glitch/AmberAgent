@@ -1,5 +1,6 @@
 import type { Context } from '@kit.AbilityKit';
 import type { AbortSignalLike } from '@amber/deepread-domain';
+import BuildProfile from 'BuildProfile';
 import type {
   Conversation, UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartTool,
   PendingUserMessage, PendingUserMessageMode, ConversationCompact, KernelPhase,
@@ -62,17 +63,42 @@ export interface ConversationVerdictCommand {
   kind: 'verdict'; toolCallId: string; verdict: ToolApprovalVerdict; locator?: ToolApprovalPartLocator;
 }
 export type ConversationRunCommand = ConversationSendCommand | ConversationRegenerateCommand
-  | ConversationResumeCommand | ConversationEditCommand | ConversationVerdictCommand;
+  | ConversationResumeCommand | ConversationEditCommand | ConversationVerdictCommand | DebugVisualReplayCommand;
+export interface DebugVisualReplayCommand {
+  kind: 'debug_visual'; frames: UIMessage[]; finalConversation: Conversation; stepMs: number;
+}
 export interface PreparedConversationSeed {
   runtime: ChatRuntime; agentRuntime: AgentRuntimeSnapshot;
   compressChoice: ChatProviderChoice | null; taskPrompts: TaskPrompts;
   searchSettings: SearchSettings; ocrSeed: OcrSeed | null; miniAppSetting: MiniAppSetting;
   userNickname: string;
+  generativeWidgetsEnabled: boolean;
   webmountGlobalEnabled: boolean; webmountEvalEnabled: boolean; imageGenConfigured: boolean;
   subAgentEnabled: boolean; subAgentMode: string;
   agentTaskTools: AgentTool[]; agentCronTools: AgentTool[];
   enableGenerationNotification: boolean;
 }
+
+export const DEBUG_VISUAL_CONVERSATION_PREFIX: string = '__amber_debug_visual__-';
+const DEBUG_VISUAL_CONVERSATION_PATTERN: RegExp = /^__amber_debug_visual__-[A-Za-z0-9]{1,32}$/;
+const DEBUG_VISUAL_LISTENER_WAIT_MS: number = 10000;
+
+const waitDebugVisual = (ms: number, signal: AbortSignalLike): Promise<boolean> =>
+  new Promise((resolve): void => {
+    if (signal.aborted) { resolve(false); return; }
+    let timer: number = -1;
+    let settled: boolean = false;
+    const finish = (value: boolean): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== -1) clearTimeout(timer);
+      signal.removeEventListener?.('abort', onAbort);
+      resolve(value);
+    };
+    const onAbort = (): void => { finish(false); };
+    signal.addEventListener?.('abort', onAbort);
+    timer = setTimeout((): void => { finish(true); }, Math.max(0, ms));
+  });
 
 export class DetachedConversationContext {
   readonly conversationId: string;
@@ -390,6 +416,22 @@ export class ConversationRunService {
   start(conversationId: string, command: ConversationRunCommand): ConversationRunHandle {
     return this.reserve(this.session(conversationId), command, false);
   }
+  replayDebugVisual(initial: Conversation, frames: UIMessage[], finalConversation: Conversation,
+    stepMs: number = 600): ConversationRunHandle {
+    if (!BuildProfile.DEBUG) throw new Error('视觉回放仅在 Debug 构建可用');
+    if (!DEBUG_VISUAL_CONVERSATION_PATTERN.test(initial.id) || finalConversation.id !== initial.id ||
+      frames.length < 1 || frames.length > 64 || !Number.isInteger(stepMs) || stepMs < 0 || stepMs > 2000) {
+      throw new Error('视觉回放参数无效');
+    }
+    const session: ConversationSession = this.session(initial.id);
+    if (session.record !== null || session.appendActive || session.latest !== null || session.newConversation !== null) {
+      throw new Error('视觉回放已登记或正在运行');
+    }
+    session.newConversation = initial;
+    return this.reserve(session, {
+      kind: 'debug_visual', frames: frames.slice(), finalConversation: finalConversation, stepMs: stepMs,
+    }, false);
+  }
   send(conversationId: string, parts: UIMessagePart[]): ConversationRunHandle {
     const command: ConversationSendCommand = { kind: 'send', parts: parts, dispatchMessageId: '' };
     return this.start(conversationId, command);
@@ -557,11 +599,62 @@ export class ConversationRunService {
     }
     return '';
   }
+  private async performDebugVisual(session: ConversationSession, record: ActiveRun,
+    command: DebugVisualReplayCommand): Promise<void> {
+    const initial: Conversation | null = session.newConversation;
+    if (initial === null) throw new Error('视觉回放会话不存在');
+    session.newConversation = null;
+    session.latest = initial;
+    session.state.conversation = initial;
+    session.state.visualConversation = initial;
+    session.state.historyNodeCount = initial.messageNodes.length;
+    session.state.modelLabel = 'Debug visual replay';
+    session.state.phase = 'preparing';
+    this.emit(session);
+
+    let waited: number = 0;
+    while (session.listeners.length === 0 && waited < DEBUG_VISUAL_LISTENER_WAIT_MS &&
+      !record.controller.signal.aborted) {
+      if (!await waitDebugVisual(50, record.controller.signal)) return;
+      waited += 50;
+    }
+    if (record.controller.signal.aborted) return;
+    if (session.listeners.length === 0) {
+      record.controller.abort();
+      return;
+    }
+
+    for (const frame of command.frames) {
+      if (record.controller.signal.aborted || session.listeners.length === 0) {
+        record.controller.abort();
+        return;
+      }
+      session.state.phase = 'streaming';
+      session.state.streamingTail = [frame];
+      record.raw = [frame];
+      const gained = record.tracker.observe([frame]);
+      if (gained.chars > 0 || gained.bytes > 0) this.reportRunProgress(record, true, session.id);
+      this.emit(session);
+      if (!await waitDebugVisual(command.stepMs, record.controller.signal)) return;
+    }
+    if (record.controller.signal.aborted || session.listeners.length === 0) {
+      record.controller.abort();
+      return;
+    }
+    session.latest = command.finalConversation;
+    session.state.conversation = command.finalConversation;
+    session.state.visualConversation = command.finalConversation;
+  }
   private async perform(session: ConversationSession, record: ActiveRun, command: ConversationRunCommand): Promise<void> {
     let failure: Error | null = null;
     let finalized: Conversation | null = null;
     let manualToolCallId: string = '';
     try {
+      if (command.kind === 'debug_visual') {
+        if (!BuildProfile.DEBUG) throw new Error('视觉回放仅在 Debug 构建可用');
+        await this.performDebugVisual(session, record, command);
+        return;
+      }
       const loaded: Conversation | null = await this.write(session, async (): Promise<Conversation | null> => {
         const latest: Conversation | null = await this.loadCanonical(session);
         session.latest = latest;
@@ -790,6 +883,7 @@ export class ConversationRunService {
     if (session !== undefined) this.clearCompletion(session);
     if (session === undefined || record === null || record.id !== runId || record.controller.signal.aborted) return;
     record.kernel?.cancel('user'); record.controller.abort();
+    if (DEBUG_VISUAL_CONVERSATION_PATTERN.test(conversationId)) return;
     record.cancelQueue = this.queueOperation(session, async (): Promise<void> => {
       const converted = convertSteerToFollowup(session.queue);
       if (!converted.changed) return;

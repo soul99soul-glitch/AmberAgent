@@ -188,11 +188,12 @@ struct SettingPage {
       ForEach([this.themeEpoch], (_e: number): void => {
       // ── 顶栏:返回 + 标题 + 账户头像(iOS SettingsHome header:头像 38,热区 44)──
       Row() {
+        // 返回热区起于页边距 16(此前 padding 4 → 热区 x=4vp 越出页边距)
         Row() {
           Icon({ name: 'back', iconSize: 24, color: INK })
         }
-        .width(48).height(48)
-        .justifyContent(FlexAlign.Center)
+        .width(44).height(48)
+        .justifyContent(FlexAlign.Start)
         .alignItems(VerticalAlign.Center)
         .accessibilityText('返回')
         .onClick((): void => { router.back(); })
@@ -204,8 +205,7 @@ struct SettingPage {
           .fontColor(INK)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ left: 8 })
-          .layoutWeight(1)
+          .layoutWeight(1) // 标题起点保持 60(16 + 44 热区)
         Row() {
           if (this.userAvatar.length > 0) {
             Image(this.userAvatar.startsWith('http') || this.userAvatar.startsWith('data:')
@@ -230,14 +230,15 @@ struct SettingPage {
           }
         }
         .width(44).height(44)
-        .justifyContent(FlexAlign.Center)
+        // 头像右缘贴页边距 16,与首页顶栏头像同位
+        .justifyContent(FlexAlign.End)
         .alignItems(VerticalAlign.Center)
         .accessibilityText('我的账户')
         .onClick((): void => { router.pushUrl({ url: 'pages/ProfilePage' }); })
       }
       .width('100%')
       .constraintSize({ minHeight: 64 })
-      .padding({ left: 4, right: GUTTER, top: this.statusBarHeight, bottom: 8 })
+      .padding({ left: GUTTER, right: GUTTER, top: this.statusBarHeight, bottom: 8 })
       .backgroundColor(BG)
 
       Scroll() {

@@ -43,6 +43,7 @@ import type { JsonObject } from './json.ts';
 //   sanitizedToolFailureMessage/isRecoverableToolFailure/toAgentToolFailureJson
 //   复用,不重复实现
 import { toAgentToolFailureJson } from './tool_dispatcher.ts';
+import { modelSlotActionTitle, toolInputDisplayTitle, toolStaticLabel } from './tool_display.ts';
 
 // ===== ToolActivityStatus(AgentRuntimeModels.kt:77-92) =====
 
@@ -459,18 +460,57 @@ export const toolActivityStatus = (
     if (status === 'cancelled' || status === 'interrupted') return 'cancelled';
     if (status === 'timed_out') return 'failed';
   }
+  if (outputJson['ok'] === false) {
+    return indicatesCancellation(outputJson) ? 'cancelled' : 'failed';
+  }
   if (indicatesFailure(outputJson)) return 'failed';
+  // 超长输出(> 解析上限)toolOutputJson 返回 {} —— 嗅探首个文本块开头的 {"ok":false
+  if (Object.keys(outputJson).length === 0) {
+    const sniffed: ToolActivityStatus | null = sniffLeadingOkFalse(tool);
+    if (sniffed !== null) return sniffed;
+  }
   return 'succeeded';
 };
 
-// indicatesFailure(:1409-1417)
+// 取消语义(ok:false 结果中):status/reason/error_code = cancelled;
+//   photos_pick/contacts_pick 的 empty_selection(用户未选任何项)同视为取消
+const CANCELLED_MARKERS: string[] = ['cancelled', 'canceled', 'empty_selection'];
+
+const indicatesCancellation = (outputJson: JsonObject): boolean => {
+  for (const key of ['status', 'reason', 'error_code']) {
+    const v: string | null = getStringContent(outputJson, key);
+    if (v !== null && CANCELLED_MARKERS.indexOf(v.trim().toLowerCase()) >= 0) return true;
+  }
+  return false;
+};
+
+const SNIFF_HEAD_CHARS: number = 512;
+const OK_FALSE_HEAD_RE: RegExp = /^\s*\{\s*"ok"\s*:\s*false\s*[,}]/;
+const CANCELLED_HEAD_RE: RegExp =
+  /"(?:status|reason|error_code)"\s*:\s*"(?:cancelled|canceled|empty_selection)"/i;
+
+// 只看首个 text part 的前 512 字符(不解析整串):输出超过 JSON 解析上限时的廉价兜底
+const sniffLeadingOkFalse = (tool: UIMessagePartTool): ToolActivityStatus | null => {
+  for (const p of tool.output) {
+    if (p.type !== 'text') continue;
+    const head: string = (p as UIMessagePartText).text.slice(0, SNIFF_HEAD_CHARS);
+    if (head.trim().length === 0) continue;
+    if (!OK_FALSE_HEAD_RE.test(head)) return null;
+    return CANCELLED_HEAD_RE.test(head) ? 'cancelled' : 'failed';
+  }
+  return null;
+};
+
+// indicatesFailure(:1409-1417)+ 严格 ok === false(Harmony 新工具族的失败信封
+//   {ok:false,tool,reason|error|status,...};仅布尔 false,'false' 字符串不算)
 export const indicatesFailure = (outputJson: JsonObject): boolean => {
   const exitCode: number | null = jsonIntOrNull(outputJson['exit_code']);
   const error: string | null = getStringContent(outputJson, 'error');
   const statusRaw: string | null = getStringContent(outputJson, 'status');
   const status: string | null = statusRaw !== null ? statusRaw.toLowerCase() : null;
   const failed: boolean = jsonBoolStrictOrNull(outputJson['failed']) === true;
-  return (error !== null && error.trim().length > 0) ||
+  return outputJson['ok'] === false ||
+    (error !== null && error.trim().length > 0) ||
     (exitCode !== null && exitCode !== 0) ||
     failed ||
     (status !== null &&
@@ -574,6 +614,42 @@ export const toolSandboxTitle = (tool: UIMessagePartTool, input?: JsonObject): s
   return name;
 };
 
+// ===== 聊天胶囊/详情页标题(非 Android 锚点;iOS displayName 对齐) =====
+
+// recipe/plugin 族的前缀兜底(无 checkpoint 元数据时)
+const packageToolTitle = (name: string): string | null => {
+  if (name === 'recipe_import') return '安装 Recipe';
+  if (name.startsWith('recipe__')) return `运行 Recipe ${compactSandboxText(name.slice('recipe__'.length), 24)}`;
+  if (name === 'plugin_import') return '安装插件';
+  if (name === 'plugin_test') return '试跑插件';
+  if (name.startsWith('plugin__')) return `运行插件 ${compactSandboxText(name.slice('plugin__'.length), 24)}`;
+  return null;
+};
+
+/**
+ * 不含模型 display_title 的标题:静态中文标签 → 沙盒标题(终端/文件/网页/MCP…)
+ * → recipe/plugin 前缀 → 原始工具名。授权界面用这个(以工具真实身份为准)。
+ */
+export const toolStaticDisplayTitle = (tool: UIMessagePartTool, input?: JsonObject): string => {
+  const inp: JsonObject = input ?? toolInputAsJson(tool);
+  const name: string = tool.toolName;
+  const label: string | null = toolStaticLabel(name, inp);
+  if (label !== null) return label;
+  const sandbox: string = toolSandboxTitle(tool, inp).trim();
+  if (sandbox.length > 0 && sandbox !== name) return sandbox;
+  const pkg: string | null = packageToolTitle(name);
+  if (pkg !== null) return pkg;
+  return name;
+};
+
+/** 胶囊标题:输入 display_title(trim/截断)优先,其次 toolStaticDisplayTitle */
+export const toolDisplayTitle = (tool: UIMessagePartTool, input?: JsonObject): string => {
+  const inp: JsonObject = input ?? toolInputAsJson(tool);
+  const fromModel: string | null = toolInputDisplayTitle(inp);
+  if (fromModel !== null) return fromModel;
+  return toolStaticDisplayTitle(tool, inp);
+};
+
 // inputPreview(:1363-1383):键取不到 → input.toString() 全串 compact 180
 export const toolSandboxInputPreview = (
   tool: UIMessagePartTool,
@@ -586,6 +662,9 @@ export const toolSandboxInputPreview = (
   if (name === 'provider_list') return '查看已配置的提供商';
   if (name === 'provider_configure') return '保存提供商和模型配置';
   if (name === 'provider_models') return '获取提供商模型列表';
+  if (name === 'settings_set_model_slot') {
+    return modelSlotActionTitle(getFirstStringContent(inp, ['slot']));
+  }
   if (name === 'search_web') {
     picked = getFirstStringContent(inp, ['query', 'q', 'keyword', 'keywords']);
   } else if (name === 'scrape_web') {

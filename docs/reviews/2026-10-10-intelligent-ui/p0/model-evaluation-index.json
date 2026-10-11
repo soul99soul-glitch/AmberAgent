@@ -1,0 +1,33 @@
+{
+  "evaluationVersion": "p0-replay-v2",
+  "fixtureSource": "harmony/chat/src/test/fixtures/intelligent-ui/p0-model-cases.json",
+  "fixtureCount": 20,
+  "caseIdentity": "fixture id + SHA-256 of submitted userText; full manifest is in each model artifact",
+  "models": [
+    {
+      "provider": "glm",
+      "model": "glm-5.3",
+      "artifact": "model-evaluation.json",
+      "transport": "nonstream_fallback for 20-case content evaluation",
+      "pilot": { "finishReason": "stop", "sawDone": true, "artifact": "glm-stream-pilot.json" },
+      "summary": { "pass": 18, "total": 20, "availableRate": 0.9 }
+    },
+    {
+      "provider": "mify",
+      "model": "moonshot/kimi-k3",
+      "artifact": "mify-model-evaluation.json",
+      "transport": "nonstream_fallback",
+      "summary": { "pass": 18, "total": 20, "availableRate": 0.9 }
+    }
+  ],
+  "unavailableModels": [
+    {
+      "provider": "qwen",
+      "model": "qwen3.8-max",
+      "pilot": { "httpStatus": 401, "errorCode": "invalid_api_key", "finishReason": null, "sawDone": false },
+      "casesRun": 0
+    }
+  ],
+  "selfCheck": { "status": "ok", "checks": 3, "command": "EVAL_SELF_CHECK=1 harmony/chat/node_modules/.bin/tsx harmony/scripts/evaluate-intelligent-ui.mjs" },
+  "credentialPolicy": "Only existing local provider configuration was used; key values and request headers are omitted."
+}

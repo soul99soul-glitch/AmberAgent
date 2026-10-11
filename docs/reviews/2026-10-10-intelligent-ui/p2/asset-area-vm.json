@@ -1,0 +1,20 @@
+{
+  "source": "ChatPage.ets private methods extracted with deepread actualPage fixture",
+  "registered": {
+    "messageId": "message-1",
+    "partIndex": 99,
+    "ref": "ca-chain",
+    "sourceStart": 1200,
+    "globalY": 900
+  },
+  "clicked": {
+    "messageId": "message-1",
+    "partIndex": 1,
+    "ref": "ca-chain",
+    "sourceStart": 0
+  },
+  "key": "[\"message-1\",\"ca-chain\"]",
+  "scrollBy": [0, 806],
+  "rowFallbacks": [],
+  "result": "passed"
+}

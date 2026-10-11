@@ -1,6 +1,6 @@
 // AgentToolCallCapsule — 工具调用胶囊(对齐 Android ChatMessageTools.kt AgentToolCallCapsule)
 // wrap-content pill: 图标 + 标题文本 + 状态徽章 / 审批按钮
-import { INK2, INK4, SURFACE2, LINE, ACCENT, SIGNAL, ERROR, META, STATUS_AMBER } from '../design/tokens.ets';
+import { INK2, INK4, SURFACE2, LINE, ACCENT, SIGNAL, ERROR, META, LABEL, STATUS_AMBER, RADIUS_PILL } from '../design/tokens.ets';
 import { DotRingLoading } from './ui/DotRingLoading.ets';
 import { Icon } from './ui/Icon.ets';
 const accentAlpha = (hex: string, alpha: number): string => {
@@ -33,8 +33,21 @@ export enum ToolKind {
 }
 
 // Use existing flat monochrome symbols, rather than platform emoji artwork.
+//   Icon 名只用 ui/Icon.ets 已登记的(clock/check_circle/bell/person/image/globe/brain/plug/eye/trash…)
 export const toolIconName = (toolName: string): string => {
   if (toolName.startsWith('memory_tool')) return 'edit';
+  // 设备日程 / 个人上下文 / 设置 / WebMount 对齐工具族(须先于下方 wm_ 通配)
+  if (toolName.startsWith('calendar_') || toolName.startsWith('alarm_') || toolName === 'alarms_list') return 'clock';
+  if (toolName.startsWith('reminder_') || toolName === 'reminders_list') return 'check_circle';
+  if (toolName.startsWith('notification_')) return 'bell';
+  if (toolName === 'contacts_pick') return 'person';
+  if (toolName === 'photos_pick') return 'image';
+  if (toolName === 'weather_read') return 'globe';
+  if (toolName === 'settings_set_model_slot') return 'brain';
+  if (toolName === 'mcp_describe_tool') return 'plug';
+  if (toolName === 'wm_get' || toolName.startsWith('wm_visual_')) return 'eye';
+  if (toolName === 'wm_clear_session') return 'trash';
+  if (toolName === 'wm_act') return 'globe';
   if (toolName.startsWith('search_web') || toolName.startsWith('scrape_web') || toolName.startsWith('webview_')) return 'search';
   if (toolName.startsWith('file_')) return 'doc';
   if (toolName.startsWith('terminal_') || toolName === 'python_execute') return 'cpu';
@@ -113,9 +126,15 @@ export struct AgentToolCallCapsule {
   @Prop canOpen: boolean = true;
   @Prop canApprove: boolean = true;
   @Prop canDeny: boolean = true;
+  // 审批按钮的无障碍名里点名工具(静态标签,不取模型 display_title);空 → 用 title
+  @Prop approvalSubject: string = '';
   onApprove: () => void = (): void => {};
   onDeny: () => void = (): void => {};
   onCapsuleClick: () => void = (): void => {};
+
+  private subject(): string {
+    return this.approvalSubject.length > 0 ? this.approvalSubject : this.title;
+  }
 
   build(): void {
     Row() {
@@ -130,23 +149,34 @@ export struct AgentToolCallCapsule {
 
       if (this.showApproval) {
         if (this.canDeny) {
-          Row() { Icon({ name: 'close', iconSize: 14, color: ERROR }); }
-            .width(44).height(44).flexShrink(0)
-            .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-            .onClick((): void => { this.onDeny(); })
-            .accessibilityText('拒绝工具执行')
+          this.ApprovalButton('close', '拒绝', ERROR, `拒绝执行：${this.subject()}`, (): void => { this.onDeny(); })
         }
         if (this.canApprove) {
-          Row() { Icon({ name: 'check', iconSize: 14, color: SIGNAL }); }
-            .width(44).height(44).flexShrink(0)
-            .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-            .onClick((): void => { this.onApprove(); })
-            .accessibilityText('批准工具执行')
+          this.ApprovalButton('check', '允许', SIGNAL, `允许执行：${this.subject()}`, (): void => { this.onApprove(); })
         }
       }
     }
     .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').alignItems(VerticalAlign.Center)
+  }
+
+  // 图标 + 文字药丸;外层 44 高保证触控面积,可见药丸 30 高与胶囊对齐
+  @Builder
+  private ApprovalButton(icon: string, label: string, color: string, a11y: string, action: () => void): void {
+    Row() {
+      Row({ space: 4 }) {
+        Icon({ name: icon, iconSize: 12, color: color })
+        Text(label).fontSize(LABEL).fontColor(color).fontWeight(FontWeight.Medium).maxLines(1)
+      }
+      .height(30).padding({ left: 10, right: 10 })
+      .borderRadius(RADIUS_PILL).border({ width: 0.7, color: LINE }).backgroundColor(SURFACE2)
+      .alignItems(VerticalAlign.Center)
+    }
+    .height(44).padding({ left: 4 }).flexShrink(0)
+    .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+    .onClick(action)
+    .accessibilityGroup(true)
+    .accessibilityText(a11y)
   }
 
   @Builder

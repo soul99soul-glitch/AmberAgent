@@ -15,9 +15,10 @@ import {
   AgentToolDispatcher, asChatStreamProvider, createClipboardTool,
   createConversationContextTools, createConversationHistoryTools, createConversationQueueTools,
   createDeepReadOpenTool, createDeepReadPlaybookTools, createHealthSummaryTool,
+  createPersonalContextTools, createWeatherReadTool, createDeviceScheduleTools,
   createMcpManagementTools, createMcpServerTools, createMemoryTools,
   createRunPlanUpdateTool, createSearchTools, createSkillTools, createTerminalApprovalGuard,
-  createProviderManagementTools, PROVIDERS_KEY,
+  createProviderManagementTools, PROVIDERS_KEY, createModelSlotTool, createMcpDescribeTool,
   currentMessages, defaultToolInvocationHooks,
   filterToolProfile, makeCompactPolicy, makeTextGenerationParams, patchAssistant,
 } from '@amber/chat-domain';
@@ -38,6 +39,11 @@ import type { DetachedConversationContext, PreparedConversationSeed } from './Co
 import { inflateRawEntry } from './EntryDocumentParser.ets';
 import { getChatCouncilTools } from './CouncilChatSupport.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from './EntryLocalToolPorts.ets';
+import { createEntryModelSlotPort } from './ModelSlotPort.ets';
+import { createEntryPersonalContextPort } from './PersonalContextPort.ets';
+import { createEntryWeatherPort } from './WeatherPort.ets';
+import { createEntryDeviceSchedulePort } from './DeviceSchedulePort.ets';
+import { createWebMountParityTools } from './WebMountParityTools.ets';
 import { createRunToolCatalog, scopeRunTools } from './RunToolCatalog.ets';
 import type { RunToolCatalogSnapshot } from './RunToolCatalog.ets';
 import { createFeishuDocsTools } from './FeishuDocsTools.ets';
@@ -286,6 +292,13 @@ export const buildConversationToolLoop = async (ctx: DetachedConversationContext
       assistantEnabled: localOptions.indexOf('webmount') >= 0,
       assertOwner: ownerAssertion,
     }) : []),
+    ...(webmountEnabled ? createWebMountParityTools({
+      session: getWebMountSession(),
+      assistantEnabled: localOptions.indexOf('webmount') >= 0,
+      assertOwner: ownerAssertion,
+      currentChoice: rt.resolvedChoice,
+      currentModelSupportsImage: rt.modelSupportsImageInput,
+    }) : []),
     ...(webmountEnabled ? [createWebMountGoalTool()] : []),
     ...(webmountEnabled ? createFeishuDocsTools(localOptions.indexOf('webmount') >= 0) : []),
     ...createMcpManagementTools({ settings: getMcpSettingsStore(), manager: getMcpManager(),
@@ -293,6 +306,8 @@ export const buildConversationToolLoop = async (ctx: DetachedConversationContext
     ...createProviderManagementTools({ store: getChatKvStore(), http: getAppContainer().httpClient,
       withLock: (action: () => Promise<UIMessagePart[]>): Promise<UIMessagePart[]> =>
         sharedKvMutex.withLock(PROVIDERS_KEY, action) }),
+    createModelSlotTool({ port: createEntryModelSlotPort(rt.assistant.id) }),
+    createMcpDescribeTool({ settings: getMcpSettingsStore(), assistantIds: [...rt.assistant.mcpServers] }),
     ...createMcpServerTools({ manager: getMcpManager(), activity: mcpActivityPort(ctx.activityStore),
       assistantIds: [...rt.assistant.mcpServers] }),
     ...((runtime.enableCoreMemory || runtime.enableShortTermMemory || runtime.enableLongTermMemory)
@@ -322,6 +337,16 @@ export const buildConversationToolLoop = async (ctx: DetachedConversationContext
     createRunPlanUpdateTool(), createHealthSummaryTool(createEntryHealthReadPort()),
     ...createSoulTools(),
     ...(localOptions.indexOf('clipboard') >= 0 ? [createClipboardTool(createEntryClipboardPort())] : []),
+    ...createPersonalContextTools({
+      port: createEntryPersonalContextPort(),
+      // Only the Claude request path forwards image blocks inside tool results.
+      includeImages: rt.modelSupportsImageInput && rt.resolvedChoice.provider.type === 'claude',
+      writeWorkspaceBytes: async (path: string, bytes: Uint8Array, mime: string): Promise<string> =>
+        (await getWorkspaceManager().writeBytes(path, bytes, mime)).path,
+    }),
+    createWeatherReadTool(createEntryWeatherPort(systemLanguage()),
+      { language: systemLanguage().startsWith('zh') ? 'zh' : 'en' }),
+    ...createDeviceScheduleTools(createEntryDeviceSchedulePort()),
     getAgentPromptConfigTool(), ...createDeepReadPlaybookTools(getDeepReadPlaybookRepository()),
     createDeepReadOpenTool({
       bus: { hasCollectors: (): boolean => ctx.hasNavigationCollector(),

@@ -14,13 +14,14 @@
 //
 // 不做(明确边界):
 //   - 动画曲线精确复刻(Android CubicBezierEasing 340ms)— 设备验证动画手感项
-//   - icon 资源 — 用文字箭头 ▾/▸(对齐 ToggleSurface 既有惯例)
+//   - 底部「全部模型 / 管理」入口用 chevron_right 图标(同设置行尾),不再用文字箭头
 import type {
   TopModelMenuGroup,
   TopModelMenuModel,
   ReasoningLevelOption,
 } from '@amber/chat-domain';
 import { ReasoningPicker } from './ReasoningPicker.ets';
+import { Icon } from './ui/Icon.ets';
 import {
   formatNumberInt, formatContextTokens,
 } from '@amber/chat-domain';
@@ -148,7 +149,7 @@ export struct TopModelMenu {
           Row() {
             Text('全部模型 / 管理')
               .fontSize(META).fontColor(this.accentColorStore).layoutWeight(1)
-            Text('▸').fontSize(LABEL).fontColor(INK4)
+            Icon({ name: 'chevron_right', iconSize: 14, color: INK4 })
           }
           .width('100%')
           .padding({ left: 16, right: 16, top: 12, bottom: 12 })

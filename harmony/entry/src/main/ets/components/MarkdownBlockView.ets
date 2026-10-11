@@ -33,6 +33,7 @@ interface MarkdownInlineBinding {
   lineHeight: number;
   align: TextAlign;
   fillWidth: boolean;
+  flexShrink?: number;
 }
 
 interface MarkdownHeadingBinding {
@@ -311,6 +312,7 @@ export struct MarkdownBlockView {
         onOpenLink: (url: string): void => { this.showLinkActions(url); },
         onCopyLink: (url: string): void => { this.copyText(url, '已复制链接'); },
       })
+      .flexShrink(params.flexShrink ?? 0)
     } else {
       // 图片与禁用排版的公式保留已有附件/源码渲染行为。
       Text() {
@@ -319,6 +321,7 @@ export struct MarkdownBlockView {
         }, (tok: InlineToken, idx: number): string => `inline-${idx}-${JSON.stringify(tok)}`)
       }
       .width(params.fillWidth ? '100%' : 'auto')
+      .flexShrink(params.flexShrink ?? 0)
       .fontSize(params.size).fontColor(this.fontColor).fontWeight(params.weight)
       .fontFamily(params.family).lineHeight(params.lineHeight).textAlign(params.align)
       .copyOption(CopyOptions.LocalDevice)
@@ -414,7 +417,7 @@ export struct MarkdownBlockView {
         ForEach(
           params.block.items,
           (itemInlines: InlineToken[], idx: number): void => {
-            Row() {
+            Flex({ direction: FlexDirection.Row, alignItems: ItemAlign.Start }) {
               // 标记与正文同 lineHeight 且顶对齐:多行条目圆点不再垂直漂移
               Text(params.block.ordered ? this.orderedLabel(params.block, idx) : '•')
                 .fontSize(this.fontSize)
@@ -422,14 +425,14 @@ export struct MarkdownBlockView {
                 .fontFamily(this.bodyFamily())
                 .lineHeight(this.effLineHeight(this.fontSize))
                 .width(params.block.ordered ? 32 : 16)
-              Column() {
-                this.RenderTextInlines({ inlines: params.block.items[idx],
-                  size: this.fontSize, weight: FontWeight.Normal, family: this.bodyFamily(),
-                  lineHeight: this.effLineHeight(this.fontSize), align: TextAlign.Start, fillWidth: true })
-              }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+                .flexShrink(0)
+              // Auto width and flex shrinking respect the bubble's maximum width as a single row.
+              this.RenderTextInlines({ inlines: params.block.items[idx],
+                size: this.fontSize, weight: FontWeight.Normal, family: this.bodyFamily(),
+                lineHeight: this.effLineHeight(this.fontSize), align: TextAlign.Start, fillWidth: false,
+                flexShrink: 1 })
             }
-            .width('100%')
-            .alignItems(VerticalAlign.Top)
+            .width(this.fillWidth ? '100%' : 'auto')
             .padding({ left: this.listDepthAt(params.block, idx) * 12 })
             .margin({ bottom: 6 })
           },
@@ -437,7 +440,7 @@ export struct MarkdownBlockView {
         )
       }
     }
-    .width('100%')
+    .width(this.fillWidth ? '100%' : 'auto')
     .margin({ top: 2, bottom: 4 })
   }
 

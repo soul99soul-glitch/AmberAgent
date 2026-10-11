@@ -1,0 +1,85 @@
+共 2 个文件,分 1 批(每批最多 80)
+--- 批 1/1 (2 文件) ---
+[32mThe configuration file /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/code-linter.json5 is in use.[0m
+[32mWorking...[=>------------------------------------------------]2%[0m[32mWorking...[==>-----------------------------------------------]5%[0m[32mCurrently active product: default[0m                                     
+[32mWorking...[==>-----------------------------------------------]5%[0m[32mWorking...[=================>--------------------------------]35%[0m[32mWorking...[========================>-------------------------]50%[0m[32mWorking...[================================>-----------------]64%[0m[32mWorking...[=====================================>------------]75%[0m[32mWorking...[==========================================>-------]84%[0m[32mWorking...[===============================================>--]95%[0m[32mWorking...[================================================>-]97%[0m[32mFinished...[==================================================]100%[0m
+[33mCodeLinter found some defects in your code.[0m
+/Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/src/main/ets/platform_impl/ConversationRunDependencies.ets(1)
+151:15      warn        Avoid repeated creation of Date objects in loops or frequently called methods.    @performance/reuse-date-instances-check
+/Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/chat/src/main/ets/chat/openai_parse.ts(74)
+50:42       warn        Unsafe member access ['role'] on an `any` value.                                  @typescript-eslint/no-unsafe-member-access
+51:9        warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+57:41       warn        Unsafe member access ['content'] on an `any` value.                               @typescript-eslint/no-unsafe-member-access
+59:48       warn        Unsafe member access ['reasoning_content'] on an `any` value.                     @typescript-eslint/no-unsafe-member-access
+59:87       warn        Unsafe member access ['reasoning'] on an `any` value.                             @typescript-eslint/no-unsafe-member-access
+62:11       warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+62:51       warn        Unsafe member access ['content'] on an `any` value.                               @typescript-eslint/no-unsafe-member-access
+64:13       warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+66:15       warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+66:55       warn        Unsafe member access ['thinking'] on an `any` value.                              @typescript-eslint/no-unsafe-member-access
+68:45       warn        Unsafe member access ['text'] on an `any` value.                                  @typescript-eslint/no-unsafe-member-access
+74:9        warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+74:52       warn        Unsafe member access ['tool_calls'] on an `any` value.                            @typescript-eslint/no-unsafe-member-access
+74:73       warn        Unsafe member access ['tool_calls'] on an `any` value.                            @typescript-eslint/no-unsafe-member-access
+75:9        warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+75:49       warn        Unsafe member access ['images'] on an `any` value.                                @typescript-eslint/no-unsafe-member-access
+75:66       warn        Unsafe member access ['images'] on an `any` value.                                @typescript-eslint/no-unsafe-member-access
+83:7        warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+83:18       warn        Unsafe call of an `any` typed value.                                              @typescript-eslint/no-unsafe-call
+93:46       warn        Unsafe member access ['type'] on an `any` value.                                  @typescript-eslint/no-unsafe-member-access
+97:47       warn        Unsafe member access ['index'] on an `any` value.                                 @typescript-eslint/no-unsafe-member-access
+98:11       warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+98:42       warn        Unsafe member access ['function'] on an `any` value.                              @typescript-eslint/no-unsafe-member-access
+99:11       warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+102:32      warn        Unsafe member access ['id'] on an `any` value.                                    @typescript-eslint/no-unsafe-member-access
+103:51      warn        Unsafe member access ['name'] on an `any` value.                                  @typescript-eslint/no-unsafe-member-access
+104:48      warn        Unsafe member access ['arguments'] on an `any` value.                             @typescript-eslint/no-unsafe-member-access
+118:49      warn        Unsafe member access ['type'] on an `any` value.                                  @typescript-eslint/no-unsafe-member-access
+120:11      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+120:51      warn        Unsafe member access ['image_url'] on an `any` value.                             @typescript-eslint/no-unsafe-member-access
+121:69      warn        Unsafe member access ['url'] on an `any` value.                                   @typescript-eslint/no-unsafe-member-access
+135:9       warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+135:57      warn        Unsafe member access ['annotations'] on an `any` value.                           @typescript-eslint/no-unsafe-member-access
+135:79      warn        Unsafe member access ['annotations'] on an `any` value.                           @typescript-eslint/no-unsafe-member-access
+136:10      warn        Unsafe call of an `any` typed value.                                              @typescript-eslint/no-unsafe-call
+145:11      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+146:47      warn        Unsafe member access ['type'] on an `any` value.                                  @typescript-eslint/no-unsafe-member-access
+149:13      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+149:47      warn        Unsafe member access ['url_citation'] on an `any` value.                          @typescript-eslint/no-unsafe-member-access
+150:13      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+153:34      warn        Unsafe member access ['title'] on an `any` value.                                 @typescript-eslint/no-unsafe-member-access
+154:32      warn        Unsafe member access ['url'] on an `any` value.                                   @typescript-eslint/no-unsafe-member-access
+164:44      warn        Unsafe member access ['prompt_cache_hit_tokens'] on an `any` value.               @typescript-eslint/no-unsafe-member-access
+165:45      warn        Unsafe member access ['prompt_cache_miss_tokens'] on an `any` value.              @typescript-eslint/no-unsafe-member-access
+166:51      warn        Unsafe member access ['prompt_tokens'] on an `any` value.                         @typescript-eslint/no-unsafe-member-access
+173:9       warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+173:46      warn        Unsafe member access ['prompt_tokens_details'] on an `any` value.                 @typescript-eslint/no-unsafe-member-access
+174:79      warn        Unsafe member access ['cached_tokens'] on an `any` value.                         @typescript-eslint/no-unsafe-member-access
+177:37      warn        Unsafe member access ['completion_tokens'] on an `any` value.                     @typescript-eslint/no-unsafe-member-access
+178:32      warn        Unsafe member access ['total_tokens'] on an `any` value.                          @typescript-eslint/no-unsafe-member-access
+192:40      warn        Unsafe member access [found] on an `any` value.                                   @typescript-eslint/no-unsafe-member-access
+215:5       warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+227:9       warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+227:30      warn        Unsafe call of an `any` typed value.                                              @typescript-eslint/no-unsafe-call
+237:11      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+239:11      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+239:50      warn        Unsafe member access ['error'] on an `any` value.                                 @typescript-eslint/no-unsafe-member-access
+245:37      warn        Unsafe member access ['id'] on an `any` value.                                    @typescript-eslint/no-unsafe-member-access
+246:40      warn        Unsafe member access ['model'] on an `any` value.                                 @typescript-eslint/no-unsafe-member-access
+248:11      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+248:54      warn        Unsafe member access ['choices'] on an `any` value.                               @typescript-eslint/no-unsafe-member-access
+248:71      warn        Unsafe member access ['choices'] on an `any` value.                               @typescript-eslint/no-unsafe-member-access
+251:13      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+252:13      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+253:13      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+253:54      warn        Unsafe member access ['delta'] on an `any` value.                                 @typescript-eslint/no-unsafe-member-access
+254:13      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+254:56      warn        Unsafe member access ['message'] on an `any` value.                               @typescript-eslint/no-unsafe-member-access
+255:13      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+256:53      warn        Unsafe member access ['finish_reason'] on an `any` value.                         @typescript-eslint/no-unsafe-member-access
+263:11      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+270:11      warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+270:48      warn        Unsafe member access ['usage'] on an `any` value.                                 @typescript-eslint/no-unsafe-member-access
+275:7       warn        Unsafe assignment of an `any` value.                                              @typescript-eslint/no-unsafe-assignment
+-Defects: 75; Errors: 0; Warns: 75; Suggestions: 0;
+

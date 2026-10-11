@@ -946,7 +946,8 @@ export struct HomeListPane {
 
   @Builder
   GearContent(): void {
-    Icon({ name: 'ph_gear', iconSize: 20, color: this.accentColorStore })
+    // 与搜索胶囊放大镜同色(HOME_MUTED):顶栏三钮同族,accent 留给选中/主动作
+    Icon({ name: 'ph_gear', iconSize: 20, color: HOME_MUTED })
   }
 
   @Builder
@@ -1014,7 +1015,7 @@ export struct HomeListPane {
             .accessibilityText('搜索')
         }
 
-        // 齿轮(iOS: glyph 随 accent)
+        // 齿轮(glyph 与搜索放大镜同为 HOME_MUTED)
         PressGlowButton({
           accentColor: this.accentColorStore,
           radius: 19,
@@ -1041,7 +1042,8 @@ export struct HomeListPane {
           },
           content: (): void => { this.AvatarContent(); },
         })
-          .margin({ left: this.twoPane ? 6 : 10 })
+          // 与搜索→齿轮间距一致(单栏 8 / 两栏 6)
+          .margin({ left: this.twoPane ? 6 : 8 })
           .accessibilityText('我的账户')
 
         // 两栏:新对话从右下胶囊收进顶栏(对齐 Android SessionHome onNewSession)

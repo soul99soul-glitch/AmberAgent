@@ -227,7 +227,12 @@ struct ChatProviderSettingsPage {
     return 'muted';
   }
 
-  // iOS 圆形字母头像:40 圆 SURFACE2 底 + 名称首字(单字符,对齐 iOS)+ 右下 8 状态点(启用=accent,否则灰)
+  // 凭据可用(已配置 key / Google 已授权):状态点与余额行仅对可用服务商生效
+  private isUsable(row: ProviderRow): boolean {
+    return this.chipTone(row.auth) === 'success';
+  }
+
+  // iOS 圆形字母头像:40 圆 SURFACE2 底 + 名称首字(单字符,对齐 iOS)+ 右下 8 状态点(启用且已配置=accent,否则灰)
   @Builder
   providerAvatar(row: ProviderRow) {
     Stack({ alignContent: Alignment.BottomEnd }) {
@@ -241,7 +246,7 @@ struct ChatProviderSettingsPage {
         .textAlign(TextAlign.Center)
       Column()
         .width(8).height(8).borderRadius(4)
-        .backgroundColor(row.enabled ? this.accentColorStore : INK4)
+        .backgroundColor(row.enabled && this.isUsable(row) ? this.accentColorStore : INK4)
     }
     .width(40).height(40)
   }
@@ -262,8 +267,11 @@ struct ChatProviderSettingsPage {
             .fontFamily(FONT_MONO).fontColor(INK3)
             .margin({ top: 3 })
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          ProviderBalanceText({ setting: this.settingFor(row.id) })
-            .margin({ top: 3 })
+          // 无可用凭据时余额必为「~」占位,不显示(各行等高)
+          if (this.isUsable(row)) {
+            ProviderBalanceText({ setting: this.settingFor(row.id) })
+              .margin({ top: 3 })
+          }
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)

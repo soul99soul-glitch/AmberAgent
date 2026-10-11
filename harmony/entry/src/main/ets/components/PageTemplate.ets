@@ -560,7 +560,8 @@ export struct CenteredTitleBar {
             .lineHeight(lineHeightForSize(13))
             .fontFamily(FONT_SANS_MEDIUM)
             .fontColor(INK3)
-            .maxLines(1)
+            .textAlign(TextAlign.Center)
+            .maxLines(2) // 长副标题折两行(56 左右让位后单行仅 ~250vp)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .margin({ top: 2 })
         }
@@ -677,7 +678,7 @@ export struct CardToggleRow {
               .lineHeight(lineHeightForSize(12))
               .fontFamily(FONT_SANS_MEDIUM)
               .fontColor(INK3)
-              .maxLines(2)
+              .maxLines(3) // 开关说明常列举范围(如高风险自动批准),2 行会截断关键项
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .margin({ top: 2 })
           }

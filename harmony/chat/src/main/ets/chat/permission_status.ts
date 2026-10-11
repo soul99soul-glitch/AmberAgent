@@ -300,7 +300,7 @@ export const AGENT_PERMISSION_CAPABILITIES: AgentPermissionCapability[] = [
     description: '读取系统日历事件。',
     runtimePermissions: [makeRuntimePermissionSpec('ohos.permission.READ_CALENDAR')],
     risk: 'Sensitive',
-    toolNames: ['calendar_list'],
+    toolNames: ['calendar_events_list', 'reminders_list'],
   }),
   makeAgentPermissionCapability({
     id: 'calendar_write',
@@ -311,7 +311,10 @@ export const AGENT_PERMISSION_CAPABILITIES: AgentPermissionCapability[] = [
       makeRuntimePermissionSpec('ohos.permission.WRITE_CALENDAR'),
     ],
     risk: 'High',
-    toolNames: ['calendar_create'],
+    toolNames: [
+      'calendar_event_create', 'calendar_event_update', 'calendar_event_delete',
+      'reminder_create', 'reminder_update', 'reminder_delete', 'reminder_complete',
+    ],
   }),
   makeAgentPermissionCapability({
     id: 'media_images',

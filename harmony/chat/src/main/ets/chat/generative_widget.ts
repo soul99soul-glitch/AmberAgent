@@ -1,6 +1,12 @@
 // show-widget is a display protocol. Original message text remains the persisted source.
 import type { JsonObject, JsonValue } from './json.ts';
 import { renderWidgetSpec } from './generative_widget_specs.ts';
+import {
+  normalizeThreeScene, normalizeThreeSceneObject, renderThreeSceneCover, THREE_SCENE_MAX_OBJECTS,
+  THREE_SCENE_RENDERER, THREE_SCENE_RENDERER_ALIAS,
+} from './three_scene.ts';
+import type { ThreeSceneObject, ThreeSceneSpec } from './three_scene.ts';
+import { MINI_APP_MAX_HTML_BYTES, utf8ByteLength } from './miniapp/miniapp_models.ts';
 
 export interface GenerativeWidgetAction { id: string; label: string; instruction: string; }
 export interface GenerativeWidget {
@@ -10,6 +16,7 @@ export interface GenerativeWidget {
   complete: boolean;
   actions: GenerativeWidgetAction[];
   notice: string;
+  scene?: ThreeSceneSpec;
 }
 export interface GenerativeWidgetSegment {
   kind: 'text' | 'widget' | 'loading' | 'error';
@@ -21,6 +28,9 @@ const object = (value: JsonValue | undefined): JsonObject | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value : null;
 const string = (value: JsonValue | undefined): string => typeof value === 'string' ? value : '';
 const MAX_HTML = 120_000;
+const THREE_RENDERER = THREE_SCENE_RENDERER;
+
+const normalizeRenderer = (value: string): string => value === THREE_SCENE_RENDERER_ALIAS ? THREE_RENDERER : value;
 
 export const widgetActionPrompt = (title: string, instruction: string): string =>
   `关于“${title || '可视化组件'}”：${instruction}`;
@@ -42,10 +52,14 @@ const actions = (value: JsonValue | undefined): GenerativeWidgetAction[] => {
   return result;
 };
 
-export const sanitizeWidgetHtml = (html: string): string => {
-  if (html.length > MAX_HTML) throw new Error('组件内容过大，无法显示');
-  return html
-    .replace(/<\s*(script|iframe|object|embed|form|foreignObject)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+export const sanitizeWidgetHtml = (html: string, miniAppPreview: boolean = false): string => {
+  if (miniAppPreview ? utf8ByteLength(html) > MINI_APP_MAX_HTML_BYTES : html.length > MAX_HTML) {
+    throw new Error('组件内容过大，无法显示');
+  }
+  // Streaming MiniApps can show form contents without activating submission.
+  const visualHtml = miniAppPreview ? html.replace(/<\s*\/?form\b[^>]*>/gi, '') : html;
+  return visualHtml
+    .replace(/<\s*(script|iframe|object|embed|form|foreignObject)\b[^>]*>[\s\S]*?(?:<\s*\/\s*\1\s*>|$)/gi, '')
     .replace(/<\s*\/?(?:script|iframe|object|embed|form|foreignObject|meta|link|base)\b[^>]*>/gi, '')
     .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/\s+(?:href|xlink:href|src|srcset|poster|background|action|srcdoc)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi,
@@ -60,11 +74,12 @@ export const sanitizeWidgetHtml = (html: string): string => {
 
 // CSP, JS-disabled Web and file/network restrictions are the enforcement boundary;
 // sanitizing preserves visual HTML/SVG and removes dead or misleading unsafe controls.
-export const widgetDocument = (html: string, dark: boolean): string => {
-  const safe = sanitizeWidgetHtml(html);
+export const widgetDocument = (html: string, dark: boolean, miniAppPreview: boolean = false): string => {
+  const safe = sanitizeWidgetHtml(html, miniAppPreview);
   const styles = safe.match(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi)?.join('\n') ?? '';
-  const bodyMatch = /<body\b[^>]*>([\s\S]*?)<\/body\s*>/i.exec(safe);
-  const body = (bodyMatch === null ? safe : bodyMatch[1])
+  const bodyMatch = /<body\b([^>]*)>([\s\S]*?)(?:<\/body\s*>|$)/i.exec(safe);
+  const bodyAttributes = bodyMatch === null ? '' : bodyMatch[1];
+  const body = (bodyMatch === null ? safe : bodyMatch[2])
     .replace(/<!doctype[^>]*>|<\/?(?:html|head|body)\b[^>]*>/gi, '');
   // Reserved markers belong to our structured chart labels, not arbitrary SVG.
   const chartLabelStyles = dark ? '.amber-chart-axis-label{fill:#D3D0C9}' +
@@ -75,15 +90,16 @@ export const widgetDocument = (html: string, dark: boolean): string => {
   return '<!doctype html><html><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; base-uri \'none\'; form-action \'none\'">' +
-    styles + '<style>html,body{margin:0;padding:8px;box-sizing:border-box;overflow-wrap:anywhere;' +
+    '<style>html,body{margin:0;padding:8px;box-sizing:border-box;overflow-wrap:anywhere;' +
     `color:${dark ? '#ECE8DF' : '#25221D'};background:transparent;font:15px sans-serif}` +
-    'svg{max-width:100%;height:auto}img{max-width:100%}details summary{cursor:pointer}' +
+    'svg{max-width:100%;height:auto}img{max-width:100%}details summary{cursor:pointer}</style>' +
+    styles + '<style>' +
     chartLabelStyles +
     // Script-driven full_html decks retain every page in a static vertical preview.
     '#deck,.slides{height:auto!important;overflow:visible!important}' +
     '.slide{display:block!important;position:relative!important;opacity:1!important;transform:none!important;' +
     'height:auto!important;min-height:240px;visibility:visible!important;margin-bottom:16px}</style>' +
-    '</head><body>' + body + '</body></html>';
+    '</head><body' + bodyAttributes + '>' + body + '</body></html>';
 };
 
 const partialString = (json: string, key: string): string => {
@@ -109,15 +125,122 @@ const partialString = (json: string, key: string): string => {
   return value;
 };
 
+const jsonObjectEnd = (text: string, start: number): number => {
+  let depth: number = 0;
+  let inString: boolean = false;
+  let escaped: boolean = false;
+  for (let index: number = start; index < text.length; index++) {
+    const c: string = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') inString = false;
+    } else if (c === '"') {
+      inString = true;
+    } else if (c === '{') {
+      depth++;
+    } else if (c === '}') {
+      depth--;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+};
+
+const objectsArrayStart = (json: string): number => {
+  let inString: boolean = false;
+  let escaped: boolean = false;
+  for (let index: number = 0; index < json.length; index++) {
+    const c: string = json[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c !== '"') continue;
+    const keyStart: number = index + 1;
+    let keyEnd: number = keyStart;
+    let keyEscaped: boolean = false;
+    for (; keyEnd < json.length; keyEnd++) {
+      const keyChar: string = json[keyEnd];
+      if (keyEscaped) keyEscaped = false;
+      else if (keyChar === '\\') keyEscaped = true;
+      else if (keyChar === '"') break;
+    }
+    if (keyEnd >= json.length || json.slice(keyStart, keyEnd) !== 'objects') {
+      index = keyEnd;
+      continue;
+    }
+    let cursor: number = keyEnd + 1;
+    while (cursor < json.length && /\s/.test(json[cursor])) cursor++;
+    if (json[cursor] !== ':') { index = keyEnd; continue; }
+    cursor++;
+    while (cursor < json.length && /\s/.test(json[cursor])) cursor++;
+    if (json[cursor] === '[') return cursor;
+    index = keyEnd;
+  }
+  return -1;
+};
+
+// A streamed object is eligible only after its own closing brace arrived.
+// The surrounding scene/array may still be incomplete.
+export const completedThreeObjects = (json: string): ThreeSceneObject[] => {
+  const arrayStart: number = objectsArrayStart(json);
+  if (arrayStart < 0) return [];
+  let cursor: number = arrayStart + 1;
+  const objects: ThreeSceneObject[] = [];
+  const ids = new Set<string>();
+  while (cursor < json.length) {
+    while (cursor < json.length && /[\s,]/.test(json[cursor])) cursor++;
+    if (cursor >= json.length || json[cursor] !== '{') break;
+    const end: number = jsonObjectEnd(json, cursor);
+    if (end < 0) break;
+    try {
+      const parsed: JsonValue = JSON.parse(json.slice(cursor, end + 1)) as JsonValue;
+      const item: ThreeSceneObject | null = normalizeThreeSceneObject(parsed);
+      if (item !== null && !ids.has(item.id)) {
+        ids.add(item.id);
+        objects.push(item);
+      }
+    } catch (_error) {
+      // Keep scanning later complete entries; malformed/incomplete data never renders.
+    }
+    cursor = end + 1;
+    if (objects.length >= THREE_SCENE_MAX_OBJECTS) break;
+  }
+  return objects;
+};
+
+const threeSceneFromPartial = (json: string): ThreeSceneSpec | null => {
+  const objects: ThreeSceneObject[] = completedThreeObjects(json);
+  return objects.length > 0 ? { objects } : null;
+};
+
+const threePlaceholder = (title: string): GenerativeWidget => ({
+  title: title || '3D 场景',
+  renderer: THREE_RENDERER,
+  html: renderThreeSceneCover({ objects: [] }),
+  complete: false,
+  actions: [],
+  notice: '正在接收 3D 对象…',
+});
+
 const parseWidget = (raw: string, complete: boolean): GenerativeWidget => {
   const parsed = object(JSON.parse(raw) as JsonValue);
   if (parsed === null) throw new Error('组件 JSON 需要是对象');
-  const renderer = string(parsed.renderer).toLowerCase() || 'html';
+  const renderer = normalizeRenderer(string(parsed.renderer).toLowerCase() || 'html');
   const spec = object(parsed.spec);
   const code = string(parsed.widget_code);
   let html = code;
   let notice = '';
-  if (renderer === 'full_html' || renderer === 'guizang_html') {
+  let scene: ThreeSceneSpec | undefined;
+  if (renderer === THREE_RENDERER) {
+    scene = normalizeThreeScene(parsed.spec ?? parsed) ?? undefined;
+    if (scene === undefined) throw new Error('3D 场景结构无效或超出限制');
+    html = renderThreeSceneCover(scene);
+    notice = '拖动旋转 · 双指缩放';
+  } else if (renderer === 'full_html' || renderer === 'guizang_html') {
     html = string(spec?.html);
     notice = '静态预览，脚本和外部资源不执行';
   } else if (renderer !== 'html' && renderer !== 'svg') {
@@ -134,7 +257,19 @@ const parseWidget = (raw: string, complete: boolean): GenerativeWidget => {
   }
   sanitizeWidgetHtml(html);
   return { title: string(parsed.title).trim().slice(0, 100) || '可视化组件', renderer, html,
-    complete, actions: complete ? actions(parsed.actions) : [], notice };
+    complete, actions: complete ? actions(parsed.actions) : [], notice, scene };
+};
+
+const recoverSvgWidget = (raw: string, complete: boolean): GenerativeWidget | null => {
+  const renderer = partialString(raw, 'renderer').toLowerCase();
+  if (renderer !== '' && renderer !== 'svg' && renderer !== 'html') return null;
+  const html = partialString(raw, 'widget_code').trim();
+  if (html.length > MAX_HTML || !/^<svg\b[^>]*>/i.test(html)) return null;
+  // Recover display markup only; malformed JSON never supplies native actions.
+  return { title: partialString(raw, 'title').trim().slice(0, 100) || '可视化组件', renderer: 'svg',
+    html: sanitizeWidgetHtml(html), complete, actions: [],
+    notice: /<\/svg\s*>\s*$/i.test(html) ? '组件 JSON 格式异常，显示已收到的 SVG 内容' :
+      'SVG 内容不完整，显示已收到的部分，请重新生成' };
 };
 
 export const parseGenerativeWidgets = (content: string, streaming: boolean): GenerativeWidgetSegment[] => {
@@ -161,14 +296,31 @@ export const parseGenerativeWidgets = (content: string, streaming: boolean): Gen
       segments.push({ kind: 'widget', start: match.index, content: '',
         widget: parseWidget(body, end !== null || !streaming) });
     } catch (error) {
-      if (streaming && end === null) {
+      const recovered: GenerativeWidget | null = error instanceof SyntaxError && (!streaming || end !== null)
+        ? recoverSvgWidget(body, end !== null || !streaming) : null;
+      if (recovered !== null) {
+        segments.push({ kind: 'widget', start: match.index, content: '', widget: recovered });
+      } else if (streaming && end === null) {
         const html = partialString(body, 'widget_code');
-        const renderer = partialString(body, 'renderer');
-        const usable = renderer !== 'full_html' && renderer !== 'guizang_html' &&
-          html.length >= 40 && html.length <= MAX_HTML && /<\s*(?:svg|div|section|p)\b/i.test(html);
-        segments.push({ kind: usable ? 'widget' : 'loading', start: match.index, content: '',
-          widget: usable ? { title: partialString(body, 'title') || '可视化组件', renderer: 'html', html,
-            complete: false, actions: [], notice: '' } : null });
+        const renderer = normalizeRenderer(partialString(body, 'renderer').toLowerCase());
+        if (renderer === THREE_RENDERER) {
+          const scene: ThreeSceneSpec | null = threeSceneFromPartial(body);
+          if (scene !== null) {
+            segments.push({ kind: 'widget', start: match.index, content: '',
+              widget: { title: partialString(body, 'title') || '3D 场景', renderer,
+                html: renderThreeSceneCover(scene), complete: false, actions: [],
+                notice: '拖动旋转 · 双指缩放', scene } });
+          } else {
+            segments.push({ kind: 'loading', start: match.index, content: '',
+              widget: threePlaceholder(partialString(body, 'title')) });
+          }
+        } else {
+          const usable = renderer !== 'full_html' && renderer !== 'guizang_html' &&
+            html.length >= 40 && html.length <= MAX_HTML && /<\s*(?:svg|div|section|p)\b/i.test(html);
+          segments.push({ kind: usable ? 'widget' : 'loading', start: match.index, content: '',
+            widget: { title: partialString(body, 'title') || '可视化组件', renderer: renderer || 'html',
+              html: usable ? html : '', complete: false, actions: [], notice: '' } });
+        }
       } else {
         segments.push({ kind: 'error', start: match.index, content: (error as Error).message, widget: null });
       }

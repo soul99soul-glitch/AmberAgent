@@ -38,6 +38,7 @@ function fixture() {
     }) } } },
     '@kit.PerformanceAnalysisKit': { hilog: { info() {}, warn() {}, error() {} } },
     '@amber/deepread-domain': statusHelpers,
+    './ModelEnterpriseCa.ets': { modelEnterpriseCaPathForUrl: () => undefined },
   }).createRcpHttpClient();
   const delivered = [];
   let dataEnds = 0;

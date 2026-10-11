@@ -18,6 +18,9 @@
 import type { JsonObject, JsonValue } from './json.ts';
 import type { UIMessagePart, UIMessagePartText } from './message.ts';
 import type { AgentTool, InputSchemaObj } from './tool.ts';
+import { DEVICE_SCHEDULE_TOOL_NAMES } from './device_schedule_tools.ts';
+import { webMountActApprovalClass } from './webmount/parity.ts';
+import type { WebMountActApprovalClass } from './webmount/parity.ts';
 
 // ===== ToolRisk(:156-160) =====
 
@@ -177,7 +180,7 @@ export const isPrivateNetworkTarget = (url: string | null): boolean => {
 // ===== category(:424-457) =====
 
 export const toolCategory = (name: string): string => {
-  if (['provider_list', 'provider_configure', 'provider_models'].includes(name)) return 'provider';
+  if (['provider_list', 'provider_configure', 'provider_models', 'settings_set_model_slot'].includes(name)) return 'provider';
   if (name.startsWith('plugin_') || name === 'plugins_list') return 'plugin';
   if (name.startsWith('recipe_') || name === 'recipes_list') return 'recipe';
   if (name.startsWith('external_file_')) return 'external_file';
@@ -201,6 +204,9 @@ export const toolCategory = (name: string): string => {
   if (name.startsWith('zhihu_')) return 'webmount_zhihu';
   if (name.startsWith('screen_') || name === 'vlm_task') return 'screen';
   if (name.startsWith('sms_') || name.startsWith('contacts_') || name.startsWith('calendar_')
+    || name.startsWith('reminder_') || name.startsWith('alarm_') || name.startsWith('photos_')
+    || name === 'weather_read'
+    || ['reminders_list', 'alarms_list', 'notification_schedule', 'notification_cancel'].includes(name)
     || name.startsWith('call_') || name.startsWith('apps_') || name.startsWith('app_')
     || ['device_phone_state', 'media_search', 'location_current', 'audio_record_once',
       'notification_list', 'usage_stats_list', 'battery_status', 'network_status',
@@ -244,7 +250,8 @@ const hasMutatingNameHint = (name: string): boolean => {
 };
 
 export const toolMutatesState = (name: string): boolean => {
-  if (name === 'provider_configure') return true;
+  if (name === 'provider_configure' || name === 'settings_set_model_slot') return true;
+  if (['reminder_complete', 'notification_schedule', 'notification_cancel', 'alarm_schedule', 'alarm_cancel'].includes(name)) return true;
   if (name === 'memory_tool') return true;
   if (name === 'deep_read_open') return true;
   if (name === 'run_plan_update') return false;
@@ -264,6 +271,7 @@ export const toolMutatesState = (name: string): boolean => {
     || name === 'deep_read_finish'
     || ['subagent_start', 'subagent_cancel'].includes(name)
     || ['wm_click', 'wm_tap', 'wm_type', 'wm_keys', 'wm_select'].includes(name)
+    || ['wm_act', 'wm_clear_session'].includes(name)
     || name.startsWith('skill_enable')
     || name.startsWith('skill_disable');
 };
@@ -280,6 +288,7 @@ const OFFICEPRO_HIGH_RISK: string[] = [
 export const toolRiskProfile = (name: string): RiskProfile => {
   if (['provider_configure', 'provider_models'].includes(name)) return { risk: 'sensitive', explicit: true };
   if (name === 'provider_list') return { risk: 'normal', explicit: true };
+  if (name === 'settings_set_model_slot') return { risk: 'normal', explicit: true };
   if (name === 'http_request') return { risk: 'high', explicit: true };
   if (name === 'memory_tool') return { risk: 'high', explicit: true };
   if (name === 'mcp_call_tool') return { risk: 'sensitive', explicit: true };
@@ -304,6 +313,8 @@ export const toolRiskProfile = (name: string): RiskProfile => {
   if (name.startsWith('screen_') || name === 'vlm_task') return { risk: 'sensitive', explicit: true };
   if (name.startsWith('terminal_')) return { risk: 'sensitive', explicit: true };
   if (name === 'python_execute') return { risk: 'sensitive', explicit: true };
+  if (DEVICE_SCHEDULE_TOOL_NAMES.includes(name)) return { risk: 'sensitive', explicit: true };
+  if (name === 'wm_clear_session') return { risk: 'sensitive', explicit: true };
   return { risk: 'normal', explicit: false };
 };
 
@@ -326,6 +337,11 @@ export const requiresFailClosedAutoApproval = (
 
 export const toolConcurrencySafe = (name: string): boolean => {
   if (name === 'python_execute') return false;
+  // System pickers / location dialog are single-instance UI: never run in parallel or speculatively.
+  if (['contacts_pick', 'photos_pick', 'weather_read'].includes(name)) return false;
+  // wm_visual_snapshot renumbers data-wm-ref; both share the per-conversation browser lock, so
+  //   same-turn parallel calls would fail with "browser busy" instead of queueing.
+  if (['wm_get', 'wm_visual_snapshot'].includes(name)) return false;
   if (['terminal_install_packages', 'terminal_job_stop', 'terminal_execute',
     'terminal_job_start'].includes(name)) return false;
   if (name.startsWith('cron_task_') && name !== 'cron_task_list') return false;
@@ -387,6 +403,8 @@ export const toolOutputBudgetChars = (name: string): number => {
   if (name === 'file_read') return 262144 + 2048;
   if (name === 'wm_screenshot') return 1200000;
   if (name === 'wm_observe') return 180000;
+  if (name === 'wm_get') return 110000;
+  if (name === 'wm_visual_snapshot') return 180000;
   if (name === 'wm_fetch_replay') return 220000;
   if (name === 'wm_signed_fetch') return 1100000;
   if (name === 'feishu_docs_read') return 220000;
@@ -521,6 +539,16 @@ export const toolInvocationPolicy = (tool: AgentTool, input: JsonValue | null): 
     riskExplicit = true;
     needsApproval = true;
     autoApprovable = tool.allowsAutoApproval;
+    concurrencySafe = false;
+  } else if (name === 'wm_act') {
+    // click/tap → mandatory approval; type/keys/select → sensitive, auto-approvable; find/wait/scroll → read-only
+    const klass: WebMountActApprovalClass = webMountActApprovalClass(input);
+    mutates = klass !== 'read_only';
+    risk = klass === 'read_only' ? 'normal' : 'sensitive';
+    riskExplicit = true;
+    mandatoryApprovalEffective = klass === 'mandatory';
+    needsApproval = klass !== 'read_only';
+    autoApprovable = klass !== 'mandatory';
     concurrencySafe = false;
   } else if (name === 'wm_tab_close') {
     // 销毁 agent 自己打开的会话;变状态但不变用户数据 — Normal + 可自动批准

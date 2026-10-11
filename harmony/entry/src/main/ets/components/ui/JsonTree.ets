@@ -1,7 +1,7 @@
 // JsonTree — JSON 树查看器(对齐 Android JsonTree.kt)
 // 可展开/折叠的 JSON 结构渲染,支持对象/数组/字符串/数字/布尔/null
 // 值颜色: string=#6A8759, boolean=#CC7832, number=#6897BB, null=outline
-import { INK2, INK3, ACCENT, META } from '../../design/tokens.ets';
+import { INK2, INK3, ACCENT, META, TINY } from '../../design/tokens.ets';
 import { FONT_MONO } from '../../design/fonts.ets';
 
 // JSON 节点类型
@@ -81,11 +81,19 @@ const bracketClose = (type: JsonNodeType): string => {
 export struct JsonTree {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('darkMode') darkMode: boolean = false;
-  @Prop json: string = '';
+  // json 变化(同一实例被复用,如详情页切换工具/流式输出更新)→ 重新解析
+  @Prop @Watch('onJsonChange') json: string = '';
   @State root: JsonNodeData | null = null;
+  // 每次重新解析递增,进入 ForEach key:避免同形新树沿用旧子项
+  @State generation: number = 0;
 
   aboutToAppear(): void {
     this.root = parseJsonToTree(this.json);
+  }
+
+  onJsonChange(): void {
+    this.root = parseJsonToTree(this.json);
+    this.generation += 1;
   }
 
   build(): void {
@@ -114,17 +122,27 @@ export struct JsonTree {
             .fontColor(ACCENT)
             .fontFamily(FONT_MONO)
             .margin({ right: 4 })
+            .flexShrink(0)
+            .constraintSize({ maxWidth: '45%' })
+            .wordBreak(WordBreak.BREAK_ALL)
           Text(': ')
             .fontSize(META)
             .fontColor(INK2)
             .fontFamily(FONT_MONO)
+            .flexShrink(0)
         }
+        // 长值在卡片内换行(占满剩余宽度,允许断词),不再溢出卡片右缘
         Text(formatValue(node.type, node.value))
           .fontSize(META)
           .fontColor(valueColor(node.type, this.darkMode))
           .fontFamily(FONT_MONO)
+          .layoutWeight(1)
+          .flexShrink(1)
+          .wordBreak(WordBreak.BREAK_ALL)
+          .copyOption(CopyOptions.LocalDevice)
       }
       .width('100%')
+      .alignItems(VerticalAlign.Top)
       .padding({ left: depth * 16 + 14, top: 2, bottom: 2 })
     }
   }
@@ -135,7 +153,7 @@ export struct JsonTree {
       // 展开头部
       Row() {
         Text(node.children.length > 0 ? '▾' : '▸')
-          .fontSize(10)
+          .fontSize(TINY)
           .fontColor(INK3)
           .margin({ right: 4 })
         if (node.key.length > 0) {
@@ -144,10 +162,14 @@ export struct JsonTree {
             .fontColor(ACCENT)
             .fontFamily(FONT_MONO)
             .margin({ right: 4 })
+            .flexShrink(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(': ')
             .fontSize(META)
             .fontColor(INK2)
             .fontFamily(FONT_MONO)
+            .flexShrink(0)
         }
         Text(bracketOpen(node.type))
           .fontSize(META)
@@ -168,7 +190,7 @@ export struct JsonTree {
       // 子节点
       ForEach(node.children, (child: JsonNodeData, idx: number): void => {
         this.RenderNode(child, depth + 1)
-      }, (child: JsonNodeData, idx: number): string => `json-${depth}-${idx}`)
+      }, (child: JsonNodeData, idx: number): string => `json-${this.generation}-${depth}-${idx}`)
 
       // 闭合括号
       Row() {

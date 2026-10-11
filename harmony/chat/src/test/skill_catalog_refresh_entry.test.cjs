@@ -54,6 +54,10 @@ test('skill management refreshes the real run catalog and discovery while preser
     './CouncilChatSupport.ets': { getChatCouncilTools: async () => [] },
     './EntryLocalToolPorts.ets': {}, './FeishuDocsTools.ets': {},
     './HealthReadPort.ets': { createEntryHealthReadPort: () => ({}) }, './ImageGenTool.ets': {},
+    './ModelSlotPort.ets': { createEntryModelSlotPort: () => ({}) },
+    './PersonalContextPort.ets': { createEntryPersonalContextPort: () => ({}) },
+    './WeatherPort.ets': { createEntryWeatherPort: () => ({}) },
+    './DeviceSchedulePort.ets': { createEntryDeviceSchedulePort: () => ({}) },
     './JevSupport.ets': { createJevStatusTool: () => dummy('jev_status'), jevToolSearchReranker: () => undefined },
     './JevAutoApprovalSupport.ets': { createEntryJevAutoApprovalReview: () => domain.createJevAutoApprovalReview({
       loadSettings: async () => domain.makeJevSettings(), recentUserTexts: [],
@@ -61,7 +65,7 @@ test('skill management refreshes the real run catalog and discovery while preser
     }) },
     './McpSettingsStore.ets': { getMcpSettingsStore: () => ({}) }, './MemoryStore.ets': {},
     './SoulTools.ets': { createSoulTools: () => [] }, './WebMountSession.ets': {},
-    './WebMountTools.ets': {}, './WebMountAdvancedTools.ets': {}, './JevWebDecision.ets': {},
+    './WebMountTools.ets': {}, './WebMountAdvancedTools.ets': {}, './WebMountParityTools.ets': {}, './JevWebDecision.ets': {},
     './EntryPluginRuntime.ets': { createEntryPluginAdapter: () => ({ supports: () => false }) },
   };
   const entry = path.resolve(__dirname, '../../../entry/src/main/ets/platform_impl');

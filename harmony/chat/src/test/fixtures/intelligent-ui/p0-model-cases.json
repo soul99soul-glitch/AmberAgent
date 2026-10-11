@@ -1,0 +1,142 @@
+[
+  {
+    "id": "choice-01",
+    "category": "choice",
+    "prompt": "解释企业 CA 的根证书和服务器证书",
+    "body": "{\"op\":\"state\",\"id\":\"selected\",\"initial\":\"root\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"title\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"企业 CA 证书链\"}\n{\"op\":\"node\",\"id\":\"choice\",\"parent\":\"panel\",\"type\":\"choice\",\"state\":\"selected\",\"options\":[{\"value\":\"root\",\"label\":\"根证书\"},{\"value\":\"server\",\"label\":\"服务器证书\"}]}\n{\"op\":\"node\",\"id\":\"root-detail\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"根证书是信任起点。\",\"visibleWhen\":{\"state\":\"selected\",\"equals\":\"root\"}}\n{\"op\":\"node\",\"id\":\"explain\",\"parent\":\"panel\",\"type\":\"button\",\"label\":\"继续解释\",\"action\":{\"type\":\"draft\",\"text\":\"请继续解释 {{selected}}\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "text", "choice", "text", "button"], "stateIds": ["selected"], "assertions": ["choice", "visibleWhen", "draft"]}
+  },
+  {
+    "id": "choice-02",
+    "category": "choice",
+    "prompt": "比较对称和非对称加密",
+    "body": "{\"op\":\"state\",\"id\":\"mode\",\"initial\":\"symmetric\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"choice\",\"parent\":\"panel\",\"type\":\"choice\",\"state\":\"mode\",\"options\":[{\"value\":\"symmetric\",\"label\":\"对称加密\"},{\"value\":\"asymmetric\",\"label\":\"非对称加密\"}]}\n{\"op\":\"node\",\"id\":\"detail\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"选择一种模式查看说明。\",\"visibleWhen\":{\"state\":\"mode\",\"equals\":\"symmetric\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "choice", "text"], "stateIds": ["mode"], "assertions": ["choice", "visibleWhen"]}
+  },
+  {
+    "id": "choice-03",
+    "category": "choice",
+    "prompt": "按风险等级查看安全建议",
+    "body": "{\"op\":\"state\",\"id\":\"risk\",\"initial\":\"medium\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"risk-choice\",\"parent\":\"panel\",\"type\":\"choice\",\"state\":\"risk\",\"options\":[{\"value\":\"low\",\"label\":\"低风险\"},{\"value\":\"medium\",\"label\":\"中风险\"},{\"value\":\"high\",\"label\":\"高风险\"}]}\n{\"op\":\"node\",\"id\":\"advice\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"中风险建议开启多因素认证。\",\"visibleWhen\":{\"state\":\"risk\",\"equals\":\"medium\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "choice", "text"], "stateIds": ["risk"], "assertions": ["choice", "visibleWhen"]}
+  },
+  {
+    "id": "choice-04",
+    "category": "choice",
+    "prompt": "选择数据库索引类型",
+    "body": "{\"op\":\"state\",\"id\":\"index\",\"initial\":\"btree\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"index-choice\",\"parent\":\"panel\",\"type\":\"choice\",\"state\":\"index\",\"options\":[{\"value\":\"btree\",\"label\":\"B-tree\"},{\"value\":\"hash\",\"label\":\"Hash\"}]}\n{\"op\":\"node\",\"id\":\"index-text\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"B-tree 适合范围查询。\",\"visibleWhen\":{\"state\":\"index\",\"equals\":\"btree\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "choice", "text"], "stateIds": ["index"], "assertions": ["choice", "visibleWhen"]}
+  },
+  {
+    "id": "choice-05",
+    "category": "choice",
+    "prompt": "选择旅行预算档位",
+    "body": "{\"op\":\"state\",\"id\":\"budget\",\"initial\":\"standard\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"budget-choice\",\"parent\":\"panel\",\"type\":\"choice\",\"state\":\"budget\",\"options\":[{\"value\":\"economy\",\"label\":\"经济\"},{\"value\":\"standard\",\"label\":\"标准\"},{\"value\":\"premium\",\"label\":\"舒适\"}]}\n{\"op\":\"node\",\"id\":\"budget-text\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"标准档位适合大多数行程。\"}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "choice", "text"], "stateIds": ["budget"], "assertions": ["choice"]}
+  },
+  {
+    "id": "choice-06",
+    "category": "choice",
+    "prompt": "选择学习计划强度",
+    "body": "{\"op\":\"state\",\"id\":\"pace\",\"initial\":\"steady\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"pace-choice\",\"parent\":\"panel\",\"type\":\"choice\",\"state\":\"pace\",\"options\":[{\"value\":\"light\",\"label\":\"轻量\"},{\"value\":\"steady\",\"label\":\"稳定\"},{\"value\":\"intensive\",\"label\":\"强化\"}]}\n{\"op\":\"node\",\"id\":\"pace-text\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"稳定计划每天学习 30 分钟。\"}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "choice", "text"], "stateIds": ["pace"], "assertions": ["choice"]}
+  },
+  {
+    "id": "choice-07",
+    "category": "choice",
+    "prompt": "选择日志保留周期",
+    "body": "{\"op\":\"state\",\"id\":\"retention\",\"initial\":\"30d\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"retention-choice\",\"parent\":\"panel\",\"type\":\"choice\",\"state\":\"retention\",\"options\":[{\"value\":\"7d\",\"label\":\"7 天\"},{\"value\":\"30d\",\"label\":\"30 天\"},{\"value\":\"90d\",\"label\":\"90 天\"}]}\n{\"op\":\"node\",\"id\":\"retention-text\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"保留 30 天可以平衡排障和成本。\"}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "choice", "text"], "stateIds": ["retention"], "assertions": ["choice"]}
+  },
+  {
+    "id": "choice-08",
+    "category": "choice",
+    "prompt": "选择消息导出格式",
+    "body": "{\"op\":\"state\",\"id\":\"format\",\"initial\":\"markdown\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"format-choice\",\"parent\":\"panel\",\"type\":\"choice\",\"state\":\"format\",\"options\":[{\"value\":\"markdown\",\"label\":\"Markdown\"},{\"value\":\"text\",\"label\":\"纯文本\"}]}\n{\"op\":\"node\",\"id\":\"format-text\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"Markdown 会保留标题和列表结构。\",\"visibleWhen\":{\"state\":\"format\",\"equals\":\"markdown\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "choice", "text"], "stateIds": ["format"], "assertions": ["choice", "visibleWhen"]}
+  },
+  {
+    "id": "input-01",
+    "category": "input",
+    "prompt": "填写证书主题名称并生成说明",
+    "body": "{\"op\":\"state\",\"id\":\"subject\",\"initial\":\"example.com\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"prompt\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"输入证书主题名称。\"}\n{\"op\":\"node\",\"id\":\"subject-input\",\"parent\":\"panel\",\"type\":\"input\",\"state\":\"subject\",\"placeholder\":\"例如 example.com\"}\n{\"op\":\"node\",\"id\":\"explain\",\"parent\":\"panel\",\"type\":\"button\",\"label\":\"生成说明\",\"action\":{\"type\":\"draft\",\"text\":\"请解释证书主题 {{subject}}\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "text", "input", "button"], "stateIds": ["subject"], "assertions": ["input", "draft"]}
+  },
+  {
+    "id": "input-02",
+    "category": "input",
+    "prompt": "输入城市后规划行程",
+    "body": "{\"op\":\"state\",\"id\":\"city\",\"initial\":\"上海\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"city-input\",\"parent\":\"panel\",\"type\":\"input\",\"state\":\"city\",\"placeholder\":\"输入城市\"}\n{\"op\":\"node\",\"id\":\"plan\",\"parent\":\"panel\",\"type\":\"button\",\"label\":\"规划\",\"action\":{\"type\":\"draft\",\"text\":\"请规划 {{city}} 的两日行程\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "input", "button"], "stateIds": ["city"], "assertions": ["input", "draft"]}
+  },
+  {
+    "id": "input-03",
+    "category": "input",
+    "prompt": "填写错误日志关键词",
+    "body": "{\"op\":\"state\",\"id\":\"query\",\"initial\":\"timeout\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"query-input\",\"parent\":\"panel\",\"type\":\"input\",\"state\":\"query\",\"placeholder\":\"错误关键词\"}\n{\"op\":\"node\",\"id\":\"search\",\"parent\":\"panel\",\"type\":\"button\",\"label\":\"查找\",\"action\":{\"type\":\"draft\",\"text\":\"请分析日志关键词 {{query}}\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "input", "button"], "stateIds": ["query"], "assertions": ["input", "draft"]}
+  },
+  {
+    "id": "input-04",
+    "category": "input",
+    "prompt": "输入目标金额并给出储蓄建议",
+    "body": "{\"op\":\"state\",\"id\":\"amount\",\"initial\":\"10000\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"amount-input\",\"parent\":\"panel\",\"type\":\"input\",\"state\":\"amount\",\"placeholder\":\"目标金额\"}\n{\"op\":\"node\",\"id\":\"advice\",\"parent\":\"panel\",\"type\":\"button\",\"label\":\"给建议\",\"action\":{\"type\":\"draft\",\"text\":\"请根据目标金额 {{amount}} 给储蓄建议\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "input", "button"], "stateIds": ["amount"], "assertions": ["input", "draft"]}
+  },
+  {
+    "id": "asset-01",
+    "category": "asset",
+    "prompt": "展示 CA 证书链示意图",
+    "body": "{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"heading\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"证书链示意图\"}\n{\"op\":\"node\",\"id\":\"diagram\",\"parent\":\"panel\",\"type\":\"asset\",\"ref\":\"ca-chain\"}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "text", "asset"], "stateIds": [], "assertions": ["asset"]}
+  },
+  {
+    "id": "asset-02",
+    "category": "asset",
+    "prompt": "展示网络请求时序图",
+    "body": "{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"heading\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"请求时序\"}\n{\"op\":\"node\",\"id\":\"diagram\",\"parent\":\"panel\",\"type\":\"asset\",\"ref\":\"request-sequence\"}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "text", "asset"], "stateIds": [], "assertions": ["asset"]}
+  },
+  {
+    "id": "asset-03",
+    "category": "asset",
+    "prompt": "展示部署拓扑图",
+    "body": "{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"heading\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"部署拓扑\"}\n{\"op\":\"node\",\"id\":\"topology\",\"parent\":\"panel\",\"type\":\"asset\",\"ref\":\"deployment-topology\"}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "text", "asset"], "stateIds": [], "assertions": ["asset"]}
+  },
+  {
+    "id": "asset-04",
+    "category": "asset",
+    "prompt": "展示三维空间对象的入口",
+    "body": "{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"heading\",\"parent\":\"panel\",\"type\":\"text\",\"text\":\"空间模型\"}\n{\"op\":\"node\",\"id\":\"model\",\"parent\":\"panel\",\"type\":\"asset\",\"ref\":\"room-model\"}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "text", "asset"], "stateIds": [], "assertions": ["asset"]}
+  },
+  {
+    "id": "combo-01",
+    "category": "combination",
+    "prompt": "选择证书节点并查看图示",
+    "body": "{\"op\":\"state\",\"id\":\"node\",\"initial\":\"root\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"node-choice\",\"parent\":\"panel\",\"type\":\"choice\",\"state\":\"node\",\"options\":[{\"value\":\"root\",\"label\":\"根证书\"},{\"value\":\"leaf\",\"label\":\"叶证书\"}]}\n{\"op\":\"node\",\"id\":\"diagram\",\"parent\":\"panel\",\"type\":\"asset\",\"ref\":\"cert-chain\"}\n{\"op\":\"node\",\"id\":\"explain\",\"parent\":\"panel\",\"type\":\"button\",\"label\":\"解释节点\",\"action\":{\"type\":\"draft\",\"text\":\"请解释证书节点 {{node}}\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "choice", "asset", "button"], "stateIds": ["node"], "assertions": ["choice", "asset", "draft"]}
+  },
+  {
+    "id": "combo-02",
+    "category": "combination",
+    "prompt": "选择部署环境并填写服务名",
+    "body": "{\"op\":\"state\",\"id\":\"env\",\"initial\":\"staging\"}\n{\"op\":\"state\",\"id\":\"service\",\"initial\":\"api\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"env-choice\",\"parent\":\"panel\",\"type\":\"choice\",\"state\":\"env\",\"options\":[{\"value\":\"staging\",\"label\":\"测试\"},{\"value\":\"production\",\"label\":\"生产\"}]}\n{\"op\":\"node\",\"id\":\"service-input\",\"parent\":\"panel\",\"type\":\"input\",\"state\":\"service\",\"placeholder\":\"服务名\"}\n{\"op\":\"node\",\"id\":\"diagram\",\"parent\":\"panel\",\"type\":\"asset\",\"ref\":\"deploy-flow\"}\n{\"op\":\"node\",\"id\":\"continue\",\"parent\":\"panel\",\"type\":\"button\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"请分析 {{env}} 环境的 {{service}} 服务\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "choice", "input", "asset", "button"], "stateIds": ["env", "service"], "assertions": ["choice", "input", "asset", "draft"]}
+  },
+  {
+    "id": "combo-03",
+    "category": "combination",
+    "prompt": "选择数据源并输入查询条件",
+    "body": "{\"op\":\"state\",\"id\":\"source\",\"initial\":\"logs\"}\n{\"op\":\"state\",\"id\":\"filter\",\"initial\":\"error\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"source-choice\",\"parent\":\"panel\",\"type\":\"choice\",\"state\":\"source\",\"options\":[{\"value\":\"logs\",\"label\":\"日志\"},{\"value\":\"traces\",\"label\":\"链路\"}]}\n{\"op\":\"node\",\"id\":\"filter-input\",\"parent\":\"panel\",\"type\":\"input\",\"state\":\"filter\",\"placeholder\":\"过滤条件\"}\n{\"op\":\"node\",\"id\":\"diagram\",\"parent\":\"panel\",\"type\":\"asset\",\"ref\":\"observability\"}\n{\"op\":\"node\",\"id\":\"query\",\"parent\":\"panel\",\"type\":\"button\",\"label\":\"查询\",\"action\":{\"type\":\"draft\",\"text\":\"请查询 {{source}} 中满足 {{filter}} 的记录\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "choice", "input", "asset", "button"], "stateIds": ["source", "filter"], "assertions": ["choice", "input", "asset", "draft"]}
+  },
+  {
+    "id": "combo-04",
+    "category": "combination",
+    "prompt": "选择学习阶段并留下目标",
+    "body": "{\"op\":\"state\",\"id\":\"stage\",\"initial\":\"beginner\"}\n{\"op\":\"state\",\"id\":\"goal\",\"initial\":\"掌握基础\"}\n{\"op\":\"node\",\"id\":\"panel\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"stage-choice\",\"parent\":\"panel\",\"type\":\"choice\",\"state\":\"stage\",\"options\":[{\"value\":\"beginner\",\"label\":\"入门\"},{\"value\":\"advanced\",\"label\":\"进阶\"}]}\n{\"op\":\"node\",\"id\":\"goal-input\",\"parent\":\"panel\",\"type\":\"input\",\"state\":\"goal\",\"placeholder\":\"学习目标\"}\n{\"op\":\"node\",\"id\":\"diagram\",\"parent\":\"panel\",\"type\":\"asset\",\"ref\":\"learning-map\"}\n{\"op\":\"node\",\"id\":\"start\",\"parent\":\"panel\",\"type\":\"button\",\"label\":\"开始规划\",\"action\":{\"type\":\"draft\",\"text\":\"为 {{stage}} 阶段规划目标：{{goal}}\"}}\n{\"op\":\"end\"}",
+    "expected": {"status": "ready", "rootId": "panel", "nodeTypes": ["column", "choice", "input", "asset", "button"], "stateIds": ["stage", "goal"], "assertions": ["choice", "input", "asset", "draft"]}
+  }
+]

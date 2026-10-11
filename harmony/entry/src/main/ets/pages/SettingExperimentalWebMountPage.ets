@@ -131,7 +131,7 @@ struct SettingExperimentalWebMountPage {
     if (state.status === 'connected') return '已连接';
     if (state.status === 'awaiting_callback') return '等待浏览器回调…';
     if (state.status === 'expired') return '已过期';
-    if (state.status === 'failed') return `失败:${state.message ?? state.errorCode ?? ''}`;
+    if (state.status === 'failed') return `失败：${state.message ?? state.errorCode ?? ''}`;
     if (state.status === 'disconnected') return '未连接';
     return '未配置';
   }
@@ -153,7 +153,7 @@ struct SettingExperimentalWebMountPage {
     this.oauthClientAuth = app.clientAuthentication;
     this.oauthApiOrigins = app.apiOrigins.join(',');
     this.oauthSecret = '';
-    this.oauthNote = `编辑 ${app.siteId};密钥留空则保留`;
+    this.oauthNote = `编辑 ${app.siteId}；密钥留空则保留`;
     this.setOauthFormOpen(true);
   }
 
@@ -186,7 +186,7 @@ struct SettingExperimentalWebMountPage {
       this.setOauthFormOpen(false);
       this.refreshOauth();
     }).catch((error: Error): void => {
-      this.oauthNote = `保存失败:${error.message}`;
+      this.oauthNote = `保存失败：${error.message}`;
     }).finally((): void => {
       this.oauthBusy = false;
     });
@@ -197,9 +197,9 @@ struct SettingExperimentalWebMountPage {
     this.oauthBusy = true;
     this.oauthNote = '';
     getWebMountOAuthRuntime().connect(siteId).then((state: WebMountOAuthState): void => {
-      if (state.status === 'awaiting_callback') this.oauthNote = '已在系统浏览器打开授权页,完成后自动回填';
+      if (state.status === 'awaiting_callback') this.oauthNote = '已在系统浏览器打开授权页，完成后自动回填';
     }).catch((error: Error): void => {
-      this.oauthNote = `连接失败:${error.message}`;
+      this.oauthNote = `连接失败：${error.message}`;
     }).finally((): void => {
       this.oauthBusy = false;
     });
@@ -252,13 +252,13 @@ struct SettingExperimentalWebMountPage {
         fileIo.readSync(file.fd, buffer);
         const text: string = util.TextDecoder.create('utf-8', { fatal: true }).decodeToString(new Uint8Array(buffer));
         const result = await importWebMountHar(text);
-        this.harNote = `已导入 ${result.entryCount} 条(来源 imported_har;重放仅限当前同源 GET/HEAD)`;
+        this.harNote = `已导入 ${result.entryCount} 条(来源 imported_har；重放仅限当前同源 GET/HEAD)`;
         this.refreshHar();
       } finally {
         fileIo.closeSync(file.fd);
       }
     } catch (error) {
-      this.harNote = `导入失败:${error instanceof Error ? error.message : String(error)}`;
+      this.harNote = `导入失败：${error instanceof Error ? error.message : String(error)}`;
     } finally {
       this.harBusy = false;
     }
@@ -439,7 +439,7 @@ struct SettingExperimentalWebMountPage {
     }
     const dup: boolean = this.sites.some((s: UserSiteEntry): boolean => hostOf(s.url) === host);
     if (dup) {
-      this.addError = `站点已存在:${host}`;
+      this.addError = `站点已存在：${host}`;
       return;
     }
     const entry: UserSiteEntry = makeUserSite(name, url);
@@ -447,7 +447,7 @@ struct SettingExperimentalWebMountPage {
       this.sites = [...this.sites, entry];
       this.setAddOpen(false);
     }).catch((): void => {
-      this.addError = '保存失败,请重试';
+      this.addError = '保存失败，请重试';
     });
   }
 
@@ -500,7 +500,7 @@ struct SettingExperimentalWebMountPage {
       })
       CardToggleRow({
         label: '允许任意脚本(wm_eval)',
-        desc: '在已授权站点页面内执行任意 JavaScript;每次调用仍需逐次确认',
+        desc: '在已授权站点页面内执行任意 JavaScript；每次调用仍需逐次确认',
         checked: this.evalEnabled,
         isLast: true,
         onToggle: (): void => {
@@ -541,7 +541,7 @@ struct SettingExperimentalWebMountPage {
       }
     }
     if (count === 0) {
-      this.cookieNote = firstError.length > 0 ? `导入失败:${firstError}` : '没有可导入的 cookie 行';
+      this.cookieNote = firstError.length > 0 ? `导入失败：${firstError}` : '没有可导入的 cookie 行';
     } else {
       this.cookieNote = `已导入 ${count} 条 cookie → ${url}`;
       this.cookieLines = '';
@@ -715,7 +715,8 @@ struct SettingExperimentalWebMountPage {
           Icon({ name: 'trash', iconSize: 18, color: ERROR })
         }
         .constraintSize({ minWidth: 44, minHeight: 44 })
-        .justifyContent(FlexAlign.Center)
+        // 图标贴热区右缘:与其它行尾控件(开关/箭头)同止于行内边距 14
+        .justifyContent(FlexAlign.End)
         .alignItems(VerticalAlign.Center)
         .margin({ left: 8 })
         .accessibilityText('移除站点')
@@ -924,12 +925,12 @@ struct SettingExperimentalWebMountPage {
           .width('100%')
           .alignItems(VerticalAlign.Center)
           .padding({ left: 14, right: 14, top: 8 })
-          TextInput({ text: this.oauthApiOrigins, placeholder: '允许注入 Bearer 的 API origins,逗号分隔(仅 https)' })
+          TextInput({ text: this.oauthApiOrigins, placeholder: '允许注入 Bearer 的 API origins，逗号分隔(仅 https)' })
             .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
             .backgroundColor(SURFACE2).borderRadius(8)
             .margin({ left: 14, right: 14, top: 8 })
             .onChange((v: string): void => { this.oauthApiOrigins = v; })
-          TextInput({ text: this.oauthSecret, placeholder: 'Client Secret(留空保留;none 方式不需要)' })
+          TextInput({ text: this.oauthSecret, placeholder: 'Client Secret(留空保留；none 方式不需要)' })
             .type(InputType.Password)
             .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
             .backgroundColor(SURFACE2).borderRadius(8)
@@ -1007,7 +1008,7 @@ struct SettingExperimentalWebMountPage {
             .lineHeight(lineHeightForSize(16))
             .fontFamily(FONT_SANS_MEDIUM)
             .fontColor(INK)
-          Text('Agent 只能打开列表中的网站;点右上角 + 添加一个站点(如 https://news.ycombinator.com)')
+          Text('Agent 只能打开列表中的网站；点右上角 + 添加一个站点(如 https://news.ycombinator.com)')
             .fontSize(12)
             .lineHeight(lineHeightForSize(12))
             .fontFamily(FONT_SANS_MEDIUM)
@@ -1123,14 +1124,14 @@ struct SettingExperimentalWebMountPage {
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.SwitchesCard(); } })
               .margin({ left: 16, right: 16 })
             FooterNote({
-              text: '关闭「启用 WebMount」会立即结束后台会话页面,但已单独勾选 WebMount 的助手仍可继续使用',
+              text: '关闭「启用 WebMount」会立即结束后台会话页面，但已单独勾选 WebMount 的助手仍可继续使用',
             })
 
             PlainSection({ label: '站点' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.SitesCard(); } })
               .margin({ left: 16, right: 16 })
             FooterNote({
-              text: '授权按域名匹配(含子域)。Agent 请求添加新站点时会在聊天中向你确认;'
+              text: '授权按域名匹配(含子域)。Agent 请求添加新站点时会在聊天中向你确认；'
                 + '点击类操作(wm_click)与站点增删均需逐次批准。',
             })
 
@@ -1138,23 +1139,23 @@ struct SettingExperimentalWebMountPage {
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.OauthCard(); } })
               .margin({ left: 16, right: 16 })
             FooterNote({
-              text: '为某个站点登记 OAuth 应用后,Agent 可在聊天中发起连接;授权在系统浏览器完成,'
-                + '密钥与令牌只存本机安全仓,断开会删除该站点的令牌。',
+              text: '为某个站点登记 OAuth 应用后，Agent 可在聊天中发起连接；授权在系统浏览器完成，'
+                + '密钥与令牌只存本机安全仓，断开会删除该站点的令牌。',
             })
 
             PlainSection({ label: 'HAR 导入' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.HarCard(); } })
               .margin({ left: 16, right: 16 })
             FooterNote({
-              text: '导入的完整 HAR 只保留在本机;Agent 只能看到脱敏摘要,重放需逐次批准且仅限当前同源 GET/HEAD。',
+              text: '导入的完整 HAR 只保留在本机；Agent 只能看到脱敏摘要，重放需逐次批准且仅限当前同源 GET/HEAD。',
             })
 
             PlainSection({ label: 'Cookie 导入' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.CookieCard(); } })
               .margin({ left: 16, right: 16 })
             FooterNote({
-              text: '逐行 name=value,写入 WebView Cookie 罐(与 wm_* 工具/页面登录共享);'
-                + '域名可带 https:// 前缀,不带则自动补。',
+              text: '逐行 name=value，写入 WebView Cookie 罐(与 wm_* 工具/页面登录共享)；'
+                + '域名可带 https:// 前缀，不带则自动补。',
             })
 
             PlainSection({ label: '飞书账号（OAuth）' })

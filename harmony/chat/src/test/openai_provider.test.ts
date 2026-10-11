@@ -259,6 +259,14 @@ test('streamEventData: choices 空(usage-only chunk)产出空 choices + usage', 
   assert.equal(chunks[0].usage?.totalTokens, 3);
 });
 
+test('streamEventData preserves a finish-only reason without inventing message text', () => {
+  const { chunks } = parseOpenAiStreamEventData(
+    '{"choices":[{"index":0,"delta":null,"finish_reason":"length"}]}');
+  assert.equal(chunks[0].choices[0]?.finishReason, 'length');
+  assert.equal(chunks[0].choices[0]?.delta, null);
+  assert.equal(chunks[0].choices[0]?.message, null);
+});
+
 test('streamEventData: finish_reason null → "unknown"(Android 归一)', () => {
   const { chunks } = parseOpenAiStreamEventData(
     '{"choices":[{"index":0,"delta":{"content":"a"},"finish_reason":null}]}');
@@ -268,7 +276,7 @@ test('streamEventData: finish_reason null → "unknown"(Android 归一)', () => 
   assert.equal(c2[0].choices[0].finishReason, 'stop');
 });
 
-test('streamEventData: delta 缺失时取 message;两者都缺跳过该 choice(usage 保留)', () => {
+test('streamEventData: missing delta uses message; finish-only choices retain reason and usage', () => {
   const { chunks } = parseOpenAiStreamEventData(
     '{"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}');
   assert.equal(textOf(chunks[0].choices[0].delta?.parts ?? []), 'hi');
@@ -276,8 +284,10 @@ test('streamEventData: delta 缺失时取 message;两者都缺跳过该 choice(u
   const r = parseOpenAiStreamEventData(
     '{"choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}');
   assert.equal(r.chunks.length, 1);
-  assert.equal(r.chunks[0].choices.length, 0);
+  assert.equal(r.chunks[0].choices[0].finishReason, 'stop');
+  assert.equal(r.chunks[0].choices[0].delta, null);
   assert.equal(r.chunks[0].usage?.promptTokens, 5);
+  assert.equal(parseOpenAiStreamEventData('{"choices":[{}]}').chunks[0].choices.length, 0);
 });
 
 test('streamEventData: 纯 [DONE] 数据 → done 信号,无 chunk', () => {

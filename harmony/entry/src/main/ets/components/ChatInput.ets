@@ -25,6 +25,13 @@ import type { MentionRoleItem } from '@amber/chat-domain';
 import { detectMentionContext, replaceMention, filterMentionRoleItems } from '@amber/chat-domain';
 import type { MentionContext } from '@amber/chat-domain';
 
+// 附件托盘尺寸:图标统一 20(同加号/发送);三个附件钮均 40 宽
+const ATTACH_ICON_SIZE: number = 20;
+const ATTACH_BTN_W: number = 40;
+// 末端让位 8:胶囊右端是 r22 半圆,末钮贴边会显得挤
+const ATTACH_TRAY_END_INSET: number = 8;
+const ATTACH_TRAY_W: number = ATTACH_BTN_W * 3 + ATTACH_TRAY_END_INSET;
+
 @Component
 export struct ChatInput {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
@@ -50,9 +57,6 @@ export struct ChatInput {
   @Prop pasteLongTextThreshold: number = 1000;
   // D0-8:@提及角色候选(ChatPage 装配;空数组 = 不启用面板)
   @Prop mentionRoles: MentionRoleItem[] = [];
-  // D0-9:输入区联网搜索开关(与设置页同一 KV,双向同步)
-  @Prop webSearchOn: boolean = false;
-  onToggleWebSearch: () => void = (): void => {};
   onTextChange: (value: string) => void = (_v: string): void => {};
   onSend: () => void = (): void => {};
   onStop: () => void = (): void => {};
@@ -224,53 +228,40 @@ export struct ChatInput {
             .onClick((): void => { this.attachExpanded = !this.attachExpanded; })
             .accessibilityText('添加附件')
 
-            Row({ space: 2 }) {
+            Row() {
               Row() {
-                Icon({ name: 'hi_camera', iconSize: 23, color: INK2 })
+                Icon({ name: 'hi_camera', iconSize: ATTACH_ICON_SIZE, color: INK2 })
               }
-              .width(44).height(44).borderRadius(999)
+              .width(ATTACH_BTN_W).height(44).borderRadius(999)
               .justifyContent(FlexAlign.Center)
               .onClick((): void => { this.attachExpanded = false; this.onTakePhoto(); })
               .accessibilityText('拍照')
 
               Row() {
-                Icon({ name: 'hi_photos', iconSize: 23, color: INK2 })
+                Icon({ name: 'hi_photos', iconSize: ATTACH_ICON_SIZE, color: INK2 })
               }
-              .width(44).height(44).borderRadius(999)
+              .width(ATTACH_BTN_W).height(44).borderRadius(999)
               .justifyContent(FlexAlign.Center)
               .onClick((): void => { this.attachExpanded = false; this.onPickImage(); })
               .accessibilityText('选择图片')
 
               Row() {
-                Icon({ name: 'hi_files', iconSize: 23, color: INK2 })
+                Icon({ name: 'hi_files', iconSize: ATTACH_ICON_SIZE, color: INK2 })
               }
-              .width(44).height(44).borderRadius(999)
+              .width(ATTACH_BTN_W).height(44).borderRadius(999)
               .justifyContent(FlexAlign.Center)
               .onClick((): void => { this.attachExpanded = false; this.onPickFile(); })
               .accessibilityText('选择文件')
-
-              // D0-9:联网搜索开关(与设置页同一状态源;开 = accent 浅底 + accent 图标)
-              Column({ space: 1 }) {
-                Icon({ name: 'hi_global', iconSize: 18,
-                  color: this.webSearchOn ? this.accentColorStore : INK2 })
-                Text(this.webSearchOn ? '联网已开' : '联网已关')
-                  .fontSize(10).fontFamily(FONT_SANS)
-                  .fontColor(this.webSearchOn ? this.accentColorStore : INK3)
-              }
-              .width(44).height(44).borderRadius(999)
-              .justifyContent(FlexAlign.Center)
-              .alignItems(HorizontalAlign.Center)
-              .backgroundColor(this.webSearchOn ? accentSoftBg(this.accentColorStore) : Color.Transparent)
-              .onClick((): void => { this.onToggleWebSearch(); })
-              .accessibilityText(this.webSearchOn ? '关闭联网搜索' : '开启联网搜索')
             }
-            .width(this.attachExpanded ? 182 : 0)
+            .width(this.attachExpanded ? ATTACH_TRAY_W : 0)
+            .padding({ right: this.attachExpanded ? ATTACH_TRAY_END_INSET : 0 })
             .opacity(this.attachExpanded ? 1 : 0)
             .clip(true)
             .alignItems(VerticalAlign.Center)
             .animation({ duration: 220, curve: Curve.EaseOut })
           }
-          .width(this.attachExpanded ? 226 : 44).height(44)
+          // 外宽 = 1px 描边×2 + 44 加号 + 动作组(须计描边,否则动作组溢出 1vp 被裁)
+          .width(this.attachExpanded ? 44 + ATTACH_TRAY_W + 2 : 44).height(44)
           .animation({ duration: 220, curve: Curve.EaseOut })
           .borderRadius(999)
           .backgroundColor(SURFACE)
@@ -295,7 +286,8 @@ export struct ChatInput {
             .placeholderFont({ size: BODY })
             .backgroundColor(Color.Transparent)
             .borderRadius(this.text.length > 0 ? 24 : 999)
-            .padding({ top: 11, bottom: 11 })
+            // 显式水平内边距(默认 16):托盘展开时收到 4,占位「输入消息…」不再被截成「输…」
+            .padding({ top: 11, bottom: 11, left: this.attachExpanded ? 4 : 16, right: this.attachExpanded ? 4 : 16 })
             .maxLines(this.attachExpanded ? 1 : 4)
             .constraintSize({ minHeight: 44, maxHeight: this.attachExpanded ? 44 : 111 })
             .lineHeight(lineHeightForSize(BODY))
@@ -338,7 +330,8 @@ export struct ChatInput {
         .borderRadius(this.text.length > 0 ? 24 : 999)
         .backgroundColor(SURFACE)
         .border({ width: 1, color: LINE })
-        .padding({ left: 18, right: 18 })
+        // 托盘展开时收窄内边距,给占位文字留足宽度(避免「输…」)
+        .padding({ left: this.attachExpanded ? 12 : 18, right: this.attachExpanded ? 12 : 18 })
         .alignItems(VerticalAlign.Center)
         .margin({ right: 8 })
 

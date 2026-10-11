@@ -8,6 +8,29 @@
 
 export const MINI_APP_STREAM_PREVIEW_LIMIT: number = 2000;
 
+export interface MiniAppStatusProjection {
+  title: string;
+  version: number | null;
+}
+
+const GENERATED_STATUS: RegExp = /^已生成小应用：(.+)$/;
+const UPDATED_STATUS: RegExp = /^已更新小应用：(.+?) v([1-9]\d*)$/;
+
+// 只把 output transformer 的整段终态文案当作状态;附加解释仍保留为正文。
+export const miniAppStatusProjection = (text: string): MiniAppStatusProjection | null => {
+  const normalized: string = text.trim();
+  const updated: RegExpMatchArray | null = normalized.match(UPDATED_STATUS);
+  if (updated !== null && updated[1] !== undefined && updated[2] !== undefined) {
+    const title: string = updated[1].trim();
+    if (title.length > 0) return { title, version: Number.parseInt(updated[2], 10) };
+  }
+  const generated: RegExpMatchArray | null = normalized.match(GENERATED_STATUS);
+  if (generated !== null && generated[1] !== undefined && generated[1].trim().length > 0) {
+    return { title: generated[1].trim(), version: null };
+  }
+  return null;
+};
+
 const HTML_KEY: string = '"html"';
 
 const SIMPLE_ESCAPES: Record<string, string> = {
@@ -31,9 +54,15 @@ export class MiniAppStreamingCodePreview {
     this.consume(from);
   }
 
+  // 返回已经解码的 HTML 全文；JSON 字符串尚未开始时不把标题/描述伪装成 HTML。
+  htmlText(): string {
+    return this.state === 'readingValue' || this.state === 'finished' ? this.decoded : '';
+  }
+
   // 尾部窗口:超出上限时只保留最后 limit 字并注明省略数,避免长文本反复排版。
   displayText(limit: number = MINI_APP_STREAM_PREVIEW_LIMIT): string {
-    const source: string = this.state === 'readingValue' || this.state === 'finished' ? this.decoded : this.raw;
+    const source: string = this.state === 'readingValue' || this.state === 'finished'
+      ? this.htmlText() : this.raw;
     if (source.length <= limit) return source;
     return `已省略 ${source.length - limit} 字\n${source.slice(-limit)}`;
   }

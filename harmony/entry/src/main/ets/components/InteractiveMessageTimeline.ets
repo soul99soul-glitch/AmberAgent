@@ -15,6 +15,7 @@ export struct InteractiveMessageTimeline {
   @Prop showOlderLoader: boolean = false;
   @Prop showDivider: boolean = false;
   @Prop showScrollBar: boolean = true;
+  @Prop scrollInteractionEnabled: boolean = true;
   onTimelineAppear: () => void = (): void => {};
   onViewportHeightChange: (height: number) => void = (_height: number): void => {};
   onReachStart: () => void = (): void => {};
@@ -55,6 +56,7 @@ export struct InteractiveMessageTimeline {
     .layoutWeight(1)
     .cachedCount(this.cachedItems)
     .scrollBar(this.showScrollBar ? BarState.Auto : BarState.Off)
+    .enableScrollInteraction(this.scrollInteractionEnabled)
     .padding({
       left: this.horizontalGutter,
       right: this.horizontalGutter,

@@ -60,6 +60,18 @@ test('Shelf discovers the same widget as the body when its fence spans adjacent 
   assert.equal(artifacts.widgets[0].id, `${message.id}:0:0`);
 });
 
+test('Shelf keeps completed threejs scene data with its static cover', () => {
+  const { conversation, message } = sample();
+  const scene = { objects: [{ id: 'cube', type: 'box', color: '#3366ff', position: [0, 0, 0],
+    rotation: [0, 0, 0], scale: [1, 1, 1], size: [2, 2, 2] }] };
+  message.parts = [text(fence({ title: '3D 场景', renderer: 'threejs', spec: scene }))];
+  const artifacts = collectConversationArtifacts(conversation, true);
+  assert.equal(artifacts.widgets.length, 1);
+  assert.equal(artifacts.widgets[0].widget.renderer, 'threejs');
+  assert.equal(artifacts.widgets[0].widget.scene?.objects[0].id, 'cube');
+  assert.match(artifacts.widgets[0].widget.html, /<svg/);
+});
+
 test('Shelf preserves image/file/miniapp discovery and document versions while deduping image and miniapp identity', () => {
   const { conversation, message } = sample();
   message.parts = [

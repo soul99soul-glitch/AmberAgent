@@ -26,6 +26,7 @@ import { hydrateWorkspaceCustomDir, activateWorkspaceCustomDir, currentWorkspace
 import { runNativeTokenCounterFixture } from '../platform_impl/NativeTokenCounterFixture.ets';
 import { runSSHRuntimeFixture } from '../platform_impl/SSHRuntimeFixture.ets';
 import { runRuntimeE3Fixture } from '../platform_impl/RuntimeE3Fixture.ets';
+import { runChatVisualFixture } from '../platform_impl/ChatVisualFixture.ets';
 import { cancelNativePluginJsSessions } from '../platform_impl/NativePluginJsTransport.ets';
 import { getMemoryTopicCoordinator } from '../platform_impl/MemoryTopicOps.ets';
 import { getWebMountOAuthRuntime } from '../platform_impl/WebMountOAuthRuntime.ets';
@@ -224,6 +225,7 @@ export default class EntryAbility extends UIAbility {
       runNativeTokenCounterFixture(want);
       runSSHRuntimeFixture(want).catch((): void => hilog.error(DOMAIN, 'SSH.Fixture', 'fixture failed'));
       runRuntimeE3Fixture(want).catch((): void => hilog.error(DOMAIN, 'Runtime.E3.Fixture', 'fixture failed'));
+      runChatVisualFixture(want);
     }
     // D-126:AmberAgentApp.kt:205-213 — 启动 fire-and-forget 装内置技能
     //   (Dispatchers.IO 异步 → promise 丢弃;失败仅 Log.e,不阻塞启动)
@@ -245,6 +247,7 @@ export default class EntryAbility extends UIAbility {
       runNativeTokenCounterFixture(want);
       runSSHRuntimeFixture(want).catch((): void => hilog.error(DOMAIN, 'SSH.Fixture', 'fixture failed'));
       runRuntimeE3Fixture(want).catch((): void => hilog.error(DOMAIN, 'Runtime.E3.Fixture', 'fixture failed'));
+      runChatVisualFixture(want);
     }
   }
 

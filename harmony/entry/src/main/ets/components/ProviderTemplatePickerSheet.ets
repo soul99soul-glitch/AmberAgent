@@ -25,6 +25,7 @@ const OAUTH_ROWS: OAuthRow[] = [
   { kind: 'codex', monogram: 'OC', name: 'OpenAI Codex OAuth', subtitle: 'openai · chatgpt.com 后端' },
   { kind: 'gemini', monogram: 'GO', name: 'Gemini OAuth', subtitle: 'google-gemini · cloudcode-pa' },
 ];
+const PROVIDER_PROTOCOLS: string[] = ['openai', 'claude', 'google'];
 
 @Component
 export struct ProviderTemplatePickerSheet {
@@ -168,6 +169,14 @@ export struct ProviderTemplatePickerSheet {
                 .width('100%')
                 .margin({ top: 6, bottom: 4 })
 
+              this.sectionLabel('自定义服务')
+              ForEach(PROVIDER_PROTOCOLS, (protocol: string): void => {
+                Text(protocol === 'openai' ? 'OpenAI 兼容 API' : protocol === 'claude' ? 'Claude' : 'Google Gemini')
+                  .fontSize(15).fontWeight(FontWeight.Medium).fontColor(INK)
+                  .width('100%').height(48).padding({ left: 4, right: 4 })
+                  .onClick((): void => { this.pickProtocol(protocol); })
+              }, (protocol: string): string => `protocol-${protocol}`)
+
               this.sectionLabel('OAUTH')
               ForEach(OAUTH_ROWS, (row: OAuthRow): void => {
                 Row() {
@@ -234,7 +243,7 @@ export struct ProviderTemplatePickerSheet {
                 .onClick((): void => { this.onPickPreset(p); })
               }, (p: ProviderSetting): string => `pre-${p.id}`)
 
-              Text('列表里没有的?选一个相近的预置,进详情改 Base URL 即可。')
+              Text('未列出的服务商可选择上方的兼容协议，再填写服务地址和密钥。')
                 .fontSize(12).fontColor(INK3)
                 .width('100%')
                 .margin({ top: 8, bottom: 16 })

@@ -1,0 +1,35 @@
+── HarmonyOS HAP 本地签名 ──
+未签名 HAP : /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/build/default/outputs/default/entry-default-unsigned.hap
+输出目录   : /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/build/default/outputs/default/signed
+签名工具   : /Users/mi/Library/Huawei/commandline/command-line-tools/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar
+
+[1-3/8] CA 链已存在，跳过
+[4/8] 应用密钥已存在，跳过
+[5/8] 应用调试证书已存在，跳过
+[6/8] Profile 签名证书已存在，跳过
+[7/8] 签名 Profile (生成 .p7b)
+    bundle-name: app.amber.deepread
+    device-ids : ["454d5504d4143041524d0d32a6938015547d5b3342c64e09707f400000000000"]
+10-10 15:46:25.750  INFO - sign-profile success
+[8/8] 签名 HAP
+10-10 15:46:26.805  INFO - Create a sign info successfully.
+10-10 15:46:26.810  INFO - Create a sign info successfully.
+10-10 15:46:26.819  INFO - Create a sign info successfully.
+10-10 15:46:26.839  INFO - Create a sign info successfully.
+10-10 15:46:26.843  INFO - Sign successfully.
+10-10 15:46:26.905  INFO - Add sign data in sign info list success.
+10-10 15:46:26.907  INFO - Generate signing block success, begin write it to output file
+10-10 15:46:26.908  INFO - Sign Hap success!
+10-10 15:46:26.908  INFO - sign-app success
+
+── 验证 ──
+10-10 15:46:27.536  INFO - verify lib: libs/arm64-v8a/libc++_shared.so
+10-10 15:46:27.543  INFO - verify codesign success
+10-10 15:46:27.617  INFO - Digest verify result: true, DigestAlgorithm: SHA-256
+10-10 15:46:27.620  INFO - verify: Verify success
+10-10 15:46:27.620  INFO - verify-app success
+
+✓ 签名完成: /Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/build/default/outputs/default/signed/entry-default-signed.hap
+
+── 安装到设备 ──
+  hdc install "/Users/mi/Downloads/AI/AmberAgent-harmony-preview/harmony/entry/build/default/outputs/default/signed/entry-default-signed.hap"

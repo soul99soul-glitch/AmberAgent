@@ -1,0 +1,43 @@
+{
+  "generatedAt": "2026-10-10T08:28:53.365Z",
+  "configSource": "mimocode.jsonc",
+  "fixtureSource": "harmony/chat/src/test/fixtures/intelligent-ui/p0-model-cases.json",
+  "systemPromptVersion": "p0-v1",
+  "diagnostics": {
+    "wireCaptureCapChars": 1048576,
+    "assistantContentCapChars": 64000,
+    "terminalMarker": "[DONE]",
+    "source": "evaluate-intelligent-ui.mjs"
+  },
+  "maxTokens": 2500,
+  "concurrency": 2,
+  "fixtureCount": 20,
+  "models": [
+    {
+      "provider": "glm",
+      "model": "glm-5.3",
+      "transportMode": "stream",
+      "pilot": {
+        "ok": true,
+        "mode": "stream",
+        "finishReason": "stop",
+        "sawDone": true,
+        "terminal": true,
+        "durationMs": 10623,
+        "output": "```amber-ui v=1 id=cert-chain-ui\n{\"op\":\"state\",\"id\":\"cert_target\",\"initial\":\"root\"}\n{\"op\":\"node\",\"type\":\"column\",\"id\":\"root_col\",\"parent\":null}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"title\",\"parent\":\"root_col\",\"text\":\"证书链解释\"}\n{\"op\":\"node\",\"type\":\"choice\",\"id\":\"cert_select\",\"parent\":\"root_col\",\"state\":\"cert_target\",\"options\":[{\"value\":\"root\",\"label\":\"根证书\"},{\"value\":\"server\",\"label\":\"服务器证书\"}]}\n{\"op\":\"node\",\"type\":\"button\",\"id\":\"continue_btn\",\"parent\":\"root_col\",\"label\":\"继续解释\",\"action\":{\"type\":\"draft\",\"text\":\"请解释{{cert_target}}的证书链\"}}\n{\"op\":\"end\"}\n```\n\n包含证书类型选择器与继续按钮，按钮草稿会引用所选证书类型。",
+        "reasoningChars": 0
+      },
+      "cases": [],
+      "skipped": false,
+      "summary": {
+        "total": 0,
+        "pass": 0,
+        "uiPass": 0,
+        "visualPass": 0,
+        "evaluated": 0,
+        "availableRate": 0,
+        "failures": {}
+      }
+    }
+  ]
+}

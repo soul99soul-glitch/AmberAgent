@@ -1,0 +1,851 @@
+{
+  "generatedAt": "2026-10-10T08:36:13.746Z",
+  "configSource": "mimocode.jsonc",
+  "fixtureSource": "harmony/chat/src/test/fixtures/intelligent-ui/p0-model-cases.json",
+  "systemPromptVersion": "p0-v1",
+  "maxTokens": 2500,
+  "concurrency": 2,
+  "fixtureCount": 20,
+  "models": [
+    {
+      "provider": "mify",
+      "model": "moonshot/kimi-k3",
+      "transportMode": "nonstream_fallback",
+      "pilot": {
+        "ok": true,
+        "mode": "nonstream_fallback",
+        "finishReason": "stop",
+        "sawDone": false,
+        "terminal": true,
+        "durationMs": 4950,
+        "output": "```amber-ui v=1 id=cert_chain_ui\n{\"op\":\"state\",\"id\":\"cert_type\",\"initial\":\"root\"}\n{\"op\":\"node\",\"type\":\"column\",\"id\":\"root_col\"}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"title\",\"parent\":\"root_col\",\"text\":\"证书链学习\"}\n{\"op\":\"node\",\"type\":\"choice\",\"id\":\"cert_choice\",\"parent\":\"root_col\",\"state\":\"cert_type\",\"options\":[{\"value\":\"root\",\"label\":\"根证书\"},{\"value\":\"server\",\"label\":\"服务器证书\"}]}\n{\"op\":\"node\",\"type\":\"button\",\"id\":\"explain_btn\",\"parent\":\"root_col\",\"label\":\"继续解释\",\"action\":{\"type\":\"draft\",\"text\":\"请解释证书链中的{{cert_type}}部分\"}}\n{\"op\":\"end\"}\n```",
+        "reasoningChars": 53
+      },
+      "cases": [
+        {
+          "id": "choice-01",
+          "category": "choice",
+          "prompt": "解释企业 CA 的根证书和服务器证书",
+          "userText": "解释企业 CA 的根证书和服务器证书。请用原生 choice 选择器切换相关说明，并提供一个只填入草稿的继续按钮。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 12329,
+          "output": "```amber-ui v=1 id=ca_explainer\n{\"op\":\"state\",\"id\":\"topic\",\"initial\":\"root\"}\n{\"op\":\"column\",\"id\":\"root\"}\n{\"op\":\"text\",\"id\":\"title\",\"parent\":\"root\",\"text\":\"企业 CA 证书说明\"}\n{\"op\":\"choice\",\"id\":\"topic_choice\",\"parent\":\"root\",\"state\":\"topic\",\"options\":[{\"value\":\"root\",\"label\":\"根证书\"},{\"value\":\"server\",\"label\":\"服务器证书\"}]}\n{\"op\":\"text\",\"id\":\"root_text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"topic\",\"equals\":\"root\"},\"text\":\"根证书是企业 CA 的信任锚，通常离线保管，用于签发中间 CA 或直接签发终端证书；客户端必须显式信任它。\"}\n{\"op\":\"text\",\"id\":\"server_text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"topic\",\"equals\":\"server\"},\"text\":\"服务器证书由企业 CA 签发给具体域名或服务，用于 TLS 握手证明身份；应包含正确 SAN、有效期短并可吊销。\"}\n{\"op\":\"button\",\"id\":\"next\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"请继续展开企业 CA 的 {{topic}} 部署与轮换要点。\"}}\n{\"op\":\"end\"}\n```",
+          "evaluation": {
+            "uiStatus": "error",
+            "uiPass": false,
+            "visualStatus": "not_required",
+            "visualPass": true,
+            "pass": false,
+            "failureClass": "format",
+            "diagnostics": [
+              {
+                "code": "unsupported-op",
+                "line": 2,
+                "severity": "error"
+              },
+              {
+                "code": "unsupported-op",
+                "line": 3,
+                "severity": "error"
+              },
+              {
+                "code": "unsupported-op",
+                "line": 4,
+                "severity": "error"
+              },
+              {
+                "code": "unsupported-op",
+                "line": 5,
+                "severity": "error"
+              },
+              {
+                "code": "unsupported-op",
+                "line": 6,
+                "severity": "error"
+              },
+              {
+                "code": "unsupported-op",
+                "line": 7,
+                "severity": "error"
+              },
+              {
+                "code": "end-before-root",
+                "line": 8,
+                "severity": "error"
+              }
+            ],
+            "blockKinds": [
+              "amber-ui:ca_explainer:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 541,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "081d91129d3b7c50919b5b8b2c45c4bc9520f3895bad2b0afae4bf162b19d76d",
+          "submittedUserTextHash": "94cd780aa54afe65d4ab598a087ea2893d7d392fbb3c61101186aa9095507743",
+          "rawOutput": "```amber-ui v=1 id=ca_explainer\n{\"op\":\"state\",\"id\":\"topic\",\"initial\":\"root\"}\n{\"op\":\"column\",\"id\":\"root\"}\n{\"op\":\"text\",\"id\":\"title\",\"parent\":\"root\",\"text\":\"企业 CA 证书说明\"}\n{\"op\":\"choice\",\"id\":\"topic_choice\",\"parent\":\"root\",\"state\":\"topic\",\"options\":[{\"value\":\"root\",\"label\":\"根证书\"},{\"value\":\"server\",\"label\":\"服务器证书\"}]}\n{\"op\":\"text\",\"id\":\"root_text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"topic\",\"equals\":\"root\"},\"text\":\"根证书是企业 CA 的信任锚，通常离线保管，用于签发中间 CA 或直接签发终端证书；客户端必须显式信任它。\"}\n{\"op\":\"text\",\"id\":\"server_text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"topic\",\"equals\":\"server\"},\"text\":\"服务器证书由企业 CA 签发给具体域名或服务，用于 TLS 握手证明身份；应包含正确 SAN、有效期短并可吊销。\"}\n{\"op\":\"button\",\"id\":\"next\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"请继续展开企业 CA 的 {{topic}} 部署与轮换要点。\"}}\n{\"op\":\"end\"}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "choice-02",
+          "category": "choice",
+          "prompt": "比较对称和非对称加密",
+          "userText": "比较对称和非对称加密。请用原生 choice 选择器切换相关说明，并提供一个只填入草稿的继续按钮。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 10860,
+          "output": "```amber-ui v=1 id=crypto_compare\n{\"op\":\"state\",\"id\":\"mode\",\"initial\":\"sym\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"pick\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"mode\",\"options\":[{\"value\":\"sym\",\"label\":\"对称加密\"},{\"value\":\"asym\",\"label\":\"非对称加密\"}]}\n{\"op\":\"node\",\"id\":\"sym_text\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"mode\",\"equals\":\"sym\"},\"text\":\"对称加密：同一密钥用于加密和解密，速度快、适合大量数据；难点在密钥分发与保管，典型算法如 AES。\"}\n{\"op\":\"node\",\"id\":\"asym_text\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"mode\",\"equals\":\"asym\"},\"text\":\"非对称加密：公钥加密、私钥解密，便于密钥交换与签名；计算较慢，常与对称加密组合使用，典型算法如 RSA、ECC。\"}\n{\"op\":\"node\",\"id\":\"next\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"请基于我选择的 {{mode}} 继续讲解实际应用。\"}}\n{\"op\":\"end\"}\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "not_required",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:crypto_compare:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 413,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "4a0ff3cff4db41e4ebd8a75c69cbbfaeefc42b1430010f75d316b30d38cba31a",
+          "submittedUserTextHash": "5f7bfe9ca3a95f57dc9f1dadf4aa25a25d2dea6e8f63f6ec38b9424ed360e86e",
+          "rawOutput": "```amber-ui v=1 id=crypto_compare\n{\"op\":\"state\",\"id\":\"mode\",\"initial\":\"sym\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"pick\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"mode\",\"options\":[{\"value\":\"sym\",\"label\":\"对称加密\"},{\"value\":\"asym\",\"label\":\"非对称加密\"}]}\n{\"op\":\"node\",\"id\":\"sym_text\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"mode\",\"equals\":\"sym\"},\"text\":\"对称加密：同一密钥用于加密和解密，速度快、适合大量数据；难点在密钥分发与保管，典型算法如 AES。\"}\n{\"op\":\"node\",\"id\":\"asym_text\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"mode\",\"equals\":\"asym\"},\"text\":\"非对称加密：公钥加密、私钥解密，便于密钥交换与签名；计算较慢，常与对称加密组合使用，典型算法如 RSA、ECC。\"}\n{\"op\":\"node\",\"id\":\"next\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"请基于我选择的 {{mode}} 继续讲解实际应用。\"}}\n{\"op\":\"end\"}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "choice-03",
+          "category": "choice",
+          "prompt": "按风险等级查看安全建议",
+          "userText": "按风险等级查看安全建议。请用原生 choice 选择器切换相关说明，并提供一个只填入草稿的继续按钮。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 10220,
+          "output": "```amber-ui v=1 id=risk_advice\n{\"op\":\"state\",\"id\":\"risk\",\"initial\":\"低\"}\n{\"op\":\"node\",\"type\":\"column\",\"id\":\"root\"}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"title\",\"parent\":\"root\",\"text\":\"按风险等级查看安全建议\"}\n{\"op\":\"node\",\"type\":\"choice\",\"id\":\"risk_choice\",\"parent\":\"root\",\"state\":\"risk\",\"options\":[{\"value\":\"低\",\"label\":\"低风险\"},{\"value\":\"中\",\"label\":\"中风险\"},{\"value\":\"高\",\"label\":\"高风险\"}]}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"low_text\",\"parent\":\"root\",\"text\":\"低风险：保持常规防护，定期复查配置。\",\"visibleWhen\":{\"state\":\"risk\",\"equals\":\"低\"}}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"mid_text\",\"parent\":\"root\",\"text\":\"中风险：启用告警，限制暴露面并安排人工复核。\",\"visibleWhen\":{\"state\":\"risk\",\"equals\":\"中\"}}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"high_text\",\"parent\":\"root\",\"text\":\"高风险：立即隔离受影响资产，升级凭证并通知负责人。\",\"visibleWhen\":{\"state\":\"risk\",\"equals\":\"高\"}}\n{\"op\":\"node\",\"type\":\"button\",\"id\":\"continue_btn\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"请基于风险等级 {{risk}} 生成下一步处置清单。\"}}\n{\"op\":\"end\"}\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "not_required",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:risk_advice:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 275,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "d6e8ac18606ce81116cbfd2c9a44681df8abfe215059f7a666c0fdd0b8ed24f4",
+          "submittedUserTextHash": "ea44f0681cd62b82b22c4c752fd8009f95cc03b5fa1fcedeb0c6a48382caa82f",
+          "rawOutput": "```amber-ui v=1 id=risk_advice\n{\"op\":\"state\",\"id\":\"risk\",\"initial\":\"低\"}\n{\"op\":\"node\",\"type\":\"column\",\"id\":\"root\"}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"title\",\"parent\":\"root\",\"text\":\"按风险等级查看安全建议\"}\n{\"op\":\"node\",\"type\":\"choice\",\"id\":\"risk_choice\",\"parent\":\"root\",\"state\":\"risk\",\"options\":[{\"value\":\"低\",\"label\":\"低风险\"},{\"value\":\"中\",\"label\":\"中风险\"},{\"value\":\"高\",\"label\":\"高风险\"}]}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"low_text\",\"parent\":\"root\",\"text\":\"低风险：保持常规防护，定期复查配置。\",\"visibleWhen\":{\"state\":\"risk\",\"equals\":\"低\"}}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"mid_text\",\"parent\":\"root\",\"text\":\"中风险：启用告警，限制暴露面并安排人工复核。\",\"visibleWhen\":{\"state\":\"risk\",\"equals\":\"中\"}}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"high_text\",\"parent\":\"root\",\"text\":\"高风险：立即隔离受影响资产，升级凭证并通知负责人。\",\"visibleWhen\":{\"state\":\"risk\",\"equals\":\"高\"}}\n{\"op\":\"node\",\"type\":\"button\",\"id\":\"continue_btn\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"请基于风险等级 {{risk}} 生成下一步处置清单。\"}}\n{\"op\":\"end\"}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "choice-04",
+          "category": "choice",
+          "prompt": "选择数据库索引类型",
+          "userText": "选择数据库索引类型。请用原生 choice 选择器切换相关说明，并提供一个只填入草稿的继续按钮。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 13986,
+          "output": "```amber-ui v=1 id=index_type_picker\n{\"op\":\"state\",\"id\":\"idx\",\"initial\":\"btree\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\",\"parent\":null}\n{\"op\":\"node\",\"id\":\"pick\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"idx\",\"options\":[{\"value\":\"btree\",\"label\":\"B-Tree\"},{\"value\":\"hash\",\"label\":\"Hash\"},{\"value\":\"gin\",\"label\":\"GIN\"}]}\n{\"op\":\"node\",\"id\":\"txt_btree\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"idx\",\"equals\":\"btree\"},\"text\":\"B-Tree：适合等值与范围查询，是最常见的默认索引。\"}\n{\"op\":\"node\",\"id\":\"txt_hash\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"idx\",\"equals\":\"hash\"},\"text\":\"Hash：仅适合等值查询，不支持范围与排序。\"}\n{\"op\":\"node\",\"id\":\"txt_gin\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"idx\",\"equals\":\"gin\"},\"text\":\"GIN：适合数组、JSONB、全文等多值包含查询。\"}\n{\"op\":\"node\",\"id\":\"go\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"已选择数据库索引类型：{{idx}}。请继续给出建表字段、查询模式与数据量。\"}}\n{\"op\":\"end\"}\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "not_required",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:index_type_picker:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 654,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "b18cb5ed3a386f8b25822072b0c7e04d025fe4aafd2c31a2267212dc1bbf1e10",
+          "submittedUserTextHash": "3288f15a71a22849498982ed723e2f991d2b37a05e6492a4cfabcea4f6feebda",
+          "rawOutput": "```amber-ui v=1 id=index_type_picker\n{\"op\":\"state\",\"id\":\"idx\",\"initial\":\"btree\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\",\"parent\":null}\n{\"op\":\"node\",\"id\":\"pick\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"idx\",\"options\":[{\"value\":\"btree\",\"label\":\"B-Tree\"},{\"value\":\"hash\",\"label\":\"Hash\"},{\"value\":\"gin\",\"label\":\"GIN\"}]}\n{\"op\":\"node\",\"id\":\"txt_btree\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"idx\",\"equals\":\"btree\"},\"text\":\"B-Tree：适合等值与范围查询，是最常见的默认索引。\"}\n{\"op\":\"node\",\"id\":\"txt_hash\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"idx\",\"equals\":\"hash\"},\"text\":\"Hash：仅适合等值查询，不支持范围与排序。\"}\n{\"op\":\"node\",\"id\":\"txt_gin\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"idx\",\"equals\":\"gin\"},\"text\":\"GIN：适合数组、JSONB、全文等多值包含查询。\"}\n{\"op\":\"node\",\"id\":\"go\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"已选择数据库索引类型：{{idx}}。请继续给出建表字段、查询模式与数据量。\"}}\n{\"op\":\"end\"}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "choice-05",
+          "category": "choice",
+          "prompt": "选择旅行预算档位",
+          "userText": "选择旅行预算档位。请用原生 choice 选择器切换相关说明，并提供一个只填入草稿的继续按钮。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 11278,
+          "output": "```amber-ui v=1 id=budget_picker\n{\"op\":\"state\",\"id\":\"budget\",\"initial\":\"standard\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"title\",\"parent\":\"root\",\"type\":\"text\",\"text\":\"请选择旅行预算档位\"}\n{\"op\":\"node\",\"id\":\"budgetChoice\",\"parent\":\"root\",\"type\":\"choice\",\"state\":\"budget\",\"options\":[{\"value\":\"economy\",\"label\":\"经济\"},{\"value\":\"standard\",\"label\":\"舒适\"},{\"value\":\"premium\",\"label\":\"高端\"}]}\n{\"op\":\"node\",\"id\":\"economyTip\",\"parent\":\"root\",\"type\":\"text\",\"text\":\"经济档：优先控制住宿与交通成本。\",\"visibleWhen\":{\"state\":\"budget\",\"equals\":\"economy\"}}\n{\"op\":\"node\",\"id\":\"standardTip\",\"parent\":\"root\",\"type\":\"text\",\"text\":\"舒适档：均衡体验与花费，适合大多数行程。\",\"visibleWhen\":{\"state\":\"budget\",\"equals\":\"standard\"}}\n{\"op\":\"node\",\"id\":\"premiumTip\",\"parent\":\"root\",\"type\":\"text\",\"text\":\"高端档：侧重品质住宿、便捷交通与深度体验。\",\"visibleWhen\":{\"state\":\"budget\",\"equals\":\"premium\"}}\n{\"op\":\"node\",\"id\":\"nextBtn\",\"parent\":\"root\",\"type\":\"button\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"已选择旅行预算档位：{{budget}}，请继续规划。\"}}\n{\"op\":\"end\"}\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "not_required",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:budget_picker:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 550,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "c0d833c48ea921e3eef975661274d409c9e798c50393515059288db66f78c2d1",
+          "submittedUserTextHash": "9cfbce05139464aa713900ada08d6a42b51ada5f9e648f604596517ce54e1be6",
+          "rawOutput": "```amber-ui v=1 id=budget_picker\n{\"op\":\"state\",\"id\":\"budget\",\"initial\":\"standard\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"title\",\"parent\":\"root\",\"type\":\"text\",\"text\":\"请选择旅行预算档位\"}\n{\"op\":\"node\",\"id\":\"budgetChoice\",\"parent\":\"root\",\"type\":\"choice\",\"state\":\"budget\",\"options\":[{\"value\":\"economy\",\"label\":\"经济\"},{\"value\":\"standard\",\"label\":\"舒适\"},{\"value\":\"premium\",\"label\":\"高端\"}]}\n{\"op\":\"node\",\"id\":\"economyTip\",\"parent\":\"root\",\"type\":\"text\",\"text\":\"经济档：优先控制住宿与交通成本。\",\"visibleWhen\":{\"state\":\"budget\",\"equals\":\"economy\"}}\n{\"op\":\"node\",\"id\":\"standardTip\",\"parent\":\"root\",\"type\":\"text\",\"text\":\"舒适档：均衡体验与花费，适合大多数行程。\",\"visibleWhen\":{\"state\":\"budget\",\"equals\":\"standard\"}}\n{\"op\":\"node\",\"id\":\"premiumTip\",\"parent\":\"root\",\"type\":\"text\",\"text\":\"高端档：侧重品质住宿、便捷交通与深度体验。\",\"visibleWhen\":{\"state\":\"budget\",\"equals\":\"premium\"}}\n{\"op\":\"node\",\"id\":\"nextBtn\",\"parent\":\"root\",\"type\":\"button\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"已选择旅行预算档位：{{budget}}，请继续规划。\"}}\n{\"op\":\"end\"}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "choice-06",
+          "category": "choice",
+          "prompt": "选择学习计划强度",
+          "userText": "选择学习计划强度。请用原生 choice 选择器切换相关说明，并提供一个只填入草稿的继续按钮。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 15163,
+          "output": "```amber-ui v=1 id=plan_intensity\n{\"op\":\"state\",\"id\":\"intensity\",\"initial\":\"medium\"}\n{\"op\":\"node\",\"type\":\"column\",\"id\":\"root\"}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"title\",\"parent\":\"root\",\"text\":\"选择学习计划强度\"}\n{\"op\":\"node\",\"type\":\"choice\",\"id\":\"picker\",\"parent\":\"root\",\"state\":\"intensity\",\"options\":[{\"value\":\"light\",\"label\":\"轻松\"},{\"value\":\"medium\",\"label\":\"标准\"},{\"value\":\"high\",\"label\":\"高强度\"}]}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"tip_light\",\"parent\":\"root\",\"text\":\"每天 20-30 分钟，适合保持节奏。\",\"visibleWhen\":{\"state\":\"intensity\",\"equals\":\"light\"}}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"tip_medium\",\"parent\":\"root\",\"text\":\"每天 60 分钟左右，均衡推进。\",\"visibleWhen\":{\"state\":\"intensity\",\"equals\":\"medium\"}}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"tip_high\",\"parent\":\"root\",\"text\":\"每天 2 小时以上，适合冲刺目标。\",\"visibleWhen\":{\"state\":\"intensity\",\"equals\":\"high\"}}\n{\"op\":\"node\",\"type\":\"button\",\"id\":\"next\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"继续学习计划，强度：{{intensity}}\"}}\n{\"op\":\"end\"}\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "not_required",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:plan_intensity:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 906,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "31a95f5b7737b34c9eea22a987ecf3d207c807d3b41869640b069a9922cf0bcc",
+          "submittedUserTextHash": "327c999e0e9b799bf21bdaeeec7b8d50101d1756f0fcd7e8f47ec4d075e5b6ce",
+          "rawOutput": "```amber-ui v=1 id=plan_intensity\n{\"op\":\"state\",\"id\":\"intensity\",\"initial\":\"medium\"}\n{\"op\":\"node\",\"type\":\"column\",\"id\":\"root\"}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"title\",\"parent\":\"root\",\"text\":\"选择学习计划强度\"}\n{\"op\":\"node\",\"type\":\"choice\",\"id\":\"picker\",\"parent\":\"root\",\"state\":\"intensity\",\"options\":[{\"value\":\"light\",\"label\":\"轻松\"},{\"value\":\"medium\",\"label\":\"标准\"},{\"value\":\"high\",\"label\":\"高强度\"}]}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"tip_light\",\"parent\":\"root\",\"text\":\"每天 20-30 分钟，适合保持节奏。\",\"visibleWhen\":{\"state\":\"intensity\",\"equals\":\"light\"}}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"tip_medium\",\"parent\":\"root\",\"text\":\"每天 60 分钟左右，均衡推进。\",\"visibleWhen\":{\"state\":\"intensity\",\"equals\":\"medium\"}}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"tip_high\",\"parent\":\"root\",\"text\":\"每天 2 小时以上，适合冲刺目标。\",\"visibleWhen\":{\"state\":\"intensity\",\"equals\":\"high\"}}\n{\"op\":\"node\",\"type\":\"button\",\"id\":\"next\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"继续学习计划，强度：{{intensity}}\"}}\n{\"op\":\"end\"}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "choice-07",
+          "category": "choice",
+          "prompt": "选择日志保留周期",
+          "userText": "选择日志保留周期。请用原生 choice 选择器切换相关说明，并提供一个只填入草稿的继续按钮。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 12765,
+          "output": "```amber-ui v=1 id=log_retention_picker\n{\"op\":\"state\",\"id\":\"period\",\"initial\":\"30d\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"title\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"选择日志保留周期\"}\n{\"op\":\"node\",\"id\":\"period_choice\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"period\",\"options\":[{\"value\":\"7d\",\"label\":\"7 天\"},{\"value\":\"30d\",\"label\":\"30 天\"},{\"value\":\"90d\",\"label\":\"90 天\"},{\"value\":\"1y\",\"label\":\"1 年\"}]}\n{\"op\":\"node\",\"id\":\"note_7d\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"仅保留最近 7 天，适合短期排障。\",\"visibleWhen\":{\"state\":\"period\",\"equals\":\"7d\"}}\n{\"op\":\"node\",\"id\":\"note_30d\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"保留 30 天，兼顾成本与常规审计。\",\"visibleWhen\":{\"state\":\"period\",\"equals\":\"30d\"}}\n{\"op\":\"node\",\"id\":\"note_90d\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"保留 90 天，适合季度合规复盘。\",\"visibleWhen\":{\"state\":\"period\",\"equals\":\"90d\"}}\n{\"op\":\"node\",\"id\":\"note_1y\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"保留 1 年，适合长期合规与趋势分析。\",\"visibleWhen\":{\"state\":\"period\",\"equals\":\"1y\"}}\n{\"op\":\"node\",\"id\":\"continue_btn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"继续配置，日志保留周期：{{period}}\"}}\n{\"op\":\"end\"}\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "not_required",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:log_retention_picker:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 401,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "5869a9e1523bcc8173fe60cac7321c74e904edca5601ed5c5257bbedc1003d2a",
+          "submittedUserTextHash": "0cb10fe1f47195394a92a1c3525af1c2dbf6d5909b7ae686cc9a88334228eea0",
+          "rawOutput": "```amber-ui v=1 id=log_retention_picker\n{\"op\":\"state\",\"id\":\"period\",\"initial\":\"30d\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"title\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"选择日志保留周期\"}\n{\"op\":\"node\",\"id\":\"period_choice\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"period\",\"options\":[{\"value\":\"7d\",\"label\":\"7 天\"},{\"value\":\"30d\",\"label\":\"30 天\"},{\"value\":\"90d\",\"label\":\"90 天\"},{\"value\":\"1y\",\"label\":\"1 年\"}]}\n{\"op\":\"node\",\"id\":\"note_7d\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"仅保留最近 7 天，适合短期排障。\",\"visibleWhen\":{\"state\":\"period\",\"equals\":\"7d\"}}\n{\"op\":\"node\",\"id\":\"note_30d\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"保留 30 天，兼顾成本与常规审计。\",\"visibleWhen\":{\"state\":\"period\",\"equals\":\"30d\"}}\n{\"op\":\"node\",\"id\":\"note_90d\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"保留 90 天，适合季度合规复盘。\",\"visibleWhen\":{\"state\":\"period\",\"equals\":\"90d\"}}\n{\"op\":\"node\",\"id\":\"note_1y\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"保留 1 年，适合长期合规与趋势分析。\",\"visibleWhen\":{\"state\":\"period\",\"equals\":\"1y\"}}\n{\"op\":\"node\",\"id\":\"continue_btn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"继续配置，日志保留周期：{{period}}\"}}\n{\"op\":\"end\"}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "choice-08",
+          "category": "choice",
+          "prompt": "选择消息导出格式",
+          "userText": "选择消息导出格式。请用原生 choice 选择器切换相关说明，并提供一个只填入草稿的继续按钮。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 14493,
+          "output": "```amber-ui v=1 id=export_format_picker\n{\"op\":\"state\",\"id\":\"fmt\",\"initial\":\"markdown\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"title\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"选择消息导出格式\"}\n{\"op\":\"node\",\"id\":\"formatChoice\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"fmt\",\"options\":[{\"value\":\"markdown\",\"label\":\"Markdown\"},{\"value\":\"json\",\"label\":\"JSON\"},{\"value\":\"txt\",\"label\":\"纯文本\"}]}\n{\"op\":\"node\",\"id\":\"mdHelp\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"fmt\",\"equals\":\"markdown\"},\"text\":\"Markdown：保留标题、列表与代码块，适合阅读与归档。\"}\n{\"op\":\"node\",\"id\":\"jsonHelp\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"fmt\",\"equals\":\"json\"},\"text\":\"JSON：结构化字段完整，适合后续程序处理。\"}\n{\"op\":\"node\",\"id\":\"txtHelp\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"fmt\",\"equals\":\"txt\"},\"text\":\"纯文本：仅保留对话文字，体积最小。\"}\n{\"op\":\"node\",\"id\":\"continueBtn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"已选择导出格式：{{fmt}}，请继续。\"}}\n{\"op\":\"end\"}\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "not_required",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:export_format_picker:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 886,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "2824c77a5059ccf03c28b749755165cf587445cf4a5c570499834c200fdc3b18",
+          "submittedUserTextHash": "d7c5711c36eff351006116cd052125286ae8e74a72de62a0ba6c8c337b00d644",
+          "rawOutput": "```amber-ui v=1 id=export_format_picker\n{\"op\":\"state\",\"id\":\"fmt\",\"initial\":\"markdown\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"title\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"选择消息导出格式\"}\n{\"op\":\"node\",\"id\":\"formatChoice\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"fmt\",\"options\":[{\"value\":\"markdown\",\"label\":\"Markdown\"},{\"value\":\"json\",\"label\":\"JSON\"},{\"value\":\"txt\",\"label\":\"纯文本\"}]}\n{\"op\":\"node\",\"id\":\"mdHelp\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"fmt\",\"equals\":\"markdown\"},\"text\":\"Markdown：保留标题、列表与代码块，适合阅读与归档。\"}\n{\"op\":\"node\",\"id\":\"jsonHelp\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"fmt\",\"equals\":\"json\"},\"text\":\"JSON：结构化字段完整，适合后续程序处理。\"}\n{\"op\":\"node\",\"id\":\"txtHelp\",\"type\":\"text\",\"parent\":\"root\",\"visibleWhen\":{\"state\":\"fmt\",\"equals\":\"txt\"},\"text\":\"纯文本：仅保留对话文字，体积最小。\"}\n{\"op\":\"node\",\"id\":\"continueBtn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"继续\",\"action\":{\"type\":\"draft\",\"text\":\"已选择导出格式：{{fmt}}，请继续。\"}}\n{\"op\":\"end\"}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "input-01",
+          "category": "input",
+          "prompt": "填写证书主题名称并生成说明",
+          "userText": "填写证书主题名称并生成说明。请提供 input 控件和一个只填入草稿的按钮，使用输入值生成下一步说明。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 6068,
+          "output": "```amber-ui v=1 id=cert_subject_form\n{\"op\":\"state\",\"id\":\"subject_name\",\"initial\":\"\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"title\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"请输入证书主题名称（CN）：\"}\n{\"op\":\"node\",\"id\":\"subject_input\",\"type\":\"input\",\"parent\":\"root\",\"state\":\"subject_name\",\"placeholder\":\"例如 example.com\"}\n{\"op\":\"node\",\"id\":\"generate_btn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"生成说明\",\"action\":{\"type\":\"draft\",\"text\":\"请为主题名称 {{subject_name}} 生成证书申请说明，包括用途、签发流程和注意事项。\"}}\n{\"op\":\"end\"}\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "not_required",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:cert_subject_form:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 62,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "5a681a8ad9364d8d305a22e54443d9cf3748a83216dfc643e2e0ccbf63ae5155",
+          "submittedUserTextHash": "80151f94c780a14650787ff5a1ca502511fcab0c5548e298a22aaac2fa2726e5",
+          "rawOutput": "```amber-ui v=1 id=cert_subject_form\n{\"op\":\"state\",\"id\":\"subject_name\",\"initial\":\"\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"title\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"请输入证书主题名称（CN）：\"}\n{\"op\":\"node\",\"id\":\"subject_input\",\"type\":\"input\",\"parent\":\"root\",\"state\":\"subject_name\",\"placeholder\":\"例如 example.com\"}\n{\"op\":\"node\",\"id\":\"generate_btn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"生成说明\",\"action\":{\"type\":\"draft\",\"text\":\"请为主题名称 {{subject_name}} 生成证书申请说明，包括用途、签发流程和注意事项。\"}}\n{\"op\":\"end\"}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "input-02",
+          "category": "input",
+          "prompt": "输入城市后规划行程",
+          "userText": "输入城市后规划行程。请提供 input 控件和一个只填入草稿的按钮，使用输入值生成下一步说明。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 8718,
+          "output": "```amber-ui v=1 id=trip_planner\n{\"op\":\"state\",\"id\":\"city\",\"initial\":\"\"}\n{\"op\":\"node\",\"type\":\"column\",\"id\":\"root\",\"parent\":null}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"title\",\"parent\":\"root\",\"text\":\"输入城市，生成下一步行程规划说明。\"}\n{\"op\":\"node\",\"type\":\"input\",\"id\":\"cityInput\",\"parent\":\"root\",\"state\":\"city\",\"placeholder\":\"例如：上海\"}\n{\"op\":\"node\",\"type\":\"button\",\"id\":\"planBtn\",\"parent\":\"root\",\"label\":\"生成行程草稿\",\"action\":{\"type\":\"draft\",\"text\":\"请为{{city}}规划一日行程，包含上午、下午、晚上安排与交通建议。\"}}\n{\"op\":\"end\"}\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "not_required",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:trip_planner:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 382,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "20945faab0fa271ca1fde57c2e84a09fa30a804d81ba42da59b0187b35dde2ad",
+          "submittedUserTextHash": "48831d3eaa78e93c9638a2facaa4e17a7902aa58f361acbe97dedf0ca9d2dede",
+          "rawOutput": "```amber-ui v=1 id=trip_planner\n{\"op\":\"state\",\"id\":\"city\",\"initial\":\"\"}\n{\"op\":\"node\",\"type\":\"column\",\"id\":\"root\",\"parent\":null}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"title\",\"parent\":\"root\",\"text\":\"输入城市，生成下一步行程规划说明。\"}\n{\"op\":\"node\",\"type\":\"input\",\"id\":\"cityInput\",\"parent\":\"root\",\"state\":\"city\",\"placeholder\":\"例如：上海\"}\n{\"op\":\"node\",\"type\":\"button\",\"id\":\"planBtn\",\"parent\":\"root\",\"label\":\"生成行程草稿\",\"action\":{\"type\":\"draft\",\"text\":\"请为{{city}}规划一日行程，包含上午、下午、晚上安排与交通建议。\"}}\n{\"op\":\"end\"}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "input-03",
+          "category": "input",
+          "prompt": "填写错误日志关键词",
+          "userText": "填写错误日志关键词。请提供 input 控件和一个只填入草稿的按钮，使用输入值生成下一步说明。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 11581,
+          "output": "```amber-ui v=1 id=error-log-keyword\n{\"op\":\"state\",\"id\":\"logKeyword\",\"initial\":\"\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"tip\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"填写错误日志关键词\"}\n{\"op\":\"node\",\"id\":\"kwInput\",\"type\":\"input\",\"parent\":\"root\",\"state\":\"logKeyword\",\"placeholder\":\"例如 timeout / NullPointerException\"}\n{\"op\":\"node\",\"id\":\"nextBtn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"生成下一步说明\",\"action\":{\"type\":\"draft\",\"text\":\"请基于错误日志关键词 {{logKeyword}} 生成下一步排查说明。\"}}\n{\"op\":\"end\"}\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "not_required",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:error-log-keyword:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 625,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "9cf9c7821480af55f21791593b5cc5e82523211d90ca89eb54ce54035deb1d59",
+          "submittedUserTextHash": "d568238bed2c81a539e8c39513b23199d353250385d9d5c79e87008d8d6176e0",
+          "rawOutput": "```amber-ui v=1 id=error-log-keyword\n{\"op\":\"state\",\"id\":\"logKeyword\",\"initial\":\"\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"tip\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"填写错误日志关键词\"}\n{\"op\":\"node\",\"id\":\"kwInput\",\"type\":\"input\",\"parent\":\"root\",\"state\":\"logKeyword\",\"placeholder\":\"例如 timeout / NullPointerException\"}\n{\"op\":\"node\",\"id\":\"nextBtn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"生成下一步说明\",\"action\":{\"type\":\"draft\",\"text\":\"请基于错误日志关键词 {{logKeyword}} 生成下一步排查说明。\"}}\n{\"op\":\"end\"}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "input-04",
+          "category": "input",
+          "prompt": "输入目标金额并给出储蓄建议",
+          "userText": "输入目标金额并给出储蓄建议。请提供 input 控件和一个只填入草稿的按钮，使用输入值生成下一步说明。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 13739,
+          "output": "```amber-ui v=1 id=savings_planner\n{\"op\":\"state\",\"id\":\"goalAmount\",\"initial\":\"\"}\n{\"op\":\"node\",\"type\":\"column\",\"id\":\"root\",\"parent\":null}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"title\",\"parent\":\"root\",\"text\":\"输入目标金额，生成储蓄建议草稿。\"}\n{\"op\":\"node\",\"type\":\"input\",\"id\":\"goalInput\",\"parent\":\"root\",\"state\":\"goalAmount\",\"placeholder\":\"例如 50000\"}\n{\"op\":\"node\",\"type\":\"button\",\"id\":\"makeDraft\",\"parent\":\"root\",\"label\":\"生成建议\",\"action\":{\"type\":\"draft\",\"text\":\"目标金额：{{goalAmount}} 元。建议先计算缺口与期限，再按月均摊；优先建立 3-6 个月应急金，随后用自动转账把每月固定比例存入低风险账户，并每季度复盘进度。\"}}\n{\"op\":\"end\"}\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "not_required",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:savings_planner:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 1289,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "5b1fedbcbd863c843c1734cdaa2afa7ded5b16877f27fffea13185347cd04938",
+          "submittedUserTextHash": "3855d66efc9349d56734f58c9567ce1c76ebe976a2c317e27b5cff2d5ef02cc6",
+          "rawOutput": "```amber-ui v=1 id=savings_planner\n{\"op\":\"state\",\"id\":\"goalAmount\",\"initial\":\"\"}\n{\"op\":\"node\",\"type\":\"column\",\"id\":\"root\",\"parent\":null}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"title\",\"parent\":\"root\",\"text\":\"输入目标金额，生成储蓄建议草稿。\"}\n{\"op\":\"node\",\"type\":\"input\",\"id\":\"goalInput\",\"parent\":\"root\",\"state\":\"goalAmount\",\"placeholder\":\"例如 50000\"}\n{\"op\":\"node\",\"type\":\"button\",\"id\":\"makeDraft\",\"parent\":\"root\",\"label\":\"生成建议\",\"action\":{\"type\":\"draft\",\"text\":\"目标金额：{{goalAmount}} 元。建议先计算缺口与期限，再按月均摊；优先建立 3-6 个月应急金，随后用自动转账把每月固定比例存入低风险账户，并每季度复盘进度。\"}}\n{\"op\":\"end\"}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "asset-01",
+          "category": "asset",
+          "prompt": "展示 CA 证书链示意图",
+          "userText": "展示 CA 证书链示意图。请只生成独立的 SVG 或 Three 场景协议，不要生成智能 UI；二维图示用 amber-svg，三维空间对象用 amber-three。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 20517,
+          "output": "```amber-svg v=1 id=ca_chain_diagram\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"760\" height=\"360\" viewBox=\"0 0 760 360\">\n  <rect x=\"20\" y=\"40\" width=\"180\" height=\"90\" rx=\"10\" fill=\"#E8F0FE\" stroke=\"#1A73E8\" stroke-width=\"3\"/>\n  <text x=\"110\" y=\"75\" text-anchor=\"middle\" font-size=\"18\" fill=\"#174EA6\">根 CA</text>\n  <text x=\"110\" y=\"102\" text-anchor=\"middle\" font-size=\"13\" fill=\"#3C4043\">自签名证书</text>\n\n  <rect x=\"290\" y=\"135\" width=\"180\" height=\"90\" rx=\"10\" fill=\"#E6F4EA\" stroke=\"#188038\" stroke-width=\"3\"/>\n  <text x=\"380\" y=\"170\" text-anchor=\"middle\" font-size=\"18\" fill=\"#137333\">中间 CA</text>\n  <text x=\"380\" y=\"197\" text-anchor=\"middle\" font-size=\"13\" fill=\"#3C4043\">由根 CA 签发</text>\n\n  <rect x=\"560\" y=\"230\" width=\"180\" height=\"90\" rx=\"10\" fill=\"#FEF7E0\" stroke=\"#F29900\" stroke-width=\"3\"/>\n  <text x=\"650\" y=\"265\" text-anchor=\"middle\" font-size=\"18\" fill=\"#B06000\">服务器证书</text>\n  <text x=\"650\" y=\"292\" text-anchor=\"middle\" font-size=\"13\" fill=\"#3C4043\">由中间 CA 签发</text>\n\n  <line x1=\"200\" y1=\"85\" x2=\"292\" y2=\"150\" stroke=\"#5F6368\" stroke-width=\"3\"/>\n  <polygon points=\"292,150 279,145 286,158\" fill=\"#5F6368\"/>\n  <text x=\"235\" y=\"105\" font-size=\"13\" fill=\"#5F6368\">签发</text>\n\n  <line x1=\"470\" y1=\"180\" x2=\"562\" y2=\"245\" stroke=\"#5F6368\" stroke-width=\"3\"/>\n  <polygon points=\"562,245 549,240 556,253\" fill=\"#5F6368\"/>\n  <text x=\"505\" y=\"200\" font-size=\"13\" fill=\"#5F6368\">签发</text>\n\n  <path d=\"M650 230 C650 120 380 80 200 70\" fill=\"none\" stroke=\"#80868B\" stroke-width=\"2\" stroke-dasharray=\"7 6\"/>\n  <polygon points=\"200,70 213,65 207,78\" fill=\"#80868B\"/>\n  <text x=\"420\" y=\"55\" text-anchor=\"middle\" font-size=\"13\" fill=\"#5F6368\">验证信任链：服务器证书 → 中间 CA → 根 CA</text>\n</svg>\n```",
+          "evaluation": {
+            "uiStatus": "not_required",
+            "uiPass": true,
+            "visualStatus": "ready",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-svg:ca_chain_diagram:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 523,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "f35d5cb2c6f4bbdc2a996a0cc53a978549db0d4d4cbb91eb45337081aae0985d",
+          "submittedUserTextHash": "cc6e33d64ac39ddec664f61daf7081d2e5e3d937b59e2df90bf7462704c9a30f",
+          "rawOutput": "```amber-svg v=1 id=ca_chain_diagram\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"760\" height=\"360\" viewBox=\"0 0 760 360\">\n  <rect x=\"20\" y=\"40\" width=\"180\" height=\"90\" rx=\"10\" fill=\"#E8F0FE\" stroke=\"#1A73E8\" stroke-width=\"3\"/>\n  <text x=\"110\" y=\"75\" text-anchor=\"middle\" font-size=\"18\" fill=\"#174EA6\">根 CA</text>\n  <text x=\"110\" y=\"102\" text-anchor=\"middle\" font-size=\"13\" fill=\"#3C4043\">自签名证书</text>\n\n  <rect x=\"290\" y=\"135\" width=\"180\" height=\"90\" rx=\"10\" fill=\"#E6F4EA\" stroke=\"#188038\" stroke-width=\"3\"/>\n  <text x=\"380\" y=\"170\" text-anchor=\"middle\" font-size=\"18\" fill=\"#137333\">中间 CA</text>\n  <text x=\"380\" y=\"197\" text-anchor=\"middle\" font-size=\"13\" fill=\"#3C4043\">由根 CA 签发</text>\n\n  <rect x=\"560\" y=\"230\" width=\"180\" height=\"90\" rx=\"10\" fill=\"#FEF7E0\" stroke=\"#F29900\" stroke-width=\"3\"/>\n  <text x=\"650\" y=\"265\" text-anchor=\"middle\" font-size=\"18\" fill=\"#B06000\">服务器证书</text>\n  <text x=\"650\" y=\"292\" text-anchor=\"middle\" font-size=\"13\" fill=\"#3C4043\">由中间 CA 签发</text>\n\n  <line x1=\"200\" y1=\"85\" x2=\"292\" y2=\"150\" stroke=\"#5F6368\" stroke-width=\"3\"/>\n  <polygon points=\"292,150 279,145 286,158\" fill=\"#5F6368\"/>\n  <text x=\"235\" y=\"105\" font-size=\"13\" fill=\"#5F6368\">签发</text>\n\n  <line x1=\"470\" y1=\"180\" x2=\"562\" y2=\"245\" stroke=\"#5F6368\" stroke-width=\"3\"/>\n  <polygon points=\"562,245 549,240 556,253\" fill=\"#5F6368\"/>\n  <text x=\"505\" y=\"200\" font-size=\"13\" fill=\"#5F6368\">签发</text>\n\n  <path d=\"M650 230 C650 120 380 80 200 70\" fill=\"none\" stroke=\"#80868B\" stroke-width=\"2\" stroke-dasharray=\"7 6\"/>\n  <polygon points=\"200,70 213,65 207,78\" fill=\"#80868B\"/>\n  <text x=\"420\" y=\"55\" text-anchor=\"middle\" font-size=\"13\" fill=\"#5F6368\">验证信任链：服务器证书 → 中间 CA → 根 CA</text>\n</svg>\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "asset-02",
+          "category": "asset",
+          "prompt": "展示网络请求时序图",
+          "userText": "展示网络请求时序图。请只生成独立的 SVG 或 Three 场景协议，不要生成智能 UI；二维图示用 amber-svg，三维空间对象用 amber-three。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 15831,
+          "output": "```amber-svg v=1 id=network_timing\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 640 360\" width=\"640\" height=\"360\">\n  <rect x=\"0\" y=\"0\" width=\"640\" height=\"360\" fill=\"#F8FAFC\"/>\n  <text x=\"320\" y=\"30\" font-family=\"sans-serif\" font-size=\"16\" fill=\"#1E293B\" text-anchor=\"middle\">网络请求时序图</text>\n\n  <line x1=\"160\" y1=\"60\" x2=\"160\" y2=\"320\" stroke=\"#475569\" stroke-width=\"2\"/>\n  <line x1=\"480\" y1=\"60\" x2=\"480\" y2=\"320\" stroke=\"#475569\" stroke-width=\"2\"/>\n  <text x=\"160\" y=\"52\" font-family=\"sans-serif\" font-size=\"14\" fill=\"#1E293B\" text-anchor=\"middle\">客户端</text>\n  <text x=\"480\" y=\"52\" font-family=\"sans-serif\" font-size=\"14\" fill=\"#1E293B\" text-anchor=\"middle\">服务器</text>\n\n  <line x1=\"160\" y1=\"90\" x2=\"472\" y2=\"90\" stroke=\"#2563EB\" stroke-width=\"2\"/>\n  <polygon points=\"472,90 462,85 462,95\" fill=\"#2563EB\"/>\n  <text x=\"316\" y=\"82\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#2563EB\" text-anchor=\"middle\">DNS 查询 / TCP 握手</text>\n\n  <line x1=\"160\" y1=\"140\" x2=\"472\" y2=\"140\" stroke=\"#2563EB\" stroke-width=\"2\"/>\n  <polygon points=\"472,140 462,135 462,145\" fill=\"#2563EB\"/>\n  <text x=\"316\" y=\"132\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#2563EB\" text-anchor=\"middle\">HTTP 请求 (GET /api/data)</text>\n\n  <rect x=\"470\" y=\"150\" width=\"20\" height=\"50\" fill=\"#F59E0B\"/>\n  <text x=\"530\" y=\"178\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#92400E\">服务器处理中</text>\n\n  <line x1=\"480\" y1=\"230\" x2=\"168\" y2=\"230\" stroke=\"#16A34A\" stroke-width=\"2\" stroke-dasharray=\"6 4\"/>\n  <polygon points=\"168,230 178,225 178,235\" fill=\"#16A34A\"/>\n  <text x=\"316\" y=\"222\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#16A34A\" text-anchor=\"middle\">200 OK 响应（首字节 TTFB）</text>\n\n  <line x1=\"480\" y1=\"280\" x2=\"168\" y2=\"280\" stroke=\"#16A34A\" stroke-width=\"2\" stroke-dasharray=\"6 4\"/>\n  <polygon points=\"168,280 178,275 178,285\" fill=\"#16A34A\"/>\n  <text x=\"316\" y=\"272\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#16A34A\" text-anchor=\"middle\">响应体传输完成</text>\n\n  <text x=\"316\" y=\"345\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#64748B\" text-anchor=\"middle\">实线：请求　虚线：响应</text>\n</svg>\n```",
+          "evaluation": {
+            "uiStatus": "not_required",
+            "uiPass": true,
+            "visualStatus": "ready",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-svg:network_timing:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 59,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "6c8b9e116938999323a301abe8604df96c209a733ec0b209968133754ceff5ff",
+          "submittedUserTextHash": "6d548a5d7032b3929c03f63abd8044a78a71c9dd91137b0530c95017c9ff47ea",
+          "rawOutput": "```amber-svg v=1 id=network_timing\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 640 360\" width=\"640\" height=\"360\">\n  <rect x=\"0\" y=\"0\" width=\"640\" height=\"360\" fill=\"#F8FAFC\"/>\n  <text x=\"320\" y=\"30\" font-family=\"sans-serif\" font-size=\"16\" fill=\"#1E293B\" text-anchor=\"middle\">网络请求时序图</text>\n\n  <line x1=\"160\" y1=\"60\" x2=\"160\" y2=\"320\" stroke=\"#475569\" stroke-width=\"2\"/>\n  <line x1=\"480\" y1=\"60\" x2=\"480\" y2=\"320\" stroke=\"#475569\" stroke-width=\"2\"/>\n  <text x=\"160\" y=\"52\" font-family=\"sans-serif\" font-size=\"14\" fill=\"#1E293B\" text-anchor=\"middle\">客户端</text>\n  <text x=\"480\" y=\"52\" font-family=\"sans-serif\" font-size=\"14\" fill=\"#1E293B\" text-anchor=\"middle\">服务器</text>\n\n  <line x1=\"160\" y1=\"90\" x2=\"472\" y2=\"90\" stroke=\"#2563EB\" stroke-width=\"2\"/>\n  <polygon points=\"472,90 462,85 462,95\" fill=\"#2563EB\"/>\n  <text x=\"316\" y=\"82\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#2563EB\" text-anchor=\"middle\">DNS 查询 / TCP 握手</text>\n\n  <line x1=\"160\" y1=\"140\" x2=\"472\" y2=\"140\" stroke=\"#2563EB\" stroke-width=\"2\"/>\n  <polygon points=\"472,140 462,135 462,145\" fill=\"#2563EB\"/>\n  <text x=\"316\" y=\"132\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#2563EB\" text-anchor=\"middle\">HTTP 请求 (GET /api/data)</text>\n\n  <rect x=\"470\" y=\"150\" width=\"20\" height=\"50\" fill=\"#F59E0B\"/>\n  <text x=\"530\" y=\"178\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#92400E\">服务器处理中</text>\n\n  <line x1=\"480\" y1=\"230\" x2=\"168\" y2=\"230\" stroke=\"#16A34A\" stroke-width=\"2\" stroke-dasharray=\"6 4\"/>\n  <polygon points=\"168,230 178,225 178,235\" fill=\"#16A34A\"/>\n  <text x=\"316\" y=\"222\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#16A34A\" text-anchor=\"middle\">200 OK 响应（首字节 TTFB）</text>\n\n  <line x1=\"480\" y1=\"280\" x2=\"168\" y2=\"280\" stroke=\"#16A34A\" stroke-width=\"2\" stroke-dasharray=\"6 4\"/>\n  <polygon points=\"168,280 178,275 178,285\" fill=\"#16A34A\"/>\n  <text x=\"316\" y=\"272\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#16A34A\" text-anchor=\"middle\">响应体传输完成</text>\n\n  <text x=\"316\" y=\"345\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#64748B\" text-anchor=\"middle\">实线：请求　虚线：响应</text>\n</svg>\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "asset-03",
+          "category": "asset",
+          "prompt": "展示部署拓扑图",
+          "userText": "展示部署拓扑图。请只生成独立的 SVG 或 Three 场景协议，不要生成智能 UI；二维图示用 amber-svg，三维空间对象用 amber-three。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 21996,
+          "output": "```amber-svg v=1 id=deploy_topo\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"720\" height=\"420\" viewBox=\"0 0 720 420\">\n  <defs>\n    <marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"7\" markerHeight=\"7\" orient=\"auto-start-reverse\">\n      <path d=\"M0,0 L10,5 L0,10 z\" fill=\"#475569\"/>\n    </marker>\n  </defs>\n  <rect x=\"0\" y=\"0\" width=\"720\" height=\"420\" fill=\"#f8fafc\"/>\n  <text x=\"360\" y=\"34\" text-anchor=\"middle\" font-size=\"20\" fill=\"#0f172a\">部署拓扑图</text>\n\n  <rect x=\"60\" y=\"90\" width=\"130\" height=\"64\" rx=\"10\" fill=\"#e0f2fe\" stroke=\"#0284c7\"/>\n  <text x=\"125\" y=\"126\" text-anchor=\"middle\" font-size=\"15\" fill=\"#0c4a6e\">客户端</text>\n\n  <rect x=\"285\" y=\"86\" width=\"150\" height=\"72\" rx=\"10\" fill=\"#fef3c7\" stroke=\"#d97706\"/>\n  <text x=\"360\" y=\"115\" text-anchor=\"middle\" font-size=\"15\" fill=\"#92400e\">负载均衡</text>\n  <text x=\"360\" y=\"137\" text-anchor=\"middle\" font-size=\"12\" fill=\"#92400e\">Nginx / LB</text>\n\n  <rect x=\"535\" y=\"70\" width=\"140\" height=\"52\" rx=\"10\" fill=\"#dcfce7\" stroke=\"#16a34a\"/>\n  <text x=\"605\" y=\"101\" text-anchor=\"middle\" font-size=\"14\" fill=\"#14532d\">应用节点 A</text>\n  <rect x=\"535\" y=\"145\" width=\"140\" height=\"52\" rx=\"10\" fill=\"#dcfce7\" stroke=\"#16a34a\"/>\n  <text x=\"605\" y=\"176\" text-anchor=\"middle\" font-size=\"14\" fill=\"#14532d\">应用节点 B</text>\n\n  <rect x=\"285\" y=\"250\" width=\"150\" height=\"64\" rx=\"10\" fill=\"#ede9fe\" stroke=\"#7c3aed\"/>\n  <text x=\"360\" y=\"278\" text-anchor=\"middle\" font-size=\"15\" fill=\"#4c1d95\">缓存</text>\n  <text x=\"360\" y=\"299\" text-anchor=\"middle\" font-size=\"12\" fill=\"#4c1d95\">Redis</text>\n\n  <rect x=\"535\" y=\"250\" width=\"140\" height=\"70\" rx=\"10\" fill=\"#fee2e2\" stroke=\"#dc2626\"/>\n  <text x=\"605\" y=\"278\" text-anchor=\"middle\" font-size=\"15\" fill=\"#7f1d1d\">数据库</text>\n  <text x=\"605\" y=\"300\" text-anchor=\"middle\" font-size=\"12\" fill=\"#7f1d1d\">PostgreSQL 主备</text>\n\n  <line x1=\"190\" y1=\"122\" x2=\"285\" y2=\"122\" stroke=\"#475569\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <line x1=\"435\" y1=\"104\" x2=\"535\" y2=\"96\" stroke=\"#475569\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <line x1=\"435\" y1=\"140\" x2=\"535\" y2=\"171\" stroke=\"#475569\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <line x1=\"605\" y1=\"197\" x2=\"605\" y2=\"250\" stroke=\"#475569\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <line x1=\"535\" y1=\"285\" x2=\"435\" y2=\"282\" stroke=\"#475569\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n</svg>\n```",
+          "evaluation": {
+            "uiStatus": "not_required",
+            "uiPass": true,
+            "visualStatus": "ready",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-svg:deploy_topo:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 455,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "f20f5110eb3d1c0c06d43a2360d371621b4443492da0ea884a47c9b7261050d2",
+          "submittedUserTextHash": "893c65a0a4c54b55a0bba62694fa76262500b8cbf8a4e44b69b001f74a4e92a2",
+          "rawOutput": "```amber-svg v=1 id=deploy_topo\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"720\" height=\"420\" viewBox=\"0 0 720 420\">\n  <defs>\n    <marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"7\" markerHeight=\"7\" orient=\"auto-start-reverse\">\n      <path d=\"M0,0 L10,5 L0,10 z\" fill=\"#475569\"/>\n    </marker>\n  </defs>\n  <rect x=\"0\" y=\"0\" width=\"720\" height=\"420\" fill=\"#f8fafc\"/>\n  <text x=\"360\" y=\"34\" text-anchor=\"middle\" font-size=\"20\" fill=\"#0f172a\">部署拓扑图</text>\n\n  <rect x=\"60\" y=\"90\" width=\"130\" height=\"64\" rx=\"10\" fill=\"#e0f2fe\" stroke=\"#0284c7\"/>\n  <text x=\"125\" y=\"126\" text-anchor=\"middle\" font-size=\"15\" fill=\"#0c4a6e\">客户端</text>\n\n  <rect x=\"285\" y=\"86\" width=\"150\" height=\"72\" rx=\"10\" fill=\"#fef3c7\" stroke=\"#d97706\"/>\n  <text x=\"360\" y=\"115\" text-anchor=\"middle\" font-size=\"15\" fill=\"#92400e\">负载均衡</text>\n  <text x=\"360\" y=\"137\" text-anchor=\"middle\" font-size=\"12\" fill=\"#92400e\">Nginx / LB</text>\n\n  <rect x=\"535\" y=\"70\" width=\"140\" height=\"52\" rx=\"10\" fill=\"#dcfce7\" stroke=\"#16a34a\"/>\n  <text x=\"605\" y=\"101\" text-anchor=\"middle\" font-size=\"14\" fill=\"#14532d\">应用节点 A</text>\n  <rect x=\"535\" y=\"145\" width=\"140\" height=\"52\" rx=\"10\" fill=\"#dcfce7\" stroke=\"#16a34a\"/>\n  <text x=\"605\" y=\"176\" text-anchor=\"middle\" font-size=\"14\" fill=\"#14532d\">应用节点 B</text>\n\n  <rect x=\"285\" y=\"250\" width=\"150\" height=\"64\" rx=\"10\" fill=\"#ede9fe\" stroke=\"#7c3aed\"/>\n  <text x=\"360\" y=\"278\" text-anchor=\"middle\" font-size=\"15\" fill=\"#4c1d95\">缓存</text>\n  <text x=\"360\" y=\"299\" text-anchor=\"middle\" font-size=\"12\" fill=\"#4c1d95\">Redis</text>\n\n  <rect x=\"535\" y=\"250\" width=\"140\" height=\"70\" rx=\"10\" fill=\"#fee2e2\" stroke=\"#dc2626\"/>\n  <text x=\"605\" y=\"278\" text-anchor=\"middle\" font-size=\"15\" fill=\"#7f1d1d\">数据库</text>\n  <text x=\"605\" y=\"300\" text-anchor=\"middle\" font-size=\"12\" fill=\"#7f1d1d\">PostgreSQL 主备</text>\n\n  <line x1=\"190\" y1=\"122\" x2=\"285\" y2=\"122\" stroke=\"#475569\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <line x1=\"435\" y1=\"104\" x2=\"535\" y2=\"96\" stroke=\"#475569\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <line x1=\"435\" y1=\"140\" x2=\"535\" y2=\"171\" stroke=\"#475569\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <line x1=\"605\" y1=\"197\" x2=\"605\" y2=\"250\" stroke=\"#475569\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <line x1=\"535\" y1=\"285\" x2=\"435\" y2=\"282\" stroke=\"#475569\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n</svg>\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "asset-04",
+          "category": "asset",
+          "prompt": "展示三维空间对象的入口",
+          "userText": "展示三维空间对象的入口。请只生成独立的 SVG 或 Three 场景协议，不要生成智能 UI；二维图示用 amber-svg，三维空间对象用 amber-three。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 15695,
+          "output": "```amber-three v=1 id=space_entry\n{\"objects\":[{\"id\":\"entry_ring\",\"color\":\"#4f8cff\",\"position\":[0,2,0],\"rotation\":[1.5708,0,0],\"scale\":[1,1,1],\"size\":[3,0.35],\"type\":\"torus\"},{\"id\":\"entry_base\",\"color\":\"#2b2f3a\",\"position\":[0,0.25,0],\"rotation\":[0,0,0],\"scale\":[1,1,1],\"size\":[4,0.5,4],\"type\":\"box\"},{\"id\":\"entry_core\",\"color\":\"#9df2ff\",\"position\":[0,2,0],\"rotation\":[0,0,0],\"scale\":[1,1,1],\"size\":[0.8],\"type\":\"sphere\"},{\"id\":\"guide_left\",\"color\":\"#7c5cff\",\"position\":[-3,1,0],\"rotation\":[0,0,0],\"scale\":[1,1,1],\"size\":[0.4,2,0.4],\"type\":\"cylinder\"},{\"id\":\"guide_right\",\"color\":\"#7c5cff\",\"position\":[3,1,0],\"rotation\":[0,0,0],\"scale\":[1,1,1],\"size\":[0.4,2,0.4],\"type\":\"cylinder\"}]}\n```",
+          "evaluation": {
+            "uiStatus": "not_required",
+            "uiPass": true,
+            "visualStatus": "error",
+            "visualPass": false,
+            "pass": false,
+            "failureClass": "content_interaction",
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-three:space_entry:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 658,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "e8b2bd174a4a991e4840a94bdc03486c66925750355b7bbe07474ed0ccc48a7a",
+          "submittedUserTextHash": "f627948e44f422712686e538ec5b4259e0de891a34beadf370f154d1da37004f",
+          "rawOutput": "```amber-three v=1 id=space_entry\n{\"objects\":[{\"id\":\"entry_ring\",\"color\":\"#4f8cff\",\"position\":[0,2,0],\"rotation\":[1.5708,0,0],\"scale\":[1,1,1],\"size\":[3,0.35],\"type\":\"torus\"},{\"id\":\"entry_base\",\"color\":\"#2b2f3a\",\"position\":[0,0.25,0],\"rotation\":[0,0,0],\"scale\":[1,1,1],\"size\":[4,0.5,4],\"type\":\"box\"},{\"id\":\"entry_core\",\"color\":\"#9df2ff\",\"position\":[0,2,0],\"rotation\":[0,0,0],\"scale\":[1,1,1],\"size\":[0.8],\"type\":\"sphere\"},{\"id\":\"guide_left\",\"color\":\"#7c5cff\",\"position\":[-3,1,0],\"rotation\":[0,0,0],\"scale\":[1,1,1],\"size\":[0.4,2,0.4],\"type\":\"cylinder\"},{\"id\":\"guide_right\",\"color\":\"#7c5cff\",\"position\":[3,1,0],\"rotation\":[0,0,0],\"scale\":[1,1,1],\"size\":[0.4,2,0.4],\"type\":\"cylinder\"}]}\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "combo-01",
+          "category": "combination",
+          "prompt": "选择证书节点并查看图示",
+          "userText": "选择证书节点并查看图示。请提供原生 choice/input 操作区，引用一份独立图示，并用按钮只填入草稿。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 20387,
+          "output": "```amber-ui v=1 id=certPicker\n{\"op\":\"state\",\"id\":\"certNode\",\"initial\":\"root_ca\"}\n{\"op\":\"state\",\"id\":\"certNote\",\"initial\":\"\"}\n{\"op\":\"node\",\"type\":\"column\",\"id\":\"certRoot\"}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"certTitle\",\"parent\":\"certRoot\",\"text\":\"选择证书节点并查看图示\"}\n{\"op\":\"node\",\"type\":\"choice\",\"id\":\"certChoice\",\"parent\":\"certRoot\",\"state\":\"certNode\",\"options\":[{\"value\":\"root_ca\",\"label\":\"根 CA\"},{\"value\":\"intermediate_ca\",\"label\":\"中间 CA\"},{\"value\":\"leaf_server\",\"label\":\"服务器证书\"}]}\n{\"op\":\"node\",\"type\":\"input\",\"id\":\"certInput\",\"parent\":\"certRoot\",\"state\":\"certNote\",\"placeholder\":\"备注（可选）\"}\n{\"op\":\"node\",\"type\":\"asset\",\"id\":\"certAsset\",\"parent\":\"certRoot\",\"ref\":\"certDiagram\"}\n{\"op\":\"node\",\"type\":\"button\",\"id\":\"certDraft\",\"parent\":\"certRoot\",\"label\":\"填入草稿\",\"action\":{\"type\":\"draft\",\"text\":\"证书节点={{certNode}}；备注={{certNote}}；请结合图示核对链路与用途。\"}}\n{\"op\":\"end\"}\n```\n\n```amber-svg v=1 id=certDiagram\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 180\" width=\"320\" height=\"180\"><rect x=\"20\" y=\"20\" width=\"80\" height=\"40\" rx=\"6\" fill=\"#dbeafe\" stroke=\"#2563eb\"/><text x=\"60\" y=\"44\" text-anchor=\"middle\" font-size=\"13\">根 CA</text><rect x=\"120\" y=\"70\" width=\"90\" height=\"40\" rx=\"6\" fill=\"#dcfce7\" stroke=\"#16a34a\"/><text x=\"165\" y=\"94\" text-anchor=\"middle\" font-size=\"13\">中间 CA</text><rect x=\"230\" y=\"120\" width=\"80\" height=\"40\" rx=\"6\" fill=\"#fee2e2\" stroke=\"#dc2626\"/><text x=\"270\" y=\"144\" text-anchor=\"middle\" font-size=\"13\">服务器</text><path d=\"M100 40 L130 70 M210 90 L240 120\" stroke=\"#64748b\" fill=\"none\"/></svg>\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "ready",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:certPicker:closed",
+              "amber-svg:certDiagram:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 1025,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "571636edd95b4c8bf4a4065b758038c918f6f31cff48beec273884573f0eadf4",
+          "submittedUserTextHash": "9ba7049d3f3b886808ce1d987bc473f55766ae586960f0a90f1e36670ed1687e",
+          "rawOutput": "```amber-ui v=1 id=certPicker\n{\"op\":\"state\",\"id\":\"certNode\",\"initial\":\"root_ca\"}\n{\"op\":\"state\",\"id\":\"certNote\",\"initial\":\"\"}\n{\"op\":\"node\",\"type\":\"column\",\"id\":\"certRoot\"}\n{\"op\":\"node\",\"type\":\"text\",\"id\":\"certTitle\",\"parent\":\"certRoot\",\"text\":\"选择证书节点并查看图示\"}\n{\"op\":\"node\",\"type\":\"choice\",\"id\":\"certChoice\",\"parent\":\"certRoot\",\"state\":\"certNode\",\"options\":[{\"value\":\"root_ca\",\"label\":\"根 CA\"},{\"value\":\"intermediate_ca\",\"label\":\"中间 CA\"},{\"value\":\"leaf_server\",\"label\":\"服务器证书\"}]}\n{\"op\":\"node\",\"type\":\"input\",\"id\":\"certInput\",\"parent\":\"certRoot\",\"state\":\"certNote\",\"placeholder\":\"备注（可选）\"}\n{\"op\":\"node\",\"type\":\"asset\",\"id\":\"certAsset\",\"parent\":\"certRoot\",\"ref\":\"certDiagram\"}\n{\"op\":\"node\",\"type\":\"button\",\"id\":\"certDraft\",\"parent\":\"certRoot\",\"label\":\"填入草稿\",\"action\":{\"type\":\"draft\",\"text\":\"证书节点={{certNode}}；备注={{certNote}}；请结合图示核对链路与用途。\"}}\n{\"op\":\"end\"}\n```\n\n```amber-svg v=1 id=certDiagram\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 180\" width=\"320\" height=\"180\"><rect x=\"20\" y=\"20\" width=\"80\" height=\"40\" rx=\"6\" fill=\"#dbeafe\" stroke=\"#2563eb\"/><text x=\"60\" y=\"44\" text-anchor=\"middle\" font-size=\"13\">根 CA</text><rect x=\"120\" y=\"70\" width=\"90\" height=\"40\" rx=\"6\" fill=\"#dcfce7\" stroke=\"#16a34a\"/><text x=\"165\" y=\"94\" text-anchor=\"middle\" font-size=\"13\">中间 CA</text><rect x=\"230\" y=\"120\" width=\"80\" height=\"40\" rx=\"6\" fill=\"#fee2e2\" stroke=\"#dc2626\"/><text x=\"270\" y=\"144\" text-anchor=\"middle\" font-size=\"13\">服务器</text><path d=\"M100 40 L130 70 M210 90 L240 120\" stroke=\"#64748b\" fill=\"none\"/></svg>\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "combo-02",
+          "category": "combination",
+          "prompt": "选择部署环境并填写服务名",
+          "userText": "选择部署环境并填写服务名。请提供原生 choice/input 操作区，引用一份独立图示，并用按钮只填入草稿。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 19631,
+          "output": "```amber-ui v=1 id=deploy_setup\n{\"op\":\"state\",\"id\":\"env\",\"initial\":\"staging\"}\n{\"op\":\"state\",\"id\":\"svc\",\"initial\":\"\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\",\"parent\":null}\n{\"op\":\"node\",\"id\":\"title\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"部署配置\"}\n{\"op\":\"node\",\"id\":\"env_pick\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"env\",\"options\":[{\"value\":\"dev\",\"label\":\"开发\"},{\"value\":\"staging\",\"label\":\"预发\"},{\"value\":\"prod\",\"label\":\"生产\"}]}\n{\"op\":\"node\",\"id\":\"svc_name\",\"type\":\"input\",\"parent\":\"root\",\"state\":\"svc\",\"placeholder\":\"服务名\"}\n{\"op\":\"node\",\"id\":\"diagram\",\"type\":\"asset\",\"parent\":\"root\",\"ref\":\"deploy_diagram\"}\n{\"op\":\"node\",\"id\":\"draft_btn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"填入草稿\",\"action\":{\"type\":\"draft\",\"text\":\"部署到 {{env}}，服务 {{svc}}\"}}\n{\"op\":\"end\"}\n```\n\n```amber-svg v=1 id=deploy_diagram\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\"><rect x=\"10\" y=\"20\" width=\"80\" height=\"40\" rx=\"6\" fill=\"#dbeafe\"/><rect x=\"120\" y=\"20\" width=\"80\" height=\"40\" rx=\"6\" fill=\"#dcfce7\"/><rect x=\"230\" y=\"20\" width=\"80\" height=\"40\" rx=\"6\" fill=\"#fee2e2\"/><text x=\"50\" y=\"45\" text-anchor=\"middle\" font-size=\"14\">dev</text><text x=\"160\" y=\"45\" text-anchor=\"middle\" font-size=\"14\">staging</text><text x=\"270\" y=\"45\" text-anchor=\"middle\" font-size=\"14\">prod</text><path d=\"M90 40h30M200 40h30\" stroke=\"#64748b\" stroke-width=\"2\"/></svg>\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "ready",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:deploy_setup:closed",
+              "amber-svg:deploy_diagram:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 954,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "9626b95ca8314fccb0dace8b350cfd428429d1525209845e6e09fc15c6cbd091",
+          "submittedUserTextHash": "2aa334a36ef43d4a628ffbe7443cb6174371088a415ceae60e23a513fcf2bc5a",
+          "rawOutput": "```amber-ui v=1 id=deploy_setup\n{\"op\":\"state\",\"id\":\"env\",\"initial\":\"staging\"}\n{\"op\":\"state\",\"id\":\"svc\",\"initial\":\"\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\",\"parent\":null}\n{\"op\":\"node\",\"id\":\"title\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"部署配置\"}\n{\"op\":\"node\",\"id\":\"env_pick\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"env\",\"options\":[{\"value\":\"dev\",\"label\":\"开发\"},{\"value\":\"staging\",\"label\":\"预发\"},{\"value\":\"prod\",\"label\":\"生产\"}]}\n{\"op\":\"node\",\"id\":\"svc_name\",\"type\":\"input\",\"parent\":\"root\",\"state\":\"svc\",\"placeholder\":\"服务名\"}\n{\"op\":\"node\",\"id\":\"diagram\",\"type\":\"asset\",\"parent\":\"root\",\"ref\":\"deploy_diagram\"}\n{\"op\":\"node\",\"id\":\"draft_btn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"填入草稿\",\"action\":{\"type\":\"draft\",\"text\":\"部署到 {{env}}，服务 {{svc}}\"}}\n{\"op\":\"end\"}\n```\n\n```amber-svg v=1 id=deploy_diagram\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\"><rect x=\"10\" y=\"20\" width=\"80\" height=\"40\" rx=\"6\" fill=\"#dbeafe\"/><rect x=\"120\" y=\"20\" width=\"80\" height=\"40\" rx=\"6\" fill=\"#dcfce7\"/><rect x=\"230\" y=\"20\" width=\"80\" height=\"40\" rx=\"6\" fill=\"#fee2e2\"/><text x=\"50\" y=\"45\" text-anchor=\"middle\" font-size=\"14\">dev</text><text x=\"160\" y=\"45\" text-anchor=\"middle\" font-size=\"14\">staging</text><text x=\"270\" y=\"45\" text-anchor=\"middle\" font-size=\"14\">prod</text><path d=\"M90 40h30M200 40h30\" stroke=\"#64748b\" stroke-width=\"2\"/></svg>\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "combo-03",
+          "category": "combination",
+          "prompt": "选择数据源并输入查询条件",
+          "userText": "选择数据源并输入查询条件。请提供原生 choice/input 操作区，引用一份独立图示，并用按钮只填入草稿。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 14811,
+          "output": "```amber-ui v=1 id=data-query\n{\"op\":\"state\",\"id\":\"source\",\"initial\":\"orders\"}\n{\"op\":\"state\",\"id\":\"keyword\",\"initial\":\"\"}\n{\"op\":\"state\",\"id\":\"dateRange\",\"initial\":\"7\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"title\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"数据查询\"}\n{\"op\":\"node\",\"id\":\"flowChart\",\"type\":\"asset\",\"parent\":\"root\",\"ref\":\"data_flow\"}\n{\"op\":\"node\",\"id\":\"sourcePick\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"source\",\"options\":[{\"value\":\"orders\",\"label\":\"订单库\"},{\"value\":\"users\",\"label\":\"用户库\"},{\"value\":\"logs\",\"label\":\"日志库\"}]}\n{\"op\":\"node\",\"id\":\"kwInput\",\"type\":\"input\",\"parent\":\"root\",\"state\":\"keyword\",\"placeholder\":\"输入查询关键词\"}\n{\"op\":\"node\",\"id\":\"rangePick\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"dateRange\",\"options\":[{\"value\":\"7\",\"label\":\"近 7 天\"},{\"value\":\"30\",\"label\":\"近 30 天\"},{\"value\":\"90\",\"label\":\"近 90 天\"}]}\n{\"op\":\"node\",\"id\":\"runBtn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"生成查询草稿\",\"action\":{\"type\":\"draft\",\"text\":\"查询 {{source}} 中近 {{dateRange}} 天包含关键词「{{keyword}}」的数据\"}}\n{\"op\":\"end\"}\n```\n\n```amber-svg v=1 id=data_flow\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"120\" viewBox=\"0 0 320 120\">\n  <rect x=\"10\" y=\"35\" width=\"80\" height=\"50\" rx=\"8\" fill=\"#dbeafe\" stroke=\"#2563eb\"/>\n  <text x=\"50\" y=\"64\" font-size=\"13\" text-anchor=\"middle\" fill=\"#1e3a8a\">数据源</text>\n  <line x1=\"90\" y1=\"60\" x2=\"125\" y2=\"60\" stroke=\"#2563eb\" stroke-width=\"2\"/>\n  <polygon points=\"125,60 117,55 117,65\" fill=\"#2563eb\"/>\n  <rect x=\"128\" y=\"35\" width=\"80\" height=\"50\" rx=\"8\" fill=\"#dcfce7\" stroke=\"#16a34a\"/>\n  <text x=\"168\" y=\"64\" font-size=\"13\" text-anchor=\"middle\" fill=\"#14532d\">查询条件</text>\n  <line x1=\"208\" y1=\"60\" x2=\"243\" y2=\"60\" stroke=\"#16a34a\" stroke-width=\"2\"/>\n  <polygon points=\"243,60 235,55 235,65\" fill=\"#16a34a\"/>\n  <rect x=\"246\" y=\"35\" width=\"66\" height=\"50\" rx=\"8\" fill=\"#fef9c3\" stroke=\"#ca8a04\"/>\n  <text x=\"279\" y=\"64\" font-size=\"13\" text-anchor=\"middle\" fill=\"#713f12\">结果</text>\n</svg>\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "ready",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:data-query:closed",
+              "amber-svg:data_flow:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 79,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "9392f00950964cba86fc5c813d8837b4d700f7ba082d5c6cd3e102a31dfca07c",
+          "submittedUserTextHash": "64b32ad3e61ea7b9e510c135824b2ae7c8157886fa773c955bbf15653f1787bd",
+          "rawOutput": "```amber-ui v=1 id=data-query\n{\"op\":\"state\",\"id\":\"source\",\"initial\":\"orders\"}\n{\"op\":\"state\",\"id\":\"keyword\",\"initial\":\"\"}\n{\"op\":\"state\",\"id\":\"dateRange\",\"initial\":\"7\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\"}\n{\"op\":\"node\",\"id\":\"title\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"数据查询\"}\n{\"op\":\"node\",\"id\":\"flowChart\",\"type\":\"asset\",\"parent\":\"root\",\"ref\":\"data_flow\"}\n{\"op\":\"node\",\"id\":\"sourcePick\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"source\",\"options\":[{\"value\":\"orders\",\"label\":\"订单库\"},{\"value\":\"users\",\"label\":\"用户库\"},{\"value\":\"logs\",\"label\":\"日志库\"}]}\n{\"op\":\"node\",\"id\":\"kwInput\",\"type\":\"input\",\"parent\":\"root\",\"state\":\"keyword\",\"placeholder\":\"输入查询关键词\"}\n{\"op\":\"node\",\"id\":\"rangePick\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"dateRange\",\"options\":[{\"value\":\"7\",\"label\":\"近 7 天\"},{\"value\":\"30\",\"label\":\"近 30 天\"},{\"value\":\"90\",\"label\":\"近 90 天\"}]}\n{\"op\":\"node\",\"id\":\"runBtn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"生成查询草稿\",\"action\":{\"type\":\"draft\",\"text\":\"查询 {{source}} 中近 {{dateRange}} 天包含关键词「{{keyword}}」的数据\"}}\n{\"op\":\"end\"}\n```\n\n```amber-svg v=1 id=data_flow\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"120\" viewBox=\"0 0 320 120\">\n  <rect x=\"10\" y=\"35\" width=\"80\" height=\"50\" rx=\"8\" fill=\"#dbeafe\" stroke=\"#2563eb\"/>\n  <text x=\"50\" y=\"64\" font-size=\"13\" text-anchor=\"middle\" fill=\"#1e3a8a\">数据源</text>\n  <line x1=\"90\" y1=\"60\" x2=\"125\" y2=\"60\" stroke=\"#2563eb\" stroke-width=\"2\"/>\n  <polygon points=\"125,60 117,55 117,65\" fill=\"#2563eb\"/>\n  <rect x=\"128\" y=\"35\" width=\"80\" height=\"50\" rx=\"8\" fill=\"#dcfce7\" stroke=\"#16a34a\"/>\n  <text x=\"168\" y=\"64\" font-size=\"13\" text-anchor=\"middle\" fill=\"#14532d\">查询条件</text>\n  <line x1=\"208\" y1=\"60\" x2=\"243\" y2=\"60\" stroke=\"#16a34a\" stroke-width=\"2\"/>\n  <polygon points=\"243,60 235,55 235,65\" fill=\"#16a34a\"/>\n  <rect x=\"246\" y=\"35\" width=\"66\" height=\"50\" rx=\"8\" fill=\"#fef9c3\" stroke=\"#ca8a04\"/>\n  <text x=\"279\" y=\"64\" font-size=\"13\" text-anchor=\"middle\" fill=\"#713f12\">结果</text>\n</svg>\n```",
+          "outputField": "rawOutput"
+        },
+        {
+          "id": "combo-04",
+          "category": "combination",
+          "prompt": "选择学习阶段并留下目标",
+          "userText": "选择学习阶段并留下目标。请提供原生 choice/input 操作区，引用一份独立图示，并用按钮只填入草稿。",
+          "finishReason": "stop",
+          "sawDone": false,
+          "durationMs": 18291,
+          "output": "```amber-ui v=1 id=study_goal_ui\n{\"op\":\"state\",\"id\":\"stage\",\"initial\":\"beginner\"}\n{\"op\":\"state\",\"id\":\"goal\",\"initial\":\"\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\",\"parent\":null}\n{\"op\":\"node\",\"id\":\"title\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"选择学习阶段并填写目标\"}\n{\"op\":\"node\",\"id\":\"stage_choice\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"stage\",\"options\":[{\"value\":\"beginner\",\"label\":\"入门\"},{\"value\":\"intermediate\",\"label\":\"进阶\"},{\"value\":\"project\",\"label\":\"实战\"}]}\n{\"op\":\"node\",\"id\":\"goal_input\",\"type\":\"input\",\"parent\":\"root\",\"state\":\"goal\",\"placeholder\":\"例如：四周内完成一个小项目\"}\n{\"op\":\"node\",\"id\":\"map_asset\",\"type\":\"asset\",\"parent\":\"root\",\"ref\":\"study_map\"}\n{\"op\":\"node\",\"id\":\"draft_btn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"填入草稿\",\"action\":{\"type\":\"draft\",\"text\":\"学习阶段：{{stage}}\\n目标：{{goal}}\"}}\n{\"op\":\"end\"}\n```\n\n```amber-svg v=1 id=study_map\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\" width=\"320\" height=\"120\">\n  <rect x=\"10\" y=\"20\" width=\"80\" height=\"50\" rx=\"8\" fill=\"#dbeafe\"/>\n  <rect x=\"120\" y=\"20\" width=\"80\" height=\"50\" rx=\"8\" fill=\"#dcfce7\"/>\n  <rect x=\"230\" y=\"20\" width=\"80\" height=\"50\" rx=\"8\" fill=\"#fee2e2\"/>\n  <path d=\"M90 45 L120 45 M200 45 L230 45\" stroke=\"#64748b\" stroke-width=\"3\"/>\n  <text x=\"50\" y=\"50\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1e3a8a\">入门</text>\n  <text x=\"160\" y=\"50\" text-anchor=\"middle\" font-size=\"14\" fill=\"#166534\">进阶</text>\n  <text x=\"270\" y=\"50\" text-anchor=\"middle\" font-size=\"14\" fill=\"#991b1b\">实战</text>\n</svg>\n```",
+          "evaluation": {
+            "uiStatus": "ready",
+            "uiPass": true,
+            "visualStatus": "ready",
+            "visualPass": true,
+            "pass": true,
+            "failureClass": null,
+            "diagnostics": [],
+            "blockKinds": [
+              "amber-ui:study_goal_ui:closed",
+              "amber-svg:study_map:closed"
+            ]
+          },
+          "terminal": true,
+          "mode": "nonstream_fallback",
+          "reasoningChars": 714,
+          "evaluationVersion": "p0-replay-v2",
+          "promptHash": "a4ee721aced7d1beac7db32cfc8e26b7a36026c24007b3ce5203ccaf5d7a3937",
+          "submittedUserTextHash": "2ee6b3672ebb8fbe4e2783020b5e0007fda5575fb15a74dd45de7c45a9f56e68",
+          "rawOutput": "```amber-ui v=1 id=study_goal_ui\n{\"op\":\"state\",\"id\":\"stage\",\"initial\":\"beginner\"}\n{\"op\":\"state\",\"id\":\"goal\",\"initial\":\"\"}\n{\"op\":\"node\",\"id\":\"root\",\"type\":\"column\",\"parent\":null}\n{\"op\":\"node\",\"id\":\"title\",\"type\":\"text\",\"parent\":\"root\",\"text\":\"选择学习阶段并填写目标\"}\n{\"op\":\"node\",\"id\":\"stage_choice\",\"type\":\"choice\",\"parent\":\"root\",\"state\":\"stage\",\"options\":[{\"value\":\"beginner\",\"label\":\"入门\"},{\"value\":\"intermediate\",\"label\":\"进阶\"},{\"value\":\"project\",\"label\":\"实战\"}]}\n{\"op\":\"node\",\"id\":\"goal_input\",\"type\":\"input\",\"parent\":\"root\",\"state\":\"goal\",\"placeholder\":\"例如：四周内完成一个小项目\"}\n{\"op\":\"node\",\"id\":\"map_asset\",\"type\":\"asset\",\"parent\":\"root\",\"ref\":\"study_map\"}\n{\"op\":\"node\",\"id\":\"draft_btn\",\"type\":\"button\",\"parent\":\"root\",\"label\":\"填入草稿\",\"action\":{\"type\":\"draft\",\"text\":\"学习阶段：{{stage}}\\n目标：{{goal}}\"}}\n{\"op\":\"end\"}\n```\n\n```amber-svg v=1 id=study_map\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\" width=\"320\" height=\"120\">\n  <rect x=\"10\" y=\"20\" width=\"80\" height=\"50\" rx=\"8\" fill=\"#dbeafe\"/>\n  <rect x=\"120\" y=\"20\" width=\"80\" height=\"50\" rx=\"8\" fill=\"#dcfce7\"/>\n  <rect x=\"230\" y=\"20\" width=\"80\" height=\"50\" rx=\"8\" fill=\"#fee2e2\"/>\n  <path d=\"M90 45 L120 45 M200 45 L230 45\" stroke=\"#64748b\" stroke-width=\"3\"/>\n  <text x=\"50\" y=\"50\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1e3a8a\">入门</text>\n  <text x=\"160\" y=\"50\" text-anchor=\"middle\" font-size=\"14\" fill=\"#166534\">进阶</text>\n  <text x=\"270\" y=\"50\" text-anchor=\"middle\" font-size=\"14\" fill=\"#991b1b\">实战</text>\n</svg>\n```",
+          "outputField": "rawOutput"
+        }
+      ],
+      "skipped": false,
+      "probeNote": "Existing Mify provider evaluated via nonstream pilot to keep the second-provider probe bounded.",
+      "summary": {
+        "total": 20,
+        "pass": 18,
+        "uiPass": 19,
+        "visualPass": 19,
+        "evaluated": 20,
+        "availableRate": 0.9,
+        "failures": {
+          "format": 1,
+          "content_interaction": 1
+        }
+      },
+      "requestParameters": {
+        "provider": "mify",
+        "model": "moonshot/kimi-k3",
+        "caseTransport": "nonstream_fallback",
+        "caseMaxTokens": 2500,
+        "pilotMaxTokens": 6000,
+        "reasoning": {
+          "reasoning_effort": "low"
+        },
+        "systemPromptVersion": "p0-v1",
+        "auth": "existing local provider config; credential value omitted"
+      }
+    }
+  ],
+  "evaluationVersion": "p0-replay-v2",
+  "requestParameters": [
+    {
+      "provider": "mify",
+      "model": "moonshot/kimi-k3",
+      "caseTransport": "nonstream_fallback",
+      "caseMaxTokens": 2500,
+      "pilotMaxTokens": 6000,
+      "reasoning": {
+        "reasoning_effort": "low"
+      },
+      "systemPromptVersion": "p0-v1",
+      "auth": "existing local provider config; credential value omitted"
+    }
+  ],
+  "fixtureManifest": [
+    {
+      "index": 0,
+      "id": "choice-01",
+      "category": "choice",
+      "promptHash": "081d91129d3b7c50919b5b8b2c45c4bc9520f3895bad2b0afae4bf162b19d76d",
+      "submittedUserTextHash": "94cd780aa54afe65d4ab598a087ea2893d7d392fbb3c61101186aa9095507743"
+    },
+    {
+      "index": 1,
+      "id": "choice-02",
+      "category": "choice",
+      "promptHash": "4a0ff3cff4db41e4ebd8a75c69cbbfaeefc42b1430010f75d316b30d38cba31a",
+      "submittedUserTextHash": "5f7bfe9ca3a95f57dc9f1dadf4aa25a25d2dea6e8f63f6ec38b9424ed360e86e"
+    },
+    {
+      "index": 2,
+      "id": "choice-03",
+      "category": "choice",
+      "promptHash": "d6e8ac18606ce81116cbfd2c9a44681df8abfe215059f7a666c0fdd0b8ed24f4",
+      "submittedUserTextHash": "ea44f0681cd62b82b22c4c752fd8009f95cc03b5fa1fcedeb0c6a48382caa82f"
+    },
+    {
+      "index": 3,
+      "id": "choice-04",
+      "category": "choice",
+      "promptHash": "b18cb5ed3a386f8b25822072b0c7e04d025fe4aafd2c31a2267212dc1bbf1e10",
+      "submittedUserTextHash": "3288f15a71a22849498982ed723e2f991d2b37a05e6492a4cfabcea4f6feebda"
+    },
+    {
+      "index": 4,
+      "id": "choice-05",
+      "category": "choice",
+      "promptHash": "c0d833c48ea921e3eef975661274d409c9e798c50393515059288db66f78c2d1",
+      "submittedUserTextHash": "9cfbce05139464aa713900ada08d6a42b51ada5f9e648f604596517ce54e1be6"
+    },
+    {
+      "index": 5,
+      "id": "choice-06",
+      "category": "choice",
+      "promptHash": "31a95f5b7737b34c9eea22a987ecf3d207c807d3b41869640b069a9922cf0bcc",
+      "submittedUserTextHash": "327c999e0e9b799bf21bdaeeec7b8d50101d1756f0fcd7e8f47ec4d075e5b6ce"
+    },
+    {
+      "index": 6,
+      "id": "choice-07",
+      "category": "choice",
+      "promptHash": "5869a9e1523bcc8173fe60cac7321c74e904edca5601ed5c5257bbedc1003d2a",
+      "submittedUserTextHash": "0cb10fe1f47195394a92a1c3525af1c2dbf6d5909b7ae686cc9a88334228eea0"
+    },
+    {
+      "index": 7,
+      "id": "choice-08",
+      "category": "choice",
+      "promptHash": "2824c77a5059ccf03c28b749755165cf587445cf4a5c570499834c200fdc3b18",
+      "submittedUserTextHash": "d7c5711c36eff351006116cd052125286ae8e74a72de62a0ba6c8c337b00d644"
+    },
+    {
+      "index": 8,
+      "id": "input-01",
+      "category": "input",
+      "promptHash": "5a681a8ad9364d8d305a22e54443d9cf3748a83216dfc643e2e0ccbf63ae5155",
+      "submittedUserTextHash": "80151f94c780a14650787ff5a1ca502511fcab0c5548e298a22aaac2fa2726e5"
+    },
+    {
+      "index": 9,
+      "id": "input-02",
+      "category": "input",
+      "promptHash": "20945faab0fa271ca1fde57c2e84a09fa30a804d81ba42da59b0187b35dde2ad",
+      "submittedUserTextHash": "48831d3eaa78e93c9638a2facaa4e17a7902aa58f361acbe97dedf0ca9d2dede"
+    },
+    {
+      "index": 10,
+      "id": "input-03",
+      "category": "input",
+      "promptHash": "9cf9c7821480af55f21791593b5cc5e82523211d90ca89eb54ce54035deb1d59",
+      "submittedUserTextHash": "d568238bed2c81a539e8c39513b23199d353250385d9d5c79e87008d8d6176e0"
+    },
+    {
+      "index": 11,
+      "id": "input-04",
+      "category": "input",
+      "promptHash": "5b1fedbcbd863c843c1734cdaa2afa7ded5b16877f27fffea13185347cd04938",
+      "submittedUserTextHash": "3855d66efc9349d56734f58c9567ce1c76ebe976a2c317e27b5cff2d5ef02cc6"
+    },
+    {
+      "index": 12,
+      "id": "asset-01",
+      "category": "asset",
+      "promptHash": "f35d5cb2c6f4bbdc2a996a0cc53a978549db0d4d4cbb91eb45337081aae0985d",
+      "submittedUserTextHash": "cc6e33d64ac39ddec664f61daf7081d2e5e3d937b59e2df90bf7462704c9a30f"
+    },
+    {
+      "index": 13,
+      "id": "asset-02",
+      "category": "asset",
+      "promptHash": "6c8b9e116938999323a301abe8604df96c209a733ec0b209968133754ceff5ff",
+      "submittedUserTextHash": "6d548a5d7032b3929c03f63abd8044a78a71c9dd91137b0530c95017c9ff47ea"
+    },
+    {
+      "index": 14,
+      "id": "asset-03",
+      "category": "asset",
+      "promptHash": "f20f5110eb3d1c0c06d43a2360d371621b4443492da0ea884a47c9b7261050d2",
+      "submittedUserTextHash": "893c65a0a4c54b55a0bba62694fa76262500b8cbf8a4e44b69b001f74a4e92a2"
+    },
+    {
+      "index": 15,
+      "id": "asset-04",
+      "category": "asset",
+      "promptHash": "e8b2bd174a4a991e4840a94bdc03486c66925750355b7bbe07474ed0ccc48a7a",
+      "submittedUserTextHash": "f627948e44f422712686e538ec5b4259e0de891a34beadf370f154d1da37004f"
+    },
+    {
+      "index": 16,
+      "id": "combo-01",
+      "category": "combination",
+      "promptHash": "571636edd95b4c8bf4a4065b758038c918f6f31cff48beec273884573f0eadf4",
+      "submittedUserTextHash": "9ba7049d3f3b886808ce1d987bc473f55766ae586960f0a90f1e36670ed1687e"
+    },
+    {
+      "index": 17,
+      "id": "combo-02",
+      "category": "combination",
+      "promptHash": "9626b95ca8314fccb0dace8b350cfd428429d1525209845e6e09fc15c6cbd091",
+      "submittedUserTextHash": "2aa334a36ef43d4a628ffbe7443cb6174371088a415ceae60e23a513fcf2bc5a"
+    },
+    {
+      "index": 18,
+      "id": "combo-03",
+      "category": "combination",
+      "promptHash": "9392f00950964cba86fc5c813d8837b4d700f7ba082d5c6cd3e102a31dfca07c",
+      "submittedUserTextHash": "64b32ad3e61ea7b9e510c135824b2ae7c8157886fa773c955bbf15653f1787bd"
+    },
+    {
+      "index": 19,
+      "id": "combo-04",
+      "category": "combination",
+      "promptHash": "a4ee721aced7d1beac7db32cfc8e26b7a36026c24007b3ce5203ccaf5d7a3937",
+      "submittedUserTextHash": "2ee6b3672ebb8fbe4e2783020b5e0007fda5575fb15a74dd45de7c45a9f56e68"
+    }
+  ]
+}

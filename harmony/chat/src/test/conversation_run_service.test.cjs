@@ -40,7 +40,8 @@ function loadEntry(filename, imports, storage, cache = new Map()) {
   }).outputText;
   const requireEntry = name => {
     if (Object.prototype.hasOwnProperty.call(imports, name)) return imports[name];
-    if (name === './EntryAbortController.ets' || name === './ConversationRunGuard.ets' || name === './GenerationProgressTracker.ets') {
+    if (name === './EntryAbortController.ets' || name === './ConversationRunGuard.ets'
+      || name === './GenerationProgressTracker.ets' || name === './ChatVisualWeatherFixture.ets') {
       return loadEntry(name, imports, storage, cache);
     }
     throw new Error('Unexpected Entry dependency: ' + name);
@@ -110,6 +111,7 @@ async function serviceFixture(initialIds = ['A', 'B'], options = {}) {
   const documentPort = { materializeDocumentParts: options.documents ?? (async parts => parts),
     materializeConversationDocuments: async conversation => conversation };
   const imports = {
+    BuildProfile: { default: { DEBUG: true }, DEBUG: true },
     '@amber/chat-domain': domain,
     '@kit.ArkTS': { util: { TextEncoder: { create: () => ({ encodeInto: text => new TextEncoder().encode(text) }) } } },
     '../di/AppContainer.ets': { getChatRepository: () => repository, getChatKvStore: () => kv,
@@ -150,6 +152,52 @@ async function serviceFixture(initialIds = ['A', 'B'], options = {}) {
   return { domain, memory, kv, service, guard, values, generating, stoppedKeepAlive, providerFor, contexts, textOf, userCount, maximum, writeEvents, toolsByConversation,
     setSaveGate: value => { saveGate = value; }, setSaveFault: value => { saveFault = value; } };
 }
+
+test('debug visual replay uses the real service subscription without provider or RDB writes', { timeout: 5000 }, async () => {
+  const f = await serviceFixture([]);
+  const id = '__amber_debug_visual__-Replay1';
+  const initial = f.domain.makeConversation(id, [f.domain.toMessageNode(f.domain.makeUserMessage('visual fixture'))]);
+  const answer = f.domain.makeAssistantMessage('final visual fixture'); answer.id = 'debug-answer';
+  const final = f.domain.patchConversation(initial, {
+    messageNodes: initial.messageNodes.concat([f.domain.toMessageNode(answer)]),
+  });
+  const frames = ['partial one', 'partial one and two'].map(text => {
+    const message = f.domain.makeAssistantMessage(text); message.id = 'debug-answer'; return message;
+  });
+  const snapshots = [];
+  const off = f.service.subscribe(id, snapshot => snapshots.push(clone(snapshot)));
+  const handle = f.service.replayDebugVisual(initial, frames, final, 0);
+  assert.throws(() => f.service.replayDebugVisual(initial, frames, final, 0), /已登记|正在运行/);
+  await handle.done;
+
+  const terminal = f.service.snapshot(id);
+  assert.equal(await f.memory.getById(id), null, 'replay must stay out of the conversation repository');
+  assert.equal(f.providerFor(id).requests.length, 0, 'replay must not call a provider');
+  assert.equal(terminal.phase, 'completed');
+  assert.equal(terminal.sending, false);
+  assert.equal(terminal.streamingTail.length, 0);
+  assert.equal(f.domain.toText(f.domain.currentMessages(terminal.conversation).at(-1)), 'final visual fixture');
+  assert.ok(snapshots.some(snapshot => snapshot.sending && snapshot.streamingTail.length === 1 &&
+    f.domain.toText(snapshot.streamingTail[0]) === 'partial one'));
+  assert.ok(snapshots.some(snapshot => snapshot.sending && snapshot.streamingTail.length === 1 &&
+    f.domain.toText(snapshot.streamingTail[0]) === 'partial one and two'));
+  off();
+  assert.equal(f.service.snapshot(id), null, 'idle debug session should release after the subscriber leaves');
+});
+
+test('debug visual fixture MiniApp HTML passes the real validator', async () => {
+  const domain = await import('../main/ets/index.ts');
+  const fixture = loadEntry('ChatVisualFixture.ets', {
+    BuildProfile: { default: { DEBUG: true }, DEBUG: true },
+    '@amber/chat-domain': domain,
+    '@kit.AbilityKit': {},
+    '@kit.PerformanceAnalysisKit': { hilog: { info: () => {}, error: () => {} } },
+    '../di/AppContainer.ets': { getConversationRunService: () => ({}) },
+    './ConversationRunService.ets': { DEBUG_VISUAL_CONVERSATION_PREFIX: '__amber_debug_visual__-' },
+    './MiniAppPlatform.ets': { getMiniAppPlatform: async () => { throw new Error('unused'); } },
+  }, {}, new Map());
+  domain.validateMiniAppHtml(fixture.debugVisualMiniAppHtml());
+});
 
 test('manual compact excludes runs/restores and pending restore atomically takes only an undispatched item', { timeout: 5000 }, async () => {
   const gate = deferred();

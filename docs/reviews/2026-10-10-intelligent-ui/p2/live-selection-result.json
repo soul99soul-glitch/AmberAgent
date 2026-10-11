@@ -1,0 +1,8 @@
+{
+  "selectedDuringStream": true,
+  "clicked": true,
+  "retainedAfterFinish": true,
+  "seconds": 18.15,
+  "terminalObserved": true,
+  "initialObservation": "18s sample was still generating; final state checked separately"
+}

@@ -13,6 +13,7 @@ import {
 } from '../design/tokens.ets';
 
 import { router, promptAction, window, KeyboardAvoidMode } from '@kit.ArkUI';
+import { clearArtifactInteractionOutside } from '../platform_impl/ArtifactInteraction.ets';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { camera, cameraPicker } from '@kit.CameraKit';
 import { util } from '@kit.ArkTS';
@@ -30,7 +31,9 @@ import type {
   MessageSearchHit, UIMessagePartTool, ToolApprovalVerdict, ToolApprovalPartLocator, DeepReadOpenEvent,
   AgentTool, MessageChunk, OpenAIChatApi, AskedAnswers, ConversationCompact, ImageGuardSettings,
   VisionModelHealth, VisionProbeDeps, ProviderModel, ProviderSetting, SandboxActivityUiState,
-  InteractiveTurnRunResult, ChatTimelineRow,
+  InteractiveTurnRunResult, ChatTimelineRow, SmartUiDocument, SmartUiDraftSource, SmartUiScalar,
+  SmartUiStateAccessor, SmartUiStateValue, SmartUiDraftStore, SmartUiDraftSaveResult,
+  SmartUiWeatherProjection,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, seedConversationWithPresets, nodeCurrentMessage,
@@ -38,13 +41,16 @@ import {
   runAutoTitle, makeUserMessage, toText, messageCopyText, makeTextGenerationParams, pendingPreviewText, convertSteerToFollowup,
   invalidateCompacts, copyValidCompactsToConversation, ContextCompactionFailedError, recoverInterruptedRecipes,
   recoverInterruptedPlugins, recoverInterruptedWebMountGoals, parseDeepReadSlashCommand, estimateConversationInputTokens, formatNumberInt,
-  formatContextTokens, nativeTokenizerForModel, loadSearchPrefs, updateSearchPrefs, SearchSettings,
+  formatContextTokens, nativeTokenizerForModel, loadSearchPrefs, SearchSettings,
   buildMentionRoleItems, MentionRoleItem, ConversationSummary, toChatModel,
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
   reasoningLevelForModel, withReasoningLevelForModel, defaultReasoningLevelForModel, reasoningLevelsForModel,
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity, withStepProgress, isActiveOperation,
   buildTopModelMenuGroups, loadProviders, loadDisplaySetting, makeDisplaySetting, isCloseEnoughToBottom,
   FOLLOW_BOTTOM_TOLERANCE_VP, makeMiniAppSetting, loadMiniAppSetting, runInteractiveTurn, type KernelPhase,
+  appendSmartUiDraft,
+  smartUiDefinitionFingerprint,
+  projectWeatherReadTool,
 } from '@amber/chat-domain';
 import type { MiniAppSetting } from '@amber/chat-domain';
 import type { ConversationRecap, ConversationRecapNode, RecapState } from '@amber/chat-domain';
@@ -147,6 +153,7 @@ import type { ConversationRunSnapshot, ConversationRunHandle, ConversationRunCom
 import { bindConversationBrowserPage } from '../platform_impl/ConversationBrowserGuard.ets';
 import { SubAgentActivityStrip } from '../components/SubAgentActivityStrip.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
+import { getChatSmartUiDraftStore } from '../platform_impl/SmartUiDraftSupport.ets';
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
 interface ChatArchiveRouteParams { conversationId: string; nodeId: string; }
@@ -263,6 +270,25 @@ interface PendingChipRow {
   preview: string;
 }
 
+interface SmartUiValueEntry {
+  sourceKey: string;
+  values: SmartUiStateValue[];
+}
+
+interface SmartUiRuntimeEntry {
+  sourceKey: string;
+  document: SmartUiDocument;
+  source: SmartUiDraftSource;
+  fingerprint: string;
+  ready: boolean;
+  streaming: boolean;
+  loadEpoch: number;
+  userChanged: boolean;
+  loaded: boolean;
+}
+
+const EMPTY_SMART_UI_VALUES: SmartUiStateValue[] = [];
+
 const QUICK_MESSAGES_KEY: string = 'quick_messages';
 
 function decodeQuickMessages(raw: string | null): QuickMessage[] {
@@ -299,6 +325,7 @@ struct ChatPage {
   // 主题切换时触发整页重建(build 重读可变令牌)
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @StorageProp('activeArtifactInteraction') activeArtifactInteraction: string = '';
   @StorageProp('chatStorageDegraded') storageDegraded: boolean = false;
   // 两栏(平板 / 折叠屏展开横屏):左侧首页窄栏 + 右侧本页聊天,见 design/adaptive.ets
   @StorageProp(WINDOW_WIDTH_VP_KEY) windowWidthVp: number = 0;
@@ -322,7 +349,9 @@ struct ChatPage {
   @State artifactDiffOpen: boolean = false;
   @State artifactDiffTitle: string = '';
   @State artifactDiffText: string = '';
-  @State shelfArtifacts: ConversationArtifactIndex = { images: [], docs: [], miniApps: [], widgets: [], duplicateDocumentNames: [] };
+  @State shelfArtifacts: ConversationArtifactIndex = {
+    images: [], docs: [], miniApps: [], widgets: [], svg: [], scenes: [], uiSnapshots: [], duplicateDocumentNames: [],
+  };
   @State displaySettings: DisplaySetting = makeDisplaySetting();
   // Return-to-page forces rebuild, reads latest theme tokens (background pages in stack don't receive StorageProp updates)
   @State themeTick: number = 0;
@@ -353,6 +382,16 @@ struct ChatPage {
   @State suggestions: string[] = [];
   // D0-10:@Watch 驱动草稿持久化(任何赋值点 — 发送清空/手动输入 — 都落 KV)
   @State @Watch('onInputTextDraftChange') inputText: string = '';
+  // P2: native Smart UI state stays page-owned and keyed by message source identity.
+  @State @Watch('onSmartUiValuesChanged') smartUiValues: SmartUiValueEntry[] = [];
+  @State smartUiStateRevision: number = 0;
+  private smartUiRuntime: Map<string, SmartUiRuntimeEntry> = new Map<string, SmartUiRuntimeEntry>();
+  private smartUiDraftStore: SmartUiDraftStore | null = null;
+  private smartUiLoadEpoch: number = 0;
+  private smartUiSaveError: string = '';
+  private smartUiProjectionConversation: Conversation | null = null;
+  private smartUiProjectionNodes: MessageNode[] | null = null;
+  private smartUiWeatherProjections: SmartUiWeatherProjection[] = [];
   private draftSaveTimer: number = -1;
   @State quickMessages: QuickMessage[] = [];
   @State sending: boolean = false;
@@ -486,6 +525,12 @@ struct ChatPage {
   // D-050:重试状态文案(strings.xml:386;null = 清除)
   @State retryStatus: string = '';
   private conversation: Conversation | null = null;
+  private smartUiStateAccessor: SmartUiStateAccessor = {
+    get: (sourceKey: string, stateId: string): SmartUiScalar | undefined => this.smartUiValue(sourceKey, stateId),
+    set: (sourceKey: string, stateId: string, value: SmartUiScalar): void => {
+      this.setSmartUiValue(sourceKey, stateId, value);
+    },
+  };
   private runConversationId: string = '';
   private currentRunId: string = '';
   private unsubscribeRun: (() => void) | null = null;
@@ -502,6 +547,7 @@ struct ChatPage {
   // 最后一次 raw 快照(onRawFlushSnapshot;checkpoint 投影基)
   // checkpoint 保存 promise 尾(串行化落库,不阻塞 provider chunk 回调)
   private scroller: Scroller = new Scroller();
+  private smartUiAssetAreas: Map<string, number> = new Map<string, number>();
   private nativeFollow: NativeTimelineFollow | null = null;
   private streamingFrameRate: StreamingFrameRate = new StreamingFrameRate();
   @StorageProp('appBackgrounded') @Watch('syncStreamingFrameRate') private appBackgrounded: boolean = false;
@@ -565,6 +611,7 @@ struct ChatPage {
 
   // 页面退订可见状态；运行服务继续持有会话，离页不取消正在生成的内容。
   aboutToDisappear(): void {
+    AppStorage.setOrCreate<string>('activeArtifactInteraction', '');
     this.sendPreflightSeq++;
     this.sendPrechecking = false;
     this.hideScrollNavigation();
@@ -595,6 +642,9 @@ struct ChatPage {
     if (this.cursorTimer !== -1) { clearInterval(this.cursorTimer); this.cursorTimer = -1; }
     this.invalidatePicker(true);
     this.closeSubAgentSheet();
+    this.smartUiDraftStore?.flush().catch((error: Error): void => {
+      this.smartUiSaveError = `智能 UI 草稿保存失败：${error.message}`;
+    });
   }
 
   private serviceOwnsConversation(id: string): boolean {
@@ -681,6 +731,11 @@ struct ChatPage {
     let timelineChanged: boolean = false;
     this.currentRunId = snapshot.runId;
     this.completionNotice = snapshot.completionNotice;
+    if (this.sending && !snapshot.sending) {
+      // 一轮结束:agent 可能已用 settings_set_model_slot 改了对话/视觉模型,刷新页头与图片守卫快照
+      this.refreshEffectiveModelState();
+      this.reloadOcrSeed();
+    }
     this.sending = snapshot.sending;
     this.syncStreamingFrameRate();
     this.streamingTail = snapshot.streamingTail;
@@ -707,6 +762,7 @@ struct ChatPage {
     if (full !== null) {
       this.unsavedConversationSeed = null;
       if (this.conversation !== full) this.conversation = full;
+      this.reconcileSmartUiSources(full);
       this.conversationLoaded = true;
       const nextTitle: string = full.title || '对话';
       if (this.title !== nextTitle) this.title = nextTitle;
@@ -741,6 +797,7 @@ struct ChatPage {
     if (!this.pageAlive || this.conversation === null) return false;
     const id: string = this.conversation.id;
     if (conversationRestoreVersion(id) !== this.loadedRestoreVersion) {
+      this.clearSmartUiMemory();
       this.refreshRestoredConversation().catch((error: Error): void => { if (this.pageAlive) this.errorMsg = error.message; });
       this.errorMsg = '会话已恢复，正在刷新，请稍后重试';
       return false;
@@ -834,28 +891,6 @@ struct ChatPage {
       .catch((): void => {});
   }
 
-  // D0-9:输入区联网搜索开关(与搜索设置页同一 KV 源;JSON 往返克隆只翻顶层字段,
-  //   updateSearchPrefs 自带 JSON 相等短路)
-  private toggleWebSearch(): void {
-    let enabled: boolean = false;
-    updateSearchPrefs(getChatKvStore(), (current: SearchSettings): SearchSettings => {
-      const next: SearchSettings = JSON.parse(JSON.stringify(current)) as SearchSettings;
-      next.enableWebSearch = !current.enableWebSearch;
-      enabled = next.enableWebSearch;
-      return next;
-    }).then((): void => {
-      this.refreshSearchSettings();
-      if (this.pageAlive && this.pageVisible) {
-        promptAction.showToast({ message: enabled
-          ? '联网搜索已开启，下一次发送生效' : '联网搜索已关闭' });
-      }
-    }).catch((error: Error): void => {
-      if (this.pageAlive && this.pageVisible) {
-        promptAction.showToast({ message: '联网搜索设置未保存：' + error.message });
-      }
-    });
-  }
-
   private stopGreetTimer(): void {
     if (this.greetTimer !== -1) clearInterval(this.greetTimer);
     this.greetTimer = -1;
@@ -926,6 +961,7 @@ struct ChatPage {
   }
 
   onPageHide(): void {
+    AppStorage.setOrCreate<string>('activeArtifactInteraction', '');
     this.sendPreflightSeq++;
     this.sendPrechecking = false;
     this.hideScrollNavigation();
@@ -1146,6 +1182,7 @@ struct ChatPage {
   aboutToAppear(): void {
     this.enableKeyboardAvoidance();
     this.pageAlive = true;
+    this.smartUiDraftStore = getChatSmartUiDraftStore(getChatKvStore());
     this.refreshNativeContextEstimate();
     this.pageVisible = true;
     this.syncStreamingFrameRate();
@@ -1191,10 +1228,7 @@ struct ChatPage {
       this.agentCronToolsCache = tools;
     });
     // D-071b:OCR 种子加载(providers/ocr_model/ocr_prompt 快照)
-    loadOcrSeed(getChatKvStore()).then((seed: OcrSeed): void => {
-      if (!this.pageAlive) return;
-      this.ocrSeed = seed;
-    });
+    this.reloadOcrSeed();
     // D-087:compress 任务模型选择快照(resolveTaskChatModel(compressModelId),
     //   未设 = AUTO → findById 必失 → 回退当前 chat 模型,语义逐字)
     readTaskModelReference(TASK_COMPRESS_MODEL_KEY).then((reference): void => {
@@ -1313,6 +1347,7 @@ struct ChatPage {
             }
           }
           this.conversation = full;
+          this.reconcileSmartUiSources(full);
           this.conversationArrivedTick++;
           this.restoreInputDraft(`chat_input_draft/${full.id}`);
           this.refreshEffectiveModelState();
@@ -1484,6 +1519,7 @@ struct ChatPage {
       const active: ConversationRunSnapshot | null = getConversationRunService().snapshot(convId);
       if (active !== null && (active.sending || active.conversation !== null)) return active.conversation;
       this.conversation = full;
+      if (full !== null) this.reconcileSmartUiSources(full);
       return full;
     });
   }
@@ -1495,6 +1531,7 @@ struct ChatPage {
     if (current === null) return;
     const version: number = conversationRestoreVersion(current.id);
     if (version === this.loadedRestoreVersion) return;
+    this.clearSmartUiMemory();
     this.conversationLoaded = false;
     this.restoreReloadFailed = false;
     let restored: Conversation | null;
@@ -1766,7 +1803,8 @@ struct ChatPage {
     if (this.nativeFollow === null) {
       this.nativeFollow = new NativeTimelineFollow(this.getUIContext(), this.scroller,
         (): boolean => this.pageAlive && this.pageVisible && this.listReady &&
-          this.enableAutoScroll && !this.userTouchActive && !this.initialJumpSuppressedUntilUserScroll &&
+          this.enableAutoScroll && this.activeArtifactInteraction.length === 0 &&
+          !this.userTouchActive && !this.initialJumpSuppressedUntilUserScroll &&
           shouldScrollOnStreamUpdate(this.followMode, this.atBottomApprox),
         (): number | null => this.measuredBottomTarget(),
         (): void => { this.beginProgrammaticScroll(); });
@@ -2489,6 +2527,7 @@ struct ChatPage {
       if (full === null || index < 0) { this.errorMsg = '来源消息已不存在或不在当前分支'; return; }
       this.artifactShelfOpen = false;
       this.conversation = full;
+      this.reconcileSmartUiSources(full);
       this.rows = buildRows(full, this.rows);
       this.timelineLoadState = applyTailWindow(this.timelineLoadState, 0, full.messageNodes.length, full.messageNodes.length);
       this.followMode = 'paused';
@@ -2810,8 +2849,11 @@ struct ChatPage {
           getConversationRunService().mutateStoredConversation(id, (latest: Conversation): Conversation | null => {
             if (getConversationRunService().isBusy(id)) throw new Error('生成中无法删除消息');
             return deleteMessage(latest, row.message.id, false);
-          }).then((updated: Conversation | null): Promise<void> => updated === null ? Promise.resolve()
-            : this.invalidateConvCompacts(id, 'message_deleted')).catch((error: Error): void => {
+          }).then((updated: Conversation | null): Promise<void> => {
+            if (updated === null) return Promise.resolve();
+            this.cleanupSmartUiMessage(id, row.message.id);
+            return this.invalidateConvCompacts(id, 'message_deleted');
+          }).catch((error: Error): void => {
               if (this.pageAlive && this.conversation?.id === id) this.errorMsg = error.message;
             });
         },
@@ -3116,6 +3158,10 @@ struct ChatPage {
               if (full === null) return;
               await getChatRepository().delete(item.id);
               getConversationRunService().forgetDeletedConversation(item.id);
+              const smartUiCleanup = await this.smartUiDraftStore?.cleanupConversation(item.id);
+              if (smartUiCleanup !== undefined && smartUiCleanup.error !== null) {
+                this.smartUiSaveError = `智能 UI 草稿清理失败：${smartUiCleanup.error}`;
+              }
               await cleanupDeletedConversation(full, getChatRepository(), getChatKvStore());
             } finally { release(); }
           };
@@ -3652,10 +3698,23 @@ struct ChatPage {
   // 鸿蒙接线:模型门已通过(chat 模型空值分支不可达,Android 同文案等价);
   //   守卫失败 → errorMsg(toast 等价面);回退场景实时探测视觉健康
   //   (generateVisionText 与 OcrTransformer 同口径,OcrSupport D-071b)。
+  // OCR 种子(providers/ocr_model 快照)可被设置页或 agent 的 settings_set_model_slot 改写;
+  //   发送/检查前重读,读失败沿用旧快照
+  private async reloadOcrSeed(): Promise<OcrSeed | null> {
+    try {
+      const seed: OcrSeed = await loadOcrSeed(getChatKvStore());
+      if (this.pageAlive) this.ocrSeed = seed;
+      return seed;
+    } catch (e) {
+      return this.ocrSeed;
+    }
+  }
+
   private async guardImagesForSend(
     inputParts: UIMessagePart[], choice: ChatProviderChoice, owner: string, sequence: number,
   ): Promise<boolean> {
-    const seed: OcrSeed | null = this.ocrSeed;
+    const seed: OcrSeed | null = await this.reloadOcrSeed();
+    if (!this.composerSendCurrent(owner, sequence)) return false;
     const settings: ImageGuardSettings = {
       chatModel: choice.model,
       ocrModelId: seed !== null ? seed.ocrModelId : '',
@@ -3677,8 +3736,8 @@ struct ChatPage {
 
   // 附件点按(ChatInputAttachments.kt:onStatusClick)— blocked 才 toast 错误,其余静默
   private inspectPendingImage(url: string): void {
-    resolveEffectiveChatChoice(this.conversation?.assistantId).then((choice: ChatProviderChoice | null): void => {
-      const seed: OcrSeed | null = this.ocrSeed;
+    resolveEffectiveChatChoice(this.conversation?.assistantId).then(async (choice: ChatProviderChoice | null): Promise<void> => {
+      const seed: OcrSeed | null = await this.reloadOcrSeed();
       const settings: ImageGuardSettings = {
         chatModel: choice !== null ? choice.model : null,
         ocrModelId: seed !== null ? seed.ocrModelId : '',
@@ -4101,6 +4160,248 @@ struct ChatPage {
     .width('100%').height('100%').padding(16)
   }
 
+  private smartUiEntry(sourceKey: string): SmartUiValueEntry | undefined {
+    return this.smartUiValues.find((entry: SmartUiValueEntry): boolean => entry.sourceKey === sourceKey);
+  }
+
+  private onSmartUiValuesChanged(): void {
+    this.smartUiStateRevision++;
+  }
+
+  private currentSmartUiWeatherProjections(): SmartUiWeatherProjection[] {
+    const conversation: Conversation | null = this.conversation;
+    if (conversation === null) return [];
+    if (this.smartUiProjectionConversation === conversation &&
+      this.smartUiProjectionNodes === conversation.messageNodes) return this.smartUiWeatherProjections;
+    const projections: SmartUiWeatherProjection[] = [];
+    for (const node of conversation.messageNodes) {
+      const message: UIMessage = nodeCurrentMessage(node);
+      for (const part of message.parts) {
+        if (part.type !== 'tool' || part.toolName !== 'weather_read') continue;
+        const projection: SmartUiWeatherProjection | null = projectWeatherReadTool(part, {
+          conversationId: conversation.id, nodeId: node.id, messageId: message.id, toolCallId: part.toolCallId,
+        });
+        if (projection !== null) projections.push(projection);
+      }
+    }
+    this.smartUiProjectionConversation = conversation;
+    this.smartUiProjectionNodes = conversation.messageNodes;
+    this.smartUiWeatherProjections = projections;
+    return projections;
+  }
+
+  private smartUiValue(sourceKey: string, stateId: string): SmartUiScalar | undefined {
+    const entry: SmartUiValueEntry | undefined = this.smartUiEntry(sourceKey);
+    const item: SmartUiStateValue | undefined = entry?.values.find(
+      (value: SmartUiStateValue): boolean => value.id === stateId);
+    return item?.value;
+  }
+
+  private smartUiValuesFor(sourceKey: string): SmartUiStateValue[] {
+    return this.smartUiEntry(sourceKey)?.values ?? EMPTY_SMART_UI_VALUES;
+  }
+
+  private setSmartUiValue(sourceKey: string, stateId: string, value: SmartUiScalar): void {
+    const runtime: SmartUiRuntimeEntry | undefined = this.smartUiRuntime.get(sourceKey);
+    if (runtime !== undefined) runtime.userChanged = true;
+    const entries: SmartUiValueEntry[] = this.smartUiValues.slice();
+    const entry: SmartUiValueEntry | undefined = entries.find(
+      (candidate: SmartUiValueEntry): boolean => candidate.sourceKey === sourceKey);
+    if (entry === undefined) {
+      this.smartUiValues = entries.concat([{ sourceKey, values: [{ id: stateId, value }] }]);
+      return;
+    }
+    const values: SmartUiStateValue[] = entry.values.slice();
+    const position: number = values.findIndex((item: SmartUiStateValue): boolean => item.id === stateId);
+    if (position >= 0) values[position] = { id: stateId, value };
+    else values.push({ id: stateId, value });
+    this.smartUiValues = entries.map((candidate: SmartUiValueEntry): SmartUiValueEntry =>
+      candidate.sourceKey === sourceKey ? { sourceKey, values } : candidate);
+  }
+
+  private clearSmartUiValues(sourcePrefix: string): void {
+    if (sourcePrefix.length === 0) return;
+    const prefix: string = `${sourcePrefix}:`;
+    this.smartUiValues = this.smartUiValues.filter(
+      (entry: SmartUiValueEntry): boolean => !entry.sourceKey.startsWith(prefix));
+    this.smartUiRuntime.forEach((runtime: SmartUiRuntimeEntry, key: string): void => {
+      if (!key.startsWith(prefix)) return;
+      this.smartUiRuntime.delete(key);
+      if (runtime.source.nodeId.length > 0) {
+        this.smartUiDraftStore?.remove(runtime.source).catch((error: Error): void => {
+          this.smartUiSaveError = `智能 UI 草稿清理失败：${error.message}`;
+        });
+      }
+    });
+  }
+
+  private onSmartUiStateChange(sourceKey: string, _stateId: string, _value: SmartUiScalar): void {
+    const runtime: SmartUiRuntimeEntry | undefined = this.smartUiRuntime.get(sourceKey);
+    this.saveSmartUiEntry(runtime, 250);
+  }
+
+  private saveSmartUiEntry(runtime: SmartUiRuntimeEntry | undefined, delayMs: number): void {
+    const store: SmartUiDraftStore | null = this.smartUiDraftStore;
+    if (runtime === undefined || store === null || !runtime.ready || runtime.source.nodeId.length === 0) return;
+    store.saveDebounced(runtime.document, runtime.source, this.smartUiValuesFor(runtime.sourceKey), Date.now(), delayMs)
+      .then((result: SmartUiDraftSaveResult): void => { this.smartUiSaveResult(runtime.sourceKey, result); })
+      .catch((error: Error): void => {
+        this.smartUiSaveError = `智能 UI 草稿保存失败：${error.message}`;
+        if (this.pageAlive) this.errorMsg = this.smartUiSaveError;
+      });
+  }
+
+  // P3 hook: the current definition and lifecycle are already source-keyed here;
+  // persistence can attach without re-parsing text groups or changing native cards.
+  private replaceSmartUiValues(sourceKey: string, values: SmartUiStateValue[]): void {
+    const next: SmartUiValueEntry[] = this.smartUiValues.filter(
+      (entry: SmartUiValueEntry): boolean => entry.sourceKey !== sourceKey);
+    this.smartUiValues = next.concat([{ sourceKey, values: values.slice() }]);
+  }
+
+  private smartUiSourceMatches(left: SmartUiDraftSource, right: SmartUiDraftSource): boolean {
+    return left.conversationId === right.conversationId && left.nodeId === right.nodeId &&
+      left.messageId === right.messageId && left.blockId === right.blockId &&
+      left.blockIndex === right.blockIndex && left.sourceStart === right.sourceStart;
+  }
+
+  private smartUiSaveResult(sourceKey: string, result: SmartUiDraftSaveResult): void {
+    if (result.saved || result.reason === 'cancelled' || result.reason === 'document-not-ready') return;
+    const message: string = result.error ?? `智能 UI 草稿未保存：${result.reason}`;
+    this.smartUiSaveError = message;
+    if (this.pageAlive) this.errorMsg = message;
+    else hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'smart UI draft save failed %{public}s: %{public}s', sourceKey, message);
+  }
+
+  private loadSmartUiDraft(entry: SmartUiRuntimeEntry): void {
+    const store: SmartUiDraftStore | null = this.smartUiDraftStore;
+    if (store === null || !entry.ready || entry.source.nodeId.length === 0 || entry.userChanged || entry.loaded) return;
+    const epoch: number = ++this.smartUiLoadEpoch;
+    entry.loadEpoch = epoch;
+    const sourceKey: string = entry.sourceKey;
+    const fingerprint: string = entry.fingerprint;
+    const source: SmartUiDraftSource = entry.source;
+    store.load(entry.document, source).then((restore): void => {
+      const current: SmartUiRuntimeEntry | undefined = this.smartUiRuntime.get(sourceKey);
+      if (!this.pageAlive || current === undefined || current.loadEpoch !== epoch || current.fingerprint !== fingerprint ||
+        !this.smartUiSourceMatches(current.source, source) || current.userChanged) return;
+      current.loaded = true;
+      if (restore.status === 'restored') this.replaceSmartUiValues(sourceKey, restore.values);
+      if (restore.status === 'rejected' && restore.diagnostics.length > 0) {
+        this.smartUiSaveError = restore.diagnostics.join('；');
+      }
+    }).catch((error: Error): void => {
+      const current: SmartUiRuntimeEntry | undefined = this.smartUiRuntime.get(sourceKey);
+      if (!this.pageAlive || current === undefined || current.loadEpoch !== epoch) return;
+      current.loaded = true;
+      this.smartUiSaveError = `智能 UI 草稿读取失败：${error.message}`;
+      this.errorMsg = this.smartUiSaveError;
+    });
+  }
+
+  private onSmartUiDocument(sourceKey: string, document: SmartUiDocument, streaming: boolean,
+    source: SmartUiDraftSource, complete: boolean): void {
+    if (source.conversationId.length === 0 || source.messageId.length === 0) return;
+    const ready: boolean = complete && document.status === 'ready' && document.ended;
+    const fingerprint: string = `${smartUiDefinitionFingerprint(document)}:${complete ? 'complete' : 'partial'}`;
+    const previous: SmartUiRuntimeEntry | undefined = this.smartUiRuntime.get(sourceKey);
+    if (previous !== undefined && previous.source.nodeId.length > 0 && source.nodeId.length > 0 &&
+      previous.source.nodeId !== source.nodeId) {
+      this.replaceSmartUiValues(sourceKey, []);
+    }
+    const branchChanged: boolean = previous !== undefined && previous.source.nodeId.length > 0 &&
+      source.nodeId.length > 0 && previous.source.nodeId !== source.nodeId;
+    const entry: SmartUiRuntimeEntry = {
+      sourceKey, document, source, fingerprint, ready, streaming,
+      loadEpoch: previous?.loadEpoch ?? 0,
+      userChanged: branchChanged ? false : (previous?.userChanged ?? false),
+      loaded: branchChanged ? false : (previous?.loaded ?? false),
+    };
+    if (previous === undefined || previous.fingerprint !== fingerprint ||
+      !this.smartUiSourceMatches(previous.source, source)) {
+      entry.loaded = false;
+      entry.loadEpoch = 0;
+    }
+    this.smartUiRuntime.set(sourceKey, entry);
+    this.loadSmartUiDraft(entry);
+    if (ready && source.nodeId.length > 0 && entry.userChanged) this.saveSmartUiEntry(entry, 0);
+  }
+
+  private reconcileSmartUiSources(conversation: Conversation): void {
+    this.smartUiRuntime.forEach((runtime: SmartUiRuntimeEntry, key: string): void => {
+      if (runtime.source.nodeId.length === 0 || runtime.source.conversationId !== conversation.id) return;
+      const node: MessageNode | undefined = conversation.messageNodes.find(
+        (candidate: MessageNode): boolean => candidate.id === runtime.source.nodeId);
+      const valid: boolean = node !== undefined && node.messages.some(
+        (message: UIMessage): boolean => message.id === runtime.source.messageId);
+      if (valid) return;
+      this.smartUiRuntime.delete(key);
+      this.smartUiValues = this.smartUiValues.filter((entry: SmartUiValueEntry): boolean => entry.sourceKey !== key);
+      this.smartUiDraftStore?.remove(runtime.source).catch((error: Error): void => {
+        this.smartUiSaveError = `智能 UI 草稿清理失败：${error.message}`;
+      });
+    });
+  }
+
+  private cleanupSmartUiMessage(conversationId: string, messageId: string): void {
+    this.smartUiRuntime.forEach((runtime: SmartUiRuntimeEntry, key: string): void => {
+      if (runtime.source.conversationId !== conversationId || runtime.source.messageId !== messageId) return;
+      this.smartUiRuntime.delete(key);
+      this.smartUiValues = this.smartUiValues.filter((entry: SmartUiValueEntry): boolean => entry.sourceKey !== key);
+      this.smartUiDraftStore?.remove(runtime.source).catch((error: Error): void => {
+        this.smartUiSaveError = `智能 UI 草稿清理失败：${error.message}`;
+      });
+    });
+  }
+
+  private clearSmartUiMemory(): void {
+    this.smartUiRuntime.clear();
+    this.smartUiValues = [];
+    this.smartUiProjectionConversation = null;
+    this.smartUiProjectionNodes = null;
+    this.smartUiWeatherProjections = [];
+  }
+
+  private onSmartUiDraft(prompt: string): void {
+    this.inputText = appendSmartUiDraft(this.inputText, prompt);
+  }
+
+  private smartUiAssetAreaKey(messageId: string, partIndex: number, ref: string, sourceStart: number): string {
+    // Declared asset IDs are unique within a message, including across text groups.
+    return JSON.stringify([messageId, ref]);
+  }
+
+  private onSmartUiAssetArea(messageId: string, partIndex: number, ref: string,
+    sourceStart: number, area: Area): void {
+    this.smartUiAssetAreas.set(this.smartUiAssetAreaKey(messageId, partIndex, ref, sourceStart),
+      Number(area.globalPosition.y));
+  }
+
+  private onSmartUiAssetView(nodeId: string, messageId: string, partIndex: number,
+    ref: string, sourceStart: number): void {
+    const y: number | undefined = messageId.length > 0
+      ? this.smartUiAssetAreas.get(this.smartUiAssetAreaKey(messageId, partIndex, ref, sourceStart)) : undefined;
+    if (y !== undefined && Number.isFinite(y)) {
+      this.followMode = 'paused';
+      this.nativeFollow?.cancel();
+      this.beginProgrammaticScroll();
+      const targetY: number = this.statusBarHeight + this.chatHeaderHeight + 24;
+      try {
+        this.scroller.scrollBy(0, y - targetY);
+      } catch (_e) {
+        this.applyInitialScroll(this.rows.findIndex((item: MsgRow): boolean => item.nodeId === nodeId));
+      }
+      return;
+    }
+    const row: number = this.rows.findIndex((item: MsgRow): boolean => item.nodeId === nodeId);
+    if (row >= 0) {
+      this.followMode = 'paused';
+      this.applyInitialScroll(row);
+    }
+    hilog.info(HILOG_DOMAIN, HILOG_TAG,
+      'smart ui asset view: %{public}s %{public}d %{public}s %{public}d', nodeId, partIndex, ref, sourceStart);
+  }
+
   // ForEach 保留初次创建的 row 闭包；参数与操作必须再读取当前状态。
   // 活动尾提交后有了 nodeId，但 message.id 不变，因此仍更新原来的 ListItem。
   private currentTimelineRow(seed: MsgRow): MsgRow {
@@ -4165,6 +4466,12 @@ struct ChatPage {
           chatFontFamily: this.displaySettings.chatFontFamily,
           enableLatexRendering: this.displaySettings.enableLatexRendering,
           enableGenerativeWidgets: this.displaySettings.enableGenerativeWidgets,
+          smartUiConversationId: this.conversation?.id ?? '',
+          smartUiNodeId: this.currentTimelineRow(row).nodeId,
+          smartUiStateAccessor: this.smartUiStateAccessor,
+          smartUiStateRevision: this.smartUiStateRevision,
+          smartUiProjections: this.currentSmartUiWeatherProjections(),
+          smartUiValuesFor: (sourceKey: string): SmartUiStateValue[] => this.smartUiValuesFor(sourceKey),
           onOpenDocument: (part: UIMessagePartDocument): void => { this.openDocumentPreview(part); },
           hostHeader: (): void => {},
           hostFooter: (): void => {},
@@ -4201,6 +4508,23 @@ struct ChatPage {
               onOpenToolPreview: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator): void => { this.openToolPreview(part, locator); },
           onModifyGeneratedImage: (url: string): void => { this.modifyGeneratedImage(url); },
           onWidgetAction: (prompt: string): void => { this.inputText = prompt; },
+          onSmartUiStateChange: (sourceKey: string, stateId: string, value: SmartUiScalar): void => {
+            this.onSmartUiStateChange(sourceKey, stateId, value);
+          },
+          onSmartUiDraft: (prompt: string): void => { this.onSmartUiDraft(prompt); },
+          onSmartUiAssetView: (messageId: string, partIndex: number, ref: string, sourceStart: number): void => {
+            this.onSmartUiAssetView(this.currentTimelineRow(row).nodeId, messageId, partIndex, ref, sourceStart);
+          },
+          onSmartUiSourceReplaced: (sourcePrefix: string): void => {
+            this.clearSmartUiValues(sourcePrefix);
+          },
+          onSmartUiDocument: (sourceKey: string, document: SmartUiDocument, streaming: boolean,
+            source: SmartUiDraftSource, complete: boolean): void => {
+            this.onSmartUiDocument(sourceKey, document, streaming, source, complete);
+          },
+          onSmartUiAssetArea: (partIndex: number, ref: string, sourceStart: number, area: Area): void => {
+            this.onSmartUiAssetArea(this.currentTimelineRow(row).message.id, partIndex, ref, sourceStart, area);
+          },
           onTextGrow: (): void => { this.followStreamingUpdate(); },
           onRunMiniApp: (appId: string): void => {
             router.pushUrl({ url: 'pages/MiniAppRunnerPage', params: { appId: appId } });
@@ -4417,13 +4741,15 @@ struct ChatPage {
             Icon({ name: 'back', iconSize: 24, color: INK })
           }
           .width(48).height(48)
+          // 窄 chevron 墨迹比右侧产物架图标内缩 4vp:右 padding 8 把墨迹左移,左右墨迹边距对称
+          .padding({ right: 8 })
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .onClick((): void => { this.navigateBack(); })
           .accessibilityText('返回')
         }
 
-        // 标题与服务商两行居中，左右各保留 48vp 按钮区域。
+        // 两行文字共用中轴，左右各保留 48vp 按钮区域。
         Column() {
           if (this.editingTitle) {
             TextInput({ text: this.titleInput, placeholder: '会话标题' })
@@ -4447,7 +4773,8 @@ struct ChatPage {
                 .flexShrink(1)
             }
             .height(34).constraintSize({ maxWidth: '100%' }).justifyContent(FlexAlign.Center)
-            .padding({ left: 10, right: 10 })
+            // 右侧补齐图标 14vp + 间距 6vp，让标题文字居中。
+            .padding({ left: 10, right: 30 })
             .backgroundColor(SURFACE2).borderRadius(17)
             .onClick((): void => { this.openRecap(); })
             .accessibilityText('对话回顾：' + this.title)
@@ -4463,7 +4790,8 @@ struct ChatPage {
               .margin({ left: 2 })
           }
           .height(30).width('100%').justifyContent(FlexAlign.Center)
-          .padding({ left: 10, right: 10 })
+          // 左侧补齐下拉图标 12vp + 间距 2vp，与标题文字对齐。
+          .padding({ left: 24, right: 10 })
           .onClick((): void => {
             if (!this.editingTitle) { this.closeRecap(); this.toggleModelMenu(); }
           })
@@ -4510,6 +4838,7 @@ struct ChatPage {
       // 共用 Timeline 只承载 List/几何/事件透传；Chat 的窗口、首帧定位与三态跟底保持原状态机。
       InteractiveMessageTimeline({
         scroller: this.scroller,
+        scrollInteractionEnabled: this.activeArtifactInteraction.length === 0,
         horizontalGutter: 20,
         topPadding: 0,
         bottomPadding: 0,
@@ -4802,8 +5131,6 @@ struct ChatPage {
           subAgentMode: this.subAgentMode,
           quickMessages: this.quickMessages,
           mentionRoles: this.mentionRoles,
-          webSearchOn: this.searchSettings !== null && this.searchSettings.enableWebSearch,
-          onToggleWebSearch: (): void => { this.toggleWebSearch(); },
           sendOnEnter: this.displaySettings.sendOnEnter,
           pasteLongTextAsFile: this.displaySettings.pasteLongTextAsFile,
           pasteLongTextThreshold: this.displaySettings.pasteLongTextThreshold,
@@ -4857,6 +5184,8 @@ struct ChatPage {
       .alignItems(HorizontalAlign.Center)
       .width('100%')
       .margin({ bottom: 128 })
+      // 模型下拉打开时隐藏 hero:面板下缘会横切问候句(只露半行)
+      .visibility(this.modelMenuOpen ? Visibility.Hidden : Visibility.Visible)
     }
 
     // TopModelMenu 覆盖层(Android TopModelMenu.kt:Box { scrim; AnimatedVisibility(panel) })
@@ -5003,5 +5332,6 @@ struct ChatPage {
     .layoutWeight(1)
     }
     .width('100%').height('100%')
+    .onTouch((event: TouchEvent): void => { clearArtifactInteractionOutside(event); })
   }
 }

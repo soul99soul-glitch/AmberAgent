@@ -89,6 +89,7 @@ export const MINI_APP_INSTRUCTION: string = [
   '  "html": "<!DOCTYPE html>..."',
   '}',
   '约束：只生成单文件 HTML；不要使用 script src、iframe、form、eval、new Function、import()、XMLHttpRequest、WebSocket、localStorage、sessionStorage、geolocation。',
+  '为了让流式卡片先展示内容，HTML 按内联样式、body 实际内容、末尾 script 的顺序输出；首屏内容直接写进 HTML，不要只留空容器再靠脚本生成。',
   '图片允许 data:image/... 或 https:// 图片 URL；不要使用 http://、相对路径、file/content/blob URL。外链图片必须声明 externalImages 权限。',
   '网络通过 await Amber.fetch({ url, method, headers, body, responseType }) 或 fetch("https://...")，必须声明 network 权限；fetch 会被安全桥接到 Amber.fetch。',
   '搜索只能通过 await Amber.search({ query, limit })，必须声明 search 权限；搜索结果是 title/url/snippet/source/publishedAt 的结构化列表。',

@@ -59,8 +59,9 @@ export const startGoogleOAuthCallback = async (
     if (timer !== -1) { clearTimeout(timer); timer = -1; }
     signal?.removeEventListener?.('abort', abort);
     if (handleId.length === 0) return Promise.resolve();
-    if (closePromise === null) closePromise = native.closeGoogleLoopback(handleId);
-    return closePromise;
+    const closing: Promise<void> = closePromise ?? native.closeGoogleLoopback(handleId);
+    closePromise = closing;
+    return closing;
   };
   const fail = (error: Error): void => {
     if (consumed) return;
