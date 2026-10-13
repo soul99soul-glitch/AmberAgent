@@ -12,6 +12,8 @@ import { createSmartUiController, SMART_UI_MAX_INPUT_VALUE_CHARS } from '@amber/
 import { ACCENT, ERROR, INK, INK3, LINE, MOTION_PRESS, SURFACE } from '../design/tokens.ets';
 import { FONT_SANS } from '../design/fonts.ets';
 import { NativeSmartUiNode } from './NativeSmartUiNode.ets';
+import { NativeUiGenerationOverlay } from './NativeUiGenerationOverlay.ets';
+import type { NativeUiNodeFrame } from './NativeUiGenerationOverlay.ets';
 
 const EMPTY_ACCESSOR: SmartUiStateAccessor = {
   get: (_sourceKey: string, _stateId: string): SmartUiScalar | undefined => undefined,
@@ -23,6 +25,23 @@ const EMPTY_DOCUMENT: SmartUiDocument = {
 };
 const EMPTY_NODE: SmartUiNode = { id: 'empty', parent: null, type: 'column' };
 
+export class NativeUiRevealLedger {
+  private consumedKeys: Set<string> = new Set<string>();
+
+  has(key: string): boolean {
+    return this.consumedKeys.has(key);
+  }
+
+  consume(key: string): void {
+    this.consumedKeys.add(key);
+  }
+}
+
+const CONSUMED_NATIVE_UI_REVEALS: NativeUiRevealLedger = new NativeUiRevealLedger();
+
+export const nativeUiRevealFrames = (frames: NativeUiNodeFrame[]): NativeUiNodeFrame[] =>
+  frames.filter((frame: NativeUiNodeFrame): boolean => frame.type !== 'column');
+
 @Component
 export struct NativeSmartUiCard {
   @StorageProp('themeEpoch') themeEpoch: number = 0;
@@ -30,8 +49,11 @@ export struct NativeSmartUiCard {
   @Prop @Watch('onInitialValuesChanged') initialValues: SmartUiStateValue[] = [];
   @Prop @Watch('onSourceKeyChanged') sourceKey: string = '';
   @Prop @Watch('onAccessorChanged') stateAccessor: SmartUiStateAccessor = EMPTY_ACCESSOR;
-  @Prop ready: boolean = false;
-  @Prop streaming: boolean = false;
+  @Prop @Watch('onReadyChanged') ready: boolean = false;
+  @Prop @Watch('onStreamingChanged') streaming: boolean = false;
+  @Prop @Watch('onRevealEligibleChanged') revealEligible: boolean = false;
+  @StorageProp('reduceMotion') @Watch('onRevealEnvironmentChanged') reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') @Watch('onRevealEnvironmentChanged') appBackgrounded: boolean = false;
   @Prop @Watch('onProjectionsChanged') projections: SmartUiWeatherProjection[] = [];
   @Prop fontSize: number = 16;
   @Prop fontFamily: string = FONT_SANS;
@@ -43,11 +65,151 @@ export struct NativeSmartUiCard {
   @State values: SmartUiStateValue[] = [];
   @State invalidStateIds: string[] = [];
   @State stateDiagnostics: string[] = [];
+  @State frames: NativeUiNodeFrame[] = [];
+  @State revealActive: boolean = false;
+  @State cardVisible: boolean = true;
   private controller: SmartUiController = EMPTY_CONTROLLER;
+  private measuredFrames: Map<string, NativeUiNodeFrame> = new Map<string, NativeUiNodeFrame>();
+  private revealStartTimer: number = -1;
+  private pendingReveal: boolean = false;
 
   aboutToAppear(): void {
     this.controller = createSmartUiController(this.stateAccessor);
     this.reconcile(this.values);
+    if (this.ready && this.revealEligible) this.requestRevealStart();
+  }
+
+  aboutToDisappear(): void {
+    this.clearRevealStartTimer();
+  }
+
+  private revealKey(): string {
+    return this.sourceKey.length > 0 ? this.sourceKey : this.document.id;
+  }
+
+  private consumed(): boolean {
+    return CONSUMED_NATIVE_UI_REVEALS.has(this.revealKey());
+  }
+
+  private consume(): void {
+    CONSUMED_NATIVE_UI_REVEALS.consume(this.revealKey());
+  }
+
+  private snapshotFrames(): NativeUiNodeFrame[] {
+    const result: NativeUiNodeFrame[] = [];
+    this.measuredFrames.forEach((frame: NativeUiNodeFrame): void => { result.push(frame); });
+    return nativeUiRevealFrames(result);
+  }
+
+  private clearRevealStartTimer(): void {
+    if (this.revealStartTimer >= 0) clearTimeout(this.revealStartTimer);
+    this.revealStartTimer = -1;
+  }
+
+  private clearMeasurements(): void {
+    this.measuredFrames.clear();
+    this.frames = [];
+  }
+
+  private pruneMeasurements(): void {
+    const liveIds: Set<string> = new Set<string>();
+    for (const node of this.document.nodes) liveIds.add(node.id);
+    const removed: string[] = [];
+    this.measuredFrames.forEach((_frame: NativeUiNodeFrame, id: string): void => {
+      if (!liveIds.has(id)) removed.push(id);
+    });
+    for (const id of removed) this.measuredFrames.delete(id);
+    if (this.revealActive) this.frames = this.snapshotFrames();
+  }
+
+  private finishReveal(): void {
+    this.clearRevealStartTimer();
+    this.pendingReveal = false;
+    this.revealActive = false;
+  }
+
+  private cancelReveal(consumePending: boolean = true): void {
+    if (!this.revealActive && !this.pendingReveal) return;
+    if (consumePending && this.pendingReveal) this.consume();
+    this.finishReveal();
+  }
+
+  private scheduleRevealStart(): void {
+    if (!this.pendingReveal || this.revealStartTimer >= 0 || this.measuredFrames.size === 0) return;
+    this.revealStartTimer = setTimeout((): void => {
+      this.revealStartTimer = -1;
+      this.tryStartReveal();
+    }, 0);
+  }
+
+  private requestRevealStart(): void {
+    if (!this.ready || !this.revealEligible || this.consumed()) return;
+    this.pendingReveal = true;
+    if (this.reduceMotion) {
+      this.consume();
+      this.finishReveal();
+      return;
+    }
+    if (this.appBackgrounded || !this.cardVisible) return;
+    this.scheduleRevealStart();
+  }
+
+  private tryStartReveal(): void {
+    if (!this.pendingReveal || !this.ready || !this.revealEligible || this.consumed()) return;
+    if (this.reduceMotion) {
+      this.consume();
+      this.finishReveal();
+      return;
+    }
+    if (this.appBackgrounded || !this.cardVisible) return;
+    const measured: NativeUiNodeFrame[] = this.snapshotFrames();
+    if (measured.length === 0) {
+      this.consume();
+      this.finishReveal();
+      return;
+    }
+    this.frames = measured;
+    this.pendingReveal = false;
+    this.consume();
+    this.revealActive = true;
+  }
+
+  private onReadyChanged(): void {
+    if (this.ready && this.revealEligible) this.requestRevealStart();
+    else this.cancelReveal();
+  }
+
+  private onStreamingChanged(): void {
+    if (!this.streaming && this.ready && this.revealEligible) this.requestRevealStart();
+    else this.cancelReveal();
+  }
+
+  private onRevealEligibleChanged(): void {
+    if (this.revealEligible && this.ready) this.requestRevealStart();
+    else this.cancelReveal();
+  }
+
+  private onRevealEnvironmentChanged(): void {
+    if (this.revealActive) {
+      this.cancelReveal();
+    } else if (this.pendingReveal) {
+      this.requestRevealStart();
+    }
+  }
+
+  private onNodeArea(id: string, frame: NativeUiNodeFrame | null): void {
+    let changed: boolean = false;
+    if (frame === null) {
+      changed = this.measuredFrames.delete(id);
+    } else {
+      const previous: NativeUiNodeFrame | undefined = this.measuredFrames.get(id);
+      changed = previous === undefined || previous.x !== frame.x || previous.y !== frame.y ||
+        previous.width !== frame.width || previous.height !== frame.height;
+      this.measuredFrames.set(id, frame);
+    }
+    if (!changed) return;
+    if (this.revealActive) this.frames = this.snapshotFrames();
+    if (this.pendingReveal) this.scheduleRevealStart();
   }
 
   private reconcile(currentValues: SmartUiStateValue[]): void {
@@ -58,7 +220,10 @@ export struct NativeSmartUiCard {
   }
 
   private onDocumentChanged(): void {
+    this.pruneMeasurements();
     this.reconcile(this.values);
+    if (this.ready && this.revealEligible) this.requestRevealStart();
+    else this.cancelReveal();
   }
 
   private onInitialValuesChanged(): void {
@@ -69,7 +234,10 @@ export struct NativeSmartUiCard {
   private onSourceKeyChanged(): void {
     // A source namespace change must not carry values across messages or branches.
     this.values = [];
+    this.clearMeasurements();
+    this.cancelReveal(false);
     this.reconcile(this.values);
+    if (this.ready && this.revealEligible) this.requestRevealStart();
   }
 
   private onAccessorChanged(): void {
@@ -121,6 +289,8 @@ export struct NativeSmartUiCard {
       controller: this.controller, ready: this.ready, sourceKey: this.sourceKey, streaming: this.streaming,
       projections: this.projections,
       depth: 1, fontSize: this.fontSize, fontFamily: this.fontFamily,
+      onNodeArea: (id: string, frame: NativeUiNodeFrame | null): void => { this.onNodeArea(id, frame); },
+      onRevealTouch: (): void => { this.cancelReveal(); },
       onStateChange: (stateId: string, value: SmartUiScalar): void => { this.updateState(stateId, value); },
       onDraft: (prompt: string): void => { this.onDraft(prompt); },
       onAssetView: (ref: string): void => { this.onAssetView(ref); },
@@ -171,8 +341,16 @@ export struct NativeSmartUiCard {
   }
 
   build(): void {
-    Column({ space: 12 }) {
-      this.Content()
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column({ space: 12 }) {
+        this.Content()
+      }
+      .width('100%');
+      if (this.revealActive) {
+        NativeUiGenerationOverlay({ frames: this.frames, active: this.revealActive, visible: this.cardVisible,
+          onFinished: (): void => { this.finishReveal(); } })
+          .width('100%').height('100%').position({ x: 0, y: 0 });
+      }
     }
     .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
@@ -180,8 +358,18 @@ export struct NativeSmartUiCard {
     .backgroundColor(SURFACE)
     .border({ width: 1, color: this.ready ? LINE : ACCENT })
     .borderRadius(16)
-    .alignItems(HorizontalAlign.Start)
     .margin({ bottom: 8 })
+    .onTouch((event: TouchEvent): void => {
+      if (event.type === TouchType.Down) this.cancelReveal();
+    })
+    .onVisibleAreaChange([0, 1], (_expanding: boolean, ratio: number): void => {
+      this.cardVisible = ratio > 0;
+      if (!this.cardVisible) {
+        if (this.revealActive) this.cancelReveal();
+      } else if (this.pendingReveal) {
+        this.requestRevealStart();
+      }
+    })
     .onAreaChange((before: Area, after: Area): void => {
       if (before.height !== after.height) this.onContentGrow();
     });

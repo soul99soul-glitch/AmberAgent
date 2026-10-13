@@ -53,6 +53,7 @@ export struct MiniAppChatCard {
   @State menuOpen: boolean = false;
   @State previewHtml: string = '';
   @State previewApp: MiniAppRecord | null = null;
+  @State revealEligible: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   private platform: MiniAppPlatform | null = null;
   // 离页守卫:异步回调在组件销毁后不再写 @State/弹对话框
@@ -96,16 +97,20 @@ export struct MiniAppChatCard {
     if (part !== null && this.previewAppId.length > 0 && this.previewAppId !== appId) {
       this.previewHtml = '';
       this.previewApp = null;
+      this.revealEligible = false;
       this.streamPreviewActive = false;
     }
     if (part === null) {
       this.previewAppId = '';
       this.previewApp = null;
+      this.revealEligible = false;
       this.refreshStreamPreview();
       return;
     }
     this.previewAppId = appId;
     this.refreshStreamPreview();
+    const generatedFromStream: boolean = this.streamPreviewActive;
+    this.revealEligible = false;
     getMiniAppPlatform().then((platform: MiniAppPlatform): void => {
       if (!this.alive || revision !== this.previewRevision || this.part?.appId !== appId) return;
       this.platform = platform;
@@ -115,10 +120,12 @@ export struct MiniAppChatCard {
         if (!this.alive || revision !== this.previewRevision || this.part?.appId !== appId) return;
         this.previewApp = app;
         this.previewHtml = app === null ? '' : app.htmlContent;
+        this.revealEligible = app !== null && generatedFromStream;
         this.streamPreviewActive = false;
       }).catch((e: Error): void => {
         if (!this.alive || revision !== this.previewRevision || this.part?.appId !== appId) return;
         this.previewHtml = '';
+        this.revealEligible = false;
         this.streamPreviewActive = false;
         hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'preview load failed: %{public}s', e.message);
       });
@@ -209,6 +216,7 @@ export struct MiniAppChatCard {
         } else {
           this.previewApp = record;
           this.previewHtml = record.htmlContent;
+          this.revealEligible = false;
           this.streamPreviewActive = false;
           this.versionTarget = null;
         }
@@ -525,6 +533,7 @@ export struct MiniAppChatCard {
           InlineMiniAppRuntime({
             app: this.previewApp,
             complete: true,
+            revealEligible: this.revealEligible,
             onContentGrow: (): void => { this.onContentGrow(); },
           })
         } else if (this.previewHtml.length > 0) {
@@ -533,6 +542,9 @@ export struct MiniAppChatCard {
             html: this.previewHtml,
             renderer: 'miniapp',
             complete: this.part !== null,
+            revealKey: this.previewApp === null || this.part === null
+              ? '' : `miniapp:${this.previewApp.id}:${this.previewApp.version}`,
+            revealEligible: this.previewApp !== null && this.part !== null && this.revealEligible,
             onContentGrow: (): void => { this.onContentGrow(); },
           })
         }

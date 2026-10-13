@@ -40,6 +40,7 @@ import { getMiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import { MiniAppBridgeImpl } from '../platform_impl/MiniAppBridgeImpl.ets';
 import type { MiniAppBridgeHost, MiniAppThemeJson } from '../platform_impl/MiniAppBridgeImpl.ets';
+import { UIGenerationMotion } from '../platform_impl/UIGenerationMotion.ets';
 
 const HILOG_DOMAIN: number = 0x0001;
 const HILOG_TAG: string = 'MiniApp.Runner';
@@ -118,11 +119,14 @@ struct MiniAppRunnerPage {
   private sourcePreviewController: webview.WebviewController = new webview.WebviewController();
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('darkMode') darkMode: boolean = false;
+  @StorageProp('reduceMotion') @Watch('motionPolicyChanged') reduceMotion: boolean = false;
+  @StorageProp('appBackgrounded') @Watch('motionPolicyChanged') appBackgrounded: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   private appId: string = '';
   private platform: MiniAppPlatform | null = null;
   private bridge: MiniAppBridgeImpl | null = null;
   private controller: webview.WebviewController = new webview.WebviewController();
+  private motion: UIGenerationMotion = new UIGenerationMotion(this.controller);
   private sessionToken: string = '';
   // 图片代理缓存(url → WebResourceResponse;同步 onInterceptRequest 消费)
   private imageCache: Map<string, WebResourceResponse> = new Map<string, WebResourceResponse>();
@@ -130,40 +134,80 @@ struct MiniAppRunnerPage {
   private prefetchStarted: boolean = false;
   // 离页守卫:预取完成等异步回调不再触碰已销毁的 controller/@State
   private alive: boolean = false;
+  private pageVisible: boolean = true;
+  private revealEligible: boolean = false;
+  private pageReady: boolean = false;
+  private prefetchFinished: boolean = false;
+  private prefetchRefreshPending: boolean = false;
+  private loadRevision: number = 0;
   private previousKeyboardAvoidMode: KeyboardAvoidMode = KeyboardAvoidMode.OFFSET;
   private keyboardAvoidanceActive: boolean = false;
 
   aboutToAppear(): void {
     this.alive = true;
+    const lifecycleRevision: number = ++this.loadRevision;
     const params = router.getParams() as Record<string, string>;
     this.appId = params ? (params['appId'] ?? '') : '';
     getMiniAppPlatform().then((platform: MiniAppPlatform): void => {
+      if (!this.alive || lifecycleRevision !== this.loadRevision) return;
       this.platform = platform;
       // Android MiniAppRunnerPage.kt:261 setWebContentsDebuggingEnabled 等价
       //   (全局静态开关,由设置页 WebView 调试项控制)
       webview.WebviewController.setWebDebuggingAccess(platform.settingSnapshot().webViewDebugEnabled);
       this.loadApp();
     }).catch((e: Error): void => {
+      if (!this.alive || lifecycleRevision !== this.loadRevision) return;
       this.state = { kind: 'error', message: e.message, app: null };
     });
   }
 
   onPageShow(): void {
+    this.pageVisible = true;
     if (this.sourceDialogOpen) this.enableKeyboardAvoidance();
+    this.resumeReveal();
   }
 
   onPageHide(): void {
+    this.pageVisible = false;
+    this.motion.cancel(false);
     this.restoreKeyboardAvoidance();
   }
 
   aboutToDisappear(): void {
+    this.motion.cancel(false);
     this.restoreKeyboardAvoidance();
     this.alive = false;
+    this.loadRevision++;
     if (this.bridge !== null) {
       this.bridge.close();
       this.bridge = null;
     }
     this.imageCache.clear();
+  }
+
+  private motionPolicyChanged(): void {
+    if (this.reduceMotion) {
+      this.motion.cancel(true);
+    } else {
+      this.resumeReveal();
+    }
+    if (this.appBackgrounded) this.motion.cancel(false);
+  }
+
+  private resumeReveal(): void {
+    if (!this.alive || !this.pageVisible || this.appBackgrounded || !this.pageReady) return;
+    const waiting: boolean = this.prefetchImagesAndReload();
+    if (waiting || !this.prefetchFinished) return;
+    if (this.prefetchRefreshPending) {
+      this.prefetchRefreshPending = false;
+      this.pageReady = false;
+      this.motion.cancel(false);
+      this.controller.refresh();
+      return;
+    }
+    const app: MiniAppRecord | null = this.state.app;
+    if (app === null) return;
+    this.motion.play(`miniapp:${app.id}:${app.version}`, this.revealEligible, this.reduceMotion, false);
   }
 
   private enableKeyboardAvoidance(): void {
@@ -198,13 +242,21 @@ struct MiniAppRunnerPage {
   private loadApp(): void {
     const platform: MiniAppPlatform | null = this.platform;
     if (platform === null) return;
+    const revision: number = ++this.loadRevision;
+    this.motion.cancel(false);
+    this.pageReady = false;
+    this.prefetchFinished = false;
+    this.prefetchRefreshPending = false;
+    this.prefetchStarted = false;
     this.state = loadingState();
     platform.repository.getById(this.appId).then((record: MiniAppRecord | null): void => {
-      if (!this.alive) return;
+      if (!this.alive || revision !== this.loadRevision) return;
       if (record === null) {
         this.state = { kind: 'missing', message: '小应用不存在', app: null };
         return;
       }
+      // runCount remains the execution statistic; read before markRun so history never animates.
+      this.revealEligible = record.runCount === 0;
       // 先就绪 shell 再置 ready:Web 构建读 shellHtml,顺序无竞态
       this.sessionToken = util.generateRandomUUID(false);
       this.shellHtml = injectMiniAppShell(record.htmlContent, BRIDGE_JS, this.sessionToken);
@@ -216,7 +268,7 @@ struct MiniAppRunnerPage {
       this.imageCache.clear();
       this.prefetchStarted = false;
     }).catch((e: Error): void => {
-      if (!this.alive) return;
+      if (!this.alive || revision !== this.loadRevision) return;
       this.state = { kind: 'error', message: e.message, app: null };
     });
   }
@@ -277,14 +329,19 @@ struct MiniAppRunnerPage {
 
   // ===== 图片代理(预取缓存 + 同步拦截) =====
 
-  private prefetchImagesAndReload(): void {
+  private prefetchImagesAndReload(): boolean {
     const app: MiniAppRecord | null = this.state.app;
     const platform: MiniAppPlatform | null = this.platform;
-    if (app === null || platform === null) return;
-    if (this.prefetchStarted) return;
+    if (app === null || platform === null) return false;
+    const revision: number = this.loadRevision;
+    if (this.prefetchStarted) return !this.prefetchFinished;
+    if (!this.pageVisible || this.appBackgrounded) return true;
     this.prefetchStarted = true;
     const urls: string[] = extractHttpsImageUrls(app.htmlContent);
-    if (urls.length === 0) return;
+    if (urls.length === 0) {
+      this.prefetchFinished = true;
+      return false;
+    }
     // 有界并发预取 + 总字节预算(剩余预算耗尽后未开始的 URL 直接置阻断响应);
     // 全部完成后才 refresh(此前 fetchedCount 必为 0,onInterceptRequest 只会
     // 返回空响应 — 并发链不被丢弃)
@@ -299,12 +356,12 @@ struct MiniAppRunnerPage {
         // 预留单图上限再发请求(完成后按实际字节退还);预算不足覆盖单次
         // 最大响应时不再请求,直接置阻断响应 — 严格总预算上限
         if (budget.remainingBytes < MINI_APP_MAX_IMAGE_BYTES) {
-          this.imageCache.set(next, this.blockedResponse());
+          if (this.isCurrentLoad(revision, app)) this.imageCache.set(next, this.blockedResponse());
           continue;
         }
         budget.remainingBytes -= MINI_APP_MAX_IMAGE_BYTES;
         const used: BytesUsedHolder = { bytes: 0 };
-        const ok: boolean = await this.fetchAndCacheImage(next, used);
+        const ok: boolean = await this.fetchAndCacheImage(next, used, revision, app);
         if (ok) fetched.count++;
         // 按实际字节退还预留(失败请求全额退还;单图上限已限单次峰值)
         budget.remainingBytes += MINI_APP_MAX_IMAGE_BYTES - used.bytes;
@@ -314,31 +371,51 @@ struct MiniAppRunnerPage {
       tasks.push(runWorker().then((): boolean => true));
     }
     Promise.all(tasks).then((): void => {
-      if (!this.alive) return; // 离页后不再刷新已销毁的 controller
+      if (!this.isCurrentLoad(revision, app)) return;
+      this.prefetchFinished = true;
       if (fetched.count > 0) {
         // 刷新触发 onInterceptRequest 重放,命中缓存返回字节流;
-        // 全部失败/阻断时不刷新(避免整页重载丢状态且无可用缓存)
-        this.controller.refresh();
+        // 页面在后台时延后刷新,回到前台后由 resumeReveal 触发。
+        if (this.pageVisible && !this.appBackgrounded) {
+          this.pageReady = false;
+          this.motion.cancel(false);
+          this.controller.refresh();
+        }
+        else this.prefetchRefreshPending = true;
+      } else {
+        this.resumeReveal();
       }
     }).catch((e: Error): void => {
       hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'image prefetch failed: %{public}s', e.message);
+      if (this.isCurrentLoad(revision, app)) {
+        this.prefetchFinished = true;
+        this.resumeReveal();
+      }
     });
+    return true;
   }
 
-  private async fetchAndCacheImage(url: string, used: BytesUsedHolder): Promise<boolean> {
-    const app: MiniAppRecord | null = this.state.app;
+  private isCurrentLoad(revision: number, app: MiniAppRecord): boolean {
+    const current: MiniAppRecord | null = this.state.app;
+    return this.alive && revision === this.loadRevision && current !== null &&
+      current.id === app.id && current.version === app.version;
+  }
+
+  private async fetchAndCacheImage(
+    url: string, used: BytesUsedHolder, revision: number, app: MiniAppRecord): Promise<boolean> {
     const platform: MiniAppPlatform | null = this.platform;
-    if (app === null || platform === null) return false;
+    if (platform === null || !this.isCurrentLoad(revision, app)) return false;
     // 权限门:externalImages 全局开关 + 声明 + grant 记忆(Android RunnerPage:283-295)
     try {
       const sandbox = platform.sandboxFor(app.id, app.permissions);
       sandbox.require('externalImages');
     } catch (_e) {
-      this.imageCache.set(url, this.blockedResponse());
+      if (this.isCurrentLoad(revision, app)) this.imageCache.set(url, this.blockedResponse());
       return false;
     }
     try {
       const bytes: Uint8Array = await this.fetchImageBytes(url);
+      if (!this.isCurrentLoad(revision, app)) return false;
       used.bytes = bytes.byteLength;
       const contentType: string = this.sniffImageContentType(bytes);
       const response: WebResourceResponse = new WebResourceResponse();
@@ -349,12 +426,13 @@ struct MiniAppRunnerPage {
       response.setResponseMimeType(contentType);
       response.setResponseCode(200);
       response.setReasonMessage('OK');
+      if (!this.isCurrentLoad(revision, app)) return false;
       this.imageCache.set(url, response);
       return true;
     } catch (e) {
       hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'image proxy failed: %{public}s',
         e instanceof Error ? e.message : String(e));
-      this.imageCache.set(url, this.blockedResponse());
+      if (this.isCurrentLoad(revision, app)) this.imageCache.set(url, this.blockedResponse());
       return false;
     }
   }
@@ -635,9 +713,23 @@ struct MiniAppRunnerPage {
       })
       .onPageEnd((): void => {
         // 页面加载完成;此后 runJavaScript 才安全(emitEvent 由桥接实例驱动)
-        this.prefetchImagesAndReload();
+        if (!this.alive) return;
+        this.pageReady = true;
+        const waiting: boolean = this.prefetchImagesAndReload();
+        if (!waiting && this.prefetchRefreshPending) {
+          this.prefetchRefreshPending = false;
+          this.pageReady = false;
+          this.motion.cancel(false);
+          this.controller.refresh();
+        } else if (!waiting) {
+          this.resumeReveal();
+        }
       })
       .onErrorReceive((event: OnErrorReceiveEvent): void => {
+        if (!this.alive) return;
+        this.motion.cancel(false);
+        this.pageReady = false;
+        this.prefetchRefreshPending = false;
         const message: string = event.error !== null && event.error !== undefined
           ? String(event.error) : '小应用加载失败';
         this.state = { kind: 'error', message: message, app: this.state.app };
@@ -655,6 +747,9 @@ struct MiniAppRunnerPage {
         if (cached !== undefined) return cached;
         // 未预取(未授权/失败/首轮加载)→ 空响应;refresh 后命中缓存
         return this.blockedResponse();
+      })
+      .onTouch((event: TouchEvent): void => {
+        if (event.type === TouchType.Down) this.motion.cancel(true);
       })
       .width('100%')
       .layoutWeight(1)

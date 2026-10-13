@@ -7,6 +7,7 @@ import { ACCENT, INK3, LABEL, SURFACE2 } from '../design/tokens.ets';
 import { DotGround } from './ui/DotMatrix.ets';
 import { DotLoading } from './ui/DotLoading.ets';
 import { activateArtifactInteraction, clearArtifactInteraction } from '../platform_impl/ArtifactInteraction.ets';
+import { UIGenerationMotion } from '../platform_impl/UIGenerationMotion.ets';
 
 const MAX_VALIDATION_SVG_CHARS: number = 120000;
 
@@ -39,12 +40,15 @@ export struct VisualArtifactPreview {
   @StorageProp('darkMode') @Watch('requestRender') darkMode: boolean = false;
   @StorageProp('accentColor') accent: string = ACCENT;
   @StorageProp('appBackgrounded') @Watch('updateActivity') backgrounded: boolean = false;
+  @StorageProp('reduceMotion') @Watch('motionPreferenceChanged') reduceMotion: boolean = false;
   @StorageLink('activeArtifactInteraction') @Watch('syncInteraction') activeInteraction: string = '';
   @Prop @Watch('requestRender') html: string = '';
   @Prop @Watch('requestRender') renderer: string = 'html';
   @Prop @Watch('requestRender') scene: ThreeSceneSpec | null = null;
   @Prop @Watch('requestRender') complete: boolean = false;
   @Prop @Watch('requestRender') strictSvg: boolean = false;
+  @Prop @Watch('requestReveal') revealKey: string = '';
+  @Prop @Watch('requestReveal') revealEligible: boolean = false;
   onContentGrow: () => void = (): void => {};
   onValidation: (ok: boolean, error: string, canonicalSvg: string) => void =
     (_ok: boolean, _error: string, _canonicalSvg: string): void => {};
@@ -54,6 +58,8 @@ export struct VisualArtifactPreview {
   @State interactiveReady: boolean = false;
   @State expanded: boolean = false;
   private controller: webview.WebviewController = new webview.WebviewController();
+  private motion: UIGenerationMotion = new UIGenerationMotion(this.controller);
+  private renderedRevision: number = -1;
   private attached: boolean = false;
   private alive: boolean = false;
   private visible: boolean = true;
@@ -76,6 +82,8 @@ export struct VisualArtifactPreview {
   }
 
   private detachHost(releaseProxy: boolean = false): void {
+    this.motion.cancel();
+    this.renderedRevision = -1;
     if (this.attached) {
       this.controller.runJavaScript('window.AmberVisual.dispose()').catch((): void => {});
       if (releaseProxy) this.controller.deleteJavaScriptRegister('AmberVisualHost');
@@ -108,6 +116,7 @@ export struct VisualArtifactPreview {
   }
 
   private requestRender(): void {
+    this.motion.cancel();
     const nextHost: string = this.hostKind();
     if (this.mountedHost.length > 0 && this.mountedHost !== nextHost) {
       this.detachHost();
@@ -158,11 +167,26 @@ export struct VisualArtifactPreview {
   }
 
   private updateActivity(): void {
+    if (!this.visible || this.backgrounded) this.motion.cancel();
     if (!this.visible || this.backgrounded) clearArtifactInteraction(this.interactionOwner);
     if (!this.alive || !this.attached) return;
     this.controller.runJavaScript(`window.AmberVisual.setActive(${this.visible && !this.backgrounded})`)
       .catch((): void => {});
     if (this.visible && !this.backgrounded) this.requestRender();
+  }
+
+  private motionPreferenceChanged(): void {
+    if (this.reduceMotion) this.motion.cancel(true);
+    this.requestReveal();
+  }
+
+  private requestReveal(): void {
+    if (!this.alive || !this.attached || !this.visible || this.backgrounded || !this.hasContent ||
+      this.renderError.length > 0 || this.renderedRevision !== this.revision ||
+      !this.complete || this.renderer === 'threejs') return;
+    // The compact preview clips at 280vp; do not draw a full-document overlay behind that clip.
+    this.motion.play(this.revealKey, this.revealEligible && this.revealKey.length > 0,
+      this.reduceMotion || this.renderedHeight > 280, true);
   }
 
   private hostMessage(raw: string): void {
@@ -171,6 +195,7 @@ export struct VisualArtifactPreview {
       const info: VisualRenderInfo = JSON.parse(raw) as VisualRenderInfo;
       if (info.revision !== this.revision) return;
       this.renderError = info.ok ? '' : info.error;
+      this.renderedRevision = info.revision;
       this.hasContent = info.content;
       this.interactiveReady = this.renderer === 'threejs' && info.ok;
       if (!this.interactiveReady && this.isInteracting()) clearArtifactInteraction(this.interactionOwner);
@@ -194,6 +219,7 @@ export struct VisualArtifactPreview {
           this.onContentGrow();
         }
       }
+      this.requestReveal();
     } catch (_) { this.renderError = '预览状态无法读取'; }
   }
 
@@ -230,6 +256,8 @@ export struct VisualArtifactPreview {
               this.updateActivity();
             })
             .onErrorReceive((event: OnErrorReceiveEvent): void => {
+              this.motion.cancel();
+              this.renderedRevision = -1;
               const message: string = event.error !== null && event.error !== undefined
                 ? String(event.error) : '预览宿主加载失败';
               this.attached = false;
@@ -286,6 +314,9 @@ export struct VisualArtifactPreview {
       }
     }
     .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').clip(true)
+    .onTouch((event: TouchEvent): void => {
+      if (event.type === TouchType.Down) this.motion.cancel(true);
+    })
     .onAreaChange((_old: Area, area: Area): void => {
       // Keep the exit strip inside the focused area so outside-touch reset cannot re-arm its toggle.
       this.canvasArea = area;

@@ -19,6 +19,7 @@ import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import { MiniAppBridgeImpl } from '../platform_impl/MiniAppBridgeImpl.ets';
 import type { MiniAppBridgeHost, MiniAppThemeJson } from '../platform_impl/MiniAppBridgeImpl.ets';
 import { activateArtifactInteraction, clearArtifactInteraction } from '../platform_impl/ArtifactInteraction.ets';
+import { UIGenerationMotion } from '../platform_impl/UIGenerationMotion.ets';
 
 const HILOG_DOMAIN: number = 0x0001;
 const HILOG_TAG: string = 'MiniApp.Inline';
@@ -77,11 +78,13 @@ const extractHttpsImageUrls = (html: string): string[] => {
 export struct InlineMiniAppRuntime {
   @StorageProp('themeEpoch') themeEpoch: number = 0;
   @StorageProp('darkMode') darkMode: boolean = false;
+  @StorageProp('reduceMotion') @Watch('motionPolicyChanged') reduceMotion: boolean = false;
   @StorageProp('appBackgrounded') @Watch('updateActivity') backgrounded: boolean = false;
   @StorageLink('activeArtifactInteraction') @Watch('onArtifactInteractionChanged')
   activeArtifactInteraction: string = '';
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop @Watch('onAppChanged') app: MiniAppRecord | null = null;
+  @Prop @Watch('onRevealEligibilityChanged') revealEligible: boolean = false;
   @Prop complete: boolean = false;
   onContentGrow: () => void = (): void => {};
   @State expanded: boolean = false;
@@ -92,6 +95,7 @@ export struct InlineMiniAppRuntime {
   private platform: MiniAppPlatform | null = null;
   private bridge: MiniAppBridgeImpl | null = null;
   private controller: webview.WebviewController = new webview.WebviewController();
+  private motion: UIGenerationMotion = new UIGenerationMotion(this.controller);
   private sessionToken: string = '';
   private imageCache: Map<string, WebResourceResponse> = new Map<string, WebResourceResponse>();
   private imageGuard: MiniAppUrlGuard = new MiniAppUrlGuard(dnsResolveHost);
@@ -103,6 +107,8 @@ export struct InlineMiniAppRuntime {
   private activePageRevision: number = 0;
   private visible: boolean = true;
   private lastVisibility: boolean | null = null;
+  private prefetchFinished: boolean = false;
+  private prefetchRefreshPending: boolean = false;
   private interactionOwner: string = util.generateRandomUUID(false);
   private interactionArea: Area | null = null;
 
@@ -113,6 +119,7 @@ export struct InlineMiniAppRuntime {
 
   aboutToDisappear(): void {
     this.clearOwnInteraction();
+    this.motion.cancel(false);
     this.emitVisibility(false);
     this.alive = false;
     this.runtimeRevision++;
@@ -126,6 +133,7 @@ export struct InlineMiniAppRuntime {
     const app: MiniAppRecord | null = this.app;
     if (app === null) {
       this.clearOwnInteraction();
+      this.motion.cancel(false);
       this.runtimeRevision++;
       this.closeBridge();
       this.imageCache.clear();
@@ -141,6 +149,7 @@ export struct InlineMiniAppRuntime {
     const revision: number = ++this.runtimeRevision;
     this.activeRevision = revision;
     this.clearOwnInteraction();
+    this.motion.cancel(false);
     this.closeBridge();
     this.sessionToken = '';
     this.errorMessage = '';
@@ -149,6 +158,8 @@ export struct InlineMiniAppRuntime {
     this.mountedAppVersion = app.version;
     this.imageCache.clear();
     this.prefetchStarted = false;
+    this.prefetchFinished = false;
+    this.prefetchRefreshPending = false;
     getMiniAppPlatform().then((platform: MiniAppPlatform): void => {
       if (!this.isCurrent(revision, app)) return;
       this.platform = platform;
@@ -193,6 +204,19 @@ export struct InlineMiniAppRuntime {
     this.syncCanvasInteraction();
   }
 
+  private onRevealEligibilityChanged(): void {
+    if (this.revealEligible) this.playRevealIfReady();
+  }
+
+  private motionPolicyChanged(): void {
+    if (this.reduceMotion) {
+      this.motion.cancel(true);
+    } else {
+      this.playRevealIfReady();
+    }
+    this.updateActivity();
+  }
+
   private onInteractionMessage(raw: string): void {
     if (!this.alive || !this.ready || !this.isActive() || raw.length === 0 || raw.length > 1024) return;
     try {
@@ -216,6 +240,7 @@ export struct InlineMiniAppRuntime {
   }
 
   private onWebTouch(event: TouchEvent): void {
+    if (event.type === TouchType.Down) this.motion.cancel(true);
     // A cancelled native stream means the parent chat has taken the gesture.
     if (event.type === TouchType.Cancel && this.isCanvasInteractionActive()) {
       this.clearOwnInteraction();
@@ -278,15 +303,19 @@ export struct InlineMiniAppRuntime {
       'text/html', 'utf-8', MINI_APP_SHELL_BASE_URL);
   }
 
-  private prefetchImagesAndReload(): void {
+  private prefetchImagesAndReload(): boolean {
     const app: MiniAppRecord | null = this.app;
     const platform: MiniAppPlatform | null = this.platform;
     const revision: number = this.activePageRevision;
-    if (app === null || platform === null || !this.isActive() ||
-      revision !== this.activeRevision || this.prefetchStarted) return;
+    if (app === null || platform === null || revision !== this.activeRevision) return false;
+    if (this.prefetchStarted) return !this.prefetchFinished;
+    if (!this.isActive()) return true;
     this.prefetchStarted = true;
     const urls: string[] = extractHttpsImageUrls(app.htmlContent);
-    if (urls.length === 0) return;
+    if (urls.length === 0) {
+      this.prefetchFinished = true;
+      return false;
+    }
     const budget: PrefetchBudget = { remainingBytes: PREFETCH_IMAGE_TOTAL_BYTES };
     const queue: string[] = [...urls];
     let fetched: number = 0;
@@ -309,20 +338,45 @@ export struct InlineMiniAppRuntime {
     const tasks: Promise<void>[] = [];
     for (let index: number = 0; index < PREFETCH_IMAGE_CONCURRENCY; index++) tasks.push(worker());
     Promise.all(tasks).then((): void => {
-      if (this.isActive() && this.isCurrent(revision, app) && fetched > 0) this.controller.refresh();
+      if (!this.isCurrent(revision, app)) return;
+      this.prefetchFinished = true;
+      if (fetched > 0) {
+        if (this.isActive()) {
+          this.ready = false;
+          this.motion.cancel(false);
+          this.controller.refresh();
+        }
+        else this.prefetchRefreshPending = true;
+      } else {
+        this.playRevealIfReady();
+      }
     }).catch((e: Error): void => {
       hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'inline image prefetch failed: %{public}s', e.message);
+      if (this.isCurrent(revision, app)) {
+        this.prefetchFinished = true;
+        this.playRevealIfReady();
+      }
     });
+    return true;
+  }
+
+  private playRevealIfReady(): void {
+    const app: MiniAppRecord | null = this.app;
+    if (app === null || !this.complete || !this.ready || !this.prefetchFinished ||
+      this.prefetchRefreshPending || !this.isActive() || this.activePageRevision !== this.activeRevision) {
+      return;
+    }
+    this.motion.play(`miniapp:${app.id}:${app.version}`, this.revealEligible, this.reduceMotion, false);
   }
 
   private async fetchAndCacheImage(
     url: string, used: UsedBytes, revision: number, app: MiniAppRecord): Promise<boolean> {
     const platform: MiniAppPlatform | null = this.platform;
-    if (platform === null || !this.isActive() || !this.isCurrent(revision, app)) return false;
+    if (platform === null || !this.isCurrent(revision, app)) return false;
     try {
       platform.sandboxFor(app.id, app.permissions).require('externalImages');
       const bytes: Uint8Array = await this.fetchImageBytes(url);
-      if (!this.isActive() || !this.isCurrent(revision, app)) return false;
+      if (!this.isCurrent(revision, app)) return false;
       used.bytes = bytes.byteLength;
       const response: WebResourceResponse = new WebResourceResponse();
       const buffer: ArrayBuffer = bytes.buffer.slice(
@@ -338,7 +392,7 @@ export struct InlineMiniAppRuntime {
     } catch (e) {
       hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'inline image blocked: %{public}s',
         e instanceof Error ? e.message : String(e));
-      if (this.isActive() && this.isCurrent(revision, app)) {
+      if (this.isCurrent(revision, app)) {
         this.imageCache.set(url, this.blockedResponse());
       }
       return false;
@@ -431,12 +485,23 @@ export struct InlineMiniAppRuntime {
       .onPageEnd((): void => {
         if (!this.alive || this.activePageRevision !== this.activeRevision) return;
         this.ready = true;
-        this.prefetchImagesAndReload();
+        const waiting: boolean = this.prefetchImagesAndReload();
+        if (!waiting && this.prefetchRefreshPending) {
+          this.prefetchRefreshPending = false;
+          this.ready = false;
+          this.motion.cancel(false);
+          this.controller.refresh();
+        } else if (!waiting) {
+          this.playRevealIfReady();
+        }
         this.updateActivity();
         this.syncCanvasInteraction();
       })
       .onErrorReceive((event: OnErrorReceiveEvent): void => {
         if (!this.alive || this.activePageRevision !== this.activeRevision) return;
+        this.motion.cancel(false);
+        this.ready = false;
+        this.prefetchRefreshPending = false;
         this.errorMessage = event.error !== null && event.error !== undefined
           ? String(event.error) : '小应用加载失败';
       })
@@ -477,6 +542,7 @@ export struct InlineMiniAppRuntime {
     if (app === null || !this.alive) return;
     if (!this.isActive()) {
       this.clearOwnInteraction();
+      this.motion.cancel(false);
       this.emitVisibility(false);
       this.closeBridge();
       return;
@@ -488,7 +554,17 @@ export struct InlineMiniAppRuntime {
       this.attachBridge(app);
     }
     if (this.bridge !== null && this.ready) this.emitVisibility(true);
-    if (this.prefetchStarted === false && this.ready) this.prefetchImagesAndReload();
+    if (this.ready) {
+      const waiting: boolean = this.prefetchImagesAndReload();
+      if (!waiting && this.prefetchRefreshPending) {
+        this.prefetchRefreshPending = false;
+        this.ready = false;
+        this.motion.cancel(false);
+        this.controller.refresh();
+      } else if (!waiting) {
+        this.playRevealIfReady();
+      }
+    }
   }
 
   build(): void {

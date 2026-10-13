@@ -11,6 +11,8 @@ export struct GenerativeWidgetCard {
   @StorageProp('themeEpoch') themeEpoch: number = 0;
   @StorageProp('accentColor') accent: string = ACCENT;
   @Prop widget: GenerativeWidget;
+  @Prop revealKey: string = '';
+  @Prop revealEligible: boolean = false;
   onAction: (prompt: string) => void = (_prompt: string): void => {};
   onContentGrow: () => void = (): void => {};
 
@@ -28,6 +30,7 @@ export struct GenerativeWidgetCard {
       .width('100%').padding({ left: 12, right: 12, top: 10 })
       VisualArtifactPreview({ html: this.widget.html, renderer: this.widget.renderer,
         scene: this.widget.scene ?? null, complete: this.widget.complete,
+        revealKey: this.revealKey, revealEligible: this.revealEligible,
         onContentGrow: (): void => { this.onContentGrow(); } })
       if (this.widget.notice.length > 0) {
         Text(this.widget.notice)

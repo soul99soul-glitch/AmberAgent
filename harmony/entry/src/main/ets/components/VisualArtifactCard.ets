@@ -9,6 +9,8 @@ export struct VisualArtifactCard {
   @StorageProp('accentColor') accent: string = ACCENT;
   @Prop @Watch('onArtifactChanged') artifact: VisualArtifact;
   @Prop streaming: boolean = false;
+  @Prop revealKey: string = '';
+  @Prop revealEligible: boolean = false;
   onContentGrow: () => void = (): void => {};
   onArtifactArea: (id: string, area: Area) => void = (_id: string, _area: Area): void => {};
   onValidation: (snapshot: string, ok: boolean, error: string) => void =
@@ -39,6 +41,7 @@ export struct VisualArtifactCard {
           VisualArtifactPreview({ html: this.artifact.snapshot ?? '',
             renderer: this.artifact.type === 'three' ? 'threejs' : 'svg',
             scene: this.artifact.scene, complete: this.artifact.closed && this.artifact.status === 'ready',
+            revealKey: this.revealKey, revealEligible: this.revealEligible,
             strictSvg: this.artifact.type === 'svg',
             onContentGrow: (): void => { this.onContentGrow(); },
             onValidation: (ok: boolean, error: string): void => {
