@@ -441,6 +441,7 @@ export type { StudyProgress } from './chat/smart_ui/study.ts';
 export {
   emptyStudyProgress, gradedItemCount, hasGradedItems, chooseStudyOption, revealStudyAnswer,
   nextStudy, previousStudy, restartStudy, parseStudyProgress, serializeStudyProgress,
+  shouldAdoptStudyProgress, studyProgressFrom,
 } from './chat/smart_ui/study.ts';
 export {
   smartUiContinuationSnapshot, appendSmartUiContinuation, isExplicitSmartUiContinuation,

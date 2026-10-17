@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   chooseStudyOption, emptyStudyProgress, gradedItemCount, hasGradedItems,
   nextStudy, parseStudyProgress, previousStudy, restartStudy, revealStudyAnswer,
-  serializeStudyProgress,
+  serializeStudyProgress, shouldAdoptStudyProgress, studyProgressFrom,
 } from '../main/ets/chat/smart_ui/study.ts';
 import type { SmartUiStudyItem } from '../main/ets/chat/smart_ui/components.ts';
 
@@ -52,4 +52,15 @@ test('flashcard reveal and restart are explicit and progress round-trips', () =>
   assert.equal(parseStudyProgress('', items.length), null);
   assert.equal(parseStudyProgress('{"i":9,"r":"---"}', items.length), null);
   assert.equal(parseStudyProgress('not json', items.length), null);
+});
+
+test('fresh empty state and explicit reset are adopted; matching snapshot is not re-read', () => {
+  assert.equal(shouldAdoptStudyProgress('', '', 3, 0), true, 'fresh mount must size r even when raw is empty');
+  assert.equal(shouldAdoptStudyProgress('', '', 0, 0), false);
+  assert.equal(shouldAdoptStudyProgress('', '{"i":0}', 3, 3), true, 'reset to empty must be adopted');
+  assert.equal(shouldAdoptStudyProgress('{"i":0}', '{"i":0}', 3, 3), false);
+  assert.equal(studyProgressFrom('', 3).r, '---');
+  assert.equal(studyProgressFrom('not json', 2).r, '--');
+  assert.equal(parseStudyProgress('{"i":0,"r":"---","finished":true}', 3)?.finished, false,
+    'finished is only valid on the terminal item');
 });

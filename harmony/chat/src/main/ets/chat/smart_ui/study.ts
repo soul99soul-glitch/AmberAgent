@@ -101,7 +101,7 @@ export const parseStudyProgress = (raw: string, count: number): StudyProgress | 
       i: index, score: scoreOf(results),
       selected: typeof parsed.selected === 'string' ? parsed.selected : '',
       answered: answeredAt(results, index),
-      finished: parsed.finished === true,
+      finished: parsed.finished === true && index === count - 1,
       r: results,
     };
   } catch {
@@ -110,3 +110,12 @@ export const parseStudyProgress = (raw: string, count: number): StudyProgress | 
 };
 
 export const serializeStudyProgress = (progress: StudyProgress): string => JSON.stringify(progress);
+
+// Component adoption contract: a fresh empty state (lastPersisted='') must still size r;
+// a genuine reset (raw='' after a non-empty write) must also be adopted.
+export const shouldAdoptStudyProgress = (
+  raw: string, lastPersisted: string, count: number, currentResultsLength: number,
+): boolean => raw !== lastPersisted || currentResultsLength !== count;
+
+export const studyProgressFrom = (raw: string, count: number): StudyProgress =>
+  parseStudyProgress(raw, count) ?? emptyStudyProgress(count);

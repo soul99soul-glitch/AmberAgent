@@ -4,8 +4,8 @@ import type {
 } from '@amber/chat-domain';
 import {
   chooseStudyOption, emptyStudyProgress, gradedItemCount, hasGradedItems,
-  nextStudy, parseStudyProgress, previousStudy, restartStudy, revealStudyAnswer,
-  serializeStudyProgress,
+  nextStudy, previousStudy, restartStudy, revealStudyAnswer,
+  serializeStudyProgress, shouldAdoptStudyProgress, studyProgressFrom,
 } from '@amber/chat-domain';
 import { ACCENT, ERROR, INK, INK3, SURFACE2, SUCCESS_FG, accentSoftBg } from '../design/tokens.ets';
 import { FONT_SANS, FONT_MONO } from '../design/fonts.ets';
@@ -35,14 +35,14 @@ export struct NativeSmartUiStudy {
   private isQuiz(): boolean { return (this.item()?.options?.length ?? 0) > 0; }
   private hasQuiz(): boolean { return hasGradedItems(this.items()); }
   private graded(): number { return gradedItemCount(this.items()); }
+  private displayScore(): number { return Math.min(this.progress.score, this.graded()); }
   private textSize(base: number): number { return Math.max(10, base * this.fontSize / 16); }
 
   private restore(): void {
     const raw: string = smartUiString(this.values, this.node.state);
-    if (raw === this.lastPersisted) return;
+    if (!shouldAdoptStudyProgress(raw, this.lastPersisted, this.items().length, this.progress.r.length)) return;
     this.lastPersisted = raw;
-    const parsed: StudyProgress | null = parseStudyProgress(raw, this.items().length);
-    this.progress = parsed !== null ? parsed : emptyStudyProgress(this.items().length);
+    this.progress = studyProgressFrom(raw, this.items().length);
   }
 
   private persist(): void {
@@ -87,7 +87,7 @@ export struct NativeSmartUiStudy {
       Text(`${Math.min(this.progress.i + 1, this.items().length)} / ${this.items().length}`)
         .fontSize(this.textSize(12)).fontFamily(FONT_MONO).fontColor(this.secondaryInk);
       if (this.hasQuiz()) {
-        Text(`得分 ${this.progress.score} / ${this.graded()}`).fontSize(this.textSize(12)).fontFamily(FONT_MONO)
+        Text(`得分 ${this.displayScore()} / ${this.graded()}`).fontSize(this.textSize(12)).fontFamily(FONT_MONO)
           .fontColor(this.accent).margin({ left: 10 });
       }
     }.width('100%');
@@ -142,9 +142,9 @@ export struct NativeSmartUiStudy {
   @Builder
   private Result(): void {
     Column({ space: 8 }) {
-      Text(this.hasQuiz() ? `本轮 ${this.graded()} 题，答对 ${this.progress.score} 题` : '本轮翻卡已看完')
+      Text(this.hasQuiz() ? `本轮 ${this.graded()} 题，答对 ${this.displayScore()} 题` : '本轮翻卡已看完')
         .width('100%').fontSize(this.textSize(18)).fontFamily(this.fontFamily).fontColor(this.ink);
-      Text(!this.hasQuiz() ? '可以重新练习再看一遍。' : this.progress.score === this.graded()
+      Text(!this.hasQuiz() ? '可以重新练习再看一遍。' : this.displayScore() === this.graded()
         ? '全部答对，可以重新练习巩固。' : '错题会在重新练习时再次出现。')
         .width('100%').fontSize(this.textSize(13)).fontColor(this.secondaryInk).lineHeight(this.textSize(19));
       Text('重新练习').fontSize(this.textSize(13)).fontColor(this.accent).width('100%').height(44)
