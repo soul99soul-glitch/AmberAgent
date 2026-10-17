@@ -82,3 +82,33 @@ test('actual boundText refuses ambiguous duplicate projection refs', () => {
   assert.equal(instance.boundText(), '温度：数据不可用');
 });
 
+
+test('completion reveal commits one deferred start frame and stays off for history and reduced motion', async () => {
+  const extracted = ts.transpileModule(
+    `class Model { ${method(card, 'onReadyChanged')} } return Model;`,
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
+  ).outputText;
+  const Model = new Function('Curve', extracted)({ EaseOut: 0 });
+  const calls = [];
+  const make = overrides => Object.assign(new Model(), {
+    previousReady: false, ready: true, reduceMotion: false,
+    revealOpacity: 1, revealScale: 1, revealTimer: -1, alive: true,
+    getUIContext: () => ({ animateTo: (options, callback) => { calls.push(options); callback(); } }),
+    ...overrides,
+  });
+  const live = make();
+  live.onReadyChanged();
+  assert.equal(calls.length, 0, 'start frame must be committed before animateTo');
+  assert.equal(live.revealOpacity, 0.88);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].duration, 240);
+  const history = make({ previousReady: true });
+  history.onReadyChanged();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(calls.length, 1, 'already-ready history must not replay');
+  const reduced = make({ reduceMotion: true });
+  reduced.onReadyChanged();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(calls.length, 1, 'reduced motion must not animate');
+});

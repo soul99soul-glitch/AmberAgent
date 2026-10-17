@@ -31,8 +31,9 @@ export struct NativeSmartUiCard {
   @Prop @Watch('onInitialValuesChanged') initialValues: SmartUiStateValue[] = [];
   @Prop @Watch('onSourceKeyChanged') sourceKey: string = '';
   @Prop @Watch('onAccessorChanged') stateAccessor: SmartUiStateAccessor = EMPTY_ACCESSOR;
-  @Prop ready: boolean = false;
+  @Prop @Watch('onReadyChanged') ready: boolean = false;
   @Prop streaming: boolean = false;
+  @StorageProp('reduceMotion') reduceMotion: boolean = false;
   @Prop @Watch('onProjectionsChanged') projections: SmartUiWeatherProjection[] = [];
   @Prop fontSize: number = 16;
   @Prop fontFamily: string = FONT_SANS;
@@ -44,11 +45,44 @@ export struct NativeSmartUiCard {
   @State values: SmartUiStateValue[] = [];
   @State invalidStateIds: string[] = [];
   @State stateDiagnostics: string[] = [];
+  @State private revealOpacity: number = 1;
+  @State private revealScale: number = 1;
   private controller: SmartUiController = EMPTY_CONTROLLER;
+  private previousReady: boolean = false;
+  private revealTimer: number = -1;
+  private alive: boolean = true;
 
   aboutToAppear(): void {
+    this.alive = true;
     this.controller = createSmartUiController(this.stateAccessor);
+    this.previousReady = this.ready;
     this.reconcile(this.values);
+  }
+
+  aboutToDisappear(): void {
+    this.alive = false;
+    if (this.revealTimer >= 0) {
+      clearTimeout(this.revealTimer);
+      this.revealTimer = -1;
+    }
+  }
+
+  private onReadyChanged(): void {
+    if (!this.previousReady && this.ready && !this.reduceMotion) {
+      if (this.revealTimer >= 0) clearTimeout(this.revealTimer);
+      this.revealOpacity = 0.88;
+      this.revealScale = 0.992;
+      // Commit the start frame for one render turn before animating (repo motion idiom).
+      this.revealTimer = setTimeout((): void => {
+        this.revealTimer = -1;
+        if (!this.alive) return;
+        this.getUIContext().animateTo({ duration: 240, curve: Curve.EaseOut }, (): void => {
+          this.revealOpacity = 1;
+          this.revealScale = 1;
+        });
+      }, 16);
+    }
+    this.previousReady = this.ready;
   }
 
   private reconcile(currentValues: SmartUiStateValue[]): void {
@@ -200,7 +234,8 @@ export struct NativeSmartUiCard {
     Column({ space: 12 }) {
       ForEach([this.themeEpoch], (_epoch: number): void => { this.Content(); }, (epoch: number): string => String(epoch));
     }
-    .opacity(this.themeEpoch >= 0 ? 1 : 1)
+    .opacity(this.revealOpacity)
+    .scale({ x: this.revealScale, y: this.revealScale })
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
     .backgroundColor(SURFACE)
