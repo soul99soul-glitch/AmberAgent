@@ -30,6 +30,9 @@ import {
   parseProviderSettingList,
 } from '../main/ets/chat/provider_settings_serialize.ts';
 import { createMemoryKeyValueStore, saveProviders, loadProviders } from '../main/ets/chat/kv_store.ts';
+import { makeChatModel, makeTextGenerationParams } from '../main/ets/chat/provider_model.ts';
+import { buildChatCompletionRequest } from '../main/ets/chat/openai_request.ts';
+import { makeUserMessage } from '../main/ets/chat/message.ts';
 
 const FIXED_ID = '11111111-2222-3333-4444-555555555555';
 
@@ -126,6 +129,38 @@ test('hasUsableAuth 矩阵(ProviderSetting.kt:389-408)', () => {
   })), false);
   assert.equal(hasUsableAuth(makeProviderSettingClaude({ apiKey: 'k' })), true);
   assert.equal(hasUsableAuth(makeProviderSettingClaude({ apiKey: '' })), false);
+});
+
+test('旧版 deepseek-flash 空 abilities 恢复 reasoning，AUTO 请求带 thinking', () => {
+  const raw = JSON.stringify({
+    type: 'openai', id: 'p1', models: [{
+      modelId: 'deepseek-flash', displayName: 'DeepSeek Flash', type: 'CHAT',
+      inputModalities: ['TEXT'], outputModalities: ['TEXT'], abilities: [], tools: [],
+    }],
+  });
+  const parsed = parseProviderSetting(raw);
+  assert.deepEqual(parsed.models[0].abilities, ['tool', 'reasoning']);
+  const req = buildChatCompletionRequest({
+    messages: [makeUserMessage('hi')],
+    params: makeTextGenerationParams({
+      model: makeChatModel({ modelId: 'deepseek-flash', abilities: parsed.models[0].abilities }),
+      reasoningLevel: 'auto',
+    }),
+    setting: makeProviderSettingOpenAIVariant({ baseUrl: 'https://api.deepseek.com/v1', brand: 'deepseek' }),
+    stream: true,
+  });
+  assert.deepEqual(req['thinking'], { type: 'enabled' });
+  assert.equal(req['reasoning_effort'], undefined);
+});
+
+test('空 abilities + 显式关闭工具：保留 reasoning 但不恢复 tool', () => {
+  const raw = JSON.stringify({ type: 'openai', models: [
+    { id: 'generic', modelId: 'mimo-v2.6-flash', type: 'CHAT', abilities: [], toolCallingDisabled: true },
+    { id: 'deepseek', modelId: 'deepseek-flash', type: 'CHAT', abilities: [], toolCallingDisabled: true },
+  ] });
+  const parsed = parseProviderSetting(raw);
+  assert.deepEqual(parsed.models[0].abilities, []);
+  assert.deepEqual(parsed.models[1].abilities, ['reasoning']);
 });
 
 test('list + KV 存取;未知鉴别名抛错', async () => {

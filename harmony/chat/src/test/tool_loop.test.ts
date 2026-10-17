@@ -5,7 +5,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   runChatTurnWithTools, runToolLoopContinuation, runAgenticToolLoop,
-  runRegenerateAtWithTools,
+  runRegenerateAtWithTools, MAX_AGENT_TOOL_LOOP_STEPS,
+  AGENT_TOOL_LOOP_STEP_OPTIONS, normalizeAgentToolLoopSteps,
 } from '../main/ets/chat/tool_loop.ts';
 import type { ToolLoopOptions } from '../main/ets/chat/tool_loop.ts';
 import { createMemoryConversationStore } from '../main/ets/chat/chat_turn.ts';
@@ -416,6 +417,19 @@ describe('R08 空 toolCallId 写回按 part 身份', () => {
 });
 
 describe('预算与步数', () => {
+  it('生产设置按 128..8192 向上取档，旧值不缩水', () => {
+    assert.equal(MAX_AGENT_TOOL_LOOP_STEPS, 8192);
+    assert.deepEqual(AGENT_TOOL_LOOP_STEP_OPTIONS, [128, 256, 512, 2048, 8192]);
+    assert.equal(normalizeAgentToolLoopSteps(1), 128);
+    assert.equal(normalizeAgentToolLoopSteps(64), 128);
+    assert.equal(normalizeAgentToolLoopSteps(128), 128);
+    assert.equal(normalizeAgentToolLoopSteps(300), 512);
+    assert.equal(normalizeAgentToolLoopSteps(1000), 2048);
+    assert.equal(normalizeAgentToolLoopSteps(4096), 8192);
+    assert.equal(normalizeAgentToolLoopSteps(9000), 8192);
+    assert.equal(normalizeAgentToolLoopSteps(Number.NaN), 256);
+  });
+
   it('main public path clamps maxSteps 1 to 16 observable provider calls', async () => {
     const conv: Conversation = makeConversation('c1', []);
     const script: MessageChunk[][] = [];

@@ -18,6 +18,7 @@ import {
 } from './provider_settings.ts';
 import type { CustomHeader } from './assistant.ts';
 import type { CustomBody, ModelAbility, OpenAIAuthMode, OpenAIBrand } from './provider_model.ts';
+import { defaultModelAbilities } from './provider_model.ts';
 
 // ===== 枚举映射 =====
 
@@ -118,13 +119,21 @@ const parseModel = (v: JsonValue): ProviderModel => {
   const o = isObj(v) ? v : {};
   const overwriteRaw = o['providerOverwrite'];
   const type: ModelType = modelTypeFromWire(strOr(o, 'type', 'CHAT'));
-  const abilities: ModelAbility[] = arrOf(o, 'abilities').map(
+  const modelId: string = strOr(o, 'modelId', '');
+  const rawAbilities: ModelAbility[] = arrOf(o, 'abilities').map(
     (v): ModelAbility => abilityFromWire(typeof v === 'string' ? v : ''));
-  if (type === 'chat' && !boolOr(o, 'toolCallingDisabled', false) && !abilities.includes('tool')) {
+  // 旧版保存的空能力列表没有 reasoning 开关；已知别名（如 deepseek-flash）恢复默认能力，
+  // 避免 AUTO 档位因 abilities 为空而漏发 thinking。非空列表保持用户显式选择。
+  // toolCallingDisabled 是用户显式关闭工具的标记，默认能力恢复后仍要剥离 tool。
+  const toolDisabled: boolean = type === 'chat' && boolOr(o, 'toolCallingDisabled', false);
+  let abilities: ModelAbility[] = type === 'chat' && rawAbilities.length === 0
+    ? defaultModelAbilities(modelId) : rawAbilities;
+  if (toolDisabled) abilities = abilities.filter((a: ModelAbility): boolean => a !== 'tool');
+  if (type === 'chat' && !toolDisabled && !abilities.includes('tool')) {
     abilities.push('tool');
   }
   return makeProviderModel({
-    modelId: strOr(o, 'modelId', ''),
+    modelId,
     displayName: strOr(o, 'displayName', ''),
     id: strOr(o, 'id', ''),
     type,
@@ -247,7 +256,12 @@ const parseProviderSettingFromObject = (o: JsonObject): ProviderSetting => {
 };
 
 export const parseProviderSetting = (json: string): ProviderSetting => {
-  const parsed: unknown = JSON.parse(json);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (error) {
+    throw new Error(`invalid provider setting json: ${error instanceof Error ? error.message : String(error)}`);
+  }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('provider setting json is not an object');
   }
@@ -258,7 +272,12 @@ export const serializeProviderSettingList = (list: ProviderSetting[]): string =>
   `[${list.map(serializeProviderSetting).join(',')}]`;
 
 export const parseProviderSettingList = (json: string): ProviderSetting[] => {
-  const parsed: unknown = JSON.parse(json);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (error) {
+    throw new Error(`invalid providers json: ${error instanceof Error ? error.message : String(error)}`);
+  }
   if (!Array.isArray(parsed)) throw new Error('providers json is not an array');
   return parsed.map((v: JsonValue): ProviderSetting =>
     parseProviderSettingFromObject(isObj(v) ? v : {}));

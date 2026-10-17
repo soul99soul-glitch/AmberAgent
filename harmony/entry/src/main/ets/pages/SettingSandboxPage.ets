@@ -3,6 +3,7 @@
 // 2026-09-27 二级页 iOS 对齐(基准 IMG_1986「运行环境」):仅换视觉骨架
 // (CenteredTitleBar/PlainSection/CardGroup r18+描边/CardRow/CardToggleRow/FooterNote),逻辑零改动。
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
+import { AGENT_TOOL_LOOP_STEP_OPTIONS, normalizeAgentToolLoopSteps } from '@amber/chat-domain';
 import {
   loadAgentRuntimeSnapshot, updateSpeculativeToolExecution, updateAgentRuntimeExecution,
 } from '../platform_impl/AgentRuntimePrefs.ets';
@@ -25,7 +26,6 @@ import {
   FooterNote, BtnGhost, PageSpacer, Seg,
 } from '../components/PageTemplate.ets';
 
-const TOOL_LOOP_STEP_OPTIONS: number[] = [64, 128, 256, 384, 512];
 const RETRY_COUNT_OPTIONS: number[] = [1, 2, 3, 5];
 const PREVIEW_MODE_OPTIONS: AgentOperationPreviewMode[] = ['always', 'auto', 'hidden'];
 const PREVIEW_MODE_LABELS: string[] = ['常驻', '自动', '隐藏'];
@@ -300,9 +300,9 @@ struct SettingSandboxPage {
         (idx: number): void => { this.setPreviewMode(PREVIEW_MODE_OPTIONS[idx]); })
       this.CardHairline()
       this.SegRow('工具循环上限', '单次回复最多调用多少轮工具。',
-        this.numericLabels(TOOL_LOOP_STEP_OPTIONS, '步'),
-        this.optionIndex(TOOL_LOOP_STEP_OPTIONS, coerceIn(this.snap.maxToolLoopSteps, 16, 512)),
-        (idx: number): void => { this.setToolLoopSteps(TOOL_LOOP_STEP_OPTIONS[idx]); })
+        AGENT_TOOL_LOOP_STEP_OPTIONS.map((value: number): string => String(value)),
+        this.optionIndex(AGENT_TOOL_LOOP_STEP_OPTIONS, normalizeAgentToolLoopSteps(this.snap.maxToolLoopSteps)),
+        (idx: number): void => { this.setToolLoopSteps(AGENT_TOOL_LOOP_STEP_OPTIONS[idx]); })
     }
   }
 

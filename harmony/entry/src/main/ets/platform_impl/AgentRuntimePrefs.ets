@@ -8,7 +8,7 @@
 import { i18n } from '@kit.LocalizationKit';
 import { sharedKvMutex } from './AtomicJsonFile.ets';
 import type { KeyValueStore, MemoryRecallSetting, ReasoningLevel } from '@amber/chat-domain';
-import { DEFAULT_AUTO_MODEL_ID } from '@amber/chat-domain';
+import { DEFAULT_AUTO_MODEL_ID, DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS, normalizeAgentToolLoopSteps } from '@amber/chat-domain';
 import { DEFAULT_AGENT_SOUL_MARKDOWN, DEFAULT_MEMORY_RECALL_SETTING } from '@amber/chat-domain';
 
 export const AGENT_RUNTIME_KEY: string = 'agent_runtime';
@@ -82,8 +82,7 @@ export interface AgentRuntimeSnapshot {
   //   tool_loop speculativeRunner 门消费,tool_loop.ts:184-188)
   speculativeToolExecution: SpeculativeToolExecutionSnapshot;
   // D-115:PreferencesStore.kt:163(默认 DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS=256,
-  //   :268-270 界 16/512;ChatService.kt:1349-1352 coerceIn 消费
-  //   → tool_loop.ts:147-148 同位已忠实)
+  //   :268-270 界 16/8192;生产设置 normalize 128..8192,消费侧 tool_loop.ts:282-284 再夹紧)
   maxToolLoopSteps: number;
   // D-115:PreferencesStore.kt:181(GenerationRetrySetting() 默认 enabled=true/
   //   maxRetries=5 — GenerationRetry.kt:14-20);GenerationHandler.kt:357/475/621
@@ -209,7 +208,7 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
   autoApproveHighRiskToolCalls: false,
   speculativeToolExecution: { enabled: false, maxConcurrentTools: 4 },
   // :163 默认 256(DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS,:269)
-  maxToolLoopSteps: 256,
+  maxToolLoopSteps: DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS,
   // :181 → GenerationRetry.kt:14-20 默认 true/5
   generationRetry: { enabled: true, maxRetries: 5 },
 });
@@ -314,10 +313,9 @@ export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<Agent
             ? parsed.speculativeToolExecution.maxConcurrentTools : 4,
       },
       memoryWorker: parseMemoryWorker(parsed.memoryWorker),
-      // D-115:非 number → 默认 256(kotlinx 缺省语义);界外值原样持有,
-      //   消费侧 coerceIn(16,512)(ChatService.kt:1349-1352 → tool_loop 同位)
+      // D-115:非 number → 默认 256；生产设置按 128..8192 向上取档，避免旧值缩水。
       maxToolLoopSteps: typeof parsed.maxToolLoopSteps === 'number'
-        ? parsed.maxToolLoopSteps : 256,
+        ? normalizeAgentToolLoopSteps(parsed.maxToolLoopSteps) : DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS,
       // D-115::181 默认 true/5(仅显式 false 关;非 number → 5)
       generationRetry: {
         enabled: parsed.generationRetry?.enabled !== false,
@@ -601,7 +599,7 @@ export const updateAgentRuntimeExecution = (
     }
   }
   if (patch.maxToolLoopSteps !== undefined) {
-    root.maxToolLoopSteps = patch.maxToolLoopSteps;
+    root.maxToolLoopSteps = normalizeAgentToolLoopSteps(patch.maxToolLoopSteps);
   }
   if (patch.operationPreviewMode !== undefined) {
     root.operationPreviewMode = patch.operationPreviewMode;

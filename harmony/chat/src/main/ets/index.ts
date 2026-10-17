@@ -226,6 +226,7 @@ export {
 export type { ToolLoopOptions } from './chat/tool_loop.ts';
 export {
   MIN_AGENT_TOOL_LOOP_STEPS, MAX_AGENT_TOOL_LOOP_STEPS, DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS,
+  AGENT_TOOL_LOOP_STEP_OPTIONS, normalizeAgentToolLoopSteps,
   runAgenticToolLoop, runChatTurnWithTools, runToolLoopContinuation, runRegenerateAtWithTools,
 } from './chat/tool_loop.ts';
 export type { RegenerateSeed } from './chat/regenerate.ts';

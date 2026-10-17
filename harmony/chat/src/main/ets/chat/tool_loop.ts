@@ -8,8 +8,9 @@
 //   - resume 路径直接用 resumable 工具(:342-346)
 //   - executeBatch → 空 break;结果**写回同一 assistant 消息**(不发 TOOL 消息,
 //     :366-373)→ emit → steer 消息步间消费(:386-390)
-//   - maxSteps = maxToolLoopSteps coerceIn(16, 512)(ChatService:1349-1352,
-//     默认 DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS=256,PreferencesStore.kt:268-270)
+//   - maxSteps = maxToolLoopSteps coerceIn(16, 8192)(ChatService:1349-1352,
+//     默认 DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS=256,PreferencesStore.kt:268-270;
+//     生产设置由 normalizeAgentToolLoopSteps 收敛到 128..8192)
 // 偏差登记:
 //   - ToolExposureState 懒暴露与 SpeculativeToolRunner 已接线(D-062/D-063;
 //     toolsForStep/prefetchedTools 非空路径见下方实现)
@@ -129,9 +130,23 @@ import { executeRecipeBatch } from './recipe_loop.ts';
 
 // ===== maxSteps 常量(PreferencesStore.kt:268-270) =====
 
+// 内部硬下限保留 16：子代理/测试可直接用更小预算；设置页与生产配置只暴露 128+。
 export const MIN_AGENT_TOOL_LOOP_STEPS: number = 16;
-export const MAX_AGENT_TOOL_LOOP_STEPS: number = 512;
+export const MAX_AGENT_TOOL_LOOP_STEPS: number = 8192;
 export const DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS: number = 256;
+// 设置页档位：覆盖低/中/高，5 段在窄屏仍可读；保存值按向上取档迁移，避免缩减已有预算。
+// 偏差登记：Android 锚点仍为 512 / 64..512 档位；鸿蒙按 iOS 对齐到 8192 与 128..8192。
+export const AGENT_TOOL_LOOP_STEP_OPTIONS: number[] = [128, 256, 512, 2048, 8192];
+
+export const normalizeAgentToolLoopSteps = (value: number): number => {
+  if (!Number.isFinite(value)) return DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS;
+  const clamped: number = Math.min(
+    Math.max(Math.floor(value), AGENT_TOOL_LOOP_STEP_OPTIONS[0]), MAX_AGENT_TOOL_LOOP_STEPS);
+  for (const option of AGENT_TOOL_LOOP_STEP_OPTIONS) {
+    if (option >= clamped) return option;
+  }
+  return MAX_AGENT_TOOL_LOOP_STEPS;
+};
 
 // ===== ToolLoopOptions(ChatService:1330-1360 调用面) =====
 
@@ -145,7 +160,7 @@ export interface ToolLoopOptions {
   // Explicit page-launched package: execute/resume this part without requesting
   // model text, then return its persisted result or approval card.
   manualToolCallId?: string;
-  // ChatService:1349-1352 coerceIn(16,512);默认 256
+  // ChatService:1349-1352 coerceIn(16,8192);默认 256；生产设置走 normalizeAgentToolLoopSteps(128..8192)
   maxSteps?: number;
   // settings.agentRuntime.autoApproveAllToolCalls || conversation.autoApproveToolCalls
   autoApproveTools?: boolean;
@@ -255,7 +270,7 @@ const emitSnapshot = (conv: Conversation, deps: ChatTurnDeps, ctx: TransformerCo
 };
 
 // ===== 主循环(:161-391) =====
-// mainClamp=true preserves the existing main-agent 16..512 behavior. Subagent
+// mainClamp=true preserves the main-agent 16..8192 clamp. Subagent
 // invocation context selects the same core with the exact requested step budget.
 const runToolLoopCore = async (
   conversation: Conversation, deps: ChatTurnDeps, loop: ToolLoopOptions,
