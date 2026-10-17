@@ -94,7 +94,7 @@ test('rich task example advertised to the model uses the production protocol and
   assert.match(snapshot, /每月预算.*50/);
   assert.match(snapshot, /额外约束.*必须离线可用/);
   assert.match(snapshot, /选择存储方案/);
-  assert.equal(domain.SMART_UI_COMPONENT_KINDS.length, 80);
+  assert.equal(domain.SMART_UI_COMPONENT_KINDS.length, 81);
   for (const kind of domain.SMART_UI_COMPONENT_KINDS) {
     assert.ok(prompt.includes(kind), `${kind} must be discoverable in the same prompt`);
   }

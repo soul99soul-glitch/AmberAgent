@@ -433,9 +433,15 @@ export {
 } from './chat/smart_ui/components.ts';
 export type {
   SmartUiComponent, SmartUiComponentKind, SmartUiComponentRow, SmartUiComponentStyle,
+  SmartUiStudyItem, SmartUiStudyOption,
   SmartUiComponentTone, SmartUiComponentEmphasis, SmartUiComponentDensity,
   SmartUiComponentAlignment, SmartUiComponentSpace, SmartUiComponentCatalogEntry, SmartUiComponentFamily,
 } from './chat/smart_ui/components.ts';
+export type { StudyProgress } from './chat/smart_ui/study.ts';
+export {
+  emptyStudyProgress, gradedItemCount, hasGradedItems, chooseStudyOption, revealStudyAnswer,
+  nextStudy, previousStudy, restartStudy, parseStudyProgress, serializeStudyProgress,
+} from './chat/smart_ui/study.ts';
 export {
   smartUiContinuationSnapshot, appendSmartUiContinuation, isExplicitSmartUiContinuation,
   latestSmartUiContinuationSource, isSmartUiTaskState, smartUiContinuationDocumentForSource,

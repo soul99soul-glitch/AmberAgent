@@ -9,7 +9,7 @@ export const SMART_UI_COMPONENT_KINDS = [
   'singleChoice', 'multiChoice', 'segmented', 'picker', 'toggle', 'textField', 'textArea', 'numberField', 'slider', 'stepper', 'datePicker', 'timePicker', 'rating', 'colorChoice',
   'metric', 'metricGrid', 'table', 'list', 'comparison', 'timeline', 'steps', 'checklist', 'barChart', 'lineChart',
   'image', 'imageGrid', 'avatar', 'icon', 'linkCard', 'fileCard', 'codeBlock', 'diagram',
-  'goal', 'context', 'source', 'reason', 'tradeoff', 'result', 'assumptions', 'decisionSummary',
+  'goal', 'context', 'source', 'reason', 'tradeoff', 'result', 'assumptions', 'decisionSummary', 'study',
   'button', 'buttonGroup', 'submitButton', 'resetButton', 'disclosure', 'tabs', 'accordion', 'menu',
 ] as const;
 export type SmartUiComponentKind = typeof SMART_UI_COMPONENT_KINDS[number];
@@ -31,8 +31,24 @@ export interface SmartUiComponentStyle {
 export interface SmartUiComponentRow {
   label: string;
   value?: number;
+  // 数字输入状态 id；有值时优先读当前状态，实现输入→指标/图表联动。
+  valueFieldId?: string;
   detail?: string;
   cells?: string[];
+}
+
+export interface SmartUiStudyOption {
+  id: string;
+  label: string;
+}
+
+export interface SmartUiStudyItem {
+  id: string;
+  prompt: string;
+  answer: string;
+  detail?: string;
+  options?: SmartUiStudyOption[];
+  correctOptionId?: string;
 }
 
 export interface SmartUiComponent {
@@ -41,7 +57,10 @@ export interface SmartUiComponent {
   text?: string;
   items?: string[];
   rows?: SmartUiComponentRow[];
+  study?: SmartUiStudyItem[];
   value?: number;
+  // metric/progress/stepProgress 的数字状态 id；与 rows[].valueFieldId 同义。
+  valueFieldId?: string;
   min?: number;
   max?: number;
   step?: number;
@@ -56,8 +75,17 @@ export const cloneSmartUiComponent = (component: SmartUiComponent): SmartUiCompo
   kind: component.kind, title: component.title, text: component.text,
   items: component.items?.slice(),
   rows: component.rows?.map((row: SmartUiComponentRow): SmartUiComponentRow => ({
-    label: row.label, value: row.value, detail: row.detail, cells: row.cells?.slice(),
+    label: row.label, value: row.value, valueFieldId: row.valueFieldId,
+    detail: row.detail, cells: row.cells?.slice(),
   })),
+  study: component.study?.map((item: SmartUiStudyItem): SmartUiStudyItem => ({
+    id: item.id, prompt: item.prompt, answer: item.answer, detail: item.detail,
+    options: item.options?.map((option: SmartUiStudyOption): SmartUiStudyOption => ({
+      id: option.id, label: option.label,
+    })),
+    correctOptionId: item.correctOptionId,
+  })),
+  valueFieldId: component.valueFieldId,
   value: component.value, min: component.min, max: component.max, step: component.step,
   columns: component.columns, symbol: component.symbol, url: component.url,
   style: component.style === undefined ? undefined : {
@@ -99,6 +127,7 @@ export interface SmartUiComponentCatalogEntry {
 }
 
 const familyFor = (index: number): SmartUiComponentFamily => {
+  if (SMART_UI_COMPONENT_KINDS[index] === 'study') return 'task';
   if (index < 10) return 'layout';
   if (index < 22) return 'text';
   if (index < 32) return 'status';
@@ -251,6 +280,58 @@ const parseStyle = (value: JsonValue | undefined, errors: string[]): SmartUiComp
   return style;
 };
 
+const SMART_UI_FIELD_ID: RegExp = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
+
+const parseStudyItems = (value: JsonValue | undefined, errors: string[]): SmartUiStudyItem[] | undefined => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length < 1 || value.length > 40) {
+    errors.push('component.study 需要 1-40 个学习项目');
+    return undefined;
+  }
+  const items: SmartUiStudyItem[] = [];
+  for (const raw of value) {
+    if (!isObject(raw)) { errors.push('study 项目必须是对象'); continue; }
+    allowedKeys(raw, ['id', 'prompt', 'answer', 'detail', 'options', 'correctOptionId'], errors, 'study');
+    const id: string | undefined = boundedText(raw['id'], 48, 'study.id', errors);
+    const prompt: string | undefined = boundedText(raw['prompt'], 2000, 'study.prompt', errors);
+    const answer: string | undefined = boundedText(raw['answer'], 2000, 'study.answer', errors);
+    if (id === undefined || !SMART_UI_FIELD_ID.test(id)) { errors.push('study.id 必须是稳定 ASCII 标识'); continue; }
+    if (prompt === undefined || prompt.trim().length === 0) { errors.push('study.prompt 不能为空'); continue; }
+    if (answer === undefined || answer.trim().length === 0) { errors.push('study.answer 不能为空'); continue; }
+    const item: SmartUiStudyItem = { id, prompt, answer };
+    item.detail = boundedText(raw['detail'], 2000, 'study.detail', errors);
+    const rawOptions = raw['options'];
+    if (rawOptions !== undefined) {
+      if (!Array.isArray(rawOptions) || rawOptions.length < 2 || rawOptions.length > 8) {
+        errors.push('study.options 需要 2-8 个选项');
+      } else {
+        item.options = [];
+        for (const optionRaw of rawOptions) {
+          if (!isObject(optionRaw)) { errors.push('study.options 每项必须是对象'); continue; }
+          allowedKeys(optionRaw, ['id', 'label'], errors, 'study.options');
+          const optionId: string | undefined = boundedText(optionRaw['id'], 48, 'study.options.id', errors);
+          const label: string | undefined = boundedText(optionRaw['label'], 200, 'study.options.label', errors);
+          if (optionId === undefined || !SMART_UI_FIELD_ID.test(optionId)) { errors.push('study.options.id 必须是稳定 ASCII 标识'); continue; }
+          if (label === undefined || label.trim().length === 0) { errors.push('study.options.label 不能为空'); continue; }
+          item.options.push({ id: optionId, label });
+        }
+      }
+    }
+    if (item.options !== undefined && item.options.length > 0) {
+      const correct: string | undefined = boundedText(raw['correctOptionId'], 48, 'study.correctOptionId', errors);
+      if (correct === undefined || !item.options.some((option: SmartUiStudyOption): boolean => option.id === correct)) {
+        errors.push('study.correctOptionId 必须指向一个选项');
+      } else {
+        item.correctOptionId = correct;
+      }
+    } else if (raw['correctOptionId'] !== undefined) {
+      errors.push('无选项的学习项目不能声明 correctOptionId');
+    }
+    items.push(item);
+  }
+  return items;
+};
+
 export interface SmartUiComponentValidation {
   component: SmartUiComponent | null;
   errors: string[];
@@ -259,7 +340,7 @@ export interface SmartUiComponentValidation {
 export const validateSmartUiComponent = (value: JsonValue | undefined): SmartUiComponentValidation => {
   const errors: string[] = [];
   if (!isObject(value)) return { component: null, errors: ['component 必须是对象'] };
-  allowedKeys(value, ['kind', 'title', 'text', 'items', 'rows', 'value', 'min', 'max', 'step', 'columns', 'symbol', 'url', 'style'], errors, 'component');
+  allowedKeys(value, ['kind', 'title', 'text', 'items', 'rows', 'study', 'value', 'valueFieldId', 'min', 'max', 'step', 'columns', 'symbol', 'url', 'style'], errors, 'component');
   const kind = value['kind'];
   if (typeof kind !== 'string' || !SMART_UI_COMPONENT_KINDS.includes(kind as SmartUiComponentKind)) return { component: null, errors: errors.concat(['component.kind 不在原生组件目录中']) };
   const component: SmartUiComponent = { kind: kind as SmartUiComponentKind };
@@ -269,6 +350,17 @@ export const validateSmartUiComponent = (value: JsonValue | undefined): SmartUiC
   component.url = boundedText(value['url'], 2048, 'component.url', errors);
   component.items = textArray(value['items'], 'component.items', 32, errors);
   component.style = parseStyle(value['style'], errors);
+  component.valueFieldId = boundedText(value['valueFieldId'], 48, 'component.valueFieldId', errors);
+  if (component.valueFieldId !== undefined && !SMART_UI_FIELD_ID.test(component.valueFieldId)) {
+    errors.push('component.valueFieldId 必须是稳定 ASCII 状态标识');
+  }
+  if (component.valueFieldId !== undefined &&
+    !['metric', 'progress', 'stepProgress'].includes(component.kind)) {
+    errors.push('只有 metric/progress/stepProgress 可以声明 component.valueFieldId');
+  }
+  component.study = parseStudyItems(value['study'], errors);
+  if (component.kind === 'study' && (component.study?.length ?? 0) === 0) errors.push('study 组件需要非空 component.study');
+  if (component.kind !== 'study' && value['study'] !== undefined) errors.push('只有 study 组件可以包含 component.study');
   const numeric: string[] = ['value', 'min', 'max', 'step', 'columns'];
   for (const field of numeric) {
     const number = value[field];
@@ -291,12 +383,16 @@ export const validateSmartUiComponent = (value: JsonValue | undefined): SmartUiC
       component.rows = [];
       for (const raw of rows) {
         if (!isObject(raw)) { errors.push('component.rows 每行必须是对象'); continue; }
-        allowedKeys(raw, ['label', 'value', 'detail', 'cells'], errors, 'component.rows');
+        allowedKeys(raw, ['label', 'value', 'valueFieldId', 'detail', 'cells'], errors, 'component.rows');
         const label = boundedText(raw['label'], 120, 'row.label', errors);
         if (label === undefined || label.trim().length === 0) { errors.push('row.label 必须有可读标签'); continue; }
         const row: SmartUiComponentRow = { label };
         row.detail = boundedText(raw['detail'], 2000, 'row.detail', errors);
         row.cells = textArray(raw['cells'], 'row.cells', 8, errors);
+        row.valueFieldId = boundedText(raw['valueFieldId'], 48, 'row.valueFieldId', errors);
+        if (row.valueFieldId !== undefined && !SMART_UI_FIELD_ID.test(row.valueFieldId)) {
+          errors.push('row.valueFieldId 必须是稳定 ASCII 状态标识');
+        }
         if (raw['value'] !== undefined) {
           if (typeof raw['value'] !== 'number' || !Number.isFinite(raw['value'])) errors.push('row.value 必须是有限数值');
           else row.value = raw['value'];
@@ -305,6 +401,6 @@ export const validateSmartUiComponent = (value: JsonValue | undefined): SmartUiC
       }
     }
   }
-  if (['barChart', 'lineChart'].includes(component.kind) && ((component.rows?.length ?? 0) === 0 || component.rows?.some((row: SmartUiComponentRow): boolean => row.value === undefined))) errors.push('图表需要带有限数值的 rows');
+  if (['barChart', 'lineChart'].includes(component.kind) && ((component.rows?.length ?? 0) === 0 || component.rows?.some((row: SmartUiComponentRow): boolean => row.value === undefined && row.valueFieldId === undefined))) errors.push('图表需要带有限数值或 valueFieldId 的 rows');
   return { component: errors.length === 0 ? component : null, errors };
 };

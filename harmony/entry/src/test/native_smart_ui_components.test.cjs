@@ -153,8 +153,9 @@ test('native date formatting uses local calendar fields without UTC day shifts',
 });
 
 test('chart geometry handles negative values, zero series and single-point lines', () => {
-  const Model = model('NativeSmartUiData.ets', ['kind', 'rows', 'row', 'chartMin', 'chartMax', 'ratio', 'points', 'barWidth', 'barLeft']);
+  const Model = model('NativeSmartUiData.ets', ['kind', 'rows', 'row', 'rowValue', 'metricValue', 'chartMin', 'chartMax', 'ratio', 'points', 'barWidth', 'barLeft'], { smartUiValue: helper.smartUiValue });
   const instance = new Model();
+  instance.values = [];
   instance.chartWidth = 240;
   instance.node = { component: { rows: [{ label: 'A', value: -10 }, { label: 'B', value: 10 }] } };
   assert.equal(instance.barWidth(0), '50%');

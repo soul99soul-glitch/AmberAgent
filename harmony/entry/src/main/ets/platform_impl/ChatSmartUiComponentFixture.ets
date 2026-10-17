@@ -31,7 +31,7 @@ const KIND_LABELS: string[] = [
   '单选', '多选', '分段选择', '选项选择器', '开关', '文本输入', '多行输入', '数字输入', '滑块', '步进', '日期', '时间', '评分', '颜色选择',
   '指标', '指标网格', '表格', '列表', '比较', '时间线', '步骤', '检查清单', '柱状图', '折线图',
   '图片', '图片网格', '头像', '图标', '链接卡片', '文件卡片', '代码块', '示意图',
-  '目标', '背景', '来源', '理由', '取舍', '结果', '假设', '决策摘要',
+  '目标', '背景', '来源', '理由', '取舍', '结果', '假设', '决策摘要', '学习卡',
   '按钮', '按钮组', '提交按钮', '重置按钮', '展开详情', '分页标签', '折叠组', '菜单',
 ];
 
@@ -78,6 +78,10 @@ const sampleComponent = (kind: SmartUiComponentKind, label: string): SmartUiComp
   if (kind === 'card') component.style = { tone: 'danger', emphasis: 'filled', padding: 'small' };
   if (kind === 'grid') component.style = { tone: 'accent', emphasis: 'filled', padding: 'small' };
   if (kind === 'alert') component.style = { tone: 'warning', emphasis: 'outlined' };
+  if (kind === 'study') component.study = [
+    { id: 'sample-q1', prompt: '学习卡示例问题', answer: '示例答案', options: [{ id: 'a', label: '选项甲' }, { id: 'b', label: '选项乙' }], correctOptionId: 'a' },
+    { id: 'sample-q2', prompt: '翻卡示例问题', answer: '翻卡示例答案' },
+  ];
   return component;
 };
 
@@ -150,4 +154,34 @@ export const debugSmartUiTaskPayload = (): string => fixtureBlock('local-decisio
   componentRecord('progress', 'root', { kind: 'progress', title: '准备步骤', value: 1, max: 3, text: '选择方案 → 补充约束 → 准备草稿' }),
   { op: 'node', id: 'submit', parent: 'root', type: 'component', component: { kind: 'submitButton', title: '准备学习问题' }, label: '准备学习问题', action: { type: 'draft', text: '请为我安排一次学习。选择的本地方案：{{plan}}；时间预算：{{budget}} 分钟；约束与偏好：{{constraints}}。请解释方案并列出具体步骤。' } },
   { op: 'node', id: 'reset', parent: 'root', type: 'component', component: { kind: 'resetButton', title: '重置选择' }, label: '重置选择' },
+]);
+
+export const debugSmartUiStudyPayload = (): string => fixtureBlock('local-study', [
+  { op: 'state', id: 'study-progress', initial: '' },
+  { op: 'node', id: 'root', type: 'column' },
+  { op: 'node', id: 'study', parent: 'root', type: 'component', state: 'study-progress', component: {
+    kind: 'study', title: '明朝十六帝',
+    study: [
+      { id: 'ming-1', prompt: '明朝开国皇帝是谁？', answer: '明太祖朱元璋', detail: '1368 年建立明朝，定都应天。',
+        options: [{ id: 'zhu', label: '朱元璋' }, { id: 'zhu-di', label: '朱棣' }, { id: 'zhu-youjian', label: '朱由检' }], correctOptionId: 'zhu' },
+      { id: 'ming-2', prompt: '永乐大帝是谁？', answer: '明成祖朱棣', detail: '迁都北京，组织编纂《永乐大典》。',
+        options: [{ id: 'zhu', label: '朱元璋' }, { id: 'zhu-di', label: '朱棣' }, { id: 'zhu-gaochi', label: '朱高炽' }], correctOptionId: 'zhu-di' },
+      { id: 'ming-3', prompt: '明朝最后一位皇帝是谁？', answer: '明思宗朱由检', detail: '年号崇祯，1644 年北京城破后自缢。',
+        options: [{ id: 'zhu-youjian', label: '朱由检' }, { id: 'zhu-changluo', label: '朱常洛' }, { id: 'zhu-houcong', label: '朱厚熜' }], correctOptionId: 'zhu-youjian' },
+      { id: 'ming-4', prompt: '复习：明朝建立于哪一年？', answer: '1368 年' },
+    ],
+  } },
+]);
+
+export const debugSmartUiLinkagePayload = (): string => fixtureBlock('local-linkage', [
+  { op: 'state', id: 'budget', initial: 50 },
+  { op: 'node', id: 'root', type: 'column' },
+  { op: 'node', id: 'budget-field', parent: 'root', type: 'component', state: 'budget', label: '时间预算',
+    component: { kind: 'slider', title: '时间预算（分钟）', min: 0, max: 100, step: 5 } },
+  { op: 'node', id: 'budget-metric', parent: 'root', type: 'component',
+    component: { kind: 'metric', title: '当前预算', valueFieldId: 'budget', text: '分钟' } },
+  { op: 'node', id: 'budget-progress', parent: 'root', type: 'component',
+    component: { kind: 'progress', title: '预算使用', valueFieldId: 'budget', max: 100 } },
+  { op: 'node', id: 'budget-chart', parent: 'root', type: 'component',
+    component: { kind: 'barChart', title: '预算对比', rows: [{ label: '当前预算', valueFieldId: 'budget' }] } },
 ]);

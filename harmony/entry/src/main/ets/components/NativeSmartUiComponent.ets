@@ -6,6 +6,7 @@ import { FONT_SANS, FONT_MONO, FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from './ui/Icon.ets';
 import { NativeSmartUiInputs } from './NativeSmartUiInputs.ets';
 import { NativeSmartUiData } from './NativeSmartUiData.ets';
+import { NativeSmartUiStudy } from './NativeSmartUiStudy.ets';
 import { smartUiValue, smartUiString, smartUiSelection, smartUiSpace } from './NativeSmartUiValues.ets';
 
 const EMPTY_NODE: SmartUiNode = { id: 'empty', parent: null, type: 'column' };
@@ -57,6 +58,11 @@ export struct NativeSmartUiComponent {
   private itemIndices(): number[] { return this.items().map((_item: string, index: number): number => index); }
   private item(index: number): string { return this.items()[index] ?? ''; }
   private textSize(base: number): number { return Math.max(10, base * this.fontSize / 16); }
+  private linkedNumber(fieldId: string | undefined, fallback: number): number {
+    if (fieldId === undefined) return fallback;
+    const value = smartUiValue(this.values, fieldId);
+    return typeof value === 'number' ? value : fallback;
+  }
   private space(): number { return smartUiSpace(this.component().style?.spacing, this.component().style?.density === 'compact' ? 6 : 12); }
   private tone(): string {
     const tone: string = this.component().style?.tone ?? 'accent';
@@ -309,14 +315,17 @@ export struct NativeSmartUiComponent {
     } else if (this.kind() === 'progress' || this.kind() === 'stepProgress') {
       this.Heading();
       if (this.kind() === 'progress') {
-        Progress({ value: this.component().value ?? 0, total: this.component().max ?? 100, type: ProgressType.Linear })
+        Progress({
+          value: this.linkedNumber(this.component().valueFieldId, this.component().value ?? 0),
+          total: this.component().max ?? 100, type: ProgressType.Linear,
+        })
           .width('100%').color(this.accent()).backgroundColor(LINE)
-          .accessibilityText(`${this.component().value ?? 0} / ${this.component().max ?? 100}`);
+          .accessibilityText(`${this.linkedNumber(this.component().valueFieldId, this.component().value ?? 0)} / ${this.component().max ?? 100}`);
       } else {
         Row({ space: 4 }) {
           ForEach(this.itemIndices(), (index: number): void => {
             Row().layoutWeight(1).height(5).borderRadius(3)
-              .backgroundColor(index < (this.component().value ?? 0) ? this.accent() : LINE);
+              .backgroundColor(index < this.linkedNumber(this.component().valueFieldId, this.component().value ?? 0) ? this.accent() : LINE);
           }, (index: number): string => `${this.nodeId}:step:${index}`);
         }.width('100%');
         Text(this.items().join(' → ')).fontSize(this.textSize(12)).fontColor(this.secondary());
@@ -446,10 +455,16 @@ export struct NativeSmartUiComponent {
       NativeSmartUiInputs({ node: this.node(), values: this.values, fontSize: this.fontSize, fontFamily: this.fontFamily,
         ink: this.ink(), secondaryInk: this.secondary(), accent: this.accent(), surface: this.surface(),
         onStateChange: (id: string, value: SmartUiScalar): void => { this.onStateChange(id, value); } });
+    } else if (this.kind() === 'study') {
+      this.Heading();
+      NativeSmartUiStudy({ node: this.node(), values: this.values, fontSize: this.fontSize, fontFamily: this.fontFamily,
+        ink: this.ink(), secondaryInk: this.secondary(), accent: this.accent(), surface: this.surface(),
+        onStateChange: (id: string, value: SmartUiScalar): void => { this.onStateChange(id, value); } });
     } else if (['metric', 'table', 'list', 'comparison', 'timeline', 'steps', 'barChart', 'lineChart'].includes(this.kind())) {
       this.Heading();
       NativeSmartUiData({ node: this.node(), fontSize: this.fontSize, fontFamily: this.fontFamily,
-        ink: this.ink(), secondaryInk: this.secondary(), accent: this.accent(), surface: this.surface() });
+        ink: this.ink(), secondaryInk: this.secondary(), accent: this.accent(), surface: this.surface(),
+        values: this.values });
     } else if (['image', 'avatar', 'icon', 'linkCard', 'fileCard', 'codeBlock', 'diagram'].includes(this.kind())) {
       this.Media();
     } else if (this.kind() === 'decisionSummary') {

@@ -402,6 +402,10 @@ export const validateSmartUiNode = (record: JsonObject, line: number = 0): Smart
         const stateResult = idField(record['state'], 'component.state', line);
         append(diagnostics, stateResult.diagnostics);
         if (stateResult.value !== null) node.state = stateResult.value;
+      } else if (kind === 'study' && record['state'] !== undefined) {
+        const stateResult = idField(record['state'], 'component.state', line);
+        append(diagnostics, stateResult.diagnostics);
+        if (stateResult.value !== null) node.state = stateResult.value;
       } else if (record['state'] !== undefined) diagnostics.push(diagnostic('unexpected-component-state', `${kind} 不接受交互状态`, line));
       if (record['options'] !== undefined) {
         const options = parseOptions(record['options'], line);
@@ -528,7 +532,7 @@ const checkNodeReferences = (
         diagnostics.push(diagnostic('state-type-mismatch', '组件选项值类型与状态声明不一致', line));
       }
       // Container selections reference children declared later in the flat stream.
-      if (component.kind !== 'tabs' && component.kind !== 'accordion' && !smartUiComponentValueValid(node, state.initial, [], false)) diagnostics.push(diagnostic('component-initial-invalid', `${component.kind} 初始值不匹配组件值域`, line));
+      if (component.kind !== 'tabs' && component.kind !== 'accordion' && component.kind !== 'study' && !smartUiComponentValueValid(node, state.initial, [], false)) diagnostics.push(diagnostic('component-initial-invalid', `${component.kind} 初始值不匹配组件值域`, line));
     } else if (node.type === 'input') {
       if (state.valueType !== 'string') diagnostics.push(diagnostic('input-state-not-string', `input 只能绑定字符串状态 ${stateId}`, line));
     } else if (node.type === 'choice' && node.options !== undefined) {
@@ -541,6 +545,18 @@ const checkNodeReferences = (
         if (scalarEqual(option.value, state.initial)) hasInitial = true;
       }
       if (!hasInitial) diagnostics.push(diagnostic('choice-initial-not-option', `状态 ${stateId} 的初始值不在 choice 选项中`, line));
+    }
+  }
+  if (node.type === 'component' && node.component !== undefined) {
+    const linked: string[] = [];
+    if (node.component.valueFieldId !== undefined) linked.push(node.component.valueFieldId);
+    for (const row of node.component.rows ?? []) {
+      if (row.valueFieldId !== undefined) linked.push(row.valueFieldId);
+    }
+    for (const fieldId of linked) {
+      const state: SmartUiState | undefined = states.get(fieldId);
+      if (state === undefined) diagnostics.push(diagnostic('unknown-state', `找不到联动状态 ${fieldId}`, line));
+      else if (state.valueType !== 'number') diagnostics.push(diagnostic('state-type-mismatch', `联动字段 ${fieldId} 必须是数字状态`, line));
     }
   }
   if (node.visibleWhen !== undefined) {
@@ -587,7 +603,9 @@ const controlStateConflict = (candidate: SmartUiNode, nodes: SmartUiNode[]): Sma
 };
 
 const nodeControlsState = (node: SmartUiNode): boolean => node.type === 'choice' || node.type === 'input' ||
-  (node.type === 'component' && node.component !== undefined && componentKindRequiresState(node.component.kind));
+  (node.type === 'component' && node.component !== undefined &&
+    (componentKindRequiresState(node.component.kind) ||
+      (node.component.kind === 'study' && node.state !== undefined)));
 
 const nodeAllowsChildren = (node: SmartUiNode | undefined): boolean => node !== undefined &&
   (node.type === 'column' || (node.type === 'component' && node.component !== undefined && componentKindAllowsChildren(node.component.kind)));

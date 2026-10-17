@@ -30,11 +30,11 @@ const readyBlocks = payload => {
   return blocks;
 };
 
-test('gallery replays all 80 catalog kinds as eight parser-ready production UI blocks', () => {
+test('gallery replays all 81 catalog kinds as eight parser-ready production UI blocks', () => {
   const blocks = readyBlocks(fixture.debugSmartUiComponentGalleryPayload());
   assert.equal(blocks.length, 8);
   const kinds = new Set(blocks.flatMap(block => block.ui.nodes.map(node => node.component?.kind).filter(Boolean)));
-  assert.equal(components.SMART_UI_COMPONENT_KINDS.length, 80);
+  assert.equal(components.SMART_UI_COMPONENT_KINDS.length, 81);
   assert.deepEqual([...kinds].sort(), [...components.SMART_UI_COMPONENT_KINDS].sort());
   const families = [...new Set(components.SMART_UI_COMPONENT_CATALOG.map(entry => entry.family))];
   assert.deepEqual(blocks.map(block => block.id), families.map(family => `component-${family}`));
@@ -135,4 +135,26 @@ test('component fixtures remain connected to the existing debug replay with expl
   assert.match(replay, /if \(!BuildProfile\.DEBUG\) return/);
   assert.match(replay, /replayDebugVisual\(/);
   assert.match(replay, /if \(persist\) await getChatRepository\(\)\.save\(data\.finalConversation\)/);
+});
+
+test('study fixture parses as a real quiz and flashcard payload', () => {
+  const blocks = readyBlocks(fixture.debugSmartUiStudyPayload());
+  assert.equal(blocks.length, 1);
+  const study = blocks[0].ui.nodes.find(node => node.component?.kind === 'study');
+  assert.ok(study);
+  assert.equal(study.component.study.length, 4);
+  assert.deepEqual(study.component.study[0].options.map(option => option.id), ['zhu', 'zhu-di', 'zhu-youjian']);
+  assert.equal(study.component.study[0].correctOptionId, 'zhu');
+  assert.equal(study.component.study[3].options, undefined);
+});
+
+test('linkage fixture binds a numeric slider to metric, progress and chart rows', () => {
+  const blocks = readyBlocks(fixture.debugSmartUiLinkagePayload());
+  assert.equal(blocks.length, 1);
+  const nodes = blocks[0].ui.nodes.filter(node => node.component);
+  const slider = nodes.find(node => node.component.kind === 'slider');
+  assert.equal(slider.state, 'budget');
+  assert.equal(nodes.find(node => node.component.kind === 'metric').component.valueFieldId, 'budget');
+  assert.equal(nodes.find(node => node.component.kind === 'progress').component.valueFieldId, 'budget');
+  assert.equal(nodes.find(node => node.component.kind === 'barChart').component.rows[0].valueFieldId, 'budget');
 });

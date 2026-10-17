@@ -102,6 +102,8 @@ const definitionJson = (document: SmartUiDocument): string => {
         if (component.text !== undefined) semantic['text'] = component.text;
         if (component.items !== undefined) semantic['items'] = component.items;
         if (component.rows !== undefined) semantic['rows'] = component.rows;
+        if (component.study !== undefined) semantic['study'] = component.study;
+        if (component.valueFieldId !== undefined) semantic['valueFieldId'] = component.valueFieldId;
         if (component.value !== undefined) semantic['value'] = component.value;
         if (component.min !== undefined) semantic['min'] = component.min;
         if (component.max !== undefined) semantic['max'] = component.max;

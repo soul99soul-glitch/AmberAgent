@@ -23,6 +23,9 @@ const recordsFor = (kind: SmartUiComponentKind): JsonObject[] => {
   if (componentKindHasOptions(kind)) node['options'] = [{ value: 'a', label: '选择甲', color: 'blue' }, { value: 'b', label: '选择乙', detail: '说明' }];
   if (kind === 'button' || kind === 'submitButton') node['action'] = { type: 'draft', text: '基于任务继续' };
   if (kind === 'barChart' || kind === 'lineChart') component['rows'] = [{ label: '甲', value: 2 }, { label: '乙', value: 5 }];
+  if (kind === 'study') component['study'] = [
+    { id: 'q1', prompt: '问题一', answer: '答案一', options: [{ id: 'a', label: '甲' }, { id: 'b', label: '乙' }], correctOptionId: 'a' },
+  ];
   records.push(node);
   if (kind === 'tabs' || kind === 'accordion') records.push({ op: 'node', id: 'child', parent: 'component', type: 'component', component: { kind: 'body', title: '第一页', text: '具体说明' } });
   records.push({ op: 'end' });
@@ -31,10 +34,10 @@ const recordsFor = (kind: SmartUiComponentKind): JsonObject[] => {
 
 const parseRecords = (records: JsonObject[]) => parseSmartUi(records.map((record) => JSON.stringify(record)).join('\n'), 'native-catalog', true);
 
-test('the 80 named native kinds each survive production parsing with their distinct kind', () => {
-  assert.equal(SMART_UI_COMPONENT_KINDS.length, 80);
-  assert.equal(new Set(SMART_UI_COMPONENT_KINDS).size, 80);
-  assert.equal(SMART_UI_COMPONENT_CATALOG.length, 80);
+test('the 81 named native kinds each survive production parsing with their distinct kind', () => {
+  assert.equal(SMART_UI_COMPONENT_KINDS.length, 81);
+  assert.equal(new Set(SMART_UI_COMPONENT_KINDS).size, 81);
+  assert.equal(SMART_UI_COMPONENT_CATALOG.length, 81);
   for (const kind of SMART_UI_COMPONENT_KINDS) {
     const document = parseRecords(recordsFor(kind));
     assert.equal(document.status, 'ready', `${kind}: ${JSON.stringify(document.diagnostics)}`);
@@ -121,4 +124,97 @@ test('legacy and native buttons cannot leak presentation-only state into task dr
       assert.ok(parseRecords(records).diagnostics.some((item) => item.code === 'presentation-state-in-action'), `${kind}/${legacy}`);
     }
   }
+});
+
+test('study cards validate items, options and the correct option id', () => {
+  const valid = parseRecords([
+    { op: 'node', id: 'root', type: 'column' },
+    { op: 'node', id: 'study', parent: 'root', type: 'component', component: {
+      kind: 'study', study: [
+        { id: 'q1', prompt: '问题', answer: '答案', options: [{ id: 'a', label: '甲' }, { id: 'b', label: '乙' }], correctOptionId: 'a' },
+        { id: 'q2', prompt: '翻卡问题', answer: '翻卡答案' },
+      ],
+    } },
+    { op: 'end' },
+  ]);
+  assert.equal(valid.status, 'ready', JSON.stringify(valid.diagnostics));
+  const missing = parseRecords([
+    { op: 'node', id: 'root', type: 'column' },
+    { op: 'node', id: 'study', parent: 'root', type: 'component', component: { kind: 'study' } },
+    { op: 'end' },
+  ]);
+  assert.ok(missing.diagnostics.some((item) => item.message.includes('study')));
+  const badCorrect = parseRecords([
+    { op: 'node', id: 'root', type: 'column' },
+    { op: 'node', id: 'study', parent: 'root', type: 'component', component: {
+      kind: 'study', study: [
+        { id: 'q1', prompt: '问题', answer: '答案', options: [{ id: 'a', label: '甲' }, { id: 'b', label: '乙' }], correctOptionId: 'x' },
+      ],
+    } },
+    { op: 'end' },
+  ]);
+  assert.ok(badCorrect.diagnostics.some((item) => item.message.includes('correctOptionId')));
+});
+
+test('valueFieldId links chart rows and metric/progress to declared number states only', () => {
+  const linked = parseRecords([
+    { op: 'state', id: 'budget', initial: 50 },
+    { op: 'state', id: 'label', initial: 'x' },
+    { op: 'node', id: 'root', type: 'column' },
+    { op: 'node', id: 'chart', parent: 'root', type: 'component', component: {
+      kind: 'barChart', rows: [{ label: '预算', valueFieldId: 'budget' }],
+    } },
+    { op: 'node', id: 'metric', parent: 'root', type: 'component', component: {
+      kind: 'metric', valueFieldId: 'budget', text: '分钟',
+    } },
+    { op: 'end' },
+  ]);
+  assert.equal(linked.status, 'ready', JSON.stringify(linked.diagnostics));
+  const wrongType = parseRecords([
+    { op: 'state', id: 'label', initial: 'x' },
+    { op: 'node', id: 'root', type: 'column' },
+    { op: 'node', id: 'chart', parent: 'root', type: 'component', component: {
+      kind: 'barChart', rows: [{ label: '预算', valueFieldId: 'label' }],
+    } },
+    { op: 'end' },
+  ]);
+  assert.ok(wrongType.diagnostics.some((item) => item.code === 'state-type-mismatch'));
+  const unknown = parseRecords([
+    { op: 'node', id: 'root', type: 'column' },
+    { op: 'node', id: 'metric', parent: 'root', type: 'component', component: {
+      kind: 'metric', valueFieldId: 'missing',
+    } },
+    { op: 'end' },
+  ]);
+  assert.ok(unknown.diagnostics.some((item) => item.code === 'unknown-state' || item.code === 'state-after-dependent-node'));
+});
+
+test('study progress must bind a string state, and required-state components still reject missing state', () => {
+  const wrongStudyState = parseRecords([
+    { op: 'state', id: 'progress', initial: 1 },
+    { op: 'node', id: 'root', type: 'column' },
+    { op: 'node', id: 'study', parent: 'root', type: 'component', state: 'progress', component: {
+      kind: 'study', study: [{ id: 'q1', prompt: '问题', answer: '答案' }],
+    } },
+    { op: 'end' },
+  ]);
+  assert.ok(wrongStudyState.diagnostics.some((item) => item.code === 'component-state-type'));
+  const missingSliderState = parseRecords([
+    { op: 'node', id: 'root', type: 'column' },
+    { op: 'node', id: 'slider', parent: 'root', type: 'component', component: { kind: 'slider' } },
+    { op: 'end' },
+  ]);
+  assert.ok(missingSliderState.diagnostics.some((item) => item.message.includes('component.state')));
+});
+
+test('valueFieldId is rejected on components that do not render a linked value', () => {
+  const document = parseRecords([
+    { op: 'state', id: 'budget', initial: 50 },
+    { op: 'node', id: 'root', type: 'column' },
+    { op: 'node', id: 'body', parent: 'root', type: 'component', component: {
+      kind: 'body', text: '正文', valueFieldId: 'budget',
+    } },
+    { op: 'end' },
+  ]);
+  assert.ok(document.diagnostics.some((item) => item.message.includes('valueFieldId')));
 });

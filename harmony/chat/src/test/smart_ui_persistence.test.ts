@@ -226,3 +226,19 @@ test('restore rejects illegal native values even when the saved definition still
   assert.equal(restored.status, 'rejected');
   assert.deepEqual(restored.values, []);
 });
+
+test('definition fingerprint covers study content and numeric linkage fields', () => {
+  const study = (answer: string): SmartUiDocument => parseSmartUi(
+    '{"op":"state","id":"progress","initial":""}\n' +
+    '{"op":"node","id":"root","type":"column"}\n' +
+    '{"op":"node","id":"study","parent":"root","type":"component","state":"progress","component":{"kind":"study","study":[{"id":"q1","prompt":"问题","answer":' + JSON.stringify(answer) + '}]}}\n' +
+    '{"op":"end"}', 'study-fp', true);
+  assert.notEqual(smartUiDefinitionFingerprint(study('答案一')), smartUiDefinitionFingerprint(study('答案二')));
+  const metric = (fieldId: string): SmartUiDocument => parseSmartUi(
+    '{"op":"state","id":"budget","initial":50}\n' +
+    '{"op":"state","id":"other","initial":10}\n' +
+    '{"op":"node","id":"root","type":"column"}\n' +
+    '{"op":"node","id":"metric","parent":"root","type":"component","component":{"kind":"metric","valueFieldId":' + JSON.stringify(fieldId) + '}}\n' +
+    '{"op":"end"}', 'metric-fp', true);
+  assert.notEqual(smartUiDefinitionFingerprint(metric('budget')), smartUiDefinitionFingerprint(metric('other')));
+});

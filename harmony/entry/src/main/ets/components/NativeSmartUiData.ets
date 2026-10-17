@@ -1,4 +1,5 @@
-import type { SmartUiNode, SmartUiComponentRow, SmartUiOption } from '@amber/chat-domain';
+import type { SmartUiNode, SmartUiComponentRow, SmartUiOption, SmartUiStateValue } from '@amber/chat-domain';
+import { smartUiValue } from './NativeSmartUiValues.ets';
 import { ACCENT, INK, INK3, LINE, SURFACE2, accentSoftBg } from '../design/tokens.ets';
 import { FONT_SANS, FONT_MONO } from '../design/fonts.ets';
 
@@ -14,6 +15,7 @@ export struct NativeSmartUiData {
   @Prop secondaryInk: string = INK3;
   @Prop accent: string = ACCENT;
   @Prop surface: string = SURFACE2;
+  @Prop values: SmartUiStateValue[] = [];
   @State private chartWidth: number = 240;
 
   private kind(): string { return this.node.component?.kind ?? ''; }
@@ -24,10 +26,26 @@ export struct NativeSmartUiData {
     return (this.node.component?.items ?? []).map((label: string): SmartUiComponentRow => ({ label }));
   }
   private row(index: number): SmartUiComponentRow { return this.rows()[index] ?? EMPTY_ROW; }
+  private rowValue(index: number): number {
+    const row: SmartUiComponentRow = this.row(index);
+    if (row.valueFieldId !== undefined) {
+      const value = smartUiValue(this.values, row.valueFieldId);
+      if (typeof value === 'number') return value;
+    }
+    return row.value ?? 0;
+  }
+  private metricValue(): number | undefined {
+    const fieldId: string | undefined = this.node.component?.valueFieldId;
+    if (fieldId !== undefined) {
+      const value = smartUiValue(this.values, fieldId);
+      if (typeof value === 'number') return value;
+    }
+    return this.node.component?.value;
+  }
   private indices(): number[] { return this.rows().map((_row: SmartUiComponentRow, index: number): number => index); }
   private cells(index: number): string[] {
     const row: SmartUiComponentRow = this.row(index);
-    return row.cells ?? [row.label, row.detail ?? (row.value === undefined ? '' : String(row.value))];
+    return row.cells ?? [row.label, row.detail ?? (row.value === undefined && row.valueFieldId === undefined ? '' : String(this.rowValue(index)))];
   }
   private cellWidth(): number { return Math.max(100, this.textSize(110)); }
   private cellsWidth(): number {
@@ -40,12 +58,12 @@ export struct NativeSmartUiData {
   private optionIndices(): number[] { return this.options().map((_option: SmartUiOption, index: number): number => index); }
   private chartMin(): number {
     let minimum: number = 0;
-    for (const row of this.rows()) minimum = Math.min(minimum, row.value ?? 0);
+    for (let index: number = 0; index < this.rows().length; index++) minimum = Math.min(minimum, this.rowValue(index));
     return minimum;
   }
   private chartMax(): number {
     let maximum: number = 0;
-    for (const row of this.rows()) maximum = Math.max(maximum, row.value ?? 0);
+    for (let index: number = 0; index < this.rows().length; index++) maximum = Math.max(maximum, this.rowValue(index));
     return maximum;
   }
   private ratio(value: number): number {
@@ -57,22 +75,22 @@ export struct NativeSmartUiData {
     const rows: SmartUiComponentRow[] = this.rows();
     for (let index = 0; index < rows.length; index++) {
       const x: number = rows.length === 1 ? this.chartWidth / 2 : 8 + index * (this.chartWidth - 16) / (rows.length - 1);
-      result.push([x, 140 - this.ratio(rows[index].value ?? 0) * 128]);
+      result.push([x, 140 - this.ratio(this.rowValue(index)) * 128]);
     }
     return result;
   }
   private barWidth(index: number): string {
-    const value: number = this.row(index).value ?? 0;
+    const value: number = this.rowValue(index);
     const range: number = this.chartMax() - this.chartMin();
     return `${range === 0 ? 0 : Math.abs(value) / range * 100}%`;
   }
   private barLeft(index: number): string {
-    const value: number = this.row(index).value ?? 0;
+    const value: number = this.rowValue(index);
     const left: number = Math.min(this.ratio(0), this.ratio(value));
     return `${left * 100}%`;
   }
   private chartDescription(): string {
-    return this.rows().map((row: SmartUiComponentRow): string => `${row.label}：${row.value ?? 0}`).join('，');
+    return this.rows().map((row: SmartUiComponentRow, index: number): string => `${row.label}：${this.rowValue(index)}`).join('，');
   }
 
   @Builder
@@ -121,8 +139,8 @@ export struct NativeSmartUiData {
             Text(this.row(index).detail ?? '').width('100%').fontSize(this.textSize(13)).fontFamily(this.fontFamily)
               .fontColor(this.secondaryInk).lineHeight(this.textSize(19));
           }
-          if (this.row(index).value !== undefined) {
-            Text(String(this.row(index).value ?? 0)).fontSize(this.textSize(13)).fontFamily(FONT_MONO).fontColor(this.accent);
+          if (this.row(index).value !== undefined || this.row(index).valueFieldId !== undefined) {
+            Text(String(this.rowValue(index))).fontSize(this.textSize(13)).fontFamily(FONT_MONO).fontColor(this.accent);
           }
         }.layoutWeight(1).alignItems(HorizontalAlign.Start);
       }.width('100%').alignItems(VerticalAlign.Top).padding({ top: 8, bottom: 8 });
@@ -165,7 +183,7 @@ export struct NativeSmartUiData {
         Column({ space: 4 }) {
           Row() {
             Text(this.row(index).label).layoutWeight(1).fontSize(this.textSize(13)).fontColor(this.ink);
-            Text(String(this.row(index).value ?? 0)).fontSize(this.textSize(13)).fontFamily(FONT_MONO).fontColor(this.accent);
+            Text(String(this.rowValue(index))).fontSize(this.textSize(13)).fontFamily(FONT_MONO).fontColor(this.accent);
           }.width('100%');
           Stack({ alignContent: Alignment.TopStart }) {
             Row().width(this.barWidth(index)).height(12).borderRadius(3).backgroundColor(this.accent)
@@ -173,7 +191,7 @@ export struct NativeSmartUiData {
             Divider().vertical(true).height(12).color(this.secondaryInk).position({ x: `${this.ratio(0) * 100}%`, y: 0 });
           }.width('100%').height(12).borderRadius(3).backgroundColor(this.surface);
         }.width('100%').alignItems(HorizontalAlign.Start).accessibilityGroup(true)
-          .accessibilityText(`${this.row(index).label}：${this.row(index).value ?? 0}`);
+          .accessibilityText(`${this.row(index).label}：${this.rowValue(index)}`);
       }, (index: number): string => `${this.node.id}:bar:${index}`);
     }
     Row() {
@@ -186,9 +204,9 @@ export struct NativeSmartUiData {
   build(): void {
     Column({ space: 8 }) {
       if (this.kind() === 'metric') {
-        Text(this.node.component?.value === undefined ? this.node.component?.text ?? '' : String(this.node.component?.value))
+        Text(this.metricValue() === undefined ? this.node.component?.text ?? '' : String(this.metricValue()))
           .width('100%').fontSize(this.textSize(32)).fontFamily(FONT_MONO).fontWeight(FontWeight.Medium).fontColor(this.ink);
-        if (this.node.component?.value !== undefined && (this.node.component?.text ?? '').length > 0) {
+        if (this.metricValue() !== undefined && (this.node.component?.text ?? '').length > 0) {
           Text(this.node.component?.text ?? '').fontSize(this.textSize(12)).fontColor(this.secondaryInk);
         }
       } else if (this.kind() === 'table') {
