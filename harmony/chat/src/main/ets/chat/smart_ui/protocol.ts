@@ -1,5 +1,11 @@
 import type { JsonObject, JsonValue } from '../json.ts';
 import { utf8ByteLength } from '../miniapp/miniapp_models.ts';
+import type { SmartUiComponent } from './components.ts';
+import {
+  componentKindAllowsChildren, componentKindRequiresState, componentKindHasOptions,
+  componentKindIsMultiSelection, componentKindIsNumeric, componentKindIsPresentationState,
+  smartUiComponentValueValid, validateSmartUiComponent,
+} from './components.ts';
 
 /** The first Smart UI protocol is deliberately smaller than SVG, HTML, or Three.js. */
 export const SMART_UI_MAX_NODES: number = 64;
@@ -17,7 +23,7 @@ export const SMART_UI_MAX_STATE_VALUE_CHARS: number = 512;
 export const SMART_UI_MAX_TEXT_BINDINGS: number = 16;
 
 export type SmartUiScalar = string | number | boolean;
-export type SmartUiNodeType = 'column' | 'text' | 'choice' | 'input' | 'button' | 'asset';
+export type SmartUiNodeType = 'column' | 'text' | 'choice' | 'input' | 'button' | 'asset' | 'component';
 export type SmartUiVariant = 'plain' | 'group' | 'outlined' | 'elevated' | 'callout' | 'section' |
   'body' | 'heading' | 'subheading' | 'caption' | 'metric' | 'code' | 'badge' | 'hero' | 'lead' | 'eyebrow' | 'quote' |
   'list' | 'chips' | 'tiles' | 'segmented' | 'primary' | 'secondary' | 'ghost' | 'pill' | 'underline';
@@ -44,6 +50,8 @@ export interface SmartUiState {
 export interface SmartUiOption {
   value: SmartUiScalar;
   label: string;
+  detail?: string;
+  color?: string;
 }
 
 export interface SmartUiVisibilityCondition {
@@ -58,10 +66,9 @@ export interface SmartUiTextBinding {
   path: SmartUiTextBindingPath;
 }
 
-export interface SmartUiDraftAction {
-  type: 'draft';
-  text: string;
-}
+export interface SmartUiDraftAction { type: 'draft'; text: string; }
+export interface SmartUiResetAction { type: 'reset'; }
+export type SmartUiAction = SmartUiDraftAction | SmartUiResetAction;
 
 /** Flat node shape keeps the native renderer free from recursive JSON unions. */
 export interface SmartUiNode {
@@ -77,7 +84,9 @@ export interface SmartUiNode {
   options?: SmartUiOption[];
   placeholder?: string;
   label?: string;
-  action?: SmartUiDraftAction;
+  action?: SmartUiAction;
+  component?: SmartUiComponent;
+  required?: boolean;
   ref?: string;
   visibleWhen?: SmartUiVisibilityCondition;
 }
@@ -103,7 +112,7 @@ export interface SmartUiStateValidationResult {
   diagnostics: SmartUiDiagnostic[];
 }
 
-const NODE_TYPES: SmartUiNodeType[] = ['column', 'text', 'choice', 'input', 'button', 'asset'];
+const NODE_TYPES: SmartUiNodeType[] = ['column', 'text', 'choice', 'input', 'button', 'asset', 'component'];
 const TEXT_BINDING_PATHS: SmartUiTextBindingPath[] = ['location', 'temperature_celsius', 'condition', 'observed_at'];
 const ID_PATTERN: RegExp = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
 const TEMPLATE_PATTERN: RegExp = /\{\{([A-Za-z][A-Za-z0-9_-]{0,47})\}\}/g;
@@ -233,16 +242,28 @@ const parseOptions = (value: JsonValue | undefined, line: number): { value: Smar
       diagnostics.push(diagnostic('invalid-option', `options[${index}] 必须是对象`, line));
       continue;
     }
-    append(diagnostics, checkAllowedKeys(item, ['value', 'label'], line));
+    append(diagnostics, checkAllowedKeys(item, ['value', 'label', 'detail', 'color'], line));
     const label = requiredString(item['label'], `options[${index}].label`, line, 1, SMART_UI_MAX_LABEL_CHARS);
     append(diagnostics, label.diagnostics);
+    if (label.value !== null && label.value.trim().length === 0) diagnostics.push(diagnostic('invalid-option-label', '选项标签不能仅包含空白', line));
     const optionValue: JsonValue | undefined = item['value'];
     if (!isScalar(optionValue)) diagnostics.push(diagnostic('invalid-option', `options[${index}].value 必须是标量`, line));
     if (label.value !== null && isScalar(optionValue)) {
       if (options.some((existing: SmartUiOption): boolean => scalarEqual(existing.value, optionValue))) {
         diagnostics.push(diagnostic('duplicate-option', `options[${index}] 的 value 重复`, line));
       } else {
-        options.push({ value: optionValue, label: label.value });
+        const option: SmartUiOption = { value: optionValue, label: label.value };
+        if (item['detail'] !== undefined) {
+          const detail = requiredString(item['detail'], 'option.detail', line, 0, 1000);
+          append(diagnostics, detail.diagnostics);
+          if (detail.value !== null) option.detail = detail.value;
+        }
+        if (item['color'] !== undefined) {
+          const color = item['color'];
+          if (typeof color !== 'string' || !['accent', 'red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'indigo', 'purple', 'pink', 'gray'].includes(color)) diagnostics.push(diagnostic('invalid-option-color', '选项颜色不在原生颜色目录中', line));
+          else option.color = color;
+        }
+        options.push(option);
       }
     }
   }
@@ -264,8 +285,12 @@ const draftReferences = (text: string): string[] | null => {
   return references;
 };
 
-const parseAction = (value: JsonValue | undefined, line: number): { value: SmartUiDraftAction | null; diagnostics: SmartUiDiagnostic[] } => {
+const parseAction = (value: JsonValue | undefined, line: number): { value: SmartUiAction | null; diagnostics: SmartUiDiagnostic[] } => {
   if (!isObject(value)) return { value: null, diagnostics: [diagnostic('invalid-action', 'button.action 必须是对象', line)] };
+  if (value['type'] === 'reset') {
+    const resetDiagnostics = checkAllowedKeys(value, ['type'], line);
+    return { value: resetDiagnostics.length === 0 ? { type: 'reset' } : null, diagnostics: resetDiagnostics };
+  }
   const diagnostics: SmartUiDiagnostic[] = checkAllowedKeys(value, ['type', 'text'], line);
   if (value['type'] !== 'draft') diagnostics.push(diagnostic('invalid-action', 'button 只支持 draft 动作', line));
   const text = requiredString(value['text'], 'button.action.text', line, 1, SMART_UI_MAX_ACTION_CHARS);
@@ -280,10 +305,11 @@ const parseAction = (value: JsonValue | undefined, line: number): { value: Smart
 
 const nodeAllowedKeys = (type: SmartUiNodeType): string[] => {
   const common: string[] = ['op', 'id', 'parent', 'type', 'visibleWhen'];
+  if (type === 'component') return common.concat(['component', 'state', 'options', 'action', 'label', 'required']);
   if (type === 'column') return common.concat(['variant', 'layout', 'tone']);
   if (type === 'text') return common.concat(['text', 'bind', 'variant', 'tone']);
-  if (type === 'choice') return common.concat(['state', 'options', 'variant']);
-  if (type === 'input') return common.concat(['state', 'placeholder', 'variant']);
+  if (type === 'choice') return common.concat(['state', 'options', 'variant', 'label', 'required']);
+  if (type === 'input') return common.concat(['state', 'placeholder', 'variant', 'label', 'required']);
   if (type === 'button') return common.concat(['label', 'action', 'variant']);
   return common.concat(['ref', 'label']);
 };
@@ -329,6 +355,16 @@ export const validateSmartUiNode = (record: JsonObject, line: number = 0): Smart
   }
   if (idResult.value === null) return { node: null, diagnostics };
   const node: SmartUiNode = { id: idResult.value, parent, type };
+  if (record['required'] !== undefined) {
+    if (typeof record['required'] !== 'boolean') diagnostics.push(diagnostic('invalid-required', 'node.required 必须是布尔值', line));
+    else node.required = record['required'];
+  }
+  if (record['label'] !== undefined && (type === 'component' || type === 'choice' || type === 'input')) {
+    const label = requiredString(record['label'], 'node.label', line, 1, SMART_UI_MAX_LABEL_CHARS);
+    append(diagnostics, label.diagnostics);
+    if (label.value !== null && label.value.trim().length > 0) node.label = label.value;
+    else diagnostics.push(diagnostic('invalid-label', '控件标签不能仅包含空白', line));
+  }
   if (visibleWhen !== undefined) node.visibleWhen = visibleWhen;
   const variant: JsonValue | undefined = record['variant'];
   if (variant !== undefined) {
@@ -356,7 +392,42 @@ export const validateSmartUiNode = (record: JsonObject, line: number = 0): Smart
     }
   }
 
-  if (type === 'text') {
+  if (type === 'component') {
+    const result = validateSmartUiComponent(record['component']);
+    for (const message of result.errors) diagnostics.push(diagnostic('invalid-component', message, line));
+    if (result.component !== null) {
+      node.component = result.component;
+      const kind = result.component.kind;
+      if (componentKindRequiresState(kind)) {
+        const stateResult = idField(record['state'], 'component.state', line);
+        append(diagnostics, stateResult.diagnostics);
+        if (stateResult.value !== null) node.state = stateResult.value;
+      } else if (record['state'] !== undefined) diagnostics.push(diagnostic('unexpected-component-state', `${kind} 不接受交互状态`, line));
+      if (record['options'] !== undefined) {
+        const options = parseOptions(record['options'], line);
+        append(diagnostics, options.diagnostics);
+        if (options.value !== null) node.options = options.value;
+        if (!componentKindHasOptions(kind)) diagnostics.push(diagnostic('unexpected-options', `${kind} 不接受选项`, line));
+      }
+      if (componentKindHasOptions(kind) && (node.options?.length ?? 0) === 0) {
+        if (kind !== 'checklist' || (result.component.items?.length ?? 0) === 0) diagnostics.push(diagnostic('component-options-required', `${kind} 需要 options`, line));
+      }
+      if (componentKindIsMultiSelection(kind) && (node.options ?? []).some((option: SmartUiOption): boolean => typeof option.value !== 'string' || option.value.length === 0 || option.value.length > 120)) diagnostics.push(diagnostic('multi-option-not-string', '多选选项必须使用 1-120 字符的字符串 ID', line));
+      if (kind === 'checklist' && (node.options?.length ?? 0) === 0 && result.component.items !== undefined) {
+        const items = result.component.items;
+        if (new Set(items).size !== items.length || items.some((item: string): boolean => item.length === 0 || item.length > 120)) diagnostics.push(diagnostic('invalid-checklist-items', '清单 items 必须唯一且有 1-120 字符的标签', line));
+      }
+      if (node.required === true && (!componentKindRequiresState(kind) || componentKindIsPresentationState(kind))) diagnostics.push(diagnostic('unexpected-required', '只有任务输入字段可以标为必填', line));
+      if (record['action'] !== undefined) {
+        const action = parseAction(record['action'], line);
+        append(diagnostics, action.diagnostics);
+        if (action.value !== null) node.action = action.value;
+        if (!['button', 'submitButton', 'resetButton'].includes(kind) || (kind === 'submitButton' && node.action?.type !== 'draft') || (kind === 'resetButton' && node.action?.type !== 'reset')) diagnostics.push(diagnostic('invalid-component-action', '组件按钮只能生成继续草稿或重置本卡状态', line));
+      }
+      if ((kind === 'button' || kind === 'submitButton') && node.action === undefined) diagnostics.push(diagnostic('component-action-required', `${kind} 必须声明 draft 或 reset 动作`, line));
+      if (componentKindRequiresState(kind) && (node.label?.trim().length ?? 0) === 0 && (result.component.title?.trim().length ?? 0) === 0) diagnostics.push(diagnostic('component-label-required', '交互组件需要 label 或 title 标签', line));
+    }
+  } else if (type === 'text') {
     const text = requiredString(record['text'], 'node.text', line, 0, SMART_UI_MAX_TEXT_CHARS);
     append(diagnostics, text.diagnostics);
     if (text.value !== null) node.text = text.value;
@@ -445,6 +516,19 @@ const checkNodeReferences = (
     const state: SmartUiState | undefined = states.get(stateId);
     if (state === undefined) {
       diagnostics.push(diagnostic('unknown-state', `找不到状态 ${stateId}`, line));
+    } else if (node.type === 'component' && node.component !== undefined) {
+      const component = node.component;
+      if (component.kind === 'toggle' || component.kind === 'disclosure') {
+        if (state.valueType !== 'boolean') diagnostics.push(diagnostic('component-state-type', `${component.kind} 必须绑定布尔状态`, line));
+      } else if (componentKindIsNumeric(component.kind)) {
+        if (state.valueType !== 'number') diagnostics.push(diagnostic('component-state-type', `${component.kind} 必须绑定数字状态`, line));
+      } else if (!componentKindHasOptions(component.kind) || componentKindIsMultiSelection(component.kind)) {
+        if (state.valueType !== 'string') diagnostics.push(diagnostic('component-state-type', `${component.kind} 必须绑定字符串状态`, line));
+      } else if ((node.options ?? []).some((option: SmartUiOption): boolean => scalarType(option.value) !== state.valueType)) {
+        diagnostics.push(diagnostic('state-type-mismatch', '组件选项值类型与状态声明不一致', line));
+      }
+      // Container selections reference children declared later in the flat stream.
+      if (component.kind !== 'tabs' && component.kind !== 'accordion' && !smartUiComponentValueValid(node, state.initial, [], false)) diagnostics.push(diagnostic('component-initial-invalid', `${component.kind} 初始值不匹配组件值域`, line));
     } else if (node.type === 'input') {
       if (state.valueType !== 'string') diagnostics.push(diagnostic('input-state-not-string', `input 只能绑定字符串状态 ${stateId}`, line));
     } else if (node.type === 'choice' && node.options !== undefined) {
@@ -466,7 +550,7 @@ const checkNodeReferences = (
       diagnostics.push(diagnostic('state-type-mismatch', `visibleWhen.equals 与状态 ${state.id} 类型不一致`, line));
     }
   }
-  if (node.type === 'button' && node.action !== undefined) {
+  if (node.action?.type === 'draft') {
     const references: string[] | null = draftReferences(node.action.text);
     if (references === null) diagnostics.push(diagnostic('invalid-action', 'button.action.text 占位符无效', line));
     else {
@@ -493,14 +577,20 @@ const appendNodeSemanticDiagnostics = (
 };
 
 const controlStateConflict = (candidate: SmartUiNode, nodes: SmartUiNode[]): SmartUiNode | null => {
-  if ((candidate.type !== 'choice' && candidate.type !== 'input') || candidate.state === undefined) return null;
+  if (!nodeControlsState(candidate) || candidate.state === undefined) return null;
   for (const node of nodes) {
-    if (node.id !== candidate.id && (node.type === 'choice' || node.type === 'input') && node.state === candidate.state) {
+    if (node.id !== candidate.id && nodeControlsState(node) && node.state === candidate.state) {
       return node;
     }
   }
   return null;
 };
+
+const nodeControlsState = (node: SmartUiNode): boolean => node.type === 'choice' || node.type === 'input' ||
+  (node.type === 'component' && node.component !== undefined && componentKindRequiresState(node.component.kind));
+
+const nodeAllowsChildren = (node: SmartUiNode | undefined): boolean => node !== undefined &&
+  (node.type === 'column' || (node.type === 'component' && node.component !== undefined && componentKindAllowsChildren(node.component.kind)));
 
 const emptyDocument = (id: string, diagnostics: SmartUiDiagnostic[], records: number = 0): SmartUiDocument => ({
   id,
@@ -561,7 +651,7 @@ export const parseSmartUi = (body: string, id: string, closedOrTerminal: boolean
       } else if (!nodeMap.has(candidate.parent)) {
         diagnostics.push(diagnostic('parent-before-child', `父节点 ${candidate.parent} 必须先声明`, line));
         return;
-      } else if (nodeMap.get(candidate.parent)?.type !== 'column') {
+      } else if (!nodeAllowsChildren(nodeMap.get(candidate.parent))) {
         diagnostics.push(diagnostic('parent-not-column', `父节点 ${candidate.parent} 必须是 column`, line));
         return;
       }
@@ -596,6 +686,10 @@ export const parseSmartUi = (body: string, id: string, closedOrTerminal: boolean
       diagnostics.push(diagnostic('node-type-change', `节点 ${candidate.id} 不能改变 type`, line));
       return;
     }
+    if (candidate.component?.kind !== existing.component?.kind) {
+      diagnostics.push(diagnostic('component-kind-change', `节点 ${candidate.id} 不能改变原生组件 kind`, line));
+      return;
+    }
     if (candidate.parent !== existing.parent) {
       diagnostics.push(diagnostic('node-parent-change', `节点 ${candidate.id} 不能改变 parent`, line));
       return;
@@ -604,7 +698,7 @@ export const parseSmartUi = (body: string, id: string, closedOrTerminal: boolean
       diagnostics.push(diagnostic('parent-before-child', `父节点 ${candidate.parent} 必须先声明`, line));
       return;
     }
-    if (candidate.parent !== null && nodeMap.get(candidate.parent)?.type !== 'column') {
+    if (candidate.parent !== null && !nodeAllowsChildren(nodeMap.get(candidate.parent))) {
       diagnostics.push(diagnostic('parent-not-column', `父节点 ${candidate.parent} 必须是 column`, line));
       return;
     }
@@ -715,6 +809,23 @@ export const parseSmartUi = (body: string, id: string, closedOrTerminal: boolean
 
   if (closedOrTerminal && !ended) diagnostics.push(diagnostic('missing-end', '终态智能 UI 缺少 end 记录', rawLines.length));
   if (closedOrTerminal && !ended && rootId === null) diagnostics.push(diagnostic('missing-root', '终态智能 UI 缺少 root 节点', rawLines.length));
+  if (ended) {
+    for (const node of nodes) {
+      if (node.action?.type === 'draft') {
+        const refs = draftReferences(node.action.text) ?? [];
+        if (refs.some((stateId: string): boolean => nodes.some((control: SmartUiNode): boolean => control.state === stateId && control.component !== undefined && componentKindIsPresentationState(control.component.kind)))) diagnostics.push(diagnostic('presentation-state-in-action', '继续草稿不能引用仅用于折叠或标签页的展示状态', 0));
+      }
+      const component = node.component;
+      if (component === undefined) continue;
+      const children = nodes.filter((child: SmartUiNode): boolean => child.parent === node.id);
+      if (component.kind === 'tabs' || component.kind === 'accordion') {
+        if (children.length === 0 || children.some((child: SmartUiNode): boolean => (child.component?.title?.trim().length ?? child.label?.trim().length ?? 0) === 0)) diagnostics.push(diagnostic('component-child-label', 'tabs/accordion 需要有标题的子组件', 0));
+        const state = states.find((item: SmartUiState): boolean => item.id === node.state);
+        if (state !== undefined && !smartUiComponentValueValid(node, state.initial, children, false)) diagnostics.push(diagnostic('component-initial-invalid', '展示状态初始值不匹配子组件', 0));
+      }
+      if (component.kind === 'decisionSummary' && (component.items ?? []).some((stateId: string): boolean => !stateMap.has(stateId))) diagnostics.push(diagnostic('component-summary-field', '摘要只能引用已声明字段', 0));
+    }
+  }
   const hasError: boolean = diagnostics.some((item: SmartUiDiagnostic): boolean => item.severity === 'error');
   const status: SmartUiDocumentStatus = ended && !hasError ? 'ready' : hasError && (closedOrTerminal || ended) ? 'error' : 'partial';
   return { id, nodes, states, status, diagnostics, ended, rootId, records };

@@ -1,3 +1,35 @@
+import {
+  SMART_UI_COMPONENT_KINDS, componentKindAllowsChildren, componentKindHasOptions,
+  componentKindIsNumeric, componentKindIsPresentationState, componentKindIsMultiSelection,
+} from './smart_ui/components.ts';
+
+const nativeComponentInstruction = (): string[] => [
+  '- Use native task controls only when choosing or entering information helps the user proceed. If the task is already clear and authorized, complete it directly. Do not force a decision card into simple answers, use a card as a substitute for investigating facts, or present generated status as a verified tool result.',
+  '- Rich native nodes use type:"component" with component:{kind,title?,text?,items?,rows?,value?,min?,max?,step?,columns?,symbol?,url?,style?}. State, options, label, required, action, parent and visibleWhen remain on the node, outside component. No component id, field_id, children array, arbitrary properties or CSS.',
+  `- Native component kinds: ${SMART_UI_COMPONENT_KINDS.join(', ')}.`,
+  `- Container kinds: ${SMART_UI_COMPONENT_KINDS.filter(componentKindAllowsChildren).join(', ')}. Declare children as separate node records whose parent is the container node id; the root remains a regular column.`,
+  `- Option controls: ${SMART_UI_COMPONENT_KINDS.filter(componentKindHasOptions).join(', ')}. Declare node.options:[{value,label,detail?,color?}]; use stable short string values for multiple selection. colorChoice uses accent|red|orange|yellow|green|cyan|blue|indigo|purple|pink|gray tokens.`,
+  `- Numeric controls: ${SMART_UI_COMPONENT_KINDS.filter(componentKindIsNumeric).join(', ')} bind number states. Set finite component.min/max/step; defaults are 0/100/1 (rating 0/5/1, integer max 1-10). Initial and current values must stay in range and on the step grid.`,
+  `- Multiple selection: ${SMART_UI_COMPONENT_KINDS.filter(componentKindIsMultiSelection).join(', ')} bind a string containing a JSON array of selected option values (accordion uses child node ids), e.g. initial:"[]". Do not use a raw array state. toggle/disclosure bind boolean; textField/textArea/datePicker/timePicker bind string; dates use YYYY-MM-DD and times HH:mm. tabs binds a child node id string.`,
+  `- Presentation-only states: ${SMART_UI_COMPONENT_KINDS.filter(componentKindIsPresentationState).join(', ')} restore locally but are not task constraints. required:true marks a task field that must be answered; false is a valid toggle answer. Use label to name the field and title/text to explain it. Never ask for passwords or secrets.`,
+  '- rows have {label,value?,detail?,cells?}; tables use cells, charts require finite value in every row, timeline/steps use label/detail. items is an array of plain strings for lists. progress uses a finite value and max. Diagram uses a structured list of nodes/relationships as items, not SVG or script. Generated numbers are explanations unless explicitly grounded in a verified data binding.',
+  '- Rich styles use component.style:{tone:neutral|accent|success|warning|danger,emphasis:plain|soft|outlined|filled,density:compact|comfortable,alignment:leading|center,spacing:none|small|medium|large,padding:none|small|medium|large}. Choose a small, coherent set of styles for each task. The host controls actual colors, dimensions, focus and motion.',
+  '- button/submitButton still require node.action:{type:"draft",text:"..."}; they fill the existing composer with a visible frozen snapshot of current task choices and inputs. The user reviews and sends it normally; no tools or network are called on tap. resetButton resets local fields to their declared defaults. Never imply that filling a draft executed an operation. A clear text follow-up such as “按这个继续” can carry the most recently edited valid card in the selected conversation branch.',
+  'Rich component example:',
+  '```amber-ui v=1 id=task-options',
+  '{"op":"state","id":"mode","initial":"local"}',
+  '{"op":"state","id":"budget","initial":50}',
+  '{"op":"state","id":"note","initial":""}',
+  '{"op":"node","id":"root","type":"column"}',
+  '{"op":"node","id":"goal","parent":"root","type":"component","component":{"kind":"goal","title":"选择存储方案","text":"比较后补充约束，再继续分析。"}}',
+  '{"op":"node","id":"mode-field","parent":"root","type":"component","label":"存储方案","state":"mode","options":[{"value":"local","label":"本地存储","detail":"离线可用"},{"value":"cloud","label":"云端存储","detail":"跨设备同步"}],"component":{"kind":"singleChoice"}}',
+  '{"op":"node","id":"budget-field","parent":"root","type":"component","label":"每月预算","state":"budget","component":{"kind":"slider","min":0,"max":100,"step":10}}',
+  '{"op":"node","id":"note-field","parent":"root","type":"component","label":"额外约束","required":true,"state":"note","component":{"kind":"textArea","text":"例如必须离线可用"}}',
+  '{"op":"node","id":"continue","parent":"root","type":"component","label":"继续分析","action":{"type":"draft","text":"根据当前选择继续比较存储方案。"},"component":{"kind":"submitButton"}}',
+  '{"op":"end"}',
+  '```',
+];
+
 // Injected only when the chat can display visual cards.
 export const GENERATIVE_WIDGET_INSTRUCTION: string = `
 Visual cards on this HarmonyOS device:
@@ -22,7 +54,7 @@ export const DECLARED_CONTENT_INSTRUCTION: string = [
   'Smart UI task controls:',
   '- Use exactly: ```amber-ui v=1 id=<block-id> followed by one complete JSON object per line and a final {"op":"end"} line. No comments, HTML, JavaScript, functions, expressions, patches, or unknown fields.',
   '- State comes first: declare every state before any node that references it. A state initial value is only a string, finite number, or boolean; input controls bind to string states.',
-  '- The only node types are column, text, choice, input, button, asset. root must be a column; child parent must be a previously declared column.',
+  '- The node types are column, text, choice, input, button, asset, component. root must be a column; child parent must be a previously declared column or a rich container component.',
   '- Compose native visual hierarchy with optional variant tokens: column plain|group|outlined|elevated|callout|section; text body|heading|subheading|caption|metric|code|badge|hero|lead|eyebrow|quote; choice list|chips|tiles|segmented; button primary|secondary|ghost|pill; input underline (omitting variant keeps the filled field). column also supports layout stack|row|grid: stack is vertical, row equally sizes 2-3 short items, grid has two equal columns. column and text support tone neutral|accent|success|warning|info; a non-neutral column tone creates a tinted section. Combine these fields independently for metric tiles, status sections, compact choices, and reading panels. Do not invent CSS, colors, dimensions, animation code, or other style fields. The host supplies theme and interaction motion. Prefer one heading, captions for hints, metric for a short key value, and one primary main action. Omitted fields use the standard appearance.',
   '- Choose styles for the task: outlined gives an outline; elevated a raised surface; callout a tinted panel with a semantic leading rule; section a leading rule without a background. hero is a large display title, lead an introductory paragraph, eyebrow a small spaced label, quote a serif quotation with a leading rule. tiles makes two-column option cards; segmented distributes short options equally, at most three per row. ghost is a lightweight text action; pill a filled capsule. Preserve 44vp touch targets and let long labels wrap. Avoid using every style in one card; combine related sections with a clear main action.',
   '- column: {"op":"node","id":"panel","type":"column"}',
@@ -35,6 +67,7 @@ export const DECLARED_CONTENT_INSTRUCTION: string = [
   '- text may use a static visibility condition: "visibleWhen":{"state":"selected","equals":"root"}. equals is only a string, finite number, or boolean literal; do not use expressions, scripts, or computed conditions.',
   '- text always requires fallback text. It may also bind one prepared data descriptor: {"bind":{"ref":"weather","path":"temperature_celsius"}}. The only paths are location, temperature_celsius, condition, and observed_at; bind.ref is a data descriptor, never a Smart UI state. If a known binding has no field, render an explicit unknown value and never present fallback text as actual data. Keep at most 16 text bindings per block.',
   '- Keep Smart UI within 64 nodes, depth 6, 256 records, 16 KiB UTF-8 per line, 128 KiB UTF-8 per block, 32 states, and 32 choice options. Emit complete lines while streaming; close the fence and end the block.',
+  ...nativeComponentInstruction(),
   'Example:',
   '```amber-ui v=1 id=ca-controls',
   '{"op":"state","id":"selected","initial":"root"}',

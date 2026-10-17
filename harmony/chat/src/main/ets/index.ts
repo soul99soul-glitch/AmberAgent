@@ -416,9 +416,26 @@ export type { GenerativeWidget, GenerativeWidgetAction, GenerativeWidgetSegment 
 export type { ThreeSceneSpec, ThreeSceneObject, ThreeSceneObjectType } from './chat/three_scene.ts';
 export { GENERATIVE_WIDGET_INSTRUCTION } from './chat/generative_widget_prompt.ts';
 export { parseSmartUi, validateSmartUiNode, validateSmartUiState } from './chat/smart_ui/protocol.ts';
+export {
+  SMART_UI_COMPONENT_KINDS, SMART_UI_COMPONENT_CATALOG, componentKindAllowsChildren, componentKindRequiresState,
+  componentKindIsPresentationState, componentKindHasOptions, componentKindIsNumeric,
+  componentKindIsMultiSelection, componentNumberMin, componentNumberMax, componentNumberStep,
+  decodeSmartUiSelection, encodeSmartUiSelection, smartUiComponentValueValid, smartUiComponentDisplayText,
+} from './chat/smart_ui/components.ts';
+export type {
+  SmartUiComponent, SmartUiComponentKind, SmartUiComponentRow, SmartUiComponentStyle,
+  SmartUiComponentTone, SmartUiComponentEmphasis, SmartUiComponentDensity,
+  SmartUiComponentAlignment, SmartUiComponentSpace, SmartUiComponentCatalogEntry, SmartUiComponentFamily,
+} from './chat/smart_ui/components.ts';
+export {
+  smartUiContinuationSnapshot, appendSmartUiContinuation, isExplicitSmartUiContinuation,
+  latestSmartUiContinuationSource, isSmartUiTaskState, smartUiContinuationDocumentForSource,
+  SMART_UI_MAX_CONTINUATION_SNAPSHOT_CHARS,
+} from './chat/smart_ui/continuation.ts';
+export type { SmartUiContinuationCandidate } from './chat/smart_ui/continuation.ts';
 export type {
   SmartUiDocument, SmartUiNode, SmartUiState, SmartUiScalar, SmartUiOption, SmartUiDiagnostic,
-  SmartUiDraftAction, SmartUiVisibilityCondition, SmartUiNodeType, SmartUiValueType,
+  SmartUiDraftAction, SmartUiResetAction, SmartUiAction, SmartUiVisibilityCondition, SmartUiNodeType, SmartUiValueType,
   SmartUiVariant, SmartUiLayout, SmartUiTone,
   SmartUiDocumentStatus, SmartUiDiagnosticSeverity,
 } from './chat/smart_ui/protocol.ts';

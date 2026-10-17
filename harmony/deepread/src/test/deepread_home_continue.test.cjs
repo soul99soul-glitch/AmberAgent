@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 
-const pageFile = path.resolve(__dirname, '../../../entry/src/main/ets/pages/ChatListPage.ets');
+const pageFile = path.resolve(__dirname, '../../../entry/src/main/ets/components/HomeListPane.ets');
 const pageSource = fs.readFileSync(pageFile, 'utf8');
 const transpile = (source) => ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -47,7 +47,7 @@ function harness(initiallyActive = false) {
   ];
   const module = { exports: {} };
   const context = {
-    module, Promise,
+    module, Promise, cachedContinue: null, cachedContinueReady: false,
     getNovelCreation: () => ({ listProjects: () => ++novelCalls === 1 ? firstNovel : Promise.resolve([]) }),
     getAgentCronManager: () => Promise.resolve({ listTasksSnapshot: async () => [] }),
     getDeepReadScheduler: () => Promise.resolve(scheduler),
@@ -62,10 +62,10 @@ function harness(initiallyActive = false) {
     markWantRoutingReady: () => {},
   };
   const code = `module.exports = class {
-    pageAlive = true; firstShowDone = false; continueSeq = 0; continueItem = null;
-    observeRunning() {} refresh() {} loadLastOpened() {} consumeDeepLink() {}
+    pageAlive = true; firstShowDone = false; hostVisible = true; twoPane = false; continueSeq = 0; continueItem = null;
+    observeRunning() {} refresh() {} loadLastOpened() {} loadUserProfile() {} stopRunningSubscription() {}
     getUIContext() { return { getRouter: () => ({}) }; }
-    ${method('onPageShow')}
+    ${method('onHostVisibleChange')}
     ${method('loadContinue')}
   };`;
   vm.runInNewContext(transpile(code), context, { filename: pageFile });
@@ -75,8 +75,8 @@ function harness(initiallyActive = false) {
 
 test('late pre-run Home aggregation cannot replace a fresh active force regeneration', async () => {
   const { page, setActive, releaseFirstNovel } = harness();
-  page.loadContinue(); page.onPageShow(); await settle();
-  setActive(true); page.onPageShow(); await settle();
+  page.loadContinue(); page.onHostVisibleChange(); await settle();
+  setActive(true); page.onHostVisibleChange(); await settle();
   assert.equal(page.continueItem.sourceId, 'infoq');
   assert.equal(page.continueItem.status, 'running');
   releaseFirstNovel(); await settle();
@@ -86,8 +86,8 @@ test('late pre-run Home aggregation cannot replace a fresh active force regenera
 
 test('late running Home aggregation cannot revive a job after the completed refresh', async () => {
   const { page, setActive, releaseFirstNovel } = harness(true);
-  page.loadContinue(); page.onPageShow(); await settle();
-  setActive(false); page.onPageShow(); await settle();
+  page.loadContinue(); page.onHostVisibleChange(); await settle();
+  setActive(false); page.onHostVisibleChange(); await settle();
   assert.equal(page.continueItem.sourceId, 'agents300k');
   assert.equal(page.continueItem.status, 'failed_resumable');
   releaseFirstNovel(); await settle();

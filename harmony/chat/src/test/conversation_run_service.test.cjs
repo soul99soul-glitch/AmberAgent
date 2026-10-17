@@ -41,7 +41,8 @@ function loadEntry(filename, imports, storage, cache = new Map()) {
   const requireEntry = name => {
     if (Object.prototype.hasOwnProperty.call(imports, name)) return imports[name];
     if (name === './EntryAbortController.ets' || name === './ConversationRunGuard.ets'
-      || name === './GenerationProgressTracker.ets' || name === './ChatVisualWeatherFixture.ets') {
+      || name === './GenerationProgressTracker.ets' || name === './ChatVisualWeatherFixture.ets'
+      || name === './ChatSmartUiComponentFixture.ets') {
       return loadEntry(name, imports, storage, cache);
     }
     throw new Error('Unexpected Entry dependency: ' + name);

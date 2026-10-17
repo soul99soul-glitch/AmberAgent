@@ -1,12 +1,15 @@
 import type {
   SmartUiDiagnostic,
   SmartUiDocument,
-  SmartUiDraftAction,
+  SmartUiAction,
   SmartUiNode,
   SmartUiScalar,
   SmartUiState,
   SmartUiVisibilityCondition,
 } from './protocol.ts';
+import { smartUiComponentValueValid, smartUiComponentDisplayText, componentKindRequiresState,
+  componentKindIsPresentationState } from './components.ts';
+import { smartUiContinuationSnapshot } from './continuation.ts';
 
 /** The page owns this store; a later KV adapter can implement the same two methods. */
 export interface SmartUiStateAccessor {
@@ -52,7 +55,8 @@ export interface SmartUiController {
   ) => SmartUiStateChange;
   isValueValid: (document: SmartUiDocument, stateId: string, value: SmartUiScalar) => boolean;
   visibleWhen: (condition: SmartUiVisibilityCondition | undefined, values: SmartUiStateValue[]) => boolean;
-  draft: (document: SmartUiDocument, action: SmartUiDraftAction | undefined, values: SmartUiStateValue[]) => string | null;
+  draft: (document: SmartUiDocument, action: SmartUiAction | undefined, values: SmartUiStateValue[]) => string | null;
+  reset: (document: SmartUiDocument, sourceKey: string) => SmartUiStateReconciliation;
 }
 
 /** State values are intentionally small because they are held by the chat page. */
@@ -110,6 +114,8 @@ const optionLabel = (document: SmartUiDocument, stateId: string, value: SmartUiS
 };
 
 const scalarText = (document: SmartUiDocument, stateId: string, value: SmartUiScalar): string => {
+  const control = document.nodes.find((node: SmartUiNode): boolean => node.state === stateId && node.component !== undefined);
+  if (control !== undefined) return smartUiComponentDisplayText(control, value, document.nodes.filter((node: SmartUiNode): boolean => node.parent === control.id)) ?? '';
   const label: string | null = optionLabel(document, stateId, value);
   if (label !== null) return label;
   if (typeof value === 'boolean') return value ? 'true' : 'false';
@@ -132,8 +138,13 @@ const inputValue = (value: SmartUiScalar): boolean => typeof value === 'string' 
 const valueIsValid = (document: SmartUiDocument, stateId: string, value: SmartUiScalar): boolean => {
   const state: SmartUiState | undefined = stateFor(document, stateId);
   if (state === undefined || typeof value !== state.valueType) return false;
+  if (typeof value === 'number' && !Number.isFinite(value)) return false;
   if (typeof value === 'string' && value.length > SMART_UI_MAX_INPUT_VALUE_CHARS) return false;
   if (hasInput(document, stateId) && !inputValue(value)) return false;
+  const control = document.nodes.find((node: SmartUiNode): boolean => node.state === stateId &&
+    node.type === 'component' && node.component !== undefined && componentKindRequiresState(node.component.kind));
+  // Empty required fields are valid editable drafts; only task submission requires an answer.
+  if (control !== undefined) return smartUiComponentValueValid(control, value, document.nodes.filter((node: SmartUiNode): boolean => node.parent === control.id), false);
   const choices: SmartUiNode[] = optionsFor(document, stateId);
   if (choices.length === 0) return true;
   for (const choice of choices) {
@@ -199,15 +210,16 @@ const visibleWhen = (condition: SmartUiVisibilityCondition | undefined, values: 
 
 const draft = (
   document: SmartUiDocument,
-  action: SmartUiDraftAction | undefined,
+  action: SmartUiAction | undefined,
   values: SmartUiStateValue[],
 ): string | null => {
-  if (action === undefined) return null;
+  if (action === undefined || action.type !== 'draft') return null;
+  if (smartUiContinuationSnapshot(document, values, (stateId: string, value: SmartUiScalar): boolean => valueIsValid(document, stateId, value)) === null) return null;
   let failed: boolean = false;
   TEMPLATE_PATTERN.lastIndex = 0;
   const result: string = action.text.replace(TEMPLATE_PATTERN, (_match: string, stateId: string): string => {
     const value: SmartUiScalar | undefined = valueAt(values, stateId);
-    if (value === undefined || !valueIsValid(document, stateId, value)) {
+    if (value === undefined || !valueIsValid(document, stateId, value) || document.nodes.some((node: SmartUiNode): boolean => node.state === stateId && node.component !== undefined && componentKindIsPresentationState(node.component.kind))) {
       failed = true;
       return '';
     }
@@ -217,6 +229,11 @@ const draft = (
 };
 
 export const createSmartUiController = (accessor: SmartUiStateAccessor): SmartUiController => ({
+  reset: (document: SmartUiDocument, sourceKey: string): SmartUiStateReconciliation => {
+    const values: SmartUiStateValue[] = document.states.map((state: SmartUiState): SmartUiStateValue => ({ id: state.id, value: state.initial }));
+    for (const item of values) accessor.set(sourceKey, item.id, item.value);
+    return reconcile(document, sourceKey, values, [], accessor);
+  },
   reconcile: (
     document: SmartUiDocument,
     sourceKey: string,
@@ -246,4 +263,3 @@ export const appendSmartUiDraft = (input: string, draftText: string): string => 
   if (input.endsWith('\n')) return `${input}\n${next}`;
   return `${input}\n\n${next}`;
 };
-

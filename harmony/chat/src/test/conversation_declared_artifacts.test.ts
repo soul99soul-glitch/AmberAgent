@@ -10,6 +10,8 @@ import type { ConversationSvgValidationProof } from '../main/ets/chat/conversati
 import { makeConversation, makeMessageNode } from '../main/ets/chat/conversation.ts';
 import { makeUIMessage } from '../main/ets/chat/message.ts';
 import { parseResponseContent } from '../main/ets/chat/response_content.ts';
+import { cloneSmartUiComponent } from '../main/ets/chat/smart_ui/components.ts';
+import type { SmartUiComponent } from '../main/ets/chat/smart_ui/components.ts';
 
 const text = (value: string) => ({ type: 'text' as const, text: value, metadata: null });
 const svgBody = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><rect width="20" height="20" fill="#3366ff"/></svg>';
@@ -26,6 +28,45 @@ const uiBody = [
 ].join('\n');
 const declared = (language: string, id: string, body: string): string =>
   `\`\`\`${language} v=1 id=${id}\n${body}\n\`\`\`\n`;
+
+test('rich native artifact snapshots retain semantic controls, row data, style and local reset', () => {
+  const body = [
+    { op: 'state', id: 'choices', initial: '[]' },
+    { op: 'node', id: 'root', type: 'column' },
+    { op: 'node', id: 'choicesNode', parent: 'root', type: 'component', state: 'choices', required: true, label: '选活动', options: [{ value: 'walk', label: '散步', detail: '附近公园', color: 'green' }], component: { kind: 'multiChoice', title: '活动偏好', style: { tone: 'accent' } } },
+    { op: 'node', id: 'table', parent: 'root', type: 'component', component: { kind: 'table', title: '计划数据', rows: [{ label: '周六', value: 2, detail: '全天', cells: ['上午', '下午'] }] } },
+    { op: 'node', id: 'reset', parent: 'root', type: 'component', component: { kind: 'button', title: '重置' }, action: { type: 'reset' } },
+    { op: 'end' },
+  ].map((record) => JSON.stringify(record)).join('\n');
+  const message = makeUIMessage('assistant', [text(declared('amber-ui', 'rich-controls', body))]);
+  const conversation = makeConversation('rich-native-artifacts', [makeMessageNode([message])]);
+  const index = collectConversationArtifacts(conversation, false);
+  assert.equal(index.uiSnapshots.length, 1);
+  const snapshot = index.uiSnapshots[0];
+  const choices = snapshot.definition.nodes.find((node) => node.id === 'choicesNode')!;
+  assert.equal(choices.required, true);
+  assert.equal(choices.component?.kind, 'multiChoice');
+  assert.equal(choices.component?.style?.tone, 'accent');
+  assert.deepEqual(choices.options, [{ value: 'walk', label: '散步', detail: '附近公园', color: 'green' }]);
+  assert.deepEqual(snapshot.definition.nodes.find((node) => node.id === 'reset')?.action, { type: 'reset' });
+  assert.match(snapshot.summary, /活动偏好/);
+  assert.match(snapshot.summary, /计划数据/);
+  const exported = uiSnapshotArtifactExport(snapshot);
+  assert.ok(exported);
+  const payload = JSON.parse(exported.content);
+  assert.deepEqual(payload.definition.nodes.find((node: { id: string }) => node.id === 'table').component.rows, [{ label: '周六', value: 2, detail: '全天', cells: ['上午', '下午'] }]);
+});
+
+test('native component snapshot rows, items and style do not share mutable references', () => {
+  const original: SmartUiComponent = { kind: 'table', items: ['列一'], rows: [{ label: '甲', cells: ['原始值'] }], style: { tone: 'accent' } };
+  const copy = cloneSmartUiComponent(original);
+  copy.items![0] = '被修改';
+  copy.rows![0].cells![0] = '新值';
+  copy.style!.tone = 'warning';
+  assert.deepEqual(original.items, ['列一']);
+  assert.deepEqual(original.rows![0].cells, ['原始值']);
+  assert.equal(original.style!.tone, 'accent');
+});
 
 test('declared artifacts use selected branches, preserve source, and index mixed content by type', () => {
   const body = `说明\n${declared('amber-ui', 'controls', uiBody)}\n${declared('amber-svg', 'diagram', svgBody)}\n${declared('amber-three', 'scene', sceneBody)}`;

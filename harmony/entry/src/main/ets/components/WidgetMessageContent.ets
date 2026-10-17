@@ -44,7 +44,7 @@ export struct WidgetMessageContent {
   onAction: (prompt: string) => void = (_prompt: string): void => {};
   onSmartUiStateChange: (sourceKey: string, stateId: string, value: SmartUiScalar) => void =
     (_sourceKey: string, _stateId: string, _value: SmartUiScalar): void => {};
-  onSmartUiDraft: (prompt: string) => void = (_prompt: string): void => {};
+  onSmartUiDraft: (nodeId: string, sourceKey: string) => void = (_nodeId: string, _sourceKey: string): void => {};
   onSmartUiAssetView: (ref: string, sourceStart: number) => void =
     (_ref: string, _sourceStart: number): void => {};
   onSmartUiSourceReplaced: (sourcePrefix: string) => void = (_sourcePrefix: string): void => {};
@@ -251,7 +251,7 @@ export struct WidgetMessageContent {
       onStateChange: (stateId: string, value: SmartUiScalar): void => {
         this.smartUiStateChangedAt(index, stateId, value);
       },
-      onDraft: (prompt: string): void => { this.onSmartUiDraft(prompt); },
+      onDraft: (nodeId: string): void => { this.onSmartUiDraft(nodeId, this.smartUiSourceKeyAt(index)); },
       onAssetView: (ref: string): void => {
         this.smartUiAssetViewAt(index, ref);
       },

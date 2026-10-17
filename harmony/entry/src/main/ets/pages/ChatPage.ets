@@ -33,7 +33,7 @@ import type {
   VisionModelHealth, VisionProbeDeps, ProviderModel, ProviderSetting, SandboxActivityUiState,
   InteractiveTurnRunResult, ChatTimelineRow, SmartUiDocument, SmartUiDraftSource, SmartUiScalar,
   SmartUiStateAccessor, SmartUiStateValue, SmartUiDraftStore, SmartUiDraftSaveResult,
-  SmartUiWeatherProjection,
+  SmartUiWeatherProjection, SmartUiContinuationCandidate, SmartUiNode,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, seedConversationWithPresets, nodeCurrentMessage,
@@ -48,8 +48,9 @@ import {
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity, withStepProgress, isActiveOperation,
   buildTopModelMenuGroups, loadProviders, loadDisplaySetting, makeDisplaySetting, isCloseEnoughToBottom,
   FOLLOW_BOTTOM_TOLERANCE_VP, makeMiniAppSetting, loadMiniAppSetting, runInteractiveTurn, type KernelPhase,
-  appendSmartUiDraft,
-  smartUiDefinitionFingerprint,
+  appendSmartUiDraft, appendSmartUiContinuation, smartUiContinuationSnapshot,
+  isExplicitSmartUiContinuation, latestSmartUiContinuationSource, isSmartUiTaskState, createSmartUiController,
+  smartUiDefinitionFingerprint, smartUiContinuationDocumentForSource,
   projectWeatherReadTool,
 } from '@amber/chat-domain';
 import type { MiniAppSetting } from '@amber/chat-domain';
@@ -285,6 +286,14 @@ interface SmartUiRuntimeEntry {
   loadEpoch: number;
   userChanged: boolean;
   loaded: boolean;
+  lastInteraction: number;
+}
+
+interface SmartUiContinuationCapture {
+  sourceKey: string;
+  source: SmartUiDraftSource;
+  fingerprint: string;
+  snapshot: string;
 }
 
 const EMPTY_SMART_UI_VALUES: SmartUiStateValue[] = [];
@@ -388,6 +397,7 @@ struct ChatPage {
   private smartUiRuntime: Map<string, SmartUiRuntimeEntry> = new Map<string, SmartUiRuntimeEntry>();
   private smartUiDraftStore: SmartUiDraftStore | null = null;
   private smartUiLoadEpoch: number = 0;
+  private smartUiInteractionSequence: number = 0;
   private smartUiSaveError: string = '';
   private smartUiProjectionConversation: Conversation | null = null;
   private smartUiProjectionNodes: MessageNode[] | null = null;
@@ -3622,8 +3632,16 @@ struct ChatPage {
     const owner: string = this.conversation.id;
     const editingNodeId: string = this.editingNodeId;
     const editingMessageId: string = this.editingMessageId;
+    const continuation: SmartUiContinuationCapture | null = editingNodeId.length === 0
+      ? this.captureSmartUiContinuation(text) : null;
+    if (editingNodeId.length === 0 && isExplicitSmartUiContinuation(text) &&
+      this.latestSmartUiContinuationRuntime() !== undefined && continuation === null) {
+      this.errorMsg = '当前选择不完整或内容过长，请检查智能 UI 后再继续';
+      return;
+    }
+    const sendText: string = appendSmartUiContinuation(text, continuation?.snapshot ?? null);
     const inputParts: UIMessagePart[] = [];
-    if (text.length > 0) inputParts.push({ type: 'text', text, metadata: null });
+    if (sendText.length > 0) inputParts.push({ type: 'text', text: sendText, metadata: null });
     for (const url of acceptedImages) inputParts.push({ type: 'image', url, metadata: null });
     for (const doc of acceptedDocs) inputParts.push({ type: 'document', url: doc.url,
       fileName: doc.fileName, mime: doc.mime, metadata: null });
@@ -3632,7 +3650,7 @@ struct ChatPage {
     const sequence: number = ++this.sendPreflightSeq;
     try {
       if (!await this.prepareComposerSend(inputParts, owner, sequence) || this.editingNodeId !== editingNodeId ||
-        this.editingMessageId !== editingMessageId) return;
+        this.editingMessageId !== editingMessageId || !this.smartUiContinuationCurrent(continuation)) return;
       this.dismissKeyboardAfterSend();
       if (this.sending) await this.enqueuePendingParts(inputParts, true, 'STEER');
       else if (getConversationRunService().isBusy(owner)) await this.enqueuePendingParts(inputParts, false);
@@ -3788,8 +3806,16 @@ struct ChatPage {
     const owner: string = this.conversation.id;
     const editingNodeId: string = this.editingNodeId;
     const editingMessageId: string = this.editingMessageId;
+    const continuation: SmartUiContinuationCapture | null = editingNodeId.length === 0
+      ? this.captureSmartUiContinuation(text) : null;
+    if (editingNodeId.length === 0 && isExplicitSmartUiContinuation(text) &&
+      this.latestSmartUiContinuationRuntime() !== undefined && continuation === null) {
+      this.errorMsg = '当前选择不完整或内容过长，请检查智能 UI 后再继续';
+      return;
+    }
+    const sendText: string = appendSmartUiContinuation(text, continuation?.snapshot ?? null);
     const inputParts: UIMessagePart[] = [];
-    if (text.length > 0) inputParts.push({ type: 'text', text, metadata: null });
+    if (sendText.length > 0) inputParts.push({ type: 'text', text: sendText, metadata: null });
     for (const url of acceptedImages) inputParts.push({ type: 'image', url, metadata: null });
     for (const doc of acceptedDocs) inputParts.push({ type: 'document', url: doc.url,
       fileName: doc.fileName, mime: doc.mime, metadata: null });
@@ -3798,7 +3824,7 @@ struct ChatPage {
     const sequence: number = ++this.sendPreflightSeq;
     try {
       if (!await this.prepareComposerSend(inputParts, owner, sequence) || this.editingNodeId !== editingNodeId ||
-        this.editingMessageId !== editingMessageId) return;
+        this.editingMessageId !== editingMessageId || !this.smartUiContinuationCurrent(continuation)) return;
       this.dismissKeyboardAfterSend();
       if (this.sending) await this.enqueuePendingParts(inputParts, true, queueMode);
       else if (editingNodeId.length > 0) {
@@ -4202,8 +4228,14 @@ struct ChatPage {
   }
 
   private setSmartUiValue(sourceKey: string, stateId: string, value: SmartUiScalar): void {
+    if (this.smartUiValue(sourceKey, stateId) === value) return;
     const runtime: SmartUiRuntimeEntry | undefined = this.smartUiRuntime.get(sourceKey);
-    if (runtime !== undefined) runtime.userChanged = true;
+    if (runtime !== undefined) {
+      runtime.userChanged = true;
+      if (isSmartUiTaskState(runtime.document, stateId)) {
+        runtime.lastInteraction = ++this.smartUiInteractionSequence;
+      }
+    }
     const entries: SmartUiValueEntry[] = this.smartUiValues.slice();
     const entry: SmartUiValueEntry | undefined = entries.find(
       (candidate: SmartUiValueEntry): boolean => candidate.sourceKey === sourceKey);
@@ -4235,8 +4267,12 @@ struct ChatPage {
     });
   }
 
-  private onSmartUiStateChange(sourceKey: string, _stateId: string, _value: SmartUiScalar): void {
+  private onSmartUiStateChange(sourceKey: string, stateId: string, value: SmartUiScalar): void {
     const runtime: SmartUiRuntimeEntry | undefined = this.smartUiRuntime.get(sourceKey);
+    // Keep transient invalid edits in the page owner too, so text continuation cannot reuse an older value.
+    if (runtime !== undefined && this.smartUiValue(sourceKey, stateId) !== value) {
+      this.setSmartUiValue(sourceKey, stateId, value);
+    }
     this.saveSmartUiEntry(runtime, 250);
   }
 
@@ -4259,10 +4295,13 @@ struct ChatPage {
     this.smartUiValues = next.concat([{ sourceKey, values: values.slice() }]);
   }
 
+  private smartUiBlockMatches(left: SmartUiDraftSource, right: SmartUiDraftSource): boolean {
+    return left.conversationId === right.conversationId && left.messageId === right.messageId &&
+      left.blockId === right.blockId && left.blockIndex === right.blockIndex && left.sourceStart === right.sourceStart;
+  }
+
   private smartUiSourceMatches(left: SmartUiDraftSource, right: SmartUiDraftSource): boolean {
-    return left.conversationId === right.conversationId && left.nodeId === right.nodeId &&
-      left.messageId === right.messageId && left.blockId === right.blockId &&
-      left.blockIndex === right.blockIndex && left.sourceStart === right.sourceStart;
+    return left.nodeId === right.nodeId && this.smartUiBlockMatches(left, right);
   }
 
   private smartUiSaveResult(sourceKey: string, result: SmartUiDraftSaveResult): void {
@@ -4316,6 +4355,9 @@ struct ChatPage {
       loadEpoch: previous?.loadEpoch ?? 0,
       userChanged: branchChanged ? false : (previous?.userChanged ?? false),
       loaded: branchChanged ? false : (previous?.loaded ?? false),
+      // Publishing a live message adds nodeId without changing the user's choice.
+      lastInteraction: previous !== undefined && !branchChanged && previous.fingerprint === fingerprint &&
+        this.smartUiBlockMatches(previous.source, source) ? previous.lastInteraction : 0,
     };
     if (previous === undefined || previous.fingerprint !== fingerprint ||
       !this.smartUiSourceMatches(previous.source, source)) {
@@ -4362,8 +4404,84 @@ struct ChatPage {
     this.smartUiWeatherProjections = [];
   }
 
-  private onSmartUiDraft(prompt: string): void {
-    this.inputText = appendSmartUiDraft(this.inputText, prompt);
+  private currentSmartUiMessages(): UIMessage[] {
+    // Timeline already resolves selected branches, regeneration and the active streaming tail.
+    return this.chatTimelineItems().map((row: MsgRow): UIMessage => this.displayedRowMessage(row));
+  }
+
+  private smartUiSourceIsCurrent(runtime: SmartUiRuntimeEntry): boolean {
+    const conversation: Conversation | null = this.conversation;
+    if (conversation === null || runtime.source.conversationId !== conversation.id || !runtime.ready) return false;
+    const message: UIMessage | undefined = this.currentSmartUiMessages().find(
+      (candidate: UIMessage): boolean => candidate.id === runtime.source.messageId);
+    if (message === undefined) return false;
+    const document: SmartUiDocument | null = smartUiContinuationDocumentForSource(message, runtime.source);
+    return document !== null && `${smartUiDefinitionFingerprint(document)}:complete` === runtime.fingerprint;
+  }
+
+  private latestSmartUiContinuationRuntime(): SmartUiRuntimeEntry | undefined {
+    const conversation: Conversation | null = this.conversation;
+    if (conversation === null) return undefined;
+    const candidates: SmartUiContinuationCandidate[] = [];
+    this.smartUiRuntime.forEach((runtime: SmartUiRuntimeEntry): void => {
+      candidates.push({ sourceKey: runtime.sourceKey, conversationId: runtime.source.conversationId,
+        messageId: runtime.source.messageId, ready: runtime.ready, streaming: runtime.streaming,
+        lastInteraction: runtime.lastInteraction });
+    });
+    const key: string | null = latestSmartUiContinuationSource(candidates, conversation.id,
+      this.currentSmartUiMessages().map((message: UIMessage): string => message.id));
+    return key === null ? undefined : this.smartUiRuntime.get(key);
+  }
+
+  private smartUiSnapshot(runtime: SmartUiRuntimeEntry): string | null {
+    const controller = createSmartUiController(this.smartUiStateAccessor);
+    return smartUiContinuationSnapshot(runtime.document, this.smartUiValuesFor(runtime.sourceKey),
+      (stateId: string, value: SmartUiScalar): boolean => controller.isValueValid(runtime.document, stateId, value));
+  }
+
+  private captureSmartUiContinuation(text: string): SmartUiContinuationCapture | null {
+    if (!isExplicitSmartUiContinuation(text)) return null;
+    const runtime: SmartUiRuntimeEntry | undefined = this.latestSmartUiContinuationRuntime();
+    if (runtime === undefined || !this.smartUiSourceIsCurrent(runtime)) return null;
+    const snapshot: string | null = this.smartUiSnapshot(runtime);
+    if (snapshot === null) return null;
+    return { sourceKey: runtime.sourceKey, source: runtime.source, fingerprint: runtime.fingerprint, snapshot };
+  }
+
+  private smartUiContinuationCurrent(capture: SmartUiContinuationCapture | null): boolean {
+    if (capture === null) return true;
+    const runtime: SmartUiRuntimeEntry | undefined = this.smartUiRuntime.get(capture.sourceKey);
+    const latest: SmartUiRuntimeEntry | undefined = this.latestSmartUiContinuationRuntime();
+    const current: boolean = runtime !== undefined && latest?.sourceKey === capture.sourceKey &&
+      this.smartUiSourceIsCurrent(runtime) &&
+      (this.smartUiSourceMatches(runtime.source, capture.source) ||
+        (capture.source.nodeId.length === 0 && this.smartUiBlockMatches(runtime.source, capture.source))) &&
+      runtime.fingerprint === capture.fingerprint && this.smartUiSnapshot(runtime) === capture.snapshot;
+    if (!current) this.errorMsg = '智能 UI 的选择或来源已变化，请确认后重新发送';
+    return current;
+  }
+
+  private onSmartUiDraft(nodeId: string, sourceKey: string): void {
+    const runtime: SmartUiRuntimeEntry | undefined = this.smartUiRuntime.get(sourceKey);
+    if (runtime === undefined || !this.smartUiSourceIsCurrent(runtime)) {
+      this.errorMsg = '这张智能 UI 已变化，请在当前消息中重新选择';
+      return;
+    }
+    const node: SmartUiNode | undefined = runtime.document.nodes.find(
+      (candidate: SmartUiNode): boolean => candidate.id === nodeId);
+    const controller = createSmartUiController(this.smartUiStateAccessor);
+    const values: SmartUiStateValue[] = controller.reconcile(runtime.document, sourceKey,
+      this.smartUiValuesFor(sourceKey), []).values;
+    const prompt: string | null = controller.draft(runtime.document, node?.action, values);
+    const snapshot: string | null = smartUiContinuationSnapshot(runtime.document, values,
+      (stateId: string, value: SmartUiScalar): boolean => controller.isValueValid(runtime.document, stateId, value));
+    if (prompt === null || snapshot === null) {
+      this.errorMsg = '当前选择不完整或内容过长，请检查后再继续';
+      return;
+    }
+    runtime.lastInteraction = ++this.smartUiInteractionSequence;
+    this.inputText = appendSmartUiDraft(this.inputText, appendSmartUiContinuation(prompt, snapshot));
+    promptAction.showToast({ message: '已填入输入框，确认后发送', duration: 1800 });
   }
 
   private smartUiAssetAreaKey(messageId: string, partIndex: number, ref: string, sourceStart: number): string {
@@ -4511,7 +4629,7 @@ struct ChatPage {
           onSmartUiStateChange: (sourceKey: string, stateId: string, value: SmartUiScalar): void => {
             this.onSmartUiStateChange(sourceKey, stateId, value);
           },
-          onSmartUiDraft: (prompt: string): void => { this.onSmartUiDraft(prompt); },
+          onSmartUiDraft: (nodeId: string, sourceKey: string): void => { this.onSmartUiDraft(nodeId, sourceKey); },
           onSmartUiAssetView: (messageId: string, partIndex: number, ref: string, sourceStart: number): void => {
             this.onSmartUiAssetView(this.currentTimelineRow(row).nodeId, messageId, partIndex, ref, sourceStart);
           },

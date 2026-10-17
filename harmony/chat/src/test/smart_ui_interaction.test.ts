@@ -98,3 +98,70 @@ test('appendSmartUiDraft preserves input and does not duplicate an identical tai
   assert.equal(appendSmartUiDraft('已有背景继续解释', '继续解释'), '已有背景继续解释\n\n继续解释');
 });
 
+const richTask = () => parseSmartUi([
+  { op: 'state', id: 'budget', initial: 10 },
+  { op: 'state', id: 'enabled', initial: false },
+  { op: 'state', id: 'selected', initial: '[]' },
+  { op: 'state', id: 'note', initial: '' },
+  { op: 'state', id: 'expanded', initial: false },
+  { op: 'node', id: 'root', type: 'column' },
+  { op: 'node', id: 'budgetNode', parent: 'root', type: 'component', state: 'budget', component: { kind: 'slider', title: '预算', min: 0, max: 20, step: 2 } },
+  { op: 'node', id: 'switchNode', parent: 'root', type: 'component', state: 'enabled', component: { kind: 'toggle', title: '附说明' } },
+  { op: 'node', id: 'selectionNode', parent: 'root', type: 'component', state: 'selected', required: true, options: [{ value: 'a', label: '旅行' }, { value: 'b', label: '阅读' }], component: { kind: 'multiChoice', title: '偏好' } },
+  { op: 'node', id: 'noteNode', parent: 'root', type: 'component', state: 'note', required: true, component: { kind: 'textArea', title: '补充需求' } },
+  { op: 'node', id: 'disclosureNode', parent: 'root', type: 'component', state: 'expanded', component: { kind: 'disclosure', title: '展开说明' } },
+  { op: 'node', id: 'submit', parent: 'root', type: 'component', component: { kind: 'submitButton', title: '继续' }, action: { type: 'draft', text: '偏好{{selected}}，预算{{budget}}，附说明{{enabled}}。' } },
+  { op: 'node', id: 'reset', parent: 'root', type: 'component', component: { kind: 'resetButton', title: '重置' } },
+  { op: 'end' },
+].map((record) => JSON.stringify(record)).join('\n'), 'trip-task', true);
+
+test('native changes preserve exact number, boolean and collection values with readable drafts', () => {
+  const doc = richTask();
+  assert.equal(doc.status, 'ready', JSON.stringify(doc.diagnostics));
+  const memory: MemoryState = { values: new Map() };
+  const controller = controllerFor(memory);
+  let values = controller.reconcile(doc, 'source', [], []).values;
+  const action = doc.nodes.find((node) => node.id === 'submit')?.action;
+  assert.equal(controller.draft(doc, action, values), null, 'unanswered required inputs block submission');
+  for (const [id, value] of [['budget', 14], ['enabled', true], ['selected', '["a","b"]'], ['note', '步行优先']] as Array<[string, SmartUiScalar]>) {
+    const changed = controller.setValue(doc, 'source', values, id, value);
+    assert.equal(changed.accepted, true, id);
+    values = changed.values;
+  }
+  assert.equal(memory.values.get('budget'), 14);
+  assert.equal(memory.values.get('enabled'), true);
+  assert.equal(memory.values.get('selected'), '["a","b"]');
+  assert.equal(controller.draft(doc, action, values), '偏好旅行、阅读，预算14，附说明开启。');
+  for (const [id, value] of [['budget', 13], ['budget', Infinity], ['enabled', 'true'], ['selected', '["missing"]'], ['selected', '["a","a"]']] as Array<[string, SmartUiScalar]>) {
+    assert.equal(controller.setValue(doc, 'source', values, id, value).accepted, false, `${id}: ${value}`);
+  }
+});
+
+test('clearing required fields replaces the accessor value and blocks only submission', () => {
+  const doc = richTask();
+  const memory: MemoryState = { values: new Map([['selected', '["a"]'], ['note', '已填写']]) };
+  const controller = controllerFor(memory);
+  const initial = controller.reconcile(doc, 'source', [], []).values;
+  const cleared = controller.setValue(doc, 'source', initial, 'note', '');
+  assert.equal(cleared.accepted, true);
+  assert.equal(memory.values.get('note'), '');
+  assert.deepEqual(cleared.invalidStateIds, []);
+  assert.equal(controller.draft(doc, doc.nodes.find((node) => node.id === 'submit')?.action, cleared.values), null);
+  const selection = controller.setValue(doc, 'source', cleared.values, 'selected', '[]');
+  assert.equal(selection.accepted, true);
+  assert.equal(memory.values.get('selected'), '[]');
+  assert.equal(controller.reconcile(doc, 'source', [], []).values.find((value) => value.id === 'note')?.value, '');
+  assert.equal(controller.reconcile(doc, 'source', [], []).values.find((value) => value.id === 'selected')?.value, '[]');
+});
+
+test('local reset restores all initial values and keeps presentation state out of drafts', () => {
+  const doc = richTask();
+  const memory: MemoryState = { values: new Map<string, SmartUiScalar>([['budget', 18], ['note', '填写过'], ['expanded', true]]) };
+  const controller = controllerFor(memory);
+  const reset = controller.reset(doc, 'source');
+  assert.deepEqual(reset.values, doc.states.map((state) => ({ id: state.id, value: state.initial })));
+  assert.equal(memory.values.get('note'), '');
+  assert.equal(memory.values.get('expanded'), false);
+  assert.equal(controller.draft(doc, { type: 'reset' }, reset.values), null);
+  assert.equal(controller.draft(doc, { type: 'draft', text: '{{expanded}}' }, reset.values), null);
+});

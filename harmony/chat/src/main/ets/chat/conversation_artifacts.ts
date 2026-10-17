@@ -8,6 +8,7 @@ import { groupMessageParts } from './message_grouping.ts';
 import { parseResponseContent } from './response_content.ts';
 import type { ResponseContentSegment, VisualArtifact } from './response_content.ts';
 import type { SmartUiNode, SmartUiState } from './smart_ui/protocol.ts';
+import { cloneSmartUiComponent } from './smart_ui/components.ts';
 import type { ThreeSceneSpec } from './three_scene.ts';
 import { renderThreeSceneCover } from './three_scene.ts';
 
@@ -142,11 +143,13 @@ const cloneSmartUiDefinition = (id: string, states: SmartUiState[], nodes: Smart
     if (node.bind !== undefined) copy.bind = { ref: node.bind.ref, path: node.bind.path };
     if (node.state !== undefined) copy.state = node.state;
     if (node.options !== undefined) {
-      copy.options = node.options.map((option) => ({ value: option.value, label: option.label }));
+      copy.options = node.options.map((option) => ({ value: option.value, label: option.label, detail: option.detail, color: option.color }));
     }
     if (node.placeholder !== undefined) copy.placeholder = node.placeholder;
     if (node.label !== undefined) copy.label = node.label;
-    if (node.action !== undefined) copy.action = { type: 'draft', text: node.action.text };
+    if (node.action !== undefined) copy.action = node.action.type === 'draft' ? { type: 'draft', text: node.action.text } : { type: 'reset' };
+    if (node.component !== undefined) copy.component = cloneSmartUiComponent(node.component);
+    if (node.required !== undefined) copy.required = node.required;
     if (node.ref !== undefined) copy.ref = node.ref;
     if (node.visibleWhen !== undefined) {
       copy.visibleWhen = { state: node.visibleWhen.state, equals: node.visibleWhen.equals };
@@ -163,6 +166,13 @@ const smartUiSummary = (nodes: SmartUiNode[]): string => {
       lines.push(`${label.length > 0 ? label : '数据'}（只读引用：${node.bind.ref}/${node.bind.path}，未包含当前值）`);
     } else if (node.type === 'text' && node.text !== undefined && node.text.trim().length > 0) {
       lines.push(node.text.trim());
+    } else if (node.type === 'component' && node.component !== undefined) {
+      const component = node.component;
+      if (component.title !== undefined && component.title.trim().length > 0) lines.push(component.title.trim());
+      if (component.text !== undefined && component.text.trim().length > 0) lines.push(component.text.trim());
+      if (component.items !== undefined) lines.push(component.items.join('、'));
+      if (component.rows !== undefined) lines.push(component.rows.map((row): string => `${row.label}${row.value !== undefined ? `：${row.value}` : ''}${row.detail ? ` ${row.detail}` : ''}${row.cells !== undefined ? ` ${row.cells.join(' | ')}` : ''}`).join('\n'));
+      if (node.options !== undefined) lines.push(`选择：${node.options.map((option): string => option.label).join('、')}`);
     } else if (node.type === 'choice' && node.options !== undefined) {
       lines.push(`选择：${node.options.map((option) => option.label).join('、')}`);
     } else if (node.type === 'input') {

@@ -54,6 +54,7 @@ const actualHttpFixture = (fastUrls: string[] = []): { http: HttpClient; request
     '@kit.NetworkKit': { http: networkHttp }, '@kit.ArkTS': { util: {} },
     '@kit.PerformanceAnalysisKit': { hilog: { info: (): void => {}, warn: (): void => {}, error: (): void => {} } },
     '@amber/deepread-domain': {},
+    './ModelEnterpriseCa.ets': { modelEnterpriseCaPathForUrl: (): undefined => undefined },
   });
   return { http: (exports.createRcpHttpClient as () => HttpClient)(), requests };
 };

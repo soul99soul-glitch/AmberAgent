@@ -163,7 +163,7 @@ export struct AgentMessageRow {
   onWidgetAction: (prompt: string) => void = (_prompt: string): void => {};
   onSmartUiStateChange: (sourceKey: string, stateId: string, value: SmartUiScalar) => void =
     (_sourceKey: string, _stateId: string, _value: SmartUiScalar): void => {};
-  onSmartUiDraft: (prompt: string) => void = (_prompt: string): void => {};
+  onSmartUiDraft: (nodeId: string, sourceKey: string) => void = (_nodeId: string, _sourceKey: string): void => {};
   onSmartUiAssetView: (messageId: string, partIndex: number, ref: string, sourceStart: number) => void =
     (_messageId: string, _partIndex: number, _ref: string, _sourceStart: number): void => {};
   onSmartUiSourceReplaced: (sourcePrefix: string) => void = (_sourcePrefix: string): void => {};
@@ -666,7 +666,7 @@ export struct AgentMessageRow {
                 onSmartUiStateChange: (sourceKey: string, stateId: string, value: SmartUiScalar): void => {
                   this.onSmartUiStateChange(sourceKey, stateId, value);
                 },
-                onSmartUiDraft: (prompt: string): void => { this.onSmartUiDraft(prompt); },
+                onSmartUiDraft: (nodeId: string, sourceKey: string): void => { this.onSmartUiDraft(nodeId, sourceKey); },
                 onSmartUiAssetView: (ref: string, sourceStart: number): void => {
                   this.onSmartUiAssetView(this.message.id, block.index, ref, sourceStart);
                 },

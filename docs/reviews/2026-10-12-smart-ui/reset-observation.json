@@ -1,0 +1,22 @@
+[
+  {
+    "type": "TextArea",
+    "text": "",
+    "enabled": "true"
+  },
+  {
+    "type": "Button",
+    "text": "准备学习问题",
+    "enabled": "false"
+  },
+  {
+    "type": "Button",
+    "text": "重置选择",
+    "enabled": "true"
+  },
+  {
+    "type": "TextArea",
+    "text": "请为我安排一次学习。选择的本地方案：轻量方案；时间预算：50 分钟；约束与偏好：offline。请解释方案并列出具体步骤。\n\n【智能 UI 当前选择】\n来源：local-decision\n目标：\"安排一次学习\"\n- \"本地方案\"：\"轻量方案\"\n- \"时间预算（分钟）\"：\"50\"\n- \"约束与偏好\"：\"offline\"\n【选择结束】",
+    "enabled": "true"
+  }
+]

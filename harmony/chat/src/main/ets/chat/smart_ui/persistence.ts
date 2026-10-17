@@ -94,6 +94,23 @@ const definitionJson = (document: SmartUiDocument): string => {
       if (node.action !== undefined) value['action'] = node.action;
       if (node.ref !== undefined) value['ref'] = node.ref;
       if (node.visibleWhen !== undefined) value['visibleWhen'] = node.visibleWhen;
+      if (node.required !== undefined) value['required'] = node.required;
+      if (node.component !== undefined) {
+        const component = node.component;
+        const semantic: Record<string, string | number | object> = { kind: component.kind };
+        if (component.title !== undefined) semantic['title'] = component.title;
+        if (component.text !== undefined) semantic['text'] = component.text;
+        if (component.items !== undefined) semantic['items'] = component.items;
+        if (component.rows !== undefined) semantic['rows'] = component.rows;
+        if (component.value !== undefined) semantic['value'] = component.value;
+        if (component.min !== undefined) semantic['min'] = component.min;
+        if (component.max !== undefined) semantic['max'] = component.max;
+        if (component.step !== undefined) semantic['step'] = component.step;
+        if (component.columns !== undefined) semantic['columns'] = component.columns;
+        if (component.symbol !== undefined) semantic['symbol'] = component.symbol;
+        if (component.url !== undefined) semantic['url'] = component.url;
+        value['component'] = semantic;
+      }
       return value;
     },
   );
@@ -296,4 +313,3 @@ export const checkSmartUiDraftSessionBudget = (rawBlocks: string[]): SmartUiDraf
   return { ok: bytes <= SMART_UI_DRAFT_SESSION_MAX_BYTES, bytes, limit: SMART_UI_DRAFT_SESSION_MAX_BYTES,
     reason: bytes <= SMART_UI_DRAFT_SESSION_MAX_BYTES ? 'ok' : 'session-too-large' };
 };
-

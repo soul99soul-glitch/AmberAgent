@@ -6,6 +6,7 @@ import type {
   SmartUiScalar,
   SmartUiStateAccessor,
   SmartUiStateValue,
+  SmartUiStateReconciliation,
   SmartUiWeatherProjection,
 } from '@amber/chat-domain';
 import { createSmartUiController, SMART_UI_MAX_INPUT_VALUE_CHARS } from '@amber/chat-domain';
@@ -36,7 +37,7 @@ export struct NativeSmartUiCard {
   @Prop fontSize: number = 16;
   @Prop fontFamily: string = FONT_SANS;
   @Prop validationDiagnostics: SmartUiAssetDiagnostic[] = [];
-  onDraft: (prompt: string) => void = (_prompt: string): void => {};
+  onDraft: (nodeId: string) => void = (_nodeId: string): void => {};
   onAssetView: (ref: string) => void = (_ref: string): void => {};
   onContentGrow: () => void = (): void => {};
   onStateChange: (stateId: string, value: SmartUiScalar) => void = (_stateId: string, _value: SmartUiScalar): void => {};
@@ -52,9 +53,27 @@ export struct NativeSmartUiCard {
 
   private reconcile(currentValues: SmartUiStateValue[]): void {
     const result = this.controller.reconcile(this.document, this.sourceKey, currentValues, this.initialValues);
-    this.values = result.values;
-    this.invalidStateIds = result.invalidStateIds;
-    this.stateDiagnostics = result.diagnostics.map((item): string => item.message);
+    this.applyReconciliation(result);
+  }
+
+  private sameValues(left: SmartUiStateValue[], right: SmartUiStateValue[]): boolean {
+    if (left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index++) {
+      if (left[index].id !== right[index].id || left[index].value !== right[index].value) return false;
+    }
+    return true;
+  }
+
+  private sameStrings(left: string[], right: string[]): boolean {
+    return left.length === right.length && left.every((value: string, index: number): boolean => value === right[index]);
+  }
+
+  private applyReconciliation(result: SmartUiStateReconciliation): void {
+    // Native text controls can echo programmatic values. Keep equivalent snapshots stable to end that update cycle.
+    if (!this.sameValues(this.values, result.values)) this.values = result.values;
+    if (!this.sameStrings(this.invalidStateIds, result.invalidStateIds)) this.invalidStateIds = result.invalidStateIds;
+    const diagnostics: string[] = result.diagnostics.map((item): string => item.message);
+    if (!this.sameStrings(this.stateDiagnostics, diagnostics)) this.stateDiagnostics = diagnostics;
   }
 
   private onDocumentChanged(): void {
@@ -84,26 +103,32 @@ export struct NativeSmartUiCard {
   private updateState(stateId: string, value: SmartUiScalar): void {
     const nextValue: SmartUiScalar = typeof value === 'string'
       ? value.slice(0, SMART_UI_MAX_INPUT_VALUE_CHARS) : value;
+    if (this.values.some((item: SmartUiStateValue): boolean => item.id === stateId && item.value === nextValue)) return;
     const result = this.controller.setValue(this.document, this.sourceKey, this.values, stateId, nextValue);
     const choice: boolean = this.document.nodes.some((node: SmartUiNode): boolean =>
       node.type === 'choice' && node.state === stateId);
     if (choice && result.accepted) {
       this.getUIContext().animateTo({ duration: MOTION_PRESS, curve: Curve.EaseOut }, (): void => {
-        this.values = result.values;
-        this.invalidStateIds = result.invalidStateIds;
-        this.stateDiagnostics = result.diagnostics.map((item): string => item.message);
+        this.applyReconciliation(result);
       });
     } else {
-      this.values = result.values;
-      this.invalidStateIds = result.invalidStateIds;
-      this.stateDiagnostics = result.diagnostics.map((item): string => item.message);
+      this.applyReconciliation(result);
     }
-    if (result.accepted) this.onStateChange(stateId, nextValue);
+    // Invalid edits remain in the page snapshot too; the controller alone decides what is persisted.
+    this.onStateChange(stateId, nextValue);
     this.onContentGrow();
   }
 
   private hasRoot(): boolean {
     return this.document.rootId !== null;
+  }
+
+  private resetValues(): void {
+    // Reset follows the same controller and page persistence path as a normal edit.
+    const result = this.controller.reset(this.document, this.sourceKey);
+    this.applyReconciliation(result);
+    for (const item of result.values) this.onStateChange(item.id, item.value);
+    this.onContentGrow();
   }
 
   private rootNodeId(): string {
@@ -122,8 +147,9 @@ export struct NativeSmartUiCard {
       projections: this.projections,
       depth: 1, fontSize: this.fontSize, fontFamily: this.fontFamily,
       onStateChange: (stateId: string, value: SmartUiScalar): void => { this.updateState(stateId, value); },
-      onDraft: (prompt: string): void => { this.onDraft(prompt); },
+      onDraft: (nodeId: string): void => { this.onDraft(nodeId); },
       onAssetView: (ref: string): void => { this.onAssetView(ref); },
+      onReset: (): void => { this.resetValues(); },
       onContentGrow: (): void => { this.onContentGrow(); } });
   }
 
@@ -172,7 +198,7 @@ export struct NativeSmartUiCard {
 
   build(): void {
     Column({ space: 12 }) {
-      this.Content()
+      ForEach([this.themeEpoch], (_epoch: number): void => { this.Content(); }, (epoch: number): string => String(epoch));
     }
     .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
@@ -187,4 +213,3 @@ export struct NativeSmartUiCard {
     });
   }
 }
-

@@ -4,6 +4,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('../../../chat/node_modules/typescript');
+require('../../../chat/node_modules/tsx/dist/cjs/index.cjs');
+const { appendSmartUiContinuation, isExplicitSmartUiContinuation } =
+  require('../../../chat/src/main/ets/chat/smart_ui/continuation.ts');
 const { rootComponentInitializers } = require('../../../deepread/src/test/deepread_ui_fixture.cjs');
 const root = path.resolve(__dirname, '../main/ets/pages');
 const read = name => fs.readFileSync(path.join(root, name + '.ets'), 'utf8');
@@ -33,12 +36,14 @@ function composer(options = {}) {
   let choicePromise = gate.promise;
   const source = read('ChatPage');
   const names = ['send', 'sendWithoutAnswer', 'clearAcceptedComposer', 'sendParts', 'sendEdit',
-    'gateModelConfigured', 'guardImagesForSend', 'reloadOcrSeed', 'submitConversationRun', 'cancelEdit', 'startEditMessage'];
+    'gateModelConfigured', 'guardImagesForSend', 'reloadOcrSeed', 'submitConversationRun', 'cancelEdit', 'startEditMessage',
+    'captureSmartUiContinuation', 'smartUiContinuationCurrent'];
   for (const n of ['prepareComposerSend', 'finishComposerPreflight', 'composerSendCurrent']) {
     if (new RegExp('^  (?:private )?(?:async )?' + n + '\\(', 'm').test(source)) names.push(n);
   }
   const page = actualPage('ChatPage', names, {
     resolveEffectiveChatChoice: () => choicePromise,
+    appendSmartUiContinuation, isExplicitSmartUiContinuation,
     loadOcrSeed: async () => null, getChatKvStore: () => ({}),
     toText: message => message.parts.map(part => part.text ?? '').join(''),
     firstImageBlockingIssueForSend: async () => null,

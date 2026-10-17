@@ -14,6 +14,7 @@ import { ACCENT, ACCENT_INK, ACCENT_LIGHT, ERROR, INK, INK3, INK4, LINE, SURFACE
   SUCCESS_BG, SUCCESS_FG, WARNING_BG, WARNING_FG, INFO_BG, INFO_FG,
   MOTION_ENTER, MOTION_PRESS, accentSoftBg } from '../design/tokens.ets';
 import { FONT_SANS, FONT_MONO, FONT_SERIF } from '../design/fonts.ets';
+import { NativeSmartUiComponent } from './NativeSmartUiComponent.ets';
 
 const EMPTY_ACCESSOR: SmartUiStateAccessor = {
   get: (_sourceKey: string, _stateId: string): SmartUiScalar | undefined => undefined,
@@ -45,9 +46,10 @@ export struct NativeSmartUiNode {
   @State private pressedKey: string = '';
   @State private inputFocused: boolean = false;
   onStateChange: (stateId: string, value: SmartUiScalar) => void = (_stateId: string, _value: SmartUiScalar): void => {};
-  onDraft: (prompt: string) => void = (_prompt: string): void => {};
+  onDraft: (nodeId: string) => void = (_nodeId: string): void => {};
   onAssetView: (ref: string) => void = (_ref: string): void => {};
   onContentGrow: () => void = (): void => {};
+  onReset: () => void = (): void => {};
 
   private nodeExists(): boolean {
     const nodes: SmartUiNode[] = this.document.nodes;
@@ -234,7 +236,7 @@ export struct NativeSmartUiNode {
   }
 
   private draftEnabled(): boolean {
-    return this.ready && this.draftText() !== null;
+    return this.currentNode().action?.type === 'reset' || (this.ready && this.draftText() !== null);
   }
 
   private visible(): boolean {
@@ -253,8 +255,12 @@ export struct NativeSmartUiNode {
   }
 
   private clickDraft(): void {
-    const latest: string | null = this.draftText();
-    if (latest !== null && this.ready) this.onDraft(latest);
+    if (this.currentNode().action?.type === 'reset') {
+      this.onReset();
+      return;
+    }
+    // The page expands the action against its current fields; child props can trail the last keystroke.
+    if (this.ready && this.currentNode().action !== undefined) this.onDraft(this.nodeId);
   }
 
   private projectionFor(ref: string): SmartUiWeatherProjection | null {
@@ -328,8 +334,9 @@ export struct NativeSmartUiNode {
         projections: this.projections, controller: this.controller, ready: this.ready, sourceKey: this.sourceKey,
         streaming: this.streaming, depth: this.depth + 1, fontSize: this.fontSize, fontFamily: this.fontFamily,
         onStateChange: (stateId: string, value: SmartUiScalar): void => { this.onStateChange(stateId, value); },
-        onDraft: (prompt: string): void => { this.onDraft(prompt); },
+        onDraft: (nodeId: string): void => { this.onDraft(nodeId); },
         onAssetView: (ref: string): void => { this.onAssetView(ref); },
+        onReset: (): void => { this.onReset(); },
         onContentGrow: (): void => { this.onContentGrow(); } });
     }
   }
@@ -587,6 +594,13 @@ export struct NativeSmartUiNode {
       this.ButtonNode();
     } else if (this.currentNode().type === 'asset') {
       this.AssetNode();
+    } else if (this.currentNode().type === 'component') {
+      NativeSmartUiComponent({ document: this.document, nodeId: this.nodeId, values: this.values,
+        invalidStateIds: this.invalidStateIds, fontSize: this.fontSize, fontFamily: this.fontFamily,
+        draftEnabled: this.draftEnabled(),
+        child: (childId: string): void => { this.ChildNode(childId); },
+        onStateChange: (stateId: string, value: SmartUiScalar): void => { this.onStateChange(stateId, value); },
+        onDraft: (): void => { this.clickDraft(); }, onReset: (): void => { this.onReset(); } });
     }
   }
 

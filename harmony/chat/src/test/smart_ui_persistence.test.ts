@@ -12,6 +12,7 @@ import type { SmartUiDraftSource } from '../main/ets/chat/smart_ui/persistence.t
 import { createSmartUiDraftStore } from '../main/ets/chat/smart_ui/store.ts';
 import { createMemoryKeyValueStore } from '../main/ets/chat/kv_store.ts';
 import type { KeyValueStore } from '../main/ets/chat/kv_store.ts';
+import { createSmartUiController } from '../main/ets/chat/smart_ui/interaction.ts';
 
 const document = (text: string = '证书链'): SmartUiDocument => parseSmartUi(
   '{"op":"state","id":"selected","initial":"root"}\n' +
@@ -178,3 +179,50 @@ test('flush persists the latest pending value before the store owner leaves', as
   assert.deepEqual((await store.load(doc, source)).values, [{ id: 'selected', value: 'server' }]);
 });
 
+const nativeDocument = (step: number = 1, tone: string = 'neutral'): SmartUiDocument => parseSmartUi([
+  { op: 'state', id: 'budget', initial: 10 },
+  { op: 'state', id: 'note', initial: '' },
+  { op: 'state', id: 'preferences', initial: '[]' },
+  { op: 'node', id: 'root', type: 'column' },
+  { op: 'node', id: 'budgetNode', parent: 'root', type: 'component', state: 'budget', component: { kind: 'slider', title: '预算', min: 0, max: 20, step, style: { tone } } },
+  { op: 'node', id: 'noteNode', parent: 'root', type: 'component', state: 'note', required: true, component: { kind: 'textArea', title: '需求' } },
+  { op: 'node', id: 'preferencesNode', parent: 'root', type: 'component', state: 'preferences', required: true, options: [{ value: 'a', label: '甲' }], component: { kind: 'multiChoice', title: '偏好' } },
+  { op: 'end' },
+].map((record) => JSON.stringify(record)).join('\n'), 'native-task', true);
+
+test('native fingerprints include semantic component changes while allowing theme-only changes', () => {
+  const doc = nativeDocument();
+  assert.equal(doc.status, 'ready');
+  assert.notEqual(smartUiDefinitionFingerprint(doc), smartUiDefinitionFingerprint(nativeDocument(2)));
+  assert.equal(smartUiDefinitionFingerprint(doc), smartUiDefinitionFingerprint(nativeDocument(1, 'accent')));
+  const saved = serializeSmartUiDraft(doc, source, [{ id: 'budget', value: 13 }], 1);
+  assert.equal(restoreSmartUiDraft(saved.raw, nativeDocument(2), source).status, 'rejected');
+  assert.equal(restoreSmartUiDraft(saved.raw, nativeDocument(1, 'accent'), source).status, 'restored');
+});
+
+test('cleared required text and collections round-trip through the actual draft store', async () => {
+  const kv = createMemoryKeyValueStore();
+  const store = createSmartUiDraftStore(kv);
+  const doc = nativeDocument();
+  await store.save(doc, source, [{ id: 'budget', value: 10 }, { id: 'note', value: '原回答' }, { id: 'preferences', value: '["a"]' }], 1);
+  const changed = await store.save(doc, source, [{ id: 'budget', value: 10 }, { id: 'note', value: '' }, { id: 'preferences', value: '[]' }], 2);
+  assert.equal(changed.saved, true);
+  const restored = await store.load(doc, source);
+  assert.deepEqual(restored.values, [{ id: 'budget', value: 10 }, { id: 'note', value: '' }, { id: 'preferences', value: '[]' }]);
+  const controller = createSmartUiController({ get: () => undefined, set: () => {} });
+  const owner = controller.reconcile(doc, 'same-source', [], restored.values);
+  assert.deepEqual(owner.values, restored.values);
+  assert.deepEqual(owner.invalidStateIds, []);
+  assert.equal(controller.draft(doc, { type: 'draft', text: '按这些继续' }, owner.values), null);
+});
+
+test('restore rejects illegal native values even when the saved definition still matches', () => {
+  const doc = nativeDocument(2);
+  const serialized = serializeSmartUiDraft(doc, source, [{ id: 'budget', value: 12 }], 1);
+  assert.ok(serialized.raw);
+  const raw = JSON.parse(serialized.raw);
+  raw.values[0].value = 13;
+  const restored = restoreSmartUiDraft(JSON.stringify(raw), doc, source);
+  assert.equal(restored.status, 'rejected');
+  assert.deepEqual(restored.values, []);
+});

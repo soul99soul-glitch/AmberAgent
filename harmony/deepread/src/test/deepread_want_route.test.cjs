@@ -59,7 +59,7 @@ function harness(push = () => Promise.resolve()) {
     observeRunning() {} refresh() {} loadContinue() {} loadLastOpened() {}
     getUIContext() { return { getRouter: () => pageRouter }; }
     ${pageMethod('onPageShow')}
-    ${pageMethod('consumeDeepLink')}
+    ${pageMethod('aboutToAppear')}
   };`), {
     module, pageRouter, Promise,
     loadDisplaySetting: async () => ({ userNickname: '', userAvatar: '' }),

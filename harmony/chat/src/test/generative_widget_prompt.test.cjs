@@ -74,3 +74,28 @@ test('declared content prompt is opt-in, state-first, and matches the native blo
   assert.ok(segments.find((item) => item.type === 'svg').artifact.snapshot);
   assert.equal(segments.find((item) => item.type === 'three').status, 'ready');
 });
+
+test('rich task example advertised to the model uses the production protocol and preserves entered constraints', async () => {
+  const domain = await import('../main/ets/index.ts');
+  const prompt = domain.resolveGenerativeWidgetInstruction('declared-content-v1');
+  const start = prompt.indexOf('```amber-ui v=1 id=task-options');
+  const end = prompt.indexOf('\n```', start) + 4;
+  assert.ok(start >= 0 && end > start);
+  const segment = domain.parseResponseContent(prompt.slice(start, end), false).find((item) => item.type === 'ui');
+  assert.ok(segment);
+  assert.ok(segment.ui);
+  assert.equal(segment.ui.status, 'ready', JSON.stringify(segment.ui.diagnostics));
+  const document = segment.ui;
+  const values = document.states.map((state) => ({ id: state.id, value: state.initial }));
+  assert.equal(domain.smartUiContinuationSnapshot(document, values), null, 'required constraint is still unanswered');
+  values.find((item) => item.id === 'note').value = '必须离线可用';
+  const snapshot = domain.smartUiContinuationSnapshot(document, values);
+  assert.match(snapshot, /本地存储/);
+  assert.match(snapshot, /每月预算.*50/);
+  assert.match(snapshot, /额外约束.*必须离线可用/);
+  assert.match(snapshot, /选择存储方案/);
+  assert.equal(domain.SMART_UI_COMPONENT_KINDS.length, 80);
+  for (const kind of domain.SMART_UI_COMPONENT_KINDS) {
+    assert.ok(prompt.includes(kind), `${kind} must be discoverable in the same prompt`);
+  }
+});

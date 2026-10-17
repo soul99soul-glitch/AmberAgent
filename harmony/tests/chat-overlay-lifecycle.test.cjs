@@ -55,6 +55,7 @@ const makeChat = productionClass('pages/ChatPage.ets', [
 function chat({ loadProviders = () => Promise.resolve([]), resolveChoice = () => Promise.resolve(null),
   getManager = () => Promise.reject(new Error('unexpected manager request')) } = {}) {
   const page = makeChat({
+    AppStorage: { get: () => undefined, setOrCreate: () => {} },
     animateTo: (_options, mutation) => mutation(), Curve: { EaseOut: 'EaseOut' },
     loadProviders, getChatKvStore: () => ({}), getSubAgentManager: getManager,
     resolveEffectiveChatChoice: resolveChoice, buildTopModelMenuGroups: () => [],
@@ -170,7 +171,7 @@ const makeMiniApp = productionClass('components/MiniAppChatCard.ets', ['restoreV
 function miniApp() {
   const request = deferred(), notices = [], target = { app: { id: 'app', version: 3 }, versions: [] };
   const card = makeMiniApp({});
-  Object.assign(card, { alive: true, versionTarget: target,
+  Object.assign(card, { alive: true, versionTarget: target, part: { appId: 'app' }, previewRevision: 0,
     platform: { repository: { restoreVersion: () => request.promise } }, toast: message => notices.push(message) });
   return { card, target, request, notices };
 }

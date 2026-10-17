@@ -13,6 +13,7 @@ import { getConversationRunService, getChatRepository } from '../di/AppContainer
 import { DEBUG_VISUAL_CONVERSATION_PREFIX } from './ConversationRunService.ets';
 import { getMiniAppPlatform } from './MiniAppPlatform.ets';
 import { CHAT_VISUAL_WEATHER_FIXTURE } from './ChatVisualWeatherFixture.ets';
+import { debugSmartUiComponentGalleryPayload, debugSmartUiTaskPayload } from './ChatSmartUiComponentFixture.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'Chat.VisualFixture';
@@ -21,7 +22,7 @@ const FRAME_STEP_MS: number = 600;
 const DEBUG_APP_TITLE: string = 'Amber Debug';
 const ANSWER_SUFFIX: string = '-answer';
 
-type VisualFixtureCase = 'svg' | 'three' | 'miniapp' | 'widget-error' | 'raw-svg' | 'raw-three' | 'smart-ui' | 'ui-svg-error' | 'weather-ui' | 'style-gallery' | 'mixed';
+type VisualFixtureCase = 'svg' | 'three' | 'miniapp' | 'widget-error' | 'raw-svg' | 'raw-three' | 'smart-ui' | 'ui-svg-error' | 'weather-ui' | 'style-gallery' | 'component-gallery' | 'task-ui' | 'mixed';
 
 interface VisualFixtureData {
   initial: Conversation;
@@ -34,7 +35,7 @@ const activeRuns: Set<string> = new Set<string>();
 const isVisualFixtureCase = (value: string): boolean =>
   value === 'svg' || value === 'three' || value === 'miniapp' || value === 'widget-error' ||
     value === 'raw-svg' || value === 'raw-three' || value === 'smart-ui' || value === 'ui-svg-error' ||
-    value === 'weather-ui' || value === 'style-gallery' || value === 'mixed';
+    value === 'weather-ui' || value === 'style-gallery' || value === 'component-gallery' || value === 'task-ui' || value === 'mixed';
 
 const conversationIdFor = (runId: string): string => `${DEBUG_VISUAL_CONVERSATION_PREFIX}${runId}`;
 const answerIdFor = (runId: string): string => `debug-visual-${runId}${ANSWER_SUFFIX}`;
@@ -192,6 +193,8 @@ const buildVisualFixture = async (runId: string, kind: VisualFixtureCase): Promi
   const answerId: string = answerIdFor(runId);
   const prompt: string = kind === 'miniapp'
     ? '请生成一个小应用，展示 Amber 的视觉回放。'
+    : kind === 'component-gallery' ? '展示八类原生智能 UI 组件，使用本地示例数据。'
+    : kind === 'task-ui' ? '做一张学习决策卡，支持选择本地方案、调整时间预算、填写约束，并准备聊天草稿。'
     : kind === 'style-gallery' ? '展示可组合的原生样式，包括卡片、引用、选项、按钮和输入框。'
     : kind === 'smart-ui' ? '请做一张“企业 CA 证书链”的原生智能 UI 交互卡片：\n\n' +
       '1. 提供“根证书 / 中间证书 / 服务器证书”三个选项。\n' +
@@ -248,6 +251,7 @@ const buildVisualFixture = async (runId: string, kind: VisualFixtureCase): Promi
     kind === 'smart-ui' ? smartUiCertificatePayload() + '\n\n' + rawSvgPayload() :
     kind === 'ui-svg-error' ? smartUiCertificatePayload() + '\n\n' + rawSvgPayload().replace('</svg>', '</g>') :
     kind === 'weather-ui' ? weatherUiPayload() : kind === 'style-gallery' ? styleGalleryPayload() :
+    kind === 'component-gallery' ? debugSmartUiComponentGalleryPayload() : kind === 'task-ui' ? debugSmartUiTaskPayload() :
     kind === 'mixed' ? '下面是证书链交互卡、独立矢量图和三维场景。\n\n' +
       smartUiCertificatePayload() + '\n\n' + rawSvgPayload() + '\n\n' + rawThreePayload() :
     kind === 'svg' ? svgPayload() : threePayload();

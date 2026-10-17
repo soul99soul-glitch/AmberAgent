@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 
-const filename = path.resolve(__dirname, '../../../entry/src/main/ets/pages/ChatListPage.ets');
+const filename = path.resolve(__dirname, '../../../entry/src/main/ets/components/HomeListPane.ets');
 const source = fs.readFileSync(filename, 'utf8');
 function block(start) {
   assert.ok(start >= 0);
