@@ -58,8 +58,10 @@ export struct NativeSmartUiInputs {
     }
   }
   private compactChoices(): boolean {
-    return this.kind() === 'segmented' && this.fontSize <= 18 && this.options().length <= 4 &&
-      this.options().every((option: SmartUiOption): boolean => option.label.length <= 8);
+    return ['segmented', 'singleChoice', 'multiChoice'].includes(this.kind()) &&
+      this.fontSize <= 18 && this.options().length >= 2 && this.options().length <= 4 &&
+      this.options().every((option: SmartUiOption): boolean =>
+        option.label.length <= 8 && (option.detail ?? '').length === 0);
   }
   private choiceLabel(): string {
     for (const option of this.options()) if (option.value === this.value()) return option.label;
@@ -125,8 +127,10 @@ export struct NativeSmartUiInputs {
           .fontSize(this.textSize(18)).fontColor(this.accent).width(24).flexShrink(0);
       }
       Column({ space: 4 }) {
-        Text(this.option(index).label).width('100%').fontSize(this.textSize(15)).fontFamily(this.fontFamily)
-          .lineHeight(this.textSize(21)).fontColor(this.selected(index) ? this.accent : this.ink);
+        Text((this.compactChoices() && this.multiple() && this.selected(index) ? '✓ ' : '') +
+          this.option(index).label).width('100%').fontSize(this.textSize(15)).fontFamily(this.fontFamily)
+          .lineHeight(this.textSize(21)).textAlign(this.compactChoices() ? TextAlign.Center : TextAlign.Start)
+          .fontColor(this.selected(index) ? this.accent : this.ink);
         if ((this.option(index).detail ?? '').length > 0) {
           Text(this.option(index).detail ?? '').width('100%').fontSize(this.textSize(12))
             .fontFamily(this.fontFamily).lineHeight(this.textSize(18)).fontColor(this.secondaryInk);
