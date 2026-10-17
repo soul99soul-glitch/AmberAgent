@@ -19,7 +19,10 @@ function fixture() {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText;
   const exportsObject = {};
-  vm.runInNewContext(compiled, { exports: exportsObject });
+  vm.runInNewContext(compiled, {
+    exports: exportsObject,
+    messageSignature: message => JSON.stringify(message),
+  });
   return Object.assign(new exportsObject.Probe(), { rows: [], streamingTail: [], regenTail: null,
     regenNodeId: '', darkMode: false });
 }
