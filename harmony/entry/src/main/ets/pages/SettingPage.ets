@@ -141,7 +141,7 @@ struct SettingPage {
       onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
     CardRow({ label: '搜索服务', iconName: 'ph_magnifyingGlass', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/ChatSearchSettingsPage'); } })
-    CardRow({ label: 'Jev 快速判断', iconName: 'ph_lightning', plateStyle: 'accent', isLast: true,
+    CardRow({ label: '快速判断模型', iconName: 'ph_lightning', plateStyle: 'accent', isLast: true,
       onRowClick: (): void => { this.go('pages/SettingJevPage'); } })
   }
 

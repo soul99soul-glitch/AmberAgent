@@ -17,9 +17,11 @@ const loadPolicy = async (): Promise<JevContextPolicy> => {
     selectionToolMetadata: settings.toolContextSelection.allowToolMetadata,
     retentionTaskText: settings.contextRetention.allowTaskText,
     retentionToolMetadata: settings.contextRetention.allowToolMetadata,
-    selectionConsentKey: JSON.stringify({ mode: settings.mode, apiMode: settings.apiMode, model: settings.model,
+    selectionConsentKey: JSON.stringify({ mode: settings.mode, provider: settings.provider,
+      apiMode: settings.apiMode, model: settings.model, modelProvider: settings.modelProvider,
       apiKey: settings.apiKey, baseUrl: settings.baseUrl, purpose: settings.toolContextSelection }),
-    retentionConsentKey: JSON.stringify({ mode: settings.mode, apiMode: settings.apiMode, model: settings.model,
+    retentionConsentKey: JSON.stringify({ mode: settings.mode, provider: settings.provider,
+      apiMode: settings.apiMode, model: settings.model, modelProvider: settings.modelProvider,
       apiKey: settings.apiKey, baseUrl: settings.baseUrl, purpose: settings.contextRetention }),
   };
 };

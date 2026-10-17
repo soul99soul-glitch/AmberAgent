@@ -1363,10 +1363,11 @@ export { composeLatex } from './chat/math_compose.ts';
 // ===== Phase C5:Jev 判断服务 =====
 export {
   makeJevSettings, makeJevNewPurposeSettings, loadJevSettings, saveJevSettings,
-  JEV_TYPESAFE_ENDPOINT, JEV_VERCEL_DEFAULT_BASE,
+  JEV_TYPESAFE_ENDPOINT, JEV_VERCEL_DEFAULT_BASE, JEV_PROVIDERS, JEV_PROVIDER_ORDER,
+  jevProviderStyle, jevEndpointOf, jevRequestUrlOf, switchJevProvider,
 } from './chat/jev_models.ts';
 export type {
-  JevMode, JevApiMode, JevSettings, JevSettingsInit, JevPurpose, JevNewPurpose, JevNewPurposeSettings, JevEvaluateResult,
+  JevMode, JevApiMode, JevProvider, JevProviderStyle, JevSettings, JevSettingsInit, JevPurpose, JevNewPurpose, JevNewPurposeSettings, JevEvaluateResult,
   JevNoulQuestion, JevChoiceQuestion, JevQuestion,
   JevNoulAnswer, JevChoiceAnswer, JevAnswer,
   JevUsage, JevEvaluation, JevCallOutcome, JevCallOk, JevCallSkipped, JevCallFailed,

@@ -9,13 +9,14 @@ require('tsx/cjs');
 const models = require('../main/ets/chat/jev_models.ts');
 const approval = require('../main/ets/chat/jev_approval.ts');
 const source = fs.readFileSync(path.resolve(__dirname, '../../../entry/src/main/ets/pages/SettingJevPage.ets'), 'utf8');
-const names = ['setMode', 'setApiMode', 'patchText', 'purposeSettings', 'patchPurpose'];
+const names = ['setMode', 'setProvider', 'patchText', 'purposeSettings', 'patchPurpose'];
 const methods = names.map(name => source.match(new RegExp(`  private ${name}\\([^]*?\\n  \\}`))[0]).join('\n');
 const exportsProbe = {};
 vm.runInNewContext(ts.transpileModule(`class Probe {${methods}};exports.Probe=Probe;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText,
 { exports: exportsProbe, makeJevSettings: models.makeJevSettings, jevPurposeSettings: approval.jevPurposeSettings,
-  MODE_VALUES: ['off', 'shadow', 'active'], API_MODE_VALUES: ['typesafe', 'vercel'], MOTION_OVERLAY: 0, Curve: { EaseOut: 0 } });
+  MODE_VALUES: ['off', 'shadow', 'active'], JEV_PROVIDER_ORDER: models.JEV_PROVIDER_ORDER,
+  switchJevProvider: models.switchJevProvider, MOTION_OVERLAY: 0, Curve: { EaseOut: 0 } });
 const fields = ['approvalTriage', 'webAutomation', 'toolContextSelection', 'contextRetention', 'autoApproval', 'completionCheck'];
 const purposes = ['approval_triage', 'web_automation', 'tool_context_selection', 'context_retention', 'auto_approval', 'completion_check'];
 const snapshot = value => JSON.parse(JSON.stringify(value));
@@ -26,10 +27,23 @@ function fixture() {
   page.persist = () => {}; page.getUIContext = () => ({ animateTo: (_opts, callback) => callback() });
   return page;
 }
-test('actual global mode/API/key/base/model setters retain all six purpose settings', () => {
+test('actual global mode/provider/key/base/model setters retain all six purpose settings', () => {
   const page = fixture(); const before = Object.fromEntries(fields.map(field => [field, snapshot(page.settings[field])]));
-  page.setMode(1); page.setApiMode(1); page.patchText({ apiKey: 'new', model: 'new', baseUrl: 'http://localhost' });
+  page.setMode(1); page.setProvider(2); page.patchText({ apiKey: 'new', model: 'new', baseUrl: 'http://localhost' });
+  assert.equal(page.settings.provider, 'perplexity');
+  assert.equal(page.settings.apiMode, 'typesafe');
+  assert.equal(page.settings.modelProvider, 'perplexity');
   for (const field of fields) assert.deepEqual(snapshot(page.settings[field]), before[field], field);
+});
+test('typing key or base without a model keeps the current model owner', () => {
+  const page = fixture();
+  page.setProvider(2);
+  page.patchText({ apiKey: 'pplx-key' });
+  assert.equal(page.settings.modelProvider, 'perplexity');
+  page.patchText({ baseUrl: 'https://gateway.example/v4/ai' });
+  assert.equal(page.settings.modelProvider, 'perplexity');
+  page.patchText({ model: 'custom' });
+  assert.equal(page.settings.modelProvider, 'perplexity');
 });
 test('each actual purpose setter changes only its target and retains independent output consent', () => {
   for (let index = 0; index < purposes.length; index++) {

@@ -5,7 +5,7 @@ import { resolveJevPurposeMode, jevPurposeConsentUnchanged } from '../main/ets/c
 import { createMemoryKeyValueStore } from '../main/ets/chat/kv_store.ts';
 
 test('four new purposes default off with independent output consent and survive persistence', async () => {
-  const settings = makeJevSettings({ mode: 'active' });
+  const settings = makeJevSettings({ mode: 'active', model: 'jev-1.14.0' });
   for (const field of ['toolContextSelection', 'contextRetention', 'autoApproval', 'completionCheck'] as const) {
     assert.equal(settings[field].mode, 'off');
     assert.equal(settings[field].allowToolOutput, false);

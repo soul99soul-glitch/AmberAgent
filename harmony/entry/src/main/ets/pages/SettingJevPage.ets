@@ -6,10 +6,13 @@
 
 import {
   loadJevSettings, saveJevSettings, makeJevSettings, decodeJevResponse, buildJevRequest,
-  JEV_TYPESAFE_ENDPOINT,
+  JEV_PROVIDERS, JEV_PROVIDER_ORDER, jevEndpointOf, jevRequestUrlOf, jevProviderStyle, switchJevProvider,
   resolveJevPurposeMode, jevPurposeSettings,
 } from '@amber/chat-domain';
-import type { JevSettings, JevEvaluation, JevQuestion, JevMode, JevNewPurpose, JevNewPurposeSettings } from '@amber/chat-domain';
+import type {
+  JevSettings, JevEvaluation, JevQuestion, JevMode, JevNewPurpose, JevNewPurposeSettings,
+  JevProvider, JevProviderStyle,
+} from '@amber/chat-domain';
 import { getChatKvStore, getAppContainer } from '../di/AppContainer.ets';
 import { loadJevRuntimeStatus, JevRuntimeStatus } from '../platform_impl/JevSupport.ets';
 import {
@@ -24,8 +27,8 @@ import { SSHUIColors } from '../components/SSHUIColors.ets';
 
 const MODE_OPTIONS: string[] = ['关', '影子', '主动'];
 const MODE_VALUES: string[] = ['off', 'shadow', 'active'];
-const API_MODE_OPTIONS: string[] = ['TypeSafe', 'Vercel'];
-const API_MODE_VALUES: string[] = ['typesafe', 'vercel'];
+const PROVIDER_LABELS: string[] = JEV_PROVIDER_ORDER.map(
+  (provider: JevProvider): string => JEV_PROVIDERS[provider].label);
 
 @Entry
 @Component
@@ -93,15 +96,15 @@ struct SettingJevPage {
     return idx >= 0 ? idx : 0;
   }
 
-  private apiModeIndex(): number {
-    const idx: number = API_MODE_VALUES.indexOf(this.settings.apiMode);
-    return idx >= 0 ? idx : 0;
+  private providerStyle(): JevProviderStyle {
+    return jevProviderStyle(this.settings.provider);
   }
 
   private setMode(idx: number): void {
     this.settings = makeJevSettings({
       mode: MODE_VALUES[idx] === 'shadow' ? 'shadow' : (MODE_VALUES[idx] === 'active' ? 'active' : 'off'),
-      apiMode: this.settings.apiMode,
+      provider: this.settings.provider,
+      modelProvider: this.settings.modelProvider,
       apiKey: this.settings.apiKey,
       baseUrl: this.settings.baseUrl,
       model: this.settings.model,
@@ -115,21 +118,11 @@ struct SettingJevPage {
     this.persist();
   }
 
-  private setApiMode(idx: number): void {
+  private setProvider(idx: number): void {
+    const provider: JevProvider = JEV_PROVIDER_ORDER[idx] ?? 'typesafe';
+    if (provider === this.settings.provider) return;
     this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
-      this.settings = makeJevSettings({
-        mode: this.settings.mode,
-        apiMode: API_MODE_VALUES[idx] === 'vercel' ? 'vercel' : 'typesafe',
-        apiKey: this.settings.apiKey,
-        baseUrl: this.settings.baseUrl,
-        model: this.settings.model,
-        approvalTriage: this.settings.approvalTriage,
-        webAutomation: this.settings.webAutomation,
-        toolContextSelection: this.settings.toolContextSelection,
-        contextRetention: this.settings.contextRetention,
-        autoApproval: this.settings.autoApproval,
-        completionCheck: this.settings.completionCheck,
-      });
+      this.settings = switchJevProvider(this.settings, provider);
     });
     this.persist();
   }
@@ -137,7 +130,8 @@ struct SettingJevPage {
   private patchText(patch: Partial<JevSettings>): void {
     this.settings = makeJevSettings({
       mode: this.settings.mode,
-      apiMode: patch.apiMode ?? this.settings.apiMode,
+      provider: this.settings.provider,
+      modelProvider: patch.model !== undefined ? this.settings.provider : this.settings.modelProvider,
       apiKey: patch.apiKey ?? this.settings.apiKey,
       baseUrl: patch.baseUrl ?? this.settings.baseUrl,
       model: patch.model ?? this.settings.model,
@@ -163,8 +157,9 @@ struct SettingJevPage {
       allowPageContent: patch.allowPageContent ?? current.allowPageContent,
       allowToolOutput: patch.allowToolOutput ?? current.allowToolOutput,
     };
-    this.settings = makeJevSettings({ mode: this.settings.mode, apiMode: this.settings.apiMode,
+    this.settings = makeJevSettings({ mode: this.settings.mode, provider: this.settings.provider,
       apiKey: this.settings.apiKey, baseUrl: this.settings.baseUrl, model: this.settings.model,
+      modelProvider: this.settings.modelProvider,
       approvalTriage: purpose === 'approval_triage' ? next : this.settings.approvalTriage,
       webAutomation: purpose === 'web_automation' ? next : this.settings.webAutomation,
       toolContextSelection: purpose === 'tool_context_selection' ? next : this.settings.toolContextSelection,
@@ -253,8 +248,7 @@ struct SettingJevPage {
         falseCriteria: '数学上错误',
       },
     };
-    const endpoint: string = this.settings.apiMode === 'vercel'
-      ? this.settings.baseUrl : JEV_TYPESAFE_ENDPOINT;
+    const endpoint: string = jevEndpointOf(this.settings);
     try {
       const spec = buildJevRequest(
         this.settings.apiMode, endpoint, this.settings.apiKey, this.settings.model,
@@ -313,33 +307,43 @@ struct SettingJevPage {
   ApiCard(): void {
     Column() {
       Row() {
-        Text('调用方式')
+        Text('供应商')
           .fontSize(16).fontWeight(FontWeight.Medium)
           .lineHeight(TEXT_STYLES.body.lineHeight)
           .fontColor(INK)
       }
       .width('100%')
-      Seg({
-        options: API_MODE_OPTIONS,
-        selected: this.apiModeIndex(),
-        onSelect: (idx: number): void => { this.setApiMode(idx); },
-      })
-        .margin({ top: 12 })
-      TextInput({ text: this.settings.model, placeholder: '模型(如 systemone-default)' })
+      Column() {
+        ForEach(JEV_PROVIDER_ORDER, (provider: JevProvider, idx: number): void => {
+          Row() {
+            Text(PROVIDER_LABELS[idx]).fontSize(BODY).fontColor(INK).layoutWeight(1)
+            if (provider === this.settings.provider) {
+              Text('✓').fontSize(BODY).fontColor(this.accentColorStore)
+            }
+          }
+          .width('100%').constraintSize({ minHeight: 44 })
+          .padding({ left: 12, right: 12 })
+          .backgroundColor(provider === this.settings.provider ? SURFACE2 : Color.Transparent)
+          .borderRadius(8)
+          .onClick((): void => { this.setProvider(idx); })
+        }, (provider: JevProvider): string => provider)
+      }
+      .width('100%').margin({ top: 8 })
+      TextInput({ text: this.settings.model, placeholder: this.providerStyle().defaultModel })
         .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
         .backgroundColor(SURFACE2).borderRadius(10)
         .padding({ left: 14, right: 14 })
         .margin({ top: 12 })
         .onChange((v: string): void => { this.patchText({ model: v.trim() }); })
-      TextInput({ text: this.settings.apiKey, placeholder: 'API Key' })
+      TextInput({ text: this.settings.apiKey, placeholder: this.providerStyle().keyHint })
         .type(InputType.Password)
         .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
         .backgroundColor(SURFACE2).borderRadius(10)
         .padding({ left: 14, right: 14 })
         .margin({ top: 12 })
         .onChange((v: string): void => { this.patchText({ apiKey: v.trim() }); })
-      if (this.settings.apiMode === 'vercel') {
-        TextInput({ text: this.settings.baseUrl, placeholder: '网关 Base URL' })
+      if (this.settings.provider === 'vercel') {
+        TextInput({ text: this.settings.baseUrl, placeholder: 'Gateway Base URL' })
           .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
           .backgroundColor(SURFACE2).borderRadius(10)
           .padding({ left: 14, right: 14 })
@@ -348,6 +352,12 @@ struct SettingJevPage {
           .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
             .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
+      Text(`请求地址：${jevRequestUrlOf(this.settings)}`)
+        .fontSize(META).fontColor(INK3).width('100%').margin({ top: 8 })
+        .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+      Text('当前只使用文本判断题；图片/Box 未接入调用点。')
+        .fontSize(META).fontColor(INK3).width('100%').margin({ top: 4 })
+        .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
       Row() {
         Text(this.testMsg)
           .fontSize(META)
@@ -397,7 +407,7 @@ struct SettingJevPage {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-      CenteredTitleBar({ title: 'Jev 快速判断' })
+      CenteredTitleBar({ title: '快速判断模型' })
       if (this.loadError.length > 0 || this.saveError.length > 0) {
         Text(this.loadError.length > 0 ? this.loadError : this.saveError).fontSize(LABEL)
           .fontColor(this.colors.error).width('100%').padding({ left: GUTTER, right: GUTTER, top: 8 })

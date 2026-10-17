@@ -6,8 +6,7 @@
 
 import type { JsonObject } from '@amber/chat-domain';
 import {
-  loadJevSettings, makeJevSettings,
-  JEV_TYPESAFE_ENDPOINT, JEV_VERCEL_DEFAULT_BASE,
+  loadJevSettings, jevEndpointOf,
   buildJevRequest, decodeJevResponse, resolveJevPurposeMode, jevPurposeConsentUnchanged, jevPurposeSettings,
   buildJevNoulBatch, readJevNoulBatchProbabilities,
   type JevPurpose, type JevEvaluation, type JevMode, type JevQuestion, type JevSettings, type JevNoulBatchSpec, type JevEvaluateResult,
@@ -100,8 +99,7 @@ const evaluateOperation = async (
   if (settings.apiKey.length === 0) return skipped('no_api_key');
   if (settings.model.length === 0) return skipped('no_model');
   if (JSON.stringify(state).length > JEV_STATE_MAX_CHARS) return skipped('state_too_large');
-  const endpoint: string = settings.apiMode === 'vercel'
-    ? (settings.baseUrl.length > 0 ? settings.baseUrl : JEV_VERCEL_DEFAULT_BASE) : JEV_TYPESAFE_ENDPOINT;
+  const endpoint: string = jevEndpointOf(settings);
   try {
     const reason: string = await reserveBudget(cancelled);
     if (reason.length > 0) return skipped(reason);

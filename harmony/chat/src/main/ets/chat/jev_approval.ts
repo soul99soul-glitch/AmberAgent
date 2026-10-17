@@ -39,8 +39,10 @@ export const resolveJevPurposeMode = (settings: JevSettings, purpose: JevPurpose
   return settings.mode === 'shadow' && mode === 'active' ? 'shadow' : mode;
 };
 export const jevPurposeConsentUnchanged = (before: JevSettings, after: JevSettings, purpose: JevPurpose): boolean =>
-  before.mode === after.mode && before.apiMode === after.apiMode && before.apiKey === after.apiKey
+  before.mode === after.mode && before.provider === after.provider
+  && before.apiMode === after.apiMode && before.apiKey === after.apiKey
   && before.baseUrl === after.baseUrl && before.model === after.model
+  && before.modelProvider === after.modelProvider
   && resolveJevPurposeMode(after, purpose) !== 'off'
   && JSON.stringify(jevPurposeSettings(before, purpose)) === JSON.stringify(jevPurposeSettings(after, purpose));
 export const jevFactFromProbability = (p: number): JevFact => {
@@ -57,6 +59,7 @@ const pendingTool = (v: JsonValue | undefined): UIMessagePartTool | null => {
     || string(part['toolName']) === null || typeof part['input'] !== 'string'
     || !Array.isArray(part['output']) || part['output'].length !== 0
     || object(part['approvalState'])?.['type'] !== 'pending') return null;
+  // SAFETY: 上面的逐字段校验已收窄 type/toolCallId/toolName/input/output/approvalState。
   return part as unknown as UIMessagePartTool;
 };
 const actionBinding = (action: UIMessagePartTool): JsonObject | null => {
