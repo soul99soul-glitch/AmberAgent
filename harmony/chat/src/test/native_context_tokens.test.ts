@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { countNativeContextFootprint, nativeTokenizerForModel } from '../main/ets/chat/native_context_tokens.ts';
+import {
+  countNativeContextFootprint, nativeTokenizerForModel, estimateImageTokens,
+} from '../main/ets/chat/native_context_tokens.ts';
 import type { UIMessage, UIMessagePart } from '../main/ets/chat/message.ts';
 import { makeUIMessage } from '../main/ets/chat/message.ts';
 import type { ConversationCompact } from '../main/ets/chat/context_compact.ts';
@@ -47,6 +49,26 @@ test('empty conversation sends one empty native batch and displays zero', async 
   assert.equal(calls, 1);
 });
 
+test('image token estimate reads PNG/JPEG dimensions instead of a fixed per-image cost', () => {
+  const png = (width: number, height: number): string => {
+    const bytes = Buffer.alloc(24);
+    bytes[0] = 0x89; bytes[1] = 0x50; bytes[2] = 0x4e; bytes[3] = 0x47;
+    bytes.writeUInt32BE(width, 16); bytes.writeUInt32BE(height, 20);
+    return `data:image/png;base64,${bytes.toString('base64')}`;
+  };
+  assert.equal(estimateImageTokens(png(1, 1)), 86);
+  assert.equal(estimateImageTokens(png(100, 100)), 99);
+  assert.equal(estimateImageTokens(png(1320, 2856)), Math.ceil(1320 * 2856 / 750) + 85);
+  const jpeg = Buffer.alloc(20);
+  jpeg[0] = 0xff; jpeg[1] = 0xd8; jpeg[2] = 0xff; jpeg[3] = 0xc0;
+  jpeg[4] = 0; jpeg[5] = 11; jpeg[6] = 8; jpeg[7] = 0x02; jpeg[8] = 0x58;
+  jpeg[9] = 0x05; jpeg[10] = 0x28;
+  assert.equal(estimateImageTokens(`data:image/jpeg;base64,${jpeg.toString('base64')}`),
+    Math.ceil(1320 * 600 / 750) + 85);
+  assert.equal(estimateImageTokens('https://example.com/a.png'), 1600);
+  assert.equal(estimateImageTokens('blob://missing'), 0);
+});
+
 test('BPE collects reasoning, tool input/output, filenames and mini-app text while retaining media/role costs', async () => {
   const parts: UIMessagePart[] = [text('reply'), { type: 'reasoning', reasoning: 'thought',
     createdAt: '2026-09-28T00:00:00Z', finishedAt: null, metadata: null },
@@ -65,7 +87,8 @@ test('BPE collects reasoning, tool input/output, filenames and mini-app text whi
     assert.deepEqual(ids, texts.map(() => 'o200k_base'));
     return [3, 7, 2, 9, 4, 5, 6];
   });
-  assert.equal(result, 36 + Math.floor((4 * 4500 + 80 + 120 + 'assistant'.length) / 4));
+  const media: number = estimateImageTokens('tool-image') + estimateImageTokens('image') + 4500 + 4500;
+  assert.equal(result, 36 + Math.floor((media + 80 + 120 + 'assistant'.length) / 4));
 });
 
 test('unexecuted tool contributes only its input and each message keeps a four-token floor', async () => {

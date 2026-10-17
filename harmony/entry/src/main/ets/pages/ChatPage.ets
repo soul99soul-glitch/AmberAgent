@@ -37,7 +37,7 @@ import type {
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, seedConversationWithPresets, nodeCurrentMessage,
-  selectMessageBranch, deleteMessage, editMessage, buildChatTimelineRows, forkConversation, patchConversation,
+  selectMessageBranch, deleteMessage, editMessage, buildChatTimelineRows, messageSignature, forkConversation, patchConversation,
   runAutoTitle, makeUserMessage, toText, messageCopyText, makeTextGenerationParams, pendingPreviewText, convertSteerToFollowup,
   invalidateCompacts, copyValidCompactsToConversation, ContextCompactionFailedError, recoverInterruptedRecipes,
   recoverInterruptedPlugins, recoverInterruptedWebMountGoals, parseDeepReadSlashCommand, estimateConversationInputTokens, formatNumberInt,
@@ -4532,6 +4532,7 @@ struct ChatPage {
     return {
       nodeId: '', message: message, branchCount: 1, selectIndex: 0,
       isAssistant: message.role === 'assistant', isLastAssistant: true, displayRevision: 0,
+      displaySignature: messageSignature(message),
     };
   }
 
@@ -4547,6 +4548,7 @@ struct ChatPage {
       items.push({
         nodeId: '', message: message, branchCount: 1, selectIndex: 0,
         isAssistant: message.role === 'assistant', isLastAssistant: true, displayRevision: 0,
+        displaySignature: messageSignature(message),
       });
     }
     return items;

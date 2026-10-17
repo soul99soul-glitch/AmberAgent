@@ -9,7 +9,7 @@ export { imageExportPages } from './chat/image_export_pages.ts';
 export type { TokenUsage } from './chat/usage.ts';
 export { mergeUsage } from './chat/usage.ts';
 export type { ContextTokenBatchCounter } from './chat/native_context_tokens.ts';
-export { nativeTokenizerForModel, countNativeContextFootprint } from './chat/native_context_tokens.ts';
+export { nativeTokenizerForModel, countNativeContextFootprint, estimateImageTokens } from './chat/native_context_tokens.ts';
 
 export type {
   MessageRole, StreamTransportState, ToolApprovalState,
@@ -326,6 +326,14 @@ export {
   serializeUIMessage, parseUIMessage, serializePart, parsePart,
   serializeMessageList, parseMessageList,
 } from './chat/serialize.ts';
+
+export type { ChatBlobPort, ExternalizedConversation } from './chat/conversation_blobs.ts';
+export {
+  CHAT_BLOB_PREFIX, CHAT_BLOB_MISSING_URL, CHAT_BLOB_MISSING_METADATA_KEY,
+  CHAT_BLOB_MISSING_DATA_URL, CHAT_BLOB_MIN_CHARS, isMissingBlobImage,
+  collectBlobHashes, collectConversationBlobHashes, externalizeConversation,
+  resolveConversation, resolveMessages, pruneOrphanBlobs, removeBlobs,
+} from './chat/conversation_blobs.ts';
 
 export {
   CHAT_SCHEMA_SQL, conversationToRow, rowToConversation,
@@ -799,6 +807,10 @@ export {
   defaultReasoningLevelForModel, resolveSessionDefaults, mergeCustomParams,
   toChatModel, seedConversationWithPresets,
 } from './chat/context_assembly.ts';
+export {
+  TOOL_IMAGE_KEEP_RECENT, TOOL_IMAGE_PLACEHOLDER_PREFIX, MISSING_TOOL_IMAGE_TEXT,
+  toolImagePlaceholderText, applyToolImageRequestBudget, countToolImageParts,
+} from './chat/tool_image_budget.ts';
 export type {
   AssembleInternalInput, SessionGroupDefault, ResolvedSessionDefaults, MergedCustomParams,
 } from './chat/context_assembly.ts';
@@ -1383,7 +1395,7 @@ export {
 // ===== Phase 5:历史分页窗口加载(纯逻辑,零 SDK 依赖) =====
 export type { ConversationTimelineLoadState } from './chat/timeline_load.ts';
 export type { ChatTimelineRow } from './chat/timeline_rows.ts';
-export { buildChatTimelineRows } from './chat/timeline_rows.ts';
+export { buildChatTimelineRows, messageSignature } from './chat/timeline_rows.ts';
 export {
   createInitialTimelineLoadState, applyTailWindow, beginLoadOlder,
   applyOlderPage, canLoadOlder, coversIndex, nextOlderPageOffset,

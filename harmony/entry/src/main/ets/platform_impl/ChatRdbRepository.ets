@@ -16,9 +16,12 @@ import type {
 import {
   CHAT_SCHEMA_SQL, conversationToRow, rowToConversation,
   messageNodeToRow, rowToMessageNode, createMemoryConversationRepository,
-  messageNodeRowPlainText, snippetAround,
+  messageNodeRowPlainText, snippetAround, externalizeConversation,
+  resolveConversation, resolveMessages, collectBlobHashes,
+  pruneOrphanBlobs,
 } from '@amber/chat-domain';
 import { enqueueConversationFileMutation } from './ManagedFileStore.ets';
+import { getChatBlobPort } from './ConversationBlobStore.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.ChatRdbRepository';
@@ -129,10 +132,11 @@ class ChatRdbRepository implements ConversationRepository {
   private async writeConversation(
     store: relationalStore.RdbStore, conv: Conversation,
   ): Promise<void> {
+    const stored: Conversation = (await externalizeConversation(conv, getChatBlobPort())).conversation;
     let committed: boolean = false;
     store.beginTransaction();
     try {
-      await this.writeConversationBody(store, conv);
+      await this.writeConversationBody(store, stored);
       store.commit();
       committed = true;
     } finally {
@@ -193,6 +197,12 @@ class ChatRdbRepository implements ConversationRepository {
       this.memory = createMemoryConversationRepository();
       this.store = store;
       AppStorage.setOrCreate<boolean>('chatStorageDegraded', false);
+      // 入全局文件 FIFO:排在后续 save 之前,又不会在 init 内等自己的队列而死锁。
+      enqueueConversationFileMutation(async (): Promise<void> => {
+        await this.sweepOrphanBlobs(store);
+      }).catch((error: Error): void => {
+        hilog.warn(DOMAIN, TAG, 'blob sweep skipped: %{public}s', error.message);
+      });
       return store;
     } catch (e) {
       const msg: string = e instanceof Error ? e.message : String(e);
@@ -343,10 +353,14 @@ class ChatRdbRepository implements ConversationRepository {
         this.deletedGen.set(id, (this.deletedGen.get(id) ?? 0) + 1);
         this.deletedIds.delete(id);
       }
+      const prepared: Conversation[] = [];
+      for (const conv of convs) {
+        prepared.push((await externalizeConversation(conv, getChatBlobPort())).conversation);
+      }
       let committed: boolean = false;
       store.beginTransaction();
       try {
-        for (const conv of convs) {
+        for (const conv of prepared) {
           await this.writeConversationBody(store, conv);
         }
         store.commit();
@@ -367,7 +381,7 @@ class ChatRdbRepository implements ConversationRepository {
     const rows: ConversationRow[] = await this.queryConversationRows(store, predicates);
     if (rows.length === 0) return null;
     const nodeRows: MessageNodeRow[] = await this.queryNodeRows(store, id);
-    return rowToConversation(rows[0], nodeRows);
+    return resolveConversation(rowToConversation(rows[0], nodeRows), getChatBlobPort());
   }
 
   // Phase 5:尾部窗口读取(会话打开默认只加载最近 limit 个节点)。
@@ -401,12 +415,17 @@ class ChatRdbRepository implements ConversationRepository {
 
   // 节点窗口组装:nodeRows 按 node_index 升序;
   //   窗口首节点绝对索引 = rows[0].node_index(空窗口回退 totalNodeCount)。
-  private windowOf(
+  private async windowOf(
     id: string, nodeRows: MessageNodeRow[], totalNodeCount: number,
-  ): ConversationWindow {
+  ): Promise<ConversationWindow> {
     const nodes: MessageNode[] = [];
     for (let i = 0; i < nodeRows.length; i++) {
-      nodes.push(rowToMessageNode(nodeRows[i]));
+      const node: MessageNode = rowToMessageNode(nodeRows[i]);
+      nodes.push({
+        id: node.id,
+        messages: await resolveMessages(node.messages, getChatBlobPort()),
+        selectIndex: node.selectIndex,
+      });
     }
     return {
       conversationId: id,
@@ -540,6 +559,17 @@ class ChatRdbRepository implements ConversationRepository {
     return hits;
   }
 
+  private async sweepOrphanBlobs(store: relationalStore.RdbStore): Promise<void> {
+    const rows: MessageNodeRow[] = await this.readNodeRows(
+      store, new relationalStore.RdbPredicates('message_node'));
+    const referenced: Set<string> = new Set<string>();
+    for (const row of rows) {
+      const node: MessageNode = rowToMessageNode(row);
+      for (const hash of collectBlobHashes(node.messages)) referenced.add(hash);
+    }
+    await pruneOrphanBlobs(referenced, getChatBlobPort());
+  }
+
   async delete(id: string): Promise<void> {
     // 代际自增 + 立墓碑:挡住此前已排队的旧 save(其捕获的 gen 已过期)
     const gen: number = (this.deletedGen.get(id) ?? 0) + 1;
@@ -553,8 +583,10 @@ class ChatRdbRepository implements ConversationRepository {
         if (store === null) {
           throw new Error(DEGRADED_WRITE_MSG);
         }
-        const old: Conversation | null = await this.getById(id);
-        if (old === null) return;
+        const predicates = new relationalStore.RdbPredicates('conversation');
+        predicates.equalTo('id', id);
+        const existing: ConversationRow[] = await this.queryConversationRows(store, predicates);
+        if (existing.length === 0) return;
         let committed: boolean = false;
         store.beginTransaction();
         try {
@@ -570,6 +602,12 @@ class ChatRdbRepository implements ConversationRepository {
           if (!committed) {
             try { store.rollBack(); } catch { /* preserve original delete failure */ }
           }
+        }
+        try {
+          await this.sweepOrphanBlobs(store);
+        } catch (error) {
+          hilog.warn(DOMAIN, TAG, 'blob sweep after delete failed: %{public}s',
+            error instanceof Error ? error.message : String(error));
         }
       }).catch((e: Error): void => {
         // 仅当本次删除代际仍为最新时撤墓碑(旧代际的墓碑属更新的删除/恢复，不动)

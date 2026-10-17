@@ -6,6 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const ts = require('typescript');
+const crypto = require('node:crypto');
 const entry = path.resolve(__dirname, '../../../entry/src/main/ets/platform_impl');
 
 function loadAdapter(filename, relationalStore, domain = {}) {
@@ -15,6 +16,15 @@ function loadAdapter(filename, relationalStore, domain = {}) {
     '@kit.PerformanceAnalysisKit': { hilog: { info() {}, warn() {} } },
     '@amber/chat-domain': domain,
     './ManagedFileStore.ets': { enqueueConversationFileMutation: operation => operation() },
+    './ConversationBlobStore.ets': { getChatBlobPort: () => blobPort },
+  };
+  const blobFiles = new Map();
+  const blobPort = {
+    hash: dataUrl => crypto.createHash('sha256').update(dataUrl).digest('hex'),
+    write: async (hash, dataUrl) => { blobFiles.set(hash, dataUrl); },
+    read: async hash => blobFiles.get(hash) ?? null,
+    list: async () => Array.from(blobFiles.keys()),
+    remove: async hash => { blobFiles.delete(hash); },
   };
   const source = ts.transpileModule(fs.readFileSync(path.join(entry, filename), 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },

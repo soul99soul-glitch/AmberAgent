@@ -428,18 +428,14 @@ export struct HomeListPane {
         const summary: ConversationSummary = list[cursor];
         cursor++;
         if (nextCounts[summary.id] !== undefined && cachedCountStamps[summary.id] === summary.updateAt) continue;
-        let conversation: Conversation | null = null;
+        let count: number = 0;
         try {
-          conversation = await repo.getById(summary.id);
+          // 只取节点总数;size=0 不加载消息,避免列表为计数解析所有图片 blob。
+          count = (await repo.getConversationNodePage(summary.id, 0, 0)).totalNodeCount;
         } catch (_e) {
           continue;
         }
-        if (conversation === null || seq !== this.refreshSeq) continue;
-        let count: number = 0;
-        for (const node of conversation.messageNodes) {
-          if (node.messages.length === 0) continue;
-          count++;
-        }
+        if (seq !== this.refreshSeq) continue;
         nextCounts[summary.id] = count;
         cachedCountStamps[summary.id] = summary.updateAt;
       }

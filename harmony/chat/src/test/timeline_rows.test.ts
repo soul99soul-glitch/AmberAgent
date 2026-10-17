@@ -58,6 +58,23 @@ describe('chat timeline immutable row replacement', () => {
     assert.equal(next[0].displayRevision, rows[0].displayRevision + 1);
   });
 
+  it('large tool images use a bounded signature and still detect a content change', () => {
+    const dataUrl: string = `data:image/png;base64,${'A'.repeat(20000)}`;
+    const tool: UIMessagePartTool = {
+      ...pendingTool, approvalState: { type: 'approved' },
+      output: [{ type: 'image', url: dataUrl, metadata: null }],
+    };
+    const message = makeUIMessage('assistant', [tool]);
+    const node = toMessageNode(message);
+    const rows = buildChatTimelineRows([node]);
+    assert.ok(rows[0].displaySignature.length < 1200);
+    assert.ok(!rows[0].displaySignature.includes('A'.repeat(500)));
+    const nextUrl: string = `data:image/png;base64,${'B'.repeat(20000)}`;
+    const nextTool: UIMessagePartTool = { ...tool, output: [{ type: 'image', url: nextUrl, metadata: null }] };
+    const next = buildChatTimelineRows([{ ...node, messages: [{ ...message, parts: [nextTool] }] }], rows);
+    assert.equal(next[0].displayRevision, rows[0].displayRevision + 1);
+  });
+
   it('branch and last-assistant controls advance the affected node, new rows begin at zero', () => {
     const message = makeUIMessage('assistant', [{ type: 'text', text: 'first', metadata: null }]);
     const node = toMessageNode(message);

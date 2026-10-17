@@ -20,6 +20,7 @@ import { makeUIMessage } from './message.ts';
 import type { ChatModel, CustomBody, Modality, ReasoningLevel } from './provider_model.ts';
 import type { ProviderModel } from './provider_settings.ts';
 import type { AgentTool } from './tool.ts';
+import { applyToolImageRequestBudget } from './tool_image_budget.ts';
 
 // ===== SystemPromptMarkers.kt =====
 
@@ -93,7 +94,8 @@ export const assembleInternalMessages = (input: AssembleInternalInput): UIMessag
       metadata: { system_prompt_block: 'tool_prompts' },
     });
   }
-  const truncated = limitContext(input.messages, input.contextMessageSize);
+  const truncated = applyToolImageRequestBudget(
+    limitContext(input.messages, input.contextMessageSize));
   const out: UIMessage[] = [];
   if (systemParts.length > 0) {
     out.push(makeUIMessage('system', systemParts));
