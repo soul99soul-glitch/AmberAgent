@@ -24,6 +24,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
 import { ImagePreviewDialog } from './ui/ImagePreviewDialog.ets';
 import { MarkdownBlockSlot, MarkdownBlockView } from './MarkdownBlockView.ets';
+import { cachedMediaUrl } from '../platform_impl/MediaCache.ets';
 
 // 正文随上游 48ms 累计快照同步排版，不叠加 reveal/parse 计时门。
 // 全局 Markdown 增量解析缓存(32 条目 / 200k 字符,精确 + 前缀增量,有界)。
@@ -63,11 +64,19 @@ export struct MarkdownText {
   private highlightCache: Map<string, HighlightToken[]> = new Map<string, HighlightToken[]>();
   private lastParsedText: string = '';
   @State private previewUrl: string = '';
+  @State private previewImages: string[] = [];
+  @State private imageSources: Record<string, string> = {};
+  private prefetchedImages: Set<string> = new Set<string>();
   private mermaidInstanceId: string = newId().replace(/-/g, '_');
+  private alive: boolean = true;
+  private visibleOnce: boolean = false;
 
   aboutToAppear(): void {
+    this.alive = true;
     this.updateDisplay();
   }
+
+  aboutToDisappear(): void { this.alive = false; }
 
   private onContentChanged(): void { this.updateDisplay(); }
 
@@ -79,6 +88,7 @@ export struct MarkdownText {
     this.updateBlockSlots(blocks);
     this.lastParsedText = this.content;
     this.hasDisplayContent = this.content.trim().length > 0;
+    if (this.visibleOnce) this.prefetchAllImages();
   }
 
   private updateBlockSlots(blocks: MarkdownBlock[]): void {
@@ -139,6 +149,7 @@ export struct MarkdownText {
               onOpenLink: (url: string): void => { this.showLinkActions(url); },
               onOpenImage: (url: string): void => { this.showImagePreview(url); },
               onVisibleGrow: (): void => { this.onVisibleGrow(); },
+              imageSources: this.imageSources,
             })
           }, (slot: MarkdownBlockSlot): string => slot.key)
         }
@@ -149,6 +160,11 @@ export struct MarkdownText {
     .alignItems(HorizontalAlign.Start)
     .onSizeChange((oldSize: SizeOptions, newSize: SizeOptions): void => {
       if (Number(oldSize.height) !== Number(newSize.height)) this.onVisibleGrow();
+    })
+    .onVisibleAreaChange([0.0, 0.01], (isVisible: boolean): void => {
+      if (!isVisible) return;
+      this.visibleOnce = true;
+      this.prefetchAllImages();
     })
     .bindContentCover(this.previewUrl.length > 0, this.ImagePreviewOverlay(), {
       onWillDismiss: (): void => { this.closeImagePreview(); },
@@ -183,6 +199,49 @@ export struct MarkdownText {
       widest = Math.max(widest, width);
     }
     return Math.ceil(widest);
+  }
+
+  private collectInlineImages(tokens: InlineToken[], out: string[]): void {
+    for (const token of tokens) {
+      if (token.type === 'image' && token.url.trim().length > 0) out.push(token.url.trim());
+    }
+  }
+
+  private blockImages(block: MarkdownBlock): string[] {
+    const out: string[] = [];
+    if (block.kind === 'heading' || block.kind === 'paragraph' || block.kind === 'blockquote') {
+      this.collectInlineImages(block.inlines, out);
+    } else if (block.kind === 'list') {
+      for (const item of block.items) this.collectInlineImages(item, out);
+    } else if (block.kind === 'table') {
+      for (const header of block.headers) this.collectInlineImages(header, out);
+      for (const row of block.rows) for (const cell of row) this.collectInlineImages(cell, out);
+    }
+    return out;
+  }
+
+  private setImageSource(url: string, local: string): void {
+    if (!this.alive || local.length === 0 || local === url || this.imageSources[url] === local) return;
+    const next: Record<string, string> = {};
+    for (const key of Object.keys(this.imageSources)) next[key] = this.imageSources[key];
+    next[url] = local;
+    this.imageSources = next;
+  }
+
+  private prefetchAllImages(): void {
+    for (let index: number = 0; index < this.displaySlots.length; index++) this.prefetchBlock(index);
+  }
+
+  private prefetchBlock(index: number): void {
+    const slot: MarkdownBlockSlot | undefined = this.displaySlots[index];
+    if (slot === undefined) return;
+    for (const url of this.blockImages(slot.block)) {
+      if (this.prefetchedImages.has(url) || !/^https?:\/\//i.test(url)) continue;
+      this.prefetchedImages.add(url);
+      cachedMediaUrl(url, 'image').then((local: string): void => {
+        this.setImageSource(url, local);
+      }).catch((): void => {});
+    }
   }
 
   private copyText(text: string, message: string): void {
@@ -234,6 +293,7 @@ export struct MarkdownText {
   }
 
   private showImagePreview(url: string): void {
+    this.previewImages = [url];
     this.previewUrl = url;
   }
 
@@ -244,7 +304,7 @@ export struct MarkdownText {
   @Builder
   ImagePreviewOverlay(): void {
     if (this.previewUrl.length > 0) {
-      ImagePreviewDialog({ images: [this.previewUrl],
+      ImagePreviewDialog({ images: this.previewImages,
         onDismiss: (): void => { this.closeImagePreview(); } })
     }
   }

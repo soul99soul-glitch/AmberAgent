@@ -119,7 +119,7 @@ test('a new DeepRead ability session clears unsubmitted settings without changin
       productKindForBundle: () => product, getProductKind: () => product,
       DeepReadDesign: { registerFonts() {} }, BuildProfile: { DEBUG: false },
       getSkillManager: () => ({ installBuiltinSkillsIfMissing: () => Promise.resolve() }),
-      rescheduleCronTasksOnStartup() {},
+      rescheduleCronTasksOnStartup() {}, warmMediaCache() {},
     };
     const Ability = new Function(...Object.keys(env), code)(...Object.values(env));
     const ability = new Ability();

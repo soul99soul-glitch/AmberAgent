@@ -10,6 +10,8 @@ import { ACCENT, BG, BODY, INK, INK3, LABEL, LINE, META, SURFACE2 } from '../des
 import { GenerativeWidgetCard } from './GenerativeWidgetCard.ets';
 import { VisualArtifactPreview } from './VisualArtifactPreview.ets';
 import { ImagePreviewDialog } from './ui/ImagePreviewDialog.ets';
+import { MediaImage } from './MediaImage.ets';
+import { cachedMediaUrl, cachedMediaUrlIfPresent } from '../platform_impl/MediaCache.ets';
 import { urlBasename } from './ContentAttachmentChip.ets';
 import { saveWidgetArtifact } from '../platform_impl/WidgetArtifactExport.ets';
 import {
@@ -32,11 +34,14 @@ export struct ChatArtifactShelf {
   onAction: (prompt: string) => void = (_prompt: string): void => {};
   @State selected: ConversationWidgetArtifact | null = null;
   @State selectedVideo: ConversationVideoArtifact | null = null;
+  @State selectedVideoSrc: string = '';
+  @State videoPreparing: boolean = false;
   @State videoFailed: boolean = false;
   @State selectedSvg: ConversationSvgArtifact | null = null;
   @State selectedScene: ConversationSceneArtifact | null = null;
   @State selectedUiSnapshot: ConversationUiSnapshotArtifact | null = null;
   @State imagePreview: string = '';
+  @State private imagePreviewImages: string[] = [];
   @State exporting: boolean = false;
   @State exportError: string = '';
   @State svgValidationSource: string = '';
@@ -64,6 +69,8 @@ export struct ChatArtifactShelf {
   private clearSelection(): void {
     this.selected = null;
     this.selectedVideo = null;
+    this.selectedVideoSrc = '';
+    this.videoPreparing = false;
     this.videoFailed = false;
     this.selectedSvg = null;
     this.selectedScene = null;
@@ -90,6 +97,21 @@ export struct ChatArtifactShelf {
     this.clearSelection();
     this.videoFailed = false;
     this.selectedVideo = artifact;
+    this.resolveVideo(artifact).catch((): void => { this.videoPreparing = false; });
+  }
+
+  private async resolveVideo(artifact: ConversationVideoArtifact): Promise<void> {
+    this.videoPreparing = true;
+    const known: string | null = await cachedMediaUrlIfPresent(artifact.url, 'video');
+    if (this.selectedVideo === null || this.selectedVideo.id !== artifact.id) return;
+    this.videoPreparing = false;
+    this.videoFailed = false;
+    if (known !== null && known.length > 0) {
+      this.selectedVideoSrc = known;
+      return;
+    }
+    this.selectedVideoSrc = artifact.url;
+    cachedMediaUrl(artifact.url, 'video').catch((): void => {});
   }
 
   private previewSvg(artifact: ConversationSvgArtifact): void {
@@ -374,10 +396,25 @@ export struct ChatArtifactShelf {
             .fontSize(META).fontColor(INK3).padding(16).textAlign(TextAlign.Center)
             .backgroundColor(SURFACE2).borderRadius(12)
         } else {
-          Video({ src: this.selectedVideo.url }).controls(true).autoPlay(false).loop(false)
-            .width('100%').layoutWeight(1).constraintSize({ maxHeight: 240 })
-            .objectFit(ImageFit.Contain).backgroundColor(Color.Black).borderRadius(12)
-            .onError((): void => { this.videoFailed = true; })
+          Stack() {
+            Video({ src: this.selectedVideoSrc.length > 0 ? this.selectedVideoSrc : this.selectedVideo.url })
+              .controls(true).autoPlay(false).loop(false)
+              .width('100%').height(220)
+              .objectFit(ImageFit.Contain).backgroundColor(Color.Black).borderRadius(12)
+              .onError((): void => {
+                if (this.selectedVideoSrc.length > 0 && this.selectedVideo !== null &&
+                  this.selectedVideoSrc !== this.selectedVideo.url) {
+                  this.selectedVideoSrc = this.selectedVideo.url;
+                  return;
+                }
+                this.videoFailed = true;
+              })
+            if (this.videoPreparing) {
+              Row() { Text('正在准备视频…').fontSize(META).fontColor(Color.White) }
+                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .backgroundColor('#66000000').borderRadius(16)
+            }
+          }.width('100%').height(220)
         }
         Row({ space: 12 }) {
           Text(this.selectedVideo.mime).fontSize(META).fontColor(INK3).layoutWeight(1)
@@ -491,8 +528,12 @@ export struct ChatArtifactShelf {
             .padding({ top: 8, bottom: 8 })
           Flex({ wrap: FlexWrap.Wrap }) {
             ForEach(this.artifacts.images, (artifact: ConversationImageArtifact): void => {
-              Image(artifact.url).width(96).height(96).objectFit(ImageFit.Cover).borderRadius(8)
-                .margin({ right: 8, bottom: 8 }).onClick((): void => { this.imagePreview = artifact.url; })
+              Column() {
+                MediaImage({
+                  url: artifact.url, frameWidth: 96, frameHeight: 96, radius: 8,
+                  onOpen: (url: string): void => { this.imagePreview = url; this.imagePreviewImages = [url]; },
+                })
+              }.margin({ right: 8, bottom: 8 })
             }, (artifact: ConversationImageArtifact): string => artifact.id)
           }.width('100%')
         }
@@ -560,7 +601,7 @@ export struct ChatArtifactShelf {
       }.width('100%').height('100%')
         .padding({ left: 20, right: 20, top: 12, bottom: 20 + this.navBarHeight }).backgroundColor(BG)
       if (this.imagePreview.length > 0) {
-        ImagePreviewDialog({ images: [this.imagePreview], onDismiss: (): void => { this.imagePreview = ''; } })
+        ImagePreviewDialog({ images: this.imagePreviewImages, onDismiss: (): void => { this.imagePreview = ''; } })
       }
     }.width('100%').height('100%')
   }

@@ -104,6 +104,12 @@ export struct MarkdownBlockView {
   onOpenLink: (url: string) => void = (_url: string): void => {};
   onOpenImage: (url: string) => void = (_url: string): void => {};
   onVisibleGrow: () => void = (): void => {};
+  @Prop imageSources: Record<string, string> = {};
+
+  private imageSource(url: string): string {
+    const value: string | undefined = this.imageSources[url];
+    return value !== undefined && value.length > 0 ? value : url;
+  }
 
   build(): void {
     if (this.themeEpoch >= 0) {
@@ -739,7 +745,7 @@ export struct MarkdownBlockView {
         )
     } else if (tok.type === 'image') {
       if (tok.url.trim().length > 0) {
-        ImageSpan(tok.url)
+        ImageSpan(this.imageSource(tok.url))
           .width(220)
           .height(150)
           .objectFit(ImageFit.Contain)

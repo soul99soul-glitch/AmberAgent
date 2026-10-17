@@ -23,6 +23,7 @@ import { registerAmberFonts, registerAmberFontsFor } from '../design/fonts.ets';
 import { syncMacGatewayPushTokenOnLaunch } from '../platform_impl/MacGatewayClient.ets';
 import { setGenerationKeepAliveBackground, disposeGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
 import { hydrateWorkspaceCustomDir, activateWorkspaceCustomDir, currentWorkspaceCustomDir } from '../platform_impl/WorkspaceStore.ets';
+import { warmMediaCache } from '../platform_impl/MediaCache.ets';
 import { runNativeTokenCounterFixture } from '../platform_impl/NativeTokenCounterFixture.ets';
 import { runSSHRuntimeFixture } from '../platform_impl/SSHRuntimeFixture.ets';
 import { runRuntimeE3Fixture } from '../platform_impl/RuntimeE3Fixture.ets';
@@ -213,6 +214,7 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<boolean>('systemDarkMode', this.systemDarkMode);
     AppStorage.setOrCreate<string>('accentColor', ACCENT);
     AppStorage.setOrCreate<Context>('abilityContext', this.context);
+    warmMediaCache();
     AppStorage.setOrCreate('productKind', productKindForBundle(this.context.applicationInfo.name));
     DeepReadDesign.registerFonts();
     if (getProductKind() === 'deepread') {

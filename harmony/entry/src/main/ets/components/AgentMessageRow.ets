@@ -37,6 +37,7 @@ import { MiniAppChatCard } from './MiniAppChatCard.ets';
 import { UIAvatar } from './UIAvatar.ets';
 import { ChatUserBubble } from './ChatUserBubble.ets';
 import { ImagePreviewDialog } from './ui/ImagePreviewDialog.ets';
+import { MediaImage } from './MediaImage.ets';
 import { MessageVideoCard } from './MessageVideoCard.ets';
 
 const EMPTY_SMART_UI_ACCESSOR: SmartUiStateAccessor = {
@@ -707,12 +708,12 @@ export struct AgentMessageRow {
             .margin({ bottom: 4 })
           }
         } else if (block.part.type === 'image') {
-          Image(block.part.url)
-            .width(160)
-            .objectFit(ImageFit.Cover)
-            .borderRadius(8)
-            .margin({ bottom: 4 })
-            .onClick((): void => { if (block.part.type === 'image') this.openImagePreview(block.part.url); })
+          Column() {
+            MediaImage({
+              url: block.part.url, frameWidth: 160, radius: 8,
+              onOpen: (url: string): void => { this.openImagePreview(url); },
+            })
+          }.margin({ bottom: 4 })
         } else if (block.part.type === 'video') {
           MessageVideoCard({ url: block.part.url, mime: block.part.mime })
         } else if (block.part.type === 'audio') {

@@ -1,6 +1,7 @@
 import { ACCENT, INK, INK3, LINE, META, SURFACE2 } from '../design/tokens.ets';
 import { FONT_SANS } from '../design/fonts.ets';
 import { ContentAttachmentChip, urlBasename } from './ContentAttachmentChip.ets';
+import { cachedMediaUrl, cachedMediaUrlIfPresent } from '../platform_impl/MediaCache.ets';
 
 /** Lazy inline video: a bounded tap-to-play card instead of an eager player per history row. */
 @Component
@@ -8,17 +9,46 @@ export struct MessageVideoCard {
   @Prop url: string = '';
   @Prop mime: string = 'video/mp4';
   @State private playing: boolean = false;
+  @State private preparing: boolean = false;
+  @State private src: string = '';
   @State private failed: boolean = false;
+  private alive: boolean = true;
 
   private label(): string {
     const name: string = urlBasename(this.url);
     return name.length > 0 ? name : '视频';
   }
 
+  aboutToAppear(): void { this.alive = true; this.preparing = false; }
+
+  aboutToDisappear(): void { this.alive = false; }
+
+  private async prepareAndPlay(): Promise<void> {
+    if (this.preparing || this.playing) return;
+    this.preparing = true;
+    const known: string | null = await cachedMediaUrlIfPresent(this.url, 'video');
+    if (!this.alive) { this.preparing = false; return; }
+    this.preparing = false;
+    this.playing = true;
+    if (known !== null && known.length > 0) {
+      this.src = known;
+      return;
+    }
+    this.src = this.url;
+    cachedMediaUrl(this.url, 'video').catch((): void => {});
+  }
+
   build(): void {
     if (this.url.length === 0 || this.failed) {
       ContentAttachmentChip({ icon: '🎬', label: this.label(), sublabel: this.mime });
     } else if (!this.playing) {
+      if (this.preparing) {
+        Row({ space: 8 }) {
+          LoadingProgress().width(18).height(18).color(ACCENT);
+          Text('正在准备视频…').fontSize(META).fontColor(INK3);
+        }.width('100%').height(60).justifyContent(FlexAlign.Center)
+          .backgroundColor(SURFACE2).borderRadius(10).border({ width: 1, color: LINE });
+      } else {
       Row({ space: 10 }) {
         Text('▶').fontSize(16).fontColor(ACCENT).width(36).height(36).textAlign(TextAlign.Center)
           .backgroundColor(Color.Transparent).borderRadius(18).border({ width: 1, color: ACCENT });
@@ -35,13 +65,17 @@ export struct MessageVideoCard {
       .width('100%').constraintSize({ minHeight: 60 }).padding({ left: 10, right: 6, top: 6, bottom: 6 })
       .backgroundColor(SURFACE2).borderRadius(10).border({ width: 1, color: LINE })
       .accessibilityGroup(true).accessibilityText(`${this.label()}，视频，点击播放`)
-      .onClick((): void => { this.playing = true; });
+      .onClick((): void => { this.prepareAndPlay().catch((): void => { this.preparing = false; }); });
+      }
     } else {
       Column({ space: 4 }) {
-        Video({ src: this.url }).controls(true).autoPlay(true).loop(false)
+        Video({ src: this.src.length > 0 ? this.src : this.url }).controls(true).autoPlay(true).loop(false)
           .width('100%').height(220).objectFit(ImageFit.Contain)
           .backgroundColor(Color.Black).borderRadius(10)
-          .onError((): void => { this.failed = true; });
+          .onError((): void => {
+            if (this.src.length > 0 && this.src !== this.url) { this.src = this.url; return; }
+            this.failed = true;
+          });
         if (this.mime.length > 0) {
           Text(this.mime).fontSize(META).fontColor(INK3).width('100%').maxLines(1);
         }
