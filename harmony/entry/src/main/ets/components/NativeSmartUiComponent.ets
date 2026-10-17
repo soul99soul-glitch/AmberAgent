@@ -191,8 +191,8 @@ export struct NativeSmartUiComponent {
   @Builder
   private Heading(): void {
     if (this.heading().length > 0) {
-      Text(this.heading()).width('100%').fontSize(this.textSize(14)).fontWeight(FontWeight.Medium)
-        .fontFamily(this.fontFamily).fontColor(this.ink()).lineHeight(this.textSize(20));
+      Text(this.heading()).width('100%').fontSize(this.textSize(15)).fontWeight(FontWeight.Medium)
+        .fontFamily(this.fontFamily).fontColor(this.ink()).lineHeight(this.textSize(21));
     }
   }
 
@@ -402,9 +402,16 @@ export struct NativeSmartUiComponent {
   private Actions(): void {
     if (this.kind() === 'button' || this.kind() === 'submitButton' || this.kind() === 'resetButton') {
       Button(this.title() || (this.kind() === 'resetButton' ? '重置选择' : '基于选择继续'), { type: ButtonType.Normal })
-        .width('100%').constraintSize({ minHeight: 44 }).padding(12).borderRadius(10)
-        .fontSize(this.textSize(15)).fontColor(this.resetAction() ? this.ink() : this.accent())
-        .backgroundColor(this.surface()).enabled(this.resetAction() || this.draftEnabled)
+        .width('100%').constraintSize({ minHeight: 44 }).padding(12).borderRadius(12)
+        .fontSize(this.textSize(15))
+        .fontWeight(this.kind() === 'submitButton' ? FontWeight.Medium : FontWeight.Normal)
+        .fontColor(this.kind() === 'submitButton' ? accentInkFor(this.accent())
+          : this.resetAction() ? this.secondary() : this.accent())
+        .backgroundColor(this.kind() === 'submitButton' ? this.accent()
+          : this.resetAction() ? Color.Transparent : this.surface())
+        .border({ width: this.kind() === 'submitButton' ? 0 : 1, color: LINE })
+        .opacity(this.kind() === 'submitButton' && !this.draftEnabled ? 0.55 : 1)
+        .enabled(this.resetAction() || this.draftEnabled)
         .onClick((): void => { if (this.resetAction()) this.onReset(); else this.onDraft(); });
       if (!this.resetAction() && !this.draftEnabled) {
         Text('请填写必填项并检查当前选择；内容完整后即可继续')

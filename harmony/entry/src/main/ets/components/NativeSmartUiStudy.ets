@@ -99,7 +99,9 @@ export struct NativeSmartUiStudy {
       Text(option.label).fontSize(this.textSize(14)).fontFamily(this.fontFamily)
         .fontColor(this.ink).layoutWeight(1).lineHeight(this.textSize(20));
       if (this.progress.answered && option.id === this.item()?.correctOptionId) {
-        Text('正确').fontSize(this.textSize(11)).fontColor(SUCCESS_FG).margin({ left: 8 });
+        Text('✓ 正确').fontSize(this.textSize(11)).fontColor(SUCCESS_FG).margin({ left: 8 });
+      } else if (this.progress.answered && option.id === this.progress.selected) {
+        Text('✕ 你的选择').fontSize(this.textSize(11)).fontColor(ERROR).margin({ left: 8 });
       }
     }
     .width('100%').constraintSize({ minHeight: 44 }).padding({ left: 12, right: 12, top: 8, bottom: 8 })
