@@ -4,7 +4,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import BuildProfile from 'BuildProfile';
 import type {
   Conversation, MiniAppGeneratedOutput, MiniAppRecord, ThreeSceneObject, ThreeSceneSpec,
-  UIMessage, UIMessagePartMiniApp, UIMessagePartTool,
+  UIMessage, UIMessagePartImage, UIMessagePartMiniApp, UIMessagePartTool, UIMessagePartVideo,
 } from '@amber/chat-domain';
 import {
   makeConversation, makeUIMessage, makeUserMessage, makeMessageNode, nowIso, patchConversation, toMessageNode,
@@ -24,7 +24,7 @@ const FRAME_STEP_MS: number = 600;
 const DEBUG_APP_TITLE: string = 'Amber Debug';
 const ANSWER_SUFFIX: string = '-answer';
 
-type VisualFixtureCase = 'svg' | 'three' | 'miniapp' | 'widget-error' | 'raw-svg' | 'raw-three' | 'smart-ui' | 'ui-svg-error' | 'weather-ui' | 'style-gallery' | 'component-gallery' | 'task-ui' | 'study-ui' | 'linkage-ui' | 'mixed';
+type VisualFixtureCase = 'svg' | 'three' | 'miniapp' | 'widget-error' | 'raw-svg' | 'raw-three' | 'smart-ui' | 'ui-svg-error' | 'weather-ui' | 'style-gallery' | 'component-gallery' | 'task-ui' | 'study-ui' | 'linkage-ui' | 'media-ui' | 'mixed';
 
 interface VisualFixtureData {
   initial: Conversation;
@@ -38,7 +38,7 @@ const isVisualFixtureCase = (value: string): boolean =>
   value === 'svg' || value === 'three' || value === 'miniapp' || value === 'widget-error' ||
     value === 'raw-svg' || value === 'raw-three' || value === 'smart-ui' || value === 'ui-svg-error' ||
     value === 'weather-ui' || value === 'style-gallery' || value === 'component-gallery' || value === 'task-ui' ||
-    value === 'study-ui' || value === 'linkage-ui' || value === 'mixed';
+    value === 'study-ui' || value === 'linkage-ui' || value === 'media-ui' || value === 'mixed';
 
 const conversationIdFor = (runId: string): string => `${DEBUG_VISUAL_CONVERSATION_PREFIX}${runId}`;
 const answerIdFor = (runId: string): string => `debug-visual-${runId}${ANSWER_SUFFIX}`;
@@ -200,6 +200,7 @@ const buildVisualFixture = async (runId: string, kind: VisualFixtureCase): Promi
     : kind === 'task-ui' ? '做一张学习决策卡，支持选择本地方案、调整时间预算、填写约束，并准备聊天草稿。'
     : kind === 'study-ui' ? '用学习卡帮我复习明朝十六帝，包含翻卡和选择题。'
     : kind === 'linkage-ui' ? '用滑块调整预算，并让指标、进度和图表跟随。'
+    : kind === 'media-ui' ? '展示一张图片和一个视频，并说明来源。'
     : kind === 'style-gallery' ? '展示可组合的原生样式，包括卡片、引用、选项、按钮和输入框。'
     : kind === 'smart-ui' ? '请做一张“企业 CA 证书链”的原生智能 UI 交互卡片：\n\n' +
       '1. 提供“根证书 / 中间证书 / 服务器证书”三个选项。\n' +
@@ -248,6 +249,26 @@ const buildVisualFixture = async (runId: string, kind: VisualFixtureCase): Promi
       initial, frames: streamFrames(answerId, raw),
       finalConversation: patchConversation(initial, {
         messageNodes: initial.messageNodes.concat([toMessageNode(finalMessage)]), updateAt: nowIso(),
+      }),
+    };
+  }
+  if (kind === 'media-ui') {
+    const image: UIMessagePartImage = {
+      type: 'image', url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      metadata: null,
+    };
+    const video: UIMessagePartVideo = {
+      type: 'video', url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+      mime: 'video/mp4', metadata: null,
+    };
+    const finalMessage: UIMessage = makeUIMessage('assistant', [
+      { type: 'text', text: '宋太祖赵匡胤画像：\n\n![宋太祖画像](https://upload.wikimedia.org/wikipedia/commons/6/6b/Song_Taizu.jpg)\n\n示例视频：', metadata: null },
+      image, video,
+    ], { id: answerId, finishedAt: nowIso() });
+    return {
+      initial, frames: [finalMessage],
+      finalConversation: patchConversation(initial, {
+        messageNodes: initial.messageNodes.concat([makeMessageNode([finalMessage], 0, `debug-answer-node-${runId}`)]), updateAt: nowIso(),
       }),
     };
   }

@@ -1622,7 +1622,7 @@ export {
   svgArtifactExport, sceneArtifactExport, uiSnapshotArtifactExport,
 } from './chat/conversation_artifacts.ts';
 export type {
-  ConversationArtifactIndex, ConversationArtifactSource, ConversationImageArtifact,
+  ConversationArtifactIndex, ConversationArtifactSource, ConversationImageArtifact, ConversationVideoArtifact,
   ConversationDocumentArtifact, ConversationMiniAppArtifact, ConversationWidgetArtifact, WidgetArtifactExport,
   ConversationDeclaredArtifactProtocol, ConversationDeclaredArtifactSource,
   ConversationSvgValidationProof, ConversationSvgArtifact, ConversationSceneArtifact,

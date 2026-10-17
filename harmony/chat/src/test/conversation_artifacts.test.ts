@@ -112,3 +112,34 @@ test('Generative display setting defaults on for old settings and off persists r
   await saveDisplaySetting(store, makeDisplaySetting({ enableGenerativeWidgets: false }));
   assert.equal((await loadDisplaySetting(store)).enableGenerativeWidgets, false);
 });
+
+test('Shelf indexes markdown images and video parts with the source message', () => {
+  const { message, conversation } = sample();
+  message.parts.push(text('看这张图 ![赵匡胤](https://example.com/zhao.jpg) 以及 ![重复](https://example.com/zhao.jpg)'),
+    { type: 'video', url: 'https://example.com/interview.mp4', mime: 'video/mp4', metadata: null });
+  const result = collectConversationArtifacts(conversation, true);
+  assert.deepEqual(result.images.map((item) => item.url), ['https://example.com/zhao.jpg']);
+  assert.equal(result.videos.length, 1);
+  assert.equal(result.videos[0].mime, 'video/mp4');
+  assert.deepEqual(result.videos[0].source, {
+    conversationId: conversation.id, nodeId: conversation.messageNodes[0].id, messageId: message.id,
+  });
+  assert.equal(result.images[0].source.messageId, message.id);
+});
+
+test('tool output media is collected once with stable tool ids', () => {
+  const { message, conversation } = sample();
+  message.parts.push({
+    type: 'tool', toolCallId: 'screenshot', toolName: 'wm_screenshot', input: '{}',
+    output: [
+      text('page'),
+      { type: 'image', url: 'https://example.com/a.png', metadata: null },
+      { type: 'video', url: 'https://example.com/a.mp4', mime: 'video/mp4', metadata: null },
+      { type: 'image', url: 'https://example.com/a.png', metadata: null },
+    ],
+    approvalState: { type: 'auto' }, metadata: null,
+  });
+  const result = collectConversationArtifacts(conversation, true);
+  assert.deepEqual(result.images.map((item) => item.id), [`${message.id}:1:tool:1`]);
+  assert.deepEqual(result.videos.map((item) => item.id), [`${message.id}:1:tool:2`]);
+});

@@ -194,6 +194,9 @@ test('aggregator:输出形状 — status/图片全局预算/total_images/image_i
   assert.equal(r['total_images'], 5);
   assert.ok(typeof r['image_instruction'] === 'string' &&
     (r['image_instruction'] as string).startsWith('搜索结果包含 5 张相关图片。'));
+  assert.match(r['image_instruction'] as string, /items\[\]\.images/);
+  assert.match(r['image_instruction'] as string, /!\[/);
+  assert.doesNotMatch(r['image_instruction'] as string, /请不要在回复正文中使用/);
   // sources:exa 失败,error take(500)
   const sources = r['sources'] as JsonObject[];
   assert.equal(sources[0]['status'], 'ok');

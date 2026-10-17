@@ -728,9 +728,9 @@ export const searchOrchestratorSearch = async (
   out['total_images'] = allImages.length;
   if (allImages.length > 0) {
     out['image_instruction'] =
-      `搜索结果包含 ${allImages.length} 张相关图片。图片由 AmberAgent 客户端单独处理；` +
-      '请不要在回复正文中使用 ![](url) Markdown 图片语法，也不要输出任何图片渲染代码块。' +
-      '只需要写好文字内容，并优先给用到的来源附上 [站点名](来源URL) 链接。';
+      `搜索结果包含 ${allImages.length} 张相关图片。只能使用 items[].images[] 中实际返回的图片 URL，` +
+      '用 ![简短描述](url) 在正文内联一到两张；不要编造图片 URL，也不要输出图片渲染代码块。' +
+      '文字内容照常回答，并优先给用到的来源附上 [站点名](来源URL) 链接。';
   }
   out['sources'] = sourceStatusJson(sourceResults, sources, calls);
   out['query_variants'] = variants;

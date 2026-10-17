@@ -1,10 +1,12 @@
 // Selected conversation history is the source of truth for the artifact shelf.
 import type { Conversation } from './conversation.ts';
 import { nodeCurrentMessage } from './conversation.ts';
-import type { UIMessagePartDocument } from './message.ts';
+import type { UIMessagePartDocument, UIMessagePart } from './message.ts';
 import type { GenerativeWidget } from './generative_widget.ts';
 import { parseGenerativeWidgets, sanitizeWidgetHtml, widgetDocument } from './generative_widget.ts';
 import { groupMessageParts } from './message_grouping.ts';
+import { parseMarkdown } from './markdown_blocks.ts';
+import type { InlineToken, MarkdownBlock } from './markdown_blocks.ts';
 import { parseResponseContent } from './response_content.ts';
 import type { ResponseContentSegment, VisualArtifact } from './response_content.ts';
 import type { SmartUiNode, SmartUiState } from './smart_ui/protocol.ts';
@@ -14,6 +16,7 @@ import { renderThreeSceneCover } from './three_scene.ts';
 
 export interface ConversationArtifactSource { conversationId: string; nodeId: string; messageId: string; }
 export interface ConversationImageArtifact { id: string; url: string; source: ConversationArtifactSource; }
+export interface ConversationVideoArtifact { id: string; url: string; mime: string; source: ConversationArtifactSource; }
 export interface ConversationDocumentArtifact { id: string; part: UIMessagePartDocument; source: ConversationArtifactSource; }
 export interface ConversationMiniAppArtifact { id: string; appId: string; title: string; source: ConversationArtifactSource; }
 export interface ConversationWidgetArtifact { id: string; widget: GenerativeWidget; source: ConversationArtifactSource; }
@@ -79,6 +82,7 @@ export interface ConversationUiSnapshotArtifact {
 
 export interface ConversationArtifactIndex {
   images: ConversationImageArtifact[];
+  videos: ConversationVideoArtifact[];
   docs: ConversationDocumentArtifact[];
   miniApps: ConversationMiniAppArtifact[];
   widgets: ConversationWidgetArtifact[];
@@ -126,6 +130,47 @@ const declaredSource = (
   protocol,
   version: declaredProtocolVersion,
 });
+
+const collectInlineImages = (tokens: InlineToken[], out: string[]): void => {
+  for (const token of tokens) {
+    if (token.type === 'image' && token.url.trim().length > 0) out.push(token.url.trim());
+  }
+};
+
+const markdownImageUrls = (text: string): string[] => {
+  const out: string[] = [];
+  let blocks: MarkdownBlock[] = [];
+  try { blocks = parseMarkdown(text); } catch { return out; }
+  for (const block of blocks) {
+    if (block.kind === 'heading' || block.kind === 'paragraph' || block.kind === 'blockquote') {
+      collectInlineImages(block.inlines, out);
+    } else if (block.kind === 'list') {
+      for (const item of block.items) collectInlineImages(item, out);
+    } else if (block.kind === 'table') {
+      for (const header of block.headers) collectInlineImages(header, out);
+      for (const row of block.rows) for (const cell of row) collectInlineImages(cell, out);
+    }
+  }
+  return out;
+};
+
+const collectPartMedia = (
+  part: UIMessagePart, source: ConversationArtifactSource, idBase: string,
+  imageUrls: Set<string>, videoUrls: Set<string>,
+  images: ConversationImageArtifact[], videos: ConversationVideoArtifact[],
+): void => {
+  if (part.type === 'image' && part.url.length > 0 && !imageUrls.has(part.url)) {
+    imageUrls.add(part.url);
+    images.push({ id: idBase, url: part.url, source });
+  } else if (part.type === 'video' && part.url.length > 0 && !videoUrls.has(part.url)) {
+    videoUrls.add(part.url);
+    videos.push({ id: idBase, url: part.url, mime: part.mime, source });
+  } else if (part.type === 'tool') {
+    for (let index: number = 0; index < part.output.length; index++) {
+      collectPartMedia(part.output[index], source, `${idBase}:tool:${index}`, imageUrls, videoUrls, images, videos);
+    }
+  }
+};
 
 const cloneSmartUiDefinition = (id: string, states: SmartUiState[], nodes: SmartUiNode[]): ConversationUiDefinition => ({
   id,
@@ -282,13 +327,14 @@ export const collectConversationArtifacts = (
 ): ConversationArtifactIndex => {
   const declared = collectDeclaredArtifacts(conversation, svgProofs);
   const index: ConversationArtifactIndex = {
-    images: [], docs: [], miniApps: [], widgets: [],
+    images: [], videos: [], docs: [], miniApps: [], widgets: [],
     svg: declared.svg,
     scenes: declared.scenes,
     uiSnapshots: declared.uiSnapshots,
     duplicateDocumentNames: [],
   };
   const imageUrls = new Set<string>();
+  const videoUrls = new Set<string>();
   const miniAppIndices = new Map<string, number>();
   const documentCounts = new Map<string, number>();
   for (const node of conversation.messageNodes) {
@@ -297,10 +343,17 @@ export const collectConversationArtifacts = (
     for (let partIndex = 0; partIndex < message.parts.length; partIndex++) {
       const part = message.parts[partIndex];
       const id = `${message.id}:${partIndex}`;
-      if (part.type === 'image' && part.url.length > 0 && !imageUrls.has(part.url)) {
-        imageUrls.add(part.url);
-        index.images.push({ id, url: part.url, source });
-      } else if (part.type === 'document') {
+      collectPartMedia(part, source, id, imageUrls, videoUrls, index.images, index.videos);
+      if (part.type === 'text') {
+        const markdownImages: string[] = markdownImageUrls(part.text);
+        for (let imageIndex: number = 0; imageIndex < markdownImages.length; imageIndex++) {
+          const url: string = markdownImages[imageIndex];
+          if (imageUrls.has(url)) continue;
+          imageUrls.add(url);
+          index.images.push({ id: `${id}:md:${imageIndex}`, url, source });
+        }
+      }
+      if (part.type === 'document') {
         index.docs.push({ id, part, source });
         const name = part.fileName.length > 0 ? part.fileName : '(未命名)';
         documentCounts.set(name, (documentCounts.get(name) ?? 0) + 1);

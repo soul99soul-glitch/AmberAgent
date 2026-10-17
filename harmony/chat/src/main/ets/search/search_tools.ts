@@ -186,14 +186,16 @@ export const createSearchTools = (settings: SearchSettings, deps: OrchestratorDe
     '- If no results are cited, omit source links.',
     '',
     'IMPORTANT — Images:',
-    'Do not embed images with Markdown image syntax like `![](url)`.',
-    'Do not write internal image-rendering fences or code blocks.',
-    'If items include images, AmberAgent handles the visual rendering separately.',
-    'Your job is to write the answer text and attach source links for the sources you used.',
+    'If items[].images[] contains a direct image URL that helps answer, embed one or two with Markdown image syntax: `![short description](url)`.',
+    'Use only image URLs returned by the tool; never invent or guess an image URL.',
+    'Do not put Markdown image syntax inside code fences or JSON.',
+    'If no relevant image URL is returned, answer with text and source links only.',
+    'Your job is to write the answer text, optionally embed returned images, and attach source links for the sources you used.',
     '',
     'Example:',
     'The capital of France is Paris. [example.com](https://example.com/paris)',
     'The population is about 2.1 million. [example.com](https://example.com/paris) [example2.com](https://example2.com/france)',
+    '宋太祖赵匡胤是北宋开国皇帝。![宋太祖画像](https://example.com/zhao.jpg) [source](https://example.com/zhao)',
   ].join('\n');
 
   const tools: AgentTool[] = [

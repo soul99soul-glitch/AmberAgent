@@ -128,3 +128,12 @@ test('tools:scrape_web — searchServiceSelected 索引命中 enabled scrape 服
   await toolByName(tools2, 'scrape_web').execute({ url: 'https://a.com', service: 'jina reader' });
   assert.ok(calls[1].url.startsWith('https://r.jina.ai/'));
 });
+
+test('search_web prompt lets the model embed returned image URLs as Markdown', () => {
+  const tool = createSearchTools(makeSettings(), DEPS).find((item) => item.name === 'search_web');
+  assert.ok(tool !== undefined);
+  assert.match(tool!.description, /Markdown image syntax/);
+  assert.match(tool!.description, /items\[\]\.images/);
+  assert.match(tool!.description, /never invent or guess an image URL/);
+  assert.doesNotMatch(tool!.description, /Do not embed images/);
+});

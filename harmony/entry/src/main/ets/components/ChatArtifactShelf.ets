@@ -1,6 +1,6 @@
 import type {
   ConversationArtifactIndex, ConversationArtifactSource, ConversationDocumentArtifact,
-  ConversationImageArtifact, ConversationMiniAppArtifact, ConversationWidgetArtifact, ConversationSvgArtifact,
+  ConversationImageArtifact, ConversationVideoArtifact, ConversationMiniAppArtifact, ConversationWidgetArtifact, ConversationSvgArtifact,
   ConversationSceneArtifact, ConversationUiSnapshotArtifact, ConversationSvgValidationProof,
   ConversationDeclaredArtifactSource, UIMessagePartDocument,
 } from '@amber/chat-domain';
@@ -10,6 +10,7 @@ import { ACCENT, BG, BODY, INK, INK3, LABEL, LINE, META, SURFACE2 } from '../des
 import { GenerativeWidgetCard } from './GenerativeWidgetCard.ets';
 import { VisualArtifactPreview } from './VisualArtifactPreview.ets';
 import { ImagePreviewDialog } from './ui/ImagePreviewDialog.ets';
+import { urlBasename } from './ContentAttachmentChip.ets';
 import { saveWidgetArtifact } from '../platform_impl/WidgetArtifactExport.ets';
 import {
   saveSceneCoverArtifact, saveSceneJsonArtifact, saveSvgArtifact, saveUiSnapshotArtifact,
@@ -21,7 +22,7 @@ export struct ChatArtifactShelf {
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @Prop artifacts: ConversationArtifactIndex = {
-    images: [], docs: [], miniApps: [], widgets: [], svg: [], scenes: [], uiSnapshots: [], duplicateDocumentNames: [],
+    images: [], videos: [], docs: [], miniApps: [], widgets: [], svg: [], scenes: [], uiSnapshots: [], duplicateDocumentNames: [],
   };
   onDismiss: () => void = (): void => {};
   onOpenDocument: (part: UIMessagePartDocument) => void = (_part: UIMessagePartDocument): void => {};
@@ -30,6 +31,8 @@ export struct ChatArtifactShelf {
   onSource: (source: ConversationArtifactSource) => void = (_source: ConversationArtifactSource): void => {};
   onAction: (prompt: string) => void = (_prompt: string): void => {};
   @State selected: ConversationWidgetArtifact | null = null;
+  @State selectedVideo: ConversationVideoArtifact | null = null;
+  @State videoFailed: boolean = false;
   @State selectedSvg: ConversationSvgArtifact | null = null;
   @State selectedScene: ConversationSceneArtifact | null = null;
   @State selectedUiSnapshot: ConversationUiSnapshotArtifact | null = null;
@@ -60,6 +63,8 @@ export struct ChatArtifactShelf {
 
   private clearSelection(): void {
     this.selected = null;
+    this.selectedVideo = null;
+    this.videoFailed = false;
     this.selectedSvg = null;
     this.selectedScene = null;
     this.selectedUiSnapshot = null;
@@ -72,13 +77,19 @@ export struct ChatArtifactShelf {
   }
 
   private hasSelection(): boolean {
-    return this.selected !== null || this.selectedSvg !== null || this.selectedScene !== null ||
-      this.selectedUiSnapshot !== null;
+    return this.selected !== null || this.selectedVideo !== null || this.selectedSvg !== null ||
+      this.selectedScene !== null || this.selectedUiSnapshot !== null;
   }
 
   private preview(artifact: ConversationWidgetArtifact): void {
     this.clearSelection();
     this.selected = artifact;
+  }
+
+  private previewVideo(artifact: ConversationVideoArtifact): void {
+    this.clearSelection();
+    this.videoFailed = false;
+    this.selectedVideo = artifact;
   }
 
   private previewSvg(artifact: ConversationSvgArtifact): void {
@@ -355,14 +366,38 @@ export struct ChatArtifactShelf {
   }
 
   @Builder
+  private VideoPreview(): void {
+    if (this.selectedVideo !== null) {
+      Column({ space: 12 }) {
+        if (this.videoFailed) {
+          Text('这段视频无法播放，可能已失效或不是视频文件').width('100%')
+            .fontSize(META).fontColor(INK3).padding(16).textAlign(TextAlign.Center)
+            .backgroundColor(SURFACE2).borderRadius(12)
+        } else {
+          Video({ src: this.selectedVideo.url }).controls(true).autoPlay(false).loop(false)
+            .width('100%').layoutWeight(1).constraintSize({ maxHeight: 240 })
+            .objectFit(ImageFit.Contain).backgroundColor(Color.Black).borderRadius(12)
+            .onError((): void => { this.videoFailed = true; })
+        }
+        Row({ space: 12 }) {
+          Text(this.selectedVideo.mime).fontSize(META).fontColor(INK3).layoutWeight(1)
+          Text('来源消息').fontSize(META).fontColor(ACCENT)
+            .constraintSize({ minWidth: 44, minHeight: 44 }).padding({ left: 12, right: 12 })
+            .onClick((): void => { if (this.selectedVideo !== null) this.onSource(this.selectedVideo.source); })
+        }.width('100%')
+      }.width('100%').layoutWeight(1).alignItems(HorizontalAlign.Start)
+    }
+  }
+
+  @Builder
   private ArtifactList() {
     Scroll() {
       Column() {
-        if (this.artifacts.images.length === 0 && this.artifacts.docs.length === 0 &&
+        if (this.artifacts.images.length === 0 && this.artifacts.videos.length === 0 && this.artifacts.docs.length === 0 &&
           this.artifacts.miniApps.length === 0 && this.artifacts.widgets.length === 0 &&
           this.artifacts.svg.length === 0 && this.artifacts.scenes.length === 0 &&
           this.artifacts.uiSnapshots.length === 0) {
-          Text('本会话还没有图片、文件、小应用或可视化产物')
+          Text('本会话还没有图片、视频、文件、小应用或可视化产物')
             .fontSize(META).fontColor(INK3).width('100%').textAlign(TextAlign.Center).padding({ top: 48 })
         }
         if (this.artifacts.widgets.length > 0) {
@@ -433,6 +468,24 @@ export struct ChatArtifactShelf {
               .backgroundColor(SURFACE2).borderRadius(12).border({ width: 1, color: LINE }).margin({ bottom: 8 })
           }, (artifact: ConversationUiSnapshotArtifact): string => this.declaredArtifactKey(artifact.id, artifact.source))
         }
+        if (this.artifacts.videos.length > 0) {
+          Text(`视频 · ${this.artifacts.videos.length}`).fontSize(LABEL).fontColor(INK3).width('100%')
+            .padding({ top: 12, bottom: 8 })
+          ForEach(this.artifacts.videos, (artifact: ConversationVideoArtifact): void => {
+            Row({ space: 10 }) {
+              Text('▶').fontSize(16).fontColor(ACCENT).width(28).textAlign(TextAlign.Center)
+              Column({ space: 2 }) {
+                Text(urlBasename(artifact.url).length > 0 ? urlBasename(artifact.url) : '视频').fontSize(BODY).fontColor(INK).width('100%')
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(artifact.mime).fontSize(LABEL).fontColor(INK3).width('100%').maxLines(1)
+              }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+              Text('播放').fontSize(META).fontColor(ACCENT)
+                .constraintSize({ minWidth: 44, minHeight: 44 }).padding({ left: 8, right: 8 })
+                .onClick((): void => { this.previewVideo(artifact); })
+            }.width('100%').height(64).padding({ left: 12, right: 4, top: 6, bottom: 6 })
+              .backgroundColor(SURFACE2).borderRadius(12).border({ width: 1, color: LINE }).margin({ bottom: 8 })
+          }, (artifact: ConversationVideoArtifact): string => artifact.id)
+        }
         if (this.artifacts.images.length > 0) {
           Text(`图片 · ${this.artifacts.images.length}`).fontSize(LABEL).fontColor(INK3).width('100%')
             .padding({ top: 8, bottom: 8 })
@@ -493,6 +546,8 @@ export struct ChatArtifactShelf {
         }.width('100%')
         if (this.selected !== null) {
           this.WidgetPreview()
+        } else if (this.selectedVideo !== null) {
+          this.VideoPreview()
         } else if (this.selectedSvg !== null) {
           this.SvgPreview()
         } else if (this.selectedScene !== null) {

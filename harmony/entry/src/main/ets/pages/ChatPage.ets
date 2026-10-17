@@ -359,7 +359,7 @@ struct ChatPage {
   @State artifactDiffTitle: string = '';
   @State artifactDiffText: string = '';
   @State shelfArtifacts: ConversationArtifactIndex = {
-    images: [], docs: [], miniApps: [], widgets: [], svg: [], scenes: [], uiSnapshots: [], duplicateDocumentNames: [],
+    images: [], videos: [], docs: [], miniApps: [], widgets: [], svg: [], scenes: [], uiSnapshots: [], duplicateDocumentNames: [],
   };
   @State displaySettings: DisplaySetting = makeDisplaySetting();
   // Return-to-page forces rebuild, reads latest theme tokens (background pages in stack don't receive StorageProp updates)
