@@ -13,10 +13,20 @@
 
 ## 远端整合
 
-远端 `origin/harmony-preview` 为 `104f07f8c`，与本地共有基点 `3bf267a1f`；本地 12 个已有提交、远端 1 个界面揭示提交将通过正常合并保留，不使用强推。
+远端 `origin/harmony-preview` 为 `104f07f8c`，与本地共有基点 `3bf267a1f`。本轮修复先独立提交为 `37a9da867`，再正常合并远端；保留本地 12 个已有提交和远端 1 个界面揭示提交。
+
+两处 Smart UI 冲突保留本地 controller、状态、nodeId 事件、80 组件及主题重挂载，并接入远端的一次性测量覆盖层。独立 subagent 对照合并双方复核通过；修正了远端新增 Node 测试中 TypeScript 依赖的引用路径，使其与同目录既有测试一致。详见 [冲突处理](2026-10-18-review-round2-evidence/results/merge-reveal-resolution.md) 与 [独立复核](2026-10-18-review-round2-evidence/results/merge-independent-review.md)。
 
 ## 验证
 
-隔离树的 Chat 与 DeepRead 类型检查已通过。首次完整 Node 回归为 4862 通过、1 项因未复制构建缓存而找不到既有 CPython host addon；按现有测试依赖复用未改动 native 源码的本机构建产物后，重新验证最终交付树。合并后的最终回归与原生构建结果将在合并提交中补齐。
+最终交付树的验证结果：
 
-原工作区和当时已安装的模拟器包保持原先状态。本次提交隔离与远端整合不宣称取得新的物理设备、API 12 或真实供应商验收。
+- Chat、DeepRead 类型检查通过；远端合并没有改动这两个 domain 的生产 TypeScript。
+- Harmony 完整回归 **4882/4882 通过，167 suites，0 fail/skip**。完整重跑显式配置了既有 Chat 依赖路径；随后清除该环境变量，新增揭示测试按修正后的引用路径单独执行，4/4 通过。
+- 39 个相关 Harmony 生产文件 lint：**0 error、2952 warn**；ArkTS 编译通过。
+- Debug `assembleApp` 与本地签名通过。新工作树的 source-dependent Mosh CMake 缓存已重建；打包使用 DevEco JBR 和原工作区已有的有效本机签名配置，完成后恢复隔离树受版本控制的配置。另用仓库离线签名脚本验证，输出 `Verify success`。签名材料和 HAP 均只保留本机。
+- 在 API 24 模拟器上以 `install -r` 安装最终 Debug HAP、启动并回放已有 Smart UI fixture；完成后原生控件可见，点击“服务器证书”能更新选中状态和说明。截图：[初始状态](2026-10-18-review-round2-evidence/merged-smart-ui-interaction.jpeg)、[选择后的稳定状态](2026-10-18-review-round2-evidence/merged-smart-ui-selected-final.jpeg)。该 fixture 未开启持久化。验证结束后以 `install -r` 恢复本轮此前保存的原工作区 Debug 包并重新启动，未卸载或清除应用数据。
+- 浏览器诊断完整执行 8/8 场景并 exit 0。原样复跑完成 8 个场景断言与截图，但卡在最终 `browser.close()`，停止后 exit 130；不将这次原样命令记作通过。首跑的一次 `started()` 超时未再复现，尚无精确根因或产品缺陷证据；没有为此改动产品或添加重试。详见 [浏览器诊断](2026-10-18-review-round2-evidence/results/browser-integration-review.md)。
+- `git diff --check` 与暂存区检查通过；原工作区 126 个已修改/未跟踪文件哈希、索引及 Git 状态与交付前快照一致。
+
+以上是隔离交付树的源码、回归、构建、签名和受控模拟器检查。原始报告的 4928 项回归对应含旧 WIP 的历史整合快照；本次没有新增物理设备、API 12、真实供应商或外部服务验收。

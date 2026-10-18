@@ -58,6 +58,7 @@ export struct WidgetMessageContent {
     (_start: number, _id: string, _snapshot: string, _ok: boolean, _error: string): void => {};
   @State segments: ResponseContentSegment[] = [];
   @State smartUiValueSnapshots: SmartUiValueSnapshot[] = [];
+  @State revealSourcePrefix: string = '';
   private previousContent: string = '';
   private previousSourcePrefix: string = '';
   private previousSmartUiDefinitions: Map<string, string> = new Map<string, string>();
@@ -76,6 +77,7 @@ export struct WidgetMessageContent {
   }
 
   private prepare(): void {
+    if (this.messageStreaming) this.revealSourcePrefix = this.smartUiSourcePrefix;
     if (this.previousSourcePrefix.length > 0 && this.previousSourcePrefix !== this.smartUiSourcePrefix) {
       this.clearSmartUiDefinitions(this.previousSourcePrefix);
       this.onSmartUiSourceReplaced(this.previousSourcePrefix);
@@ -212,6 +214,11 @@ export struct WidgetMessageContent {
     return this.segmentAt(index)?.draftEnabled ?? false;
   }
 
+  private revealEligible(): boolean {
+    return !this.messageStreaming && this.smartUiSourcePrefix.length > 0 &&
+      this.revealSourcePrefix === this.smartUiSourcePrefix;
+  }
+
   private segmentDiagnosticAt(index: number): string {
     return this.segmentAt(index)?.diagnostics[0]?.message ?? '内容未完整生成';
   }
@@ -230,6 +237,7 @@ export struct WidgetMessageContent {
   private LegacyWidgetSegment(index: number): void {
     if (this.segmentWidgetAt(index) !== null) {
       GenerativeWidgetCard({ widget: this.segmentWidgetAt(index) as GenerativeWidget,
+        revealKey: `widget:${this.smartUiSourceKeyAt(index)}`, revealEligible: this.revealEligible(),
         onAction: (prompt: string): void => { this.onAction(prompt); },
         onContentGrow: (): void => { this.onVisibleGrow(); } });
     }
@@ -243,6 +251,7 @@ export struct WidgetMessageContent {
       sourceKey: this.smartUiSourceKeyAt(index),
       stateAccessor: this.smartUiStateAccessor,
       ready: this.segmentReadyAt(index),
+      revealEligible: this.revealEligible(),
       streaming: this.messageStreaming,
       projections: this.smartUiProjections,
       fontSize: this.fontSize,
@@ -263,6 +272,7 @@ export struct WidgetMessageContent {
   private ArtifactSegment(index: number): void {
     if (this.segmentArtifactAt(index) !== null) {
       VisualArtifactCard({ artifact: this.segmentArtifactAt(index) as VisualArtifact,
+        revealKey: `widget:${this.smartUiSourceKeyAt(index)}`, revealEligible: this.revealEligible(),
         streaming: this.messageStreaming, onContentGrow: (): void => { this.onVisibleGrow(); },
         onArtifactArea: (ref: string, area: Area): void => {
           this.smartUiAssetAreaAt(index, ref, area);

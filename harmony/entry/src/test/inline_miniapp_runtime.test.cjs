@@ -25,7 +25,8 @@ function fixture(names, env = {}) {
   Object.assign(page, { alive: true, attached: true, visible: true, backgrounded: false,
     complete: true, runtimeRevision: 0, activeRevision: 0, app: null, bridge: null,
     imageCache: new Map(), sessionToken: '', mountedAppId: '', mountedAppVersion: 0,
-    activeArtifactInteraction: '', interactionOwner: 'inline-test-owner', interactionArea: null });
+    activeArtifactInteraction: '', interactionOwner: 'inline-test-owner', interactionArea: null,
+    motion: { play() {}, cancel() {} } });
   return page;
 }
 

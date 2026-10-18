@@ -9,12 +9,13 @@ import type {
   SmartUiStateValue,
   SmartUiWeatherProjection,
 } from '@amber/chat-domain';
-import { createSmartUiController, resolveWeatherBinding } from '@amber/chat-domain';
+import { componentKindAllowsChildren, createSmartUiController, resolveWeatherBinding } from '@amber/chat-domain';
 import { ACCENT, ACCENT_INK, ACCENT_LIGHT, ERROR, INK, INK3, INK4, LINE, SURFACE, SURFACE2, HOME_GLASS_SHADOW,
   SUCCESS_BG, SUCCESS_FG, WARNING_BG, WARNING_FG, INFO_BG, INFO_FG,
   MOTION_ENTER, MOTION_PRESS, accentSoftBg } from '../design/tokens.ets';
 import { FONT_SANS, FONT_MONO, FONT_SERIF } from '../design/fonts.ets';
 import { NativeSmartUiComponent } from './NativeSmartUiComponent.ets';
+import type { NativeUiNodeAreaCallback, NativeUiNodeFrame } from './NativeUiGenerationOverlay.ets';
 
 const EMPTY_ACCESSOR: SmartUiStateAccessor = {
   get: (_sourceKey: string, _stateId: string): SmartUiScalar | undefined => undefined,
@@ -31,12 +32,12 @@ const EMPTY_ASSET_DIAGNOSTIC: SmartUiAssetDiagnostic = { ref: '', message: '', s
 export struct NativeSmartUiNode {
   /** Keep only the stable identity in retained ForEach closures; read the current definition below. */
   @Prop nodeId: string = EMPTY_NODE.id;
-  @Prop document: SmartUiDocument = EMPTY_DOCUMENT;
-  @Prop values: SmartUiStateValue[] = [];
+  @Prop @Watch('onNodeVisibilityChanged') document: SmartUiDocument = EMPTY_DOCUMENT;
+  @Prop @Watch('onNodeVisibilityChanged') values: SmartUiStateValue[] = [];
   @Prop invalidStateIds: string[] = [];
   @Prop validationDiagnostics: SmartUiAssetDiagnostic[] = [];
   @Prop projections: SmartUiWeatherProjection[] = [];
-  @Prop controller: SmartUiController = EMPTY_CONTROLLER;
+  @Prop @Watch('onNodeVisibilityChanged') controller: SmartUiController = EMPTY_CONTROLLER;
   @Prop ready: boolean = false;
   @Prop sourceKey: string = '';
   @Prop streaming: boolean = false;
@@ -50,6 +51,42 @@ export struct NativeSmartUiNode {
   onAssetView: (ref: string) => void = (_ref: string): void => {};
   onContentGrow: () => void = (): void => {};
   onReset: () => void = (): void => {};
+  onNodeArea: NativeUiNodeAreaCallback = (_id: string, _frame: NativeUiNodeFrame | null): void => {};
+  onRevealTouch: () => void = (): void => {};
+
+  aboutToAppear(): void {
+    this.onNodeVisibilityChanged();
+  }
+
+  aboutToDisappear(): void {
+    this.onNodeArea(this.nodeId, null);
+  }
+
+  private onNodeVisibilityChanged(): void {
+    if (!this.nodeExists() || !this.visible()) this.onNodeArea(this.nodeId, null);
+  }
+
+  private reportArea(area: Area): void {
+    const node: SmartUiNode = this.currentNode();
+    if (node.type === 'component' && node.component !== undefined && componentKindAllowsChildren(node.component.kind)) {
+      this.onNodeArea(this.nodeId, null);
+      return;
+    }
+    const frame: NativeUiNodeFrame = {
+      id: this.nodeId,
+      type: node.type,
+      x: Number(area.globalPosition.x),
+      y: Number(area.globalPosition.y),
+      width: Number(area.width),
+      height: Number(area.height),
+    };
+    if (![frame.x, frame.y, frame.width, frame.height].every((value: number): boolean =>
+      Number.isFinite(value)) || frame.width <= 0 || frame.height <= 0) {
+      this.onNodeArea(this.nodeId, null);
+      return;
+    }
+    this.onNodeArea(this.nodeId, frame);
+  }
 
   private nodeExists(): boolean {
     const nodes: SmartUiNode[] = this.document.nodes;
@@ -173,6 +210,7 @@ export struct NativeSmartUiNode {
 
   private touch(key: string, event: TouchEvent): void {
     if (event.type !== TouchType.Down && event.type !== TouchType.Up && event.type !== TouchType.Cancel) return;
+    if (event.type === TouchType.Down) this.onRevealTouch();
     this.getUIContext().animateTo({ duration: MOTION_PRESS, curve: Curve.EaseOut }, (): void => {
       this.pressedKey = event.type === TouchType.Down ? key : '';
     });
@@ -337,7 +375,9 @@ export struct NativeSmartUiNode {
         onDraft: (nodeId: string): void => { this.onDraft(nodeId); },
         onAssetView: (ref: string): void => { this.onAssetView(ref); },
         onReset: (): void => { this.onReset(); },
-        onContentGrow: (): void => { this.onContentGrow(); } });
+        onContentGrow: (): void => { this.onContentGrow(); },
+        onNodeArea: (id: string, frame: NativeUiNodeFrame | null): void => { this.onNodeArea(id, frame); },
+        onRevealTouch: (): void => { this.onRevealTouch(); } });
     }
   }
 
@@ -383,7 +423,8 @@ export struct NativeSmartUiNode {
     .shadow({ radius: this.currentNode().variant === 'elevated' ? 10 : 0,
       color: HOME_GLASS_SHADOW, offsetY: this.currentNode().variant === 'elevated' ? 3 : 0 })
     .alignItems(HorizontalAlign.Start)
-    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }));
+    .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
+    .onAreaChange((_old: Area, area: Area): void => { this.reportArea(area); });
   }
 
   @Builder
@@ -407,7 +448,8 @@ export struct NativeSmartUiNode {
       .backgroundColor(this.currentNode().variant === 'code' ? SURFACE2 :
         this.currentNode().variant === 'badge' ? this.toneBackground() : Color.Transparent)
       .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 6 }))
-        .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }));
+        .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut }))
+      .onAreaChange((_old: Area, area: Area): void => { this.reportArea(area); });
   }
 
   @Builder
@@ -477,7 +519,8 @@ export struct NativeSmartUiNode {
       this.StateWarning();
     }
     .width('100%')
-    .alignItems(HorizontalAlign.Start);
+    .alignItems(HorizontalAlign.Start)
+    .onAreaChange((_old: Area, area: Area): void => { this.reportArea(area); });
   }
 
   @Builder
@@ -502,11 +545,15 @@ export struct NativeSmartUiNode {
         .accessibilityText(this.currentNode().placeholder ?? '输入内容')
         .onFocus((): void => { this.inputFocused = true; })
         .onBlur((): void => { this.inputFocused = false; })
+        .onTouch((event: TouchEvent): void => {
+          if (event.type === TouchType.Down) this.onRevealTouch();
+        })
         .onChange((value: string): void => { this.changeInput(value); });
       this.StateWarning();
     }
     .width('100%')
-    .alignItems(HorizontalAlign.Start);
+    .alignItems(HorizontalAlign.Start)
+    .onAreaChange((_old: Area, area: Area): void => { this.reportArea(area); });
   }
 
   @Builder
@@ -530,7 +577,8 @@ export struct NativeSmartUiNode {
     .onTouch((event: TouchEvent): void => { this.touch('button', event); })
     .enabled(this.draftEnabled())
     .onClick((): void => { this.clickDraft(); })
-    .accessibilityText(`${this.currentNode().label ?? ''}${this.draftEnabled() ? '' : '，暂不可用'}`);
+    .accessibilityText(`${this.currentNode().label ?? ''}${this.draftEnabled() ? '' : '，暂不可用'}`)
+    .onAreaChange((_old: Area, area: Area): void => { this.reportArea(area); });
   }
 
   @Builder
@@ -577,7 +625,8 @@ export struct NativeSmartUiNode {
       }, (index: number): string => `${this.sourceKey}:${this.nodeId}:diagnostic:${index}`);
     }
     .width('100%')
-    .alignItems(HorizontalAlign.Start);
+    .alignItems(HorizontalAlign.Start)
+    .onAreaChange((_old: Area, area: Area): void => { this.reportArea(area); });
   }
 
   @Builder
@@ -595,12 +644,16 @@ export struct NativeSmartUiNode {
     } else if (this.currentNode().type === 'asset') {
       this.AssetNode();
     } else if (this.currentNode().type === 'component') {
-      NativeSmartUiComponent({ document: this.document, nodeId: this.nodeId, values: this.values,
-        invalidStateIds: this.invalidStateIds, fontSize: this.fontSize, fontFamily: this.fontFamily,
-        draftEnabled: this.draftEnabled(),
-        child: (childId: string): void => { this.ChildNode(childId); },
-        onStateChange: (stateId: string, value: SmartUiScalar): void => { this.onStateChange(stateId, value); },
-        onDraft: (): void => { this.clickDraft(); }, onReset: (): void => { this.onReset(); } });
+      Column() {
+        NativeSmartUiComponent({ document: this.document, nodeId: this.nodeId, values: this.values,
+          invalidStateIds: this.invalidStateIds, fontSize: this.fontSize, fontFamily: this.fontFamily,
+          draftEnabled: this.draftEnabled(),
+          child: (childId: string): void => { this.ChildNode(childId); },
+          onStateChange: (stateId: string, value: SmartUiScalar): void => { this.onStateChange(stateId, value); },
+          onDraft: (): void => { this.clickDraft(); }, onReset: (): void => { this.onReset(); } });
+      }
+      .width('100%')
+      .onAreaChange((_old: Area, area: Area): void => { this.reportArea(area); });
     }
   }
 
