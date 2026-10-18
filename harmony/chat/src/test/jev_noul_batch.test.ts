@@ -22,7 +22,7 @@ test('noul batch questions identify their own candidate, then answers map to the
   assert.deepEqual(body.state.candidates, {
     'warm-id': '用户偏好暖色', 'cool-id': '用户偏好冷色',
   });
-  const evaluation = decodeJevResponse('{"answers":{"c0":0.1,"c1":0.9}}', batch.questions, 'typesafe');
+  const evaluation = decodeJevResponse('{"answers":{"c0":{"type":"noul","noul":0.1},"c1":{"type":"noul","noul":0.9}}}', batch.questions, 'typesafe');
   assert.deepEqual(readJevNoulBatchProbabilities(keys, evaluation), { 'warm-id': 0.1, 'cool-id': 0.9 });
   assert.deepEqual(keys, ['warm-id', 'cool-id'], 'batch construction must preserve caller ordering');
 });

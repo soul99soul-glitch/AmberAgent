@@ -183,6 +183,47 @@ test('buildMessages: 并行 tool 同组(3 tool_calls 一条 assistant + 3 条 to
   assert.equal(toolResults.length, 3);
 });
 
+test('request: tool images follow the complete parallel result group and retain their source call', () => {
+  // Chat Completions permits only text in tool messages; image_url belongs in user content.
+  // https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create
+  const shot: UIMessagePartTool = { ...executedTool('shot', 'wm_screenshot', '{}', ''),
+    output: [{ type: 'image', url: 'file:///shot.png', metadata: null }] };
+  const mixed: UIMessagePartTool = { ...executedTool('mixed', 'inspect', '{}', 'page title'),
+    output: [{ type: 'text', text: 'page title', metadata: null },
+      { type: 'image', url: 'https://example.test/page.png', metadata: null }] };
+  const messages = [makeUserMessage('Inspect the page'), makeUIMessage('assistant', [
+    shot, mixed, executedTool('plain', 'get_time', '{}', 'noon'),
+    { type: 'text', text: 'Finished inspection.', metadata: null },
+  ])];
+  const before = JSON.stringify(messages);
+  const encoded: string[] = [];
+  const body = buildChatCompletionRequest({ messages, params: makeTextGenerationParams(),
+    setting: makeProviderSettingOpenAI(), stream: true,
+    encodeImage: (url): string => { encoded.push(url); return encoder(url); } });
+  const wire = body['messages'] as JsonObject[];
+  assert.deepEqual(wire.map((message) => message['role']), ['user', 'assistant', 'tool', 'tool', 'tool', 'user', 'assistant']);
+  assert.deepEqual(wire.slice(2, 5).map((message) => [message['tool_call_id'], message['content']]),
+    [['shot', ''], ['mixed', 'page title'], ['plain', 'noon']]);
+  assert.deepEqual(wire[5]['content'], [
+    { type: 'text', text: 'Images returned by tool wm_screenshot (tool_call_id: shot):' },
+    { type: 'image_url', image_url: { url: encoder('file:///shot.png') } },
+    { type: 'text', text: 'Images returned by tool inspect (tool_call_id: mixed):' },
+    { type: 'image_url', image_url: { url: encoder('https://example.test/page.png') } },
+  ]);
+  assert.deepEqual(encoded, ['file:///shot.png', 'https://example.test/page.png']);
+  assert.equal(wire[6]['content'], 'Finished inspection.');
+  assert.equal(JSON.stringify(messages), before, 'wire projection must not rewrite stored tool outputs');
+});
+
+test('buildMessages: tool image encoder failures propagate', () => {
+  const tool: UIMessagePartTool = { ...executedTool('shot', 'wm_screenshot', '{}', ''),
+    output: [{ type: 'image', url: 'file:///missing.png', metadata: null }] };
+  const messages = [makeUIMessage('assistant', [tool])];
+  assert.throws(() => buildMessages(messages), /requires injected ImageEncoder/);
+  const error = new Error('screenshot file missing');
+  assert.throws(() => buildMessages(messages, {}, () => { throw error; }), error);
+});
+
 test('buildMessages: reasoning 只带最后一条 user 之后的 assistant(非 MiMo)', () => {
   const a1 = makeUIMessage('assistant', [reasoning('old think'), { type: 'text', text: 'old', metadata: null }]);
   const a2 = makeUIMessage('assistant', [reasoning('new think'), { type: 'text', text: 'new', metadata: null }]);

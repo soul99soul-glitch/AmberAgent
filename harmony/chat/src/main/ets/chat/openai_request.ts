@@ -275,6 +275,7 @@ export const buildMessages = (
         buf.content = [];
         buf.reasoning = null;
 
+        const toolImages: JsonValue[] = [];
         for (const tool of group.tools) {
           out.push({
             role: 'tool',
@@ -285,7 +286,18 @@ export const buildMessages = (
               .map((p): string => p.text)
               .join('\n'),
           });
+          const images: UIMessagePartImage[] = tool.output.filter(
+            (part: UIMessagePart): part is UIMessagePartImage => part.type === 'image');
+          if (images.length > 0) {
+            toolImages.push({ type: 'text',
+              text: `Images returned by tool ${tool.toolName} (tool_call_id: ${tool.toolCallId}):` });
+            for (const image of images) {
+              toolImages.push({ type: 'image_url', image_url: { url: encodeImage(image.url) } });
+            }
+          }
         }
+        // Chat Completions 的 tool content 仅允许文本；整组 tool 结果必须先完成配对。
+        if (toolImages.length > 0) out.push({ role: 'user', content: toolImages });
       }
     }
 

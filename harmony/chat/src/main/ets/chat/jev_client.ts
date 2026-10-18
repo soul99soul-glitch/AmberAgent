@@ -2,8 +2,7 @@
 //
 // 双方言:TYPESAFE body {model, state, questions};VERCEL body {state, questions}
 //   (模型走 ai-model-id 头,ai-gateway-auth-method: api-key)。
-// 题编码:noul → {type:'noul', instructions, true/false_criteria}(VERCEL 记 boolean);
-//   choice → {type:'choice', instructions, options{id: 说明}}。
+// 题编码:criteria 保存 noul 的 true/false 标准或 choice 的选项说明(VERCEL 记 boolean)。
 // 答解码:逐题校验 — 缺题抛;noul 取 [0,1] 有限数;choice 必须是已知选项 id。
 
 import type { JsonObject, JsonValue } from './json.ts';
@@ -58,8 +57,10 @@ const questionToJson = (q: JevQuestion, apiMode: JevApiMode): JsonObject => {
       type: apiMode === 'vercel' ? 'boolean' : 'noul',
       instructions: q.instructions,
     };
-    if (q.trueCriteria.length > 0) out['true_criteria'] = q.trueCriteria;
-    if (q.falseCriteria.length > 0) out['false_criteria'] = q.falseCriteria;
+    const criteria: JsonObject = {};
+    if (q.trueCriteria.length > 0) criteria['true'] = q.trueCriteria;
+    if (q.falseCriteria.length > 0) criteria['false'] = q.falseCriteria;
+    if (Object.keys(criteria).length > 0) out['criteria'] = criteria;
     return out;
   }
   const options: JsonObject = {};
@@ -69,7 +70,7 @@ const questionToJson = (q: JevQuestion, apiMode: JevApiMode): JsonObject => {
   return {
     type: 'choice',
     instructions: q.instructions,
-    options,
+    criteria: options,
   };
 };
 
@@ -94,6 +95,7 @@ export const buildJevRequest = (
         Authorization: `Bearer ${apiKey}`,
         'ai-model-id': model,
         'ai-gateway-auth-method': 'api-key',
+        'ai-evaluation-model-specification-version': '4',
       },
       body: JSON.stringify(body),
     };
@@ -138,35 +140,18 @@ const decodeOneAnswer = (
   id: string, question: JevQuestion, raw: JsonValue | undefined, apiMode: JevApiMode,
 ): JevAnswer => {
   if (raw === undefined) throw new JevDecodeError(`missing answer for question ${id}`);
+  const obj: JsonObject = asObject(raw, `answer for ${id}`);
+  const expectedType: string = question.kind === 'noul' && apiMode === 'vercel' ? 'boolean' : question.kind;
+  if (obj['type'] !== expectedType) throw new JevDecodeError(`invalid answer type for ${id}`);
   if (question.kind === 'noul') {
-    // TYPESAFE {probability: 0..1} 或 {value};VERCEL boolean/number 直给或 {probability}
-    let p: number | null = null;
-    if (typeof raw === 'number') p = raw;
-    else if (typeof raw === 'boolean') p = raw ? 1 : 0;
-    else if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
-      const obj = raw as JsonObject;
-      const pv = obj['probability'];
-      if (typeof pv === 'number') p = pv;
-      else {
-        const vv = obj['value'];
-        if (typeof vv === 'number') p = vv;
-        else if (typeof vv === 'boolean') p = vv ? 1 : 0;
-      }
-    }
-    if (p === null || !Number.isFinite(p) || p < 0 || p > 1) {
+    const p: JsonValue | undefined = obj[apiMode === 'vercel' ? 'probability' : 'noul'];
+    if (typeof p !== 'number' || !Number.isFinite(p) || p < 0 || p > 1) {
       throw new JevDecodeError(`invalid noul probability for ${id}`);
     }
     return { kind: 'noul', probability: p };
   }
-  // choice:TYPESAFE {selected} 或直给字符串;VERCEL 同
-  let selected: string = '';
-  if (typeof raw === 'string') selected = raw;
-  else if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
-    const obj = raw as JsonObject;
-    const sv = obj['selected'];
-    if (typeof sv === 'string') selected = sv;
-  }
-  if (selected.length === 0 || question.options[selected] === undefined) {
+  const selected: JsonValue | undefined = obj['choice'];
+  if (typeof selected !== 'string' || Object.keys(question.options).indexOf(selected) < 0) {
     throw new JevDecodeError(`invalid choice selection for ${id}`);
   }
   return { kind: 'choice', selected };

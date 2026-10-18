@@ -87,8 +87,18 @@ test('BPE collects reasoning, tool input/output, filenames and mini-app text whi
     assert.deepEqual(ids, texts.map(() => 'o200k_base'));
     return [3, 7, 2, 9, 4, 5, 6];
   });
-  const media: number = estimateImageTokens('tool-image') + estimateImageTokens('image') + 4500 + 4500;
-  assert.equal(result, 36 + Math.floor((media + 80 + 120 + 'assistant'.length) / 4));
+  // Two remote images contribute 1600 tokens each; other fixed costs retain
+  // their character estimate and the BPE batch above contributes 36 tokens.
+  assert.equal(result, 5538);
+});
+
+test('a 1024px image contributes its token estimate without another character conversion', async () => {
+  const png = Buffer.alloc(24);
+  png[0] = 0x89; png[1] = 0x50; png[2] = 0x4e; png[3] = 0x47;
+  png.writeUInt32BE(1024, 16); png.writeUInt32BE(1024, 20);
+  const image: UIMessagePart = { type: 'image', url: `data:image/png;base64,${png.toString('base64')}`, metadata: null };
+  assert.equal(await countNativeContextFootprint([message('image', [image])], [], 'o200k_base',
+    async (_ids, texts) => { assert.deepEqual(texts, []); return []; }), 1485);
 });
 
 test('unexecuted tool contributes only its input and each message keeps a four-token floor', async () => {

@@ -127,6 +127,7 @@ import type { JsonObject } from './json.ts';
 import type { RecipeLoopAdapter } from './recipes/runner.ts';
 import type { PluginLoopAdapter } from './plugins/ports.ts';
 import { executeRecipeBatch } from './recipe_loop.ts';
+import { checkpointRegenerateConversation } from './stream_checkpoint.ts';
 
 // ===== maxSteps 常量(PreferencesStore.kt:268-270) =====
 
@@ -591,6 +592,26 @@ export const runAgenticToolLoop = async (
 ): Promise<Conversation> => runToolLoopCore(
   conversation, deps, loop, loop.invocationContext !== 'subagent');
 
+// The loop sees only this branch's prefix. Every durable save projects it back
+// onto the original conversation, including alternatives and later messages.
+const runToolLoopAtBranch = async (
+  conversation: Conversation, nodeId: string, working: Conversation,
+  deps: ChatTurnDeps, loop: ToolLoopOptions,
+): Promise<Conversation> => {
+  const nodeIndex: number = conversation.messageNodes.findIndex((node): boolean => node.id === nodeId);
+  const project = (snapshot: Conversation): Conversation => {
+    const messages: UIMessage[] = currentMessages(snapshot);
+    if (messages[nodeIndex]?.parts.length === 0) return conversation;
+    return checkpointRegenerateConversation(conversation, nodeId, messages);
+  };
+  const out: Conversation = await runAgenticToolLoop(working, {
+    ...deps, store: { save: (snapshot: Conversation): Promise<void> => deps.store.save(project(snapshot)) },
+  }, loop);
+  const merged: Conversation = project(out);
+  await deps.store.save(merged);
+  return merged;
+};
+
 // ===== 入口:带工具循环的发送(runChatTurn 同序:user 先落库再循环) =====
 
 export const runChatTurnWithTools = async (
@@ -615,9 +636,19 @@ export const runChatTurnWithTools = async (
 //   工具(canResumeExecution)走 resume 路径
 export const runToolLoopContinuation = async (
   conversation: Conversation, deps: ChatTurnDeps, loop: ToolLoopOptions,
+  targetNodeId: string = '',
 ): Promise<Conversation> => {
   if (loop.tools.length === 0) {
     return conversation;
+  }
+  if (targetNodeId.length > 0) {
+    const index: number = conversation.messageNodes.findIndex((node): boolean => node.id === targetNodeId);
+    if (index < 0) throw new Error(`runToolLoopContinuation: node not found: ${targetNodeId}`);
+    if (index < conversation.messageNodes.length - 1) {
+      return runToolLoopAtBranch(conversation, targetNodeId, {
+        ...conversation, messageNodes: conversation.messageNodes.slice(0, index + 1),
+      }, deps, loop);
+    }
   }
   return runAgenticToolLoop(conversation, deps, loop);
 };
@@ -630,9 +661,7 @@ export const runToolLoopContinuation = async (
 //   末条 assistant),循环产出合入占位节点;完成后占位消息并入目标节点
 //   alternatives(分支追加不覆盖,selectIndex 指向新分支),其余生成节点
 //   (steer 等)插入目标之后
-// 登记偏差:assistant 分支再生中途持久化形态 = 基底+占位节点(追加形态),
-//   完成后改写为分支形态;Android 窗口化 merge 依附其分页架构
-//   (PARITY_DEBT 既登,扁平节点模型下等价语义)
+// 中途与最终保存均投影成完整分支形态,失败或进程退出也保留旧分支与后续节点。
 export const runRegenerateAtWithTools = async (
   conversation: Conversation, nodeId: string, deps: RegenerateDeps, loop: ToolLoopOptions,
 ): Promise<Conversation> => {
@@ -649,28 +678,5 @@ export const runRegenerateAtWithTools = async (
     messageNodes: [...seedInfo.seed.messageNodes, placeholder],
     updateAt: nowIso(),
   };
-  const out: Conversation = await runAgenticToolLoop(working, deps, loop);
-  const target: MessageNode = conversation.messageNodes[seedInfo.nodeIndex];
-  const placeholderMsg: UIMessage = nodeCurrentMessage(out.messageNodes[seedInfo.nodeIndex]);
-  const extraNodes: MessageNode[] = out.messageNodes.slice(seedInfo.nodeIndex + 1);
-  // 占位无产出(abort 即刻/无 chunk,runRegenerateAt !sawChunk 同语义)→ 目标节点不变
-  const mergedTarget: MessageNode = placeholderMsg.parts.length > 0
-    ? {
-      ...target,
-      messages: [...target.messages, placeholderMsg],
-      selectIndex: target.messages.length,
-    }
-    : target;
-  const merged: Conversation = {
-    ...out,
-    messageNodes: [
-      ...conversation.messageNodes.slice(0, seedInfo.nodeIndex),
-      mergedTarget,
-      ...extraNodes,
-      ...conversation.messageNodes.slice(seedInfo.nodeIndex + 1),
-    ],
-    updateAt: nowIso(),
-  };
-  await deps.store.save(merged);
-  return merged;
+  return runToolLoopAtBranch(conversation, nodeId, working, deps, loop);
 };

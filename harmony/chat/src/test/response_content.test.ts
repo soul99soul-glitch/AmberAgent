@@ -2,11 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applySvgValidation,
+  declaredResponseContentIds,
   parseResponseContent,
   stripDeclaredResponseBlocks,
   validateResponseContentReferences,
 } from '../main/ets/chat/response_content.ts';
 import type { ResponseContentSegment, VisualArtifact } from '../main/ets/chat/response_content.ts';
+import type { UIMessagePart } from '../main/ets/chat/message.ts';
 
 const segment = (content: string, streaming: boolean = false): ResponseContentSegment[] =>
   parseResponseContent(content, streaming);
@@ -208,6 +210,44 @@ test('duplicate artifact IDs and missing terminal references are local errors', 
   const duplicateUi: ResponseContentSegment[] = segment(ui('same-ui') + ui('same-ui'));
   assert.equal(duplicateUi.filter((item) => item.type === 'ui').every((item) => item.status === 'error'), true);
   assert.ok(duplicateUi.filter((item) => item.type === 'ui').every((item) => codes(item).includes('duplicate-id')));
+});
+
+test('message IDs include every declared text group without reading tool output or code examples', () => {
+  const parts: UIMessagePart[] = [
+    { type: 'text', text: ui('shared').slice(0, 42), metadata: null },
+    { type: 'text', text: ui('shared').slice(42), metadata: null },
+    { type: 'tool', toolCallId: 't', toolName: 'search', input: '{}', approvalState: { type: 'auto' },
+      output: [{ type: 'text', text: ui('tool-only'), metadata: null }], metadata: null },
+    { type: 'text', text: '````text\n' + ui('example-only') + '\n````\n' + svg('shared'), metadata: null },
+  ];
+  const ids = declaredResponseContentIds(parts);
+  assert.deepEqual(ids, ['shared', 'shared']);
+  const control = byType(parseResponseContent(ui('shared'), false, undefined, true, ids), 'ui');
+  assert.equal(control.complete, false);
+  assert.equal(control.draftEnabled, false);
+  assert.ok(codes(control).includes('duplicate-id'));
+  const initial = parseResponseContent(svg('shared'), false, undefined, true, ids);
+  const visual = byType(initial, 'svg');
+  const validated = byType(applySvgValidation(initial, visual.sourceStart, 'shared',
+    visual.artifact?.snapshot as string, true), 'svg');
+  assert.equal(validated.status, 'error', 'XML validity cannot remove a message-level ID ambiguity');
+  assert.equal(validated.artifact?.status, 'error');
+  assert.equal(validated.complete, false);
+  assert.ok(codes(validated).includes('duplicate-id'));
+});
+
+test('unique IDs in separate text groups keep their normal completion and XML validation', () => {
+  const ids = declaredResponseContentIds([
+    { type: 'text', text: ui(), metadata: null },
+    { type: 'image', url: 'https://example.com/image.png', metadata: null },
+    { type: 'text', text: svg(), metadata: null },
+  ]);
+  assert.deepEqual(ids, ['controls', 'diagram']);
+  assert.equal(byType(parseResponseContent(ui(), false, undefined, true, ids), 'ui').draftEnabled, true);
+  const initial = parseResponseContent(svg(), false, undefined, true, ids);
+  const visual = byType(initial, 'svg');
+  assert.equal(byType(applySvgValidation(initial, visual.sourceStart, 'diagram',
+    visual.artifact?.snapshot as string, true), 'svg').complete, true);
 });
 
 test('stripDeclaredResponseBlocks only strips new protocol blocks and keeps source immutable', () => {

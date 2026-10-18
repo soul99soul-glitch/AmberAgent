@@ -341,6 +341,29 @@ test('polish runner cancellation reaches active model and persists failure', asy
   assert.equal(repository.failCount, 0);
 });
 
+test('polish runner consumes an owner stop queued after validation before synchronously starting the model', async () => {
+  const repository = new FakeRepository(makeJob());
+  const model = new FakeModel((): string => candidateJson(1));
+  let stopRequested = false;
+  let stopScheduled = false;
+  const runner = createPolishRunner({
+    repository, modelRunning: model, nowMs: (): number => NOW + 100,
+    shouldYieldToSystem: (_projectId: string, _jobId: string, ownerToken: string): boolean => {
+      assert.equal(ownerToken, 'owner-1');
+      if (model.validated.length > 0 && !stopScheduled) {
+        stopScheduled = true;
+        queueMicrotask((): void => { stopRequested = true; });
+      }
+      return stopRequested;
+    },
+  });
+  const result = await runner.run('project-1', 'polish-1', 'owner-1');
+  assert.equal(result.stage, 'waiting_system');
+  assert.equal(repository.yieldCount, 1);
+  assert.equal(model.requests.length, 0);
+  assert.equal(repository.failCount, 0);
+});
+
 test('polish runner old owner does not overwrite a newer durable state', async () => {
   const repository = new FakeRepository(claimPolishJob(makeJob(), 'old-owner', NOW, 60_000));
   const model = new FakeModel((): string => candidateJson(1));

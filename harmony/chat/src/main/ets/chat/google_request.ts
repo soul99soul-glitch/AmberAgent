@@ -250,6 +250,12 @@ export const buildGoogleContents = (
         const responses: JsonValue[] = [];
         for (const tool of group.tools) {
           responses.push(toGoogleFunctionResponsePart(tool));
+          // Gemini 2.5 不支持 functionResponse 内嵌图片;同级 inlineData 紧随所属工具结果。
+          for (const output of tool.output) {
+            if (output.type !== 'image') continue;
+            const image: JsonObject | null = toGooglePart(output, encodeImage);
+            if (image !== null) responses.push(image);
+          }
         }
         out.push({ role: 'user', parts: responses as unknown as JsonValue });
       }

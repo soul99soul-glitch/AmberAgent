@@ -10,7 +10,7 @@ const methods = [...source.matchAll(/  private [A-Za-z][A-Za-z0-9_]*\([^]*?\n  \
   .map(match => match[0]).join('\n');
 const build = source.slice(source.indexOf('  build(): void'));
 const callback = build.match(/ForEach\(this\.segments,[^]*?=>\s*\{([^]*?)\n\s*\},/)[1];
-function fixture() {
+function fixture(dependencies = {}) {
   const records = [];
   const exports = {};
   const chain = new Proxy({}, { get: () => () => chain });
@@ -19,7 +19,7 @@ function fixture() {
   vm.runInNewContext(ts.transpileModule(script, {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText, {
-    exports, LABEL: 12, INK3: '#888',
+    exports, LABEL: 12, INK3: '#888', ...dependencies,
     MarkdownText: props => records.push({ kind: 'text', props }),
     GenerativeWidgetCard: props => records.push({ kind: 'widget', props }),
     NativeSmartUiCard: props => records.push({ kind: 'ui', props }),
@@ -50,6 +50,49 @@ test('retained callbacks read current UI and SVG through real builders', async (
   f.render.call(f.probe, initial, 0);
   assert.equal(f.records[1].kind, 'visual');
   assert.match(f.records[1].props.artifact.snapshot, /width="10"/);
+});
+
+test('a message-level ID change disables an earlier card without replacing its content or state', async () => {
+  const domain = await import('../main/ets/chat/response_content.ts');
+  const f = fixture(domain);
+  const content = '```amber-ui v=1 id=panel\n{"op":"node","id":"root","type":"column"}\n' +
+    '{"op":"end"}\n```';
+  const published = [];
+  const changes = [];
+  Object.assign(f.probe, { content, previousContent: '', previousSourcePrefix: '',
+    previousSmartUiDefinitions: new Map(), assets: [], streaming: false, messageStreaming: false,
+    smartUiNodeId: 'node', declaredContentIds: ['panel'],
+    onSmartUiDocument: (...args) => published.push(args),
+    onSmartUiSourceReplaced: (...args) => changes.push(args) });
+  f.probe.prepare();
+  assert.equal(f.probe.segmentReadyAt(0), true);
+  assert.equal(published.at(-1).at(-1), true);
+  f.probe.declaredContentIds = ['panel', 'panel'];
+  f.probe.prepare();
+  assert.equal(f.probe.segmentReadyAt(0), false);
+  assert.match(f.probe.segmentDiagnosticAt(0), /ID 重复/);
+  assert.equal(published.at(-1).at(-1), false);
+  assert.equal(changes.length, 0);
+  f.probe.declaredContentIds = ['panel', 'unique'];
+  f.probe.prepare();
+  assert.equal(f.probe.segmentReadyAt(0), true);
+  assert.equal(published.at(-1).at(-1), true);
+});
+
+test('duplicate blocks retain their local view and show the ID ambiguity beside it', async () => {
+  const { parseResponseContent } = await import('../main/ets/chat/response_content.ts');
+  const blocks = [
+    '```amber-ui v=1 id=shared\n{"op":"node","id":"root","type":"column"}\n{"op":"end"}\n```',
+    '```amber-svg v=1 id=shared\n<svg/>\n```',
+  ];
+  for (const content of blocks) {
+    const f = fixture();
+    f.probe.segments = parseResponseContent(content, false, undefined, true, ['shared', 'shared']);
+    f.probe.ResponseSegment(0);
+    assert.ok(['ui', 'visual'].includes(f.records[0].kind), 'valid local content remains visible');
+    assert.equal(f.records.at(-1).kind, 'fallback');
+    assert.match(f.records.at(-1).text, /shared.*ID 重复/);
+  }
 });
 test('legacy failures and replacement text do not use captured old snapshots', async () => {
   const { parseResponseContent } = await import('../main/ets/chat/response_content.ts');

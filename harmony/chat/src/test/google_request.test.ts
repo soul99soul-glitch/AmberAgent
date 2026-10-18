@@ -230,6 +230,104 @@ test('contents:assistant 已执行 tool → model functionCall + user functionRe
   });
 });
 
+test('request:图片工具结果作为 functionResponse 后的 inlineData 发送,兼容 Gemini 2.5/3', () => {
+  const tool: UIMessagePartTool = {
+    type: 'tool', toolCallId: 'shot-1', toolName: 'wm_screenshot', input: '{}',
+    output: [{ type: 'image', url: 'file:///screenshot.png', metadata: null }],
+    approvalState: { type: 'auto' }, metadata: null,
+  };
+  for (const modelId of ['gemini-2.5-flash', 'gemini-3-pro']) {
+    const encodedUrls: string[] = [];
+    const request = buildGoogleCompletionRequestBody({
+      messages: [makeUIMessage('assistant', [tool])],
+      params: baseParams({ model: makeChatModel({ modelId, abilities: ['tool'] }) }),
+      encodeImage: (url: string): GoogleEncodedImage => {
+        encodedUrls.push(url);
+        return { mimeType: 'image/png', base64: 'c2NyZWVuc2hvdA==' };
+      },
+    });
+    assert.deepEqual(encodedUrls, ['file:///screenshot.png']);
+    assert.deepEqual(request['contents'], [
+      { role: 'model', parts: [{ functionCall: { name: 'wm_screenshot', args: {} } }] },
+      { role: 'user', parts: [
+        { functionResponse: { name: 'wm_screenshot', response: { result: '' } } },
+        { inlineData: { mimeType: 'image/png', data: 'c2NyZWVuc2hvdA==' } },
+      ] },
+    ]);
+  }
+});
+
+test('request:混合工具结果保留原文本聚合和图片顺序', () => {
+  const tool: UIMessagePartTool = {
+    type: 'tool', toolCallId: 'capture-1', toolName: 'capture', input: '{}',
+    output: [
+      { type: 'text', text: 'before', metadata: null },
+      { type: 'image', url: 'file:///before.png', metadata: null },
+      { type: 'text', text: 'after', metadata: null },
+      { type: 'image', url: 'file:///after.jpg', metadata: null },
+    ],
+    approvalState: { type: 'auto' }, metadata: null,
+  };
+  const request = buildGoogleCompletionRequestBody({
+    messages: [makeUIMessage('assistant', [tool])], params: baseParams(),
+    encodeImage: (url: string): GoogleEncodedImage => url.endsWith('.png')
+      ? { mimeType: 'image/png', base64: 'YmVmb3Jl' }
+      : { mimeType: 'image/jpeg', base64: 'YWZ0ZXI=' },
+  });
+  assert.deepEqual((request['contents'] as JsonObject[])[1], {
+    role: 'user', parts: [
+      { functionResponse: { name: 'capture', response: { result: 'before\nafter' } } },
+      { inlineData: { mimeType: 'image/png', data: 'YmVmb3Jl' } },
+      { inlineData: { mimeType: 'image/jpeg', data: 'YWZ0ZXI=' } },
+    ],
+  });
+});
+
+test('request:并行同名工具的图片紧随各自结果,保留 wire ID 和思考签名', () => {
+  const tools: UIMessagePartTool[] = ['first', 'second'].map((name: string): UIMessagePartTool => ({
+    type: 'tool', toolCallId: `local-${name}`, toolName: 'capture', input: JSON.stringify({ name }),
+    output: [{ type: 'image', url: `file:///${name}.png`, metadata: null }],
+    approvalState: { type: 'auto' },
+    metadata: { gemini_wire_call_id: `wire/${name}`, thoughtSignature: `sig-${name}` },
+  }));
+  const request = buildGoogleCompletionRequestBody({
+    messages: [makeUIMessage('assistant', tools)], params: baseParams(),
+    encodeImage: (url: string): GoogleEncodedImage => ({
+      mimeType: 'image/png', base64: url.includes('first') ? 'Zmlyc3Q=' : 'c2Vjb25k',
+    }),
+  });
+  assert.deepEqual(request['contents'], [
+    { role: 'model', parts: [
+      { functionCall: { name: 'capture', args: { name: 'first' }, id: 'wire/first' },
+        thoughtSignature: 'sig-first' },
+      { functionCall: { name: 'capture', args: { name: 'second' }, id: 'wire/second' },
+        thoughtSignature: 'sig-second' },
+    ] },
+    { role: 'user', parts: [
+      { functionResponse: { name: 'capture', response: { result: '' }, id: 'wire/first' } },
+      { inlineData: { mimeType: 'image/png', data: 'Zmlyc3Q=' } },
+      { functionResponse: { name: 'capture', response: { result: '' }, id: 'wire/second' } },
+      { inlineData: { mimeType: 'image/png', data: 'c2Vjb25k' } },
+    ] },
+  ]);
+});
+
+test('request:工具图片编码失败或未提供 encoder 时抛错,不发送空工具结果', () => {
+  const tool: UIMessagePartTool = {
+    type: 'tool', toolCallId: 'shot-1', toolName: 'wm_screenshot', input: '{}',
+    output: [{ type: 'image', url: 'file:///missing.png', metadata: null }],
+    approvalState: { type: 'auto' }, metadata: null,
+  };
+  const messages = [makeUIMessage('assistant', [tool])];
+  const error = new Error('screenshot read failed');
+  assert.throws(() => buildGoogleCompletionRequestBody({
+    messages, params: baseParams(),
+    encodeImage: (): GoogleEncodedImage => { throw error; },
+  }), (actual: unknown): boolean => actual === error);
+  assert.throws(() => buildGoogleCompletionRequestBody({ messages, params: baseParams() }),
+    /image encoding requires injected GoogleImageEncoder/);
+});
+
 test('toGooglePart:图片 inlineData + thoughtSignature;video 编码失败跳过(getOrNull)', () => {
   const img = toGooglePart(
     { type: 'image', url: 'file:///p.png', metadata: { thoughtSignature: 's' } }, encoder);

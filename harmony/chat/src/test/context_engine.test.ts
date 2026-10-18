@@ -23,6 +23,7 @@ import type { UIMessage, UIMessagePart, MessageChunk } from '../main/ets/chat/me
 import { makeConversation } from '../main/ets/chat/conversation.ts';
 import type { Conversation, MessageNode } from '../main/ets/chat/conversation.ts';
 import type { ChatStreamProvider } from '../main/ets/chat/chat_turn.ts';
+import { countToolImageParts } from '../main/ets/chat/tool_image_budget.ts';
 
 // ===== 构造助手 =====
 
@@ -289,6 +290,26 @@ describe('compactConversation(engine:346-605)', () => {
 // ===== prepareContext =====
 
 describe('prepareContext(engine:112-286)', () => {
+  it('budgets old tool screenshots before planning so the user task survives a long tool message', async () => {
+    const user = textMsg('task', 'user', 'Continue checkout without submitting payment.');
+    const parts: UIMessagePart[] = Array.from({ length: 30 }, (_, index): UIMessagePart => ({
+      type: 'tool', toolCallId: `screenshot-${index}`, toolName: 'wm_screenshot', input: '{}',
+      output: [{ type: 'image', url: 'data:image/png;base64,c2NyZWVuc2hvdA==', metadata: null }],
+      approvalState: { type: 'auto' }, metadata: null,
+    }));
+    const messages = [user, makeUIMessage('assistant', parts)];
+    const conversation = makeConversation('screenshots', messages.map(nodeOf));
+    let summaryCalls = 0;
+    const prepared = await prepareContext(conversation, makeCompactPolicy(), 32000, messages, 0, {
+      store: createMemoryCompactStore(), provider: { streamText: async () => { summaryCalls++; } },
+    });
+    assert.deepEqual(prepared.messages.map(message => message.id), messages.map(message => message.id));
+    assert.equal(prepared.messages[0], user);
+    assert.equal(countToolImageParts(prepared.messages), 2);
+    assert.equal(countToolImageParts(messages), 30, 'request budgeting must not change durable messages');
+    assert.equal(summaryCalls, 0);
+    assert.ok(!prepared.trace.steps.some(step => step.stage === 'fit' || step.stage === 'compact'));
+  });
   it('conversation=null → limitContext 路径', async () => {
     const msgs: UIMessage[] = [textMsg('a', 'user', '1'), textMsg('b', 'user', '2'),
       textMsg('c', 'user', '3')];

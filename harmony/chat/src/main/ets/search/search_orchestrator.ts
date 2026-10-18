@@ -301,9 +301,7 @@ export const buildQueryVariants = (
     if (!variants.includes(v)) variants.push(v);
   };
   if (topic === 'news' || timeRange !== 'any') {
-    const parts: string[] = [query2, 'news'];
-    if (timeText !== null) parts.push(timeText);
-    push(parts.join(' '));
+    push(`${query2} news`);
   }
   if (topic === 'market' || looksLikeMarketQuery(query)) {
     push(`${query2} market share shipment sales Counterpoint Canalys IDC`);
@@ -318,7 +316,9 @@ export const buildQueryVariants = (
     push(`${query2} site:reuters.com OR site:apnews.com OR site:bloomberg.com OR site:canalys.com OR site:idc.com`);
   }
   const limit: number = depth === 'quick' ? 1 : depth === 'deep' ? 4 : 3;
-  return variants.filter((v: string) => v.trim().length > 0).slice(0, limit);
+  // Time constraints apply to every query, including quick's sole variant.
+  return variants.filter((v: string) => v.trim().length > 0).slice(0, limit)
+    .map((v: string): string => timeText === null ? v : `${v} ${timeText}`);
 };
 
 // :370-375
@@ -593,8 +593,8 @@ const providerTopic = (topic: string): string => {
 const requestServiceParams = (request: SourceSearchRequest, deps: OrchestratorDeps): JsonObject => {
   if (request.source.source === 'configured' && request.source.options !== undefined) {
     return buildServiceParams(
-      request.query, providerTopic(request.topic), request.timeRange,
-      request.recencyDays, request.source.options, deps,
+      request.query, providerTopic(request.topic), 'any',
+      null, request.source.options, deps,
     );
   }
   return { query: request.query };

@@ -127,6 +127,24 @@ test('Shelf indexes markdown images and video parts with the source message', ()
   assert.equal(result.images[0].source.messageId, message.id);
 });
 
+test('Shelf discovers images spanning adjacent text parts in message order', () => {
+  const { message, conversation } = sample();
+  message.parts = [text('![photo](https://example.com/'), text('photo.jpg)'),
+    { type: 'image', url: 'https://example.com/attachment.jpg', metadata: null }];
+  const result = collectConversationArtifacts(conversation, false);
+  assert.deepEqual(result.images.map((item) => item.url), [
+    'https://example.com/photo.jpg', 'https://example.com/attachment.jpg',
+  ]);
+  assert.equal(result.images[0].id, `${message.id}:0:md:0`);
+  assert.equal(result.images[0].source.messageId, message.id);
+});
+
+test('Shelf excludes image examples inside code fences spanning text parts', () => {
+  const { message, conversation } = sample();
+  message.parts = [text('```markdown\n'), text('![example](https://example.com/sample.jpg)\n'), text('```')];
+  assert.deepEqual(collectConversationArtifacts(conversation, true).images, []);
+});
+
 test('tool output media is collected once with stable tool ids', () => {
   const { message, conversation } = sample();
   message.parts.push({

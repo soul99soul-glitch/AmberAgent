@@ -47,14 +47,15 @@ async function fixture(actionText = '继续比较') {
     'smartUiEntry', 'smartUiValue', 'smartUiValuesFor', 'setSmartUiValue', 'onSmartUiStateChange',
     'smartUiSnapshot', 'captureSmartUiContinuation', 'smartUiSourceIsCurrent', 'latestSmartUiContinuationRuntime',
     'smartUiContinuationCurrent', 'smartUiSourceMatches', 'smartUiBlockMatches', 'onSmartUiDraft',
+    'onSmartUiDocument', 'replaceSmartUiValues',
   ], { ...domain, EMPTY_SMART_UI_VALUES: [], promptAction: { showToast: notice => notices.push(notice.message) } });
   const page = new Page();
   const runtime = { sourceKey: 'source', source, document, ready: true, streaming: false,
     fingerprint: `${domain.smartUiDefinitionFingerprint(document)}:complete`, userChanged: false, lastInteraction: 0 };
   Object.assign(page, { conversation: { id: source.conversationId }, smartUiRuntime: new Map([['source', runtime]]),
-    smartUiValues: [], smartUiInteractionSequence: 0, inputText: '我的原草稿', attachedImages: ['file://image'],
-    attachedDocs: [{ url: 'file://document' }], errorMsg: '', currentSmartUiMessages: () => [message],
-    saveSmartUiEntry: () => {} });
+    smartUiValues: [], smartUiInteractionSequence: 0, inputText: '我的原草稿', pendingImages: ['file://image'],
+    pendingDocs: [{ url: 'file://document' }], errorMsg: '', currentSmartUiMessages: () => [message],
+    saveSmartUiEntry: () => {}, loadSmartUiDraft: () => {} });
   page.smartUiStateAccessor = { get: (key, id) => page.smartUiValue(key, id),
     set: (key, id, value) => page.setSmartUiValue(key, id, value) };
   const controller = domain.createSmartUiController(page.smartUiStateAccessor);
@@ -65,7 +66,7 @@ async function fixture(actionText = '继续比较') {
   Object.assign(card, { controller, document, sourceKey: 'source', values: controller.reconcile(document, 'source', [], []).values,
     invalidStateIds: [], stateDiagnostics: [], onContentGrow: () => {},
     onStateChange: (id, value) => page.onSmartUiStateChange('source', id, value) });
-  return { page, card, controller, document, runtime, message, notices };
+  return { page, card, controller, document, runtime, message, notices, domain };
 }
 
 test('a transient invalid numeric edit reaches the page owner and blocks ordinary text continuation', async () => {
@@ -89,8 +90,8 @@ test('button drafts freeze a visible selection without consuming original compos
   const { page, card, notices } = await fixture();
   card.updateState('amount', 60);
   card.updateState('note', '必须离线可用');
-  const images = page.attachedImages.slice();
-  const docs = page.attachedDocs.slice();
+  const images = page.pendingImages.slice();
+  const docs = page.pendingDocs.slice();
   page.onSmartUiDraft('continue', 'source');
   const filled = page.inputText;
   assert.ok(filled.startsWith('我的原草稿\n\n继续比较'));
@@ -100,8 +101,8 @@ test('button drafts freeze a visible selection without consuming original compos
   assert.equal(page.inputText, filled, 'identical button taps do not duplicate the snapshot');
   card.updateState('amount', 70);
   assert.equal(page.inputText, filled, 'changing the card does not rewrite user-editable composer text');
-  assert.deepEqual(page.attachedImages, images);
-  assert.deepEqual(page.attachedDocs, docs);
+  assert.deepEqual(page.pendingImages, images);
+  assert.deepEqual(page.pendingDocs, docs);
   assert.equal(notices[0], '已填入输入框，确认后发送');
 });
 
@@ -146,6 +147,71 @@ test('a repeated native value notification preserves the owner array and actual 
   page.setSmartUiValue('source', 'note', 'updated');
   assert.notEqual(page.smartUiValues, values);
   assert.ok(runtime.lastInteraction > interaction);
+});
+
+test('streamed card growth and completion keep the most recent actual field interaction', async () => {
+  const { page, runtime, message, domain } = await fixture();
+  const header = '```amber-ui v=1 id=budget\n';
+  const body = message.parts[0].text.slice(header.length).split('{"op":"end"}')[0];
+  const liveSource = { ...runtime.source, nodeId: '' };
+  message.parts[0].text = header + body;
+  page.onSmartUiDocument('source', domain.parseSmartUi(body, 'budget', false), true, liveSource, false);
+  page.setSmartUiValue('source', 'note', '只用离线方案');
+  const interaction = page.smartUiRuntime.get('source').lastInteraction;
+  assert.ok(interaction > 0);
+  const grownBody = body + JSON.stringify({ op: 'node', id: 'explanation', parent: 'root',
+    type: 'text', text: '新增说明不改变已填的要求' }) + '\n';
+  message.parts[0].text = header + grownBody;
+  page.onSmartUiDocument('source', domain.parseSmartUi(grownBody, 'budget', false), true, liveSource, false);
+  assert.equal(page.smartUiRuntime.get('source').lastInteraction, interaction);
+  const completedBody = grownBody + '{"op":"end"}\n';
+  message.parts[0].text = header + completedBody + '```';
+  page.onSmartUiDocument('source', domain.parseSmartUi(completedBody, 'budget', true), false, runtime.source, true);
+  assert.equal(page.smartUiRuntime.get('source').lastInteraction, interaction);
+  assert.match(page.captureSmartUiContinuation('按这个继续').snapshot, /只用离线方案/);
+});
+
+test('a different durable source clears the prior values and continuation intent', async () => {
+  const { page, runtime, document } = await fixture();
+  page.setSmartUiValue('source', 'note', '原分支要求');
+  page.onSmartUiDocument('source', document, false, { ...runtime.source, nodeId: 'different-node' }, true);
+  assert.equal(page.smartUiRuntime.get('source').lastInteraction, 0);
+  assert.equal(page.smartUiValue('source', 'note'), undefined);
+  assert.equal(page.captureSmartUiContinuation('按这个继续'), null);
+});
+
+test('an expanded button prompt cannot silently truncate its selection snapshot', async () => {
+  const { page, card, controller, document, runtime, notices, domain } = await fixture('{{note}}'.repeat(7));
+  card.updateState('note', 'x'.repeat(512));
+  const prompt = controller.draft(document, document.nodes.find(node => node.id === 'continue').action,
+    page.smartUiValuesFor('source'));
+  const snapshot = page.smartUiSnapshot(runtime);
+  assert.ok(prompt.length < domain.SMART_UI_MAX_DRAFT_PROMPT_CHARS);
+  assert.ok(domain.appendSmartUiContinuation(prompt, snapshot).length > domain.SMART_UI_MAX_DRAFT_PROMPT_CHARS);
+  const original = page.inputText;
+  const images = page.pendingImages.slice();
+  const docs = page.pendingDocs.slice();
+  const interaction = runtime.lastInteraction;
+  page.onSmartUiDraft('continue', 'source');
+  assert.equal(page.inputText, original);
+  assert.deepEqual(page.pendingImages, images);
+  assert.deepEqual(page.pendingDocs, docs);
+  assert.equal(runtime.lastInteraction, interaction);
+  assert.match(page.errorMsg, /内容过长/);
+  assert.deepEqual(notices, []);
+});
+
+test('an expanded button prompt within the total budget keeps its complete snapshot', async () => {
+  const { page, card, runtime } = await fixture('{{note}}'.repeat(6));
+  card.updateState('note', 'x'.repeat(512));
+  const snapshot = page.smartUiSnapshot(runtime);
+  page.onSmartUiDraft('continue', 'source');
+  const filled = page.inputText;
+  assert.ok(filled.startsWith('我的原草稿\n\n'));
+  assert.ok(filled.endsWith(snapshot));
+  assert.ok(filled.endsWith('【选择结束】'));
+  page.onSmartUiDraft('continue', 'source');
+  assert.equal(page.inputText, filled);
 });
 
 

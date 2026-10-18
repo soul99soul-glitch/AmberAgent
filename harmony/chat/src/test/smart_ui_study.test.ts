@@ -9,7 +9,7 @@ import type { SmartUiStudyItem } from '../main/ets/chat/smart_ui/components.ts';
 
 const quiz = (id: string, correct: string): SmartUiStudyItem => ({
   id, prompt: `${id} prompt`, answer: `${id} answer`,
-  options: [{ id: 'a', label: 'A' }, { id: correct, label: correct }], correctOptionId: correct,
+  options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], correctOptionId: correct,
 });
 const items: SmartUiStudyItem[] = [quiz('q1', 'a'), quiz('q2', 'b'), { id: 'f1', prompt: 'flash', answer: 'answer' }];
 
@@ -63,4 +63,22 @@ test('fresh empty state and explicit reset are adopted; matching snapshot is not
   assert.equal(studyProgressFrom('not json', 2).r, '--');
   assert.equal(parseStudyProgress('{"i":0,"r":"---","finished":true}', 3)?.finished, false,
     'finished is only valid on the terminal item');
+});
+
+test('restoring a revealed flashcard preserves its answer without awarding quiz points', () => {
+  let progress = emptyStudyProgress(items.length);
+  progress = nextStudy(nextStudy(progress, items.length), items.length);
+  assert.equal(items[progress.i].options, undefined);
+  progress = revealStudyAnswer(progress);
+  const restored = studyProgressFrom(serializeStudyProgress(progress), items.length);
+  assert.deepEqual(restored, progress);
+  assert.equal(restored.answered, true);
+  assert.equal(restored.score, 0);
+  assert.equal(restored.r, '---');
+});
+
+test('restored graded questions remain answered even when the reveal flag is absent or false', () => {
+  for (const raw of ['{"i":0,"r":"1"}', '{"i":0,"r":"0","answered":false}']) {
+    assert.equal(studyProgressFrom(raw, 1).answered, true);
+  }
 });

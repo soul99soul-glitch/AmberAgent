@@ -7,6 +7,7 @@ import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import type { FileStore } from '@amber/deepread-domain';
 import { joinPath } from '@amber/deepread-domain';
+import type { BusinessError } from '@kit.BasicServicesKit';
 
 class OhosFileStore implements FileStore {
   private root: string | null = null;
@@ -206,6 +207,27 @@ class OhosFileStore implements FileStore {
     const file: fileIo.File = await fileIo.open(full, mode);
     try {
       await file.lock(true);
+      try {
+        return await op();
+      } finally {
+        file.unlock();
+      }
+    } finally {
+      await fileIo.close(file);
+    }
+  }
+
+  async tryWithExclusiveLock<T>(path: string, op: () => Promise<T>): Promise<T | null> {
+    const full: string = await this.resolve(path);
+    await this.ensureParent(full);
+    const file: fileIo.File = await fileIo.open(full, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE);
+    try {
+      try {
+        file.tryLock(true);
+      } catch (error) {
+        if ((error as BusinessError).code === 13900034) return null;
+        throw error as Error;
+      }
       try {
         return await op();
       } finally {

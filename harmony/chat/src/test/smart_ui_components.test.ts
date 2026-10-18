@@ -133,6 +133,7 @@ test('study cards validate items, options and the correct option id', () => {
       kind: 'study', study: [
         { id: 'q1', prompt: '问题', answer: '答案', options: [{ id: 'a', label: '甲' }, { id: 'b', label: '乙' }], correctOptionId: 'a' },
         { id: 'q2', prompt: '翻卡问题', answer: '翻卡答案' },
+        { id: 'q3', prompt: '下一题', answer: '乙', options: [{ id: 'a', label: '甲' }, { id: 'b', label: '乙' }], correctOptionId: 'b' },
       ],
     } },
     { op: 'end' },
@@ -154,6 +155,20 @@ test('study cards validate items, options and the correct option id', () => {
     { op: 'end' },
   ]);
   assert.ok(badCorrect.diagnostics.some((item) => item.message.includes('correctOptionId')));
+});
+
+test('study rejects duplicate option IDs before an incorrect choice can share the answer ID', () => {
+  const document = parseRecords([
+    { op: 'node', id: 'root', type: 'column' },
+    { op: 'node', id: 'study', parent: 'root', type: 'component', component: {
+      kind: 'study', study: [
+        { id: 'q1', prompt: '2 + 2 = ?', answer: '4', options: [{ id: 'a', label: '3' }, { id: 'a', label: '4' }], correctOptionId: 'a' },
+      ],
+    } },
+    { op: 'end' },
+  ]);
+  assert.ok(document.diagnostics.some((item) => item.message.includes('study.options.id') && item.message.includes('重复')));
+  assert.equal(document.nodes.some((node) => node.id === 'study'), false);
 });
 
 test('valueFieldId links chart rows and metric/progress to declared number states only', () => {

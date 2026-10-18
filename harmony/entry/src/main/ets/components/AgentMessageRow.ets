@@ -26,7 +26,7 @@ import { ChatMessageAvatar } from './ChatMessageAvatar.ets';
 import { ChatMessageSubAgentStep } from './ChatMessageSubAgentStep.ets';
 import { ChatMessageCouncilStep } from './ChatMessageCouncilStep.ets';
 import { WidgetMessageContent } from './WidgetMessageContent.ets';
-import { parseResponseContent, applySvgValidation } from '@amber/chat-domain';
+import { parseResponseContent, applySvgValidation, declaredResponseContentIds } from '@amber/chat-domain';
 import type {
   SmartUiDocument, SmartUiDraftSource, SmartUiScalar, SmartUiStateAccessor, SmartUiStateValue,
   SmartUiWeatherProjection, VisualArtifact,
@@ -429,11 +429,12 @@ export struct AgentMessageRow {
     const assets: VisualArtifact[] = [];
     const blocks: MessagePartBlock[] = this.getBlocks();
     const validations: MessageSvgValidation[] = this.svgValidationResults;
+    const declaredIds: string[] = declaredResponseContentIds(this.message.parts);
     for (let index: number = 0; index < blocks.length; index++) {
       const block: MessagePartBlock = blocks[index];
       if (block.kind !== 'content' || block.part.type !== 'text') continue;
       let segments = parseResponseContent(block.part.text,
-        this.streaming && this.isLastTextBlock(blocks, index));
+        this.streaming && this.isLastTextBlock(blocks, index), undefined, !this.streaming, declaredIds);
       for (const result of validations) {
         if (result.partIndex === block.index) segments = applySvgValidation(
           segments, result.start, result.id, result.snapshot, result.ok, result.error);
@@ -645,6 +646,7 @@ export struct AgentMessageRow {
               WidgetMessageContent({
                 content: this.contentTextAt(block.index),
                 assets: this.responseAssets(), messageStreaming: this.streaming,
+                declaredContentIds: declaredResponseContentIds(this.message.parts),
                 smartUiSourcePrefix: JSON.stringify([this.smartUiConversationId, this.message.id, block.index]),
                 smartUiNodeId: this.smartUiNodeId,
                 smartUiStateAccessor: this.smartUiStateAccessor,

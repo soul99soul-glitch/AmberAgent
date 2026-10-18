@@ -14,7 +14,7 @@ import {
   checkpointConversationTail, checkpointRegenerateConversation,
   runChatTurnWithTools, runRegenerateAtWithTools, runToolLoopContinuation,
   runAppendUserMessage, editMessage, applyToolApprovalToConversation,
-  conversationHasPendingTools, conversationHasPendingOrUnexecutedTools,
+  conversationHasPendingTools, isToolExecuted, isToolPending,
   resolveIdleToolBlocker, createChatKernelHost, ContextCompactionFailedError,
   makePendingUserMessage, enqueuePendingUserMessage, cancelPendingUserMessage,
   dequeueNextPendingUserMessage, preparePendingMessageForDispatch, convertSteerToFollowup,
@@ -122,6 +122,7 @@ export class DetachedConversationContext {
     this.signal = signal;
   }
   save(conversation: Conversation): Promise<void> { return this.service.saveContext(this, conversation); }
+  activeConversation(): Conversation { return this.service.activeContextConversation(this); }
   mutateConversation(update: (latest: Conversation) => Conversation | null): Promise<Conversation | null> {
     return this.service.mutateContext(this, update);
   }
@@ -146,6 +147,7 @@ interface ActiveRun {
   historyCount: number;
   regenerateNodeId: string;
   visualNodeId: string;
+  branchBase: Conversation | null;
   resumeMode: boolean;
   writeError: Error | null;
   inputCommitted: boolean;
@@ -174,6 +176,14 @@ interface ConversationSession {
 }
 const errorText = (error: Error): string => error instanceof ContextCompactionFailedError
   ? '上下文已满，压缩失败，请配置任务模型' : error.message;
+const pendingToolNodeId = (conversation: Conversation): string => {
+  for (let index: number = conversation.messageNodes.length - 1; index >= 0; index--) {
+    const node = conversation.messageNodes[index];
+    if (node.messages[node.selectIndex].parts.some((part: UIMessagePart): boolean =>
+      part.type === 'tool' && (!isToolExecuted(part) || isToolPending(part)))) return node.id;
+  }
+  return '';
+};
 const emptySnapshot = (id: string): ConversationRunSnapshot => ({
   conversationId: id, runId: '', phase: 'idle', sending: false, conversation: null,
   visualConversation: null, conversationDeleted: false,
@@ -275,7 +285,7 @@ export class ConversationRunService {
     }
     session.latest = conversation;
     session.state.conversation = conversation;
-    session.state.awaitingTools = conversationHasPendingOrUnexecutedTools(conversation);
+    session.state.awaitingTools = pendingToolNodeId(conversation).length > 0;
     if (session.record?.context !== null && session.record?.context !== undefined) {
       session.record.context.conversation = conversation;
     }
@@ -464,7 +474,7 @@ export class ConversationRunService {
     const record: ActiveRun = {
       id: id, controller: new EntryAbortController(), kernel: null, context: null,
       tracker: new GenerationProgressTracker(), raw: [],
-      checkpointAt: 0, checkpointLen: 0, historyCount: 0, regenerateNodeId: '', visualNodeId: '',
+      checkpointAt: 0, checkpointLen: 0, historyCount: 0, regenerateNodeId: '', visualNodeId: '', branchBase: null,
       resumeMode: command.kind !== 'send', writeError: null, inputCommitted: false, cancelQueue: null,
       release: release, unsubscribeActivity: null,
     };
@@ -495,6 +505,26 @@ export class ConversationRunService {
     if (patch.modelLabel !== undefined) session.state.modelLabel = patch.modelLabel;
     if (patch.jsSandboxNeeded !== undefined) session.state.jsSandboxNeeded = patch.jsSandboxNeeded;
     this.emit(session);
+  }
+  activeContextConversation(context: DetachedConversationContext): Conversation {
+    const session: ConversationSession | undefined = this.sessions.get(context.conversationId);
+    const record: ActiveRun | null = session?.record ?? null;
+    if (session === undefined || record === null || record.id !== context.runId) return context.conversation;
+    return this.activeRunConversation(record, context.conversation);
+  }
+  private activeRunConversation(record: ActiveRun, conversation: Conversation): Conversation {
+    const target: string = record.regenerateNodeId || (record.resumeMode ? record.visualNodeId : '');
+    const baseline: Conversation | null = record.branchBase;
+    if (target.length === 0 || baseline === null) return conversation;
+    const index: number = baseline.messageNodes.findIndex((node): boolean => node.id === target);
+    const suffix = index < 0 ? undefined : baseline.messageNodes[index + 1];
+    if (suffix === undefined) return conversation;
+    const suffixIndex: number = conversation.messageNodes.findIndex((node): boolean => node.id === suffix.id);
+    // The original suffix stays durable but must not authorize or inform this
+    // earlier branch. New STEER nodes before it remain part of the active run.
+    return suffixIndex < 0 ? conversation : patchConversation(conversation, {
+      messageNodes: conversation.messageNodes.slice(0, suffixIndex),
+    });
   }
   saveContext(context: DetachedConversationContext, conversation: Conversation, checkpoint: boolean = false): Promise<void> {
     const session: ConversationSession | undefined = this.sessions.get(context.conversationId);
@@ -552,6 +582,15 @@ export class ConversationRunService {
       return updated;
     }).finally(release);
   }
+  private checkpointRun(record: ActiveRun,
+    conversation: Conversation, messages: UIMessage[]): Conversation {
+    const target: string = record.regenerateNodeId || (record.resumeMode ? record.visualNodeId : '');
+    // Branch checkpoints share the original baseline: projecting onto a
+    // previous checkpoint would insert STEER nodes before the retained suffix twice.
+    return target.length > 0
+      ? checkpointRegenerateConversation(record.branchBase ?? conversation, target, messages)
+      : checkpointConversationTail(conversation, messages);
+  }
   private captureRaw(session: ConversationSession, record: ActiveRun, messages: UIMessage[]): void {
     if (session.record !== record || record.context === null) return;
     record.raw = messages.slice();
@@ -565,9 +604,7 @@ export class ConversationRunService {
     if (!shouldCheckpoint(now, record.checkpointAt, record.checkpointLen, length)) return;
     record.checkpointAt = now; record.checkpointLen = length;
     const context: DetachedConversationContext = record.context;
-    const projected: Conversation = record.regenerateNodeId.length > 0
-      ? checkpointRegenerateConversation(context.conversation, record.regenerateNodeId, messages)
-      : checkpointConversationTail(context.conversation, messages);
+    const projected: Conversation = this.checkpointRun(record, context.conversation, messages);
     this.saveContext(context, projected, true).catch((): void => { /* saveContext records failure; final done rejects it. */ });
   }
   private updateVisual(session: ConversationSession, record: ActiveRun, messages: UIMessage[]): void {
@@ -704,6 +741,14 @@ export class ConversationRunService {
       } else if (command.kind === 'verdict') {
         const approved: Conversation = applyToolApprovalToConversation(conversation, command.toolCallId, command.verdict, command.locator);
         if (approved === conversation) throw new Error('工具调用已变化或无法唯一定位，请重新打开工具卡片');
+        const target = approved.messageNodes.find((node): boolean => {
+          const message: UIMessage = node.messages[node.selectIndex];
+          return message.parts.some((part: UIMessagePart, index: number): boolean => part.type === 'tool'
+            && (command.locator === undefined ? part.toolCallId === command.toolCallId
+              : message.id === command.locator.messageId && index === command.locator.partIndex));
+        });
+        if (target === undefined) throw new Error('工具调用所在分支已变化，请重新打开工具卡片');
+        record.visualNodeId = target.id;
         conversation = approved; await context.save(conversation);
         if (conversationHasPendingTools(conversation)) finalized = context.conversation;
       }
@@ -715,10 +760,14 @@ export class ConversationRunService {
             messageNodes: context.conversation.messageNodes.slice(0, targetIndex + 1),
           });
           session.state.visualConversation = prefix;
+          record.branchBase = prefix;
           session.state.historyNodeCount = prefix.messageNodes.length;
           record.historyCount = currentMessages(prefix).length;
           record.resumeMode = false; record.visualNodeId = '';
-        } else session.state.visualConversation = context.conversation;
+        } else {
+          record.branchBase = context.conversation;
+          session.state.visualConversation = context.conversation;
+        }
         await invalidateCompacts(getCompactStore(), session.id, 'message_regenerated');
       }
       if (command.kind === 'send') {
@@ -737,8 +786,14 @@ export class ConversationRunService {
         }
       }
       if (record.resumeMode && record.regenerateNodeId.length === 0) {
-        record.visualNodeId = conversation.messageNodes.length > 0 ? conversation.messageNodes[conversation.messageNodes.length - 1].id : '';
-        manualToolCallId = this.manualId(conversation, command.kind === 'resume' ? command.manualToolCallId : '');
+        record.branchBase = conversation;
+        if (record.visualNodeId.length === 0) record.visualNodeId = pendingToolNodeId(conversation)
+          || (conversation.messageNodes.length > 0 ? conversation.messageNodes[conversation.messageNodes.length - 1].id : '');
+        const targetIndex: number = conversation.messageNodes.findIndex((node): boolean => node.id === record.visualNodeId);
+        const prefix: Conversation = patchConversation(conversation, {
+          messageNodes: conversation.messageNodes.slice(0, targetIndex + 1),
+        });
+        manualToolCallId = this.manualId(prefix, command.kind === 'resume' ? command.manualToolCallId : '');
       }
       if (record.regenerateNodeId.length === 0) session.state.visualConversation = context.conversation;
       session.state.regenNodeId = record.visualNodeId;
@@ -761,7 +816,8 @@ export class ConversationRunService {
           async (runtimeDeps: ChatTurnDeps): Promise<Conversation> => {
             if (record.regenerateNodeId.length > 0) return await runRegenerateAtWithTools(
               context.conversation, record.regenerateNodeId, runtimeDeps, loop);
-            if (record.resumeMode) return await runToolLoopContinuation(context.conversation, runtimeDeps, loop);
+            if (record.resumeMode) return await runToolLoopContinuation(
+              context.conversation, runtimeDeps, loop, record.visualNodeId);
             if (command.kind !== 'send') throw new Error('会话命令没有生成入口');
             const accepted: UIMessagePart[] = await materializeDocumentParts(userParts);
             if (record.controller.signal.aborted) throw new Error('会话运行已取消');
@@ -773,16 +829,16 @@ export class ConversationRunService {
       if (record.controller.signal.aborted && record.raw.length > 0) {
         // Kernel cancellation tracks engine writes; the newest raw checkpoint belongs to this same session tail.
         await session.writeTail;
-        finalized = record.regenerateNodeId.length > 0
-          ? checkpointRegenerateConversation(context.conversation, record.regenerateNodeId, record.raw)
-          : checkpointConversationTail(context.conversation, record.raw);
+        finalized = this.checkpointRun(record, context.conversation, record.raw);
       }
-      let stopTarget: string = '';
-      if (record.regenerateNodeId.length > 0) {
-        const target = finalized.messageNodes.find((node): boolean => node.id === record.regenerateNodeId);
-        if (target !== undefined && nodeRole(target) === 'assistant') stopTarget = record.regenerateNodeId;
+      if (record.controller.signal.aborted) {
+        // STEER can append another assistant before the retained history. Stop
+        // the active tail, which may differ from the original regenerated node.
+        const active: Conversation = this.activeRunConversation(record, finalized);
+        const stopTarget: string = active.messageNodes.length > 0
+          ? active.messageNodes[active.messageNodes.length - 1].id : '';
+        finalized = applyStopGeneration(finalized, nowIso(), stopTarget) ?? finalized;
       }
-      if (record.controller.signal.aborted) finalized = applyStopGeneration(finalized, nowIso(), stopTarget) ?? finalized;
       await context.save(finalized);
       finalized = context.conversation;
       if (record.cancelQueue !== null) await record.cancelQueue;
@@ -795,9 +851,7 @@ export class ConversationRunService {
       // checkpoints can legitimately lag by fewer than 512 characters.
       if (record.writeError === null && record.context !== null && record.raw.length > 0) {
         const context: DetachedConversationContext = record.context;
-        const partial: Conversation = record.regenerateNodeId.length > 0
-          ? checkpointRegenerateConversation(context.conversation, record.regenerateNodeId, record.raw)
-          : checkpointConversationTail(context.conversation, record.raw);
+        const partial: Conversation = this.checkpointRun(record, context.conversation, record.raw);
         try { await this.saveContext(context, partial, true); }
         catch (persistError) { failure = persistError instanceof Error ? persistError : new Error(String(persistError)); }
       }
@@ -817,7 +871,7 @@ export class ConversationRunService {
         session.state.sending = false; session.state.streamingTail = []; session.state.regenTail = null;
         session.state.visualConversation = session.latest;
         session.state.regenNodeId = ''; session.state.retryStatus = ''; session.state.compactActiveCount = 0;
-        session.state.awaitingTools = session.latest !== null && conversationHasPendingOrUnexecutedTools(session.latest);
+        session.state.awaitingTools = session.latest !== null && pendingToolNodeId(session.latest).length > 0;
         session.state.phase = failure !== null ? (record.controller.signal.aborted && record.writeError === null ? 'cancelled' : 'failed')
           : (record.controller.signal.aborted ? 'cancelled' : (session.state.awaitingTools ? 'awaiting_approval' : 'completed'));
         session.state.errorMsg = failure === null ? '' : errorText(failure);
@@ -999,7 +1053,7 @@ export class ConversationRunService {
   }
   private drain(session: ConversationSession): void {
     if (session.drainActive || session.record !== null || session.appendActive || session.queue.length === 0
-      || (session.latest !== null && conversationHasPendingOrUnexecutedTools(session.latest))) return;
+      || (session.latest !== null && pendingToolNodeId(session.latest).length > 0)) return;
     session.drainActive = true;
     this.drainLoop(session).catch((error: Error): void => {
       session.state.errorMsg = error.message; this.emit(session);
@@ -1012,7 +1066,7 @@ export class ConversationRunService {
       this.applyConversation(session, latest);
     }
     while (session.record === null && !session.appendActive && session.queue.length > 0) {
-      if (session.latest !== null && conversationHasPendingOrUnexecutedTools(session.latest)) return;
+      if (session.latest !== null && pendingToolNodeId(session.latest).length > 0) return;
       const message: PendingUserMessage | null = await this.queueOperation(session, async (): Promise<PendingUserMessage | null> => {
         const next = dequeueNextPendingUserMessage(session.queue);
         if (next.next === null) return null;

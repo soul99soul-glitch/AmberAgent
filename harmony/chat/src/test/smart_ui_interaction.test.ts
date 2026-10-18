@@ -80,13 +80,15 @@ test('visibleWhen compares literal scalar types and draft prefers option labels'
   assert.equal(controller.draft(document, document.nodes[4]?.action, values), '请继续解释：根证书；请看链路');
 });
 
-test('input values are capped at the state boundary and prompt output has a final limit', () => {
+test('input and expanded prompt budgets reject excess without truncating user content', () => {
   const controller = controllerFor();
   assert.equal(controller.isValueValid(document, 'note', 'x'.repeat(SMART_UI_MAX_INPUT_VALUE_CHARS)), true);
   assert.equal(controller.isValueValid(document, 'note', 'x'.repeat(SMART_UI_MAX_INPUT_VALUE_CHARS + 1)), false);
-  const longAction = { type: 'draft' as const, text: `{{note}}${'y'.repeat(SMART_UI_MAX_DRAFT_PROMPT_CHARS)}` };
-  const result = controller.draft(document, longAction, [{ id: 'note', value: 'x' }]);
-  assert.equal(result?.length, SMART_UI_MAX_DRAFT_PROMPT_CHARS);
+  const values = [{ id: 'note', value: 'x'.repeat(SMART_UI_MAX_INPUT_VALUE_CHARS) }];
+  const atLimit = { type: 'draft' as const, text: '{{note}}'.repeat(8) };
+  assert.equal(controller.draft(document, atLimit, values)?.length, SMART_UI_MAX_DRAFT_PROMPT_CHARS);
+  const longAction = { type: 'draft' as const, text: '{{note}}'.repeat(9) };
+  assert.equal(controller.draft(document, longAction, values), null);
 });
 
 test('appendSmartUiDraft preserves input and does not duplicate an identical tail', () => {

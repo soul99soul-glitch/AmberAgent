@@ -184,7 +184,7 @@ const loadEditSourceBytes = async (url: string): Promise<EditSourceImage | null>
 };
 
 const resolveEditSourceImage = async (ctx: DetachedConversationContext): Promise<EditSourceImage | null> => {
-  const messages: UIMessage[] = currentMessages(ctx.conversation);
+  const messages: UIMessage[] = currentMessages(ctx.activeConversation());
   for (let index: number = messages.length - 1; index >= 0; index--) {
     if (messages[index].role !== 'user') continue;
     for (const part of messages[index].parts) {
@@ -224,9 +224,9 @@ const warnIfToolAbilityMissing = (ctx: DetachedConversationContext): void => {
 export const buildConversationToolLoop = async (ctx: DetachedConversationContext): Promise<ToolLoopOptions> => {
   const seed: PreparedConversationSeed = ctx.seed;
   const rt: ChatRuntime = seed.runtime;
-  const conversation: Conversation = ctx.conversation;
+  const conversation: Conversation = ctx.activeConversation();
   const conversationProvider: () => Promise<Conversation> = (): Promise<Conversation> =>
-    Promise.resolve(ctx.conversation);
+    Promise.resolve(ctx.activeConversation());
   const localOptions: LocalToolOption[] = rt.assistant.localTools;
   const terminalGuard: TerminalApprovalGuard | null = localOptions.indexOf('terminal') >= 0
     && rt.terminalRuntime !== null && rt.sshProfiles !== null
@@ -381,8 +381,8 @@ export const buildConversationToolLoop = async (ctx: DetachedConversationContext
   ctx.baseTools = snapshot.baseTools;
   const tools: AgentTool[] = scopeRunTools([...snapshot.tools, ...ctx.subAgentTools], ctx.conversationId, ctx.activityStore);
   const options: ToolLoopOptions = {
-    dispatcher: new AgentToolDispatcher({ autoApprovalReview: createEntryJevAutoApprovalReview(currentMessages(ctx.conversation),
-      (): UIMessage[] => currentMessages(ctx.conversation)),
+    dispatcher: new AgentToolDispatcher({ autoApprovalReview: createEntryJevAutoApprovalReview(currentMessages(ctx.activeConversation()),
+      (): UIMessage[] => currentMessages(ctx.activeConversation())),
       hooks: terminalGuard === null
       ? defaultToolInvocationHooks() : [...defaultToolInvocationHooks(), terminalGuard.hook] }),
     captureInvocationMetadata: terminalGuard === null ? undefined : terminalGuard.captureInvocationMetadata,

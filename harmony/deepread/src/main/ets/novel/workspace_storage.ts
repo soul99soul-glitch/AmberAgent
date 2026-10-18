@@ -48,14 +48,19 @@ export const writeWorkspaceStorageFiles = async (
 
 // Old bytes remain recoverable after an explicitly confirmed replacement.
 export const swapWorkspaceStorageStage = async (
-  fileStore: FileStore, stage: string, live: string, retained: string,
+  fileStore: FileStore, stage: string, live: string, backup: string, retained: string,
 ): Promise<void> => {
   const existed: boolean = await fileStore.exists(live);
-  if (existed) await fileStore.rename(live, retained);
+  if (existed) {
+    if (await fileStore.exists(backup)) await fileStore.rename(backup, `${retained}-previous`);
+    // Keep the in-flight replacement at the same recovery path as ordinary commits.
+    await fileStore.rename(live, backup);
+  }
   try {
     await fileStore.rename(stage, live);
   } catch (error) {
-    if (existed && !await fileStore.exists(live)) await fileStore.rename(retained, live);
+    if (existed && !await fileStore.exists(live)) await fileStore.rename(backup, live);
     throw error;
   }
+  if (await fileStore.exists(backup)) await fileStore.rename(backup, retained);
 };

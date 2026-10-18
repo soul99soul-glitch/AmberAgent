@@ -1,6 +1,6 @@
 // Re-read mutable settings and the committed branch after worker model work.
 import type { Conversation, UIMessage } from '@amber/chat-domain';
-import { currentMessages, extractionMessagesContaminated } from '@amber/chat-domain';
+import { collectMemoryExtractionSources, currentMessages, extractionMessagesContaminated } from '@amber/chat-domain';
 import { getChatKvStore, getChatRepository } from '../di/AppContainer.ets';
 import { loadAgentRuntimeSnapshot } from './AgentRuntimePrefs.ets';
 
@@ -19,5 +19,8 @@ export const canCommitMemoryExtraction = async (snapshot: Conversation): Promise
   const original: UIMessage | null = lastUser(snapshot);
   const live: UIMessage | null = lastUser(latest);
   return original !== null && live !== null && original.id === live.id
-    && original.createdAt === live.createdAt && JSON.stringify(original.parts) === JSON.stringify(live.parts);
+    && original.createdAt === live.createdAt && JSON.stringify(original.parts) === JSON.stringify(live.parts)
+    // User references such as "the second option" depend on the preceding assistant branch.
+    && JSON.stringify(collectMemoryExtractionSources(currentMessages(snapshot), [original.id]))
+      === JSON.stringify(collectMemoryExtractionSources(currentMessages(latest), [live.id]));
 };

@@ -137,3 +137,27 @@ test('search_web prompt lets the model embed returned image URLs as Markdown', (
   assert.match(tool!.description, /never invent or guess an image URL/);
   assert.doesNotMatch(tool!.description, /Do not embed images/);
 });
+
+test('search_web preserves time constraints in actual requests at quick and standard depth', async () => {
+  const tavily = svc('tavily', 'time-filter');
+  const settings = makeSettings([tavily], [tavily.id], {
+    searchBuiltinDuckDuckGoEnabled: false, searchBuiltinBingEnabled: false,
+    searchBuiltinWikipediaEnabled: false, searchBuiltinHackerNewsEnabled: false,
+    searchGoogleWebViewFallbackEnabled: false,
+  });
+  const scenarios: { params: JsonObject; expected: string }[] = [
+    { params: { query: 'technology release', topic: 'news', time_range: 'day', depth: 'quick' },
+      expected: 'technology release today 2026-07-28' },
+    { params: { query: 'technology release', recency_days: 2 }, expected: 'technology release last 2 days' },
+  ];
+  for (const scenario of scenarios) {
+    const calls: HttpRequest[] = [];
+    initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: '{"results":[]}' }], calls));
+    await toolByName(createSearchTools(settings, DEPS), 'search_web').execute(scenario.params);
+    assert.ok(calls.length > 0);
+    for (const call of calls) {
+      assert.match((JSON.parse(call.body as string) as JsonObject)['query'] as string,
+        new RegExp(scenario.expected));
+    }
+  }
+});

@@ -142,7 +142,7 @@ const extraSystemBlocks = async (ctx: DetachedConversationContext): Promise<stri
   if (!ctx.seed.agentRuntime.enableRecentChatsReference) return blocks;
   let recent: ConversationSummary[] = await getChatRepository().listRecent(RECENT_CHATS_PROMPT_LIMIT);
   if (recent.length > 1) {
-    const query: string = latestUserQuery(ctx.conversation, ctx.conversation.title);
+    const query: string = latestUserQuery(ctx.activeConversation(), ctx.conversation.title);
     const keys: string[] = [];
     const candidates: Record<string, string> = {};
     for (const summary of recent.slice(0, 12)) {
@@ -193,7 +193,7 @@ const memorySystemBlocks = async (ctx: DetachedConversationContext): Promise<str
     enableLongTermMemory: runtime.enableLongTermMemory,
     memoryRecall: runtime.memoryRecall,
   };
-  const conversation: Conversation = ctx.conversation;
+  const conversation: Conversation = ctx.activeConversation();
   const now: number = Date.now();
   const repository: MemoryReadRepository = getMemoryReadRepository();
   let selections: MemoryRecallSelection[] = await recallMemorySelections(
@@ -277,7 +277,7 @@ const prepareMessages = (ctx: DetachedConversationContext):
     ctx.publish({ compactActiveCount });
   };
   return async (messages: UIMessage[]): Promise<UIMessage[]> => {
-    const effective: Conversation = conversationWithMessagesAsNodes(ctx.conversation, messages);
+    const effective: Conversation = conversationWithMessagesAsNodes(ctx.activeConversation(), messages);
     // Keep the original compress-prompt refresh; the provider/model remains this run's seed.
     const prompts: TaskPrompts = await loadTaskPrompts();
     const prepared: PreparedContext = await prepareContext(effective, policy,
@@ -313,14 +313,14 @@ export const buildConversationTurnDeps = (ctx: DetachedConversationContext): Cha
     modelSupportsImageInput: rt.modelSupportsImageInput,
     outputTransformers: [
       createThinkTagTransformer(),
-      createReasoningLevelMetadataTransformer(rt.params.reasoningLevel, currentMessages(ctx.conversation)),
+      createReasoningLevelMetadataTransformer(rt.params.reasoningLevel, currentMessages(ctx.activeConversation())),
       createEntryBase64ImageTransformer(),
       createMiniAppOutputTransformer({
         enabled: (): boolean => seed.miniAppSetting.enabled,
         repository: getMiniAppRepositorySync(),
       }),
       regexOutputTransformer,
-      createMemoryCitationTransformer(ctx.runId, currentMessages(ctx.conversation), (): number[] => ctx.recalledMemoryIds),
+      createMemoryCitationTransformer(ctx.runId, currentMessages(ctx.activeConversation()), (): number[] => ctx.recalledMemoryIds),
     ],
     provider: asChatStreamProvider(rt.api, () => rt.params),
     wrapStreamProvider: (provider: ChatStreamProvider): ChatStreamProvider => ({

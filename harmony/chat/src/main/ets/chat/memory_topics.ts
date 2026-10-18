@@ -130,6 +130,7 @@ const sameSource = (live: MemoryRecord, baseline: MemoryRecord): boolean =>
 
 export const applyMemoryTopicSuggestions = (
   live: MemoryRecord[], baseline: MemoryRecord[], suggestions: MemoryTopicSuggestion[], now: number,
+  allocateId?: () => number,
 ): MemoryTopicApplyResult => {
   const pruned: MemoryTopicPruneResult = pruneMemoryTopics(live, now);
   let records: MemoryRecord[] = pruned.records;
@@ -191,7 +192,8 @@ export const applyMemoryTopicSuggestions = (
         scope: 'long_term', assistantId: '__long_term__', archived: false, updatedAt: now };
       records = records.map((record: MemoryRecord): MemoryRecord => record.id === existing.id ? updated : record);
     } else {
-      const id: number = records.reduce((max: number, record: MemoryRecord): number => Math.max(max, record.id), 0) + 1;
+      const id: number = allocateId !== undefined ? allocateId()
+        : records.reduce((max: number, record: MemoryRecord): number => Math.max(max, record.id), 0) + 1;
       const created: MemoryRecord = makeMemoryRecord({ id, content: summary, scope: 'long_term', kind: 'topic',
         assistantId: '__long_term__', topicTitle: title, memberIds: members, createdAt: now, updatedAt: now });
       records = [...records, created];

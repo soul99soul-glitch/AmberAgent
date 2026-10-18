@@ -39,3 +39,19 @@ test('external tool content added while extraction runs blocks the old response'
     [{type:'tool',toolName:'search_web',toolCallId:'web-call',arguments:{},output:'external result',metadata:null}],{id:'external'})));
   assert.equal(await h.check(),false);
 });
+
+test('switching the assistant context invalidates a user reference while later replies do not', async () => {
+  const h = await harness();
+  const message = (text, id) => h.domain.makeUIMessage('assistant',
+    [{ type: 'text', text, metadata: null }], { id });
+  h.snapshot.messageNodes.unshift(h.domain.makeMessageNode([
+    message('第二个方案使用 SQLite', 'sqlite'), message('第二个方案使用 PostgreSQL', 'postgres'),
+  ], 0, 'options'));
+  h.snapshot.messageNodes[1].messages[0].parts[0].text = '就用第二个方案';
+  h.setLive(JSON.parse(JSON.stringify(h.snapshot)));
+  assert.equal(await h.check(), true);
+  h.getLive().messageNodes.push(h.domain.toMessageNode(message('好的，按这个方案继续', 'reply')));
+  assert.equal(await h.check(), true, 'The completed answer after the user is not extraction context');
+  h.setLive(h.domain.selectMessageBranch(h.getLive(), 'options', 1));
+  assert.equal(await h.check(), false, 'The unchanged user reference now refers to PostgreSQL');
+});

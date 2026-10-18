@@ -28,6 +28,7 @@ import type {
   PolishStage,
 } from '../main/ets/novel/polish.ts';
 import { makeAssistantMessage } from '../main/ets/agent/message.ts';
+import { defaultNovelModelDefaults } from '../main/ets/novel/standalone_defaults.ts';
 
 const NOW: number = 1_700_000_000_000;
 const WRITER: NovelModelTarget = {
@@ -457,6 +458,218 @@ test('cold open leaves waiting_system durable and only reschedules it', async ()
   assert.deepEqual(effects.events, ['notify:waiting_system:0', 'schedule:waiting_system:0']);
   assert.equal(model.requests.length, 0);
 });
+
+test('opening from another context leaves a live background polish owner and its model result intact', async () => {
+  const files = createMemoryFileStore();
+  const repository = createFileNovelRepository(files);
+  const job = await startDirectJob(repository, 'background-open', 1);
+  const model = new FakeModel();
+  const background = createNovelCreation({ repository, modelRunning: model, nowMs: makeNow() });
+  const foreground = createNovelCreation({
+    repository: createFileNovelRepository(files), modelRunning: model, nowMs: makeNow(),
+  });
+  const driving = background.drivePolishInBackground(job.projectId, job.branchId, job.jobId);
+  await waitForRequest(model, 1);
+  const originalClaim = (await repository.loadPolishJob(job.projectId, job.jobId)).claim;
+
+  await foreground.open(job.projectId);
+  for (let attempt = 0; attempt < 10; attempt++) await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(model.requests.length, 1);
+  assert.deepEqual((await repository.loadPolishJob(job.projectId, job.jobId)).claim, originalClaim);
+  assert.deepEqual(model.cancelled, []);
+
+  model.complete(0, writerResponse(model.requests[0]));
+  await waitForRequest(model, 2);
+  model.complete(1, reviewResponse(model.requests[1]));
+  assert.equal((await driving).stage, 'completed');
+  assert.equal((await repository.loadProject(job.projectId)).chapters[0].content, '第 1 章润色正文。');
+});
+
+test('background contention returns immediately and its later stop cannot yield the foreground owner', async () => {
+  const files = createMemoryFileStore();
+  const repository = createFileNovelRepository(files);
+  await repository.createProject(projectFixture('foreground-background', 1));
+  const model = new FakeModel();
+  const foreground = createNovelCreation({ repository, modelRunning: model, nowMs: makeNow() });
+  const background = createNovelCreation({
+    repository: createFileNovelRepository(files), modelRunning: model, nowMs: makeNow(),
+  });
+  const job = await foreground.startPolish('foreground-background', 1, 1, CONTEXT);
+  await waitForRequest(model, 1);
+  const originalClaim = (await repository.loadPolishJob(job.projectId, job.jobId)).claim;
+  let returned = false;
+  const duplicate = background.drivePolishInBackground(job.projectId, job.branchId, job.jobId)
+    .then(result => { returned = true; return result; });
+  await eventually(() => returned, value => value, 'background must not wait for the active model');
+  assert.equal((await duplicate).stage, 'writing');
+  await background.yieldPolishForSystem(job.projectId, job.jobId);
+  assert.deepEqual((await repository.loadPolishJob(job.projectId, job.jobId)).claim, originalClaim);
+  assert.equal(model.requests.length, 1);
+  assert.deepEqual(model.cancelled, []);
+  await foreground.cancelPolish(job.projectId, job.jobId);
+});
+
+test('cold recovery takes over an unexpired durable lease when no process holds the driver lock', async () => {
+  const files = createMemoryFileStore();
+  const repository = createFileNovelRepository(files);
+  const job = await startDirectJob(repository, 'dead-owner', 1);
+  const claimed = await repository.claimPolishJob(job.projectId, job.jobId, 'terminated-process', NOW + 2, 12 * 60 * 60 * 1000);
+  await repository.checkpointPolishStage(job.projectId, job.jobId, claimRef(claimed), 'writing', NOW + 3);
+  const model = new FakeModel(automaticResponder);
+  const cold = createNovelCreation({
+    repository: createFileNovelRepository(files), modelRunning: model, nowMs: makeNow(),
+  });
+  await cold.open(job.projectId);
+  const completed = await eventually(() => repository.loadPolishJob(job.projectId, job.jobId),
+    value => value.stage === 'completed', 'a dead owner must not delay recovery until the 12-hour lease expires');
+  assert.equal(completed.claimEpoch, claimed.claimEpoch + 1);
+  assert.equal(completed.progress.length, 1);
+  assert.equal(model.requests.length, 2);
+});
+
+test('system stop yields only the model owned by this background callback and releases its driver lock', async () => {
+  const repository = createFileNovelRepository(createMemoryFileStore());
+  const job = await startDirectJob(repository, 'background-stop', 1);
+  const model = new FakeModel();
+  const creation = createNovelCreation({ repository, modelRunning: model, nowMs: makeNow() });
+  const driving = creation.drivePolishInBackground(job.projectId, job.branchId, job.jobId);
+  await waitForRequest(model, 1);
+  const stopped = await creation.yieldPolishForSystem(job.projectId, job.jobId);
+  assert.equal(stopped.stage, 'waiting_system');
+  assert.deepEqual(model.cancelled, [model.requests[0].runId]);
+  assert.equal((await driving).stage, 'waiting_system');
+  assert.equal(await repository.tryWithPolishDriverLock(job.projectId, job.jobId, async () => 'released'), 'released');
+});
+
+test('explicit foreground resume takes over after an invalidated background owner releases its driver lock', async () => {
+  const files = createMemoryFileStore();
+  const repository = createFileNovelRepository(files);
+  const job = await startDirectJob(repository, 'background-pause-resume', 1);
+  const model = new FakeModel();
+  const background = createNovelCreation({ repository, modelRunning: model, nowMs: makeNow() });
+  const foreground = createNovelCreation({
+    repository: createFileNovelRepository(files), modelRunning: model, nowMs: makeNow(),
+  });
+  const driving = background.drivePolishInBackground(job.projectId, job.branchId, job.jobId)
+    .catch((): null => null);
+  await waitForRequest(model, 1);
+  await foreground.pausePolish(job.projectId, job.jobId);
+  await foreground.resumePolish(job.projectId, job.jobId);
+  for (let attempt = 0; attempt < 10; attempt++) await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(model.requests.length, 1, 'the replacement must wait for the old driver to release its lock');
+
+  model.complete(0, writerResponse(model.requests[0]));
+  await driving;
+  await waitForRequest(model, 2);
+  model.complete(1, writerResponse(model.requests[1]));
+  await waitForRequest(model, 3);
+  model.complete(2, reviewResponse(model.requests[2]));
+  const completed = await eventually(() => repository.loadPolishJob(job.projectId, job.jobId),
+    value => value.stage === 'completed', 'explicit resume must keep a replacement driver after the stale owner exits');
+  assert.equal(completed.progress.length, 1);
+  assert.equal((await repository.loadProject(job.projectId)).chapters[0].content, '第 1 章润色正文。');
+});
+
+for (const boundary of ['initial load', 'driver lock'] as const) {
+  test(`system stop during background ${boundary} yields before sending any model request`, async () => {
+    const repository = createFileNovelRepository(createMemoryFileStore());
+    const job = await startDirectJob(repository, `background-start-stop-${boundary.replace(' ', '-')}`, 1);
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let initialLoad = true;
+    const delayed = new Proxy(repository, {
+      get(target, key) {
+        if (boundary === 'initial load' && key === 'loadPolishJob') {
+          return async (projectId: string, jobId: string): Promise<DurablePolishJob> => {
+            const loaded = await target.loadPolishJob(projectId, jobId);
+            if (initialLoad) {
+              initialLoad = false;
+              entered();
+              await held;
+            }
+            return loaded;
+          };
+        }
+        if (boundary === 'driver lock' && key === 'tryWithPolishDriverLock') {
+          return (projectId: string, jobId: string, op: () => Promise<DurablePolishJob>) =>
+            target.tryWithPolishDriverLock(projectId, jobId, async () => {
+              entered();
+              await held;
+              return await op();
+            });
+        }
+        return Reflect.get(target, key);
+      },
+    });
+    const model = new FakeModel(automaticResponder);
+    const creation = createNovelCreation({ repository: delayed, modelRunning: model, nowMs: makeNow() });
+    const driving = creation.drivePolishInBackground(job.projectId, job.branchId, job.jobId);
+    await started;
+    await creation.yieldPolishForSystem(job.projectId, job.jobId);
+    release();
+    assert.equal((await driving).stage, 'waiting_system');
+    assert.equal(model.requests.length, 0, 'a stopped callback must not launch a writer after its startup IO finishes');
+  });
+}
+
+for (const boundary of ['claim', 'model selection', 'writer validation', 'reviewer validation'] as const) {
+  test(`system stop during background ${boundary} prevents any later model request`, async () => {
+    const repository = createFileNovelRepository(createMemoryFileStore());
+    const job = await startDirectJob(repository, `background-stop-${boundary.replace(' ', '-')}`, 1);
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let claimed = false;
+    let validations = 0;
+    let selections = 0;
+    const delayed = new Proxy(repository, {
+      get(target, key) {
+        if (boundary === 'claim' && key === 'claimPolishJob') {
+          return async (...args: Parameters<NovelProjectRepository['claimPolishJob']>) => {
+            if (!claimed) {
+              claimed = true;
+              entered();
+              await held;
+            }
+            return await target.claimPolishJob(...args);
+          };
+        }
+        return Reflect.get(target, key);
+      },
+    });
+    const model = new FakeModel(automaticResponder, async () => {
+      validations += 1;
+      if ((boundary === 'writer validation' && validations === 1) ||
+        (boundary === 'reviewer validation' && validations === 2)) {
+        entered();
+        await held;
+      }
+    });
+    const creation = createNovelCreation({
+      repository: delayed, modelRunning: model, nowMs: makeNow(),
+      loadModelDefaults: async () => {
+        selections += 1;
+        if (boundary === 'model selection' && selections === 1) {
+          entered();
+          await held;
+        }
+        return defaultNovelModelDefaults();
+      },
+    });
+    const driving = creation.drivePolishInBackground(job.projectId, job.branchId, job.jobId);
+    await started;
+    const requestsBeforeStop = model.requests.length;
+    await creation.yieldPolishForSystem(job.projectId, job.jobId);
+    release();
+    assert.equal((await driving).stage, 'waiting_system');
+    assert.equal(model.requests.length, requestsBeforeStop,
+      'a completed system stop must prevent the pending writer/reviewer from starting');
+    assert.equal(await repository.tryWithPolishDriverLock(job.projectId, job.jobId, async () => 'released'), 'released');
+  });
+}
 
 
 test('startSelectedPolish runs a sparse selection without writing the skipped chapter', async () => {

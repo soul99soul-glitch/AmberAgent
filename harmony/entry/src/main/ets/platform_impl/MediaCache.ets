@@ -19,7 +19,7 @@ const IMAGE_MAX_BYTES: number = 25 * 1024 * 1024;
 const VIDEO_MAX_BYTES: number = 120 * 1024 * 1024;
 const TOTAL_MAX_BYTES: number = 256 * 1024 * 1024;
 const MAX_AGE_MS: number = 30 * 24 * 60 * 60 * 1000;
-const PRUNE_INTERVAL_MS: number = 10 * 60 * 1000;
+const EXPIRY_SCAN_INTERVAL_MS: number = 10 * 60 * 1000;
 const HASH_PATTERN: RegExp = /^([a-f0-9]{64})(?:\.[a-z0-9]+)?$/i;
 
 export type MediaKind = 'image' | 'video';
@@ -55,7 +55,8 @@ class MediaCache {
   private index: Map<string, string> | null = null;
   private indexTask: Promise<Map<string, string>> | null = null;
   private inflight: Map<string, Promise<string | null>> = new Map<string, Promise<string | null>>();
-  private lastPruneAt: number = 0;
+  private lastExpiryScanAt: number = 0;
+  private pruneTask: Promise<void> = Promise.resolve();
 
   private rootPath(): string {
     if (this.root !== null) return this.root;
@@ -229,6 +230,7 @@ class MediaCache {
         return;
       }
       writes = writes.then(async (): Promise<void> => {
+        if (finished || tooLarge || writeError !== null) return;
         const written: number = await fileIo.write(file.fd, chunk);
         if (written !== chunk.byteLength) throw new Error('media short write');
       }).catch((error: Error): void => {
@@ -264,17 +266,20 @@ class MediaCache {
       await fileIo.close(file);
       closed = true;
       const path: string = await this.finalizeTemp(hash, temp, mime, url, kind);
-      this.pruneIfNeeded().catch((): void => {});
+      await this.pruneCache();
       return path;
     } catch (error) {
       fail(error instanceof Error ? error : new Error(String(error)));
       return null;
     } finally {
+      finished = true;
+      try { request.destroy(); } catch { /* destroyed */ }
+      // An active write must release this fd before another download can reuse it.
+      await writes;
       if (!closed) {
         try { await fileIo.close(file); } catch { /* already closed */ }
       }
       try { if (await this.exists(temp)) await fileIo.unlink(temp); } catch { /* ignore */ }
-      try { request.destroy(); } catch { /* destroyed */ }
     }
   }
   private async download(url: string, hash: string, kind: MediaKind): Promise<string | null> {
@@ -298,6 +303,7 @@ class MediaCache {
         method: http.RequestMethod.GET,
         header: { 'User-Agent': 'AmberAgent/0.8' },
         expectDataType: http.HttpDataType.ARRAY_BUFFER,
+        maxLimit: IMAGE_MAX_BYTES,
         usingCache: false,
         connectTimeout: 15000,
         readTimeout: 60000,
@@ -311,7 +317,7 @@ class MediaCache {
         if (name.toLowerCase() === 'content-type') mime = String(headers[name]);
       }
       const path: string = await this.writeTemp(hash, mime, url, kind, data);
-      this.pruneIfNeeded().catch((): void => {});
+      await this.pruneCache();
       return path;
     } catch (error) {
       hilog.warn(DOMAIN, TAG, 'media download failed: %{public}s', error instanceof Error ? error.message : String(error));
@@ -353,27 +359,35 @@ class MediaCache {
   async warmUp(): Promise<void> {
     try {
       await this.ensureIndex();
-      this.lastPruneAt = 0;
-      await this.pruneIfNeeded();
+      this.lastExpiryScanAt = 0;
+      await this.pruneCache();
     } catch (error) {
       hilog.warn(DOMAIN, TAG, 'media cache warm-up failed: %{public}s', error instanceof Error ? error.message : String(error));
     }
   }
 
-  private async pruneIfNeeded(): Promise<void> {
+  private pruneCache(): Promise<void> {
+    // Concurrent downloads must not evict from overlapping LRU snapshots.
+    this.pruneTask = this.pruneTask.then((): Promise<void> => this.prune());
+    return this.pruneTask;
+  }
+
+  private async prune(): Promise<void> {
     const now: number = Date.now();
-    if (now - this.lastPruneAt < PRUNE_INTERVAL_MS) return;
-    this.lastPruneAt = now;
+    const scanExpired: boolean = now - this.lastExpiryScanAt >= EXPIRY_SCAN_INTERVAL_MS;
+    if (scanExpired) this.lastExpiryScanAt = now;
     try {
-      const root: string = this.rootPath();
-      const names: string[] = await fileIo.listFile(root);
-      for (const name of names) {
-        if (!name.includes('.tmp-')) continue;
-        const tempPath: string = `${root}/${name}`;
-        try {
-          const stat: fileIo.Stat = await fileIo.stat(tempPath);
-          if (now - stat.mtime * 1000 > 60 * 60 * 1000) await fileIo.unlink(tempPath);
-        } catch { /* already gone */ }
+      if (scanExpired) {
+        const root: string = this.rootPath();
+        const names: string[] = await fileIo.listFile(root);
+        for (const name of names) {
+          if (!name.includes('.tmp-')) continue;
+          const tempPath: string = `${root}/${name}`;
+          try {
+            const stat: fileIo.Stat = await fileIo.stat(tempPath);
+            if (now - stat.mtime * 1000 > 60 * 60 * 1000) await fileIo.unlink(tempPath);
+          } catch { /* already gone */ }
+        }
       }
       const index: Map<string, string> = await this.ensureIndex();
       const entries: MediaEntry[] = [];
@@ -393,7 +407,7 @@ class MediaCache {
       }
       entries.sort((a, b): number => a.mtime - b.mtime);
       for (const entry of entries) {
-        const expired: boolean = now - entry.mtime > MAX_AGE_MS;
+        const expired: boolean = scanExpired && now - entry.mtime > MAX_AGE_MS;
         const overBudget: boolean = total > TOTAL_MAX_BYTES;
         if (!expired && !overBudget) continue;
         try { await fileIo.unlink(entry.path); } catch { /* ignore */ }

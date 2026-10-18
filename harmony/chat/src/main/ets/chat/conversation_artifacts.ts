@@ -340,12 +340,19 @@ export const collectConversationArtifacts = (
   for (const node of conversation.messageNodes) {
     const message = nodeCurrentMessage(node);
     const source: ConversationArtifactSource = { conversationId: conversation.id, nodeId: node.id, messageId: message.id };
+    const blocks = groupMessageParts(message.parts);
+    // Match visible Markdown without changing attachment order or source part indices.
+    const bodyTextByPartIndex = new Map<number, string>();
+    for (const block of blocks) {
+      if (block.kind === 'content' && block.part.type === 'text') bodyTextByPartIndex.set(block.index, block.part.text);
+    }
     for (let partIndex = 0; partIndex < message.parts.length; partIndex++) {
       const part = message.parts[partIndex];
       const id = `${message.id}:${partIndex}`;
       collectPartMedia(part, source, id, imageUrls, videoUrls, index.images, index.videos);
-      if (part.type === 'text') {
-        const markdownImages: string[] = markdownImageUrls(part.text);
+      const bodyText: string | undefined = bodyTextByPartIndex.get(partIndex);
+      if (bodyText !== undefined) {
+        const markdownImages: string[] = markdownImageUrls(bodyText);
         for (let imageIndex: number = 0; imageIndex < markdownImages.length; imageIndex++) {
           const url: string = markdownImages[imageIndex];
           if (imageUrls.has(url)) continue;
@@ -369,7 +376,7 @@ export const collectConversationArtifacts = (
     }
     if (widgetsEnabled && message.role === 'assistant') {
       // Use the same adjacent-text grouping as the visible message body.
-      for (const block of groupMessageParts(message.parts)) {
+      for (const block of blocks) {
         if (block.kind !== 'content' || block.part.type !== 'text') continue;
         // Requiring a closed fence keeps interrupted partial JSON out of the shelf.
         for (const segment of parseGenerativeWidgets(block.part.text, true)) {

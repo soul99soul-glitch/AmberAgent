@@ -48,7 +48,7 @@ import {
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity, withStepProgress, isActiveOperation,
   buildTopModelMenuGroups, loadProviders, loadDisplaySetting, makeDisplaySetting, isCloseEnoughToBottom,
   FOLLOW_BOTTOM_TOLERANCE_VP, makeMiniAppSetting, loadMiniAppSetting, runInteractiveTurn, type KernelPhase,
-  appendSmartUiDraft, appendSmartUiContinuation, smartUiContinuationSnapshot,
+  appendSmartUiDraft, appendSmartUiContinuation, smartUiContinuationSnapshot, SMART_UI_MAX_DRAFT_PROMPT_CHARS,
   isExplicitSmartUiContinuation, latestSmartUiContinuationSource, isSmartUiTaskState, createSmartUiController,
   smartUiDefinitionFingerprint, smartUiContinuationDocumentForSource,
   projectWeatherReadTool,
@@ -4364,8 +4364,8 @@ struct ChatPage {
       loadEpoch: previous?.loadEpoch ?? 0,
       userChanged: branchChanged ? false : (previous?.userChanged ?? false),
       loaded: branchChanged ? false : (previous?.loaded ?? false),
-      // Publishing a live message adds nodeId without changing the user's choice.
-      lastInteraction: previous !== undefined && !branchChanged && previous.fingerprint === fingerprint &&
+      // Stream growth and completion retain the same card's edits; source replacement clears its owner separately.
+      lastInteraction: previous !== undefined && !branchChanged &&
         this.smartUiBlockMatches(previous.source, source) ? previous.lastInteraction : 0,
     };
     if (previous === undefined || previous.fingerprint !== fingerprint ||
@@ -4488,8 +4488,13 @@ struct ChatPage {
       this.errorMsg = '当前选择不完整或内容过长，请检查后再继续';
       return;
     }
+    const draft: string = appendSmartUiContinuation(prompt, snapshot);
+    if (draft.length > SMART_UI_MAX_DRAFT_PROMPT_CHARS) {
+      this.errorMsg = '智能 UI 草稿内容过长，请缩短输入后再继续';
+      return;
+    }
     runtime.lastInteraction = ++this.smartUiInteractionSequence;
-    this.inputText = appendSmartUiDraft(this.inputText, appendSmartUiContinuation(prompt, snapshot));
+    this.inputText = appendSmartUiDraft(this.inputText, draft);
     promptAction.showToast({ message: '已填入输入框，确认后发送', duration: 1800 });
   }
 

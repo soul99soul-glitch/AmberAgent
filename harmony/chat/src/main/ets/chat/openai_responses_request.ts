@@ -162,6 +162,24 @@ const addUserItems = (out: JsonValue[], message: UIMessage, encodeImage?: ImageE
   }
 };
 
+const functionCallOutput = (tool: UIMessagePartTool, encodeImage?: ImageEncoder): JsonValue => {
+  if (!tool.output.some((part: UIMessagePart): boolean => part.type === 'image')) {
+    return tool.output.filter((part: UIMessagePart): part is UIMessagePartText => part.type === 'text')
+      .map((part: UIMessagePartText): string => part.text).join('\n');
+  }
+  const output: JsonValue[] = [];
+  for (const part of tool.output) {
+    if (part.type === 'text') output.push({ type: 'input_text', text: part.text });
+    else if (part.type === 'image') {
+      if (encodeImage === undefined) {
+        throw new Error(`image encoding requires injected ImageEncoder (url: ${part.url})`);
+      }
+      output.push({ type: 'input_image', image_url: encodeImage(part.url) });
+    }
+  }
+  return output;
+};
+
 const addAssistantItems = (out: JsonValue[], message: UIMessage, encodeImage?: ImageEncoder): void => {
   const groups = groupPartsByToolBoundary(message.parts);
   const contentBuffer: UIMessagePart[] = [];
@@ -211,14 +229,10 @@ const addAssistantItems = (out: JsonValue[], message: UIMessage, encodeImage?: I
           name: tool.toolName,
           arguments: tool.input,
         });
-        const outputText = tool.output
-          .filter((p: UIMessagePart): boolean => p.type === 'text')
-          .map((p: UIMessagePart): string => (p as UIMessagePartText).text)
-          .join('\n');
         out.push({
           type: 'function_call_output',
           call_id: callId,
-          output: outputText,
+          output: functionCallOutput(tool, encodeImage),
         });
       }
     }

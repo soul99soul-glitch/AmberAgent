@@ -1,6 +1,8 @@
 // One message-level router for new declared content and the legacy widget protocol.
 // The source message remains unchanged; these segments are a disposable native projection.
 import type { JsonValue } from './json.ts';
+import type { UIMessagePart } from './message.ts';
+import { groupMessageParts } from './message_grouping.ts';
 import {
   parseGenerativeWidgets,
   sanitizeWidgetHtml,
@@ -264,14 +266,13 @@ export const applySvgValidation = (
   const artifact: VisualArtifact = { ...currentArtifact };
   if (!ok) {
     diagnostics.push(diagnostic('svg-validation-failed', error));
-    artifact.status = 'error';
-  } else {
-    artifact.status = current.closed ? 'ready' : 'partial';
   }
+  const invalid: boolean = hasError(diagnostics);
+  artifact.status = invalid ? 'error' : current.closed ? 'ready' : 'partial';
   const next: ResponseContentSegment = {
     ...current,
-    status: !ok ? 'error' : current.closed ? 'ready' : 'partial',
-    complete: ok && current.closed,
+    status: artifact.status,
+    complete: !invalid && current.closed,
     artifact,
     diagnostics,
   };
@@ -439,14 +440,16 @@ const applyReferenceDiagnostics = (
   segments: ResponseContentSegment[],
   suppliedRegistry: ResponseContentAssetRegistry | undefined,
   messageClosed: boolean,
+  messageDeclaredIds: ReadonlyArray<string> | undefined,
 ): void => {
   const localArtifacts: VisualArtifact[] = collectAssets(segments);
   const registry: ResponseContentAssetRegistry = suppliedRegistry ?? localArtifacts;
   const counts = new Map<string, number>();
-  for (const segment of segments) {
-    if ((segment.type === 'ui' || segment.type === 'svg' || segment.type === 'three') && segment.id !== null) {
-      counts.set(segment.id, (counts.get(segment.id) ?? 0) + 1);
-    }
+  const ids: ReadonlyArray<string> = messageDeclaredIds ?? segments.filter((segment: ResponseContentSegment): boolean =>
+    (segment.type === 'ui' || segment.type === 'svg' || segment.type === 'three') && segment.id !== null)
+    .map((segment: ResponseContentSegment): string => segment.id as string);
+  for (const id of ids) {
+    counts.set(id, (counts.get(id) ?? 0) + 1);
   }
   for (const segment of segments) {
     if ((segment.type === 'ui' || segment.type === 'svg' || segment.type === 'three') &&
@@ -466,12 +469,32 @@ const applyReferenceDiagnostics = (
   }
 };
 
+/** IDs share one namespace across the assistant's text groups, including groups split by tools. */
+export const declaredResponseContentIds = (parts: UIMessagePart[]): string[] => {
+  const ids: string[] = [];
+  for (const group of groupMessageParts(parts)) {
+    if (group.kind !== 'content' || group.part.type !== 'text') continue;
+    const content: string = group.part.text;
+    const opener: RegExp = /^[\t ]*(`{3,}|~{3,})([^\r\n]*)(?:\r?\n|$)/gm;
+    let cursor: number = 0;
+    while (true) {
+      const block: FenceBlock | null = nextFence(content, opener, cursor);
+      if (block === null) break;
+      const header: ParsedHeader | null = parseHeader(block.header);
+      if (header !== null && header.kind !== 'legacy' && header.id !== null) ids.push(header.id);
+      cursor = block.end;
+    }
+  }
+  return ids;
+};
+
 /** Parse one complete assistant message while preserving every segment's source order. */
 export const parseResponseContent = (
   content: string,
   streaming: boolean,
   messageRegistry?: ResponseContentAssetRegistry,
   messageClosed: boolean = !streaming,
+  messageDeclaredIds?: ReadonlyArray<string>,
 ): ResponseContentSegment[] => {
   const segments: ResponseContentSegment[] = [];
   const opener: RegExp = /^[\t ]*(`{3,}|~{3,})([^\r\n]*)(?:\r?\n|$)/gm;
@@ -507,7 +530,7 @@ export const parseResponseContent = (
     cursor = block.end;
   }
   if (textStart < content.length || segments.length === 0) segments.push(textSegment(content.slice(textStart), textStart));
-  applyReferenceDiagnostics(segments, messageRegistry, messageClosed);
+  applyReferenceDiagnostics(segments, messageRegistry, messageClosed, messageDeclaredIds);
   return segments;
 };
 

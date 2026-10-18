@@ -313,6 +313,10 @@ const parseStudyItems = (value: JsonValue | undefined, errors: string[]): SmartU
           const label: string | undefined = boundedText(optionRaw['label'], 200, 'study.options.label', errors);
           if (optionId === undefined || !SMART_UI_FIELD_ID.test(optionId)) { errors.push('study.options.id 必须是稳定 ASCII 标识'); continue; }
           if (label === undefined || label.trim().length === 0) { errors.push('study.options.label 不能为空'); continue; }
+          if (item.options.some((option: SmartUiStudyOption): boolean => option.id === optionId)) {
+            errors.push('同一学习项目内 study.options.id 不能重复');
+            continue;
+          }
           item.options.push({ id: optionId, label });
         }
       }

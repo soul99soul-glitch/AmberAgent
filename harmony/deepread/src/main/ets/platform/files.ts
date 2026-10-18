@@ -42,6 +42,8 @@ export interface FileStore {
   // 对同一路径加独占文件锁后执行。生产实现用于跨进程串行化工作区 root swap；
   // 锁文件必须位于被交换目录之外。
   withExclusiveLock<T>(path: string, op: () => Promise<T>): Promise<T>;
+  // 独占锁已被持有时立即返回 null，不排队；用于判定跨 context 的任务执行者是否仍存活。
+  tryWithExclusiveLock<T>(path: string, op: () => Promise<T>): Promise<T | null>;
   // D-127:文件最后修改时间(epoch millis,File.lastModified 等价);
   //   不存在 → null(DeepReadPlaybookRepository updatedAt/快照挑选用)
   mtime(path: string): Promise<number | null>;
@@ -214,6 +216,11 @@ class MemoryFileStore implements FileStore {
     return run.finally((): void => {
       if (this.lockTails.get(key) === tail) this.lockTails.delete(key);
     });
+  }
+
+  tryWithExclusiveLock<T>(path: string, op: () => Promise<T>): Promise<T | null> {
+    if (this.lockTails.has(this.norm(path))) return Promise.resolve(null);
+    return this.withExclusiveLock(path, op);
   }
 
   // D-127:写入序号当 mtime(单调递增,测试可预期;epoch 语义由调用方自定)

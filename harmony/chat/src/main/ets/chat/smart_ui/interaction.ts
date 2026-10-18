@@ -225,7 +225,7 @@ const draft = (
     }
     return scalarText(document, stateId, value);
   });
-  return failed ? null : truncatePrompt(result);
+  return failed || result.length > SMART_UI_MAX_DRAFT_PROMPT_CHARS ? null : result;
 };
 
 export const createSmartUiController = (accessor: SmartUiStateAccessor): SmartUiController => ({

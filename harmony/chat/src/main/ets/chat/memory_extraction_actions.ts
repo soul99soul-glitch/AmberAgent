@@ -107,7 +107,7 @@ const liveTarget = (record: MemoryRecord, now: number): boolean => !record.archi
 // Pure transaction body: caller serializes this with all other writes and
 // persists result.records once. Skipped actions never prevent unrelated writes.
 export const applyMemoryExtractionActions = (
-  original: MemoryRecord[], actions: MemoryExtractionAction[], now: number,
+  original: MemoryRecord[], actions: MemoryExtractionAction[], now: number, allocateId?: () => number,
 ): MemoryExtractionApplyResult => {
   let records: MemoryRecord[] = original;
   const result: MemoryExtractionApplyResult = {
@@ -178,7 +178,7 @@ export const applyMemoryExtractionActions = (
       supersedesIds: target === undefined ? [] : [target.id],
       expiresAt: item.expiresAt ?? target?.expiresAt ?? null,
       confidence: target?.confidence ?? item.confidence, evidence: item.evidence,
-    }, now);
+    }, now, allocateId?.());
     records = appended.records;
     if (target === undefined) result.added.push(appended.record);
     else result.updated.push(appended.record);

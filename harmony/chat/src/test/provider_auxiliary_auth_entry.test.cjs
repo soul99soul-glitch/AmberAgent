@@ -180,6 +180,7 @@ test('Entry foreground context preparation forwards the owning run signal to the
   const messages = [h.domain.makeUserMessage('hello')];
   const ctx = { conversationId: 'conversation', runId: 'foreground-run',
     signal, conversation: h.domain.makeConversation('conversation'), publish() {},
+    activeConversation() { return this.conversation; },
     seed: { runtime: h.runtime, compressChoice: h.choice, agentRuntime: { contextCompaction: {} } } };
   await h.host.prepareMessages(ctx)(messages);
   assert.equal(captured.abortSignal, signal);

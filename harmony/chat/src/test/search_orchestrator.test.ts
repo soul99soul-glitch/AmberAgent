@@ -54,7 +54,7 @@ test('orchestrator:buildQueryVariants — quick 1/standard 3/deep 4 + news/marke
   // standard + news → 时间变体(today 钉住)
   assert.deepEqual(
     buildQueryVariants('q', 'news', 'week', null, 'standard', DEPS),
-    ['q', 'q news this week 2026-07-28'],
+    ['q this week 2026-07-28', 'q news this week 2026-07-28'],
   );
   // market topic → 市场变体;standard limit 3
   assert.deepEqual(
@@ -69,20 +69,20 @@ test('orchestrator:buildQueryVariants — quick 1/standard 3/deep 4 + news/marke
   // deep → 4:原 query + news/time + site 变体
   const deep = buildQueryVariants('q', 'news', 'day', null, 'deep', DEPS);
   assert.deepEqual(deep, [
-    'q', 'q news today 2026-07-28',
-    'q site:reuters.com OR site:apnews.com OR site:bloomberg.com OR site:canalys.com OR site:idc.com',
+    'q today 2026-07-28', 'q news today 2026-07-28',
+    'q site:reuters.com OR site:apnews.com OR site:bloomberg.com OR site:canalys.com OR site:idc.com today 2026-07-28',
   ]);
   // looksLikeMarketQuery:中文'销量'触发市场变体(topic general 也算)(:350-352,370-375)
   const market = buildQueryVariants('手机销量', 'general', 'any', null, 'standard', DEPS);
   assert.deepEqual(market, ['手机销量', '手机销量 market share shipment sales Counterpoint Canalys IDC']);
-  // recency_days 时间文本仅在 topic==news || timeRange!=any 时落出(:347)
+  // 独立 recency_days 也约束首个查询。
   assert.deepEqual(
     buildQueryVariants('q', 'general', 'any', 7, 'standard', DEPS),
-    ['q'],
+    ['q last 7 days'],
   );
   assert.deepEqual(
     buildQueryVariants('q', 'news', 'any', 7, 'standard', DEPS),
-    ['q', 'q news last 7 days'],
+    ['q last 7 days', 'q news last 7 days'],
   );
 });
 

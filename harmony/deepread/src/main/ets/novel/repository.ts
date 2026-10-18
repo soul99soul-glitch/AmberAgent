@@ -131,6 +131,8 @@ export interface NovelWorkspaceSnapshot {
 }
 
 export interface NovelProjectRepository {
+  tryWithPolishDriverLock<T>(id: string, jobId: string, op: () => Promise<T>): Promise<T | null>;
+  withPolishDriverLock<T>(id: string, jobId: string, op: () => Promise<T>): Promise<T>;
   listProjects(): Promise<NovelProject[]>;
   listProjectInventory(): Promise<NovelProjectInventory>;
   inspectProjectRecovery(id: string): Promise<NovelProjectRecoveryPreview | null>;
@@ -1125,15 +1127,25 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     const liveExists: boolean = await fileStore.exists(live);
     const backupExists: boolean = await fileStore.exists(backup);
     if (!liveExists && backupExists) {
-      if (await workspaceNeedsSchemaMigration(fileStore, backup)) await loadAt(fileStore, backup);
-      else await validateFullTree(await walkWorkspaceFiles(fileStore, backup));
+      try {
+        if (await workspaceNeedsSchemaMigration(fileStore, backup)) await loadAt(fileStore, backup);
+        else await validateFullTree(await walkWorkspaceFiles(fileStore, backup));
+      } catch (error) {
+        // An explicit repair may have moved a damaged live tree to backup. Its validated
+        // replacement is still staged if the process stopped between the two renames.
+        if (!await fileStore.exists(stage)) throw error;
+        await validateFullTree(await walkWorkspaceFiles(fileStore, stage));
+        await fileStore.rename(stage, live);
+        await fileStore.rename(backup, joinPath(ROOT, '.retained', id, novelId()));
+        return;
+      }
       await fileStore.rename(backup, live);
     }
     else if (liveExists && backupExists) {
       // A failed live tree must never erase the only valid pre-swap copy.
       if (!await workspaceNeedsSchemaMigration(fileStore, live)) {
         await validateFullTree(await walkWorkspaceFiles(fileStore, live));
-        await fileStore.deleteTree(backup);
+        await fileStore.rename(backup, joinPath(ROOT, '.retained', id, novelId()));
       }
     }
     await fileStore.deleteTree(stage);
@@ -1937,7 +1949,9 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
         unresolvedFromOrdinal: snapshot.unresolvedFromOrdinal, plotStale: snapshot.plotStale,
         plotSourceTreeDigest: snapshot.plotSourceTreeDigest,
         plotSyncedTreeDigest: snapshot.plotSyncedTreeDigest, plotContent: snapshot.plotContent };
-      const replacements: SnapshotFile[] = built.files.concat([
+      const hasProjectDocument: boolean = liveFiles.some(file => file.path === 'project.md');
+      const replacements: SnapshotFile[] = built.files.filter(file =>
+        file.path !== 'project.md' || !hasProjectDocument).concat([
         { path: branchSnapshotPath(checkout.branchId), content: JSON.stringify(branch) },
       ]);
       const replacementPaths: Set<string> = new Set(replacements.map((file: SnapshotFile): string => file.path));
@@ -2008,6 +2022,11 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
 
 
   const repository: NovelProjectRepository = {
+    tryWithPolishDriverLock: <T>(id: string, jobId: string, op: () => Promise<T>): Promise<T | null> =>
+      fileStore.tryWithExclusiveLock(joinPath(LOCK_ROOT, `${id}.polish.${jobId}.lock`), op),
+    withPolishDriverLock: <T>(id: string, jobId: string, op: () => Promise<T>): Promise<T> =>
+      fileStore.withExclusiveLock(joinPath(LOCK_ROOT, `${id}.polish.${jobId}.lock`), op),
+
     async listProjects(): Promise<NovelProject[]> {
       return (await repository.listProjectInventory()).projects;
     },
@@ -2087,9 +2106,8 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
         await writeWorkspaceStorageFiles(fileStore, stage, candidate.files);
         await loadAt(fileStore, stage);
         const retained: string = joinPath(ROOT, '.retained', preview.projectId, novelId());
-        await swapWorkspaceStorageStage(fileStore, stage, projectRoot(preview.projectId), retained);
-        if (preview.source === 'trash') await fileStore.rename(trashRoot(preview.projectId),
-          joinPath(ROOT, '.retained', preview.projectId, novelId()));
+        await swapWorkspaceStorageStage(fileStore, stage, projectRoot(preview.projectId),
+          trashRoot(preview.projectId), retained);
         return await loadAt(fileStore, projectRoot(preview.projectId));
       }),
 
@@ -2135,7 +2153,7 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
         const stage: string = stagingRoot(input.projectId);
         await writeWorkspaceStorageFiles(fileStore, stage, input.files);
         await loadAt(fileStore, stage);
-        await swapWorkspaceStorageStage(fileStore, stage, projectRoot(input.projectId),
+        await swapWorkspaceStorageStage(fileStore, stage, projectRoot(input.projectId), trashRoot(input.projectId),
           joinPath(ROOT, '.retained', input.projectId, novelId()));
         const roots: string[] = [trashRoot(input.projectId), deletedRoot(input.projectId)];
         for (let i: number = 0; i < roots.length; i++) {
@@ -2251,7 +2269,7 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
         const files: NovelWorkspaceArchiveFile[] = Array.from(contents.values());
         await validateFullTree(files);
         await writeWorkspaceStorageFiles(fileStore, stagingRoot(id), files);
-        await swapWorkspaceStorageStage(fileStore, stagingRoot(id), projectRoot(id),
+        await swapWorkspaceStorageStage(fileStore, stagingRoot(id), projectRoot(id), trashRoot(id),
           joinPath(ROOT, '.retained', id, novelId()));
         for (const root of [trashRoot(id), deletedRoot(id)]) {
           if (await fileStore.exists(root)) await fileStore.rename(root, joinPath(ROOT, '.retained', id, novelId()));

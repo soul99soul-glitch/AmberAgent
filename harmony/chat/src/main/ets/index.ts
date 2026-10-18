@@ -463,7 +463,8 @@ export type {
   SmartUiStateAccessor, SmartUiStateValue, SmartUiStateReconciliation, SmartUiStateChange, SmartUiController,
   SmartUiAssetDiagnostic,
 } from './chat/smart_ui/interaction.ts';
-export { parseResponseContent, validateResponseContentReferences, stripDeclaredResponseBlocks, applySvgValidation } from './chat/response_content.ts';
+export { parseResponseContent, validateResponseContentReferences, stripDeclaredResponseBlocks, applySvgValidation,
+  declaredResponseContentIds } from './chat/response_content.ts';
 export type {
   ResponseContentSegment, ResponseContentDiagnostic, VisualArtifact, ResponseContentAssetRegistry,
   ResponseContentStatus, ResponseContentSegmentType, VisualArtifactType,

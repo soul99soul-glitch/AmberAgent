@@ -6,6 +6,7 @@
 
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { util } from '@kit.ArkTS';
 import type { ChatBlobPort } from '@amber/chat-domain';
 import { sha256HexUtf8 } from './EntryLocalToolPorts.ets';
 
@@ -55,9 +56,22 @@ class OhosChatBlobPort implements ChatBlobPort {
     const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC;
     const file: fileIo.File = await fileIo.open(temp, mode);
     try {
-      await fileIo.write(file.fd, dataUrl);
-    } finally {
-      await fileIo.close(file);
+      try {
+        const bytes: Uint8Array = util.TextEncoder.create('utf-8').encodeInto(dataUrl);
+        let consumed: number = 0;
+        while (consumed < bytes.byteLength) {
+          const remaining: ArrayBuffer = (bytes.buffer as ArrayBuffer)
+            .slice(bytes.byteOffset + consumed, bytes.byteOffset + bytes.byteLength);
+          const written: number = await fileIo.write(file.fd, remaining);
+          if (written <= 0 || written > remaining.byteLength) throw new Error('Incomplete chat blob write');
+          consumed += written;
+        }
+      } finally {
+        await fileIo.close(file);
+      }
+    } catch (error) {
+      try { await fileIo.unlink(temp); } catch { /* 保留原写入错误 */ }
+      throw error instanceof Error ? error : new Error(String(error));
     }
     try {
       await fileIo.rename(temp, path);

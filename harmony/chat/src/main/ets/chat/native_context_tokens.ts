@@ -112,7 +112,8 @@ const collectPart = (part: UIMessagePart, texts: string[]): number => {
       for (const output of tool.output) fixedChars += collectPart(output, texts);
       return fixedChars;
     }
-    case 'image': return estimateImageTokens((part as UIMessagePartImage).url);
+    // collectGroup accumulates character-equivalent overhead before its /4 conversion.
+    case 'image': return estimateImageTokens((part as UIMessagePartImage).url) * 4;
     case 'video':
     case 'audio': return 4500;
     case 'document': texts.push((part as UIMessagePartDocument).fileName); return 80;

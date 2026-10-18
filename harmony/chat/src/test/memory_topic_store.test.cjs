@@ -30,7 +30,7 @@ test('actual topic source/model/document chain is durable, idempotent, guarded a
   // Old persisted JSON has no E7 fields.
   rows.forEach(row => { delete row.topicTitle; delete row.memberIds; });
   await fsp.mkdir(path.dirname(sourcePath), { recursive: true }); await fsp.writeFile(sourcePath, JSON.stringify(rows));
-  let documentFailure = false, sourceReadFailure = false, writeBarrier = null;
+  let documentFailure = false, sourceReadFailure = false, sourceWriteFailure = false, writeBarrier = null;
   const handles = new Map(); let nextHandle = 1;
   const fileIo = {
     OpenMode: { READ_WRITE: 1, CREATE: 2, TRUNC: 4 },
@@ -41,6 +41,7 @@ test('actual topic source/model/document chain is durable, idempotent, guarded a
     stat: async file => { const stat = await fsp.stat(file); return { size: stat.size, mtime: stat.mtimeMs / 1000, isDirectory: () => stat.isDirectory() }; },
     open: async file => {
       if (documentFailure && file.startsWith(docs + '/')) throw new Error('controlled derived write failure');
+      if (sourceWriteFailure && file === sourcePath + '.tmp') throw new Error('controlled source write failure');
       if (writeBarrier && file === sourcePath + '.tmp') { const barrier = writeBarrier; writeBarrier = null; barrier.entered.resolve(); await barrier.release.promise; }
       const handle = await fsp.open(file, 'w'); const fd = nextHandle++; handles.set(fd, handle); return { fd };
     },
@@ -102,7 +103,7 @@ test('actual topic source/model/document chain is durable, idempotent, guarded a
 
     documentFailure = true;
     await assert.rejects(library.updateContent(1, '编辑后的真实事实'), error => error instanceof store.MemoryDocumentRefreshError && error.sourceSaved);
-    assert.equal(JSON.parse(await fsp.readFile(sourcePath, 'utf8')).find(row => row.id === 1).content, '编辑后的真实事实');
+    assert.equal(JSON.parse(await fsp.readFile(sourcePath, 'utf8')).records.find(row => row.id === 1).content, '编辑后的真实事实');
     assert.equal((await ops.snapshotForTopics()).find(row => row.id === topic.id).archived, true);
     await store.getMemoryReadRepository().touchMemories([1]); // Auxiliary recall is not coupled to failed document I/O.
     const preserved = await fsp.readFile(path.join(docs, document.relativePath), 'utf8');
@@ -157,6 +158,11 @@ test('actual topic source/model/document chain is durable, idempotent, guarded a
 
     const persisted = JSON.stringify(expired.concat([topic]));
     await fsp.writeFile(sourcePath, persisted);
+    const recalled = await domain.recallMemorySelections({ enableCoreMemory: true,
+      enableShortTermMemory: true, enableLongTermMemory: true, memoryRecall: domain.DEFAULT_MEMORY_RECALL_SETTING },
+    [domain.makeUserMessage(topic.content)], store.getMemoryReadRepository(), Date.now());
+    assert.deepEqual(recalled, [], 'Expired source facts must not remain eligible through their topic');
+    assert.equal(await fsp.readFile(sourcePath, 'utf8'), persisted, 'Recall prunes only its availability view');
     const current = await ops.snapshotForTopics();
     assert.equal(await fsp.readFile(sourcePath, 'utf8'), persisted, 'Snapshot is a readonly availability view');
     assert.equal(current.filter(row => row.kind !== 'topic').length, 2);
@@ -225,6 +231,57 @@ test('actual topic source/model/document chain is durable, idempotent, guarded a
     const lateProfile = await ops.applyOptimization(beforeSourceAddition, [],
       {profile: [{text: '偏好清楚简洁的解释', memoryIds: [10,11,12]}], duplicates: []}, Date.now());
     assert.equal(lateProfile.profileUpdated, false, 'New sources not seen by the model cannot be marked evaluated');
+
+    // The same atomic snapshot owns IDs across source/topic deletion, restart and import.
+    const removed = await library.addMemory({ content: '旧引用对应的记忆', scope: 'long_term', kind: 'note' });
+    await library.deleteMemory(removed.id);
+    cache.delete('./MemoryStore.ets');
+    const restarted = load('./MemoryStore.ets');
+    const restartedLibrary = restarted.getMemoryLibraryOps();
+    const replacement = await restartedLibrary.addMemory({ content: '新建的独立记忆', scope: 'long_term', kind: 'note' });
+    assert.ok(replacement.id > removed.id);
+    await assert.rejects(restarted.getMemoryToolDeps('today').onUpdate(removed.id, '来自旧工具结果的修改'), /not found/);
+    await restarted.getMemoryReadRepository().reinforceMemories([removed.id], 'old-answer');
+    const fresh = (await restartedLibrary.getAllRecords()).find(row => row.id === replacement.id);
+    assert.equal(fresh.content, replacement.content); assert.equal(fresh.reinforcementCount, 0);
+    for (const row of await restartedLibrary.getAllRecords()) {
+      if (row.kind === 'topic') await restarted.getMemoryTopicStoreOps().deleteTopic(row.id);
+      else await restartedLibrary.deleteMemory(row.id);
+    }
+    const empty = JSON.parse(await fsp.readFile(sourcePath, 'utf8'));
+    assert.deepEqual(empty.records, []); assert.equal(empty.lastId, replacement.id);
+    cache.delete('./MemoryStore.ets');
+    const emptyRestart = load('./MemoryStore.ets');
+    const sourceSnapshot = await fsp.readFile(sourcePath, 'utf8');
+    const revision = values.get('memoryRevision');
+    sourceWriteFailure = true;
+    await assert.rejects(emptyRestart.getMemoryLibraryOps().addMemory({
+      content: '不应提交的记忆', scope: 'long_term', kind: 'note',
+    }), /controlled source write failure/);
+    sourceWriteFailure = false;
+    assert.equal(await fsp.readFile(sourcePath, 'utf8'), sourceSnapshot);
+    assert.equal(values.get('memoryRevision'), revision);
+    const batch = await emptyRestart.getMemoryExtractionStoreOps().applyActions([1, 2].map(index => ({
+      action: 'add', content: '提炼后的旅行安排' + index, evidence: '用户原话' + index,
+      sourceMessageId: 'message-' + index, sourceConversationId: 'conversation', scope: 'short_term', kind: 'project',
+      confidence: 1, expiresAt: null, targetId: null, targetUpdatedAt: null,
+    })), Date.now());
+    assert.deepEqual(batch.added.map(row => row.id), [replacement.id + 1, replacement.id + 2]);
+    const topicOps = emptyRestart.getMemoryTopicStoreOps();
+    const firstTopic = await topicOps.applyTopics(batch.records, [{ title: '旅行', summary: '用户的旅行安排',
+      memberIds: batch.added.map(row => row.id) }], Date.now());
+    await topicOps.deleteTopic(firstTopic.topicIds[0]);
+    const secondTopic = await topicOps.applyTopics(batch.records, [{ title: '旅行', summary: '用户的旅行安排',
+      memberIds: batch.added.map(row => row.id) }], Date.now());
+    assert.ok(secondTopic.topicIds[0] > firstTopic.topicIds[0]);
+    const importRoot = path.join(directory, 'import');
+    await fsp.mkdir(path.join(importRoot, 'memories/note'), { recursive: true });
+    await fsp.writeFile(path.join(importRoot, 'manifest.json'), '{}');
+    await fsp.writeFile(path.join(importRoot, 'memories/note/import.mem.md'), domain.encodeMemoryFrontmatter(
+      domain.makeMemoryRecord({ id: removed.id, content: '导入的另一条独立记忆', scope: 'long_term', kind: 'note' })));
+    await domain.importMemoriesFrom(importRoot, emptyRestart.getMemoryImportExportDeps());
+    const imported = (await emptyRestart.getMemoryLibraryOps().getAllRecords()).find(row => row.content === '导入的另一条独立记忆');
+    assert.ok(imported.id > secondTopic.topicIds[0], 'Import allocates in the target library instead of restoring an exported ID');
 
   } finally { await fsp.rm(directory, { recursive: true, force: true }); }
 });

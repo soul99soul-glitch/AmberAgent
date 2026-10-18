@@ -26,6 +26,7 @@ import {
   upsertMemoryRecord, applyMemoryExtractionActions, reinforceMemoryRecords, restoreMemoryRecord, isMemoryActive, makeMemoryEvent,
   applyMemoryTopicSuggestions, makeMemoryRecord, pruneMemoryTopics, memoryProfileSources, buildMemoryProfile,
   nearDuplicateCandidates, planConfirmedMemoryMerges, remapMemoryProfileItems, invalidateMemoryTopicsForSource,
+  nextMemoryId,
 } from '@amber/chat-domain';
 import { writeTextFileAtomic, readGuardedJson } from './AtomicJsonFile.ets';
 import type { GuardedJsonRead } from './AtomicJsonFile.ets';
@@ -99,16 +100,49 @@ const requireArrayForWrite = async <T>(path: string): Promise<T[]> => {
 
 const normalizeRecords = (records: MemoryRecord[]): MemoryRecord[] => records.map(
   (record: MemoryRecord): MemoryRecord => makeMemoryRecord(record));
-const readAll = async (): Promise<MemoryRecord[]> =>
-  normalizeRecords(await readJsonArray<MemoryRecord>(memoryPath(MEMORY_FILE)));
 
-// 写路径基准:损坏/IO 错时抛错(不再返回空库)
-const readAllForWrite = async (): Promise<MemoryRecord[]> =>
-  normalizeRecords(await requireArrayForWrite<MemoryRecord>(memoryPath(MEMORY_FILE)));
+// The ID high-water mark travels with the records in the same atomic file,
+// including when every record has been deleted. Legacy arrays upgrade on write.
+interface MemorySnapshot {
+  records: MemoryRecord[];
+  lastId: number;
+}
+const parseMemorySnapshot = (text: string): MemorySnapshot | null => {
+  try {
+    const parsed: MemorySnapshot | MemoryRecord[] = JSON.parse(text) as MemorySnapshot | MemoryRecord[];
+    if (Array.isArray(parsed)) {
+      const records: MemoryRecord[] = normalizeRecords(parsed);
+      return { records, lastId: nextMemoryId(records) - 1 };
+    }
+    if (parsed === null || !Array.isArray(parsed.records)
+      || !Number.isSafeInteger(parsed.lastId) || parsed.lastId < 0) return null;
+    const records: MemoryRecord[] = normalizeRecords(parsed.records);
+    return { records, lastId: Math.max(parsed.lastId, nextMemoryId(records) - 1) };
+  } catch { return null; }
+};
+const readAll = async (): Promise<MemoryRecord[]> => {
+  const outcome: GuardedJsonRead<MemorySnapshot> = await readGuardedJson(memoryPath(MEMORY_FILE), parseMemorySnapshot);
+  return outcome.status === 'ok' && outcome.value !== null ? outcome.value.records : [];
+};
 
+const readSnapshotForWrite = async (): Promise<MemorySnapshot> => {
+  const outcome: GuardedJsonRead<MemorySnapshot> = await readGuardedJson(memoryPath(MEMORY_FILE), parseMemorySnapshot);
+  if (outcome.status === 'ok' && outcome.value !== null) return outcome.value;
+  if (outcome.status === 'missing') return { records: [], lastId: 0 };
+  throw new Error(outcome.status === 'blocked'
+    ? '存储文件损坏已被隔离,拒绝以空数据覆盖(需恢复或显式重置)'
+    : '存储文件读取失败,拒绝覆盖');
+};
+const readAllForWrite = async (): Promise<MemoryRecord[]> => (await readSnapshotForWrite()).records;
 
-const writeAll = (records: MemoryRecord[]): Promise<void> =>
-  writeJsonArray<MemoryRecord>(memoryPath(MEMORY_FILE), records);
+const allocateMemoryId = (snapshot: MemorySnapshot): number => {
+  snapshot.lastId += 1;
+  return snapshot.lastId;
+};
+const writeAll = (snapshot: MemorySnapshot, records: MemoryRecord[]): Promise<void> => {
+  const next: MemorySnapshot = { records, lastId: snapshot.lastId };
+  return writeTextFileAtomic(memoryPath(MEMORY_FILE), JSON.stringify(next));
+};
 
 const publishMemoryRevision = (): void => {
   AppStorage.setOrCreate<number>('memoryRevision', (AppStorage.get<number>('memoryRevision') ?? 0) + 1);
@@ -125,9 +159,10 @@ export class MemoryDocumentRefreshError extends Error {
 }
 
 // The successful source commit is never rolled back after a derived file failure.
-const saveRecords = async (records: MemoryRecord[], topicResult: MemoryTopicApplyResult | null = null): Promise<void> => {
+const saveRecords = async (snapshot: MemorySnapshot, records: MemoryRecord[],
+  topicResult: MemoryTopicApplyResult | null = null): Promise<void> => {
   const next: MemoryRecord[] = pruneMemoryTopics(records, Date.now()).records;
-  await writeAll(next);
+  await writeAll(snapshot, next);
   publishMemoryRevision();
   try {
     const profile: MemoryProfile | null = await refreshMemoryProfile(next, Date.now());
@@ -160,52 +195,54 @@ const enqueueWrite = <T>(op: () => Promise<T>): Promise<T> => {
 export const getMemoryReadRepository = (): MemoryReadRepository => ({
   getActiveRecords: async (scopes: MemoryScope[], now: number): Promise<MemoryRecord[]> => {
     const all: MemoryRecord[] = await readAll();
-    return filterActiveMemoryRecords(all, scopes, now);
+    return filterActiveMemoryRecords(pruneMemoryTopics(all, now).records, scopes, now);
   },
   reinforceMemories: (ids: number[], sourceId: string): Promise<void> => enqueueWrite(async (): Promise<void> => {
-    const all: MemoryRecord[] = await readAllForWrite();
+    const snapshot: MemorySnapshot = await readSnapshotForWrite();
+    const all: MemoryRecord[] = snapshot.records;
     const next: MemoryRecord[] = reinforceMemoryRecords(all, ids, Date.now(), sourceId);
-    if (next.some((row: MemoryRecord, index: number): boolean => row !== all[index])) await saveRecords(next);
+    if (next.some((row: MemoryRecord, index: number): boolean => row !== all[index])) await saveRecords(snapshot, next);
   }),
   touchMemories: (ids: number[]): Promise<void> => {
     if (ids.length === 0) return Promise.resolve(); // MemoryRepository.kt:150
     return enqueueWrite(async (): Promise<void> => {
-      const all: MemoryRecord[] = await readAllForWrite();
-      await writeAll(touchMemoryRecords(all, ids, Date.now()));
+      const snapshot: MemorySnapshot = await readSnapshotForWrite();
+      await writeAll(snapshot, touchMemoryRecords(snapshot.records, ids, Date.now()));
     });
   },
 });
 
 // ===== D-085c:写路径(MemoryRepository.kt addMemory/updateContent/deleteMemory) =====
 
-// addMemory(:102-133)— id 自增在 appendMemoryRecord(max+1);返回所插记录
+// All persistent insertion paths allocate from this snapshot inside the write queue.
 const addMemory = (params: MemoryAddParams): Promise<MemoryRecord> =>
   enqueueWrite(async (): Promise<MemoryRecord> => {
-    const all: MemoryRecord[] = await readAllForWrite();
-    const out = appendMemoryRecord(all, params, Date.now());
-    await saveRecords(out.records);
+    const snapshot: MemorySnapshot = await readSnapshotForWrite();
+    const out = appendMemoryRecord(snapshot.records, params, Date.now(), allocateMemoryId(snapshot));
+    await saveRecords(snapshot, out.records);
     return out.record;
   });
 
 // updateContent(:84-89)— 未命中错误消息逐字,经 enqueueWrite 传播
 const updateContent = (id: number, content: string): Promise<MemoryRecord> =>
   enqueueWrite(async (): Promise<MemoryRecord> => {
-    const all: MemoryRecord[] = await readAllForWrite();
-    const out = updateMemoryRecordContent(all, id, content, Date.now());
-    await saveRecords(out.records);
+    const snapshot: MemorySnapshot = await readSnapshotForWrite();
+    const out = updateMemoryRecordContent(snapshot.records, id, content, Date.now());
+    await saveRecords(snapshot, out.records);
     return out.record;
   });
 
 // deleteMemory(:145-147)— 未命中 no-op
 const deleteMemory = (id: number): Promise<void> =>
   enqueueWrite(async (): Promise<void> => {
-    const all: MemoryRecord[] = await readAllForWrite();
-    await saveRecords(deleteMemoryRecord(all, id));
+    const snapshot: MemorySnapshot = await readSnapshotForWrite();
+    await saveRecords(snapshot, deleteMemoryRecord(snapshot.records, id));
   });
 
 const updatePinned = (id: number, pinned: boolean): Promise<MemoryRecord> =>
   enqueueWrite(async (): Promise<MemoryRecord> => {
-    const all: MemoryRecord[] = await readAllForWrite();
+    const snapshot: MemorySnapshot = await readSnapshotForWrite();
+    const all: MemoryRecord[] = snapshot.records;
     const index: number = all.findIndex((r: MemoryRecord): boolean => r.id === id);
     if (index < 0) throw new Error(`Memory record #${id} not found`);
     const row: MemoryRecord = all[index];
@@ -224,7 +261,7 @@ const updatePinned = (id: number, pinned: boolean): Promise<MemoryRecord> =>
     };
     const next: MemoryRecord[] = [...all];
     next[index] = updated;
-    await saveRecords(next);
+    await saveRecords(snapshot, next);
     return updated;
   });
 
@@ -326,10 +363,11 @@ const getAllActiveRecords = async (now: number): Promise<MemoryRecord[]> => {
 // runMemoryExtraction 的存储面 deps(模型解析/generateText/locale 由 ChatPage 供给)
 const applyExtractionActions = (actions: MemoryExtractionAction[], now: number, beforeCommit?: () => Promise<void>): Promise<MemoryExtractionApplyResult> =>
   enqueueWrite(async (): Promise<MemoryExtractionApplyResult> => {
-    const all: MemoryRecord[] = await readAllForWrite();
+    const snapshot: MemorySnapshot = await readSnapshotForWrite();
     if (beforeCommit !== undefined) await beforeCommit();
-    const out: MemoryExtractionApplyResult = applyMemoryExtractionActions(all, actions, Math.max(now, Date.now()));
-    if (out.changed) await saveRecords(out.records);
+    const out: MemoryExtractionApplyResult = applyMemoryExtractionActions(snapshot.records, actions,
+      Math.max(now, Date.now()), (): number => allocateMemoryId(snapshot));
+    if (out.changed) await saveRecords(snapshot, out.records);
     return out;
   });
 
@@ -366,9 +404,10 @@ const getRecentEvents = async (limit: number): Promise<MemoryEvent[]> => {
 // upsertRecord(MemoryRepository.kt:135-143)
 const upsertRecord = (record: MemoryRecord): Promise<MemoryRecord> =>
   enqueueWrite(async (): Promise<MemoryRecord> => {
-    const all: MemoryRecord[] = await readAllForWrite();
-    const out = upsertMemoryRecord(all, record, Date.now());
-    await saveRecords(out.records);
+    const snapshot: MemorySnapshot = await readSnapshotForWrite();
+    const out = upsertMemoryRecord(snapshot.records, record, Date.now(),
+      record.id === 0 ? allocateMemoryId(snapshot) : record.id);
+    await saveRecords(snapshot, out.records);
     return out.record;
   });
 
@@ -502,10 +541,10 @@ interface MemoryChangeEventFields {
 }
 
 const restoreMemory = (id: number): Promise<void> => enqueueWrite(async (): Promise<void> => {
-  const all: MemoryRecord[] = await readAllForWrite();
+  const snapshot: MemorySnapshot = await readSnapshotForWrite();
   const now: number = Date.now();
-  const next: MemoryRecord[] = restoreMemoryRecord(all, id, now);
-  await saveRecords(next);
+  const next: MemoryRecord[] = restoreMemoryRecord(snapshot.records, id, now);
+  await saveRecords(snapshot, next);
   const events: MemoryEvent[] = await requireArrayForWrite<MemoryEvent>(memoryPath(EVENTS_FILE));
   const fields: MemoryChangeEventFields = {
     type: 'memory_restored', memoryId: id, message: '用户恢复记忆', createdAt: now,
@@ -545,7 +584,8 @@ export const getMemoryLibraryOps = (): MemoryLibraryOps => ({
 const applyMemoryOptimization = (baseline: MemoryRecord[], suggestions: MemoryTopicSuggestion[],
   pass: MemoryProfilePassOutput | null, now: number, beforeCommit?: () => Promise<void>): Promise<MemoryOptimizationApplyResult> =>
   enqueueWrite(async (): Promise<MemoryOptimizationApplyResult> => {
-    const live: MemoryRecord[] = await readAllForWrite();
+    const snapshot: MemorySnapshot = await readSnapshotForWrite();
+    const live: MemoryRecord[] = snapshot.records;
     if (beforeCommit !== undefined) await beforeCommit();
     const commitNow: number = Math.max(now, Date.now());
     const scopes: MemoryScope[] = ['core', 'short_term', 'long_term'];
@@ -562,7 +602,8 @@ const applyMemoryOptimization = (baseline: MemoryRecord[], suggestions: MemoryTo
         : row.id === merge.loser.id ? merge.loser : row);
       next = invalidateMemoryTopicsForSource(next, merge.loser.id, commitNow);
     }
-    const topic: MemoryTopicApplyResult = applyMemoryTopicSuggestions(next, baseline, suggestions, commitNow);
+    const topic: MemoryTopicApplyResult = applyMemoryTopicSuggestions(next, baseline, suggestions, commitNow,
+      (): number => allocateMemoryId(snapshot));
     let profile: MemoryProfile | null = null;
     if (pass !== null && profileSourcesUnchanged) {
       profile = buildMemoryProfile(remapMemoryProfileItems(pass.profile, merges),
@@ -572,7 +613,7 @@ const applyMemoryOptimization = (baseline: MemoryRecord[], suggestions: MemoryTo
       changed: topic.changed || merges.length > 0, staleCount: topic.staleCount,
       rejectedReasons: topic.rejectedReasons, profileUpdated: profile !== null,
       mergedIds: merges.map((merge: MemorySemanticMerge): number => merge.loser.id) };
-    if (out.changed) await saveRecords(out.records, out);
+    if (out.changed) await saveRecords(snapshot, out.records, out);
     if (profile !== null) {
       await writeMemoryProfile(profile);
       publishMemoryRevision();
@@ -606,9 +647,10 @@ export interface MemoryTopicStoreOps {
 }
 
 const refreshDocuments = async (): Promise<void> => {
-  const records: MemoryRecord[] = await readAllForWrite();
+  const snapshot: MemorySnapshot = await readSnapshotForWrite();
+  const records: MemoryRecord[] = snapshot.records;
   const pruned = pruneMemoryTopics(records, Date.now());
-  if (pruned.changed) await saveRecords(pruned.records);
+  if (pruned.changed) await saveRecords(snapshot, pruned.records);
   else await syncProjection(records, Date.now());
 };
 
@@ -624,20 +666,22 @@ export const getMemoryTopicStoreOps = (): MemoryTopicStoreOps => {
   applyTopics: (baseline: MemoryRecord[], suggestions: MemoryTopicSuggestion[], now: number,
     beforeCommit?: () => Promise<void>): Promise<MemoryTopicApplyResult> =>
     enqueueWrite(async (): Promise<MemoryTopicApplyResult> => {
-      const live: MemoryRecord[] = await readAllForWrite();
+      const snapshot: MemorySnapshot = await readSnapshotForWrite();
       if (beforeCommit !== undefined) await beforeCommit();
       const commitNow: number = Math.max(now, Date.now());
-      const result: MemoryTopicApplyResult = applyMemoryTopicSuggestions(live, baseline, suggestions, commitNow);
-      if (result.changed) await saveRecords(result.records, result);
+      const result: MemoryTopicApplyResult = applyMemoryTopicSuggestions(snapshot.records, baseline, suggestions, commitNow,
+        (): number => allocateMemoryId(snapshot));
+      if (result.changed) await saveRecords(snapshot, result.records, result);
       else await syncProjection(result.records, commitNow, result);
       return result;
     }),
   deleteTopic: (id: number): Promise<void> => enqueueWrite(async (): Promise<void> => {
-    const records: MemoryRecord[] = await readAllForWrite();
+    const snapshot: MemorySnapshot = await readSnapshotForWrite();
+    const records: MemoryRecord[] = snapshot.records;
     const record: MemoryRecord | undefined = records.find((item: MemoryRecord): boolean => item.id === id);
     if (record === undefined) return;
     if (record.kind !== 'topic') throw new Error('该记忆不是主题');
-    await saveRecords(records.filter((item: MemoryRecord): boolean => item.id !== id));
+    await saveRecords(snapshot, records.filter((item: MemoryRecord): boolean => item.id !== id));
   }),
   syncDocuments: (): Promise<void> => enqueueWrite(async (): Promise<void> => {
     await refreshDocuments();

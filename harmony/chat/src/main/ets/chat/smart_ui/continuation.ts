@@ -3,13 +3,13 @@ import type { SmartUiStateValue } from './interaction.ts';
 import type { SmartUiDraftSource } from './persistence.ts';
 import type { UIMessage } from '../message.ts';
 import { groupMessageParts } from '../message_grouping.ts';
-import { parseResponseContent } from '../response_content.ts';
+import { parseResponseContent, declaredResponseContentIds } from '../response_content.ts';
 import {
   componentKindRequiresState, componentKindIsPresentationState,
   smartUiComponentValueValid, smartUiComponentDisplayText,
 } from './components.ts';
 
-/** Leave room for the protocol's 512-character action without cutting selected fields. */
+/** Reserve the action template budget; the composer also checks the expanded prompt plus snapshot. */
 export const SMART_UI_MAX_CONTINUATION_SNAPSHOT_CHARS: number = 3582;
 const SNAPSHOT_START: string = '【智能 UI 当前选择】';
 
@@ -53,7 +53,8 @@ export const smartUiContinuationDocumentForSource = (
   const group = groupMessageParts(message.parts).find((candidate): boolean =>
     candidate.kind === 'content' && candidate.index === source.blockIndex);
   if (group === undefined || group.kind !== 'content' || group.part.type !== 'text') return null;
-  const segment = parseResponseContent(group.part.text, false).find((candidate): boolean =>
+  const segment = parseResponseContent(group.part.text, false, undefined, true,
+    declaredResponseContentIds(message.parts)).find((candidate): boolean =>
     candidate.type === 'ui' && candidate.sourceStart === source.sourceStart && candidate.id === source.blockId);
   return segment !== undefined && segment.complete && segment.ui !== null ? segment.ui : null;
 };

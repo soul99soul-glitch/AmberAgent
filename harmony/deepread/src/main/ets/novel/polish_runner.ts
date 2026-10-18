@@ -28,6 +28,7 @@ export interface PolishRunnerDeps {
   modelRunning: NovelModelRunning;
   loadPolishPreference?: () => Promise<string>;
   resolveModelTarget?: (policy: NovelModelPolicy, role: NovelModelRole) => Promise<NovelModelTarget>;
+  shouldYieldToSystem?: (projectId: string, jobId: string, ownerToken: string) => boolean;
   nowMs?: () => number;
   makeId?: (prefix: string) => string;
 }
@@ -40,10 +41,17 @@ export interface PolishRunner {
   cancel(projectId: string, jobId: string): void;
 }
 
-interface ModelCallResult {
+interface ModelCallOutput {
   kind: 'completed' | 'waiting_user';
   text: string;
 }
+
+interface StoppedModelCall {
+  kind: 'stopped';
+  job: DurablePolishJob;
+}
+
+type ModelCallResult = ModelCallOutput | StoppedModelCall;
 
 interface RawCandidate {
   jobId?: unknown;
@@ -262,12 +270,14 @@ class DefaultPolishRunner implements PolishRunner {
           try {
             let checkpointed: DurablePolishJob;
             if (job.stage === 'reviewing') {
-              const reviewed = await this.callModel(job, 'reviewer', reviewSystemPrompt(), reviewUserPrompt(job));
+              const reviewed = await this.callModel(job, claim, 'reviewer', reviewSystemPrompt(), reviewUserPrompt(job));
+              if (reviewed.kind === 'stopped') return reviewed.job;
               if (reviewed.kind === 'waiting_user') throw invalidInput('审核模型请求用户输入，batch polish 不支持等待用户');
               checkpointed = await this.deps.repository.checkpointPolishReview(
                 projectId, jobId, claim, parseReview(reviewed.text, job), this.nowMs());
             } else {
-              const generated = await this.callModel(job, 'writer', writerSystemPrompt(), writerUserPrompt(job));
+              const generated = await this.callModel(job, claim, 'writer', writerSystemPrompt(), writerUserPrompt(job));
+              if (generated.kind === 'stopped') return generated.job;
               if (generated.kind === 'waiting_user') throw invalidInput('润色模型请求用户输入，batch polish 不支持等待用户');
               const candidateId: string = job.candidate?.candidateId ?? this.makeId('polish-candidate');
               checkpointed = await this.deps.repository.checkpointPolishCandidate(
@@ -344,6 +354,11 @@ class DefaultPolishRunner implements PolishRunner {
     this.assertJobBinding(job, projectId, jobId);
     if (STOPPED_STAGES.includes(job.stage)) return job;
     assertPolishClaim(job, claim, this.nowMs());
+    if (this.deps.shouldYieldToSystem?.(projectId, jobId, claim.token)) {
+      const waiting = await this.deps.repository.yieldPolishJob(projectId, jobId, claim, this.nowMs());
+      this.assertJobBinding(waiting, projectId, jobId);
+      return waiting;
+    }
     return job;
   }
 
@@ -354,7 +369,8 @@ class DefaultPolishRunner implements PolishRunner {
   }
 
   private async callModel(
-    job: DurablePolishJob, role: 'writer' | 'reviewer', systemPrompt: string, userPrompt: string,
+    job: DurablePolishJob, claim: GhostwriteClaimRef,
+    role: 'writer' | 'reviewer', systemPrompt: string, userPrompt: string,
   ): Promise<ModelCallResult> {
     const modelTarget = this.deps.resolveModelTarget !== undefined
       ? await this.deps.resolveModelTarget(job.modelPolicyAtStart, role === 'writer' ? 'writing' : role === 'reviewer' ? 'review' : 'stateSync')
@@ -362,6 +378,9 @@ class DefaultPolishRunner implements PolishRunner {
       ? job.modelPolicyAtStart.writing
       : (job.modelPolicyAtStart.review ?? job.modelPolicyAtStart.writing);
     await this.deps.modelRunning.validate(modelTarget, job.projectId);
+    // Model selection/validation can outlive a pause, cancellation or system stop.
+    const current: DurablePolishJob = await this.safePoint(job.projectId, job.jobId, claim);
+    if (STOPPED_STAGES.includes(current.stage)) return { kind: 'stopped', job: current };
     const runId: string = this.makeId(`polish-${role}`);
     const preference: string = role === 'writer' ? (job.polishPreferenceAtStart ?? '').trim() : '';
     const prompt: string = preference.length > 0 ? `${userPrompt}\n\n作者润色偏好：\n${preference}` : userPrompt;
@@ -379,7 +398,7 @@ class DefaultPolishRunner implements PolishRunner {
     const key: string = this.jobKey(job.projectId, job.jobId);
     this.activeModelRuns.set(key, runId);
     try {
-      return await this.collectModel(request);
+      return await this.collectModel(request, job.jobId, claim);
     } finally {
       if (this.activeModelRuns.get(key) === runId) this.activeModelRuns.delete(key);
     }
@@ -389,7 +408,16 @@ class DefaultPolishRunner implements PolishRunner {
     return `${projectId}:${jobId}`;
   }
 
-  private collectModel(request: NovelModelRequest): Promise<ModelCallResult> {
+  private async collectModel(
+    request: NovelModelRequest, jobId: string, claim: GhostwriteClaimRef,
+  ): Promise<ModelCallResult> {
+    // No await separates this owner-specific stop check from modelRunning.start below.
+    if (this.deps.shouldYieldToSystem?.(request.projectId, jobId, claim.token)) {
+      const waiting = await this.deps.repository.yieldPolishJob(
+        request.projectId, jobId, claim, this.nowMs());
+      this.assertJobBinding(waiting, request.projectId, jobId);
+      return { kind: 'stopped', job: waiting };
+    }
     return new Promise<ModelCallResult>((resolve, reject): void => {
       let latestText: string = '';
       let settled: boolean = false;

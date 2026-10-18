@@ -25,7 +25,7 @@ async function fixture(overrides = {}, fetchHook = null) {
     '../di/AppContainer.ets': { getChatKvStore: () => kv, getAppContainer: () => ({ httpClient: {
       fetch: async (request, options) => { requests.push({ request, signal: options.signal });
         if (fetchHook) return fetchHook(request, options);
-        return { status: 200, body: JSON.stringify({ answers: { fact: 0.9 }, model: 'model' }) };
+        return { status: 200, body: JSON.stringify({ answers: { fact: { type: 'noul', noul: 0.9 } }, model: 'model' }) };
       } } }) } };
   const cache = new Map();
   function load(name) {
@@ -96,7 +96,7 @@ test('consent revoked during HTTP discards successful result', async () => {
   await entered.promise;
   await models.saveJevSettings(f.kv, models.makeJevSettings({ ...f.settings,
     completionCheck: { ...f.settings.completionCheck, allowTaskText: false } }));
-  gate.resolve({ status: 200, body: JSON.stringify({ answers: { fact: 0.9 }, model: 'model' }) });
+  gate.resolve({ status: 200, body: JSON.stringify({ answers: { fact: { type: 'noul', noul: 0.9 } }, model: 'model' }) });
   assert.equal((await result).reason, 'settings_changed');
 });
 
@@ -139,7 +139,7 @@ const changedConversation = () => conversations.makeConversation('completion', [
     { type: 'text', text: 'done', metadata: null }], { id: 'final' })),
 ]);
 const claimsResponse = request => { const questions = JSON.parse(request.body).questions; const answers = {};
-  for (const id of Object.keys(questions)) answers[id] = 0.9;
+  for (const id of Object.keys(questions)) answers[id] = { type: 'noul', noul: 0.9 };
   return { status: 200, body: JSON.stringify({ answers, model: 'model' }) };
 };
 

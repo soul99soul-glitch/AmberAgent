@@ -1,4 +1,5 @@
 import type { JevPreparedToolResults } from './jev_context.ts';
+import { applyToolImageRequestBudget } from './tool_image_budget.ts';
 // context_engine.ts — 上下文压缩引擎(执行 + prepareContext 管线 + 存储 Port)
 //
 // Android 基准:
@@ -694,22 +695,28 @@ export const prepareContext = async (
   contextMessageSize: number,
   deps: PrepareContextDeps,
 ): Promise<PreparedContext> => {
+  // Estimate and compact the same screenshot-bounded request that will be sent.
+  // Durable conversation messages retain every original tool image.
+  const requestMessages: UIMessage[] = applyToolImageRequestBudget(messages);
+  const requestConversation: Conversation | null = conversation === null ? null
+    : withEffectiveMessages(conversation, requestMessages);
   const keepRecentMessages: number = Math.max(policy.keepRecentTurns * 2, 4);
   const preparedToolResults: JevPreparedToolResults = deps.prepareToolResults === undefined
-    ? { messages, retainedToolCallIds: new Set() } : await deps.prepareToolResults(messages, keepRecentMessages);
+    ? { messages: requestMessages, retainedToolCallIds: new Set() }
+    : await deps.prepareToolResults(requestMessages, keepRecentMessages);
   const editResult: PreparedContextEditResult = policy.enabled
     ? editPreparedContext(preparedToolResults.messages, keepRecentMessages, preparedToolResults.retainedToolCallIds)
     : {
       messages: preparedToolResults.messages,
       trace: {
-        originalTokenEstimate: estimateTokens(messages),
+        originalTokenEstimate: estimateTokens(requestMessages),
         finalTokenEstimate: estimateTokens(preparedToolResults.messages),
         steps: [],
       },
     };
   const effectiveMessages: UIMessage[] = editResult.messages;
-  const effectiveConversation: Conversation | null = conversation !== null
-    ? withEffectiveMessages(conversation, effectiveMessages)
+  const effectiveConversation: Conversation | null = requestConversation !== null
+    ? withEffectiveMessages(requestConversation, effectiveMessages)
     : null;
   if (conversation === null || !policy.enabled) {
     const limited: UIMessage[] = limitContext(effectiveMessages, contextMessageSize);
@@ -734,7 +741,7 @@ export const prepareContext = async (
       if (deps.onCompactActiveChange !== undefined) deps.onCompactActiveChange(true);
       try {
         const result: CompactResult = await compactConversation(
-          conversation, policy, modelContextWindowTokens, 'auto_force', '', false, deps);
+          requestConversation as Conversation, policy, modelContextWindowTokens, 'auto_force', '', false, deps);
         if (result.status === 'failed') {
           throw new ContextCompactionFailedError('auto_force', result.error ?? result.status);
         }
@@ -750,7 +757,7 @@ export const prepareContext = async (
         try {
           deps.launchPrecompact((): Promise<CompactResult> =>
             compactConversation(
-              conversation as Conversation, policy, modelContextWindowTokens,
+              requestConversation as Conversation, policy, modelContextWindowTokens,
               'auto_precompact', '', false, backgroundDeps).finally(release));
         } catch (e) {
           release(); // launcher 同步抛错/拒收回调时不泄漏门闩
@@ -758,7 +765,7 @@ export const prepareContext = async (
         }
       } else {
         const run: Promise<CompactResult> = compactConversation(
-          conversation, policy, modelContextWindowTokens, 'auto_precompact', '', false, backgroundDeps)
+          requestConversation as Conversation, policy, modelContextWindowTokens, 'auto_precompact', '', false, backgroundDeps)
           .finally(release);
         run.catch((e: Error): void => {
           if (deps.store.recordEvent !== undefined) {
@@ -797,7 +804,7 @@ export const prepareContext = async (
       ...policy, keepRecentTurns: Math.max(Math.floor(policy.keepRecentTurns / 2), 2),
     };
     const result: CompactResult = await compactConversation(
-      conversation, fitPolicy, modelContextWindowTokens,
+      requestConversation as Conversation, fitPolicy, modelContextWindowTokens,
       'auto_fit_model_window', '', true, deps);
     if (result.status === 'failed') {
       throw new ContextCompactionFailedError('auto_fit_model_window',

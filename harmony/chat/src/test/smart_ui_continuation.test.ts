@@ -189,3 +189,19 @@ test('a complete UI block stays usable while later content in the same message i
   assert.equal(latestSmartUiContinuationSource([{ sourceKey: 'live-card', conversationId: 'c', messageId: message.id,
     ready: true, streaming: true, lastInteraction: 1 }], 'c', [message.id]), 'live-card');
 });
+
+test('continuation rejects a message-level duplicate ID across tool-separated text groups and types', () => {
+  const ui = '```amber-ui v=1 id=shared\n{"op":"node","id":"root","type":"column"}\n{"op":"end"}\n```';
+  const other = [ui, '```amber-svg v=1 id=shared\n<svg/>\n```',
+    '```amber-three v=1 id=shared\n{"objects":[]}\n```'];
+  for (const duplicate of other) {
+    const message = makeAssistantMessage(ui);
+    message.parts.push({ type: 'tool', toolCallId: 't', toolName: 'search', input: '{}', output: [],
+      approvalState: { type: 'auto' }, metadata: null }, { type: 'text', text: duplicate, metadata: null });
+    const source = { conversationId: 'c', nodeId: 'n', messageId: message.id,
+      blockId: 'shared', blockIndex: 0, sourceStart: 0 };
+    assert.equal(smartUiContinuationDocumentForSource(message, source), null);
+    message.parts[2] = { type: 'text', text: duplicate.replace('id=shared', 'id=unique'), metadata: null };
+    assert.equal(smartUiContinuationDocumentForSource(message, source)?.status, 'ready');
+  }
+});

@@ -44,7 +44,9 @@ async function fixture(mode = 'active') {
     if (httpGate) await httpGate.promise;
     const questions = JSON.parse(request.body).questions;
     const answers = {};
-    for (const id of Object.keys(questions)) answers[id] = questions[id].type === 'choice' ? 'candidate' : id === 'readonly' ? 0.7 : id === 'reversible' ? 0.3 : 0.5;
+    for (const id of Object.keys(questions)) answers[id] = questions[id].type === 'choice'
+      ? { type: 'choice', choice: 'candidate' }
+      : { type: 'noul', noul: id === 'readonly' ? 0.7 : id === 'reversible' ? 0.3 : 0.5 };
     return { status: 200, headers: {}, body: JSON.stringify({ answers, model: 'evaluation-model' }) };
   } };
   const imports = {

@@ -100,7 +100,8 @@ export const parseStudyProgress = (raw: string, count: number): StudyProgress | 
     return {
       i: index, score: scoreOf(results),
       selected: typeof parsed.selected === 'string' ? parsed.selected : '',
-      answered: answeredAt(results, index),
+      // Flashcard reveals have no graded result in r, but still survive a remount.
+      answered: parsed.answered === true || answeredAt(results, index),
       finished: parsed.finished === true && index === count - 1,
       r: results,
     };

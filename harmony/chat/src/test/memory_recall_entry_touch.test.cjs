@@ -45,7 +45,6 @@ const loadRecall = (domain, initialRecords, { profile = null, probabilities = nu
   const ctx = {
     seed: { agentRuntime: { enableCoreMemory: true, enableShortTermMemory: true, enableLongTermMemory: true,
       memoryRecall: { maxItems: 12, maxPromptChars, debug: false } } },
-    conversation,
     activeConversation: () => conversation,
     recalledMemoryIds: [...recalledMemoryIds],
   };

@@ -63,7 +63,7 @@ export interface MemoryWriteResult {
   record: MemoryRecord;
 }
 
-// Room 自增:max(id)+1;空库首 id = 1
+// In-memory helpers default to max(id)+1; persistent hosts supply a durable allocated ID.
 export const nextMemoryId = (records: MemoryRecord[]): number => {
   let max = 0;
   for (const r of records) {
@@ -77,7 +77,7 @@ const coerce01 = (v: number): number => Math.min(1, Math.max(0, v));
 // addMemory(:102-133)— insert 后 getMemoryById 回读(本实现即所插记录);
 //   supersedesIds distinct 保序(Kotlin distinct = 首次出现序)
 export const appendMemoryRecord = (
-  records: MemoryRecord[], params: MemoryAddParams, now: number,
+  records: MemoryRecord[], params: MemoryAddParams, now: number, allocatedId: number = nextMemoryId(records),
 ): MemoryWriteResult => {
   if (params.kind === 'topic') throw new Error('主题只能通过主题聚合生成');
   const supersedes: number[] = [];
@@ -85,7 +85,7 @@ export const appendMemoryRecord = (
     if (supersedes.indexOf(id) < 0) supersedes.push(id);
   }
   const record: MemoryRecord = makeMemoryRecord({
-    id: nextMemoryId(records),
+    id: allocatedId,
     content: params.content,
     scope: params.scope,
     kind: params.kind,
@@ -157,7 +157,7 @@ export const memoriesOfAssistant = (
 //   实体映射:assistantId 空白→bucketForScope、supersedesIds distinct、
 //   confidence coerce 0-1、createdAt ≤0 → now、updatedAt 恒 = now
 export const upsertMemoryRecord = (
-  records: MemoryRecord[], record: MemoryRecord, now: number,
+  records: MemoryRecord[], record: MemoryRecord, now: number, allocatedId: number = nextMemoryId(records),
 ): MemoryWriteResult => {
   const original: MemoryRecord | undefined = records.find((r: MemoryRecord): boolean => r.id === record.id);
   if (record.kind === 'topic' || original?.kind === 'topic') {
@@ -193,7 +193,7 @@ export const upsertMemoryRecord = (
     memberIds: record.memberIds ?? [],
   });
   if (record.id === 0) {
-    const withId: MemoryRecord = { ...mapped, id: nextMemoryId(records) };
+    const withId: MemoryRecord = { ...mapped, id: allocatedId };
     return { records: [...records, withId], record: withId };
   }
   const index: number = records.findIndex((r: MemoryRecord): boolean => r.id === record.id);

@@ -29,6 +29,7 @@ import {
   makeSystemMessage,
 } from '../main/ets/chat/message.ts';
 import { makeChatModel, makeTextGenerationParams, makeProviderSettingOpenAI } from '../main/ets/chat/provider_model.ts';
+import type { UIMessagePartTool } from '../main/ets/chat/message.ts';
 
 const sampleMessages = () => [
   makeSystemMessage('You are helpful.'),
@@ -166,6 +167,49 @@ test('Responses native image call replay retains its id between surrounding hist
     { role: 'assistant', content: 'Native result' },
   ]);
   assert.deepEqual(encoded, ['file:///foreign.png']);
+});
+
+test('Responses tool output carries images and text in source order with the original wire call id', () => {
+  // FunctionCallOutput.output accepts input_text/input_image content directly.
+  // https://developers.openai.com/api/reference/resources/responses/methods/create
+  const shot: UIMessagePartTool = { type: 'tool', toolCallId: 'local-shot', toolName: 'wm_screenshot', input: '{}',
+    output: [{ type: 'image', url: 'file:///shot.png', metadata: null }],
+    approvalState: { type: 'auto' }, metadata: { openai_call_id: 'wire-shot' } };
+  const mixed: UIMessagePartTool = { ...shot, toolCallId: 'mixed', toolName: 'inspect', metadata: null,
+    output: [{ type: 'text', text: 'before', metadata: null },
+      { type: 'image', url: 'https://example.test/page.png', metadata: null },
+      { type: 'text', text: 'after', metadata: null }] };
+  const plain: UIMessagePartTool = { ...shot, toolCallId: 'plain', metadata: null,
+    output: [{ type: 'text', text: 'first', metadata: null }, { type: 'text', text: 'second', metadata: null }] };
+  const messages = [makeUIMessage('assistant', [shot, mixed, plain])];
+  const before = JSON.stringify(messages);
+  const encoded: string[] = [];
+  const body = buildResponsesRequestBody({ messages, params: makeTextGenerationParams(),
+    setting: makeProviderSettingOpenAI({ useResponseApi: true }), stream: true,
+    encodeImage: (url): string => { encoded.push(url); return `data:image/png;base64,${url}`; } });
+  const items = body['input'] as Array<Record<string, unknown>>;
+  assert.deepEqual(items.map((item) => [item.type, item.call_id]), [
+    ['function_call', 'wire-shot'], ['function_call_output', 'wire-shot'],
+    ['function_call', 'mixed'], ['function_call_output', 'mixed'],
+    ['function_call', 'plain'], ['function_call_output', 'plain'],
+  ]);
+  assert.deepEqual(items[1].output, [{ type: 'input_image', image_url: 'data:image/png;base64,file:///shot.png' }]);
+  assert.deepEqual(items[3].output, [{ type: 'input_text', text: 'before' },
+    { type: 'input_image', image_url: 'data:image/png;base64,https://example.test/page.png' },
+    { type: 'input_text', text: 'after' }]);
+  assert.equal(items[5].output, 'first\nsecond', 'text-only results retain the existing string wire shape');
+  assert.deepEqual(encoded, ['file:///shot.png', 'https://example.test/page.png']);
+  assert.equal(JSON.stringify(messages), before);
+});
+
+test('Responses tool images require an encoder and propagate encoding failures', () => {
+  const shot: UIMessagePartTool = { type: 'tool', toolCallId: 'shot', toolName: 'wm_screenshot', input: '{}',
+    output: [{ type: 'image', url: 'file:///missing.png', metadata: null }],
+    approvalState: { type: 'auto' }, metadata: null };
+  const messages = [makeUIMessage('assistant', [shot])];
+  assert.throws(() => buildResponsesInput(messages), /requires injected ImageEncoder/);
+  const error = new Error('screenshot file missing');
+  assert.throws(() => buildResponsesInput(messages, () => { throw error; }), error);
 });
 
 test('reasoning effort mapping', () => {

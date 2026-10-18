@@ -197,6 +197,11 @@ export interface NovelPolishEffects {
   notify(job: DurablePolishJob): Promise<void>;
 }
 
+interface BackgroundPolishOwner {
+  token: string;
+  stopRequested: boolean;
+}
+
 const DEFAULT_IDLE_TIMEOUT_MS: number = 90_000;
 const GHOSTWRITE_LEASE_MS: number = 12 * 60 * 60 * 1000;
 const POLISH_LEASE_MS: number = 12 * 60 * 60 * 1000;
@@ -328,6 +333,7 @@ export class NovelCreation {
   // 仅防止同一进程重复驱动；durable job/repository 始终是唯一事实源。
   private drivingGhostwriteJobs: Map<string, Promise<void>> = new Map();
   private drivingPolishJobs: Map<string, Promise<void>> = new Map();
+  private backgroundPolishOwners: Map<string, BackgroundPolishOwner> = new Map();
   private stateService: NovelStateService;
   private repairRuns: Map<string, LiveContinuityRepair> = new Map();
 
@@ -350,6 +356,10 @@ export class NovelCreation {
       repository: deps.repository,
       modelRunning: deps.modelRunning,
       resolveModelTarget: async (policy, role) => resolveNovelDefaultTarget(policy, await this.loadModelDefaults(), role),
+      shouldYieldToSystem: (projectId: string, jobId: string, ownerToken: string): boolean => {
+        const owner: BackgroundPolishOwner | undefined = this.backgroundPolishOwners.get(`${projectId}:${jobId}`);
+        return owner !== undefined && owner.token === ownerToken && owner.stopRequested;
+      },
       nowMs: deps.nowMs,
       makeId: (prefix: string): string => `${prefix}:${novelId()}`,
     });
@@ -618,7 +628,7 @@ export class NovelCreation {
     const resumed: DurablePolishJob = await this.repository.resumePolishJob(
       projectId, jobId, this.nowMs());
     await this.syncPolishEffects(resumed, true);
-    this.launchPolishDriver(projectId, jobId, null);
+    this.launchPolishDriver(projectId, jobId, null, true);
     return resumed;
   }
 
@@ -627,7 +637,7 @@ export class NovelCreation {
     const retried: DurablePolishJob = await this.repository.retryPolishJob(
       projectId, jobId, this.nowMs(), chapterIds);
     await this.syncPolishEffects(retried, true);
-    this.launchPolishDriver(projectId, jobId, null);
+    this.launchPolishDriver(projectId, jobId, null, true);
     return retried;
   }
 
@@ -642,31 +652,28 @@ export class NovelCreation {
   async drivePolishInBackground(
     projectId: string, branchId: string, jobId: string, maxChapters: number = 1,
   ): Promise<DurablePolishJob> {
-    let job: DurablePolishJob = await this.repository.loadPolishJob(projectId, jobId);
-    if (job.branchId !== branchId) throw invalidInput('polish 后台任务分支不匹配');
-    if (job.stage === 'waiting_system') {
-      job = await this.repository.resumePolishJob(projectId, jobId, this.nowMs());
+    const key: string = `${projectId}:${jobId}`;
+    const existing: BackgroundPolishOwner | undefined = this.backgroundPolishOwners.get(key);
+    const owner: BackgroundPolishOwner = existing ?? { token: novelId(), stopRequested: false };
+    // onWorkStop may arrive while the first repository read or file-lock open is pending.
+    if (existing === undefined) this.backgroundPolishOwners.set(key, owner);
+    try {
+      const job: DurablePolishJob = await this.repository.loadPolishJob(projectId, jobId);
+      if (job.branchId !== branchId) throw invalidInput('polish 后台任务分支不匹配');
+      if (existing !== undefined) return job;
+      return await this.runPolishDriver(projectId, jobId, maxChapters, owner);
+    } finally {
+      if (existing === undefined) this.backgroundPolishOwners.delete(key);
     }
-    if (!this.canDrivePolishStage(job.stage)) {
-      await this.syncPolishEffects(job, false);
-      return job;
-    }
-    if (job.claim !== null) {
-      const staleClaim: GhostwriteClaimRef = { token: job.claim.token, epoch: job.claim.epoch };
-      job = await this.repository.pausePolishJob(projectId, jobId, staleClaim, this.nowMs());
-      this.polishRunner.cancel(projectId, jobId);
-      job = await this.repository.resumePolishJob(projectId, jobId, this.nowMs());
-    }
-    const result: DurablePolishJob = await this.polishRunner.run(
-      projectId, jobId, novelId(), POLISH_LEASE_MS, maxChapters);
-    await this.syncPolishEffects(result, result.stage === 'waiting_system');
-    return result;
   }
 
   async yieldPolishForSystem(projectId: string, jobId: string): Promise<DurablePolishJob> {
+    const owner: BackgroundPolishOwner | undefined = this.backgroundPolishOwners.get(`${projectId}:${jobId}`);
+    if (owner !== undefined) owner.stopRequested = true;
     const job: DurablePolishJob = await this.repository.loadPolishJob(projectId, jobId);
-    if (!this.canDrivePolishStage(job.stage)) return job;
-    const claim: GhostwriteClaimRef = await this.ensurePolishClaim(projectId, job);
+    // A scheduler callback that lost the driver lock must not stop the foreground owner.
+    if (!this.canDrivePolishStage(job.stage) || owner === undefined || job.claim?.token !== owner.token) return job;
+    const claim: GhostwriteClaimRef = { token: owner.token, epoch: job.claim.epoch };
     const waiting: DurablePolishJob = await this.repository.yieldPolishJob(
       projectId, jobId, claim, this.nowMs());
     this.polishRunner.cancel(projectId, jobId);
@@ -2121,13 +2128,12 @@ export class NovelCreation {
   }
 
   private launchPolishDriver(
-    projectId: string, jobId: string, maxChapters: number | null,
+    projectId: string, jobId: string, maxChapters: number | null, waitForOwner: boolean = false,
   ): void {
     const key: string = `${projectId}:${jobId}`;
     if (this.drivingPolishJobs.has(key)) return;
-    const driving: Promise<void> = this.polishRunner.run(projectId, jobId, novelId(), POLISH_LEASE_MS, maxChapters)
-      .then((job: DurablePolishJob): Promise<void> =>
-        this.syncPolishEffects(job, job.stage === 'waiting_system'))
+    const driving: Promise<void> = this.runPolishDriver(projectId, jobId, maxChapters, null, waitForOwner)
+      .then((): void => {})
       .catch((): void => {
         // runner owns durable failure; a stale foreground owner must not overwrite a newer state.
       })
@@ -2148,13 +2154,42 @@ export class NovelCreation {
     }
     const key: string = `${projectId}:${job.jobId}`;
     if (this.drivingPolishJobs.has(key)) return;
-    const now: number = this.nowMs();
-    if (job.claim !== null && now < job.claim.leaseUntil) {
-      const staleClaim: GhostwriteClaimRef = { token: job.claim.token, epoch: job.claim.epoch };
-      await this.repository.pausePolishJob(projectId, job.jobId, staleClaim, now);
-      await this.repository.resumePolishJob(projectId, job.jobId, now);
-    }
     this.launchPolishDriver(projectId, job.jobId, null);
+  }
+
+  private async runPolishDriver(
+    projectId: string, jobId: string, maxChapters: number | null,
+    background: BackgroundPolishOwner | null, waitForOwner: boolean = false,
+  ): Promise<DurablePolishJob> {
+    const drive = async (): Promise<DurablePolishJob> => {
+      let job: DurablePolishJob = await this.repository.loadPolishJob(projectId, jobId);
+      if (background !== null && job.stage === 'waiting_system' && !background.stopRequested) {
+        job = await this.repository.resumePolishJob(projectId, jobId, this.nowMs());
+      }
+      if (!this.canDrivePolishStage(job.stage)) {
+        await this.syncPolishEffects(job, job.stage === 'waiting_system');
+        return job;
+      }
+      // The process-owned file lock, not a context-local Map, proves the old driver is gone.
+      // A dead process releases this lock even while its durable 12-hour lease is still valid.
+      const now: number = this.nowMs();
+      if (job.claim !== null && now < job.claim.leaseUntil) {
+        const staleClaim: GhostwriteClaimRef = { token: job.claim.token, epoch: job.claim.epoch };
+        await this.repository.pausePolishJob(projectId, jobId, staleClaim, now);
+        job = await this.repository.resumePolishJob(projectId, jobId, now);
+      }
+      const owner: string = background?.token ?? novelId();
+      const completed = await this.polishRunner.run(projectId, jobId, owner, POLISH_LEASE_MS, maxChapters);
+      await this.syncPolishEffects(completed, completed.stage === 'waiting_system');
+      return completed;
+    };
+    // Explicit resume/retry must replace the invalidated owner after it exits; passive opens
+    // and scheduler callbacks only observe a busy owner and never queue duplicate model work.
+    const result: DurablePolishJob | null = waitForOwner
+      ? await this.repository.withPolishDriverLock(projectId, jobId, drive)
+      : await this.repository.tryWithPolishDriverLock(projectId, jobId, drive);
+    // A live owner is already doing the work; do not queue a second model request.
+    return result ?? await this.repository.loadPolishJob(projectId, jobId);
   }
 
   private async syncPolishEffects(job: DurablePolishJob, schedule: boolean): Promise<void> {

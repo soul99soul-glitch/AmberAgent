@@ -33,6 +33,7 @@ export struct WidgetMessageContent {
   @Prop showLineNumbers: boolean = false;
   @Prop @Watch('prepare') streamKey: string = '';
   @Prop @Watch('prepare') assets: VisualArtifact[] = [];
+  @Prop @Watch('prepare') declaredContentIds: string[] = [];
   @Prop @Watch('prepare') messageStreaming: boolean = false;
   @Prop @Watch('prepare') smartUiSourcePrefix: string = '';
   @Prop @Watch('prepare') smartUiNodeId: string = '';
@@ -88,7 +89,8 @@ export struct WidgetMessageContent {
     this.previousSourcePrefix = this.smartUiSourcePrefix;
     this.previousContent = this.content;
     let segments: ResponseContentSegment[] = parseResponseContent(this.content, this.streaming,
-      this.assets.length > 0 ? this.assets : undefined, !this.messageStreaming);
+      this.assets.length > 0 ? this.assets : undefined, !this.messageStreaming,
+      this.declaredContentIds.length > 0 ? this.declaredContentIds : undefined);
     for (const segment of segments) {
       if (segment.type !== 'svg' || segment.id === null) continue;
       const validation: VisualArtifact | undefined = this.assets.find((asset: VisualArtifact): boolean =>
@@ -298,8 +300,10 @@ export struct WidgetMessageContent {
       this.LegacyWidgetSegment(index);
     } else if (this.segmentDocumentAt(index) !== null) {
       this.SmartUiSegment(index);
+      if (this.segmentAt(index)?.status === 'error') this.FallbackSegment(index);
     } else if (this.segmentArtifactAt(index) !== null) {
       this.ArtifactSegment(index);
+      if (this.segmentAt(index)?.status === 'error') this.FallbackSegment(index);
     } else {
       this.FallbackSegment(index);
     }

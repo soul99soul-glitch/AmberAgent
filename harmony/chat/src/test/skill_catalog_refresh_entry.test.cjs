@@ -89,6 +89,7 @@ test('skill management refreshes the real run catalog and discovery while preser
     const rt = { assistant: originalAssistant, allSkills: skills.listSkills(), api: originalApi,
       params: { model: originalModel, temperature: 0.3 }, modelAbilities: ['tool'], modelContextWindowTokens: 16000 };
     const ctx = { conversationId: 'conversation', conversation: domain.makeConversation('conversation'),
+      activeConversation() { return this.conversation; },
       seed: { runtime: rt, searchSettings: { enableWebSearch: false }, agentRuntime: {
         contextCompaction: {}, speculativeToolExecution: {}, maxToolLoopSteps: 6 }, taskPrompts: {}, agentTaskTools: [], agentCronTools: [] },
       activityStore: new domain.AgentToolActivityStore(), publish: () => {}, pending: () => [], consumeSteer: async () => [] };

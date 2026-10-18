@@ -31,6 +31,156 @@ test('failed generation commits the latest tail below checkpoint growth threshol
   off();
 });
 
+test('assistant tool regeneration keeps every original branch and following node on intermediate saves and failure', { timeout: 5000 }, async () => {
+  const f = await serviceFixture(['A']); const d = f.domain;
+  const target = d.makeMessageNode([d.makeAssistantMessage('original answer'), d.makeAssistantMessage('selected answer')], 1);
+  const nodes = [d.toMessageNode(d.makeUserMessage('original question')), target,
+    d.toMessageNode(d.makeUserMessage('later question')), d.toMessageNode(d.makeAssistantMessage('later answer'))];
+  await f.memory.save(d.makeConversation('A', nodes));
+  const off = f.service.subscribe('A', () => {});
+  f.toolsByConversation.set('A', [d.makeAgentTool({ name: 'file_read', description: 'read',
+    execute: async () => [{ type: 'text', text: 'read result', metadata: null }] })]);
+  const handle = f.service.regenerate('A', target.id);
+  const rejected = assert.rejects(handle.done, /second request failed/);
+  const first = await f.providerFor('A').next(0);
+  first.emitParts([{ type: 'tool', toolCallId: 'read-call', toolName: 'file_read', input: '{}',
+    output: [], approvalState: { type: 'auto' }, metadata: null }]);
+  first.finish();
+  const second = await f.providerFor('A').next(1);
+  const assertRetained = async () => {
+    const saved = await f.memory.getById('A');
+    assert.deepEqual(saved.messageNodes.map(node => node.id), nodes.map(node => node.id));
+    assert.deepEqual(saved.messageNodes[1].messages.slice(0, 2), target.messages);
+    assert.deepEqual(saved.messageNodes.slice(2), nodes.slice(2));
+    assert.equal(saved.messageNodes[1].messages.length, 3);
+    return saved;
+  };
+  await assertRetained();
+  second.emit('partial second response'); second.fail(new Error('second request failed'));
+  await rejected;
+  const saved = await assertRetained();
+  assert.equal(d.currentMessages(saved)[1].parts.filter(part => part.type === 'text').map(part => part.text).join(''),
+    'partial second response');
+  assert.equal(f.service.snapshot('A').phase, 'failed');
+  off();
+});
+
+test('approval of a regenerated historical answer resumes its branch and retains later conversation', { timeout: 5000 }, async () => {
+  const f = await serviceFixture(['A']); const d = f.domain; let executed = 0;
+  const nodes = [d.toMessageNode(d.makeUserMessage('original question')),
+    d.toMessageNode(d.makeAssistantMessage('original answer')),
+    d.toMessageNode(d.makeUserMessage('later question')), d.toMessageNode(d.makeAssistantMessage('later answer'))];
+  await f.memory.save(d.makeConversation('A', nodes));
+  const off = f.service.subscribe('A', () => {});
+  f.toolsByConversation.set('A', [d.makeAgentTool({ name: 'file_write', description: 'write', needsApproval: true,
+    execute: async () => { executed++; return [{ type: 'text', text: 'written', metadata: null }]; } })]);
+  const handle = f.service.regenerate('A', nodes[1].id);
+  const first = await f.providerFor('A').next(0);
+  first.emitParts([{ type: 'tool', toolCallId: 'write-call', toolName: 'file_write', input: '{}',
+    output: [], approvalState: { type: 'auto' }, metadata: null }]);
+  first.finish(); await handle.done;
+  assert.equal(f.service.snapshot('A').phase, 'awaiting_approval');
+  assert.equal(f.service.snapshot('A').awaitingTools, true);
+  const before = await f.memory.getById('A');
+  const selected = d.currentMessages(before)[1];
+  const approval = f.service.verdict('A', 'write-call', { kind: 'approved' }, { messageId: selected.id, partIndex: 0 });
+  const resumed = await f.providerFor('A').next(1);
+  assert.equal(executed, 1);
+  assert.ok(!resumed.messages.some(message => d.toText(message).includes('later question')));
+  assert.equal(f.service.snapshot('A').regenNodeId, nodes[1].id);
+  resumed.emit('completed original task'); resumed.finish(); await approval.done;
+  const saved = await f.memory.getById('A');
+  assert.deepEqual(saved.messageNodes.slice(2), nodes.slice(2));
+  assert.equal(saved.messageNodes[1].messages.length, 2, 'resume updates the selected branch without adding another alternative');
+  assert.equal(d.currentMessages(saved)[1].parts.filter(part => part.type === 'text').map(part => part.text).join(''),
+    'completed original task');
+  assert.equal(d.toText(saved.messageNodes[1].messages[0]), 'original answer');
+  assert.equal(f.service.snapshot('A').awaitingTools, false);
+  off();
+});
+
+test('cancelling a regenerated branch with STEER preserves later nodes and does not duplicate checkpoint inserts', { timeout: 5000 }, async () => {
+  const f = await serviceFixture(['A']); const d = f.domain;
+  const nodes = [d.toMessageNode(d.makeUserMessage('original question')),
+    d.toMessageNode(d.makeAssistantMessage('original answer')),
+    d.toMessageNode(d.makeUserMessage('later question')), d.toMessageNode(d.makeAssistantMessage('later answer'))];
+  await f.memory.save(d.makeConversation('A', nodes));
+  const off = f.service.subscribe('A', () => {});
+  f.toolsByConversation.set('A', [d.makeAgentTool({ name: 'file_read', description: 'read',
+    execute: async () => [{ type: 'text', text: 'read result', metadata: null }] })]);
+  const handle = f.service.regenerate('A', nodes[1].id);
+  const first = await f.providerFor('A').next(0);
+  await f.service.enqueue('A', d.makeUserMessage('steer this branch').parts, true, 'STEER');
+  first.emitParts([{ type: 'tool', toolCallId: 'read-call', toolName: 'file_read', input: '{}',
+    output: [], approvalState: { type: 'auto' }, metadata: null }]);
+  first.finish();
+  const second = await f.providerFor('A').next(1);
+  const active = d.currentMessages(f.contexts.get('A').at(-1).activeConversation()).map(d.toText);
+  assert.ok(active.includes('steer this branch'));
+  assert.ok(!active.includes('later question'));
+  for (let checkpoint = 0; checkpoint < 2; checkpoint++) {
+    second.emit('x'.repeat(600)); await turn();
+    const saved = await f.memory.getById('A');
+    assert.equal(saved.messageNodes.length, 6);
+    assert.equal(d.currentMessages(saved).filter(message => d.toText(message) === 'steer this branch').length, 1);
+    assert.deepEqual(saved.messageNodes.slice(-2), nodes.slice(-2));
+  }
+  f.service.cancel('A', handle.runId); await handle.done;
+  const saved = await f.memory.getById('A');
+  assert.equal(saved.messageNodes.length, 6);
+  assert.deepEqual(saved.messageNodes.slice(-2), nodes.slice(-2));
+  assert.equal(d.toText(saved.messageNodes[1].messages[0]), 'original answer');
+  assert.equal(f.service.snapshot('A').phase, 'cancelled');
+  off();
+});
+
+for (const terminal of ['cancel', 'failure']) {
+  test(`${terminal} after a regenerated STEER tool preserves the suffix and closes only cancelled work`, { timeout: 5000 }, async () => {
+    const f = await serviceFixture(['A']); const d = f.domain; let writes = 0;
+    const nodes = [d.toMessageNode(d.makeUserMessage('original question')),
+      d.toMessageNode(d.makeAssistantMessage('original answer')),
+      d.toMessageNode(d.makeUserMessage('later question')), d.toMessageNode(d.makeAssistantMessage('later answer'))];
+    await f.memory.save(d.makeConversation('A', nodes));
+    const off = f.service.subscribe('A', () => {});
+    f.toolsByConversation.set('A', [d.makeAgentTool({ name: 'file_read', description: 'read',
+      execute: async () => [{ type: 'text', text: 'read result', metadata: null }] }),
+    d.makeAgentTool({ name: 'file_write', description: 'write', needsApproval: true,
+      execute: async () => { writes++; return [{ type: 'text', text: 'written', metadata: null }]; } })]);
+    const handle = f.service.regenerate('A', nodes[1].id);
+    const rejected = terminal === 'failure' ? assert.rejects(handle.done, /second request failed/) : null;
+    const first = await f.providerFor('A').next(0);
+    await f.service.enqueue('A', d.makeUserMessage('steer this branch').parts, true, 'STEER');
+    first.emitParts([{ type: 'tool', toolCallId: 'read-call', toolName: 'file_read', input: '{}',
+      output: [], approvalState: { type: 'auto' }, metadata: null }]);
+    first.finish();
+    const second = await f.providerFor('A').next(1);
+    second.emitParts([{ type: 'tool', toolCallId: 'write-call', toolName: 'file_write', input: '{}',
+      output: [], approvalState: { type: 'auto' }, metadata: null }]);
+    await turn();
+    if (terminal === 'cancel') { f.service.cancel('A', handle.runId); await handle.done; }
+    else { second.fail(new Error('second request failed')); await rejected; }
+    const saved = await f.memory.getById('A');
+    const activeTail = d.currentMessages(saved)[3];
+    const write = activeTail.parts.find(part => part.type === 'tool' && part.toolCallId === 'write-call');
+    assert.equal(writes, 0);
+    assert.deepEqual(saved.messageNodes.slice(-2), nodes.slice(-2));
+    assert.deepEqual(saved.messageNodes[1].messages[0], nodes[1].messages[0]);
+    assert.equal(saved.messageNodes[1].messages[1].parts.find(part => part.type === 'tool').output[0].text, 'read result');
+    assert.equal(f.service.snapshot('A').phase, terminal === 'cancel' ? 'cancelled' : 'failed');
+    if (terminal === 'cancel') {
+      assert.equal(write.approvalState.type, 'denied');
+      assert.equal(JSON.parse(write.output[0].text).status, 'cancelled');
+      assert.ok(activeTail.finishedAt !== null);
+      assert.equal(f.service.snapshot('A').awaitingTools, false);
+    } else {
+      assert.deepEqual(write.approvalState, { type: 'auto' });
+      assert.deepEqual(write.output, []);
+      assert.match(f.service.snapshot('A').errorMsg, /second request failed/);
+    }
+    off();
+  });
+}
+
 function loadEntry(filename, imports, storage, cache = new Map()) {
   const full = path.resolve(entry, filename);
   if (cache.has(full)) return cache.get(full);
@@ -143,6 +293,7 @@ async function serviceFixture(initialIds = ['A', 'B'], options = {}) {
     './ConversationRunTools.ets': { buildConversationToolLoop: async context => ({ tools: toolsByConversation.get(context.conversationId) ?? [],
       dispatcher: options.autoReviewFactory ? new domain.AgentToolDispatcher({ autoApprovalReview: options.autoReviewFactory(context, domain, kv) }) : undefined,
       autoApproveTools: options.autoReviewFactory !== undefined, autoApproveHighRiskTools: options.autoReviewFactory !== undefined,
+      consumeSteerMessages: () => context.consumeSteer(),
       makeProviderForStep: () => providerFor(context.conversationId) }) },
     './ConversationRunAuxiliary.ets': { completeConversationAuxiliary: () => {} },
   };
@@ -436,8 +587,8 @@ for (const scenario of ['send', 'assistant regenerate']) {
             destructive: { kind: 'noul', probability: .9 }, exfiltration: { kind: 'noul', probability: 0 },
             offTask: { kind: 'noul', probability: 0 }, authorized: { kind: 'noul', probability: .9 } }, usage: null, model: 'judge' } };
         } } }, {});
-      initialSnapshots.push(domain.currentMessages(context.conversation));
-      return support.createEntryJevAutoApprovalReview(domain.currentMessages(context.conversation), () => domain.currentMessages(context.conversation));
+      initialSnapshots.push(domain.currentMessages(context.activeConversation()));
+      return support.createEntryJevAutoApprovalReview(domain.currentMessages(context.activeConversation()), () => domain.currentMessages(context.activeConversation()));
     } });
     const d = f.domain;
     await d.saveJevSettings(f.kv, d.makeJevSettings({ mode: 'active', autoApproval: { mode: 'active', allowTaskText: true, allowToolMetadata: true } }));
@@ -458,7 +609,7 @@ for (const scenario of ['send', 'assistant regenerate']) {
     assert.match(JSON.stringify(states[0].user_requests), /CURRENT_AUTHORIZED_REQUEST/);
     assert.doesNotMatch(JSON.stringify(states[0].user_requests), /FUTURE_UNRELATED_REQUEST/);
     if (scenario === 'send') assert.doesNotMatch(JSON.stringify(initialSnapshots[0]), /CURRENT_AUTHORIZED_REQUEST/);
-    else assert.match(JSON.stringify(initialSnapshots[0]), /FUTURE_UNRELATED_REQUEST/);
+    else assert.doesNotMatch(JSON.stringify(initialSnapshots[0]), /FUTURE_UNRELATED_REQUEST/);
     off();
   });
 }
