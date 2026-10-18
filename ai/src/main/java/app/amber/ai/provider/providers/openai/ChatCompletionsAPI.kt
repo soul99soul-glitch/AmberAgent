@@ -37,6 +37,7 @@ import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.provider.providers.PartGroup
 import app.amber.ai.provider.providers.StreamProtocol
 import app.amber.ai.provider.providers.StreamTerminationGuard
+import app.amber.ai.provider.providers.grok.GROK_CLIENT_VERSION
 import app.amber.ai.provider.providers.groupPartsByToolBoundary
 import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.ui.MessageChunk
@@ -608,9 +609,9 @@ class ChatCompletionsAPI(
             // The Grok CLI proxy rejects requests without its client identity
             // headers (iOS parity); these are only applied on the OAuth path.
             addHeader("Authorization", "Bearer $token")
-            header("User-Agent", "grok-shell/0.2.101 (android; arm64)")
+            header("User-Agent", "grok-shell/$GROK_CLIENT_VERSION (android; arm64)")
             header("x-grok-client-identifier", "grok-shell")
-            header("x-grok-client-version", "0.2.101")
+            header("x-grok-client-version", GROK_CLIENT_VERSION)
             header("x-grok-client-mode", "interactive")
             header("X-XAI-Token-Auth", "xai-grok-cli")
             header("x-authenticateresponse", "authenticate-response")
