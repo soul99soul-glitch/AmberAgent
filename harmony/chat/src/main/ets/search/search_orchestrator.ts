@@ -368,7 +368,8 @@ const domainOf = (url: string): string => {
     if (authority.startsWith('[')) {
       const close: number = authority.indexOf(']');
       const host: string = close >= 0 ? authority.substring(0, close + 1) : authority;
-      return host.toLowerCase();
+      const port: string = close >= 0 ? authority.substring(close + 1) : '';
+      return (host + (/^:\d+$/.test(port) ? port : '')).toLowerCase();
     }
     const colon: number = authority.indexOf(':');
     const host: string = colon >= 0 && /^\d+$/.test(authority.substring(colon + 1))

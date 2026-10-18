@@ -45,6 +45,14 @@ const ROLE_MAP: Record<string, MessageRole> = {
   TOOL: 'tool',
 };
 
+const makeReasoningContentPart = (reasoning: string, hasReasoningContent: boolean): UIMessagePart => ({
+  type: 'reasoning',
+  reasoning,
+  createdAt: nowIso(),
+  finishedAt: null,
+  metadata: hasReasoningContent ? { [REASONING_CONTENT_PRESENT_METADATA_KEY]: true } : null,
+});
+
 export const parseChatCompletionMessage = (obj: JsonObject): UIMessage => {
   // MessageRole.valueOf(uppercase):未知 role 抛错,缺失默认 ASSISTANT
   const rawRole: string = (strOrNull(obj['role']) ?? 'ASSISTANT').toUpperCase();
@@ -53,20 +61,27 @@ export const parseChatCompletionMessage = (obj: JsonObject): UIMessage => {
     throw new Error(`unknown message role: ${rawRole}`);
   }
 
-  // content 仅取 primitive string;数组形态(Mistral)不进正文
-  const content: string = strOrNull(obj['content']) ?? '';
   const hasReasoningContent: boolean = 'reasoning_content' in obj;
-  let reasoning: string | null = strOrNull(obj['reasoning_content']) ?? strOrNull(obj['reasoning']);
-  if (reasoning === null) {
-    // Mistral 接口:content 为数组 [{type:"thinking",thinking:[{type:"text",text}]}]
-    const contentArr: JsonValue | undefined = obj['content'];
-    if (Array.isArray(contentArr)) {
-      const first: JsonValue | undefined = contentArr[0];
-      if (isObj(first)) {
-        const thinking: JsonValue | undefined = first['thinking'];
-        if (Array.isArray(thinking) && isObj(thinking[0])) {
-          reasoning = strOrNull(thinking[0]['text']);
-        }
+  const reasoning: string | null = strOrNull(obj['reasoning_content']) ?? strOrNull(obj['reasoning']);
+  const contentParts: UIMessagePart[] = [];
+  const content = obj['content'];
+  if (typeof content === 'string' && content.length > 0) {
+    contentParts.push({ type: 'text', text: content, metadata: null });
+  } else if (Array.isArray(content)) {
+    // Mistral may send the reasoning-to-answer transition as ordered content chunks.
+    for (const part of content) {
+      if (!isObj(part)) continue;
+      const type = strOrNull(part['type']);
+      if (type === 'text') {
+        const text = strOrNull(part['text']) ?? '';
+        if (text.length > 0) contentParts.push({ type: 'text', text, metadata: null });
+      } else if (type === 'thinking' && reasoning === null) {
+        const thinking = part['thinking'];
+        if (!Array.isArray(thinking)) continue;
+        const text = thinking.filter(isObj)
+          .filter((chunk: JsonObject): boolean => strOrNull(chunk['type']) === 'text')
+          .map((chunk: JsonObject): string => strOrNull(chunk['text']) ?? '').join('');
+        if (text.length > 0) contentParts.push(makeReasoningContentPart(text, hasReasoningContent));
       }
     }
   }
@@ -76,16 +91,15 @@ export const parseChatCompletionMessage = (obj: JsonObject): UIMessage => {
 
   const parts: UIMessagePart[] = [];
 
-  if (hasReasoningContent || (reasoning !== null && reasoning.length > 0)) {
-    parts.push({
-      type: 'reasoning',
-      reasoning: reasoning ?? '',
-      createdAt: nowIso(),
-      finishedAt: null,
-      metadata: hasReasoningContent
-        ? { [REASONING_CONTENT_PRESENT_METADATA_KEY]: true }
-        : null,
-    });
+  if ((hasReasoningContent || (reasoning !== null && reasoning.length > 0))
+    && !contentParts.some((part: UIMessagePart): boolean => part.type === 'reasoning')) {
+    parts.push(makeReasoningContentPart(reasoning ?? '', hasReasoningContent));
+  }
+  // Leading Mistral thinking belongs to this tool-call group, just like scalar reasoning_content.
+  let contentStart = 0;
+  while (contentParts[contentStart]?.type === 'reasoning') {
+    parts.push(contentParts[contentStart]);
+    contentStart++;
   }
 
   for (const tc of toolCalls) {
@@ -109,9 +123,9 @@ export const parseChatCompletionMessage = (obj: JsonObject): UIMessage => {
     parts.push(tool);
   }
 
-  if (content.length > 0) {
-    parts.push({ type: 'text', text: content, metadata: null });
-  }
+  parts.push(...contentParts.slice(contentStart));
+  const refusal = strOrNull(obj['refusal']);
+  if (refusal !== null && refusal.length > 0) parts.push({ type: 'text', text: refusal, metadata: null });
 
   for (const image of images) {
     if (!isObj(image)) continue;
@@ -123,11 +137,10 @@ export const parseChatCompletionMessage = (obj: JsonObject): UIMessage => {
     if (!url.startsWith('data:image')) {
       throw new Error('Only data uri is supported');
     }
-    // Kotlin substringAfter:前缀不存在时返回原串(对齐)
-    const prefix = 'data:image/png;base64,';
     parts.push({
       type: 'image',
-      url: url.startsWith(prefix) ? url.slice(prefix.length) : url,
+      // A complete data URI keeps separate images distinct from bare streaming fragments.
+      url,
       metadata: null,
     });
   }

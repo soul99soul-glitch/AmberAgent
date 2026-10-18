@@ -539,6 +539,51 @@ export const decodeArchive = (bytes: Uint8Array): SyncArchive => {
   return { entries };
 };
 
+const validateSyncManifest = (value: unknown): SyncManifest => {
+  const obj: JsonObject | null = asObject(value);
+  if (obj === null) throw new Error('备份 manifest 非法');
+  const archiveVersion = obj['archiveVersion'];
+  if (typeof archiveVersion !== 'number' || !Number.isInteger(archiveVersion)
+    || archiveVersion < 1 || archiveVersion > SYNC_ARCHIVE_VERSION) {
+    throw new Error('不支持的备份版本');
+  }
+  const appVersionName = obj['appVersionName'];
+  const appVersionCode = obj['appVersionCode'];
+  const createdAt = obj['createdAt'];
+  const deviceId = obj['deviceId'];
+  const deviceLabel = obj['deviceLabel'];
+  const mode = obj['mode'];
+  const passphraseProtected = obj['passphraseProtected'];
+  const payloadSha256 = obj['payloadSha256'];
+  if (typeof appVersionName !== 'string' || typeof deviceId !== 'string' || typeof deviceLabel !== 'string'
+    || typeof payloadSha256 !== 'string' || typeof passphraseProtected !== 'boolean'
+    || typeof appVersionCode !== 'number' || !Number.isFinite(appVersionCode)
+    || typeof createdAt !== 'number' || !Number.isFinite(createdAt)
+    || (mode !== 'STANDARD' && mode !== 'FULL') || obj['encrypted'] !== true) {
+    throw new Error('备份 manifest 字段非法');
+  }
+  const kdf: JsonObject | null = asObject(obj['kdf']);
+  const cipher: JsonObject | null = asObject(obj['cipher']);
+  if (kdf === null || cipher === null) throw new Error('备份加密参数缺失或非法');
+  const kdfName = kdf['name'];
+  const saltBase64 = kdf['saltBase64'];
+  const iterations = kdf['iterations'];
+  const ivBase64 = cipher['ivBase64'];
+  // v1 本端归档曾使用 PBKDF2 标签，仍须按既有恢复契约接收。
+  if ((kdfName !== 'SHA256-ITERATED' && kdfName !== 'PBKDF2' && kdfName !== 'scrypt')
+    || typeof saltBase64 !== 'string' || typeof iterations !== 'number'
+    || !Number.isInteger(iterations) || iterations <= 0
+    || cipher['name'] !== 'AES-GCM-256' || typeof ivBase64 !== 'string') {
+    throw new Error('备份加密参数非法');
+  }
+  return {
+    archiveVersion, appVersionName, appVersionCode, createdAt, deviceId, deviceLabel, mode,
+    encrypted: true, passphraseProtected,
+    kdf: { name: kdfName, saltBase64, iterations },
+    cipher: { name: 'AES-GCM-256', ivBase64 }, payloadSha256,
+  };
+};
+
 export const inspectSyncArchive = async (
   archiveBytes: Uint8Array, fileName: string,
 ): Promise<SyncInspectPreview> => {
@@ -548,10 +593,7 @@ export const inspectSyncArchive = async (
   if (manifestEntry === undefined || payloadEntry === undefined) {
     throw new Error('同步备份缺少 manifest 或 payload');
   }
-  const manifest = JSON.parse(utf8Decode(manifestEntry.data)) as SyncManifest;
-  if (typeof manifest.archiveVersion !== 'number' || manifest.archiveVersion > SYNC_ARCHIVE_VERSION) {
-    throw new Error('不支持的备份版本');
-  }
+  const manifest: SyncManifest = validateSyncManifest(JSON.parse(utf8Decode(manifestEntry.data)));
   return {
     manifest,
     fileName,

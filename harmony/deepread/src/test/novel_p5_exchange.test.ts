@@ -40,7 +40,7 @@ const fixture = async () => {
     project = withNovelUpcomingArc(project, ['入城', '调查旧事'], 102);
     project = { ...project, chapters: [chapter], materials: [material], baseMaterials: [material], materialOverrides: [], hiddenMaterialIds: [],
         creationMode: 'quickStart', quickStartSeed: { genre: '悬疑', coreIdea: '渡桥', world: '旧城', characters: '林舟', direction: '调查' },
-        polishPreference: '压缩修饰但保留事实', stateSyncReasoningEnabled: true,
+        polishPreference: '压缩修饰但保留事实', stateSyncReasoningEnabled: false,
         branchSettings: { ...project.branchSettings, preferences: '采用第三人称', suggestedChapterCount: 2 },
         structuredState: { ...emptyNovelStructuredState(), events: [{ id: 'rescue', chapterId: chapter.id,
             sourceDigest: chapterPlotSourceDigest(chapter.content), quote: '小舟救起了沈青。', summary: '林舟救人', entityRefs: ['lin'] }],
@@ -52,6 +52,7 @@ const fixture = async () => {
     await source.commitProject(project.id, (await source.workspaceStatus(project.id)).cas, 'setup', 'compat_update', () => project);
     await source.createBranch(project.id, '支线', (await source.workspaceStatus(project.id)).cas, 'fork');
     await source.commitProject(project.id, (await source.workspaceStatus(project.id)).cas, 'override', 'material_edit', current => ({ ...current,
+        stateSyncReasoningEnabled: true,
         materials: [{ ...current.materials[0], content: '支线人物', aliases: ['舟哥'], tags: ['支线'], injectionMode: 'off', enabled: false }] }));
     return { source, id: project.id };
 };
@@ -66,6 +67,31 @@ test('public import does not treat project polish preference as missing writing 
     const imported = await target.loadProject(id);
     assert.equal(imported.polishPreference, '压缩修饰但保留事实');
     assert.equal(imported.branchSettings.preferences, '');
+});
+
+test('legacy public archives without branch reasoning flags keep the project.md fallback', async () => {
+    const { source, id } = await fixture();
+    const files = buildNovelWorkspacePublicFiles(await source.publicExportPlan(id)).map(file => {
+        let text = new TextDecoder().decode(file.bytes);
+        if (file.path.endsWith('/branch.md')) text = text.replace(/^stateSyncReasoningEnabled:.*\n/m, '');
+        if (file.path === 'project.md') text = text.replace(/^stateSyncReasoningEnabled:.*$/m, 'stateSyncReasoningEnabled: "true"');
+        return { ...file, bytes: new TextEncoder().encode(text) };
+    });
+    const text = (path: string) => new TextDecoder().decode(files.find(file => file.path === path)!.bytes);
+    const plan = buildNovelWorkspaceImportPlan(parseNovelWorkspaceManifest(text('manifest.yaml'), text('project.md')), files);
+    assert.deepEqual(plan.branches.map(branch => branch.project.stateSyncReasoningEnabled), [true, true]);
+});
+
+test('public import rejects malformed reasoning flags in branch and project metadata', async () => {
+    const { source, id } = await fixture();
+    const exported = buildNovelWorkspacePublicFiles(await source.publicExportPlan(id));
+    for (const targetPath of ['project.md', exported.find(file => file.path.endsWith('/branch.md'))!.path]) {
+        const files = exported.map(file => file.path !== targetPath ? file : { ...file, bytes: new TextEncoder().encode(
+            new TextDecoder().decode(file.bytes).replace(/^stateSyncReasoningEnabled:.*\n/m, '')
+                .replace(/^---\n/, '---\nstateSyncReasoningEnabled: "enabled"\n')) });
+        const text = (path: string) => new TextDecoder().decode(files.find(file => file.path === path)!.bytes);
+        assert.throws(() => buildNovelWorkspaceImportPlan(parseNovelWorkspaceManifest(text('manifest.yaml'), text('project.md')), files), /状态同步思考开关无效/);
+    }
 });
 
 test('actual public/native file installation preserves contracts arc state evidence clarifications preferences and branch material overrides', async () => {

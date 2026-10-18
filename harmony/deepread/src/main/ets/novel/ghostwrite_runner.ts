@@ -40,10 +40,17 @@ export interface GhostwriteRunner {
   cancel(projectId: string, jobId: string): void;
 }
 
-interface ModelCallResult {
+interface ModelCallOutput {
   kind: 'completed' | 'waiting_user';
   text: string;
 }
+
+interface StoppedModelCall {
+  kind: 'stopped';
+  job: DurableGhostwriteJob;
+}
+
+type ModelCallResult = ModelCallOutput | StoppedModelCall;
 
 interface RawCandidate {
   title?: unknown;
@@ -264,7 +271,8 @@ class DefaultGhostwriteRunner implements GhostwriteRunner {
           if (job.review !== null && job.review.nextPlan === null &&
             job.currentChapterOrdinal < job.endChapterOrdinal) {
             const planned: ModelCallResult = await this.callModel(
-              job, 'planner', plannerSystemPrompt(), plannerUserPrompt(job));
+              job, claim, 'planner', plannerSystemPrompt(), plannerUserPrompt(job));
+            if (planned.kind === 'stopped') return planned.job;
             if (planned.kind === 'waiting_user') {
               return await this.waitForUser(projectId, jobId, claim, job);
             }
@@ -279,7 +287,8 @@ class DefaultGhostwriteRunner implements GhostwriteRunner {
         }
         if (job.stage === 'writing' || job.stage === 'rewriting_1' || job.stage === 'rewriting_2') {
           const generated: ModelCallResult = await this.callModel(
-            job, 'writer', writerSystemPrompt(), writerUserPrompt(job));
+            job, claim, 'writer', writerSystemPrompt(), writerUserPrompt(job));
+          if (generated.kind === 'stopped') return generated.job;
           if (generated.kind === 'waiting_user') {
             return await this.waitForUser(projectId, jobId, claim, job);
           }
@@ -291,7 +300,8 @@ class DefaultGhostwriteRunner implements GhostwriteRunner {
         }
         if (job.stage === 'reviewing') {
           const reviewed: ModelCallResult = await this.callModel(
-            job, 'reviewer', reviewSystemPrompt(), reviewUserPrompt(job));
+            job, claim, 'reviewer', reviewSystemPrompt(), reviewUserPrompt(job));
+          if (reviewed.kind === 'stopped') return reviewed.job;
           if (reviewed.kind === 'waiting_user') {
             return await this.waitForUser(projectId, jobId, claim, job);
           }
@@ -354,7 +364,7 @@ class DefaultGhostwriteRunner implements GhostwriteRunner {
   }
 
   private async callModel(
-    job: DurableGhostwriteJob, role: 'writer' | 'reviewer' | 'planner',
+    job: DurableGhostwriteJob, claim: GhostwriteClaimRef, role: 'writer' | 'reviewer' | 'planner',
     systemPrompt: string, userPrompt: string,
   ): Promise<ModelCallResult> {
     const modelTarget = this.deps.resolveModelTarget !== undefined
@@ -365,6 +375,9 @@ class DefaultGhostwriteRunner implements GhostwriteRunner {
         ? (job.modelPolicyAtStart.review ?? job.modelPolicyAtStart.writing)
         : (job.modelPolicyAtStart.stateSync ?? job.modelPolicyAtStart.writing);
     await this.deps.modelRunning.validate(modelTarget, job.projectId);
+    // Model selection/validation can outlive a durable pause, cancellation or owner lease.
+    const current: DurableGhostwriteJob = await this.safePoint(job.projectId, job.jobId, claim);
+    if (TERMINAL_OR_IDLE.includes(current.stage)) return { kind: 'stopped', job: current };
     const runId: string = this.makeId(`ghostwrite-${role}`);
     const request: NovelModelRequest = {
       runId,
@@ -390,8 +403,8 @@ class DefaultGhostwriteRunner implements GhostwriteRunner {
     return `${projectId}:${jobId}`;
   }
 
-  private collectModel(request: NovelModelRequest): Promise<ModelCallResult> {
-    return new Promise<ModelCallResult>((resolve, reject): void => {
+  private collectModel(request: NovelModelRequest): Promise<ModelCallOutput> {
+    return new Promise<ModelCallOutput>((resolve, reject): void => {
       let latestText: string = '';
       let settled: boolean = false;
       let unsubscribe: () => void = (): void => {};

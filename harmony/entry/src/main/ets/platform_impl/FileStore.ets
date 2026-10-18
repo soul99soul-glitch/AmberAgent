@@ -4,6 +4,7 @@
 // ArkTS 兼容:class implements FileStore。
 
 import { fileIo } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 import type { FileStore } from '@amber/deepread-domain';
 import { joinPath } from '@amber/deepread-domain';
 
@@ -58,13 +59,29 @@ class OhosFileStore implements FileStore {
     return await fileIo.readText(full);
   }
 
+  private async writeFully(fd: number, content: Uint8Array): Promise<void> {
+    let consumed: number = 0;
+    while (consumed < content.byteLength) {
+      const remaining: ArrayBuffer = (content.buffer as ArrayBuffer)
+        .slice(content.byteOffset + consumed, content.byteOffset + content.byteLength);
+      // offset 指文件位置;切片按实际字节数续写,也适用于 APPEND 和 UTF-8。
+      const written: number = await fileIo.write(fd, remaining);
+      if (written <= 0 || written > remaining.byteLength) {
+        throw new Error('FileStore write returned invalid byte count');
+      }
+      consumed += written;
+    }
+  }
+
   async writeText(path: string, content: string): Promise<void> {
     const full: string = await this.resolve(path);
     await this.ensureParent(full);
     const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC;
     const file: fileIo.File = await fileIo.open(full, mode);
     try {
-      await fileIo.write(file.fd, content);
+      if (content.length > 0) {
+        await this.writeFully(file.fd, util.TextEncoder.create('utf-8').encodeInto(content));
+      }
     } finally {
       await fileIo.close(file);
     }
@@ -78,7 +95,16 @@ class OhosFileStore implements FileStore {
     try {
       const stat: fileIo.Stat = await fileIo.stat(file.fd);
       const buffer: ArrayBuffer = new ArrayBuffer(stat.size);
-      await fileIo.read(file.fd, buffer);
+      let consumed: number = 0;
+      while (consumed < stat.size) {
+        const chunk: ArrayBuffer = new ArrayBuffer(stat.size - consumed);
+        const read: number = await fileIo.read(file.fd, chunk);
+        if (read <= 0 || read > chunk.byteLength) {
+          throw new Error('FileStore read returned invalid byte count before end of file');
+        }
+        new Uint8Array(buffer).set(new Uint8Array(chunk, 0, read), consumed);
+        consumed += read;
+      }
       return new Uint8Array(buffer);
     } finally {
       await fileIo.close(file);
@@ -91,9 +117,7 @@ class OhosFileStore implements FileStore {
     const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC;
     const file: fileIo.File = await fileIo.open(full, mode);
     try {
-      const exact: ArrayBuffer = (content.buffer as ArrayBuffer)
-        .slice(content.byteOffset, content.byteOffset + content.byteLength);
-      await fileIo.write(file.fd, exact);
+      await this.writeFully(file.fd, content);
     } finally {
       await fileIo.close(file);
     }
@@ -105,7 +129,9 @@ class OhosFileStore implements FileStore {
     const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.APPEND;
     const file: fileIo.File = await fileIo.open(full, mode);
     try {
-      await fileIo.write(file.fd, content);
+      if (content.length > 0) {
+        await this.writeFully(file.fd, util.TextEncoder.create('utf-8').encodeInto(content));
+      }
     } finally {
       await fileIo.close(file);
     }

@@ -5,7 +5,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   ChatTurnDeps, ChatStreamProvider, CompactPolicy, CompactResult, Conversation,
   ConversationSummary, DisplaySetting, MemoryRecallRuntimeGate, MemoryRecallSelection,
-  MemoryRecord, MemoryScope, MemoryProfileSelection,
+  MemoryRecord, MemoryScope, MemoryProfileSelection, MemoryReadRepository,
   MessageTransformer, MiniAppRecord, PreparedContext, RecentChatItem,
   SubAgentRuntimeSetting, UIMessage, MessageChunk, StreamOpts, JevPreparedToolResults,
 } from '@amber/chat-domain';
@@ -195,8 +195,9 @@ const memorySystemBlocks = async (ctx: DetachedConversationContext): Promise<str
   };
   const conversation: Conversation = ctx.conversation;
   const now: number = Date.now();
+  const repository: MemoryReadRepository = getMemoryReadRepository();
   let selections: MemoryRecallSelection[] = await recallMemorySelections(
-    gate, currentMessages(conversation), getMemoryReadRepository(), now);
+    gate, currentMessages(conversation), repository, now);
   try { selections = await memoryReranker(latestUserQuery(conversation))(selections); }
   catch (_error) { /* Keep local selections when the optional reranker fails. */ }
   const scopes: MemoryScope[] = [];
@@ -225,6 +226,7 @@ const memorySystemBlocks = async (ctx: DetachedConversationContext): Promise<str
     recordPrompt = candidate;
   }
   const injectedIds: number[] = profile.coveredIds.concat(records.map((record: MemoryRecord): number => record.id));
+  if (injectedIds.length > 0) await repository.touchMemories(injectedIds);
   for (const id of injectedIds) {
     if (!ctx.recalledMemoryIds.includes(id)) ctx.recalledMemoryIds.push(id);
   }

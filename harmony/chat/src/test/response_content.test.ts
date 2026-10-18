@@ -220,3 +220,26 @@ test('stripDeclaredResponseBlocks only strips new protocol blocks and keeps sour
   assert.match(stripped, /后/);
 });
 
+
+test('invalid closed Three.js tails preserve only current-source valid objects and cover', () => {
+  const good = { id: 'cube', type: 'box', color: '#ff6633', position: [0, 1, 0], rotation: [0, 0, 0], scale: [1, 1, 1], size: [2, 2, 2] };
+  const prefix = '```amber-three v=1 id=scene\n{"objects":[' + JSON.stringify(good);
+  const partial = byType(segment(prefix + ',', true), 'three');
+  assert.equal(partial.artifact?.scene?.objects.length, 1);
+  for (const tail of [
+    ',' + JSON.stringify({ ...good, id: 'bad', type: 'unsupported' }) + ']}',
+    ',{"id":"unfinished"',
+    ',' + JSON.stringify(good) + ']}',
+  ]) {
+    const result = byType(segment(prefix + tail + '\n```'), 'three');
+    assert.equal(result.status, 'error');
+    assert.equal(result.complete, false);
+    assert.equal(result.artifact?.status, 'error');
+    assert.deepEqual(result.artifact?.scene?.objects.map(item => item.id), ['cube']);
+    assert.equal(result.artifact?.snapshot, partial.artifact?.snapshot);
+    assert.ok(codes(result).includes('invalid-three-scene'));
+  }
+  const replaced = byType(segment('```amber-three v=1 id=scene\n{"objects":[{"id":"bad"}]}\n```'), 'three');
+  assert.equal(replaced.status, 'error');
+  assert.equal(replaced.artifact, null);
+});

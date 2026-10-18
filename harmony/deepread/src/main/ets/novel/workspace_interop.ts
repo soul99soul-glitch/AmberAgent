@@ -126,6 +126,8 @@ export const buildNovelWorkspaceImportPlan = (manifest: NovelWorkspaceManifest,
   const projectDoc: MarkdownDocument | null = textAt(files, 'project.md');
   if (projectDoc === null) throw invalidInput('工作区缺少 project.md');
   if (projectDoc.fields.has('id') && projectDoc.fields.get('id') !== manifest.projectId) throw invalidInput('项目与 manifest 标识冲突');
+  const projectStateReasoning: string | undefined = projectDoc.fields.get('stateSyncReasoningEnabled');
+  if (projectStateReasoning !== undefined && projectStateReasoning !== 'true' && projectStateReasoning !== 'false') throw invalidInput('状态同步思考开关无效');
   const names: Set<string> = new Set();
   for (const path of files.keys()) if (path.startsWith('branches/')) { const pieces: string[] = path.split('/'); if (pieces.length >= 3) names.add(pieces[1]); }
   if (names.size === 0 && manifest.dialect !== 'ios') names.add(manifest.activeBranch);
@@ -173,11 +175,11 @@ export const buildNovelWorkspaceImportPlan = (manifest: NovelWorkspaceManifest,
     project.materialOverrides = [];
     project.hiddenMaterialIds = [];
     project.polishPreference = projectDoc.fields.get('polishPreference') ?? '';
-    const stateReasoning = projectDoc.fields.get('stateSyncReasoningEnabled');
+    const branchMetadata: MarkdownDocument | null = textAt(files, prefix + 'branch.md');
+    const stateReasoning = branchMetadata?.fields.get('stateSyncReasoningEnabled') ?? projectStateReasoning;
     if (stateReasoning !== undefined && stateReasoning !== 'true' && stateReasoning !== 'false') throw invalidInput('状态同步思考开关无效');
     project.stateSyncReasoningEnabled = stateReasoning === 'true';
     project.materials = globalMaterials.map((m: NovelMaterial): NovelMaterial => ({ ...m }));
-    const branchMetadata: MarkdownDocument | null = textAt(files, prefix + 'branch.md');
     project.settingProposals = branchMetadata?.fields.get('harmonyInboxComplete') === 'true' ? []
       : globalProposals.map((p: NovelSettingProposal): NovelSettingProposal => ({ ...p }));
     const ordered: OrderedChapter[] = [];
@@ -456,7 +458,8 @@ export const buildNovelWorkspacePublicFiles = (plan: NovelWorkspaceImportPlan): 
   for (const branch of plan.branches) {
     const prefix: string = `branches/${branch.pathName}/`;
     put(prefix + 'branch.md', render(fieldMap([['id', branch.id], ['kind', 'branch'], ['title', branch.name],
-      ['syncStatus', branch.plotStale ? 'needsSync' : 'synchronized'], ['harmonyInboxComplete', 'true']]), '', textAt(originals, prefix + 'branch.md')));
+      ['syncStatus', branch.plotStale ? 'needsSync' : 'synchronized'], ['harmonyInboxComplete', 'true'],
+      ['stateSyncReasoningEnabled', String(branch.project.stateSyncReasoningEnabled ?? false)]]), '', textAt(originals, prefix + 'branch.md')));
     let ordinal: number = 0;
     for (const chapter of branch.project.chapters) {
       if (!chapter.discarded) ordinal++;

@@ -129,11 +129,12 @@ const addContentItem = (
     out.push({ role, content: textPart.text });
     return;
   }
+  // Easy input messages retain their role but use input content types, including assistant image history.
   const content: JsonObject[] = [];
   for (const part of parts) {
     if (part.type === 'text') {
       content.push({
-        type: role === 'user' ? 'input_text' : 'output_text',
+        type: 'input_text',
         text: part.text,
       });
     } else if (part.type === 'image') {
@@ -144,7 +145,7 @@ const addContentItem = (
       }
       const encoded = encode(img.url);
       content.push({
-        type: role === 'user' ? 'input_image' : 'output_image',
+        type: 'input_image',
         image_url: encoded,
       });
     }

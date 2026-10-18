@@ -1,12 +1,18 @@
 package app.amber.ai.provider.providers
 
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.MessageChunk
+import app.amber.ai.ui.MessageStreamAccumulator
+import app.amber.ai.ui.UIMessageChoice
+import app.amber.ai.ui.handleMessageChunk
 import app.amber.ai.util.ImageEncodingException
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -43,6 +49,52 @@ class GoogleProviderMessageTest {
         )
         method.isAccessible = true
         return method.invoke(provider, messages) as JsonArray
+    }
+
+    @Test
+    fun `complete inline images remain separate in streaming and immutable generation paths`() {
+        val parsePart = GoogleProvider::class.java.getDeclaredMethod("parseMessagePart", JsonObject::class.java)
+        parsePart.isAccessible = true
+        val parts = listOf(
+            """{"inlineData":{"mimeType":"image/png","data":"QUJDRA=="},"thoughtSignature":"sig_1"}""",
+            """{"inlineData":{"mimeType":"image/jpeg","data":"RUZHSA=="},"thoughtSignature":"sig_2"}""",
+        ).map { source ->
+            parsePart.invoke(provider, Json.parseToJsonElement(source).jsonObject) as UIMessagePart
+        }
+        val chunk = MessageChunk(
+            id = "google-images",
+            model = "gemini-test",
+            choices = listOf(
+                UIMessageChoice(
+                    index = 0,
+                    delta = null,
+                    message = UIMessage(role = MessageRole.ASSISTANT, parts = parts),
+                    finishReason = null,
+                )
+            ),
+        )
+        val initial = listOf(UIMessage.user("Generate two images"))
+        val accumulator = MessageStreamAccumulator(initial)
+        parts.forEach { part ->
+            accumulator.append(
+                chunk.copy(
+                    choices = listOf(
+                        UIMessageChoice(
+                            index = 0,
+                            delta = UIMessage(role = MessageRole.ASSISTANT, parts = listOf(part)),
+                            message = null,
+                            finishReason = null,
+                        )
+                    )
+                )
+            )
+        }
+
+        listOf(accumulator.snapshot().last(), initial.handleMessageChunk(chunk).last()).forEach { message ->
+            val images = message.parts.filterIsInstance<UIMessagePart.Image>()
+            assertEquals(listOf("data:image/png;base64,QUJDRA==", "data:image/jpeg;base64,RUZHSA=="), images.map { it.url })
+            assertEquals(listOf("sig_1", "sig_2"), images.map { it.metadata?.get("thoughtSignature")?.jsonPrimitive?.content })
+        }
     }
 
     @Test

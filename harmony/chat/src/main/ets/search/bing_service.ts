@@ -22,11 +22,11 @@ const asBingOptions = (o: SearchServiceOptions): BingLocalOptions => {
   return o;
 };
 
-// decodeBingUrl(:115-124):query 首段 key ∈ {u,url} → URLDecoder;否则原文
+// 仅 Bing /ck/a 的 u/url 是跳转参数;普通结果 URL 的同名参数属于目标页面。
 // 国际版 /ck/a 跳转的 u 值为 'a1' + base64url(目标 URL),需再解一层
 const decodeBingUrl = (raw: string): string => {
+  if (!/^https?:\/\/(?:[a-z0-9-]+\.)*bing\.com\/ck\/a\?/i.test(raw.trim())) return raw;
   const qIdx: number = raw.indexOf('?');
-  if (qIdx < 0) return raw;
   const query: string = raw.slice(qIdx + 1).split('#')[0];
   for (const seg of query.split('&')) {
     const eq: number = seg.indexOf('=');

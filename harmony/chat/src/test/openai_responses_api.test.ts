@@ -125,6 +125,49 @@ test('buildResponsesInput: assistant tools → function_call + output', () => {
   assert.equal(fc['arguments'], '{"tz":"UTC"}');
 });
 
+test('Responses replays foreign assistant image history as easy input with the original role and order', () => {
+  const messages = [makeUserMessage('Draw a scene'), makeUIMessage('assistant', [
+    { type: 'text', text: 'First view', metadata: null },
+    { type: 'image', url: 'file:///foreign.png', metadata: null },
+    { type: 'text', text: 'Second view', metadata: null },
+    { type: 'image', url: 'https://example.test/foreign.png', metadata: null },
+  ]), makeUserMessage('Describe the scene')];
+  const before = JSON.stringify(messages);
+  const body = buildResponsesRequestBody({ messages, params: makeTextGenerationParams(),
+    setting: makeProviderSettingOpenAI({ useResponseApi: true }), stream: false,
+    encodeImage: (url): string => `data:image/png;base64,${url}` });
+  assert.deepEqual(body['input'], [
+    { role: 'user', content: 'Draw a scene' },
+    { role: 'assistant', content: [
+      { type: 'input_text', text: 'First view' },
+      { type: 'input_image', image_url: 'data:image/png;base64,file:///foreign.png' },
+      { type: 'input_text', text: 'Second view' },
+      { type: 'input_image', image_url: 'data:image/png;base64,https://example.test/foreign.png' },
+    ] },
+    { role: 'user', content: 'Describe the scene' },
+  ]);
+  assert.equal(JSON.stringify(messages), before);
+});
+
+test('Responses native image call replay retains its id between surrounding history content', () => {
+  const encoded: string[] = [];
+  const input = buildResponsesInput([makeUIMessage('assistant', [
+    { type: 'text', text: 'Foreign image', metadata: null },
+    { type: 'image', url: 'file:///foreign.png', metadata: null },
+    { type: 'image', url: 'file:///native.png', metadata: { openai_image_call_id: 'ig_native' } },
+    { type: 'text', text: 'Native result', metadata: null },
+  ])], (url): string => { encoded.push(url); return `encoded:${url}`; });
+  assert.deepEqual(input, [
+    { role: 'assistant', content: [
+      { type: 'input_text', text: 'Foreign image' },
+      { type: 'input_image', image_url: 'encoded:file:///foreign.png' },
+    ] },
+    { type: 'image_generation_call', id: 'ig_native' },
+    { role: 'assistant', content: 'Native result' },
+  ]);
+  assert.deepEqual(encoded, ['file:///foreign.png']);
+});
+
 test('reasoning effort mapping', () => {
   assert.equal(openAIResponsesReasoningEffort('auto'), null);
   assert.equal(openAIResponsesReasoningEffort('off'), 'low');

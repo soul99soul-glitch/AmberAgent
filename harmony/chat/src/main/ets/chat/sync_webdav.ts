@@ -57,7 +57,9 @@ export const webDavBuildUrl = (config: WebDavConfig, segments: string[]): string
   const base = config.url.replace(/\/+$/, '');
   const parts: string[] = [];
   const path = config.path.replace(/^\/+|\/+$/g, '');
-  if (path.length > 0) parts.push(path);
+  if (path.length > 0) {
+    for (const segment of path.split('/')) parts.push(encodeURIComponent(segment));
+  }
   for (const seg of segments) {
     const s = seg.replace(/^\/+|\/+$/g, '');
     if (s.length > 0) parts.push(encodeURIComponent(s));

@@ -22,8 +22,9 @@ const decodeDuckDuckGoUrl = (rawHref: string): string => {
   } else if (href.startsWith('/')) {
     normalized = 'https://duckduckgo.com' + href;
   }
+  // uddg 只在 DuckDuckGo /l/ 跳转端点解包,不能改写普通页面的查询参数。
+  if (!/^https?:\/\/(?:[a-z0-9-]+\.)*duckduckgo\.com\/l\/\?/i.test(normalized)) return normalized;
   const qIdx: number = normalized.indexOf('?');
-  if (qIdx < 0) return normalized;
   const query: string = normalized.slice(qIdx + 1).split('#')[0];
   for (const seg of query.split('&')) {
     const eq: number = seg.indexOf('=');

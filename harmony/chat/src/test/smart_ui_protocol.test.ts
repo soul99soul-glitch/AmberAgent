@@ -10,6 +10,7 @@ import {
   validateSmartUiNode,
 } from '../main/ets/chat/smart_ui/protocol.ts';
 import type { SmartUiDiagnostic, SmartUiNodeType } from '../main/ets/chat/smart_ui/protocol.ts';
+import type { JsonObject } from '../main/ets/chat/json.ts';
 
 interface SmartUiModelCase {
   id: string;
@@ -49,9 +50,10 @@ test('presentation tokens are type-specific, composable, and survive streaming u
   for (const tone of ['neutral', 'accent', 'success', 'warning', 'info']) {
     assert.ok(validateSmartUiNode({ ...metric, tone }).node, tone);
   }
-  for (const invalid of [{ ...metric, variant: 'chips' }, { ...root, variant: 'heading' },
+  const invalidNodes: JsonObject[] = [{ ...metric, variant: 'chips' }, { ...root, variant: 'heading' },
     { ...metric, layout: 'row' }, { ...root, layout: 'masonry' }, { ...metric, tone: '#ff0000' },
-    { op: 'node', id: 'input', type: 'input', state: 'note', variant: 'primary' }]) {
+    { op: 'node', id: 'input', type: 'input', state: 'note', variant: 'primary' }];
+  for (const invalid of invalidNodes) {
     assert.equal(validateSmartUiNode(invalid).node, null);
   }
 });

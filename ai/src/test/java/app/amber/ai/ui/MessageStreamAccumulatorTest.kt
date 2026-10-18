@@ -7,6 +7,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MessageStreamAccumulatorTest {
+    @Test
+    fun `unkeyed base64 image fragments still append in order`() {
+        val accumulator = MessageStreamAccumulator(listOf(UIMessage.user("go")))
+        accumulator.append(chunk(UIMessagePart.Image("QUJD")))
+        accumulator.append(chunk(UIMessagePart.Image("RA==")))
+
+        assertEquals(
+            "data:image/png;base64,QUJDRA==",
+            accumulator.snapshot().last().parts.filterIsInstance<UIMessagePart.Image>().single().url,
+        )
+    }
+
     @Test(timeout = 4_000)
     fun `20k tiny text and reasoning chunks merge without repeated full string copies`() {
         val accumulator = MessageStreamAccumulator(

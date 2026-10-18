@@ -20,6 +20,24 @@ test('decoded remote filename is encoded exactly once for requests', () => {
     'https://dav.example.com/dav/amber_agent_backups/%E5%A4%87%E4%BB%BD%20%231%25.abin');
 });
 
+test('plain nested DAV directories preserve special characters through client requests', async () => {
+  const requests: WebDavRequest[] = [];
+  const config: WebDavConfig = { ...cfg, url: 'https://dav.example.com/dav%20base/', path: '/备份 #1/2026?100%/' };
+  const client = createWebDavClient({ fetch: async (request: WebDavRequest) => {
+    requests.push(request);
+    return request.method === 'PROPFIND' ? response(207, '<multistatus/>') : response(201);
+  } }, config);
+  await client.mkcol('');
+  await client.put('文件 #1%.abin', bytes('backup'));
+  await client.get('文件 #1%.abin');
+  await client.list();
+  const directory = 'https://dav.example.com/dav%20base/%E5%A4%87%E4%BB%BD%20%231/2026%3F100%25';
+  const file = directory + '/%E6%96%87%E4%BB%B6%20%231%25.abin';
+  assert.deepEqual(requests.map(request => request.url), [directory, file, file, directory + '/']);
+  assert.equal(new URL(requests[1].url).hash, '');
+  assert.equal(new URL(requests[1].url).search, '');
+});
+
 test('backup file name format', () => {
   assert.match(webDavBackupFileName(0), /^amber-backup-.*\.abin$/);
 });

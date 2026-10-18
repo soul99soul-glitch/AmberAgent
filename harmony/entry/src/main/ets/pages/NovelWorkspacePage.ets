@@ -424,6 +424,7 @@ struct NovelWorkspacePage {
   onPageHide(): void {
     this.closeControlSheet();
     this.studioPageVisible = false;
+    this.polishPollToken++;
     if (this.composerModelSheetOpen) this.closeComposerModelSheet(this.composerModelSession, true);
     this.modelOptionsLoadToken++;
     this.clearStudioFeedback();
@@ -767,10 +768,11 @@ struct NovelWorkspacePage {
 
   private schedulePolishPoll(): void {
     const job: DurablePolishJob | null = this.polishJob;
-    if (job === null || !this.polishStageRuns(job.stage) || !this.pageAlive) return;
+    if (job === null || (!this.polishStageRuns(job.stage) && job.stage !== 'waiting_system') ||
+      !this.pageAlive || !this.studioPageVisible) return;
     const token: number = ++this.polishPollToken;
     setTimeout((): void => {
-      if (!this.pageAlive || token !== this.polishPollToken) return;
+      if (!this.pageAlive || !this.studioPageVisible || token !== this.polishPollToken) return;
       void this.pollPolish(token);
     }, 1200);
   }
@@ -780,18 +782,20 @@ struct NovelWorkspacePage {
       const previous: DurablePolishJob | null = this.polishJob;
       const next: DurablePolishJob | null = await getNovelCreation().polishJob(
         this.projectId, this.requestedPolishJobId);
-      if (!this.pageAlive || token !== this.polishPollToken) return;
+      if (!this.pageAlive || !this.studioPageVisible || token !== this.polishPollToken) return;
       this.polishJob = next;
       const previousProgress: number = previous?.progress.length ?? 0;
       const nextProgress: number = next?.progress.length ?? 0;
       if (previousProgress !== nextProgress || previous?.stage !== next?.stage) {
-        this.project = await getNovelCreation().open(this.projectId);
-        this.workspaceStatus = await getNovelCreation().workspaceStatus(this.projectId);
-        if (!this.pageAlive || token !== this.polishPollToken) return;
+        const project: NovelProject = await getNovelCreation().open(this.projectId);
+        const status: NovelWorkspaceStatus = await getNovelCreation().workspaceStatus(this.projectId);
+        if (!this.pageAlive || !this.studioPageVisible || token !== this.polishPollToken) return;
+        this.project = project;
+        this.workspaceStatus = status;
       }
       this.schedulePolishPoll();
     } catch (error) {
-      if (this.pageAlive && token === this.polishPollToken) {
+      if (this.pageAlive && this.studioPageVisible && token === this.polishPollToken) {
         this.errorMsg = `润色状态刷新失败：${String(error)}`;
       }
     }

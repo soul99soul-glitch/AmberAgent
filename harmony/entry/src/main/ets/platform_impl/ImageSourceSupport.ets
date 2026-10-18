@@ -11,6 +11,9 @@ export interface PreparedImageSource {
   temporary: boolean;
 }
 
+// 与聊天图片缓存的上限一致，保存/分享原图也支持 5 MiB 以上的图片。
+const IMAGE_MAX_BYTES: number = 25 * 1024 * 1024;
+
 const imageExtension = (bytes: Uint8Array, fallback: string): string => {
   if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png';
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpg';
@@ -55,12 +58,14 @@ export const prepareImageSource = async (url: string, fallbackExtension: string 
     try {
       const response: http.HttpResponse = await request.request(url, {
         method: http.RequestMethod.GET, expectDataType: http.HttpDataType.ARRAY_BUFFER,
+        maxLimit: IMAGE_MAX_BYTES,
         connectTimeout: 30000, readTimeout: 60000,
       });
       if (response.responseCode < 200 || response.responseCode >= 300 || !(response.result instanceof ArrayBuffer)) {
         throw new Error('图片下载失败');
       }
       bytes = new Uint8Array(response.result as ArrayBuffer);
+      if (bytes.byteLength > IMAGE_MAX_BYTES) throw new Error('图片超过 25MB，无法保存或分享');
     } finally {
       request.destroy();
     }

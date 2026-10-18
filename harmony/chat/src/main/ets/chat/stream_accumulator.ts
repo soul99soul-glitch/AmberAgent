@@ -65,6 +65,42 @@ const findReasoningTarget = (parts: UIMessagePart[], incoming: UIMessagePartReas
     ? parts.length - 1 : -1;
 };
 
+const imageCallId = (part: UIMessagePartImage): string | null => {
+  const id = part.metadata?.['openai_image_call_id'];
+  return typeof id === 'string' && id.length > 0 ? id : null;
+};
+
+const completeImageUrl = (url: string): string =>
+  url.startsWith('data:') ? url : `data:image/png;base64,${url}`;
+
+const appendImagePart = (parts: UIMessagePart[], incoming: UIMessagePartImage): UIMessagePart[] => {
+  const callId = imageCallId(incoming);
+  if (callId !== null) {
+    const target = parts.findIndex((part: UIMessagePart): boolean =>
+      part.type === 'image' && imageCallId(part) === callId);
+    const previous = parts[target];
+    if (previous?.type === 'image') {
+      // Image-generation results complete a call, including when text separates its events.
+      const merged: UIMessagePartImage = {
+        ...previous,
+        url: incoming.url.length > 0 ? completeImageUrl(incoming.url) : previous.url,
+        metadata: incoming.metadata !== null ? incoming.metadata : previous.metadata,
+      };
+      return parts.map((part: UIMessagePart, index: number): UIMessagePart => index === target ? merged : part);
+    }
+  }
+  const last = parts[parts.length - 1];
+  if (callId === null && last?.type === 'image' && imageCallId(last) === null && !incoming.url.startsWith('data:')) {
+    // Bare chunks retain the existing fragment contract; complete data URIs start a new image.
+    return [...parts.slice(0, -1), {
+      ...last,
+      url: last.url + incoming.url,
+      metadata: incoming.metadata !== null ? incoming.metadata : last.metadata,
+    }];
+  }
+  return [...parts, { ...incoming, url: completeImageUrl(incoming.url) }];
+};
+
 // ===== coalesceStreamParts(MessageStreamAccumulator.kt:264-320) =====
 // 合并相邻 Text、丢弃空 reasoning(带 explicit 标记的空 reasoning 保留一个占位)
 export const coalesceStreamParts = (parts: UIMessagePart[]): UIMessagePart[] => {
@@ -211,24 +247,7 @@ class MutableMessage {
   }
 
   private appendImage(deltaPart: UIMessagePartImage): void {
-    const last: UIMessagePart | undefined = this.parts[this.parts.length - 1];
-    if (last !== undefined && last.type === 'image') {
-      const merged: UIMessagePartImage = {
-        ...last,
-        url: last.url + deltaPart.url,
-        metadata: deltaPart.metadata !== null ? deltaPart.metadata : last.metadata,
-      };
-      this.parts[this.parts.length - 1] = merged;
-    } else {
-      this.parts.push({
-        ...deltaPart,
-        // 已是完整 data URI(如 JPEG/WebP)保持原样,只给裸 base64 补 PNG 前缀,
-        // 避免拼出 data:image/png;base64,data:image/jpeg;... 双前缀
-        url: deltaPart.url.startsWith('data:')
-          ? deltaPart.url
-          : `data:image/png;base64,${deltaPart.url}`,
-      });
-    }
+    this.parts = appendImagePart(this.parts, deltaPart);
   }
 
   private appendReasoning(deltaPart: UIMessagePartReasoning): void {
@@ -407,17 +426,7 @@ const appendPartImmutable = (acc: UIMessagePart[], deltaPart: UIMessagePart): UI
       return [...acc, deltaPart];
     }
     case 'image': {
-      const last = acc[acc.length - 1];
-      if (last !== undefined && last.type === 'image') {
-        return [...acc.slice(0, -1), {
-          ...last,
-          url: last.url + deltaPart.url,
-          metadata: deltaPart.metadata !== null ? deltaPart.metadata : last.metadata,
-        }];
-      }
-      return [...acc, { ...deltaPart, url: deltaPart.url.startsWith('data:')
-        ? deltaPart.url
-        : `data:image/png;base64,${deltaPart.url}` }];
+      return appendImagePart(acc, deltaPart);
     }
     case 'reasoning': {
       if (deltaPart.reasoning.length === 0 && deltaPart.metadata === null) return acc;

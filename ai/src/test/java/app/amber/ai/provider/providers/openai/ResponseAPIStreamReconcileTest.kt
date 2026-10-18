@@ -5,10 +5,12 @@ import app.amber.ai.ui.MessageStreamAccumulator
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.handleMessageChunk
 import app.amber.ai.ui.isStreamArgsReplace
 import app.amber.ai.util.HttpException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -88,6 +90,67 @@ class ResponseAPIStreamReconcileTest {
 
     private fun messageOutput(content: String) =
         """{"type":"message","id":"msg_1","role":"assistant","content":[$content]}"""
+
+    private fun imageAdded(id: String) =
+        """{"type":"response.output_item.added","item":{"id":"$id","type":"image_generation_call","status":"in_progress"}}"""
+
+    private fun imageDone(id: String, result: String) =
+        """{"type":"response.output_item.done","item":{"id":"$id","type":"image_generation_call","status":"completed","result":"$result"}}"""
+
+    /** Exercise the streaming accumulator and the immutable generation path with identical parsed chunks. */
+    private fun accumulateImagesThroughBothPaths(vararg events: String): List<List<UIMessagePart.Image>> {
+        val reconciler = ResponseStreamReconciler()
+        val accumulator = MessageStreamAccumulator(listOf(UIMessage.user("go")))
+        var messages = listOf(UIMessage.user("go"))
+        events.forEach { event ->
+            parse(event)?.let { parsed ->
+                val chunk = reconciler.reconcile(parsed)
+                accumulator.append(chunk)
+                messages = messages.handleMessageChunk(chunk)
+            }
+        }
+        return listOf(accumulator.snapshot().last(), messages.last()).map { message ->
+            message.parts.filterIsInstance<UIMessagePart.Image>()
+        }
+    }
+
+    @Test
+    fun `consecutive image generation calls retain independent payloads and identities`() {
+        accumulateImagesThroughBothPaths(
+            imageAdded("ig_1"),
+            imageDone("ig_1", "QUJDRA=="),
+            imageAdded("ig_2"),
+            imageDone("ig_2", "RUZHSA=="),
+        ).forEach { images ->
+            assertEquals(listOf("data:image/png;base64,QUJDRA==", "data:image/png;base64,RUZHSA=="), images.map { it.url })
+            assertEquals(listOf("ig_1", "ig_2"), images.map { it.metadata?.get("openai_image_call_id")?.jsonPrimitive?.content })
+        }
+    }
+
+    @Test
+    fun `interleaved image generation results update their own placeholders`() {
+        accumulateImagesThroughBothPaths(
+            imageAdded("ig_1"),
+            imageAdded("ig_2"),
+            imageDone("ig_2", "RUZHSA=="),
+            textDelta("Generated images"),
+            imageDone("ig_1", "QUJDRA=="),
+        ).forEach { images ->
+            assertEquals(listOf("data:image/png;base64,QUJDRA==", "data:image/png;base64,RUZHSA=="), images.map { it.url })
+            assertEquals(listOf("ig_1", "ig_2"), images.map { it.metadata?.get("openai_image_call_id")?.jsonPrimitive?.content })
+        }
+    }
+
+    @Test
+    fun `one image generation call replaces its placeholder once`() {
+        accumulateImagesThroughBothPaths(
+            imageAdded("ig_1"),
+            imageDone("ig_1", "QUJDRA=="),
+        ).forEach { images ->
+            assertEquals("data:image/png;base64,QUJDRA==", images.single().url)
+            assertEquals("ig_1", images.single().metadata?.get("openai_image_call_id")?.jsonPrimitive?.content)
+        }
+    }
 
     // ==================== parser 层 ====================
 

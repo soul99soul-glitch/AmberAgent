@@ -16,7 +16,7 @@
 //     event-stream→inline 行解析/else 空体无 ct→return,否则
 //     StreamableHttpError(-1,'Unexpected content type: $<ct>')(:151-176);
 //     terminateSession:405 容忍,他错 'Failed to terminate session: <desc>'
-//     (:201-223);startSseSession:GET accept(json)+(resumptionToken ?: lastEventId)
+//     (:201-223);startSseSession:GET accept(event-stream,按 MCP 协议修正)+(resumptionToken ?: lastEventId)
 //     →Last-Event-ID;405/ct=json → 静默返回(:247-262);collectSse:id 沉淀+
 //     onResumptionToken;null/'message' 解码(replay 改 id)/'error'→onError
 //     (:280-314);handleInlineSse:id:/event:/data: trim **concat 无换行**(:362-366
@@ -491,13 +491,22 @@ export class McpStreamableHttpTransport implements McpTransport {
   // :179-196
   async close(): Promise<void> {
     if (!this.initialized) return;
+    // A pending GET must observe closure before it can publish its stream.
+    this.initialized = false;
     try {
       await this.terminateSession();
-      if (this.sseSession !== null) await this.sseSession.cancel();
     } catch {
       // 清理期错误忽略(:190-192)
+    }
+    const stream: McpSseStream | null = this.sseSession;
+    this.sseSession = null;
+    try {
+      if (stream !== null) await stream.cancel();
+    } catch {
+      // 服务端终止失败仍需关闭本地流;取消失败不阻止本地状态清理。
     } finally {
-      this.initialized = false;
+      this.sessionId = null;
+      this.lastEventId = null;
       this.closeBlock();
     }
   }
@@ -522,9 +531,11 @@ export class McpStreamableHttpTransport implements McpTransport {
   private async startSseSession(
     resumptionToken: string | null, replayMessageId: JsonValue | null,
   ): Promise<void> {
+    if (!this.initialized) return;
     if (this.sseSession !== null) await this.sseSession.cancel();
+    if (!this.initialized) return;
     const protocol: Array<[string, string]> = [...this.applyCommonHeaders([])];
-    protocol.push(['Accept', 'application/json']);
+    protocol.push(['Accept', 'text/event-stream']);
     const token: string | null = resumptionToken ?? this.lastEventId;
     if (token !== null) protocol.push([MCP_RESUMPTION_TOKEN_HEADER, token]);
     const headers: Array<[string, string]> =
@@ -534,6 +545,7 @@ export class McpStreamableHttpTransport implements McpTransport {
     try {
       stream = await this.port.openSse(this.url, headers);
     } catch (e) {
+      if (!this.initialized) return;
       // :247-262 — 405(不支持 GET/SSE)/ct=json(JSON-only 模式)→ 静默返回
       if (e instanceof McpSseOpenError) {
         if (e.status === 405) return;
@@ -546,6 +558,10 @@ export class McpStreamableHttpTransport implements McpTransport {
       this.errorBlock(err);
       throw err;
     }
+    if (!this.initialized) {
+      await stream.cancel();
+      return;
+    }
     this.sseSession = stream;
     this.collectSse(stream, replayMessageId).catch((): void => {});
   }
@@ -556,6 +572,7 @@ export class McpStreamableHttpTransport implements McpTransport {
     try {
       for (;;) {
         const event: McpSseEvent | null = await session.next();
+        if (!this.initialized || this.sseSession !== session) break;
         if (event === null) break;
         if (event.id !== null) {
           this.lastEventId = event.id;
@@ -576,7 +593,9 @@ export class McpStreamableHttpTransport implements McpTransport {
         }
       }
     } catch (e) {
-      this.errorBlock(e instanceof Error ? e : new Error(String(e)));
+      if (this.initialized && this.sseSession === session) {
+        this.errorBlock(e instanceof Error ? e : new Error(String(e)));
+      }
     }
   }
 

@@ -292,33 +292,33 @@ const makeThreeSegment = (block: FenceBlock, id: string | null, body: string): R
     diagnostics.push(diagnostic('content-limit', `3D 内容超过 ${MAX_THREE_BYTES} 字节限制`));
     return artifactSegment('three', block, id, body, null, 'error', diagnostics);
   }
+  let scene: ThreeSceneSpec | null = null;
+  let status: ResponseContentStatus = 'partial';
   if (block.closed) {
     try {
       const parsed: JsonValue = JSON.parse(body) as JsonValue;
-      const scene: ThreeSceneSpec | null = normalizeThreeScene(parsed);
+      scene = normalizeThreeScene(parsed);
       if (scene === null) throw new Error('3D 场景结构无效或超出限制');
-      const artifact: VisualArtifact = {
-        type: 'three', status: 'ready', closed: block.closed, sourceStart: block.sourceStart,
-        id, raw: body, content: jsonString(scene),
-        snapshot: renderThreeSceneCover(scene), scene,
-      };
-      return artifactSegment('three', block, id, body, artifact, 'ready', diagnostics);
+      status = 'ready';
     } catch (error) {
       diagnostics.push(diagnostic('invalid-three-scene', error instanceof Error ? error.message : '3D 场景结构无效'));
-      return artifactSegment('three', block, id, body, null, 'error', diagnostics);
+      status = 'error';
     }
   }
-  const objects = completedThreeObjects(body);
-  if (objects.length === 0) {
-    return artifactSegment('three', block, id, body, null, 'partial', diagnostics);
+  if (scene === null) {
+    // A malformed terminal tail must not remove objects already safe to preview.
+    const objects = completedThreeObjects(body);
+    if (objects.length > 0) scene = { objects };
   }
-  const scene: ThreeSceneSpec = { objects };
+  if (scene === null) {
+    return artifactSegment('three', block, id, body, null, status, diagnostics);
+  }
   const artifact: VisualArtifact = {
-    type: 'three', status: 'partial', closed: block.closed, sourceStart: block.sourceStart,
+    type: 'three', status, closed: block.closed, sourceStart: block.sourceStart,
     id, raw: body, content: jsonString(scene),
     snapshot: renderThreeSceneCover(scene), scene,
   };
-  return artifactSegment('three', block, id, body, artifact, 'partial', diagnostics);
+  return artifactSegment('three', block, id, body, artifact, status, diagnostics);
 };
 
 const makeUiSegment = (

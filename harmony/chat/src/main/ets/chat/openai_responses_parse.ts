@@ -84,7 +84,7 @@ const extractMessageOutputText = (item: JsonObject): string => {
   const texts: string[] = [];
   for (const part of content) {
     if (!isObj(part)) continue;
-    const t = strOrNull(part['text']);
+    const t = strOrNull(part['type']) === 'refusal' ? strOrNull(part['refusal']) : strOrNull(part['text']);
     if (t !== null && t.length > 0) texts.push(t);
   }
   return texts.join('');
@@ -142,12 +142,16 @@ export const parseResponsesOutput = (jsonObject: JsonObject, terminalStatus?: st
       const name = strOrNull(outputItem['name']);
       if (callId === null || name === null) continue;
       parts.push(makeToolPart(callId, name, strOrNull(outputItem['arguments']) ?? ''));
+    } else if (type === 'image_generation_call') {
+      const result = strOrNull(outputItem['result']);
+      if (result !== null) parts.push(makeImagePart(result,
+        id !== null ? { [OPENAI_IMAGE_CALL_ID_METADATA_KEY]: id } : undefined));
     } else if (type === 'message') {
       const content = outputItem['content'];
       if (Array.isArray(content)) {
         for (const part of content) {
           if (!isObj(part)) continue;
-          const t = strOrNull(part['text']);
+          const t = strOrNull(part['type']) === 'refusal' ? strOrNull(part['refusal']) : strOrNull(part['text']);
           if (t !== null) {
             parts.push(makeTextPart(t));
           }
@@ -257,14 +261,15 @@ export const parseResponsesStreamEvent = (jsonObject: JsonObject): MessageChunk 
     };
   }
 
-  if (chunkType === 'response.output_text.done') {
+  if (chunkType === 'response.output_text.done' || chunkType === 'response.refusal.done') {
     return {
       id: strOrNull(jsonObject['item_id']) ?? '',
       model: '',
       choices: [{
         index: 0,
         delta: null,
-        message: makeAssistantMessage(strOrNull(jsonObject['text']) ?? ''),
+        message: makeAssistantMessage(strOrNull(jsonObject[
+          chunkType === 'response.refusal.done' ? 'refusal' : 'text']) ?? ''),
         finishReason: null,
       }],
       usage: null,
@@ -608,6 +613,11 @@ export class ResponseStreamReconciler {
     }
 
     for (const p of message.parts) {
+      if (p.type === 'image') {
+        // The accumulator completes/replaces an existing image by its native call ID.
+        parts.push(p);
+        continue;
+      }
       if (p.type !== 'reasoning') continue;
       const reasoningId = p.metadata !== null ? strOrNull(p.metadata[REASONING_ID_METADATA_KEY]) : null;
       const streamed = this.hasStreamedReasoning || (reasoningId !== null && this.streamedReasoningIds.has(reasoningId));

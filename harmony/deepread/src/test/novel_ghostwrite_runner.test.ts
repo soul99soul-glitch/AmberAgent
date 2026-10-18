@@ -13,6 +13,7 @@ import {
   applyGhostwriteReview, assertGhostwriteClaim, claimGhostwriteJob,
   freezeGhostwritePlan, ghostwriteReceipt, makeGhostwriteCandidate, makeGhostwriteJob,
   transitionGhostwriteJob, validateGhostwriteReview, withGhostwriteCandidate,
+  pauseGhostwriteJob,
 } from '../main/ets/novel/ghostwrite.ts';
 import {
   createGhostwriteRunner,
@@ -279,6 +280,82 @@ const roleOf = (request: NovelModelRequest): 'writer' | 'reviewer' | 'planner' =
   if (request.systemPrompt.includes('联合审核员')) return 'reviewer';
   return 'planner';
 };
+
+for (const role of ['writer', 'reviewer', 'planner'] as const) {
+  for (const boundary of ['resolve', 'validate'] as const) {
+    for (const stoppedStage of ['paused', 'cancelled'] as const) {
+      test(`ghostwrite runner: ${role} ${boundary} 等待期间 ${stoppedStage} 不启动模型`, async () => {
+        let job = transitionGhostwriteJob(makeJob(2), 'writing', NOW + 1);
+        if (role !== 'writer') {
+          const plan = job.frozenPlan!;
+          job = withGhostwriteCandidate(job, makeGhostwriteCandidate({
+            candidateId: 'candidate-before-stop', chapterOrdinal: 1, title: '已写章节', content: '已写正文',
+            planId: plan.planId, planDigest: plan.digest, attempt: 0,
+          }), NOW + 2);
+          if (role === 'planner') {
+            job = applyGhostwriteReview(job, JSON.parse(reviewJson(job, { nextPlan: null })), NOW + 3);
+            job = transitionGhostwriteJob(job, 'planning', NOW + 4);
+          }
+        }
+        const repository = new FakeRepository(job);
+        const model = new FakeModel((): string => role === 'writer' ? candidateJson(1)
+          : role === 'reviewer' ? reviewJson(repository.job) : JSON.stringify({ nextPlan: '第二章计划' }));
+        let release: () => void = (): void => {};
+        let entered: () => void = (): void => {};
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        const atBoundary = new Promise<void>(resolve => { entered = resolve; });
+        if (boundary === 'validate') {
+          model.validate = async (): Promise<void> => { entered(); await gate; };
+        }
+        const runner = createGhostwriteRunner({
+          repository, modelRunning: model, nowMs: (): number => NOW + 100,
+          resolveModelTarget: async (_policy, modelRole): Promise<NovelModelTarget> => {
+            assert.equal(modelRole, role === 'writer' ? 'writing' : role === 'reviewer' ? 'review' : 'stateSync');
+            if (boundary === 'resolve') { entered(); await gate; }
+            return WRITER_TARGET;
+          },
+        });
+        const running = runner.run('project-1', 'job-1', 'owner-1');
+        await atBoundary;
+        repository.job = stoppedStage === 'paused'
+          ? pauseGhostwriteJob(repository.job, currentClaim(repository.job), NOW + 101)
+          : { ...transitionGhostwriteJob(repository.job, 'cancelled', NOW + 101), claim: null };
+        runner.cancel('project-1', 'job-1');
+        release();
+        const result = await running;
+        assert.equal(result.stage, stoppedStage);
+        assert.equal(model.requests.length, 0, 'durable stop must prevent a fresh paid model run');
+        assert.equal(repository.commitCount, 0);
+        assert.equal(repository.failCount, 0);
+      });
+    }
+  }
+}
+
+for (const ownerChange of ['expired', 'replaced'] as const) {
+  test(`ghostwrite runner: validate 等待期间 owner ${ownerChange} 不启动模型`, async () => {
+    const repository = new FakeRepository(makeJob());
+    const model = new FakeModel((): string => candidateJson(1));
+    let release: () => void = (): void => {};
+    let entered: () => void = (): void => {};
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const atValidation = new Promise<void>(resolve => { entered = resolve; });
+    model.validate = async (): Promise<void> => { entered(); await gate; };
+    let now = NOW + 100;
+    const runner = createGhostwriteRunner({ repository, modelRunning: model, nowMs: (): number => now });
+    const running = runner.run('project-1', 'job-1', 'owner-1', 1_000);
+    await atValidation;
+    now += 1_001;
+    if (ownerChange === 'replaced') {
+      repository.job = claimGhostwriteJob(repository.job, 'owner-2', now, 1_000);
+    }
+    release();
+    await assert.rejects(running, /owner lease 已失效/);
+    assert.equal(model.requests.length, 0, 'only the current owner can start a paid model run');
+    assert.equal(repository.failCount, 0);
+    assert.equal(repository.job.stage, 'writing');
+  });
+}
 
 for (const count of [1, 5, 10]) {
   test(`ghostwrite runner: ${count} 章顺序完成且所有模型调用只读`, async () => {

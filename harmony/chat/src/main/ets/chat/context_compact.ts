@@ -894,8 +894,8 @@ export const planCompaction = (
       sourceStartIndex: 0, sourceEndIndex: -1, sourceMessageIds: [],
     };
   }
-  const completedEnds: number[] = activeCompacts
-    .filter((c: ConversationCompact): boolean => c.status === 'completed')
+  const existingMessageIds: Set<string> = new Set(messages.map((message: UIMessage): string => message.id));
+  const completedEnds: number[] = validCompletedCompacts(activeCompacts, existingMessageIds)
     .map((c: ConversationCompact): number => c.sourceEndIndex);
   const latestCoveredEnd: number = completedEnds.length > 0 ? Math.max(...completedEnds) : -1;
   if (latestCoveredEnd >= sourceEnd) {

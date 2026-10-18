@@ -7,6 +7,7 @@ import {
 } from '../main/ets/chat/weather_tool.ts';
 import type { WeatherPort, DeviceLocationResult, WeatherHttpResult } from '../main/ets/chat/weather_tool.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
+import type { JsonObject } from '../main/ets/chat/json.ts';
 
 const FORECAST_BODY = JSON.stringify({
   latitude: 39.9, longitude: 116.4, utc_offset_seconds: 28800, timezone: 'Asia/Shanghai',
@@ -72,10 +73,11 @@ test('parseWeatherRequest enforces exactly-one source', () => {
   assert.deepEqual(parseWeatherRequest({ location: ' Paris ' }), { kind: 'named', location: 'Paris', latitude: 0, longitude: 0 });
   assert.equal((parseWeatherRequest({ use_current_location: true }) as { kind: string }).kind, 'current');
   assert.equal((parseWeatherRequest({ latitude: 1, longitude: 2 }) as { kind: string }).kind, 'coordinates');
-  for (const bad of [
+  const invalidRequests: JsonObject[] = [
     {}, { location: 'x', use_current_location: true }, { latitude: 1 }, { latitude: 91, longitude: 0 },
     { location: 'a'.repeat(81) }, { location: 'x', latitude: 1, longitude: 2 }, { use_current_location: 'maybe' },
-  ]) {
+  ];
+  for (const bad of invalidRequests) {
     assert.ok('reason' in parseWeatherRequest(bad), JSON.stringify(bad));
   }
   assert.equal((parseWeatherRequest({ use_current_location: false, location: 'Rome' }) as { kind: string }).kind, 'named');

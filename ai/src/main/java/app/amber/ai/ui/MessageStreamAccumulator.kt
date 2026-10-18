@@ -121,13 +121,29 @@ class MessageStreamAccumulator(
         }
 
         private fun appendImage(deltaPart: UIMessagePart.Image) {
-            val lastPart = parts.lastOrNull()
-            if (lastPart is MutablePart.Image) {
-                lastPart.url.append(deltaPart.url)
-                lastPart.metadata = deltaPart.metadata ?: lastPart.metadata
+            val callId = deltaPart.metadata.openAIImageCallId()
+            val target = if (callId != null) {
+                parts.filterIsInstance<MutablePart.Image>().lastOrNull {
+                    it.metadata.openAIImageCallId() == callId
+                }
+            } else if (!deltaPart.url.startsWith("data:")) {
+                (parts.lastOrNull() as? MutablePart.Image)?.takeIf {
+                    it.metadata.openAIImageCallId() == null
+                }
+            } else {
+                null
+            }
+            if (target != null) {
+                if (callId == null) {
+                    target.url.append(deltaPart.url)
+                } else if (deltaPart.url.isNotEmpty()) {
+                    // Responses done is the complete result for the matching call, not a base64 fragment.
+                    target.url.clear().append(deltaPart.imageDataUrl())
+                }
+                target.metadata = deltaPart.metadata ?: target.metadata
             } else {
                 parts += MutablePart.Image(
-                    url = StringBuilder("data:image/png;base64,${deltaPart.url}"),
+                    url = StringBuilder(deltaPart.imageDataUrl()),
                     metadata = deltaPart.metadata
                 )
             }

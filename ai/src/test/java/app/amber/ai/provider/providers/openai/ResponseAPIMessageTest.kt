@@ -16,6 +16,7 @@ import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.handleMessageChunk
 import app.amber.ai.util.ImageEncodingException
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -374,6 +375,20 @@ class ResponseAPIMessageTest {
         val reasoning = requestBody["reasoning"]?.jsonObject
         assertTrue("reasoning should exist", reasoning != null)
         assertEquals("low", reasoning!!["effort"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `non-stream generated images remain independent through message accumulation`() {
+        val response = Json.parseToJsonElement(
+            """{"id":"resp_1","model":"gpt-test","status":"completed","output":[{"type":"image_generation_call","id":"ig_1","result":"QUJDRA=="},{"type":"image_generation_call","id":"ig_2","result":"RUZHSA=="}]}"""
+        ).jsonObject
+
+        val chunk = api.parseResponseOutput(response)
+        val images = listOf(UIMessage.user("Generate two images")).handleMessageChunk(chunk)
+            .last().parts.filterIsInstance<UIMessagePart.Image>()
+
+        assertEquals(listOf("data:image/png;base64,QUJDRA==", "data:image/png;base64,RUZHSA=="), images.map { it.url })
+        assertEquals(listOf("ig_1", "ig_2"), images.map { it.metadata?.get("openai_image_call_id")?.jsonPrimitive?.content })
     }
 
     @Test

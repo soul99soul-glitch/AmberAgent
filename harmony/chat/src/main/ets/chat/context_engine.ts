@@ -14,8 +14,8 @@ import type { JevPreparedToolResults } from './jev_context.ts';
 //   StringUtils.kt applyPlaceholders(:37-44)
 //
 // 裁剪/偏差登记:
-//   - compactMutex/_compactingConversations/生命周期 StateFlow → 调用方串行
-//     (entry 单页面);onStream 回调替代 _summaryStreamFlow(30fps flush 裁剪,
+//   - compactMutex/_compactingConversations/生命周期 StateFlow → 同 store/会话串行;
+//     onStream 回调替代 _summaryStreamFlow(30fps flush 裁剪,
 //     每 chunk 回调)
 //   - capabilitySnapshotBuilder.build(tools)(:303)— 工具能力快照,鸿蒙无工具
 //     执行,跳过(工具循环落地时接入)
@@ -66,11 +66,12 @@ Requirements:
 // ===== applyPlaceholders(StringUtils.kt:37-44) =====
 
 export const applyPlaceholders = (template: string, pairs: [string, string][]): string => {
-  let result: string = template;
+  const replacements: Map<string, string> = new Map();
   for (const [placeholder, replacement] of pairs) {
-    result = result.split(`{${placeholder}}`).join(replacement);
+    replacements.set(placeholder, replacement);
   }
-  return result;
+  return template.replace(/\{([^{}]+)\}/g, (match: string, key: string): string =>
+    replacements.get(key) ?? match);
 };
 
 // ===== buildCompressionPrompt(engine:731-773,模板逐字) =====
@@ -329,7 +330,9 @@ export const editPreparedContext = (
 
 export interface CompactStore {
   getCompacts(conversationId: string): Promise<ConversationCompact[]>;
-  insertCompact(compact: ConversationCompact): Promise<void>;
+  // Capture before reading source compacts; history invalidation advances this revision.
+  getRevision(conversationId: string): Promise<number>;
+  insertCompact(compact: ConversationCompact, expectedRevision?: number): Promise<boolean>;
   deleteByConversation(conversationId: string): Promise<void>;
   recordEvent?(conversationId: string, eventType: string,
     summaryId: string | null, message: string): Promise<void>;
@@ -342,6 +345,7 @@ export interface MemoryCompactStore extends CompactStore {
 
 export const createMemoryCompactStore = (): MemoryCompactStore => {
   const compacts = new Map<string, ConversationCompact[]>();
+  const revisions = new Map<string, number>();
   const events: string[] = [];
   return {
     compacts,
@@ -349,12 +353,18 @@ export const createMemoryCompactStore = (): MemoryCompactStore => {
     getCompacts(conversationId: string): Promise<ConversationCompact[]> {
       return Promise.resolve(compacts.get(conversationId) ?? []);
     },
-    insertCompact(compact: ConversationCompact): Promise<void> {
+    getRevision(conversationId: string): Promise<number> {
+      return Promise.resolve(revisions.get(conversationId) ?? 0);
+    },
+    insertCompact(compact: ConversationCompact, expectedRevision?: number): Promise<boolean> {
+      if (expectedRevision !== undefined
+        && expectedRevision !== (revisions.get(compact.conversationId) ?? 0)) return Promise.resolve(false);
       const list: ConversationCompact[] = compacts.get(compact.conversationId) ?? [];
       compacts.set(compact.conversationId, [...list, compact]);
-      return Promise.resolve();
+      return Promise.resolve(true);
     },
     deleteByConversation(conversationId: string): Promise<void> {
+      revisions.set(conversationId, (revisions.get(conversationId) ?? 0) + 1);
       compacts.delete(conversationId);
       return Promise.resolve();
     },
@@ -457,7 +467,34 @@ const streamCompactSummary = async (
   return accumulated.trim();
 };
 
-export const compactConversation = async (
+// Include planning and publication in the same conversation queue. A force request
+// arriving during precompact must plan from its committed result, not its old snapshot.
+const compactionTails: WeakMap<CompactStore, Map<string, Promise<CompactResult>>> = new WeakMap();
+
+export const compactConversation = (
+  conversation: Conversation, policy: CompactPolicy,
+  modelContextWindowTokens: number | null,
+  reason: string = 'manual_compact',
+  additionalPrompt: string = '',
+  force: boolean = false,
+  deps: CompactEngineDeps,
+): Promise<CompactResult> => {
+  let tails: Map<string, Promise<CompactResult>> | undefined = compactionTails.get(deps.store);
+  if (tails === undefined) {
+    tails = new Map();
+    compactionTails.set(deps.store, tails);
+  }
+  const storeTails: Map<string, Promise<CompactResult>> = tails;
+  const previous: Promise<CompactResult | null> = storeTails.get(conversation.id) ?? Promise.resolve(null);
+  const run: Promise<CompactResult> = previous.catch((): null => null).then((): Promise<CompactResult> =>
+    compactConversationInternal(conversation, policy, modelContextWindowTokens, reason, additionalPrompt, force, deps));
+  storeTails.set(conversation.id, run);
+  return run.finally((): void => {
+    if (storeTails.get(conversation.id) === run) storeTails.delete(conversation.id);
+  });
+};
+
+const compactConversationInternal = async (
   conversation: Conversation, policy: CompactPolicy,
   modelContextWindowTokens: number | null,
   reason: string = 'manual_compact',
@@ -467,6 +504,7 @@ export const compactConversation = async (
 ): Promise<CompactResult> => {
   const now: () => number = deps.now ?? Date.now;
   try {
+    const revision: number = await deps.store.getRevision(conversation.id);
     const activeCompacts: ConversationCompact[] = await deps.store.getCompacts(conversation.id);
     const enabledPolicy: CompactPolicy = { ...policy, enabled: true };
     const plan: CompactPlan = force
@@ -555,7 +593,9 @@ export const compactConversation = async (
       updatedAt: now(),
       status: 'completed',
     };
-    await deps.store.insertCompact(compact);
+    if (!await deps.store.insertCompact(compact, revision)) {
+      return { status: 'skipped', error: 'history_invalidated' };
+    }
     if (deps.store.recordEvent !== undefined) {
       const count: number = plan.shouldCompact
         ? plan.sourceEndIndex - plan.sourceStartIndex + 1

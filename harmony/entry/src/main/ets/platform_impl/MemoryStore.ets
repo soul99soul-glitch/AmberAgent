@@ -304,12 +304,17 @@ const addEvent = (event: MemoryEvent): Promise<void> =>
     await writeJsonArray<MemoryEvent>(memoryPath(EVENTS_FILE), [...all, truncated]);
   });
 
-// countEventsSince(MemoryEventDAO :21-22)— COUNT WHERE event_type = :t AND created_at >= :after
-const countEventsSince = async (type: MemoryEventType, createdAfter: number): Promise<number> => {
-  const all: MemoryEvent[] = await readJsonArray<MemoryEvent>(memoryPath(EVENTS_FILE));
-  return all.filter((e: MemoryEvent): boolean => e.type === type && e.createdAt >= createdAfter)
-    .length;
-};
+// Count and persist the reservation in the same queue turn. Provider work starts
+// only after this returns, outside the queue, so other conversations can run.
+const tryStartExtraction = (event: MemoryEvent, createdAfter: number, maxDailyRuns: number): Promise<boolean> =>
+  enqueueWrite(async (): Promise<boolean> => {
+    const all: MemoryEvent[] = await requireArrayForWrite<MemoryEvent>(memoryPath(EVENTS_FILE));
+    const runsToday: number = all.filter((row: MemoryEvent): boolean =>
+      row.type === 'extraction_started' && row.createdAt >= createdAfter).length;
+    if (runsToday >= maxDailyRuns) return false;
+    await writeJsonArray<MemoryEvent>(memoryPath(EVENTS_FILE), [...all, event]);
+    return true;
+  });
 
 // getAllActiveRecords(MemoryRepository.kt:74-75)— archived=0 && (expires null||>now),插入序
 const getAllActiveRecords = async (now: number): Promise<MemoryRecord[]> => {
@@ -334,7 +339,7 @@ export interface MemoryExtractionStoreOps {
   addCandidate: (candidate: MemoryCandidate) => Promise<void>;
   addMemory: (params: MemoryAddParams) => Promise<MemoryRecord>;
   addEvent: (event: MemoryEvent) => Promise<void>;
-  countEventsSince: (type: MemoryEventType, createdAfter: number) => Promise<number>;
+  tryStartExtraction: (event: MemoryEvent, createdAfter: number, maxDailyRuns: number) => Promise<boolean>;
   getAllActiveRecords: (now: number) => Promise<MemoryRecord[]>;
 }
 
@@ -344,7 +349,7 @@ export const getMemoryExtractionStoreOps = (): MemoryExtractionStoreOps => ({
   addCandidate,
   addMemory,
   addEvent,
-  countEventsSince,
+  tryStartExtraction,
   getAllActiveRecords,
 });
 

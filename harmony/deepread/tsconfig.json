@@ -14,7 +14,11 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "lib": ["ES2022"],
-    "types": ["node"]
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@amber/deepread-domain": ["src/main/ets/index.ts"]
+    }
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules"]

@@ -179,6 +179,60 @@ test('bing:国际版 /ck/a 跳转 u=a1<base64url> 解包(含中文路径)', asyn
   assert.equal(r.items[0].url, target);
 });
 
+for (const fallback of [false, true]) {
+  test(`bing:普通结果的 u/url 参数保持原链接 (${fallback ? 'fallback' : 'b_algo'})`, async () => {
+    const urls: string[] = [
+      'https://forum.example.com/member.php?u=123',
+      'https://developer.example.com/tool?url=https%3A%2F%2Fexample.org',
+      'https://bing.com.example.net/ck/a?u=https%3A%2F%2Fexample.org',
+      'https://www.bing.com/search?url=https%3A%2F%2Fexample.org',
+    ];
+    const anchors: string[] = urls.map((url: string, index: number): string => {
+      const result: string = `<h2><a href="${url}">Result ${index}</a></h2><p>Snippet ${index}</p>`;
+      return fallback ? result : `<li class="b_algo">${result}</li>`;
+    });
+    const page: string = `<main><ol id="b_results">${anchors.join('')}</ol></main>`;
+    initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: page }], []));
+    const result = await bingSearchService.search({ query: 'q' }, { resultSize: 10 }, bingOptions());
+    assert.deepEqual(result.items.map((item) => item.url), urls);
+    assert.deepEqual(result.items.map((item) => item.title), urls.map((_, index) => `Result ${index}`));
+  });
+}
+
+test('bing:自有 /ck/a 跳转仍解包 url 参数', async () => {
+  const page: string = `<ol id="b_results"><li class="b_algo"><h2>
+    <a href="https://cn.bing.com/ck/a?url=https%3A%2F%2Fexample.org%2Farticle">Article</a>
+    </h2><p>Article snippet</p></li></ol>`;
+  initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: page }], []));
+  const result = await bingSearchService.search({ query: 'q' }, { resultSize: 10 }, bingOptions());
+  assert.equal(result.items[0].url, 'https://example.org/article');
+});
+
+test('ddg:普通结果的 uddg 参数保持原链接', async () => {
+  const urls: string[] = [
+    'https://example.com/docs?uddg=section1',
+    'https://duckduckgo.com.example.net/l/?uddg=https%3A%2F%2Fexample.org',
+    'https://duckduckgo.com/?uddg=https%3A%2F%2Fexample.org',
+  ];
+  const page: string = urls.map((url: string, index: number): string =>
+    `<div class="result"><a class="result__a" href="${url}">Result ${index}</a>
+    <div class="result__snippet">Snippet ${index}</div></div>`).join('');
+  initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: page }], []));
+  const result = await duckDuckGoSearch('q', { resultSize: 10 });
+  assert.deepEqual(result.items.map((item) => item.url), urls);
+  assert.deepEqual(result.items.map((item) => item.text), urls.map((_, index) => `Snippet ${index}`));
+});
+
+test('ddg:相对和绝对的自有 /l/ 跳转仍解包 uddg', async () => {
+  const endpoints: string[] = ['/l/', 'https://duckduckgo.com/l/', 'https://html.duckduckgo.com/l/'];
+  const page: string = endpoints.map((endpoint: string, index: number): string =>
+    `<div class="result"><a class="result__a" href="${endpoint}?uddg=https%3A%2F%2Fexample.org%2F${index}">
+    Result ${index}</a></div>`).join('');
+  initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: page }], []));
+  const result = await duckDuckGoSearch('q', { resultSize: 10 });
+  assert.deepEqual(result.items.map((item) => item.url), endpoints.map((_, index) => `https://example.org/${index}`));
+});
+
 // ===== Phase 6 回归:非 2xx 响应不得被当作结果页解析 =====
 
 test('bing: HTTP 429 rate-limit page rejects with HTTP error (not "no results")', async () => {

@@ -121,6 +121,100 @@ test('create without passphrase → needsPassphrase false', async () => {
   assert.equal(restored.payload.conversations.length, 1);
 });
 
+const rewriteManifest = (archiveBytes: Uint8Array, change: (manifest: Record<string, unknown>) => unknown): Uint8Array => {
+  const archive = JSON.parse(new TextDecoder().decode(archiveBytes)) as Array<{ name: string; b64: string }>;
+  const entry = archive.find(item => item.name === MANIFEST_ENTRY)!;
+  const manifest = JSON.parse(Buffer.from(entry.b64, 'base64').toString('utf8')) as Record<string, unknown>;
+  entry.b64 = Buffer.from(JSON.stringify(change(manifest))).toString('base64');
+  return new TextEncoder().encode(JSON.stringify(archive));
+};
+
+const metadataArchive = () => createSyncBackup(mockCrypto(), {
+  conversations: [sampleConv()], appVersionName: '1', appVersionCode: 1, deviceId: 'd', passphrase: null,
+}, 2000);
+
+const malformedManifests: Array<[string, (manifest: Record<string, unknown>) => unknown]> = [
+  ['null manifest', () => null],
+  ['array manifest', () => []],
+  ['missing preview fields', () => ({ archiveVersion: 2 })],
+  ['missing deviceLabel', manifest => { delete manifest.deviceLabel; return manifest; }],
+  ['null deviceLabel', manifest => ({ ...manifest, deviceLabel: null })],
+  ['numeric deviceLabel', manifest => ({ ...manifest, deviceLabel: 123 })],
+  ['wrong deviceId', manifest => ({ ...manifest, deviceId: [] })],
+  ['wrong appVersionName', manifest => ({ ...manifest, appVersionName: null })],
+  ['wrong appVersionCode', manifest => ({ ...manifest, appVersionCode: '1' })],
+  ['wrong timestamp', manifest => ({ ...manifest, createdAt: '2000' })],
+  ['wrong password flag', manifest => ({ ...manifest, passphraseProtected: 'false' })],
+  ['wrong encryption flag', manifest => ({ ...manifest, encrypted: false })],
+  ['wrong mode', manifest => ({ ...manifest, mode: 'UNKNOWN' })],
+  ['wrong checksum type', manifest => ({ ...manifest, payloadSha256: null })],
+  ['missing kdf', manifest => { delete manifest.kdf; return manifest; }],
+  ['null kdf', manifest => ({ ...manifest, kdf: null })],
+  ['wrong kdf name', manifest => ({ ...manifest, kdf: { ...(manifest.kdf as object), name: 'UNKNOWN' } })],
+  ['wrong salt type', manifest => ({ ...manifest, kdf: { ...(manifest.kdf as object), saltBase64: [] } })],
+  ['zero iterations', manifest => ({ ...manifest, kdf: { ...(manifest.kdf as object), iterations: 0 } })],
+  ['fractional iterations', manifest => ({ ...manifest, kdf: { ...(manifest.kdf as object), iterations: 1.5 } })],
+  ['missing cipher', manifest => { delete manifest.cipher; return manifest; }],
+  ['array cipher', manifest => ({ ...manifest, cipher: [] })],
+  ['wrong cipher name', manifest => ({ ...manifest, cipher: { ...(manifest.cipher as object), name: 'UNKNOWN' } })],
+  ['wrong iv type', manifest => ({ ...manifest, cipher: { ...(manifest.cipher as object), ivBase64: 12 } })],
+];
+for (const [name, change] of malformedManifests) {
+  test(`inspection rejects ${name} before publishing a restore preview`, async () => {
+    const bytes = rewriteManifest(await metadataArchive(), change);
+    await assert.rejects(() => inspectSyncArchive(bytes, 'damaged.abin'), /备份/);
+  });
+}
+
+test('non-finite numeric manifest values reject before invoking restore crypto', async () => {
+  const valid = await metadataArchive();
+  for (const field of ['appVersionCode', 'createdAt', 'iterations']) {
+    const archive = JSON.parse(new TextDecoder().decode(valid)) as Array<{ name: string; b64: string }>;
+    const entry = archive.find(item => item.name === MANIFEST_ENTRY)!;
+    const raw = Buffer.from(entry.b64, 'base64').toString('utf8').replace(new RegExp(`"${field}":\\d+`), `"${field}":1e309`);
+    entry.b64 = Buffer.from(raw).toString('base64');
+    const bytes = new TextEncoder().encode(JSON.stringify(archive));
+    const crypto = mockCrypto();
+    crypto.deriveKey = async () => { assert.fail('malformed metadata must not reach deriveKey'); };
+    crypto.decrypt = async () => { assert.fail('malformed metadata must not reach decrypt'); };
+    await assert.rejects(() => restoreSyncBackup(crypto, bytes, null), /备份/);
+  }
+});
+
+for (const version of [0, -1, 1.5, 3]) {
+  test(`inspection rejects unsupported archive version ${version}`, async () => {
+    const bytes = rewriteManifest(await metadataArchive(), manifest => ({ ...manifest, archiveVersion: version }));
+    await assert.rejects(() => inspectSyncArchive(bytes, 'bad-version.abin'), /版本/);
+  });
+}
+
+test('historical v1 PBKDF2 metadata and empty device labels remain compatible', async () => {
+  const crypto = mockCrypto();
+  const archive = JSON.parse(new TextDecoder().decode(await metadataArchive())) as Array<{ name: string; b64: string }>;
+  const manifestEntry = archive.find(item => item.name === MANIFEST_ENTRY)!;
+  const payloadEntry = archive.find(item => item.name === PAYLOAD_ENTRY)!;
+  const manifest = JSON.parse(Buffer.from(manifestEntry.b64, 'base64').toString('utf8'));
+  manifest.archiveVersion = 1;
+  manifest.kdf.name = 'PBKDF2';
+  const legacyPayload = { version: 1, createdAt: 2000, conversations: [{
+    id: 'legacy-c', assistantId: 'a1', title: '旧备份',
+    createAt: '2026-07-28T09:00:00.000Z', updateAt: '2026-07-28T09:01:00.000Z', messages: [validMsg()],
+  }] };
+  const key = await crypto.deriveKey('', manifest.kdf.saltBase64, manifest.kdf.iterations);
+  const encrypted = await crypto.encrypt(new TextEncoder().encode(JSON.stringify(legacyPayload)), key, manifest.cipher.ivBase64);
+  manifest.payloadSha256 = await crypto.sha256Hex(encrypted);
+  manifestEntry.b64 = Buffer.from(JSON.stringify(manifest)).toString('base64');
+  payloadEntry.b64 = Buffer.from(encrypted).toString('base64');
+  const bytes = new TextEncoder().encode(JSON.stringify(archive));
+  const preview = await inspectSyncArchive(bytes, 'v1.abin');
+  assert.equal(preview.manifest.archiveVersion, 1);
+  assert.equal(preview.manifest.kdf.name, 'PBKDF2');
+  assert.equal(preview.manifest.deviceLabel, '');
+  const restored = await restoreSyncBackup(crypto, bytes, null);
+  assert.equal(restored.payload.conversations[0].title, '旧备份');
+  assert.equal(restored.payload.conversations[0].nodes[0].messages.length, 1);
+});
+
 test('tampered payload fails checksum', async () => {
   const crypto = mockCrypto();
   const bytes = await createSyncBackup(crypto, {

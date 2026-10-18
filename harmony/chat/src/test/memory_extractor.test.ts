@@ -244,8 +244,12 @@ const harness = (over: {
       events.push(e);
       return Promise.resolve();
     },
-    countEventsSince: (_t: MemoryEventType, _after: number): Promise<number> =>
-      Promise.resolve(over.runsToday ?? 0),
+    tryStartExtraction: async (event: MemoryEvent, _after: number, maxDailyRuns: number): Promise<boolean> => {
+      const started: number = events.filter((row: MemoryEvent): boolean => row.type === 'extraction_started').length;
+      if ((over.runsToday ?? 0) + started >= maxDailyRuns) return false;
+      events.push(event);
+      return true;
+    },
     now: over.now !== undefined ? (): number => over.now as number : undefined,
   };
   return { deps, events, addedCandidates, addedMemories, prompts, activeRecords };

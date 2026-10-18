@@ -53,7 +53,7 @@ test('parseGoogleMessagePart:inlineData → image;thought → [Draft Image] reas
     thoughtSignature: 'sig',
   }) as UIMessagePartImage;
   assert.equal(img.type, 'image');
-  assert.equal(img.url, 'QUJD', 'url = 裸 base64(Android :718)');
+  assert.equal(img.url, 'data:image/png;base64,QUJD', '完整 data URI 保留图片边界及 MIME');
   assert.deepEqual(img.metadata, { thoughtSignature: 'sig' });
 
   const draft = parseGoogleMessagePart({

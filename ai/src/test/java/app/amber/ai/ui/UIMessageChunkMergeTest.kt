@@ -16,6 +16,15 @@ import org.junit.Test
 class UIMessageChunkMergeTest {
 
     @Test
+    fun `unkeyed base64 image fragments still append in order`() {
+        var message = emptyAssistant()
+        message += chunk(UIMessagePart.Image("QUJD"))
+        message += chunk(UIMessagePart.Image("RA=="))
+
+        assertEquals("data:image/png;base64,QUJDRA==", message.parts.filterIsInstance<UIMessagePart.Image>().single().url)
+    }
+
+    @Test
     fun `text deltas merge in order`() {
         var message = emptyAssistant()
         message += chunk(UIMessagePart.Text("你"))

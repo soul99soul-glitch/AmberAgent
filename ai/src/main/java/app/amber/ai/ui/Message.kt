@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -71,19 +72,32 @@ data class UIMessage(
                     }
 
                     is UIMessagePart.Image -> {
-                        val lastPart = acc.lastOrNull()
-                        if (lastPart is UIMessagePart.Image) {
-                            // Append to the last Image part (for streaming base64)
-                            acc.dropLast(1) + lastPart.copy(
-                                url = lastPart.url + deltaPart.url,
-                                metadata = deltaPart.metadata ?: lastPart.metadata
-                            )
+                        val callId = deltaPart.metadata.openAIImageCallId()
+                        val target = if (callId != null) {
+                            acc.filterIsInstance<UIMessagePart.Image>().lastOrNull {
+                                it.metadata.openAIImageCallId() == callId
+                            }
+                        } else if (!deltaPart.url.startsWith("data:")) {
+                            (acc.lastOrNull() as? UIMessagePart.Image)?.takeIf {
+                                it.metadata.openAIImageCallId() == null
+                            }
                         } else {
-                            // Create new Image part
-                            acc + UIMessagePart.Image(
-                                url = "data:image/png;base64,${deltaPart.url}",
-                                metadata = deltaPart.metadata,
+                            null
+                        }
+                        if (target == null) {
+                            acc + deltaPart.copy(url = deltaPart.imageDataUrl())
+                        } else {
+                            val imageUrl = when {
+                                callId == null -> target.url + deltaPart.url
+                                deltaPart.url.isEmpty() -> target.url
+                                else -> deltaPart.imageDataUrl()
+                            }
+                            val image = target.copy(
+                                // Responses done carries a full image; only unkeyed raw deltas are fragments.
+                                url = imageUrl,
+                                metadata = deltaPart.metadata ?: target.metadata,
                             )
+                            acc.map { if (it === target) image else it }
                         }
                     }
 
@@ -213,6 +227,12 @@ data class UIMessage(
         )
     }
 }
+
+internal fun JsonObject?.openAIImageCallId(): String? =
+    this?.get("openai_image_call_id")?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotEmpty() }
+
+internal fun UIMessagePart.Image.imageDataUrl(): String =
+    if (url.startsWith("data:")) url else "data:image/png;base64,$url"
 
 private fun UIMessagePart.isReasoningContentDelta(): Boolean =
     this is UIMessagePart.Reasoning && reasoning.isNotEmpty()

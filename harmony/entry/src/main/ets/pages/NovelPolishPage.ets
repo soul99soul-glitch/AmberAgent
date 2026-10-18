@@ -140,7 +140,8 @@ struct NovelPolishPage {
   }
   private schedulePoll(): void {
     this.stopPolling();
-    if (!this.alive || !this.visible || this.job === null || !this.running(this.job)) return;
+    if (!this.alive || !this.visible || this.job === null ||
+      (!this.running(this.job) && this.job.stage !== 'waiting_system')) return;
     const token: number = this.pollToken;
     this.pollTimer = setTimeout((): void => {
       this.pollTimer = -1;

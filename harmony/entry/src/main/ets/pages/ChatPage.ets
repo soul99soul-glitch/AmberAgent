@@ -2372,25 +2372,34 @@ struct ChatPage {
 
   private async pickFiles(): Promise<void> {
     const token: number = ++this.pickerToken;
+    let uris: string[];
     try {
       const docPicker = new picker.DocumentViewPicker();
       const options: picker.DocumentSelectOptions =
         new picker.DocumentSelectOptions();
       options.maxSelectNumber = 3;
-      const uris: string[] = await docPicker.select(options);
-      if (token !== this.pickerToken) return;
-      for (const uri of uris) {
+      uris = await docPicker.select(options);
+    } catch (_e) {
+      // 选择器取消，不影响当前附件和错误提示。
+      return;
+    }
+    if (token !== this.pickerToken) return;
+    const failures: string[] = [];
+    for (const uri of uris) {
+      let fileName: string = 'file';
+      try {
         const raw: string = uri.substring(uri.lastIndexOf('/') + 1);
-        const fileName: string = decodeURIComponent(raw.split('?')[0]) || 'file';
+        fileName = decodeURIComponent(raw.split('?')[0]) || 'file';
         const bytes: Uint8Array = this.readUriBytes(uri);
         const b64: string = new util.Base64Helper().encodeToStringSync(bytes);
         const mime: string = mimeByName(fileName);
         this.pendingDocs = [...this.pendingDocs,
           { url: `data:${mime};base64,${b64}`, fileName: fileName, mime: mime } as PendingDoc];
+      } catch (error) {
+        failures.push(`${fileName}：${error instanceof Error ? error.message : String(error)}`);
       }
-    } catch (_e) {
-      // 用户取消选择
     }
+    if (failures.length > 0) this.errorMsg = `文件读取失败：${failures.join('；')}`;
   }
 
   // 长文本粘贴为文件(Android pasteLongTextAsFile 对齐):转 text/plain 附件,不进输入框

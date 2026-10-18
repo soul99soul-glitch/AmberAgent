@@ -22,6 +22,7 @@ import {
   makeChatModel, makeProviderSettingOpenAI, makeTextGenerationParams,
 } from '../main/ets/chat/provider_model.ts';
 import type { ChatToolDefinition } from '../main/ets/chat/provider_model.ts';
+import { makeNovelTextGenerationParams } from '../main/ets/chat/novel_request_config.ts';
 import {
   hostOf, isMiMoProvider, shouldForceReasoningContentForToolCalls, isModelAllowTemperature,
   groupPartsByToolBoundary, buildMessages, buildChatCompletionRequest, mergeCustomBody,
@@ -305,6 +306,50 @@ test('request: max_tokens vs MiMo max_completion_tokens', () => {
   const mimoReq = mk(true);
   assert.equal(mimoReq['max_completion_tokens'], 100);
   assert.equal(mimoReq['max_tokens'], undefined);
+});
+
+test('request: official OpenAI o-series output caps use max_completion_tokens', () => {
+  const request = (modelId: string, baseUrl = 'https://api.openai.com/v1', maxTokens: number | null = 4096) =>
+    buildChatCompletionRequest({
+      messages: [makeUserMessage('hi')],
+      params: makeTextGenerationParams({ model: makeChatModel({ modelId }), maxTokens }),
+      setting: makeProviderSettingOpenAI({ baseUrl }), stream: true,
+    });
+  for (const modelId of ['o1', 'o3', 'o3-mini', 'o4-mini-2025-04-16']) {
+    const body = request(modelId);
+    assert.equal(body['max_completion_tokens'], 4096, modelId);
+    assert.equal(body['max_tokens'], undefined, modelId);
+  }
+  for (const [modelId, baseUrl] of [
+    ['gpt-4o', 'https://api.openai.com/v1'],
+    ['o3abc', 'https://api.openai.com/v1'],
+    ['o3', 'https://compatible.example/v1'],
+  ]) {
+    const body = request(modelId, baseUrl);
+    assert.equal(body['max_tokens'], 4096);
+    assert.equal(body['max_completion_tokens'], undefined);
+  }
+  const unlimited = request('o3', 'https://api.openai.com/v1', null);
+  assert.equal(unlimited['max_tokens'], undefined);
+  assert.equal(unlimited['max_completion_tokens'], undefined);
+});
+
+test('request: o-series custom cap overrides and Novel-owned cap retain their existing priority', () => {
+  const params = makeTextGenerationParams({
+    model: makeChatModel({ modelId: 'o3' }), maxTokens: 4096,
+    customBody: [{ key: 'max_completion_tokens', value: 2048 }],
+  });
+  const request = (value: typeof params) => buildChatCompletionRequest({
+    messages: [makeUserMessage('write')], params: value, setting: makeProviderSettingOpenAI(), stream: false,
+  });
+  const ordinary = request(params);
+  assert.equal(ordinary['max_completion_tokens'], 2048);
+  assert.equal(ordinary['max_tokens'], undefined);
+  assert.throws(() => makeNovelTextGenerationParams(params, [], 8192), /max_completion_tokens/);
+  const novelSource = makeTextGenerationParams({ model: params.model, maxTokens: params.maxTokens });
+  const novel = request(makeNovelTextGenerationParams(novelSource, [], 8192));
+  assert.equal(novel['max_completion_tokens'], 8192);
+  assert.equal(novel['max_tokens'], undefined);
 });
 
 test('request: reasoning 矩阵 — 默认/deepseek/dashscope/openrouter/mimo/siliconflow', () => {

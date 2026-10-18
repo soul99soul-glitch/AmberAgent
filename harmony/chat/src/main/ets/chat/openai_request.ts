@@ -80,9 +80,11 @@ export const shouldForceReasoningContentForToolCalls = (
 // isModelAllowTemperature(ChatCompletionsAPI.kt:490)
 // D-014 简化:OPENAI_O_MODELS(^o$+^\d+$ token 序列)→ /^o\d+(-|$)/;
 // GPT_5 matcher 被 startsWith('gpt-5') 覆盖。
+const isOpenAIOSeriesModel = (model: ChatModel): boolean => /^o\d+(-|$)/.test(model.modelId.toLowerCase());
+
 export const isModelAllowTemperature = (model: ChatModel): boolean => {
   const modelId = model.modelId.toLowerCase();
-  return !/^o\d+(-|$)/.test(modelId) &&
+  return !isOpenAIOSeriesModel(model) &&
     !modelId.startsWith('gpt-5') &&
     modelId.indexOf('codex') < 0;
 };
@@ -396,7 +398,8 @@ export const buildChatCompletionRequest = (input: BuildChatCompletionRequestInpu
     if (params.topP !== null) req['top_p'] = params.topP;
   }
   if (params.maxTokens !== null) {
-    req[isMiMo ? 'max_completion_tokens' : 'max_tokens'] = params.maxTokens;
+    const useCompletionTokenLimit = isMiMo || (host === 'api.openai.com' && isOpenAIOSeriesModel(params.model));
+    req[useCompletionTokenLimit ? 'max_completion_tokens' : 'max_tokens'] = params.maxTokens;
   }
 
   req['stream'] = stream;

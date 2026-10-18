@@ -369,8 +369,8 @@ test('sh: 202 + notifications/initialized → 异步起 SSE(:129-143)', async ()
   await tick();
   await tick();
   assert.equal(port.openCalls.length, 1);
-  // GET SSE 头:Accept application/json + config(:241-244)
-  assert.deepEqual(port.openCalls[0].headers, [['Accept', 'application/json'], ['X-K', 'v']]);
+  // GET SSE 头按 MCP 协议声明 text/event-stream,并保留 config 头
+  assert.deepEqual(port.openCalls[0].headers, [['Accept', 'text/event-stream'], ['X-K', 'v']]);
 });
 
 test('sh: 202 其他通知 → 不起 SSE', async () => {
@@ -590,4 +590,89 @@ test('sh: collectSse — message → onMessage;error → StreamableHttpError(nul
   assert.ok(errors[0] instanceof StreamableHttpError);
   assert.equal((errors[0] as StreamableHttpError).code, null);
   assert.equal(errors[0].message, 'Streamable HTTP error: stream broke');
+});
+
+test('sh: GET negotiates an SSE stream with a strict server', async () => {
+  class StrictSsePort extends FakePort {
+    override openSse(url: string, headers: Array<[string, string]>): Promise<McpSseStream> {
+      const accept: string = headers.find(([name]): boolean => name.toLowerCase() === 'accept')?.[1] ?? '';
+      if (!accept.includes('text/event-stream')) {
+        return Promise.reject(new McpSseOpenError('Not Acceptable', 406, null));
+      }
+      return super.openSse(url, headers);
+    }
+  }
+  const port = new StrictSsePort();
+  port.postStreamQueue.push(postResp(202, ''));
+  const transport = new McpStreamableHttpTransport(port, 'https://x/mcp', [['accept', 'application/json']]);
+  const errors: Error[] = [];
+  transport.onError((error): void => { errors.push(error); });
+  await transport.start();
+  await transport.send({ method: 'notifications/initialized', jsonrpc: '2.0' });
+  await tick();
+  assert.equal(port.streams.length, 1);
+  assert.deepEqual(errors, []);
+  await transport.close();
+  assert.equal(port.streams[0].cancelled, true);
+});
+
+test('sh: close cancels SSE even when session DELETE fails', async () => {
+  const port = new FakePort();
+  port.postStreamQueue.push(postResp(202, '', [['mcp-session-id', 'session']]));
+  port.requestQueue.push(resp(500, 'termination failed'));
+  const transport = new McpStreamableHttpTransport(port, 'https://x/mcp', []);
+  let closed = 0;
+  transport.onClose((): void => { closed++; });
+  await transport.start();
+  await transport.send({ method: 'notifications/initialized', jsonrpc: '2.0' });
+  await tick();
+  const stream = port.streams[0];
+  await transport.close();
+  await transport.close();
+  assert.equal(stream.cancelled, true);
+  assert.equal(closed, 1);
+  assert.equal(transport.sessionId, null);
+});
+
+test('sh: a GET that completes after close is cancelled without delivering messages', async () => {
+  const stream = new FakeSseStream();
+  let release: (value: McpSseStream) => void = (): void => {};
+  class PendingSsePort extends FakePort {
+    override openSse(): Promise<McpSseStream> {
+      return new Promise((resolve): void => { release = resolve; });
+    }
+  }
+  const port = new PendingSsePort();
+  port.postStreamQueue.push(postResp(202, ''));
+  const transport = new McpStreamableHttpTransport(port, 'https://x/mcp', []);
+  const messages: JsonObject[] = [];
+  transport.onMessage((message): void => { messages.push(message); });
+  await transport.start();
+  await transport.send({ method: 'notifications/initialized', jsonrpc: '2.0' });
+  await transport.close();
+  stream.push({ event: 'message', data: '{"method":"notifications/progress","jsonrpc":"2.0"}', id: null });
+  release(stream);
+  await tick();
+  assert.equal(stream.cancelled, true);
+  assert.deepEqual(messages, []);
+});
+
+test('sh: buffered SSE events stop dispatching when the transport closes', async () => {
+  const port = new FakePort();
+  port.postStreamQueue.push(postResp(202, ''));
+  const transport = new McpStreamableHttpTransport(port, 'https://x/mcp', []);
+  const messages: JsonObject[] = [];
+  transport.onMessage((message): void => { messages.push(message); });
+  await transport.start();
+  await transport.send({ method: 'notifications/initialized', jsonrpc: '2.0' });
+  await tick();
+  const stream = port.streams[0];
+  for (let index = 0; index < 20; index++) {
+    stream.push({ event: 'message', data: JSON.stringify({ method: 'notifications/progress', params: { index }, jsonrpc: '2.0' }), id: null });
+  }
+  await transport.close();
+  const countAtClose = messages.length;
+  await tick();
+  assert.equal(stream.cancelled, true);
+  assert.equal(messages.length, countAtClose);
 });

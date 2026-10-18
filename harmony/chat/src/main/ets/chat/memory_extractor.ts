@@ -2,8 +2,7 @@
 //
 // Android 基准: core/memory/extraction/MemoryExtractor.kt(全文 292 行)
 //   - 门序列(:47-100):worker 关闭 → 'Memory worker disabled.';120s 去抖 →
-//     'Debounced.';日配额(今日 EXTRACTION_STARTED 计数 ≥ maxDailyRuns(coerce≥1))
-//     → 'Daily memory worker limit reached.';模型空 → 'No memory worker model
+//     'Debounced.';模型空 → 'No memory worker model
 //     available.';provider 空 → 'Memory worker model provider not found.'
 //     (均 EXTRACTION_SKIPPED + messageCount)
 //   - todayStart = now - now % 86_400_000(:67 — UTC 日界,逐字)
@@ -19,6 +18,8 @@
 //     (title/suggestion 同偏差类,entry 以 chat 模型顶替 — D-025 登记)
 //   - JSON 解析失败的错误文本 = JS SyntaxError 消息(非 Kotlin 异常文本)
 //   - lastRunAt ConcurrentHashMap → 模块级 Map(单线程 JS 无并发竞争)
+//   - 日配额在污染/模型门后由存储原子检查并记录 EXTRACTION_STARTED;
+//     只串行化准入,不同会话的模型调用仍可并行。
 
 import type { Conversation } from './conversation.ts';
 import { currentMessages } from './conversation.ts';
@@ -222,7 +223,8 @@ export interface MemoryExtractionDeps {
   addCandidate: (candidate: MemoryCandidate) => Promise<void>;
   addMemory: (params: MemoryAddParams) => Promise<MemoryRecord>;
   addEvent: (event: MemoryEvent) => Promise<void>;
-  countEventsSince: (type: MemoryEventType, createdAfter: number) => Promise<number>;
+  // Host atomically checks the persisted daily count and saves this start event.
+  tryStartExtraction: (event: MemoryEvent, createdAfter: number, maxDailyRuns: number) => Promise<boolean>;
   // Platform runs the pure apply helper against its latest full snapshot inside
   // its write queue and commits once, including archived history and evidence.
   applyActions?: (actions: MemoryExtractionAction[], now: number) => Promise<MemoryExtractionApplyResult>;
@@ -314,15 +316,6 @@ const runMemoryExtractionGuarded = async (
     });
     return;
   }
-  // :67-77 日配额门
-  const todayStart: number = now - (now % 86_400_000);
-  const runsToday: number = await deps.countEventsSince('extraction_started', todayStart);
-  if (runsToday >= Math.max(1, deps.worker.maxDailyRuns)) {
-    await logEvent(deps, 'extraction_skipped', {
-      conversationId, message: 'Daily memory worker limit reached.', messageCount,
-    });
-    return;
-  }
   // Sources that touched external tools never become automatically extracted facts.
   const contaminated: boolean = extractionMessagesContaminated(messages);
   if (contaminated) {
@@ -333,8 +326,6 @@ const runMemoryExtractionGuarded = async (
     });
     return;
   }
-  lastRunAt.set(conversationId, now);
-
   // :80-100 模型/provider 门
   const resolution: MemoryWorkerModelResolution = await deps.resolveWorkerModel();
   if (resolution.kind === 'no_model') {
@@ -353,7 +344,17 @@ const runMemoryExtractionGuarded = async (
   const modelId: string = resolution.modelId;
 
   const startedAt: number = nowFn();
-  await logEvent(deps, 'extraction_started', { conversationId, modelId, messageCount });
+  const todayStart: number = startedAt - (startedAt % 86_400_000);
+  const admitted: boolean = await deps.tryStartExtraction(makeMemoryEvent({
+    type: 'extraction_started', conversationId, modelId, messageCount, createdAt: startedAt,
+  }), todayStart, Math.max(1, deps.worker.maxDailyRuns));
+  if (!admitted) {
+    await logEvent(deps, 'extraction_skipped', {
+      conversationId, message: 'Daily memory worker limit reached.', messageCount,
+    });
+    return;
+  }
+  lastRunAt.set(conversationId, startedAt);
 
   // :110-181 主体(runCatching → onFailure EXTRACTION_FAILED)
   try {

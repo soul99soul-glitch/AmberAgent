@@ -174,13 +174,13 @@ test('parseMessage: tool_calls 带 index → stream_tool_index metadata;非 func
   }), /tool call type not supported/);
 });
 
-test('parseMessage: images 仅支持 data uri,剥离 base64 前缀', () => {
+test('parseMessage: images 仅支持 data uri,保留完整图片边界', () => {
   const msg = parseChatCompletionMessage({
     images: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD' } }],
   });
   const img = msg.parts.find((p: UIMessagePart): boolean => p.type === 'image');
   assert.ok(img !== undefined);
-  assert.equal((img as { url: string }).url, 'QUJD');
+  assert.equal((img as { url: string }).url, 'data:image/png;base64,QUJD');
   assert.throws(() => parseChatCompletionMessage({
     images: [{ type: 'image_url', image_url: { url: 'https://x/y.png' } }],
   }), /Only data uri/);

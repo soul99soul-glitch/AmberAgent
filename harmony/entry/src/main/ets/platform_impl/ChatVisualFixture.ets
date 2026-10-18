@@ -24,7 +24,7 @@ const FRAME_STEP_MS: number = 600;
 const DEBUG_APP_TITLE: string = 'Amber Debug';
 const ANSWER_SUFFIX: string = '-answer';
 
-type VisualFixtureCase = 'svg' | 'three' | 'miniapp' | 'widget-error' | 'raw-svg' | 'raw-three' | 'smart-ui' | 'ui-svg-error' | 'weather-ui' | 'style-gallery' | 'component-gallery' | 'task-ui' | 'study-ui' | 'linkage-ui' | 'media-ui' | 'mixed';
+type VisualFixtureCase = 'svg' | 'three' | 'miniapp' | 'widget-error' | 'raw-svg' | 'raw-three' | 'raw-three-error' | 'smart-ui' | 'ui-svg-error' | 'weather-ui' | 'style-gallery' | 'component-gallery' | 'task-ui' | 'study-ui' | 'linkage-ui' | 'media-ui' | 'mixed';
 
 interface VisualFixtureData {
   initial: Conversation;
@@ -36,7 +36,7 @@ const activeRuns: Set<string> = new Set<string>();
 
 const isVisualFixtureCase = (value: string): boolean =>
   value === 'svg' || value === 'three' || value === 'miniapp' || value === 'widget-error' ||
-    value === 'raw-svg' || value === 'raw-three' || value === 'smart-ui' || value === 'ui-svg-error' ||
+    value === 'raw-svg' || value === 'raw-three' || value === 'raw-three-error' || value === 'smart-ui' || value === 'ui-svg-error' ||
     value === 'weather-ui' || value === 'style-gallery' || value === 'component-gallery' || value === 'task-ui' ||
     value === 'study-ui' || value === 'linkage-ui' || value === 'media-ui' || value === 'mixed';
 
@@ -97,11 +97,13 @@ const rawSvgPayload = (): string => '```amber-svg v=1 id=ca-chain\n' +
   '<rect x="222" y="18" width="130" height="52" rx="10" fill="#3d6657"/>' +
   '<text x="230" y="50" fill="#fff" font-size="18">服务器证书</text></svg>\n```';
 
-const rawThreePayload = (): string => {
+const rawThreePayload = (corruptTail: boolean = false): string => {
   const widgetText: string = threePayload();
   const start: number = widgetText.indexOf('\n');
   const payload: WidgetPayload = JSON.parse(widgetText.substring(start + 1, widgetText.lastIndexOf('\n'))) as WidgetPayload;
-  return '```amber-three v=1 id=ca-scene\n' + JSON.stringify(payload.spec) + '\n```';
+  const scene: string = JSON.stringify(payload.spec);
+  const body: string = corruptTail ? scene.slice(0, -2) + ',{"id":"unfinished"' : scene;
+  return '```amber-three v=1 id=ca-scene\n' + body + '\n```';
 };
 
 const smartUiCertificatePayload = (): string => '```amber-ui v=1 id=ca-controls\n' +
@@ -274,6 +276,7 @@ const buildVisualFixture = async (runId: string, kind: VisualFixtureCase): Promi
   }
   const content: string = kind === 'widget-error' ? svgPayload().slice(0, -12) :
     kind === 'raw-svg' ? rawSvgPayload() : kind === 'raw-three' ? rawThreePayload() :
+    kind === 'raw-three-error' ? rawThreePayload(true) :
     kind === 'smart-ui' ? smartUiCertificatePayload() + '\n\n' + rawSvgPayload() :
     kind === 'ui-svg-error' ? smartUiCertificatePayload() + '\n\n' + rawSvgPayload().replace('</svg>', '</g>') :
     kind === 'weather-ui' ? weatherUiPayload() : kind === 'style-gallery' ? styleGalleryPayload() :

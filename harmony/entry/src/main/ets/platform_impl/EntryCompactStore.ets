@@ -41,6 +41,7 @@ class EntryCompactStore implements CompactStore {
   // 同会话写串行:insert/recordEvent 都是 read-modify-write,并发会互相覆盖
   // (丢摘要/丢审计行)
   private readonly writeTails: Map<string, Promise<void>> = new Map();
+  private readonly revisions: Map<string, number> = new Map();
 
   constructor(kv: KeyValueStore) {
     this.kv = kv;
@@ -72,22 +73,45 @@ class EntryCompactStore implements CompactStore {
     }
   }
 
-  insertCompact(compact: ConversationCompact): Promise<void> {
-    return this.enqueueWrite(compact.conversationId, async (): Promise<void> => {
+  async getRevision(conversationId: string): Promise<number> {
+    // Invalidation can enqueue a new tail while an older write is awaited. The
+    // revision is safe to pair with source reads only after that deletion commits.
+    let tail: Promise<void> | undefined = this.writeTails.get(conversationId);
+    while (tail !== undefined) {
+      await tail;
+      const latest: Promise<void> | undefined = this.writeTails.get(conversationId);
+      if (latest === tail) break;
+      tail = latest;
+    }
+    return this.revisions.get(conversationId) ?? 0;
+  }
+
+  async insertCompact(compact: ConversationCompact, expectedRevision?: number): Promise<boolean> {
+    let inserted: boolean = false;
+    const revisionMatches = (): boolean => expectedRevision === undefined
+      || expectedRevision === (this.revisions.get(compact.conversationId) ?? 0);
+    await this.enqueueWrite(compact.conversationId, async (): Promise<void> => {
       // 删除标记先于写检查:在途摘要迟到不会复活已删除会话
-      if (await this.isDeleted(compact.conversationId)) return;
+      if (!revisionMatches() || await this.isDeleted(compact.conversationId)) return;
       const list: ConversationCompact[] = await this.getCompacts(compact.conversationId);
       const key: string = compactsKey(compact.conversationId);
+      if (!revisionMatches()) return;
       await this.kv.put(key, JSON.stringify([...list, compact]));
       // 写后复核:deleteConversationCompactData 不走本队列,可能在两次 await 之间
       // 落标记并删键;若如此,撤回本次写入,避免摘要成为不可见残留
-      if (await this.isDeleted(compact.conversationId)) await this.kv.delete(key);
+      if (await this.isDeleted(compact.conversationId) || !revisionMatches()) {
+        await this.kv.delete(key);
+      } else {
+        inserted = true;
+      }
     });
+    return inserted;
   }
 
   deleteByConversation(conversationId: string): Promise<void> {
-    // 入同一写队列:invalidate 与飞行中 precompact 的 read-put 竞态会把
-    // 已失效的摘要写回复活
+    // Invalidate generations immediately, including providers still running or
+    // insertions waiting behind another write in this conversation's queue.
+    this.revisions.set(conversationId, (this.revisions.get(conversationId) ?? 0) + 1);
     return this.enqueueWrite(conversationId, async (): Promise<void> => {
       await this.kv.delete(compactsKey(conversationId));
     });

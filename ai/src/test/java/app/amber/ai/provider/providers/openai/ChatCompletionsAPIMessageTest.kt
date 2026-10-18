@@ -22,6 +22,7 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.hasExplicitReasoningContentField
+import app.amber.ai.ui.handleMessageChunk
 import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.ImageEncodingException
 import okhttp3.OkHttpClient
@@ -75,6 +76,33 @@ class ChatCompletionsAPIMessageTest {
         )
         method.isAccessible = true
         return method.invoke(api, message) as UIMessage
+    }
+
+    @Test
+    fun `complete image URLs retain mime and remain separate through both generation paths`() {
+        val parsed = invokeParseMessage(
+            Json.parseToJsonElement(
+                """{"role":"assistant","images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,QUJDRA=="}},{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,RUZHSA=="}}]}"""
+            ).jsonObject
+        )
+        val initial = listOf(UIMessage.user("Generate two images"))
+        val streamingChunk = MessageChunk(
+            id = "chat-images",
+            model = "test",
+            choices = listOf(UIMessageChoice(index = 0, delta = parsed, message = null, finishReason = null)),
+        )
+        val accumulator = MessageStreamAccumulator(initial)
+        accumulator.append(streamingChunk)
+        val finalChunk = streamingChunk.copy(
+            choices = listOf(UIMessageChoice(index = 0, delta = null, message = parsed, finishReason = null))
+        )
+
+        listOf(accumulator.snapshot().last(), initial.handleMessageChunk(finalChunk).last()).forEach { message ->
+            assertEquals(
+                listOf("data:image/png;base64,QUJDRA==", "data:image/jpeg;base64,RUZHSA=="),
+                message.parts.filterIsInstance<UIMessagePart.Image>().map { it.url },
+            )
+        }
     }
 
     private fun invokeBuildChatCompletionRequest(

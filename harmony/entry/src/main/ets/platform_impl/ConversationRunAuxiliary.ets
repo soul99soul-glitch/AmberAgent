@@ -128,7 +128,7 @@ const maybeMemoryExtraction = (ctx: DetachedConversationContext, finalized: Conv
     },
     getAllActiveRecords: ops.getAllActiveRecords, addCandidates: ops.addCandidates,
     addCandidate: ops.addCandidate, addMemory: ops.addMemory, addEvent: ops.addEvent,
-    countEventsSince: ops.countEventsSince,
+    tryStartExtraction: ops.tryStartExtraction,
     canApply: (): Promise<boolean> => canCommitMemoryExtraction(finalized),
     applyActions: (actions, now) => ops.applyActions(actions, now, async (): Promise<void> => {
       if (!await canCommitMemoryExtraction(finalized)) throw new Error('提炼来源或自动记忆设置已改变，结果未写入');

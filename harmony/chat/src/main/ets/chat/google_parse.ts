@@ -92,7 +92,7 @@ export const parseGoogleMessagePart = (obj: JsonObject): UIMessagePart => {
     }
     return {
       type: 'image',
-      url: data,
+      url: `data:${mime};base64,${data}`,
       metadata: { thoughtSignature: strOrNull(obj['thoughtSignature']) },
     };
   }

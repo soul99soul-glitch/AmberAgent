@@ -715,7 +715,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     )
                 }
                 UIMessagePart.Image(
-                    url = data,
+                    url = "data:$mime;base64,$data",
                     metadata = buildJsonObject {
                         put("thoughtSignature", thoughtSignature)
                     }

@@ -49,7 +49,8 @@ const evaluate = async (userText: string, outputs: OutputCandidate[], opts: {
     addCandidates: async list => { candidates.push(...list); }, addCandidate: async candidate => { candidates.push(candidate); },
     addMemory: async () => { throw new Error('Atomic callback must handle writes'); },
     applyActions: async (actions, now) => { const applied = applyMemoryExtractionActions(records, actions, now); records = applied.records; return applied; },
-    addEvent: async event => { events.push(event); }, countEventsSince: async () => 0,
+    addEvent: async event => { events.push(event); },
+    tryStartExtraction: async event => { events.push(event); return true; },
   };
   await runMemoryExtraction(conversation, deps);
   return { records, candidates, events, prompt };
