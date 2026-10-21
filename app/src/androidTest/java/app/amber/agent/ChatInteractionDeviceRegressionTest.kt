@@ -633,6 +633,163 @@ class ChatInteractionDeviceRegressionTest {
     }
 
     /**
+     * Measurement only (PR #31 review item 2), not a pass/fail gate: the real
+     * timeline streams a long pinned reply under 30 warmed history replies.
+     * Records MarkdownParseCache misses and newly cached chars during
+     * generation, how many history bodies stay cached, frame durations, and
+     * the misses needed to walk the history again afterwards. The same test
+     * APK runs against app builds before and after the prefetch exclusion.
+     */
+    @Test(timeout = 240_000)
+    fun productionLongReplyPrefetchParseBudget(): Unit = runBlocking {
+        requireFixture()
+        val (repository, service, gateway) = isolatedFixture()
+        val id = Uuid.random()
+        val historyBodies = (0 until 30).map(::prefetchHistoryBody)
+        val history = buildList {
+            historyBodies.forEachIndexed { turn, body ->
+                add(MessageNode.of(UIMessage.user("Prefetch history question $turn")))
+                add(MessageNode.of(UIMessage.assistant(body)))
+            }
+        }
+        val reply = prefetchLongReply()
+        gateway.reply = reply
+        gateway.delayMs = 20
+        gateway.beforeFinish = null
+        repository.insertConversation(Conversation.ofId(id, messages = history).copy(title = "Prefetch measurement fixture"))
+        val cache = ParseCacheProbe()
+        val worker = android.os.HandlerThread("prefetch-frames").apply { start() }
+        try {
+            open(id).use { scenario ->
+                compose.waitUntil(30_000) { compose.onAllNodes(hasSetTextAction(), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+                suspend fun walkHistory() {
+                    for (index in listOf(15, 30, 45, 58, 0)) {
+                        timelineScrollable().performScrollToIndex(index)
+                        compose.waitForIdle()
+                        delay(400)
+                    }
+                    delay(1_500)
+                }
+                walkHistory()
+                val historyCachedBefore = cache.cachedCount(historyBodies)
+
+                val frames = java.util.Collections.synchronizedList(mutableListOf<Double>())
+                val listener = android.view.Window.OnFrameMetricsAvailableListener { _, metrics, _ ->
+                    frames.add(metrics.getMetric(android.view.FrameMetrics.TOTAL_DURATION) / 1_000_000.0)
+                }
+                compose.onAllNodes(hasSetTextAction(), useUnmergedTree = true).onFirst().performTextInput("Long reply for prefetch measurement")
+                val send = sendStopButton(R.string.send).fetchSemanticsNode().boundsInWindow.center
+                val missesBefore = cache.misses()
+                cache.startTracking()
+                scenario.onActivity { it.window.addOnFrameMetricsAvailableListener(listener, android.os.Handler(worker.looper)) }
+                compose.mainClock.autoAdvance = false
+                val started = SystemClock.uptimeMillis()
+                tap(send.x, send.y)
+                withTimeout(150_000) {
+                    while (text(service, id).length < reply.length ||
+                        service.getGenerationJobStateFlow(id).value?.isActive == true
+                    ) pump(32)
+                }
+                pump(2_000) // drain + settled handover
+                scenario.onActivity { it.window.removeOnFrameMetricsAvailableListener(listener) }
+                val generationMs = SystemClock.uptimeMillis() - started
+                val (newEntries, newChars) = cache.stopTracking()
+                val missesGeneration = cache.misses() - missesBefore
+                val historyCachedAfter = cache.cachedCount(historyBodies)
+                compose.mainClock.autoAdvance = true
+                awaitImeHidden(scenario)
+
+                val missesBeforeWalk = cache.misses()
+                walkHistory()
+                val historyReparseMisses = cache.misses() - missesBeforeWalk
+
+                val sorted = synchronized(frames) { frames.sorted() }
+                fun pct(q: Double) = if (sorted.isEmpty()) -1.0 else sorted[minOf(sorted.lastIndex, (q * sorted.size).toInt())]
+                val result = org.json.JSONObject().apply {
+                    put("replyChars", reply.length); put("generationMs", generationMs)
+                    put("missesDuringGeneration", missesGeneration)
+                    put("newCacheEntriesDuringGeneration", newEntries); put("newCachedCharsDuringGeneration", newChars)
+                    put("historyBodies", historyBodies.size)
+                    put("historyCachedBefore", historyCachedBefore); put("historyCachedAfter", historyCachedAfter)
+                    put("historyReparseMisses", historyReparseMisses)
+                    put("frames", sorted.size); put("p50", pct(0.50)); put("p95", pct(0.95)); put("p99", pct(0.99))
+                    put("over32Pct", if (sorted.isEmpty()) -1.0 else 100.0 * sorted.count { it > 32.0 } / sorted.size)
+                }
+                writeEvidence("production-prefetch-measure", result)
+                check(text(service, id) == reply) { "Generated reply changed" }
+            }
+        } finally {
+            compose.mainClock.autoAdvance = true
+            worker.quitSafely()
+            service.stopGeneration(id)
+            repository.getConversationById(id)?.let { service.deleteConversation(it) }
+        }
+    }
+
+    private fun prefetchHistoryBody(turn: Int): String =
+        "## 历史第 $turn 轮\n\n这是第 $turn 轮的完整回答，包含 **加粗**、`code` 与 [链接](https://example.com/$turn)。\n\n" +
+            "- 要点一：缓存命中\n- 要点二：滚动回看\n\n```kotlin\nfun history$turn() = $turn\n```\n\n" +
+            "| 项目 | 值 |\n| --- | --- |\n| 轮次 | $turn |\n\n" + "历史正文用于填充长度。".repeat(30)
+
+    private fun prefetchLongReply(): String = buildString {
+        for (section in 0 until 40) {
+            append("## 第 $section 节\n\n中文说明 **重点** and [link](https://example.com/$section)。")
+            append("这一段用于验证生成中的长回复。\n\n```kotlin\nfun answer$section(x: Int) = x + $section\n```\n\n")
+            append("| 项目 | 结果 |\n| --- | --- |\n| 小节 | $section |\n\n")
+        }
+        append("PREFETCH_MEASURE_END")
+    }
+
+    /** Reads MarkdownParseCache by reflection without touching its LRU access order. */
+    private class ParseCacheProbe {
+        private val owner = Class.forName("app.amber.feature.ui.components.richtext.MarkdownParseCache")
+        private val instance = owner.getDeclaredField("INSTANCE").get(null)
+        private fun field(name: String) = owner.getDeclaredField(name).apply { isAccessible = true }
+        private val lock: Any = field("lock").get(instance)!!
+        private val missesField = field("misses")
+        @Suppress("UNCHECKED_CAST")
+        private val entries = field("entries").get(instance) as Map<Any, Any>
+        private var contentField: java.lang.reflect.Field? = null
+        private val seen = HashSet<String>()
+        @Volatile private var running = false
+        private var tracker: Thread? = null
+        private var newEntries = 0
+        private var newChars = 0L
+
+        fun misses(): Int = synchronized(lock) { missesField.getInt(instance) }
+
+        fun keys(): List<String> {
+            val raw = synchronized(lock) { entries.keys.toList() }
+            return raw.map { key ->
+                val f = contentField ?: key.javaClass.getDeclaredField("content").apply { isAccessible = true }
+                    .also { contentField = it }
+                f.get(key) as String
+            }
+        }
+
+        fun cachedCount(bodies: List<String>): Int = keys().toHashSet().let { cached -> bodies.count { it in cached } }
+
+        private fun sample() {
+            for (key in keys()) if (seen.add(key)) { newEntries++; newChars += key.length }
+        }
+
+        fun startTracking() {
+            seen.addAll(keys())
+            running = true
+            tracker = Thread {
+                while (running) { sample(); Thread.sleep(5) }
+            }.apply { start() }
+        }
+
+        fun stopTracking(): Pair<Int, Long> {
+            running = false
+            tracker?.join()
+            sample()
+            return newEntries to newChars
+        }
+    }
+
+    /**
      * The reader is anchored in an older message while the short reply below
      * stays visible off-bottom. The viewport reading line is outside the reply,
      * so same-frame hold lets the settled tree take over immediately without
