@@ -71,7 +71,8 @@ import app.amber.feature.runtime.OutcomeUnknownPrompt
 import app.amber.feature.miniapp.ConversationDraftStore
 import app.amber.feature.ui.hooks.writeStringPreference
 import app.amber.feature.ui.hooks.ChatInputState
-import app.amber.feature.ui.components.message.chatMessageVirtualizationPrewarmTexts
+import app.amber.feature.ui.components.message.chatMessageTimelinePrewarmTexts
+import app.amber.feature.ui.components.message.prewarmChatMessageToolJson
 import app.amber.feature.ui.components.richtext.prewarmMarkdownContent
 import kotlin.uuid.Uuid
 
@@ -564,15 +565,16 @@ class ChatVM(
         withContext(Dispatchers.Default) {
             nodes.asReversed().forEachIndexed { index, node ->
                 currentCoroutineContext().ensureActive()
-                node.chatMessageVirtualizationPrewarmTexts(
+                val lastMessage = index == 0
+                node.chatMessageTimelinePrewarmTexts(
                     regexes = settings.regexes,
-                    showAssistantBubble = settings.displaySetting.showAssistantBubble,
                     loading = loadingLastMessage,
-                    lastMessage = index == 0,
+                    lastMessage = lastMessage,
                 ).forEach { content ->
                     currentCoroutineContext().ensureActive()
                     prewarmMarkdownContent(content)
                 }
+                if (!(loadingLastMessage && lastMessage)) node.prewarmChatMessageToolJson()
             }
         }
     }

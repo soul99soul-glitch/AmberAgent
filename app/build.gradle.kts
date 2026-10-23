@@ -39,6 +39,11 @@ val baseApplicationId = "app.amber.agent"
 val graphiteDebugApplicationIdSuffix = ".graphite"
 val chatDeviceFixtureEnabled =
     project.findProperty("chatDeviceFixture")?.toString()?.toBoolean() == true
+// -PprofileableDebug=true builds the debug variant non-debuggable and profileable. It installs over
+// the existing `.graphite` debug build (same package, same signature, data kept), so frame timing
+// and Baseline Profile collection run on real conversations without debuggable-ART overhead.
+val profileableDebugEnabled =
+    project.findProperty("profileableDebug")?.toString()?.toBoolean() == true
 
 // Build types that share the Amber UI/runtime contract — must each call
 // `applyAmberUiBuildConfig(...)` in the `buildTypes {}` block below to set
@@ -275,6 +280,10 @@ android {
                 googleOAuthConfigured("$baseApplicationId$graphiteDebugApplicationIdSuffix", name).toString(),
             )
             manifestPlaceholders["xiaomiXmsBuildTypeDebug"] = "true"
+            if (profileableDebugEnabled) {
+                isDebuggable = false
+                isProfileable = true
+            }
         }
         create("graphite") {
             initWith(getByName("debug"))

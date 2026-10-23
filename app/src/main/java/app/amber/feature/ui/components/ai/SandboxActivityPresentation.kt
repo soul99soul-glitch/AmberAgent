@@ -34,8 +34,9 @@ internal fun WebViewOperationState.matchesPreview(toolCallId: String, normalized
         .any { it == normalizedUrl }
 }
 
-internal fun WebViewOperationState.bestThumbnailFile(isCurrentPreview: Boolean): File? =
+internal fun WebViewOperationState.bestThumbnailFile(isCurrentPreview: Boolean, cached: File? = null): File? =
     thumbnailPath.takeIf { isCurrentPreview }?.asValidThumbnailFile()
+        ?: cached
         ?: lastGoodThumbnailPath.asValidThumbnailFile()
 
 internal fun String.asValidThumbnailFile(): File? =

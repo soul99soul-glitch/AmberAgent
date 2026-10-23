@@ -4,6 +4,7 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.MessageNode
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -66,6 +67,41 @@ class ChatMessageVirtualItemsTest {
         assertTrue("content-Text-1" in contentKeys)
         assertTrue("content-Document-0" in contentKeys)
         assertTrue("content-Text-2" in contentKeys)
+    }
+
+    @Test
+    fun timelinePrewarmCoversShortUserAndAssistantTextsButNotTheStreamingTail() {
+        val user = MessageNode.of(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("short **user** ask"))))
+        val assistant = MessageNode.of(
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(
+                    UIMessagePart.Text("1. short\n2. list"),
+                    UIMessagePart.Text("   "),
+                    UIMessagePart.Text(longMarkdown()),
+                ),
+            )
+        )
+
+        assertEquals(listOf("short **user** ask"), user.chatMessageTimelinePrewarmTexts(emptyList(), loading = false, lastMessage = false))
+        assertEquals(
+            listOf("1. short\n2. list", longMarkdown()),
+            assistant.chatMessageTimelinePrewarmTexts(emptyList(), loading = false, lastMessage = false),
+        )
+        assertTrue(assistant.chatMessageTimelinePrewarmTexts(emptyList(), loading = true, lastMessage = true).isEmpty())
+        assertEquals(2, assistant.chatMessageTimelinePrewarmTexts(emptyList(), loading = true, lastMessage = false).size)
+    }
+
+    @Test
+    fun timelinePrewarmSkipsAssistantWidgetPayloads() {
+        val widget = MessageNode.of(
+            UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(UIMessagePart.Text("```widget\n{\"type\":\"card\"}\n```")),
+            )
+        )
+
+        assertTrue(widget.chatMessageTimelinePrewarmTexts(emptyList(), loading = false, lastMessage = false).isEmpty())
     }
 
     private fun longMarkdown(): String = buildString {

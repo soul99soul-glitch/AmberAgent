@@ -67,7 +67,7 @@ internal fun HiddenWebOperationRenderer(
             webViewOperationStore.markPageFinished(loadId, resolvedUrl)
             webView?.let {
                 extractReadablePage(it, webViewOperationStore, loadId, force = true)
-                scheduleThumbnailCaptures(it, webViewOperationStore, context = it.context, loadId = loadId)
+                scheduleThumbnailCaptures(it, webViewOperationStore, context = it.context, loadId = loadId, cacheUrl = url)
             }
         },
         onReceivedError = { webView, pageUrl, error ->

@@ -64,6 +64,8 @@ internal fun AgentOperationPreviewPeek(
             WebOperationPreviewThumbnail(
                 url = previewUrl,
                 toolCallId = activity.toolCallId,
+                live = activity.status == ToolActivityStatus.RUNNING ||
+                    activity.status == ToolActivityStatus.WAITING_FOR_PERMISSION,
                 onOpen = onOpen,
             )
         } else {

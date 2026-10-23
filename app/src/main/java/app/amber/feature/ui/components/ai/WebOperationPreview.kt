@@ -20,6 +20,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,16 +39,22 @@ import app.amber.feature.webview.WebViewOperationState
 import app.amber.feature.webview.WebViewOperationStore
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.webview.WebView
+import app.amber.feature.ui.components.webview.WebViewWarmUp
 import app.amber.feature.ui.components.webview.rememberWebViewState
 import org.koin.compose.koinInject
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun WebOperationPreviewThumbnail(
     url: String,
     toolCallId: String,
+    live: Boolean,
     onOpen: () -> Unit,
 ) {
+    val context = LocalContext.current
     val webViewOperationStore: WebViewOperationStore = koinInject()
     val webState by webViewOperationStore.state.collectAsStateWithLifecycle()
     val normalizedUrl = remember(url) { url.normalizedWebPreviewUrl() }
@@ -55,11 +62,25 @@ internal fun WebOperationPreviewThumbnail(
     val isCurrentPreview = remember(toolCallId, normalizedUrl, webState.loadId) {
         webState.matchesPreview(toolCallId = toolCallId, normalizedUrl = normalizedUrl)
     }
-    val thumbnailFile = webState.bestThumbnailFile(isCurrentPreview)
-    LaunchedEffect(toolCallId, normalizedUrl, isCurrentPreview) {
-        if (!isCurrentPreview) {
-            webViewOperationStore.open(url, toolCallId = toolCallId)
+    val cached by produceState<CachedWebThumbnail>(CachedWebThumbnail.Pending, normalizedUrl) {
+        value = withContext(Dispatchers.IO) {
+            WebPreviewThumbnails.cached(context, url)?.let(CachedWebThumbnail::Found) ?: CachedWebThumbnail.Missing
         }
+    }
+    val thumbnailFile = webState.bestThumbnailFile(isCurrentPreview, cached = (cached as? CachedWebThumbnail.Found)?.file)
+    LaunchedEffect(toolCallId, normalizedUrl, isCurrentPreview, live, cached) {
+        if (isCurrentPreview) return@LaunchedEffect
+        // A finished tool with a saved thumbnail needs no WebView. Without one, wait until the
+        // page has settled before paying for WebView startup, then keep the capture for next time.
+        when (cached) {
+            CachedWebThumbnail.Pending -> return@LaunchedEffect
+            is CachedWebThumbnail.Found -> if (!live) return@LaunchedEffect
+            CachedWebThumbnail.Missing -> if (!live) {
+                WebViewWarmUp.request(context)
+                delay(WEB_PREVIEW_BACKFILL_DELAY_MS)
+            }
+        }
+        webViewOperationStore.open(url, toolCallId = toolCallId)
     }
     val loadId = webState.loadId.takeIf { isCurrentPreview }
     val workspace = workspaceColors()
@@ -100,6 +121,14 @@ internal fun WebOperationPreviewThumbnail(
         )
     }
 }
+
+private sealed interface CachedWebThumbnail {
+    data object Pending : CachedWebThumbnail
+    data object Missing : CachedWebThumbnail
+    data class Found(val file: File) : CachedWebThumbnail
+}
+
+private const val WEB_PREVIEW_BACKFILL_DELAY_MS = 2_000L
 
 @Composable
 private fun WebOperationPreviewPlaceholder(
@@ -209,7 +238,7 @@ internal fun OperationWebPreview(
                         webViewOperationStore.markPageFinished(loadId, resolvedUrl)
                         webView?.let { view ->
                             extractReadablePage(view, webViewOperationStore, loadId, force = true)
-                            scheduleThumbnailCaptures(view, webViewOperationStore, context, loadId)
+                            scheduleThumbnailCaptures(view, webViewOperationStore, context, loadId, cacheUrl = url)
                         }
                     },
                     onReceivedError = { webView, pageUrl, error ->

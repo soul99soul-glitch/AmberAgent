@@ -24,7 +24,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -35,6 +38,7 @@ import kotlinx.coroutines.delay
 import app.amber.core.settings.GenerativeUiSetting
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.toCssHex
+import app.amber.feature.ui.components.webview.WebViewWarmUp
 import org.json.JSONObject
 import java.util.UUID
 
@@ -42,6 +46,9 @@ private const val WIDGET_MIN_HEIGHT_DP = 160
 private const val WIDGET_FALLBACK_HEIGHT_DP = 320
 private const val MAX_WIDGET_URL_LENGTH = 2048
 private const val STREAM_WIDGET_DEBOUNCE_MS = 16L
+// A settled inline widget outside the viewport mounts its WebView once the page has had time to
+// settle, so opening a conversation never pays for WebView startup inside its first frames.
+private const val OFFSCREEN_WIDGET_MOUNT_DELAY_MS = 1_500L
 
 private val heightCache = object {
     private val map = java.util.LinkedHashMap<String, Int>(16, 0.75f, true)
@@ -176,12 +183,39 @@ internal fun SafeGenerativeWidgetWebView(
         }
     }
 
+    // Streaming and expanded widgets need their WebView at once. A settled inline widget keeps
+    // its measured slot empty until it has been drawn once (on screen) or the page has settled
+    // (off screen): WebView creation costs tens of ms on the main thread, and the first one in a
+    // process also loads the Chromium provider.
+    val deferMount = !streaming && !liveStreaming && !interactive && !fillContainer
+    var mounted by remember { mutableStateOf(!deferMount) }
+    var onScreen by remember { mutableStateOf(false) }
+    if (!mounted) {
+        LaunchedEffect(onScreen) {
+            WebViewWarmUp.request(context)
+            if (onScreen) {
+                withFrameNanos {}
+                withFrameNanos {}
+            } else {
+                delay(OFFSCREEN_WIDGET_MOUNT_DELAY_MS)
+            }
+            mounted = true
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .then(if (fillContainer) Modifier.fillMaxSize() else Modifier.height(animatedHeight))
+            .then(
+                if (mounted) {
+                    Modifier
+                } else {
+                    Modifier.onGloballyPositioned { onScreen = it.boundsInWindow().height > 0f }
+                }
+            )
     ) {
-        AndroidView(
+        if (mounted) AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 WebView(ctx).apply {

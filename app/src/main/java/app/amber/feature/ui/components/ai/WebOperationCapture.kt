@@ -12,9 +12,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
+import kotlin.math.roundToInt
 
 private val readablePageParseScope = CoroutineScope(Dispatchers.Default.limitedParallelism(1))
+private val thumbnailWriteScope = CoroutineScope(Dispatchers.IO.limitedParallelism(1))
+private const val THUMBNAIL_MAX_WIDTH_PX = 540
 
 internal fun extractReadablePage(
     webView: AndroidWebView,
@@ -97,9 +99,10 @@ internal fun scheduleThumbnailCaptures(
     store: WebViewOperationStore,
     context: android.content.Context,
     loadId: String,
+    cacheUrl: String,
 ) {
-    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 800L)
-    captureWebViewThumbnail(webView, store, context, loadId, delayMillis = 5_000L)
+    captureWebViewThumbnail(webView, store, context, loadId, cacheUrl, delayMillis = 800L)
+    captureWebViewThumbnail(webView, store, context, loadId, cacheUrl, delayMillis = 5_000L)
 }
 
 internal fun captureWebViewThumbnail(
@@ -107,9 +110,11 @@ internal fun captureWebViewThumbnail(
     store: WebViewOperationStore,
     context: android.content.Context,
     loadId: String,
+    cacheUrl: String,
     delayMillis: Long = 500L,
     force: Boolean = false,
 ) {
+    val appContext = context.applicationContext
     webView.postDelayed({
         runCatching {
             if (!store.shouldCaptureThumbnail(loadId, webView.url, force = force)) return@runCatching
@@ -117,30 +122,35 @@ internal fun captureWebViewThumbnail(
             val height = webView.height
             if (width <= 0 || height <= 0) return@runCatching
 
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            webView.draw(canvas)
-
-            val cropWidth = minOf(bitmap.width, bitmap.height * 4 / 3)
-            val cropHeight = minOf(bitmap.height, bitmap.width * 3 / 4)
-            val cropX = ((bitmap.width - cropWidth) / 2).coerceAtLeast(0)
-            val cropped = Bitmap.createBitmap(bitmap, cropX, 0, cropWidth, cropHeight)
-            if (cropped !== bitmap) {
+            // Only drawing has to happen on the main thread. Draw the 4:3 crop straight into a
+            // thumbnail-sized bitmap, then scan, encode and write it off the main thread.
+            val cropWidth = minOf(width, height * 4 / 3)
+            val cropHeight = minOf(height, width * 3 / 4)
+            val cropX = ((width - cropWidth) / 2).coerceAtLeast(0)
+            val scale = minOf(1f, THUMBNAIL_MAX_WIDTH_PX.toFloat() / cropWidth)
+            val bitmap = Bitmap.createBitmap(
+                (cropWidth * scale).roundToInt().coerceAtLeast(1),
+                (cropHeight * scale).roundToInt().coerceAtLeast(1),
+                Bitmap.Config.ARGB_8888,
+            )
+            Canvas(bitmap).apply {
+                scale(scale, scale)
+                translate(-cropX.toFloat(), 0f)
+                webView.draw(this)
+            }
+            val pageUrl = webView.url
+            thumbnailWriteScope.launch {
+                runCatching {
+                    if (bitmap.looksBlank()) return@runCatching
+                    val output = WebPreviewThumbnails.write(appContext, cacheUrl, bitmap)
+                    withContext(Dispatchers.Main.immediate) {
+                        store.updateThumbnail(loadId, pageUrl, output.absolutePath)
+                    }
+                }.onFailure {
+                    Log.w("ChatInput", "Failed to write WebView thumbnail", it)
+                }
                 bitmap.recycle()
             }
-            if (cropped.looksBlank()) {
-                cropped.recycle()
-                return@runCatching
-            }
-
-            val dir = File(context.filesDir, "amberagent/artifacts/webview-thumbnails")
-            dir.mkdirs()
-            val output = File(dir, "webview-${System.currentTimeMillis()}.png")
-            output.outputStream().use { stream ->
-                cropped.compress(Bitmap.CompressFormat.PNG, 92, stream)
-            }
-            cropped.recycle()
-            store.updateThumbnail(loadId, webView.url, output.absolutePath)
         }.onFailure {
             Log.w("ChatInput", "Failed to capture WebView thumbnail", it)
         }

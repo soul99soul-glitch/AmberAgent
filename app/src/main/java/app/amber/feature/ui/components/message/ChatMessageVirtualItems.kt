@@ -113,34 +113,44 @@ internal sealed interface BlockAttachment {
     ) : BlockAttachment
 }
 
-internal fun MessageNode.chatMessageVirtualizationPrewarmTexts(
+/**
+ * Markdown sources the settled timeline will parse for this node, keyed exactly as
+ * [MessageRenderCache.displayMarkdownText] renders them. Short texts are included too: on a cache
+ * miss they are parsed synchronously in composition, and the first parse in a process also pays
+ * for lexer initialization.
+ */
+internal fun MessageNode.chatMessageTimelinePrewarmTexts(
     regexes: List<AssistantRegex>,
-    showAssistantBubble: Boolean,
     loading: Boolean,
     lastMessage: Boolean,
 ): List<String> {
     val message = currentMessage
-    if (message.role != MessageRole.ASSISTANT || (loading && lastMessage)) {
-        return emptyList()
-    }
+    if (message.role != MessageRole.ASSISTANT && message.role != MessageRole.USER) return emptyList()
+    if (loading && lastMessage) return emptyList()
     return message.parts
         .filterIsInstance<UIMessagePart.Text>()
         .mapNotNull { part ->
-            part.text
-                .let { text ->
-                    MessageRenderCache.visualRegexText(
-                        text = text,
-                        regexes = regexes,
-                        scope = AssistantAffectScope.ASSISTANT,
-                    )
-                }
-                .takeUnless {
-                    GenerativeWidgetParser.containsWidgetFence(it) ||
-                        GenerativeWidgetParser.containsFullHtmlDeckPayload(it) ||
-                        it.looksLikeMiniAppJsonPayload()
-                }
-                ?.takeIf(::shouldVirtualizeMarkdownContent)
+            MessageRenderCache.displayMarkdownText(
+                text = part.text,
+                regexes = regexes,
+                role = message.role,
+            ).takeUnless {
+                it.isBlank() ||
+                    message.role == MessageRole.ASSISTANT && (
+                        GenerativeWidgetParser.containsWidgetFence(it) ||
+                            GenerativeWidgetParser.containsFullHtmlDeckPayload(it) ||
+                            it.looksLikeMiniAppJsonPayload()
+                        )
+            }
         }
+}
+
+/** Fills [MessageRenderCache]'s tool JSON entries that tool cards would otherwise parse in composition. */
+internal fun MessageNode.prewarmChatMessageToolJson() {
+    currentMessage.parts.filterIsInstance<UIMessagePart.Tool>().forEach { tool ->
+        MessageRenderCache.toolInputJson(tool.input)
+        if (tool.isExecuted) MessageRenderCache.toolOutputJson(tool.output)
+    }
 }
 
 internal fun buildChatMessageVirtualItems(

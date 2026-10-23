@@ -49,6 +49,7 @@ import app.amber.feature.ui.components.ai.OperationWebPreview
 import app.amber.feature.ui.components.ai.SandboxActivitySheet
 import app.amber.feature.ui.components.ai.SandboxPeekBar
 import app.amber.feature.ui.components.ai.WebOperationPreviewThumbnail
+import app.amber.feature.ui.components.ai.WebPreviewThumbnails
 import app.amber.feature.ui.pages.chat.LocalChatTheme
 import app.amber.feature.ui.pages.chat.toChatTheme
 import app.amber.feature.ui.theme.AmberBase
@@ -102,6 +103,7 @@ class ModularizationSandboxPreviewDeviceTest {
                                 WebOperationPreviewThumbnail(
                                     url = url,
                                     toolCallId = "p3-sandbox-local-page",
+                                    live = true,
                                     onOpen = { expanded = true },
                                 )
                             }
@@ -149,6 +151,41 @@ class ModularizationSandboxPreviewDeviceTest {
         assertFalse(hidden.isAttachedToWindow)
         assertFalse(store.state.value.rendererActive)
         capture("04-preview-disposed")
+    }
+
+    @Test
+    fun finishedPreviewWithASavedThumbnailReopensWithoutAWebView() {
+        val url = "https://example.invalid/p3-saved-thumbnail"
+        val saved = WebPreviewThumbnails.write(
+            instrumentation.targetContext,
+            url,
+            Bitmap.createBitmap(48, 36, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.DKGRAY) },
+        )
+        try {
+            compose.setContent {
+                KoinIsolatedContext(fixtureKoin) {
+                    FixtureTheme {
+                        Box(Modifier.width(72.dp).height(96.dp)) {
+                            WebOperationPreviewThumbnail(
+                                url = url,
+                                toolCallId = "p3-finished-tool",
+                                live = false,
+                                onOpen = {},
+                            )
+                        }
+                    }
+                }
+            }
+            compose.waitForIdle()
+            // Longer than the backfill delay an uncached finished preview waits before loading.
+            SystemClock.sleep(2_500)
+            compose.waitForIdle()
+            assertTrue(nativeWebViews().isEmpty())
+            assertEquals("", store.state.value.loadId)
+            capture("05-saved-thumbnail-without-webview")
+        } finally {
+            saved.delete()
+        }
     }
 
     @Test
