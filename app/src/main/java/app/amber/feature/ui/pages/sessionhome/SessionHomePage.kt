@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -88,6 +90,8 @@ import dev.chrisbanes.haze.rememberHazeState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.androidx.compose.koinViewModel
 import kotlinx.coroutines.CancellationException
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 
 /**
@@ -109,6 +113,12 @@ fun SessionHomePage() {
     val toaster = LocalToaster.current
     val vm: SessionHomeVM = koinViewModel()
     val conversations = vm.conversations.collectAsLazyPagingItems()
+    val deleteState = vm.deleteUndoState.collectAsStateWithLifecycle().value
+    val deleteFailure = vm.deleteFailure.collectAsStateWithLifecycle().value
+    val density = LocalDensity.current
+    var bottomOverlayHeight by remember { mutableIntStateOf(0) }
+    var lastUndoCount by remember { mutableIntStateOf(1) }
+    if (deleteState.pendingIds.isNotEmpty()) lastUndoCount = deleteState.pendingIds.size
     val hasConversationError = vm.hasConversationError.collectAsStateWithLifecycle().value
     var homeSearchQuery by rememberSaveable { mutableStateOf("") }
     var homeSearchExpanded by rememberSaveable { mutableStateOf(false) }
@@ -169,6 +179,17 @@ fun SessionHomePage() {
             if (hdrAvailable && Build.VERSION.SDK_INT >= 35) {
                 window?.setDesiredHdrHeadroom(AMBER_HDR_IDLE_HEADROOM)
             }
+        }
+    }
+    LaunchedEffect(deleteFailure) {
+        deleteFailure?.let { failure ->
+            val message = when (failure.kind) {
+                HomeDeleteFailureKind.Restored -> R.string.session_home_delete_failed_restored
+                HomeDeleteFailureKind.AlreadyDeleted -> R.string.session_home_delete_cleanup_failed
+                HomeDeleteFailureKind.Unverified -> R.string.session_home_delete_unverified
+            }
+            toaster.show(context.getString(message), type = ToastType.Error)
+            vm.acknowledgeDeleteFailure(failure.sequence)
         }
     }
     val operationError = stringResource(R.string.error_title_operation)
@@ -255,8 +276,7 @@ fun SessionHomePage() {
                         .amberTraceMeasure("Amber Home list measure"),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
                         top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
-                        bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() +
-                            if (inTwoPane) 24.dp else 100.dp,
+                        bottom = with(density) { bottomOverlayHeight.toDp() } + 12.dp,
                     ),
                 ) {
                     item(key = "home_header") {
@@ -332,11 +352,14 @@ fun SessionHomePage() {
                     homeConversationItems(
                         conversations = conversations,
                         hasConversationError = hasConversationError,
+                        rowVersions = deleteState.rowVersions,
                         homeSearchQuery = homeSearchQuery,
                         lastConversationId = lastConversationId,
                         tokens = tokens,
                         onRetry = vm::retryConversations,
-                        onOpen = { openChat(Screen.Chat(id = it.id.toString())) },
+                        onOpen = {
+                            if (!vm.isConversationHidden(it.id)) openChat(Screen.Chat(id = it.id.toString()))
+                        },
                         onDelete = vm::deleteConversation,
                         onTogglePin = vm::updatePinnedStatus,
                     )
@@ -366,59 +389,88 @@ fun SessionHomePage() {
                         )
                 )
 
-                // Floating new-session button —— iOS 同款胶囊（铅笔 + 新对话）
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(end = 26.dp, bottom = 26.dp)
-                        .height(48.dp)
-                        .clickable(
-                            interactionSource = fabInteractionSource,
-                            indication = null,
-                            onClick = {
-                                // 新会话：push 保留首页在栈底，与列表点开一致
-                                openChat(Screen.Chat(id = Uuid.random().toString()))
-                            },
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
+            }
+
+            // Measure the complete overlay, including IME/navigation insets. The
+            // list reserves the actual height even with large text or two panes.
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .onSizeChanged { bottomOverlayHeight = it.height }
+                    .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
+                    .padding(bottom = 12.dp),
+                horizontalAlignment = Alignment.End,
+            ) {
+                if (!inTwoPane) {
+                    // Floating new-session button —— iOS 同款胶囊（铅笔 + 新对话）
                     Box(
                         modifier = Modifier
-                            .height(40.dp)
-                            .amberPressHighlight(
-                                fabInteractionSource,
-                                fabShape,
-                                DpOffset(0.dp, 4.dp),
-                                hdrHighlight = true,
-                                glowTint = tokens.accent,
-                            )
-                            .amberShadow(fabShape, AmberDepthStyle.Accent)
-                            .background(fabFill, fabShape)
-                            .amberRim(fabShape, AmberDepthStyle.Accent)
-                            .padding(horizontal = 14.dp),
+                            .padding(end = 26.dp, bottom = 14.dp)
+                            .height(48.dp)
+                            .clickable(
+                                interactionSource = fabInteractionSource,
+                                indication = null,
+                                onClick = {
+                                    // 新会话：push 保留首页在栈底，与列表点开一致
+                                    openChat(Screen.Chat(id = Uuid.random().toString()))
+                                },
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        Box(
+                            modifier = Modifier
+                                .height(40.dp)
+                                .amberPressHighlight(
+                                    fabInteractionSource,
+                                    fabShape,
+                                    DpOffset(0.dp, 4.dp),
+                                    hdrHighlight = true,
+                                    glowTint = tokens.accent,
+                                )
+                                .amberShadow(fabShape, AmberDepthStyle.Accent)
+                                .background(fabFill, fabShape)
+                                .amberRim(fabShape, AmberDepthStyle.Accent)
+                                .padding(horizontal = 14.dp),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Icon(
-                                imageVector = Lucide.Pen,
-                                contentDescription = stringResource(R.string.chat_page_new_message),
-                                modifier = Modifier.size(15.dp),
-                                tint = tokens.accentInk,
-                            )
-                            Text(
-                                text = stringResource(R.string.history_page_new_conversation),
-                                fontSize = 12.sp,
-                                lineHeight = 15.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = tokens.accentInk,
-                                maxLines = 1,
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Lucide.Pen,
+                                    contentDescription = stringResource(R.string.chat_page_new_message),
+                                    modifier = Modifier.size(15.dp),
+                                    tint = tokens.accentInk,
+                                )
+                                Text(
+                                    text = stringResource(R.string.history_page_new_conversation),
+                                    fontSize = 12.sp,
+                                    lineHeight = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = tokens.accentInk,
+                                    maxLines = 1,
+                                )
+                            }
                         }
                     }
+                }
+                // Opacity only; Compose respects the system animator duration scale.
+                // Disable immediately on commit/undo, even during the short exit.
+                AnimatedVisibility(
+                    visible = deleteState.pendingIds.isNotEmpty(),
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    enter = fadeIn(tween(160, easing = HomeSessionSwipeMotion.EaseOut)),
+                    exit = fadeOut(tween(160, easing = HomeSessionSwipeMotion.EaseOut)),
+                ) {
+                    HomeDeleteUndoBar(
+                        count = lastUndoCount,
+                        seconds = deleteState.remainingSeconds,
+                        onUndo = vm::undoConversationDeletion,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        enabled = deleteState.pendingIds.isNotEmpty(),
+                    )
                 }
             }
         }

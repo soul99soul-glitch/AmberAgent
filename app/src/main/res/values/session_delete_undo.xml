@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="session_home_deleted_count"><item quantity="one">Conversation deleted</item><item quantity="other">%d conversations deleted</item></plurals>
+    <string name="session_home_undo">Undo</string>
+    <string name="session_home_undo_seconds">%d seconds left to undo</string>
+    <string name="session_home_delete_failed_restored">Could not delete a conversation. It has been restored to the list.</string>
+    <string name="session_home_delete_cleanup_failed">Conversation deleted, but some cleanup failed.</string>
+    <string name="session_home_delete_unverified">Could not verify deletion. Restart the app to check the conversation.</string>
+</resources>

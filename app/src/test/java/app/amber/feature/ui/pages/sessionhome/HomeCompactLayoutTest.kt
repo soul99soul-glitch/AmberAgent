@@ -1,6 +1,19 @@
 package app.amber.feature.ui.pages.sessionhome
 
 import android.app.Application
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
+import androidx.paging.PagingData
+import androidx.paging.compose.collectAsLazyPagingItems
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import app.amber.core.model.AMBER_AGENT_ID
+import app.amber.core.model.Conversation
+import java.util.concurrent.atomic.AtomicInteger
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -229,6 +242,83 @@ class HomeCompactLayoutTest {
         status = ContinueStatus.FAILED_RESUMABLE,
         isRunning = running,
     )
+
+    @Test
+    fun undoBarShowsCountdownAndDispatchesUndo() {
+        var undos = 0
+        content { HomeDeleteUndoBar(count = 2, seconds = 4, onUndo = { undos++ }) }
+        compose.onNodeWithText("已删除 2 个会话").assertIsDisplayed()
+        compose.onNodeWithText("4").assertIsDisplayed()
+        compose.onNodeWithTag("home-delete-undo-action").assertIsDisplayed().performClick()
+        assertEquals(1, undos)
+    }
+
+    @Test
+    fun undoBarAtNarrowDoubleTextShowsWholeMessageAndAction() {
+        var undos = 0
+        content(width = 280, fontScale = 2f) {
+            HomeDeleteUndoBar(count = 12, seconds = 1, onUndo = { undos++ })
+        }
+        val message = compose.onNodeWithText("已删除 12 个会话").assertIsDisplayed().fetchSemanticsNode()
+        val layouts = mutableListOf<TextLayoutResult>()
+        message.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts)
+        val layout = layouts.single()
+        assertFalse("size=${layout.size} lines=${layout.lineCount} widthOverflow=${layout.didOverflowWidth} heightOverflow=${layout.didOverflowHeight} paragraphHeight=${layout.multiParagraph.height}", layout.hasVisualOverflow)
+        compose.onNodeWithTag("home-delete-undo-action").assertIsDisplayed().performClick()
+        assertEquals(1, undos)
+    }
+
+    @Test fun undoRestoresProductionPagingRowAndAllowsAnotherSwipe() {
+        val enqueues = AtomicInteger()
+        val durableDeletes = AtomicInteger()
+        val conversation = Conversation(
+            assistantId = AMBER_AGENT_ID, title = "Undo fixture only", messageNodes = emptyList(),
+        )
+        compose.setContent {
+            MaterialTheme {
+                val scope = rememberCoroutineScope()
+                val owner = remember {
+                    HomeDeleteUndo(scope, android.os.SystemClock::elapsedRealtime,
+                        delete = { durableDeletes.incrementAndGet() }, exists = { true })
+                }
+                val state = owner.state.collectAsState().value
+                val source = remember {
+                    observeVisibleHomeConversations(
+                        flowOf(PagingData.from(listOf(conversation))),
+                        owner.state.map { it.hiddenIds }, scope,
+                    )
+                }
+                val items = source.collectAsLazyPagingItems()
+                val tokens = LocalAmberTokens.current
+                Box(Modifier.fillMaxSize()) {
+                    LazyColumn {
+                        homeConversationItems(
+                            conversations = items, hasConversationError = false,
+                            rowVersions = state.rowVersions, homeSearchQuery = "",
+                            lastConversationId = null, tokens = tokens, onRetry = {}, onOpen = {},
+                            onDelete = { enqueues.incrementAndGet(); owner.enqueue(it) }, onTogglePin = {},
+                        )
+                    }
+                    if (state.pendingIds.isNotEmpty()) {
+                        HomeDeleteUndoBar(
+                            count = state.pendingIds.size, seconds = state.remainingSeconds,
+                            onUndo = { owner.undo() },
+                            modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter),
+                        )
+                    }
+                }
+            }
+        }
+        repeat(2) { index ->
+            compose.onNodeWithText(conversation.title).assertIsDisplayed().performTouchInput { swipeLeft() }
+            compose.waitUntil(5_000) { enqueues.get() == index + 1 }
+            compose.onNodeWithTag("home-delete-undo-action").assertIsDisplayed().performClick()
+            compose.onNodeWithText(conversation.title).assertIsDisplayed()
+            compose.onNodeWithTag("home-delete-undo").assertDoesNotExist()
+            assertEquals(index + 1, enqueues.get())
+            assertEquals(0, durableDeletes.get())
+        }
+    }
 
     private fun content(width: Int = 373, fontScale: Float = 1f, block: @Composable () -> Unit) {
         compose.setContent {

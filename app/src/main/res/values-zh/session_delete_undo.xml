@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="session_home_deleted_count"><item quantity="other">已删除 %d 个会话</item></plurals>
+    <string name="session_home_undo">撤销</string>
+    <string name="session_home_undo_seconds">还剩 %d 秒可撤销</string>
+    <string name="session_home_delete_failed_restored">部分会话删除失败，已恢复到列表。</string>
+    <string name="session_home_delete_cleanup_failed">会话已删除，但部分清理未完成。</string>
+    <string name="session_home_delete_unverified">暂时无法确认删除结果，请重启应用后核查会话。</string>
+</resources>

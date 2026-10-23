@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="session_home_deleted_count"><item quantity="other">已刪除 %d 個對話</item></plurals>
+    <string name="session_home_undo">復原</string>
+    <string name="session_home_undo_seconds">還剩 %d 秒可復原</string>
+    <string name="session_home_delete_failed_restored">部分對話刪除失敗，已恢復到清單。</string>
+    <string name="session_home_delete_cleanup_failed">對話已刪除，但部分清理未完成。</string>
+    <string name="session_home_delete_unverified">暫時無法確認刪除結果，請重新啟動應用程式後檢查對話。</string>
+</resources>

@@ -2,7 +2,6 @@ package app.amber.feature.ui.pages.sessionhome
 
 import android.util.Log
 import androidx.paging.PagingData
-import androidx.paging.cachedIn
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.amber.core.model.Conversation
@@ -24,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
@@ -60,13 +60,24 @@ class SessionHomeVM(
     private val _hasContinueError = MutableStateFlow(false)
     val hasContinueError: StateFlow<Boolean> = _hasContinueError
 
+    private val deleteUndo = HomeDeleteUndo(
+        scope = viewModelScope,
+        nowMillis = android.os.SystemClock::elapsedRealtime,
+        delete = { chatService.deleteConversation(it) },
+        exists = conversationRepo::existsConversationById,
+        onError = { Log.e(TAG, "Home conversation deletion failed", it) },
+    )
+    internal val deleteUndoState = deleteUndo.state
+    internal val deleteFailure = deleteUndo.failure
+    private val hiddenIds = deleteUndoState.map { it.hiddenIds }.distinctUntilChanged()
+
     /**
      * Home's default list is paged. A non-empty quick search deliberately reads
      * the complete lightweight summary flow before applying the local predicate:
      * [filterHomeConversations] must see every row so a match after the first
      * page (or a no-match query) is not mistaken for an empty result.
      */
-    val conversations: Flow<PagingData<Conversation>> =
+    private val sourceConversations: Flow<PagingData<Conversation>> =
         combine(reloadRequests, homeSearchRequest) { _, search -> search }
             .flatMapLatest { search ->
                 observeConversationPaging(
@@ -94,7 +105,11 @@ class SessionHomeVM(
                     },
                 ).onEach { _hasConversationError.value = false }
             }
-            .cachedIn(viewModelScope)
+
+    // Cache upstream of filter: every hide/undo can replay loaded pages without
+    // consuming a PageEvent stream twice. Cache the transformed flow for rotation.
+    val conversations: Flow<PagingData<Conversation>> =
+        observeVisibleHomeConversations(sourceConversations, hiddenIds, viewModelScope)
 
     fun setHomeSearchQuery(query: String, untitledLabel: String) {
         val request = HomeSearchRequest(query = query, untitledLabel = untitledLabel)
@@ -124,6 +139,9 @@ class SessionHomeVM(
                 },
             )
         }
+        .combine(hiddenIds) { candidates, hidden ->
+            filterHomeContinueCandidates(candidates, hidden)
+        }
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(
@@ -151,16 +169,20 @@ class SessionHomeVM(
     suspend fun createCouncilRoom(objective: String) = councilRoomCreator.create(objective)
 
     suspend fun canOpenContinue(route: ContinueRoute): Boolean =
-        canOpenContinueRoute(route) { conversationId ->
+        canOpenHomeContinueRoute(route, { deleteUndoState.value.hiddenIds }) { conversationId ->
             val id = runCatching { Uuid.parse(conversationId) }.getOrNull()
             id != null && conversationRepo.existsConversationById(id)
         }
 
+    fun isConversationHidden(id: Uuid): Boolean = id in deleteUndoState.value.hiddenIds
+
     fun deleteConversation(conversation: Conversation) {
-        viewModelScope.launch {
-            chatService.deleteConversation(conversation)
-        }
+        deleteUndo.enqueue(conversation)
     }
+
+    fun undoConversationDeletion() { deleteUndo.undo() }
+
+    fun acknowledgeDeleteFailure(sequence: Long) { deleteUndo.acknowledgeFailure(sequence) }
 
     fun updatePinnedStatus(conversation: Conversation) {
         viewModelScope.launch {

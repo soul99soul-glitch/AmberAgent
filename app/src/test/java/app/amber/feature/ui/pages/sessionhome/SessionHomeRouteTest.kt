@@ -81,4 +81,27 @@ class SessionHomeRouteTest {
             },
         )
     }
+    @Test fun `pending routes hide from resume and cannot open across a suspended lookup`() = runTest {
+        val id = kotlin.uuid.Uuid.random()
+        val routes = listOf(ContinueRoute.Chat(id.toString()),
+            ContinueRoute.ImageGeneration(id.toString(), toolCallId = "test"),
+            ContinueRoute.CouncilRoom(id.toString()))
+        for (route in routes) {
+            var hidden = setOf(id)
+            assertFalse(canOpenHomeContinueRoute(route, { hidden }) { error("pending must not query") })
+            hidden = emptySet()
+            assertFalse(canOpenHomeContinueRoute(route, { hidden }) { hidden = setOf(id); true })
+            hidden = emptySet()
+            assertTrue(canOpenHomeContinueRoute(route, { hidden }) { true })
+            assertFalse(canOpenHomeContinueRoute(route, { hidden }) { false })
+        }
+        val candidate = app.amber.feature.home.ContinueCandidate(
+            sourceKind = app.amber.feature.home.ContinueSourceKind.COUNCIL,
+            sourceId = "test", route = routes.last(), title = "Test", summary = "",
+            lastUpdatedAt = java.time.Instant.EPOCH, status = app.amber.feature.home.ContinueStatus.PAUSED,
+        )
+        assertTrue(filterHomeContinueCandidates(listOf(candidate), setOf(id)).isEmpty())
+        assertEquals(listOf(candidate), filterHomeContinueCandidates(listOf(candidate), emptySet()))
+    }
+
 }

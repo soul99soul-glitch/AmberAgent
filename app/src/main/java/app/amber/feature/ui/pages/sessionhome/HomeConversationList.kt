@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.key
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +42,7 @@ import androidx.compose.material3.TextButton
 internal fun LazyListScope.homeConversationItems(
     conversations: LazyPagingItems<Conversation>,
     hasConversationError: Boolean,
+    rowVersions: Map<kotlin.uuid.Uuid, Long> = emptyMap(),
     homeSearchQuery: String,
     lastConversationId: String?,
     tokens: AmberTokens,
@@ -94,30 +96,32 @@ internal fun LazyListScope.homeConversationItems(
         ) { index ->
             val conversation = conversations[index] ?: return@items
             val isLastVisited = conversation.id.toString() == lastConversationId
-            HomeSessionRow(
-                conversation = conversation,
-                tileColor = homeConversationTileColor(
-                    tokens = tokens,
+            key(conversation.id, rowVersions[conversation.id] ?: 0L) {
+                HomeSessionRow(
+                    conversation = conversation,
+                    tileColor = homeConversationTileColor(
+                        tokens = tokens,
+                        isLastVisited = isLastVisited,
+                    ),
                     isLastVisited = isLastVisited,
-                ),
-                isLastVisited = isLastVisited,
-                isFirst = index == 0,
-                isLast = index == conversations.itemCount - 1,
-                onOpen = { onOpen(conversation) },
-                onDelete = { onDelete(conversation) },
-                onTogglePin = { onTogglePin(conversation) },
-                modifier = Modifier.animateItem(
-                    fadeInSpec = null,
-                    fadeOutSpec = tween(
-                        durationMillis = HomeSessionSwipeMotion.FadeMs,
-                        easing = HomeSessionSwipeMotion.EaseOut,
+                    isFirst = index == 0,
+                    isLast = index == conversations.itemCount - 1,
+                    onOpen = { onOpen(conversation) },
+                    onDelete = { onDelete(conversation) },
+                    onTogglePin = { onTogglePin(conversation) },
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = null,
+                        fadeOutSpec = tween(
+                            durationMillis = HomeSessionSwipeMotion.FadeMs,
+                            easing = HomeSessionSwipeMotion.EaseOut,
+                        ),
+                        placementSpec = tween(
+                            durationMillis = HomeSessionSwipeMotion.CollapseMs,
+                            easing = HomeSessionSwipeMotion.EaseOut,
+                        ),
                     ),
-                    placementSpec = tween(
-                        durationMillis = HomeSessionSwipeMotion.CollapseMs,
-                        easing = HomeSessionSwipeMotion.EaseOut,
-                    ),
-                ),
-            )
+                )
+            }
         }
 
         if (appendError != null) {

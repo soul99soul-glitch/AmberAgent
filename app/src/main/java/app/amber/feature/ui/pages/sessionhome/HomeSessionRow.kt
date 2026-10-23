@@ -70,7 +70,6 @@ import com.composables.icons.lucide.Trash2
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import kotlinx.coroutines.delay
 
 /**
  * Delete settle/collapse. M3 SwipeToDismissBox uses default `spring()`
@@ -168,14 +167,10 @@ internal fun HomeSessionRow(
     // 只在松手后、已经对准 Delete 锚点时才收起。拖过阈值但手指还在时保持 1:1 跟随。
     LaunchedEffect(isDragging, swipeState.targetValue) {
         if (!isDragging && swipeState.targetValue == HomeSessionSwipeValue.Delete) {
-            visibleState.targetState = false
-        }
-    }
-    LaunchedEffect(visibleState.targetState) {
-        if (!visibleState.targetState) {
-            try {
-                delay(HomeSessionSwipeMotion.CollapseMs.toLong())
-            } finally {
+            if (visibleState.targetState) {
+                visibleState.targetState = false
+                // Send exactly once at release. Disposal/cancellation must never
+                // enqueue a fresh deletion after undo or search replacement.
                 latestOnDelete.value()
             }
         }

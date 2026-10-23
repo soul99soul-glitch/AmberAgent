@@ -37,7 +37,34 @@ internal suspend fun canOpenContinueRoute(
     val conversationId = when (route) {
         is ContinueRoute.Chat -> route.conversationId
         is ContinueRoute.ImageGeneration -> route.conversationId
+        is ContinueRoute.CouncilRoom -> route.conversationId
         else -> return true
     }
     return conversationExists(conversationId)
+}
+
+/** Include Council: its conversation is also opened from Home's resume rail. */
+internal fun ContinueRoute.conversationIdOrNull(): String? = when (this) {
+    is ContinueRoute.Chat -> conversationId
+    is ContinueRoute.ImageGeneration -> conversationId
+    is ContinueRoute.CouncilRoom -> conversationId
+    else -> null
+}
+
+internal fun filterHomeContinueCandidates(
+    candidates: List<app.amber.feature.home.ContinueCandidate>,
+    hidden: Set<kotlin.uuid.Uuid>,
+): List<app.amber.feature.home.ContinueCandidate> {
+    val hiddenStrings = hidden.map { it.toString() }.toSet()
+    return candidates.filter { it.route.conversationIdOrNull() !in hiddenStrings }
+}
+
+internal suspend fun canOpenHomeContinueRoute(
+    route: ContinueRoute,
+    hiddenIds: () -> Set<kotlin.uuid.Uuid>,
+    conversationExists: suspend (String) -> Boolean,
+): Boolean {
+    fun hidden() = hiddenIds().any { it.toString() == route.conversationIdOrNull() }
+    // Recheck after the database suspension, including a swipe on the other pane.
+    return !hidden() && canOpenContinueRoute(route, conversationExists) && !hidden()
 }
