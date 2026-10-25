@@ -7,12 +7,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
@@ -22,9 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -46,7 +42,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastAll
@@ -64,18 +59,13 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.FileText
 import com.composables.icons.lucide.Music
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.composables.icons.lucide.Play
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.model.AssistantRegex
 import app.amber.core.ai.generative.GenerativeWidgetCopy
 import app.amber.core.ai.generative.GenerativeWidgetParser
+import app.amber.feature.ui.components.media.VideoPlaybackDialog
 import app.amber.feature.ui.components.media.rememberVideoCover
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.components.richtext.StreamingSingleTextMarkdown
@@ -83,6 +73,7 @@ import app.amber.feature.ui.components.richtext.MarkPresented
 import app.amber.feature.ui.components.richtext.rememberStreamingPresentationLifetime
 import app.amber.feature.ui.components.richtext.ZoomableAsyncImage
 import app.amber.feature.ui.components.ui.ChainOfThought
+import app.amber.feature.ui.utils.AmberTraceSection
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.modifier.shimmer
 import app.amber.feature.ui.context.LocalNavController
@@ -178,6 +169,7 @@ internal fun MessagePartsBlock(
                     // (less aggressive, single layer), so the user-visible "新思维步骤滑入"
                     // motion is preserved. Removing the outer Card-level spring is the
                     // free win — it stacked on top of the inner one with no added value.
+                    AmberTraceSection("Amber chain of thought") {
                     ChainOfThought(
                         steps = block.steps,
                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
@@ -189,6 +181,7 @@ internal fun MessagePartsBlock(
                     ) { step ->
                         when (step) {
                             is ThinkingStep.ReasoningStep -> {
+                                AmberTraceSection("Amber reasoning step") {
                                 key(step.reasoning.createdAt) {
                                     ChatMessageReasoningStep(
                                         reasoning = step.reasoning,
@@ -199,9 +192,11 @@ internal fun MessagePartsBlock(
                                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
                                     )
                                 }
+                                }
                             }
 
                             is ThinkingStep.ToolStep -> {
+                                AmberTraceSection("Amber tool step ${step.tool.toolName}") {
                                 key(step.tool.stableStepKey()) {
                                     ChatMessageToolStep(
                                         tool = step.tool,
@@ -211,6 +206,7 @@ internal fun MessagePartsBlock(
                                         onOpenWorkspaceFile = onOpenWorkspaceFile,
                                         themeTryOnCardTarget = themeTryOnCardTarget,
                                     )
+                                }
                                 }
                             }
 
@@ -236,6 +232,7 @@ internal fun MessagePartsBlock(
                                 }
                             }
                         }
+                    }
                     }
                     themeTryOnTool?.let { tool ->
                         ThemeTryOnToolCard(
@@ -284,22 +281,12 @@ internal fun MessagePartsBlock(
                                         bottomEnd = 14.dp,
                                         bottomStart = 23.dp,
                                     )
-                                    // §6.2 max-width = 92% of available width. BoxWithConstraints
-                                    // is the in-repo idiom for a fraction-of-parent cap (see
-                                    // GeneratedImageCarousel / GenerativeWidgetCard); it only adds
-                                    // a measuring frame — the Surface + every branch below is
-                                    // untouched. contentAlignment=TopEnd 把 wrap 到内容宽度的气泡靠右放
-                                    // ——光靠 Surface 上的 wrapContentWidth(End) 不够：它只收窄不定位，
-                                    // box 默认 TopStart 会把气泡按到左边，表现为"左对齐"。
-                                    BoxWithConstraints(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        contentAlignment = Alignment.TopEnd,
-                                    ) {
-                                    val userBubbleMaxWidth = maxWidth * 0.92f
+                                    // §6.2 max-width = 92% of available width, right-aligned.
+                                    // A plain layout modifier caps/places the bubble without a
+                                    // nested subcomposition; see Modifier.chatBubbleWidth.
                                     Surface(
                                         modifier = Modifier
-                                            .wrapContentWidth(Alignment.End)
-                                            .widthIn(max = userBubbleMaxWidth)
+                                            .chatBubbleWidth(0.92f, alignEnd = true)
                                             .clip(userBubbleShape)
                                             .combinedClickable(
                                                 onClick = { onUserMessageClick?.invoke() },
@@ -329,7 +316,6 @@ internal fun MessagePartsBlock(
                                             )
                                         }
                                     }
-                                    } // end BoxWithConstraints
                                     } // end DisableSelection
                                 } else {
                                     // True only when this Text block is the very last block
@@ -373,56 +359,51 @@ internal fun MessagePartsBlock(
                                         // Streaming text height animation is intentionally disabled:
                                         // assistant markdown should grow by natural layout only, without
                                         // a restarted spring/tween on every accumulator flush.
-                                        BoxWithConstraints(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            contentAlignment = Alignment.TopStart,
+                                        val amberTokens = LocalAmberTokens.current
+                                        val themeRadius = themeBubbleRadius()
+                                        val themeBorderWidth = themeBubbleBorderWidth()
+                                        val assistantBubbleShape = themeRadius?.let { RoundedCornerShape(it) }
+                                            ?: RoundedCornerShape(
+                                            topStart = 14.dp,
+                                            topEnd = 14.dp,
+                                            bottomStart = 5.dp,
+                                            bottomEnd = 14.dp,
+                                        )
+                                        Surface(
+                                            modifier = Modifier.chatBubbleWidth(0.86f),
+                                            shape = assistantBubbleShape,
+                                            color = amberTokens.surface,
+                                            contentColor = amberTokens.ink,
+                                            tonalElevation = 0.dp,
+                                            shadowElevation = 0.dp,
+                                            border = if (themeBorderWidth == null) {
+                                                BorderStroke(1.dp, amberTokens.line)
+                                            } else {
+                                                themeBorderWidth.takeIf { it > 0.dp }
+                                                    ?.let { BorderStroke(it, amberTokens.line) }
+                                            },
                                         ) {
-                                            val amberTokens = LocalAmberTokens.current
-                                            val themeRadius = themeBubbleRadius()
-                                            val themeBorderWidth = themeBubbleBorderWidth()
-                                            val assistantBubbleShape = themeRadius?.let { RoundedCornerShape(it) }
-                                                ?: RoundedCornerShape(
-                                                topStart = 14.dp,
-                                                topEnd = 14.dp,
-                                                bottomStart = 5.dp,
-                                                bottomEnd = 14.dp,
-                                            )
-                                            Surface(
-                                                modifier = Modifier.widthIn(max = maxWidth * 0.86f),
-                                                shape = assistantBubbleShape,
-                                                color = amberTokens.surface,
-                                                contentColor = amberTokens.ink,
-                                                tonalElevation = 0.dp,
-                                                shadowElevation = 0.dp,
-                                                border = if (themeBorderWidth == null) {
-                                                    BorderStroke(1.dp, amberTokens.line)
-                                                } else {
-                                                    themeBorderWidth.takeIf { it > 0.dp }
-                                                        ?.let { BorderStroke(it, amberTokens.line) }
-                                                },
-                                            ) {
-                                                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                                                    AssistantMarkdownBlockOrWidgets(
-                                                        content = assistantDisplayText,
-                                                        streaming = isStreamingText,
-                                                        deferStreamingParse = deferStreamingParse && isStreamingText,
-                                                        streamingMarkdownContent = streamingMarkdownContent,
-                                                        onClickCitation = handleClickCitation,
-                                                        onGenerativeWidgetAction = onGenerativeWidgetAction,
-                                                        onStreamingVisibleFrame = if (isStreamingText) {
-                                                            onStreamingVisibleFrame
-                                                        } else {
-                                                            null
-                                                        },
-                                                        onStreamingVisualActiveChange = if (
-                                                            isStreamingText || onStreamingVisibleFrame != null
-                                                        ) {
-                                                            onStreamingVisualActiveChange
-                                                        } else {
-                                                            null
-                                                        },
-                                                    )
-                                                }
+                                            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                                                AssistantMarkdownBlockOrWidgets(
+                                                    content = assistantDisplayText,
+                                                    streaming = isStreamingText,
+                                                    deferStreamingParse = deferStreamingParse && isStreamingText,
+                                                    streamingMarkdownContent = streamingMarkdownContent,
+                                                    onClickCitation = handleClickCitation,
+                                                    onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                                    onStreamingVisibleFrame = if (isStreamingText) {
+                                                        onStreamingVisibleFrame
+                                                    } else {
+                                                        null
+                                                    },
+                                                    onStreamingVisualActiveChange = if (
+                                                        isStreamingText || onStreamingVisibleFrame != null
+                                                    ) {
+                                                        onStreamingVisualActiveChange
+                                                    } else {
+                                                        null
+                                                    },
+                                                )
                                             }
                                         }
                                     } else {
@@ -717,106 +698,3 @@ private fun UIMessagePart.Tool.stableStepKey(): String =
     toolCallId.ifBlank {
         streamToolIndex()?.let { "stream-tool-$it" } ?: hashCode().toString()
     }
-
-/**
- * 全屏视频播放：只在用户点开时创建 MediaPlayer，关闭或离开组合即停止并释放。
- * 本地文件走 FileProvider（读权限），http(s) 直连；两者都失败时提示可外部打开。
- */
-@Composable
-private fun VideoPlaybackDialog(url: String, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var failed by remember(url) { mutableStateOf(false) }
-    val playerView = remember(url) { mutableStateOf<android.widget.VideoView?>(null) }
-    // MediaPlayer 不受 Activity 生命周期约束：退到后台必须主动停，否则音频会继续。
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                runCatching { playerView.value?.pause() }
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            runCatching { playerView.value?.stopPlayback() }
-        }
-    }
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(16f / 9f),
-            color = androidx.compose.ui.graphics.Color.Black,
-        ) {
-            if (failed) {
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = stringResource(R.string.chat_video_playback_failed),
-                            color = androidx.compose.ui.graphics.Color.White,
-                        )
-                        val external = remember(url) {
-                            runCatching {
-                                val target = if (url.startsWith("http")) {
-                                    url.toUri()
-                                } else {
-                                    FileProvider.getUriForFile(
-                                        context,
-                                        "${context.packageName}.fileprovider",
-                                        url.toUri().toFile(),
-                                    )
-                                }
-                                Intent(Intent.ACTION_VIEW).apply {
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    data = target
-                                }
-                            }.getOrNull()
-                        }
-                        if (external != null) {
-                            TextButton(onClick = { context.startActivity(Intent.createChooser(external, null)) }) {
-                                Text(stringResource(R.string.chat_video_open_external))
-                            }
-                        }
-                    }
-                }
-            } else {
-                AndroidView(
-                    modifier = Modifier.fillMaxWidth(),
-                    factory = { ctx ->
-                        android.widget.VideoView(ctx).apply {
-                            playerView.value = this
-                            setOnPreparedListener { player ->
-                                player.isLooping = false
-                                start()
-                            }
-                            setOnErrorListener { _, _, _ ->
-                                failed = true
-                                true
-                            }
-                            runCatching {
-                                setVideoURI(
-                                    if (url.startsWith("http")) {
-                                        url.toUri()
-                                    } else {
-                                        FileProvider.getUriForFile(
-                                            ctx,
-                                            "${ctx.packageName}.fileprovider",
-                                            url.toUri().toFile(),
-                                        )
-                                    },
-                                )
-                            }.onFailure { failed = true }
-                        }
-                    },
-                    onRelease = { view ->
-                        // 关闭即停止：不留下后台播放。
-                        runCatching { view.stopPlayback() }
-                    },
-                )
-            }
-        }
-    }
-}

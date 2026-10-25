@@ -83,6 +83,9 @@ internal suspend fun verifiedScreenActionResult(
         ocrObservation?.let { obs ->
             put("ocr_reason", obs.triggerReason)
             put("ocr_block_count", obs.blocks.size)
+            put("ocr_source", obs.source.wireName())
+            put("ocr_outcome", obs.outcome.wireName())
+            obs.diagnosticSummary?.let { put("ocr_diagnostics", it) }
         }
     }
 }

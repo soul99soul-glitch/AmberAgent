@@ -11,7 +11,7 @@ private const val AmberPerfTag = "AmberChatPerf"
 private const val SlowMeasureThresholdMs = 8L
 
 internal fun Modifier.amberTraceMeasure(section: String): Modifier {
-    if (!BuildConfig.DEBUG) return this
+    if (!BuildConfig.DEBUG && !BuildConfig.CHAT_PERF_TRACE) return this
     return layout { measurable, constraints ->
         Trace.beginSection(section)
         val startNanos = SystemClock.elapsedRealtimeNanos()

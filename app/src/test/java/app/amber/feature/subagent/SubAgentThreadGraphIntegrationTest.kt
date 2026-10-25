@@ -19,6 +19,17 @@ import app.amber.core.ai.GenerationRunSession
 import app.amber.core.ai.GenerationTerminal
 import app.amber.core.ai.RunKernel
 import app.amber.core.infra.AppScope
+import app.amber.core.jev.JevClient
+import app.amber.core.jev.JevDataScope
+import app.amber.core.jev.JevDecisionCoordinator
+import app.amber.core.jev.JevHttpRequest
+import app.amber.core.jev.JevMode
+import app.amber.core.jev.JevPurpose
+import app.amber.core.jev.JevRuntime
+import app.amber.core.jev.JevSetting
+import app.amber.core.jev.JevSubagentIntent
+import app.amber.core.jev.JevTransport
+import app.amber.core.jev.JevTransportResponse
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.core.settings.Settings
@@ -136,6 +147,7 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         turnAgentRegistered: Boolean = true,
         threadStore: ThreadGraphStore? = null,
         taskStore: AgentTaskStore = AgentTaskStore(context, Json),
+        intentAlignment: SubAgentIntentAlignment? = null,
     ): SubAgentManager {
         val payloads = SubAgentTurnPayloads()
         lastPayloads = payloads
@@ -168,6 +180,7 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
             turnPayloads = payloads,
             threadGraphStore = threadStore ?: RoomThreadGraphStore(database.threadGraphDao(), restoreWriteGate),
             capabilityFlags = flags,
+            intentAlignment = intentAlignment,
         )
     }
 
@@ -1419,6 +1432,161 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         assertEquals("interrupted", payloadStatus(payload))
         assertEquals(true, payload["transcript_available"]?.jsonPrimitive?.contentOrNull?.toBoolean())
     }
+
+    // ── SUBAGENT_INTENT through real SubAgentManager.start catalog path ──
+
+    private class IntentTransport(
+        private val probability: Double?,
+        private val fail: Boolean = false,
+    ) : JevTransport {
+        var calls = 0
+
+        override suspend fun execute(request: JevHttpRequest): JevTransportResponse {
+            calls++
+            if (fail) return JevTransportResponse.Failure("offline")
+            val answer = if (probability == null) {
+                """"aligned":{"type":"choice","choice":"bogus","confidence":0.9}"""
+            } else {
+                """"aligned":{"type":"noul","noul":$probability}"""
+            }
+            return JevTransportResponse.Http(
+                200,
+                """{"model":"jev-test","answers":{$answer}}""".toByteArray(),
+                null,
+            )
+        }
+    }
+
+    private class RecordingAlignment : SubAgentIntentAlignment {
+        var calls = 0
+
+        override suspend fun assess(
+            definition: SubAgentDefinition,
+            task: SubAgentTaskSpec,
+            runKey: String?,
+        ): SubAgentIntentAlignment.Result {
+            calls++
+            return SubAgentIntentAlignment.Result.NotJudged
+        }
+    }
+
+    private fun jevIntent(mode: JevMode, transport: IntentTransport): JevSubagentIntent {
+        val settings = Settings(
+            jev = JevSetting(
+                enabled = mode != JevMode.OFF,
+                purposes = if (mode == JevMode.OFF) emptyMap() else mapOf(JevPurpose.SUBAGENT_INTENT to mode),
+                dataScopes = setOf(JevDataScope.TOOL_METADATA, JevDataScope.TASK_TEXT),
+            ),
+        )
+        return JevSubagentIntent(
+            JevRuntime(
+                coordinator = JevDecisionCoordinator(
+                    client = JevClient(transport = transport),
+                    apiKeyProvider = { "key" },
+                    clock = { 1_000_000L },
+                ),
+                settingsProvider = { settings },
+            ),
+        )
+    }
+
+    private fun explorerCatalogAllowlist(): Set<String> =
+        SubAgentDefinitions.find("explorer")!!.toolAllowlist
+
+    private fun assertExplorerAllowlistUnchanged(call: FakeSubAgentRunner.CapturedCall) {
+        val catalog = explorerCatalogAllowlist()
+        val scopedDiscovery = setOf("tool_search", "tools_list", "tool_policy_explain")
+        assertTrue(call.toolNames.isNotEmpty())
+        val granted = call.toolNames.filterNot { it in scopedDiscovery }
+        assertTrue(granted.all { it in catalog })
+        assertFalse(call.toolNames.contains("search_web"))
+        assertFalse(call.toolNames.contains("file_read"))
+        assertTrue("tools_list" in call.toolNames)
+        assertTrue(call.definitionAllowlist.all { it in catalog })
+        assertEquals(setOf("tools_list"), call.definitionAllowlist)
+    }
+
+    @Test
+    fun intentOffSpawnsExplorerCatalogRoleWithoutChangingAllowlist() = runBlocking {
+        val transport = IntentTransport(0.1)
+        val manager = manager(intentAlignment = jevIntent(JevMode.OFF, transport))
+        val started = manager.start(conversationId, startInput("OFF spawn"), parentTools(), "parent_start")
+        assertEquals("running", payloadStatus(started))
+        awaitTerminal(manager, started["run_id"]!!.jsonPrimitive.content)
+        assertEquals(0, transport.calls)
+        assertExplorerAllowlistUnchanged(fakeRunner.calls.single())
+    }
+
+    @Test
+    fun intentShadowSpawnsExplorerCatalogRoleWithoutChangingAllowlist() = runBlocking {
+        val transport = IntentTransport(0.1)
+        val manager = manager(intentAlignment = jevIntent(JevMode.SHADOW, transport))
+        val started = manager.start(conversationId, startInput("SHADOW spawn"), parentTools(), "parent_start")
+        assertEquals("running", payloadStatus(started))
+        awaitTerminal(manager, started["run_id"]!!.jsonPrimitive.content)
+        assertExplorerAllowlistUnchanged(fakeRunner.calls.single())
+    }
+
+    @Test
+    fun intentActiveMisalignedDoesNotSpawnExplorer() = runBlocking {
+        val transport = IntentTransport(0.1)
+        val manager = manager(intentAlignment = jevIntent(JevMode.ACTIVE, transport))
+        val started = manager.start(conversationId, startInput("ACTIVE misaligned"), parentTools(), "parent_start")
+        assertEquals("failed", payloadStatus(started))
+        assertEquals("intent_misaligned", started["code"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("explorer", started["subagent_id"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("false", started["intent_aligned"]?.jsonPrimitive?.contentOrNull)
+        assertEquals(1, transport.calls)
+        assertTrue(fakeRunner.calls.isEmpty())
+    }
+
+    @Test
+    fun intentFailOpenStillSpawnsExplorerCatalogRole() = runBlocking {
+        val transport = IntentTransport(0.1, fail = true)
+        val manager = manager(intentAlignment = jevIntent(JevMode.ACTIVE, transport))
+        val started = manager.start(conversationId, startInput("fail-open spawn"), parentTools(), "parent_start")
+        assertEquals("running", payloadStatus(started))
+        awaitTerminal(manager, started["run_id"]!!.jsonPrimitive.content)
+        assertTrue(transport.calls >= 1)
+        assertExplorerAllowlistUnchanged(fakeRunner.calls.single())
+    }
+
+    @Test
+    fun invalidCatalogRoleDoesNotCallAlignmentOrSpawn() = runBlocking {
+        val alignment = RecordingAlignment()
+        val manager = manager(intentAlignment = alignment)
+        val started = manager.start(
+            conversationId,
+            buildJsonObject {
+                put("subagent_id", "not_a_catalog_role")
+                put("task", buildJsonObject { put("objective", "x") })
+            },
+            parentTools(),
+            "parent_start",
+        )
+        assertEquals("failed", payloadStatus(started))
+        assertEquals("invalid_subagent", started["code"]?.jsonPrimitive?.contentOrNull)
+        assertEquals(0, alignment.calls)
+        assertTrue(fakeRunner.calls.isEmpty())
+    }
+
+    @Test
+    fun emptyParentAllowlistDoesNotCallAlignmentOrSpawn() = runBlocking {
+        val alignment = RecordingAlignment()
+        val manager = manager(intentAlignment = alignment)
+        val parent = listOf(
+            Tool(
+                name = "unrelated_tool",
+                description = "not in explorer catalog",
+                execute = { listOf(UIMessagePart.Text("{}")) },
+            ),
+        )
+        val started = manager.start(conversationId, startInput("no tools"), parent, "parent_start")
+        assertEquals("failed", payloadStatus(started))
+        assertEquals("no_allowed_tools", started["code"]?.jsonPrimitive?.contentOrNull)
+        assertEquals(0, alignment.calls)
+        assertTrue(fakeRunner.calls.isEmpty())
+    }
 }
 
 /** Scripted [SubAgentRunner] fake: completes instantly or blocks on a gate. */
@@ -1431,6 +1599,8 @@ class FakeSubAgentRunner : SubAgentRunner {
         /** Step 3: the run scope's protocol event writer passed through. */
         val events: AgentEventWriter?,
         val consumeSteerMessages: suspend () -> List<UIMessage>,
+        val toolNames: List<String>,
+        val definitionAllowlist: Set<String>,
     )
 
     val calls = CopyOnWriteArrayList<CapturedCall>()
@@ -1464,6 +1634,8 @@ class FakeSubAgentRunner : SubAgentRunner {
             previousAnswer = previousAnswer,
             events = events,
             consumeSteerMessages = consumeSteerMessages,
+            toolNames = tools.map { it.name },
+            definitionAllowlist = definition.toolAllowlist,
         )
         if (emitToolOnlyPart) {
             liveParts.value = listOf(

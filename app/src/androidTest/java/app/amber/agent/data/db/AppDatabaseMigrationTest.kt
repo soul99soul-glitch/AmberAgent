@@ -219,6 +219,29 @@ class AppDatabaseMigrationTest {
         db.close()
     }
 
+    @Test
+    fun migration_21_22_creates_activity_watermark_tables() {
+        helper.createDatabase(TEST_DB, 21).close()
+
+        val db = helper.runMigrationsAndValidate(
+            TEST_DB,
+            22,
+            true,
+            AppDatabase.MIGRATION_21_22,
+        )
+
+        db.execSQL(
+            "INSERT INTO conversation_activity_seen (run_id, conversation_id, version_ms) " +
+                "VALUES ('run-1', 'conv-1', 1000)"
+        )
+        db.execSQL(
+            "INSERT INTO conversation_activity_baseline (id, established_at_ms) VALUES (1, 2000)"
+        )
+        assertEquals(1, db.countRows("conversation_activity_seen", "run_id = 'run-1'"))
+        assertEquals(2000, db.intValue("conversation_activity_baseline", "established_at_ms", "id = 1"))
+        db.close()
+    }
+
     private fun SupportSQLiteDatabase.countRows(table: String, where: String): Int {
         query("SELECT COUNT(*) FROM $table WHERE $where").use { cursor ->
             assertTrue(cursor.moveToFirst())

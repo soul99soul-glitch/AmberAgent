@@ -1,6 +1,14 @@
 package app.amber.core.jev
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonObject
 
 /**
  * Jev (TypeSafe systemone) 判断服务的领域模型。
@@ -32,10 +40,20 @@ enum class JevPurpose(val requiredScopes: Set<JevDataScope>) {
     CONTEXT_SELECTION(setOf(JevDataScope.TOOL_OUTPUT, JevDataScope.TASK_TEXT)),
     MODEL_ROUTING(setOf(JevDataScope.TASK_TEXT, JevDataScope.TOOL_METADATA)),
     WEB_AUTOMATION(setOf(JevDataScope.WEB_CONTENT, JevDataScope.TASK_TEXT)),
-    SCREEN_AUTOMATION(setOf(JevDataScope.SCREEN_CONTENT, JevDataScope.TASK_TEXT)),
+    PHONE_VERIFICATION(setOf(JevDataScope.SCREEN_CONTENT, JevDataScope.TASK_TEXT)),
+    PHONE_ACTIONS(setOf(JevDataScope.SCREEN_CONTENT, JevDataScope.TASK_TEXT)),
     TOOL_RESULT_RETENTION(setOf(JevDataScope.TOOL_OUTPUT, JevDataScope.TASK_TEXT)),
     AUTO_APPROVAL_GATE(setOf(JevDataScope.TOOL_METADATA, JevDataScope.TASK_TEXT)),
+    APPROVAL_TRIAGE(setOf(JevDataScope.TOOL_METADATA, JevDataScope.TASK_TEXT)),
     COMPLETION_CHECK(setOf(JevDataScope.TASK_TEXT, JevDataScope.TOOL_METADATA)),
+    SUBAGENT_INTENT(setOf(JevDataScope.TOOL_METADATA, JevDataScope.TASK_TEXT)),
+    SCRIPT_JUDGMENT(setOf(JevDataScope.TOOL_OUTPUT)),
+    ;
+
+    companion object {
+        const val VISIBLE_COUNT = 13
+        const val LEGACY_SCREEN_AUTOMATION = "SCREEN_AUTOMATION"
+    }
 }
 
 /** 数据外发范围。请求所需范围全部被允许才发送；shadow 同样外发，不是本地模式。 */
@@ -59,6 +77,7 @@ data class JevSetting(
     val model: String? = null,
     /** VERCEL 模式的网关 decision 模型 id（默认 typesafe-ai/jev-1.14.0）；必填，缺省由协调器 NO_MODEL 跳过。 */
     val vercelModel: String? = null,
+    @Serializable(with = JevPurposeModesSerializer::class)
     val purposes: Map<JevPurpose, JevMode> = emptyMap(),
     val dataScopes: Set<JevDataScope> = emptySet(),
     val apiKeyMask: String? = null,
@@ -86,6 +105,58 @@ data class JevSetting(
         JevApiMode.PERPLEXITY -> copy(perplexityModel = value)
         JevApiMode.LIQUID -> copy(liquidModel = value)
     }
+}
+
+/**
+ * Persist [JevSetting.purposes] without a 14th visible enum.
+ *
+ * Coexist priority: explicit `PHONE_*` keys win; a legacy `SCREEN_AUTOMATION`
+ * value fills only missing phone keys; absent legacy (old OFF stored as
+ * missing) stays OFF. Encode never writes `SCREEN_AUTOMATION`.
+ */
+object JevPurposeModesSerializer : KSerializer<Map<JevPurpose, JevMode>> {
+    private val mapSerializer = MapSerializer(JevPurpose.serializer(), JevMode.serializer())
+
+    override val descriptor: SerialDescriptor = mapSerializer.descriptor
+
+    override fun serialize(encoder: Encoder, value: Map<JevPurpose, JevMode>) {
+        mapSerializer.serialize(encoder, value)
+    }
+
+    override fun deserialize(decoder: Decoder): Map<JevPurpose, JevMode> {
+        val jsonDecoder = decoder as? JsonDecoder
+            ?: return mapSerializer.deserialize(decoder)
+        val obj = jsonDecoder.decodeJsonElement().jsonObject
+        val known = linkedMapOf<JevPurpose, JevMode>()
+        var legacy: JevMode? = null
+        for ((key, element) in obj) {
+            if (key == JevPurpose.LEGACY_SCREEN_AUTOMATION) {
+                legacy = jsonDecoder.json.decodeFromJsonElement(JevMode.serializer(), element)
+                continue
+            }
+            val purpose = JevPurpose.entries.firstOrNull { it.name == key } ?: continue
+            known[purpose] = jsonDecoder.json.decodeFromJsonElement(JevMode.serializer(), element)
+        }
+        return migrateJevPurposeModes(known, legacy)
+    }
+}
+
+/**
+ * Apply the documented coexist priority used by persisted settings decode.
+ *
+ * @param known already-decoded visible purposes (explicit `PHONE_*` included)
+ * @param legacyScreenAutomation mode of the retired `SCREEN_AUTOMATION` key, or
+ *   null if that key was absent (old OFF stored as missing)
+ */
+fun migrateJevPurposeModes(
+    known: Map<JevPurpose, JevMode>,
+    legacyScreenAutomation: JevMode?,
+): Map<JevPurpose, JevMode> {
+    if (legacyScreenAutomation == null) return known
+    val result = known.toMutableMap()
+    result.putIfAbsent(JevPurpose.PHONE_VERIFICATION, legacyScreenAutomation)
+    result.putIfAbsent(JevPurpose.PHONE_ACTIONS, legacyScreenAutomation)
+    return result
 }
 
 /** 一次 decide 调用携带的配置快照；异步返回后与当前配置比对，防止旧结果串任务。 */

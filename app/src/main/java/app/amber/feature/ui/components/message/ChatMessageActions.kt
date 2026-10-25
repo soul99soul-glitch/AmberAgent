@@ -1,24 +1,39 @@
 package app.amber.feature.ui.components.message
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -65,16 +80,52 @@ fun ChatMessageActionsSheet(
     onToggleFavorite: (() -> Unit)? = null,
     onDismissRequest: () -> Unit
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val currentOnDismissRequest by rememberUpdatedState(onDismissRequest)
+    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    fun dismissThen(action: () -> Unit) {
+        if (pendingAction == null) pendingAction = action
+    }
+
+    LaunchedEffect(pendingAction) {
+        val action = pendingAction ?: return@LaunchedEffect
+        try {
+            // Start after recomposition disables dragging, so another tap cannot
+            // interrupt the exit. Keep the dialog/scrim until it is offscreen.
+            sheetState.hide()
+            if (!sheetState.isVisible) {
+                currentOnDismissRequest()
+                action()
+            }
+        } finally {
+            pendingAction = null
+        }
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
+        sheetGesturesEnabled = pendingAction == null,
+        // Use one slide-out for key/edge back and action taps. M3's predictive
+        // back handler scales this dialog first, exposing its bottom/side edges.
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false),
+        // Reserve the top safe area outside the sheet's measured content. The
+        // default top content inset depends on the sheet offset; a tall menu
+        // can grow as that inset changes and moves its expanded anchor again.
+        modifier = Modifier.windowInsetsPadding(
+            WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+        ),
+        contentWindowInsets = { WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom) },
     ) {
+        BackHandler { dismissThen {} }
         val workspace = workspaceColors()
         val hasTextContent = message.parts.filterIsInstance<UIMessagePart.Text>()
             .any { it.text.isNotBlank() }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -98,10 +149,7 @@ fun ChatMessageActionsSheet(
                             icon = Lucide.Copy,
                             text = stringResource(R.string.copy),
                             workspace = workspace,
-                            onClick = {
-                                onDismissRequest()
-                                onCopy()
-                            },
+                            onClick = { dismissThen(onCopy) },
                         )
                         MessageActionDivider(workspace)
                     }
@@ -111,8 +159,7 @@ fun ChatMessageActionsSheet(
                             text = stringResource(R.string.chat_message_quote),
                             workspace = workspace,
                             onClick = {
-                                onDismissRequest()
-                                onQuote(message.toQuoteBlock())
+                                dismissThen { onQuote(message.toQuoteBlock()) }
                             },
                         )
                         MessageActionDivider(workspace)
@@ -122,10 +169,7 @@ fun ChatMessageActionsSheet(
                             icon = Lucide.Archive,
                             text = stringResource(R.string.workspace_save_to_title),
                             workspace = workspace,
-                            onClick = {
-                                onDismissRequest()
-                                onSaveToWorkspace()
-                            },
+                            onClick = { dismissThen(onSaveToWorkspace) },
                         )
                         MessageActionDivider(workspace)
                     }
@@ -134,10 +178,7 @@ fun ChatMessageActionsSheet(
                             icon = Lucide.RotateCw,
                             text = stringResource(R.string.regenerate),
                             workspace = workspace,
-                            onClick = {
-                                onDismissRequest()
-                                onRegenerate()
-                            },
+                            onClick = { dismissThen(onRegenerate) },
                         )
                         MessageActionDivider(workspace)
                     }
@@ -145,10 +186,7 @@ fun ChatMessageActionsSheet(
                         icon = Lucide.TextSelect,
                         text = stringResource(R.string.select_and_copy),
                         workspace = workspace,
-                        onClick = {
-                            onDismissRequest()
-                            onSelectAndCopy()
-                        },
+                        onClick = { dismissThen(onSelectAndCopy) },
                     )
                     // V3: 移除 "render_with_webview" (网页视图渲染) 项
                     MessageActionDivider(workspace)
@@ -156,30 +194,21 @@ fun ChatMessageActionsSheet(
                         icon = Lucide.Pencil,
                         text = stringResource(R.string.edit),
                         workspace = workspace,
-                        onClick = {
-                            onDismissRequest()
-                            onEdit()
-                        },
+                        onClick = { dismissThen(onEdit) },
                     )
                     MessageActionDivider(workspace)
                     MessageActionRow(
                         icon = Lucide.Share2,
                         text = stringResource(R.string.share),
                         workspace = workspace,
-                        onClick = {
-                            onDismissRequest()
-                            onShare()
-                        },
+                        onClick = { dismissThen(onShare) },
                     )
                     MessageActionDivider(workspace)
                     MessageActionRow(
                         icon = Lucide.GitFork,
                         text = stringResource(R.string.create_fork),
                         workspace = workspace,
-                        onClick = {
-                            onDismissRequest()
-                            onFork()
-                        },
+                        onClick = { dismissThen(onFork) },
                     )
                     if (onToggleFavorite != null) {
                         MessageActionDivider(workspace)
@@ -190,10 +219,7 @@ fun ChatMessageActionsSheet(
                                 else R.string.chat_message_add_favorite
                             ),
                             workspace = workspace,
-                            onClick = {
-                                onDismissRequest()
-                                onToggleFavorite()
-                            },
+                            onClick = { dismissThen(onToggleFavorite) },
                         )
                     }
                     MessageActionDivider(workspace)
@@ -202,10 +228,7 @@ fun ChatMessageActionsSheet(
                         text = stringResource(R.string.delete),
                         workspace = workspace,
                         danger = true,
-                        onClick = {
-                            onDismissRequest()
-                            onDelete()
-                        },
+                        onClick = { dismissThen(onDelete) },
                     )
                 }
             }

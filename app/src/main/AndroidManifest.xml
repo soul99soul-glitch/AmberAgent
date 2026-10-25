@@ -104,6 +104,9 @@
     android:theme="@style/Theme.amberagent"
     tools:targetApi="33">
     <meta-data
+      android:name="app.amber.perf.traceEnabled"
+      android:value="${chatPerfTrace}" />
+    <meta-data
       android:name="com.xiaomi.xms.APP_ID"
       android:value="${xiaomiXmsAppId}" />
     <meta-data

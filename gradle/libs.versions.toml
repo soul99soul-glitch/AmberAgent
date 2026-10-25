@@ -1,6 +1,7 @@
 [versions]
 agp = "9.2.0"
 barcodeScanning = "17.3.0"
+mlkitTextRecognition = "16.0.1"
 cameraCore = "1.6.0"
 dom4j = "2.2.0"
 jlatexmath = "0.2.0"
@@ -69,6 +70,9 @@ sqlite-android = "0bbaa7a8b4c485c0d4b385425113fe33ead6c3c0"
 androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "cameraCore" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 barcode-scanning = { module = "com.google.mlkit:barcode-scanning", version.ref = "barcodeScanning" }
+# Bundled on-device text recognition. The Chinese model also recognizes Latin
+# script, so this single artifact covers the app's Chinese + English paths.
+mlkit-text-recognition-chinese = { module = "com.google.mlkit:text-recognition-chinese", version.ref = "mlkitTextRecognition" }
 dom4j = { module = "org.dom4j:dom4j", version.ref = "dom4j" }
 jlatexmath = { module = "ru.noties:jlatexmath-android", version.ref = "jlatexmath" }
 jlatexmath-font-greek = { module = "ru.noties:jlatexmath-android-font-greek", version.ref = "jlatexmath" }

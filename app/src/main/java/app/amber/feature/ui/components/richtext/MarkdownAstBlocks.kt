@@ -22,6 +22,10 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -34,6 +38,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -50,6 +56,9 @@ import app.amber.feature.ui.components.message.LocalSearchImageUrls
 import app.amber.feature.ui.context.LocalChatFontScale
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.utils.amberTraceMeasure
+import app.amber.feature.ui.utils.ChatPerfProbeToken
+import app.amber.feature.ui.utils.LocalMarkdownReadinessProbe
+import app.amber.feature.ui.utils.LocalMarkdownReadinessDispose
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.toDp
 import app.amber.feature.ui.components.richtext.tree.JvmMdNode
@@ -156,9 +165,39 @@ internal fun MarkdownTopLevelBlock(
     onClickCitation: (String) -> Unit = {}
 ) {
     val child = data.tree.children.getOrNull(blockIndex) ?: return
+    // Virtualized history already has an AST and bypasses MarkdownBlockLegacy.
+    // Register only a composed, real block; lazy-item disposal removes it again.
+    val probe = LocalMarkdownReadinessProbe.current
+    val measuredModifier = if (probe != null) {
+        val dispose = LocalMarkdownReadinessDispose.current
+        val token = remember(probe, data, blockIndex) { ChatPerfProbeToken.next() }
+        var visible by remember(token) { mutableStateOf(false) }
+        val registered = remember(token) { booleanArrayOf(false) }
+        DisposableEffect(token, dispose) {
+            onDispose { if (registered[0]) dispose?.invoke(token) }
+        }
+        // Read in composition so a later placement/viewport change schedules
+        // the reporting effect again (an effect-only read is not subscribed).
+        val visibleAtComposition = visible
+        SideEffect {
+            if (visibleAtComposition) {
+                registered[0] = true
+                probe(token, data.isPendingPlaceholder)
+            } else if (registered[0]) {
+                registered[0] = false
+                dispose?.invoke(token)
+            }
+        }
+        modifier.onGloballyPositioned { coordinates ->
+            // Default boundsInWindow clips against ancestors, including the lazy
+            // viewport. A prefetched/offscreen slice cannot certify readability.
+            val bounds = coordinates.boundsInWindow()
+            visible = coordinates.isAttached && bounds.width > 0f && bounds.height > 0f
+        }
+    } else modifier
     ProvideTextStyle(style) {
         Column(
-            modifier = modifier
+            modifier = measuredModifier
                 .padding(start = 4.dp)
                 .amberTraceMeasure("Amber MarkdownBlock child measure")
         ) {

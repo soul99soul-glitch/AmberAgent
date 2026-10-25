@@ -1,6 +1,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
-        <activity android:name="app.amber.agent.JevScreenFixtureActivity"
-            android:exported="true" android:theme="@android:style/Theme.Material.Light.NoActionBar" />
-    </application>
+    <!-- AGP rewrites the first instrumentation android:name to
+         testInstrumentationRunner. A second, differently named entry is
+         required so ChatDeviceFixtureRunner remains selectable. -->
+    <instrumentation
+        android:name="app.amber.agent.AmberAgentAndroidTestRunner"
+        android:targetPackage="${applicationId}"
+        android:label="Plain Application tests"
+        android:handleProfiling="false"
+        android:functionalTest="false" />
+    <instrumentation
+        android:name="app.amber.agent.ChatDeviceFixtureRunner"
+        android:targetPackage="app.amber.agent.graphite"
+        android:label="S9 isolated fixture tests"
+        android:handleProfiling="false"
+        android:functionalTest="false" />
+    <application />
 </manifest>

@@ -2,10 +2,14 @@ package app.amber.feature.runtime
 
 import android.util.Log
 import app.amber.agent.data.db.dao.RunTerminalDAO
+import app.amber.agent.data.db.entity.ConversationActivityBaselineEntity
+import app.amber.agent.data.db.entity.ConversationActivitySeenEntity
 import app.amber.agent.data.db.entity.RunTerminalEntity
 import app.amber.core.ai.GenerationTerminal
 import app.amber.core.sync.core.SyncRestoreWriteGate
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 private const val TAG = "RunTerminalStore"
 
@@ -87,6 +91,8 @@ data class RunTerminal(
     val updatedAtMs: Long,
     val finishedAtMs: Long?,
 ) {
+    val activityVersionMs: Long get() = finishedAtMs ?: updatedAtMs
+
     companion object {
         fun from(entity: RunTerminalEntity): RunTerminal = RunTerminal(
             runId = entity.runId,
@@ -100,6 +106,21 @@ data class RunTerminal(
             startedAtMs = entity.startedAtMs,
             updatedAtMs = entity.updatedAtMs,
             finishedAtMs = entity.finishedAtMs,
+        )
+    }
+}
+
+/** Persisted activity-center watermark for one run. */
+data class ConversationActivitySeen(
+    val runId: String,
+    val conversationId: String,
+    val versionMs: Long,
+) {
+    companion object {
+        fun from(entity: ConversationActivitySeenEntity) = ConversationActivitySeen(
+            runId = entity.runId,
+            conversationId = entity.conversationId,
+            versionMs = entity.versionMs,
         )
     }
 }
@@ -128,6 +149,29 @@ interface RunTerminalStore {
     suspend fun activeForConversation(conversationId: String): RunTerminal?
 
     suspend fun unfinished(): List<RunTerminal>
+
+    /** Live runs plus attention terminals for the cross-conversation activity center. */
+    fun observeActivity(): Flow<List<RunTerminal>>
+
+    fun observeActivitySeen(): Flow<List<ConversationActivitySeen>>
+
+    /**
+     * Persist the first-upgrade cutoff. Later calls return the original timestamp
+     * so historical COMPLETED/FAILED rows never become unread as a flood.
+     */
+    suspend fun ensureActivityBaseline(nowMs: Long): Long
+
+    /**
+     * CAS watermark for the version the user actually opened. Returns true when
+     * a row was inserted or moved forward.
+     *
+     * The durable owner must exist: [runId] belongs to [conversationId] and
+     * [versionMs] is at most that run's `finishedAtMs ?: updatedAtMs`. Missing
+     * runs, mismatched conversations, and future versions are rejected and
+     * mint no watermark. Registry-only RUNNING (no `begin` row yet) cannot
+     * bypass this check.
+     */
+    suspend fun markActivitySeen(runId: String, conversationId: String, versionMs: Long): Boolean
 }
 
 class RoomRunTerminalStore(
@@ -211,6 +255,27 @@ class RoomRunTerminalStore(
 
     override suspend fun unfinished(): List<RunTerminal> =
         dao.listUnfinished().map(RunTerminal::from)
+
+    override fun observeActivity(): Flow<List<RunTerminal>> =
+        dao.observeActivityCandidates().map { rows -> rows.map(RunTerminal::from) }
+
+    override fun observeActivitySeen(): Flow<List<ConversationActivitySeen>> =
+        dao.observeActivitySeen().map { rows -> rows.map(ConversationActivitySeen::from) }
+
+    override suspend fun ensureActivityBaseline(nowMs: Long): Long = withDurableWrite {
+        dao.insertActivityBaselineIfAbsent(
+            ConversationActivityBaselineEntity(id = 1, establishedAtMs = nowMs),
+        )
+        dao.getActivityBaselineMs() ?: nowMs
+    }
+
+    override suspend fun markActivitySeen(
+        runId: String,
+        conversationId: String,
+        versionMs: Long,
+    ): Boolean = withDurableWrite {
+        dao.markActivitySeenOwned(runId, conversationId, versionMs)
+    }
 
     private suspend fun <T> withDurableWrite(block: suspend () -> T): T {
         val gate = restoreWriteGate

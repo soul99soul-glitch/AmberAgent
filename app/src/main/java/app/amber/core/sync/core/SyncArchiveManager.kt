@@ -821,6 +821,8 @@ class SyncArchiveManager(
             "thread_message",
             "thread_result",
             "continue_candidate_dismiss",
+            "conversation_activity_seen",
+            "conversation_activity_baseline",
             "theme_package",
             "live_card",
         )

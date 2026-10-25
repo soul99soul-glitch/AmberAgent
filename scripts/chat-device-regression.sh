@@ -50,7 +50,7 @@ for method in ${CHAT_DEVICE_METHODS:-cancelRegenerateSwitchHistoryAndCopy reopen
   ) > "$output_dir/$method-foreground-kick.txt" 2>&1 &
   kick_pid=$!
   run_adb shell am instrument -w -e amberDeviceRegression true \
-    -e class "app.amber.agent.ChatInteractionDeviceRegressionTest#$method" \
+    -e class "${CHAT_DEVICE_TEST_CLASS:-app.amber.agent.ChatInteractionDeviceRegressionTest}#$method" \
     "$package.test/app.amber.agent.ChatDeviceFixtureRunner" | tee "$output_dir/$method.txt"
   wait "$kick_pid" || true
   run_adb logcat -d -s AmberDeviceRegression:I > "$output_dir/$method-logcat.txt"

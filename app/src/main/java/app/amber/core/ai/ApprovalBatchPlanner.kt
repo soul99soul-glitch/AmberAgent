@@ -3,6 +3,7 @@ package app.amber.core.ai
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.jev.JevApprovalTriage
 import app.amber.core.jev.JevAutoApprovalGate
 import app.amber.feature.runtime.PermissionDecision
 import app.amber.feature.runtime.PermissionDecisionAction
@@ -23,6 +24,7 @@ internal class ApprovalBatchPlanner(
     private val invocationContext: ToolInvocationContext,
     private val runId: String?,
     private val autoApprovalGate: JevAutoApprovalGate?,
+    private val approvalTriage: JevApprovalTriage? = null,
     private val resolveDecision: (Tool?, UIMessagePart.Tool) -> PermissionDecision,
 ) {
     class ResumePlan(
@@ -53,7 +55,7 @@ internal class ApprovalBatchPlanner(
                 waitingTools.isNotEmpty() &&
                 waitingTools.all { it.toolCallId in initialPendingToolCallIds } &&
                 // Jev 复核收紧的调用只能由用户决定，不随高风险开关释放。
-                waitingTools.none { it.metadata?.containsKey(JevAutoApprovalGate.METADATA_KEY) == true }
+                waitingTools.none { jevTightened(it) }
         val autoToolsToRecheck = buildList {
             if (pendingTools.isNotEmpty()) addAll(deferredAutoTools)
             if (canReleaseAllWaitingToolsWithHighRisk) {
@@ -66,11 +68,18 @@ internal class ApprovalBatchPlanner(
             val autoTool = tool.copy(approvalState = ToolApprovalState.Auto)
             val decision = resolveDecision(toolDefinitions[tool.toolName], autoTool)
             val escalation = autoApprovalEscalation(autoTool, decision, recentUserTexts)
-            if (escalation.isEmpty()) {
+            val afterGate = if (escalation.isEmpty()) {
                 tool to decision
             } else {
                 tool.copy(metadata = escalationMetadata(tool.metadata, escalation)) to
                     decision.copy(action = PermissionDecisionAction.ASK)
+            }
+            val triage = runTriage(afterGate.first, afterGate.second, recentUserTexts)
+            when (triage?.applied) {
+                JevApprovalTriage.Posture.ASK ->
+                    afterGate.first.copy(metadata = triageMetadata(afterGate.first.metadata, triage)) to
+                        afterGate.second.copy(action = PermissionDecisionAction.ASK)
+                else -> afterGate
             }
         }
         if (recheckedAutoTools.any { it.second.action == PermissionDecisionAction.ASK }) {
@@ -118,34 +127,47 @@ internal class ApprovalBatchPlanner(
                     put("run_id", runId)
                 }
             } ?: JsonObject(emptyMap())
+            val afterGate = if (escalation.isEmpty()) {
+                tool to decision
+            } else {
+                tool.copy(metadata = escalationMetadata(tool.metadata, escalation)) to
+                    decision.copy(action = PermissionDecisionAction.ASK)
+            }
+            val triage = runTriage(afterGate.first, afterGate.second, recentUserTexts)
+            val triagedTool = if (triage == null) {
+                afterGate.first
+            } else {
+                afterGate.first.copy(metadata = triageMetadata(afterGate.first.metadata, triage))
+            }
+            val tightenedToAsk = triage != null && triage.applied == JevApprovalTriage.Posture.ASK
             when {
-                // Jev 复核只把自动批准收紧为人工审批。
-                escalation.isNotEmpty() -> {
+                // Jev 复核与分诊只把自动批准收紧为人工审批，从不放行。
+                escalation.isNotEmpty() || tightenedToAsk -> {
                     hasPendingApproval = true
-                    tool.copy(
+                    triagedTool.copy(
                         approvalState = ToolApprovalState.Pending,
                         metadata = mergeToolMetadata(
-                            tool.metadata,
+                            triagedTool.metadata,
                             decision.trace.toJson(),
                             ledgerMetadata,
-                        ).let { escalationMetadata(it, escalation) },
+                        ),
                     )
                 }
                 decision.action == PermissionDecisionAction.ASK -> {
                     hasPendingApproval = true
-                    tool.copy(
+                    triagedTool.copy(
                         approvalState = ToolApprovalState.Pending,
-                        metadata = mergeToolMetadata(tool.metadata, decision.trace.toJson(), ledgerMetadata),
+                        metadata = mergeToolMetadata(triagedTool.metadata, decision.trace.toJson(), ledgerMetadata),
                     )
                 }
                 tool.approvalState is ToolApprovalState.Pending -> {
                     hasPendingApproval = true
-                    tool
+                    triagedTool
                 }
-                else -> if (ledgerMetadata.isEmpty()) {
-                    tool
+                else -> if (ledgerMetadata.isEmpty() && triagedTool.metadata == tool.metadata) {
+                    triagedTool
                 } else {
-                    tool.copy(metadata = mergeToolMetadata(tool.metadata, null, ledgerMetadata))
+                    triagedTool.copy(metadata = mergeToolMetadata(triagedTool.metadata, null, ledgerMetadata))
                 }
             }
         }
@@ -173,6 +195,39 @@ internal class ApprovalBatchPlanner(
     } else {
         emptyList()
     }
+
+    private suspend fun runTriage(
+        tool: UIMessagePart.Tool,
+        decision: PermissionDecision,
+        recentUserTexts: List<String>,
+    ): JevApprovalTriage.Result? {
+        val gate = approvalTriage ?: return null
+        val original = when {
+            decision.action == PermissionDecisionAction.DENY -> JevApprovalTriage.Posture.DENY
+            decision.action == PermissionDecisionAction.ASK ||
+                tool.approvalState is ToolApprovalState.Pending -> JevApprovalTriage.Posture.ASK
+            else -> JevApprovalTriage.Posture.ALLOW
+        }
+        val result = gate.assess(
+            toolName = tool.toolName,
+            input = tool.input,
+            recentUserTexts = recentUserTexts,
+            original = original,
+            runKey = runId,
+        )
+        return result.takeIf { it.writeMetadata }
+    }
+
+    private fun jevTightened(tool: UIMessagePart.Tool): Boolean =
+        tool.metadata?.containsKey(JevAutoApprovalGate.METADATA_KEY) == true ||
+            tool.metadata?.containsKey(JevApprovalTriage.METADATA_KEY) == true
+
+    private fun triageMetadata(
+        metadata: JsonObject?,
+        result: JevApprovalTriage.Result,
+    ): JsonObject = JsonObject(metadata.orEmpty() + (
+        JevApprovalTriage.METADATA_KEY to JevApprovalTriage.metadata(result)
+    ))
 
     private fun escalationMetadata(
         metadata: JsonObject?,

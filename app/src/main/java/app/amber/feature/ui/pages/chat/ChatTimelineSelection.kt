@@ -193,11 +193,16 @@ internal fun TimelineSelectableMessageItem(
     showCheckbox: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        if (enabled) {
+    if (app.amber.agent.BuildConfig.DEBUG) android.os.Trace.beginSection("Amber selectable item")
+    if (!enabled) {
+        // Normal reading mode: no checkbox/weight row. Wrapping every message
+        // in an extra Row+Box was pure per-item layout/applyChanges cost.
+        Box(modifier = modifier.fillMaxWidth()) { content() }
+    } else {
+        Row(
+            modifier = modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             if (showCheckbox) {
                 Checkbox(
                     checked = key in selectedKeys,
@@ -208,11 +213,12 @@ internal fun TimelineSelectableMessageItem(
             } else {
                 Spacer(modifier = Modifier.size(48.dp))
             }
-        }
-        Box(
-            modifier = Modifier.weight(1f)
-        ) {
-            content()
+            Box(
+                modifier = Modifier.weight(1f)
+            ) {
+                content()
+            }
         }
     }
+    if (app.amber.agent.BuildConfig.DEBUG) android.os.Trace.endSection()
 }

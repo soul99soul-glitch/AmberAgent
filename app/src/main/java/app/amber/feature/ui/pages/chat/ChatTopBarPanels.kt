@@ -104,7 +104,12 @@ import com.composables.icons.lucide.AppWindow
 import com.composables.icons.lucide.File
 import com.composables.icons.lucide.Globe
 import com.composables.icons.lucide.Image
+import app.amber.feature.runtime.ConversationActivityKind
+import app.amber.feature.runtime.ConversationActivityNotice
 import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.CircleAlert
+import com.composables.icons.lucide.CircleCheck
+import com.composables.icons.lucide.Clock
 import com.composables.icons.lucide.Layers
 import com.composables.icons.lucide.Radio
 import com.composables.icons.lucide.Video
@@ -409,10 +414,11 @@ fun ChatActivityButton(
 /** 其他对话的活动列表；点一条跳到那个对话。 */
 @Composable
 fun ColumnScope.ChatActivityPanelContent(
-    notices: List<app.amber.feature.runtime.ConversationActivityNotice>?,
-    onOpen: (String) -> Unit,
+    notices: List<ConversationActivityNotice>?,
+    onOpen: (ConversationActivityNotice) -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
+    val theme = LocalChatTheme.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -439,20 +445,27 @@ fun ColumnScope.ChatActivityPanelContent(
                 modifier = Modifier.padding(start = 8.dp, bottom = 8.dp),
             )
             else -> notices.forEach { notice ->
+                val kindTint = when (notice.kind) {
+                    ConversationActivityKind.AWAITING_USER -> theme.accent
+                    ConversationActivityKind.FAILED -> tokens.ink
+                    ConversationActivityKind.COMPLETED,
+                    ConversationActivityKind.RUNNING,
+                    -> tokens.ink3
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .clickable { onOpen(notice.conversationId) }
+                        .clickable { onOpen(notice) }
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Icon(
-                        imageVector = Lucide.Radio,
+                        imageVector = notice.kind.icon(),
                         contentDescription = null,
-                        tint = tokens.ink3,
+                        tint = kindTint,
                         modifier = Modifier.size(16.dp),
                     )
                     Column(modifier = Modifier.weight(1f)) {
@@ -464,9 +477,9 @@ fun ColumnScope.ChatActivityPanelContent(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = stringResource(R.string.chat_activity_kind_running),
+                            text = stringResource(notice.kind.labelRes()),
                             style = MaterialTheme.typography.bodySmall,
-                            color = tokens.ink3,
+                            color = kindTint,
                             maxLines = 1,
                         )
                     }
@@ -480,6 +493,20 @@ fun ColumnScope.ChatActivityPanelContent(
             }
         }
     }
+}
+
+private fun ConversationActivityKind.icon() = when (this) {
+    ConversationActivityKind.RUNNING -> Lucide.Radio
+    ConversationActivityKind.AWAITING_USER -> Lucide.Clock
+    ConversationActivityKind.FAILED -> Lucide.CircleAlert
+    ConversationActivityKind.COMPLETED -> Lucide.CircleCheck
+}
+
+private fun ConversationActivityKind.labelRes() = when (this) {
+    ConversationActivityKind.RUNNING -> R.string.chat_activity_kind_running
+    ConversationActivityKind.AWAITING_USER -> R.string.chat_activity_kind_waiting
+    ConversationActivityKind.FAILED -> R.string.chat_activity_kind_failed
+    ConversationActivityKind.COMPLETED -> R.string.chat_activity_kind_completed
 }
 
 // ── Panel shell ───────────────────────────────────────────────────────────────

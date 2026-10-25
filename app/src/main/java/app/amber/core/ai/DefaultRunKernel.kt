@@ -92,8 +92,12 @@ class DefaultRunKernel(
     private val capabilityPermissionStore: CapabilityPermissionStore? = null,
     // Jev 自动批准复核：只把自动批准收紧为人工审批，从不放行。
     private val autoApprovalGate: app.amber.core.jev.JevAutoApprovalGate? = null,
+    // Jev 审批分诊：独立安全交集，只收紧不放松。
+    private val approvalTriage: app.amber.core.jev.JevApprovalTriage? = null,
     // Jev 完成声明校验：改过文件却未检查就宣称完成时，续跑一轮（每次 run 至多一次）。
     private val completionCheck: app.amber.core.jev.JevCompletionCheck? = null,
+    // Jev 脚本判断：只评估既有脚本/工具输出。
+    private val scriptJudgment: app.amber.core.jev.JevScriptJudgment? = null,
 ) : RunKernel {
 
     override fun run(session: GenerationRunSession): Flow<GenerationChunk> = flow {
@@ -153,6 +157,7 @@ class DefaultRunKernel(
             invocationContext = invocationContext,
             runId = runId,
             autoApprovalGate = autoApprovalGate,
+            approvalTriage = approvalTriage,
             resolveDecision = { toolDef, tool ->
                 toolDispatcher.resolveDecision(
                     toolDef = toolDef,
@@ -619,7 +624,7 @@ class DefaultRunKernel(
             } else {
                 toolsInternal.associateBy { it.name }
             }
-            val executedTools = protocolFailures + classification.skipped + toolDispatcher.executeBatch(
+            val rawExecutedTools = protocolFailures + classification.skipped + toolDispatcher.executeBatch(
                 tools = classification.toExecute,
                 toolDefinitions = toolDefinitionsForBatch,
                 autoApproveTools = autoApproveTools,
@@ -644,6 +649,7 @@ class DefaultRunKernel(
                 permissionContext = permissionContext,
                 executionPolicy = executionPolicy,
             )
+            val executedTools = scriptJudgment?.annotate(rawExecutedTools, runId) ?: rawExecutedTools
 
             if (executedTools.isNotEmpty()) {
                 toolExposure.observeExecutedTools(executedTools)

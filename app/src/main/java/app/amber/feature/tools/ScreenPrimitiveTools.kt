@@ -21,7 +21,6 @@ import app.amber.core.automation.ScreenOcrBlock
 import app.amber.core.automation.ScreenOcrEngine
 import app.amber.core.automation.ScreenOcrMode
 import app.amber.core.automation.ScreenOcrObservation
-import app.amber.core.automation.SensitiveScreenTextClassifier
 
 /** Approved single actions, legacy reads and screenshot tools; no operation state. */
 internal class ScreenPrimitiveTools(
@@ -244,7 +243,7 @@ internal class ScreenPrimitiveTools(
 
     val screenReadUiTool = Tool(
         name = "screen_read_ui",
-        description = "Read the current Accessibility UI tree for screen reasoning (with automatic on-device OCR fallback for low-coverage/WebView/Canvas screens). For a multi-step phone goal, first discover screen_run_goal: when enabled it uses Jev inside Accessibility to select and execute validated actions, reducing model round trips. Use this raw tree tool for inspection or when that tool hands back.",
+        description = "Read the current Accessibility UI tree for screen reasoning (with automatic compiled on-device OCR fallback for low-coverage/WebView/Canvas screens). OCR uses bundled ML Kit text recognition for Chinese (Simplified/Traditional) and Latin/English; `ocr_source`/`ocr_outcome` in the result distinguish real bitmap OCR from Accessibility-only metadata. For a multi-step phone goal, first discover screen_run_goal: when enabled it uses Jev inside Accessibility to select and execute validated actions, reducing model round trips. Use this raw tree tool for inspection or when that tool hands back.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -651,64 +650,6 @@ internal class ScreenPrimitiveTools(
         })
     }
 
-    private fun ScreenOcrBlock.toMatchJson(index: Int) = buildJsonObject {
-        put("index", index)
-        put("source", "ocr")
-        put("id", id)
-        put("text", SensitiveScreenTextClassifier.redactIfSensitive(text))
-        put("content_description", "")
-        put("class_name", "ocr.text_block")
-        put("view_id", "")
-        put("clickable", true)
-        put("enabled", true)
-        put("confidence", confidence.toDouble())
-        put("sensitive", isSensitive)
-        put("bounds", buildJsonObject {
-            put("left", left)
-            put("top", top)
-            put("right", right)
-            put("bottom", bottom)
-            put("center_x", centerX.toDouble())
-            put("center_y", centerY.toDouble())
-        })
-        put("normalized_bounds", buildJsonObject {
-            put("left", normalizedBounds.left.toDouble())
-            put("top", normalizedBounds.top.toDouble())
-            put("right", normalizedBounds.right.toDouble())
-            put("bottom", normalizedBounds.bottom.toDouble())
-            put("center_x", normalizedBounds.centerX.toDouble())
-            put("center_y", normalizedBounds.centerY.toDouble())
-        })
-    }
-
-    private fun kotlinx.serialization.json.JsonObjectBuilder.appendOcrTelemetry(
-        observation: ScreenOcrObservation,
-    ) {
-        put("ocr_mode", observation.mode.wireName())
-        put("ocr_triggered", observation.triggered)
-        put("ocr_reason", observation.triggerReason)
-        put("ocr_block_count", observation.blocks.size)
-        if (observation.triggered) {
-            put("ocr_text", observation.mergedText(maxChars = 4_000))
-            put("ocr_blocks", buildJsonArray {
-                observation.blocks.forEachIndexed { index, block ->
-                    add(block.toMatchJson(index))
-                }
-            })
-        }
-        observation.coverage?.let { cov ->
-            put("tree_coverage", buildJsonObject {
-                put("total_nodes", cov.totalNodes)
-                put("labeled_nodes", cov.labeledNodes)
-                put("interactive_nodes", cov.interactiveNodes)
-                put("unlabeled_interactive_nodes", cov.unlabeledInteractiveNodes)
-                put("custom_canvas_or_webview_nodes", cov.customCanvasOrWebViewNodes)
-                put("coverage_ratio", cov.coverageRatio.toDouble())
-                put("is_low_coverage", cov.isLowCoverage)
-                put("reason", cov.reason)
-            })
-        }
-    }
 }
 
 internal fun JsonElement.requiredFloat(name: String): Float =

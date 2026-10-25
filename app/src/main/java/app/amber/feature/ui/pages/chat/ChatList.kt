@@ -1,18 +1,21 @@
 package app.amber.feature.ui.pages.chat
 
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import app.amber.ai.ui.UIMessage
 import app.amber.core.context.ActiveCompactBoundary
@@ -109,64 +112,89 @@ internal fun ChatList(
     onEnsureTimelineLoaded: suspend () -> Conversation = { conversation },
     chatTimelinePlan: ChatTimelinePlan,
 ) {
-    AnimatedContent(
-        targetState = previewMode,
-        label = "ChatListMode",
-        transitionSpec = {
-            (fadeIn(animationSpec = tween(durationMillis = 160)) togetherWith
-                fadeOut(animationSpec = tween(durationMillis = 100)))
-                .using(null)
+    // Normal entry composes exactly one branch (no AnimatedContent
+    // SubcomposeLayout on the first frame). The original crossfade is kept for
+    // the rare user-driven preview toggle: only then are both modes composed
+    // for the 160ms transition.
+    val displayedMode = remember { mutableStateOf(previewMode) }
+    val outgoingMode = remember { mutableStateOf<Boolean?>(null) }
+    val modeProgress = remember { Animatable(1f) }
+    LaunchedEffect(previewMode) {
+        if (previewMode == displayedMode.value) return@LaunchedEffect
+        outgoingMode.value = displayedMode.value
+        displayedMode.value = previewMode
+        modeProgress.snapTo(0f)
+        modeProgress.animateTo(1f, tween(durationMillis = 160))
+        outgoingMode.value = null
+    }
+    val modeContent: @Composable (Boolean) -> Unit = { showPreview ->
+    if (showPreview) {
+        ChatListPreview(
+            innerPadding = innerPadding,
+            conversation = conversation,
+            settings = settings,
+            onJumpToMessage = onJumpToMessage,
+        )
+    } else {
+        ChatListNormal(
+            innerPadding = innerPadding,
+            conversation = conversation,
+            timelineLoadState = timelineLoadState,
+            pendingUserMessages = pendingUserMessages,
+            contextCompacts = contextCompacts,
+            activeCompactBoundary = activeCompactBoundary,
+            compactLifecycleState = compactLifecycleState,
+            isCompacting = isCompacting,
+            streamingSummary = streamingSummary,
+            state = state,
+            loading = loading,
+            processingStatus = processingStatus,
+            settings = settings,
+            errors = errors,
+            globalErrors = globalErrors,
+            onDismissError = onDismissError,
+            onClearAllErrors = onClearAllErrors,
+            onRegenerate = onRegenerate,
+            onEdit = onEdit,
+            onQuote = onQuote,
+            onForkMessage = onForkMessage,
+            onDelete = onDelete,
+            onUpdateMessage = onUpdateMessage,
+            onClickSuggestion = onClickSuggestion,
+            onLongClickSuggestion = onLongClickSuggestion,
+            onToolApproval = onToolApproval,
+            onToolAnswer = onToolAnswer,
+            onToggleFavorite = onToggleFavorite,
+            onCancelPendingMessage = onCancelPendingMessage,
+            onOpenQueue = onOpenQueue,
+            onOpenWorkspaceFile = onOpenWorkspaceFile,
+            onGenerativeWidgetAction = onGenerativeWidgetAction,
+            onMiniAppModify = onMiniAppModify,
+            onSaveToWorkspace = onSaveToWorkspace,
+            onLoadOlderTimeline = onLoadOlderTimeline,
+            onEnsureTimelineLoaded = onEnsureTimelineLoaded,
+            chatTimelinePlan = chatTimelinePlan,
+        )
+    }
+    }
+    Box(Modifier.fillMaxSize()) {
+        outgoingMode.value?.let { outgoing ->
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = 1f - modeProgress.value }
+            ) {
+                modeContent(outgoing)
+            }
         }
-    ) { target ->
-        if (target) {
-            ChatListPreview(
-                innerPadding = innerPadding,
-                conversation = conversation,
-                settings = settings,
-                onJumpToMessage = onJumpToMessage,
-                animatedVisibilityScope = this@AnimatedContent,
-            )
-        } else {
-            ChatListNormal(
-                innerPadding = innerPadding,
-                conversation = conversation,
-                timelineLoadState = timelineLoadState,
-                pendingUserMessages = pendingUserMessages,
-                contextCompacts = contextCompacts,
-                activeCompactBoundary = activeCompactBoundary,
-                compactLifecycleState = compactLifecycleState,
-                isCompacting = isCompacting,
-                streamingSummary = streamingSummary,
-                state = state,
-                loading = loading,
-                processingStatus = processingStatus,
-                settings = settings,
-                errors = errors,
-                globalErrors = globalErrors,
-                onDismissError = onDismissError,
-                onClearAllErrors = onClearAllErrors,
-                onRegenerate = onRegenerate,
-                onEdit = onEdit,
-                onQuote = onQuote,
-                onForkMessage = onForkMessage,
-                onDelete = onDelete,
-                onUpdateMessage = onUpdateMessage,
-                onClickSuggestion = onClickSuggestion,
-                onLongClickSuggestion = onLongClickSuggestion,
-                animatedVisibilityScope = this@AnimatedContent,
-                onToolApproval = onToolApproval,
-                onToolAnswer = onToolAnswer,
-                onToggleFavorite = onToggleFavorite,
-                onCancelPendingMessage = onCancelPendingMessage,
-                onOpenQueue = onOpenQueue,
-                onOpenWorkspaceFile = onOpenWorkspaceFile,
-                onGenerativeWidgetAction = onGenerativeWidgetAction,
-                onMiniAppModify = onMiniAppModify,
-                onSaveToWorkspace = onSaveToWorkspace,
-                onLoadOlderTimeline = onLoadOlderTimeline,
-                onEnsureTimelineLoaded = onEnsureTimelineLoaded,
-                chatTimelinePlan = chatTimelinePlan,
-            )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    alpha = if (outgoingMode.value != null) modeProgress.value else 1f
+                }
+        ) {
+            modeContent(displayedMode.value)
         }
     }
 }

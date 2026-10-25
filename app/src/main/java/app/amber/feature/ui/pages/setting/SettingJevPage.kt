@@ -768,10 +768,14 @@ private fun JevPurpose.title(): String = stringResource(
         JevPurpose.CONTEXT_SELECTION -> R.string.setting_jev_purpose_context_selection
         JevPurpose.MODEL_ROUTING -> R.string.setting_jev_purpose_model_routing
         JevPurpose.WEB_AUTOMATION -> R.string.setting_jev_purpose_web_automation
-        JevPurpose.SCREEN_AUTOMATION -> R.string.setting_jev_purpose_screen_automation
+        JevPurpose.PHONE_VERIFICATION -> R.string.setting_jev_purpose_phone_verification
+        JevPurpose.PHONE_ACTIONS -> R.string.setting_jev_purpose_phone_actions
         JevPurpose.TOOL_RESULT_RETENTION -> R.string.setting_jev_purpose_tool_result_retention
         JevPurpose.AUTO_APPROVAL_GATE -> R.string.setting_jev_purpose_auto_approval_gate
+        JevPurpose.APPROVAL_TRIAGE -> R.string.setting_jev_purpose_approval_triage
         JevPurpose.COMPLETION_CHECK -> R.string.setting_jev_purpose_completion_check
+        JevPurpose.SUBAGENT_INTENT -> R.string.setting_jev_purpose_subagent_intent
+        JevPurpose.SCRIPT_JUDGMENT -> R.string.setting_jev_purpose_script_judgment
     },
 )
 
@@ -783,10 +787,14 @@ private fun JevPurpose.description(): String = stringResource(
         JevPurpose.CONTEXT_SELECTION -> R.string.setting_jev_purpose_context_selection_desc
         JevPurpose.MODEL_ROUTING -> R.string.setting_jev_purpose_model_routing_desc
         JevPurpose.WEB_AUTOMATION -> R.string.setting_jev_purpose_web_automation_desc
-        JevPurpose.SCREEN_AUTOMATION -> R.string.setting_jev_purpose_screen_automation_desc
+        JevPurpose.PHONE_VERIFICATION -> R.string.setting_jev_purpose_phone_verification_desc
+        JevPurpose.PHONE_ACTIONS -> R.string.setting_jev_purpose_phone_actions_desc
         JevPurpose.TOOL_RESULT_RETENTION -> R.string.setting_jev_purpose_tool_result_retention_desc
         JevPurpose.AUTO_APPROVAL_GATE -> R.string.setting_jev_purpose_auto_approval_gate_desc
+        JevPurpose.APPROVAL_TRIAGE -> R.string.setting_jev_purpose_approval_triage_desc
         JevPurpose.COMPLETION_CHECK -> R.string.setting_jev_purpose_completion_check_desc
+        JevPurpose.SUBAGENT_INTENT -> R.string.setting_jev_purpose_subagent_intent_desc
+        JevPurpose.SCRIPT_JUDGMENT -> R.string.setting_jev_purpose_script_judgment_desc
     },
 )
 

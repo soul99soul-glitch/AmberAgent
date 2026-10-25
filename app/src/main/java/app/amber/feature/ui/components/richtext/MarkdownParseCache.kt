@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import app.amber.agent.BuildConfig
+import app.amber.feature.ui.utils.ChatPerfTrace
 import app.amber.core.agent.utils.markdown.CjkCompatibleGfmFlavourDescriptor
 import org.intellij.markdown.parser.MarkdownParser
 import app.amber.feature.ui.components.richtext.tree.JvmMdNode
@@ -201,15 +202,13 @@ internal object MarkdownParseCache {
             return result
         }
         try {
-            val startedAt = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+            val startedAt = System.nanoTime()
             val parsed = traceMarkdown(section) {
                 parser(content)
             }
-            val elapsedMs = if (BuildConfig.DEBUG) {
-                (System.nanoTime() - startedAt) / 1_000_000.0
-            } else {
-                null
-            }
+            val elapsed = (System.nanoTime() - startedAt) / 1_000_000.0
+            val elapsedMs = if (BuildConfig.DEBUG || BuildConfig.CHAT_PERF_TRACE) elapsed else null
+            ChatPerfTrace.recordMarkdownParse(elapsed)
             synchronized(lock) {
                 if (content.length > MARKDOWN_PARSE_CACHE_MAX_CHARS) {
                     logCacheLocked("oversize-skip", content.length, elapsedMs)
@@ -284,7 +283,7 @@ internal object MarkdownParseCache {
 }
 
 internal inline fun <T> traceMarkdown(section: String, block: () -> T): T {
-    val tracing = BuildConfig.DEBUG && runCatching {
+    val tracing = (BuildConfig.DEBUG || BuildConfig.CHAT_PERF_TRACE) && runCatching {
         Trace.beginSection(section)
         true
     }.getOrDefault(false)

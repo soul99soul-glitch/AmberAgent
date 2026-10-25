@@ -31,7 +31,9 @@ val generationModule = module {
             capabilityFlags = get(),
             capabilityPermissionStore = get(),
             autoApprovalGate = get(),
+            approvalTriage = get(),
             completionCheck = get(),
+            scriptJudgment = get(),
         )
     }
     single<GenerationRoundEngine> { get<ChatGenerationRoundEngine>() }
