@@ -336,7 +336,7 @@ struct ChatMcpSettingsPage {
         .margin({ top: 3 })
     }
     .alignItems(HorizontalAlign.Start).width('100%')
-    .padding({ top: 12, bottom: 6 })
+    .padding({ left: 16, right: 16, top: 12, bottom: 6 })
   }
 
   @Builder
@@ -353,110 +353,122 @@ struct ChatMcpSettingsPage {
 
         // 名称(:516-544)
         this.formLabel('名称', 'MCP服务器的显示名称')
-        TextInput({ text: draft.commonOptions.name, placeholder: '例如：My MCP Server' })
-          .fontSize(14).fontWeight(400).lineHeight(lineHeightForSize(14)).fontFamily(FONT_SANS_SEMIBOLD)
-          .backgroundColor(RAISED)
-          .border({
-            width: this.nameError.length > 0 ? 1 : 0,
-            color: this.nameError.length > 0 ? ERROR : LINE,
-          })
-          .onChange((v: string): void => {
-            this.patchCommon({ name: v });
-            if (this.nameError.length > 0 && v.trim().length > 0) this.nameError = '';
-          })
-        if (this.nameError.length > 0) {
-          // F23:行内反馈(与导入错误同款式)
-          Text(this.nameError)
-            .fontSize(TEXT_STYLES.meta.size)
-            .fontWeight(400)
-            .lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontFamily(TEXT_STYLES.meta.family)
-            .fontColor(ERROR).width('100%').maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 6 })
+        Column() {
+          TextInput({ text: draft.commonOptions.name, placeholder: '例如：My MCP Server' })
+            .fontSize(14).fontWeight(400).lineHeight(lineHeightForSize(14)).fontFamily(FONT_SANS_SEMIBOLD)
+            .backgroundColor(RAISED)
+            .border({
+              width: this.nameError.length > 0 ? 1 : 0,
+              color: this.nameError.length > 0 ? ERROR : LINE,
+            })
+            .onChange((v: string): void => {
+              this.patchCommon({ name: v });
+              if (this.nameError.length > 0 && v.trim().length > 0) this.nameError = '';
+            })
+          if (this.nameError.length > 0) {
+            // F23:行内反馈(与导入错误同款式)
+            Text(this.nameError)
+              .fontSize(TEXT_STYLES.meta.size)
+              .fontWeight(400)
+              .lineHeight(TEXT_STYLES.meta.lineHeight)
+              .fontFamily(TEXT_STYLES.meta.family)
+              .fontColor(ERROR).width('100%').maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 6 })
+          }
         }
+        .width('100%').padding({ left: 16, right: 16, bottom: 12 })
         PaperSeparator()
 
         // 传输类型(:548-604)— 0=Streamable HTTP,1=SSE
         this.formLabel('传输类型', '选择MCP服务器的传输协议类型')
-        Seg({
-          options: ['Streamable HTTP', 'SSE'],
-          selected: draft.kind === 'sse' ? 1 : 0,
-          onSelect: (index: number): void => { this.switchTransport(index); },
-        }).margin({ top: 12 })
+        Column() {
+          Seg({
+            options: ['Streamable HTTP', 'SSE'],
+            selected: draft.kind === 'sse' ? 1 : 0,
+            onSelect: (index: number): void => { this.switchTransport(index); },
+          })
+        }
+        .width('100%').padding({ left: 16, right: 16, top: 6, bottom: 12 })
         PaperSeparator()
 
         // URL(:608-646 — 按类型 desc/placeholder)
         this.formLabel('服务器地址',
           draft.kind === 'sse' ? 'SSE传输服务器的URL地址' : '流式HTTP服务器的URL地址')
-        TextInput({
-          text: draft.url,
-          placeholder: draft.kind === 'sse'
-            ? 'https://example.com/sse' : 'https://example.com/mcp',
-        })
-          .fontSize(14).fontWeight(400).lineHeight(lineHeightForSize(14)).fontFamily(FONT_MONO_MEDIUM)
-          .backgroundColor(RAISED)
-          .onChange((v: string): void => {
-            const d: McpServerConfig | null = this.draft;
-            if (d === null) return;
-            if (d.kind === 'sse') {
-              this.draft = makeMcpSseServer({
-                id: d.id, commonOptions: d.commonOptions, url: v,
-              });
-            } else {
-              this.draft = makeMcpStreamableHttpServer({
-                id: d.id, commonOptions: d.commonOptions, url: v,
-              });
-            }
+        Column() {
+          TextInput({
+            text: draft.url,
+            placeholder: draft.kind === 'sse'
+              ? 'https://example.com/sse' : 'https://example.com/mcp',
           })
+            .fontSize(14).fontWeight(400).lineHeight(lineHeightForSize(14)).fontFamily(FONT_MONO_MEDIUM)
+            .backgroundColor(RAISED)
+            .onChange((v: string): void => {
+              const d: McpServerConfig | null = this.draft;
+              if (d === null) return;
+              if (d.kind === 'sse') {
+                this.draft = makeMcpSseServer({
+                  id: d.id, commonOptions: d.commonOptions, url: v,
+                });
+              } else {
+                this.draft = makeMcpStreamableHttpServer({
+                  id: d.id, commonOptions: d.commonOptions, url: v,
+                });
+              }
+            })
+        }
+        .width('100%').padding({ left: 16, right: 16, bottom: 12 })
         PaperSeparator()
 
         // 请求头(:650-769)
         this.formLabel('自定义请求头', '为MCP服务器请求添加自定义HTTP头')
-        ForEach(this.draftHeaderIds, (headerId: number) => {
-          Row() {
-            Column() {
-              TextInput({ text: this.draftHeaderValue(headerId, 0), placeholder: '例如：Authorization' })
-                .id(`mcp-header-name-${headerId}`)
-                .accessibilityText('请求头名称')
-                .fontSize(13).fontWeight(400).lineHeight(lineHeightForSize(13)).fontFamily(FONT_MONO_MEDIUM)
-                .backgroundColor(RAISED)
-                .onChange((v: string): void => {
-                  this.patchHeader(headerId, 0, v);
-                })
-              TextInput({ text: this.draftHeaderValue(headerId, 1), placeholder: '例如：Bearer token123' })
-                .id(`mcp-header-value-${headerId}`)
-                .accessibilityText('请求头值')
-                .fontSize(13).fontWeight(400).lineHeight(lineHeightForSize(13)).fontFamily(FONT_MONO_MEDIUM)
-                .backgroundColor(RAISED).margin({ top: 8 })
-                .onChange((v: string): void => {
-                  this.patchHeader(headerId, 1, v);
-                })
-            }
-            .layoutWeight(1)
+        Column() {
+          ForEach(this.draftHeaderIds, (headerId: number) => {
             Row() {
-              Icon({ name: 'close', iconSize: 16, color: INK3 })
+              Column() {
+                TextInput({ text: this.draftHeaderValue(headerId, 0), placeholder: '例如：Authorization' })
+                  .id(`mcp-header-name-${headerId}`)
+                  .accessibilityText('请求头名称')
+                  .fontSize(13).fontWeight(400).lineHeight(lineHeightForSize(13)).fontFamily(FONT_MONO_MEDIUM)
+                  .backgroundColor(RAISED)
+                  .onChange((v: string): void => {
+                    this.patchHeader(headerId, 0, v);
+                  })
+                TextInput({ text: this.draftHeaderValue(headerId, 1), placeholder: '例如：Bearer token123' })
+                  .id(`mcp-header-value-${headerId}`)
+                  .accessibilityText('请求头值')
+                  .fontSize(13).fontWeight(400).lineHeight(lineHeightForSize(13)).fontFamily(FONT_MONO_MEDIUM)
+                  .backgroundColor(RAISED).margin({ top: 8 })
+                  .onChange((v: string): void => {
+                    this.patchHeader(headerId, 1, v);
+                  })
+              }
+              .layoutWeight(1)
+              Row() {
+                Icon({ name: 'close', iconSize: 16, color: INK3 })
+              }
+              .width(32).height(44)
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .margin({ left: 8 })
+              .id(`mcp-header-remove-${headerId}`)
+              .accessibilityText('删除请求头')
+              .onClick((): void => { this.removeHeader(headerId); })
             }
-            .width(32).height(44)
-            .justifyContent(FlexAlign.Center)
-            .alignItems(VerticalAlign.Center)
-            .margin({ left: 8 })
-            .id(`mcp-header-remove-${headerId}`)
-            .accessibilityText('删除请求头')
-            .onClick((): void => { this.removeHeader(headerId); })
+            .width('100%').margin({ bottom: 8 })
+          }, (headerId: number): string => String(headerId))
+          Row() {
+            BtnGhost({ label: '添加请求头', onTap: (): void => {
+              const d: McpServerConfig | null = this.draft;
+              if (d === null) return;
+              // :746 — '' to ''
+              const headers: Array<[string, string]> = [...d.commonOptions.headers, ['', '']];
+              this.draftHeaderIds = [...this.draftHeaderIds, this.nextDraftHeaderId++];
+              this.patchCommon({ headers: headers });
+            } })
           }
-          .width('100%').margin({ bottom: 8 })
-        }, (headerId: number): string => String(headerId))
-        Row() {
-          BtnGhost({ label: '添加请求头', onTap: (): void => {
-            const d: McpServerConfig | null = this.draft;
-            if (d === null) return;
-            // :746 — '' to ''
-            const headers: Array<[string, string]> = [...d.commonOptions.headers, ['', '']];
-            this.draftHeaderIds = [...this.draftHeaderIds, this.nextDraftHeaderId++];
-            this.patchCommon({ headers: headers });
-          } })
+          .width('100%')
         }
-        .width('100%')
+        .width('100%').padding({ left: 16, right: 16 })
       }
       .width('100%').padding({ bottom: 16 })
       .alignItems(HorizontalAlign.Start)
@@ -476,6 +488,8 @@ struct ChatMcpSettingsPage {
           .lineHeight(TEXT_STYLES.secondary.lineHeight)
           .fontFamily(TEXT_STYLES.secondary.family)
           .fontColor(INK3)
+          .width('100%')
+          .padding({ left: 16, right: 16 })
           .margin({ top: 24 })
       }
       List() {
@@ -527,11 +541,14 @@ struct ChatMcpSettingsPage {
   editSheet() {
     Column() {
       // Tab 行(:398-424)
-      Seg({
-        options: ['基础设置', '工具'],
-        selected: this.draftTab,
-        onSelect: (index: number): void => { this.draftTab = index; },
-      })
+      Column() {
+        Seg({
+          options: ['基础设置', '工具'],
+          selected: this.draftTab,
+          onSelect: (index: number): void => { this.draftTab = index; },
+        })
+      }
+      .width('100%').padding({ left: 16, right: 16 })
       if (this.draft !== null && this.draftTab === 0) {
         this.basicTab(this.draft)
       } else if (this.draft !== null) {
@@ -541,9 +558,9 @@ struct ChatMcpSettingsPage {
       Row() {
         BtnFill({ label: '保存', onTap: (): void => { this.confirmDraft(); } })
       }
-      .width('100%').justifyContent(FlexAlign.End).padding({ top: 8 })
+      .width('100%').justifyContent(FlexAlign.End).padding({ left: 16, right: 16, top: 8 })
     }
-      .width('100%').height('90%').padding(16)
+      .width('100%').height('90%').padding({ top: 16, bottom: 16 })
       .backgroundColor(BG)
   }
 

@@ -2,8 +2,8 @@
 import type { JsonObject, JsonValue } from './json.ts';
 import { renderWidgetSpec } from './generative_widget_specs.ts';
 import {
-  normalizeThreeScene, normalizeThreeSceneObject, renderThreeSceneCover, THREE_SCENE_MAX_OBJECTS,
-  THREE_SCENE_RENDERER, THREE_SCENE_RENDERER_ALIAS,
+  normalizeThreeScene, normalizeThreeSceneObject, normalizeThreeVoxelTuple, renderThreeSceneCover,
+  THREE_SCENE_MAX_OBJECTS, THREE_SCENE_RENDERER, THREE_SCENE_RENDERER_ALIAS,
 } from './three_scene.ts';
 import type { ThreeSceneObject, ThreeSceneSpec } from './three_scene.ts';
 import { MINI_APP_MAX_HTML_BYTES, utf8ByteLength } from './miniapp/miniapp_models.ts';
@@ -125,7 +125,7 @@ const partialString = (json: string, key: string): string => {
   return value;
 };
 
-const jsonObjectEnd = (text: string, start: number): number => {
+const jsonBlockEnd = (text: string, start: number, openChar: string, closeChar: string): number => {
   let depth: number = 0;
   let inString: boolean = false;
   let escaped: boolean = false;
@@ -137,9 +137,9 @@ const jsonObjectEnd = (text: string, start: number): number => {
       else if (c === '"') inString = false;
     } else if (c === '"') {
       inString = true;
-    } else if (c === '{') {
+    } else if (c === openChar) {
       depth++;
-    } else if (c === '}') {
+    } else if (c === closeChar) {
       depth--;
       if (depth === 0) return index;
     }
@@ -147,7 +147,7 @@ const jsonObjectEnd = (text: string, start: number): number => {
   return -1;
 };
 
-const objectsArrayStart = (json: string): number => {
+const namedArrayStart = (json: string, targetKey: string): number => {
   let inString: boolean = false;
   let escaped: boolean = false;
   for (let index: number = 0; index < json.length; index++) {
@@ -168,7 +168,7 @@ const objectsArrayStart = (json: string): number => {
       else if (keyChar === '\\') keyEscaped = true;
       else if (keyChar === '"') break;
     }
-    if (keyEnd >= json.length || json.slice(keyStart, keyEnd) !== 'objects') {
+    if (keyEnd >= json.length || json.slice(keyStart, keyEnd) !== targetKey) {
       index = keyEnd;
       continue;
     }
@@ -183,31 +183,56 @@ const objectsArrayStart = (json: string): number => {
   return -1;
 };
 
-// A streamed object is eligible only after its own closing brace arrived.
+// A streamed object is eligible only after its own closing brace/bracket arrived.
 // The surrounding scene/array may still be incomplete.
 export const completedThreeObjects = (json: string): ThreeSceneObject[] => {
-  const arrayStart: number = objectsArrayStart(json);
-  if (arrayStart < 0) return [];
-  let cursor: number = arrayStart + 1;
   const objects: ThreeSceneObject[] = [];
   const ids = new Set<string>();
-  while (cursor < json.length) {
-    while (cursor < json.length && /[\s,]/.test(json[cursor])) cursor++;
-    if (cursor >= json.length || json[cursor] !== '{') break;
-    const end: number = jsonObjectEnd(json, cursor);
-    if (end < 0) break;
-    try {
-      const parsed: JsonValue = JSON.parse(json.slice(cursor, end + 1)) as JsonValue;
-      const item: ThreeSceneObject | null = normalizeThreeSceneObject(parsed);
-      if (item !== null && !ids.has(item.id)) {
-        ids.add(item.id);
-        objects.push(item);
+  const arrayStart: number = namedArrayStart(json, 'objects');
+  if (arrayStart >= 0) {
+    let cursor: number = arrayStart + 1;
+    while (cursor < json.length) {
+      while (cursor < json.length && /[\s,]/.test(json[cursor])) cursor++;
+      if (cursor >= json.length || json[cursor] !== '{') break;
+      const end: number = jsonBlockEnd(json, cursor, '{', '}');
+      if (end < 0) break;
+      try {
+        const parsed: JsonValue = JSON.parse(json.slice(cursor, end + 1)) as JsonValue;
+        const item: ThreeSceneObject | null = normalizeThreeSceneObject(parsed);
+        if (item !== null && !ids.has(item.id)) {
+          ids.add(item.id);
+          objects.push(item);
+        }
+      } catch (_error) {
+        // Keep scanning later complete entries; malformed/incomplete data never renders.
       }
-    } catch (_error) {
-      // Keep scanning later complete entries; malformed/incomplete data never renders.
+      cursor = end + 1;
+      if (objects.length >= THREE_SCENE_MAX_OBJECTS) break;
     }
-    cursor = end + 1;
-    if (objects.length >= THREE_SCENE_MAX_OBJECTS) break;
+  }
+  const voxelsStart: number = namedArrayStart(json, 'voxels');
+  if (voxelsStart >= 0 && objects.length < THREE_SCENE_MAX_OBJECTS) {
+    let cursor: number = voxelsStart + 1;
+    let voxelIndex: number = 0;
+    while (cursor < json.length) {
+      while (cursor < json.length && /[\s,]/.test(json[cursor])) cursor++;
+      if (cursor >= json.length || json[cursor] !== '[') break;
+      const end: number = jsonBlockEnd(json, cursor, '[', ']');
+      if (end < 0) break;
+      try {
+        const parsed: JsonValue = JSON.parse(json.slice(cursor, end + 1)) as JsonValue;
+        const item: ThreeSceneObject | null = normalizeThreeVoxelTuple(parsed, voxelIndex);
+        voxelIndex++;
+        if (item !== null && !ids.has(item.id)) {
+          ids.add(item.id);
+          objects.push(item);
+        }
+      } catch (_error) {
+        voxelIndex++;
+      }
+      cursor = end + 1;
+      if (objects.length >= THREE_SCENE_MAX_OBJECTS) break;
+    }
   }
   return objects;
 };
@@ -229,8 +254,12 @@ const threePlaceholder = (title: string): GenerativeWidget => ({
 const parseWidget = (raw: string, complete: boolean): GenerativeWidget => {
   const parsed = object(JSON.parse(raw) as JsonValue);
   if (parsed === null) throw new Error('组件 JSON 需要是对象');
-  const renderer = normalizeRenderer(string(parsed.renderer).toLowerCase() || 'html');
   const spec = object(parsed.spec);
+  const hasThreeArrays: boolean = Array.isArray(spec?.objects) || Array.isArray(spec?.voxels) ||
+    Array.isArray(parsed.objects) || Array.isArray(parsed.voxels);
+  const renderer = normalizeRenderer(
+    string(parsed.renderer).toLowerCase() || (hasThreeArrays ? THREE_RENDERER : 'html'),
+  );
   const code = string(parsed.widget_code);
   let html = code;
   let notice = '';
@@ -302,7 +331,9 @@ export const parseGenerativeWidgets = (content: string, streaming: boolean): Gen
         segments.push({ kind: 'widget', start: match.index, content: '', widget: recovered });
       } else if (streaming && end === null) {
         const html = partialString(body, 'widget_code');
-        const renderer = normalizeRenderer(partialString(body, 'renderer').toLowerCase());
+        const rawRenderer = normalizeRenderer(partialString(body, 'renderer').toLowerCase());
+        const renderer = rawRenderer === '' && (namedArrayStart(body, 'objects') >= 0 || namedArrayStart(body, 'voxels') >= 0)
+          ? THREE_RENDERER : rawRenderer;
         if (renderer === THREE_RENDERER) {
           const scene: ThreeSceneSpec | null = threeSceneFromPartial(body);
           if (scene !== null) {

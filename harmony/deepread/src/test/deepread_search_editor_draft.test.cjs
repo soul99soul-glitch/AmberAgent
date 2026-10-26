@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { actualPage } = require('./deepread_ui_fixture.cjs');
+const { actualPage } = require('./deepread_settings_fixture.cjs');
 
 const settings = () => ({ enableWebSearch: true, searchCommonOptions: { resultSize: 12 },
   searchServices: [{ type: 'tavily', id: 'first', apiKey: 'old', depth: 'advanced' },

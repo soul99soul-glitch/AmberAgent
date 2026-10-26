@@ -1,7 +1,5 @@
 // firecrawl_service — Firecrawl 搜索/抓取(D-068c)
 // Android 基准: search/.../FirecrawlSearchService.kt(全文 244 行)
-// **bug 钉住**: search 失败文案 Android 为字面量 'response failed #{response.code}'
-//   (Kotlin "response failed #${'$'}{response.code}" — ${'$'} 渲染 $,其余字面量)
 import type { SearchRequestContext } from './search_service.ts';
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import { makeInputSchemaObj } from '../chat/tool.ts';
@@ -92,8 +90,8 @@ export const firecrawlSearchService: SearchService = {
       body: JSON.stringify(body),
     }, context);
     if (resp.status < 200 || resp.status >= 300) {
-      // Android bug 逐字保留(见文件头注)
-      throw new Error('response failed #{response.code}');
+      const detail: string = resp.body.trim().substring(0, 500);
+      throw new Error(`response failed #${resp.status}${detail.length > 0 ? `: ${detail}` : ''}`);
     }
     const payload: JsonObject = asRecord(JSON.parse(resp.body) as JsonObject);
     const dataRaw = payload['data'];
@@ -119,7 +117,7 @@ export const firecrawlSearchService: SearchService = {
         url: strOrNull(o['url']) ?? '',
         // """${snippet}\n${date}""".trimIndent()
         text: `${strOrNull(o['snippet']) ?? ''}\n${strOrNull(o['date']) ?? ''}`,
-        publishedAt: null,
+        publishedAt: strOrNull(o['date']),
         images: [],
       });
     }

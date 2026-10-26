@@ -1,27 +1,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-const ts = require('typescript');
+const { actualPage } = require('./deepread_settings_fixture.cjs');
 
-// ArkUI builders are not a Node runtime. Execute the actual persistence method
-// from the page, keeping its state and the platform toast as controlled inputs.
 const loadPageMethod = () => {
-  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/pages/SettingDeepReadPage.ets');
-  const source = fs.readFileSync(filename, 'utf8');
-  const start = source.indexOf('  async toggleHotlist(');
-  const end = source.indexOf('\n  async saveSourceConfig(', start);
-  assert.ok(start >= 0 && end > start);
-  const method = source.slice(start, end);
-  const exports = {};
   const toasts = [];
-  const fixture = `class SettingsFixture { hotlistToggles = []; storage = null; saved = ''; ${method} }
-    exports.SettingsFixture = SettingsFixture;`;
-  vm.runInNewContext(ts.transpileModule(fixture, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText, { exports, Promise, promptAction: { showToast: (value) => toasts.push(value.message) } }, { filename });
-  return { page: new exports.SettingsFixture(), toasts };
+  const page = actualPage('pages/SettingDeepReadPage.ets', ['toggleHotlist'], {
+    promptAction: { showToast: value => toasts.push(value.message) },
+  });
+  return { page, toasts };
 };
 
 test('hotlist toggle persists the source key and updates only its displayed switch', async () => {

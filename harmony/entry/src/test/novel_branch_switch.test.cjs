@@ -22,12 +22,15 @@ function pageFor(creation, blocked = false) {
     + '\n}\nreturn Page;', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   const Page = new Function('getNovelCreation', 'AlertDialog', code)(() => creation, { show: dialog => dialogs.push(dialog) });
   const page = new Page();
-  Object.assign(page, { projectId: 'project', busy: false, ghostwriteBusy: false, polishBusy: false,
-    sendStarting: false, composerRestoring: false, ghostwriteJob: null, polishJob: null,
+  Object.assign(page, { projectId: 'project', busy: false,
+    jobs: { ghostwriteBusy: false, polishBusy: false, ghostwriteJob: null, polishJob: null,
+      ghostwritePollToken: 1, polishPollToken: 1, polishLocksWorkspace: () => true },
+    discussion: { sendStarting: false, composerRestoring: false },
     workspaceStatus: { activeBranchId: 'main', branches: [{ id: 'alternate', name: '另一条故事线' }] },
-    ghostwritePollToken: 1, polishPollToken: 1, branchSheetOpen: true,
-    hasBlockingNovelRun: () => blocked, polishLocksWorkspace: () => true,
-    reload: async () => {}, showWorkspaceOperationError: (_label, error) => { page.error = error.message; } });
+    branchSheetOpen: true,
+    hasBlockingNovelRun: () => blocked, reload: async () => {},
+    showWorkspaceOperationError: (_label, error) => { page.error = error.message; },
+  });
   return { page, dialogs };
 }
 
@@ -55,8 +58,8 @@ for (const kind of ['ordinary', 'ghostwrite', 'polish']) {
       switchBranch: async (id, branch) => { assert.equal(id, 'project'); assert.equal(branch, 'alternate'); calls.push('switch'); },
     };
     const { page } = pageFor(creation);
-    if (kind === 'ghostwrite') page.ghostwriteJob = { jobId: 'job', stage: 'writing' };
-    if (kind === 'polish') page.polishJob = { jobId: 'job', stage: 'rewriting' };
+    if (kind === 'ghostwrite') page.jobs.ghostwriteJob = { jobId: 'job', stage: 'writing' };
+    if (kind === 'polish') page.jobs.polishJob = { jobId: 'job', stage: 'rewriting' };
     page.reload = async () => { calls.push('reload'); };
     const switched = page.stopAndSwitchWorkspaceBranch('alternate');
     assert.deepEqual(calls, ['ordinary-stop']);
@@ -72,12 +75,12 @@ test('cancellation failure keeps original branch selected and surfaces error wit
   let switches = 0;
   const { page } = pageFor({ stopActiveRun: async () => {}, cancelGhostwrite: async () => { throw new Error('无法取消'); },
     switchBranch: async () => { switches++; } });
-  page.ghostwriteJob = { jobId: 'job', stage: 'writing' };
+  page.jobs.ghostwriteJob = { jobId: 'job', stage: 'writing' };
   await page.stopAndSwitchWorkspaceBranch('alternate');
   assert.equal(switches, 0);
   assert.equal(page.workspaceStatus.activeBranchId, 'main');
   assert.equal(page.branchSheetOpen, true);
   assert.equal(page.error, '无法取消');
-  assert.equal(page.ghostwritePollToken, 1, 'failed cancel keeps existing progress subscription alive');
+  assert.equal(page.jobs.ghostwritePollToken, 1, 'failed cancel keeps existing progress subscription alive');
   assert.equal(page.busy, false);
 });

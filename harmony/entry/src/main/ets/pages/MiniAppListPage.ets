@@ -433,6 +433,7 @@ struct MiniAppListPage {
             .onClick((): void => { this.versionTarget = null; })
         }
         .width('100%')
+        .alignItems(VerticalAlign.Center)
         .margin({ bottom: 4 })
         Scroll() {
           Column() {
@@ -464,6 +465,7 @@ struct MiniAppListPage {
                   })
               }
               .width('100%')
+              .alignItems(VerticalAlign.Center)
               .padding({ left: 4, right: 4, top: 10, bottom: 10 })
               .border({ width: { bottom: 0.5 }, color: LINE })
             }, (v: MiniAppVersionRecord): string => `${v.appId}-${v.versionNumber}`)

@@ -798,7 +798,7 @@ struct NovelChapterReaderPage {
             Column() { this.EditorBody(); }.width('100%').alignItems(HorizontalAlign.Start)
           }.width('100%').layoutWeight(1).align(Alignment.TopStart)
         } else {
-          Column() { this.EditorBody(); }.width('100%').layoutWeight(1)
+          Column() { this.EditorBody(); }.width('100%').layoutWeight(1).alignItems(HorizontalAlign.Start)
         }
         Row() {
           Text('取消').fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)

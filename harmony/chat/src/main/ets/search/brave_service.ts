@@ -33,8 +33,9 @@ export const braveSearchService: SearchService = {
   ): Promise<SearchResult> => {
     const opts: BraveOptions = asOptions(serviceOptions);
     const query: string = requireQuery(params);
+    const resultSize: number = Math.min(Math.max(commonOptions.resultSize, 1), 20);
     const url: string = 'https://api.search.brave.com/res/v1/web/search'
-      + `?q=${javaUrlEncodeForm(query)}&count=${commonOptions.resultSize}`;
+      + `?q=${javaUrlEncodeForm(query)}&count=${resultSize}`;
     const resp = await searchSdkRuntime().http.fetch({
       url,
       method: 'GET',

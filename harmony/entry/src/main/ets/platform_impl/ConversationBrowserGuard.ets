@@ -33,6 +33,18 @@ export const releaseConversationBrowserRun = (conversationId: string, awaitingTo
   if (!awaitingTools) leases.delete(conversationId);
 };
 
+// Search suggestions inspect availability without acquiring a browser lease.
+// A visible page can mount its first WebView lazily when wm_open executes.
+export const conversationBrowserUnavailableReason = (conversationId: string): string | null => {
+  if (visibleConversation !== conversationId) return '浏览器工具需要当前会话的页面宿主，请返回该会话后操作。';
+  const lease: BrowserLease | undefined = leases.get(conversationId);
+  if (lease !== undefined && (lease.lost || lease.revision !== pageRevision)) {
+    return '该工具链的浏览器页面已离开，原页面状态不再可用。请结束本轮后重新打开目标页面。';
+  }
+  if (inFlight !== null) return '浏览器工具仍被另一次实际操作占用，请等待其结束。';
+  return null;
+};
+
 // Plugin URL scopes mutate the same WebView before invoking a primitive.
 export const assertConversationBrowserOwner = (conversationId: string): (() => void) => {
   if (visibleConversation !== conversationId) throw new Error('浏览器工具需要当前会话的页面宿主，请返回该会话后操作。');

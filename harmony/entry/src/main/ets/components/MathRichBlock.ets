@@ -40,12 +40,17 @@ export struct MathRichBlock {
   private controller: webview.WebviewController = new webview.WebviewController();
   private attached: boolean = false;
   private alive: boolean = false;
+  private visible: boolean = false;
+  // Keep measured geometry while clipped; submit only the latest pending content on return.
+  private renderPending: boolean = true;
   private revision: number = 0;
 
   aboutToAppear(): void { this.alive = true; }
 
   aboutToDisappear(): void {
     this.alive = false;
+    this.visible = false;
+    this.renderPending = true;
     if (this.attached) {
       this.controller.deleteJavaScriptRegister('AmberMath');
     }
@@ -54,11 +59,25 @@ export struct MathRichBlock {
 
   private renderChanged(): void {
     this.revision++;
+    this.renderPending = true;
     this.renderNow();
   }
 
+  private onHostReady(): void {
+    if (!this.alive) return;
+    this.attached = true;
+    this.renderPending = true;
+    this.renderNow();
+  }
+
+  private onVisibilityChange(visible: boolean): void {
+    this.visible = visible;
+    if (visible) this.renderNow();
+  }
+
   private renderNow(): void {
-    if (!this.attached || !this.alive || this.source.length === 0) return;
+    if (!this.attached || !this.alive || !this.visible || !this.renderPending || this.source.length === 0) return;
+    this.renderPending = false;
     const style: MathBlockStyle = {
       size: this.fontSize, lineHeight: this.lineHeight, color: this.fontColor,
       accent: ACCENT, muted: INK3, line: LINE, surface: SURFACE2,
@@ -97,9 +116,9 @@ export struct MathRichBlock {
         object: { postMessage: (raw: string): void => { this.hostMessage(raw); } },
         name: 'AmberMath', methodList: ['postMessage'], controller: this.controller,
       })
-      .onPageEnd((): void => {
-        this.attached = true;
-        this.renderNow();
+      .onPageEnd((): void => { this.onHostReady(); })
+      .onVisibleAreaChange([0.0, 0.01], (isVisible: boolean): void => {
+        this.onVisibilityChange(isVisible);
       })
   }
 }

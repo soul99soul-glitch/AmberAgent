@@ -259,6 +259,7 @@ struct SettingAgentMemoryPageFull {
           })
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
       .margin({ top: 8 })
     }
     .width('100%')
@@ -350,6 +351,7 @@ struct SettingAgentMemoryPageFull {
         }
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
       .margin({ top: 6 })
     }
     .width('100%')

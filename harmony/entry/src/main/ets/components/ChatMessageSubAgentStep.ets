@@ -5,12 +5,14 @@ import { INK2, INK3, SURFACE2, LINE, ACCENT, META, SUCCESS_FG, ERROR } from '../
 import { SubAgentAvatar } from './SubAgentAvatar.ets';
 import { Icon } from './ui/Icon.ets';
 import { SubAgentResultCard } from './SubAgentResultCard.ets';
+import type { MessageRowViewState } from './MessageRowViewState.ets';
 
 @Component
 export struct ChatMessageSubAgentStep {
   @StorageProp('themeEpoch') themeEpoch: number = 0;
   @Prop tools: UIMessagePartTool[];
   @Prop runId: string = '';
+  viewState: MessageRowViewState | null = null;
   @Prop canOpenRun: boolean = true;
   onOpenRun: (runId: string) => void = (_id: string): void => {};
   onResultToggle: () => void = (): void => {};
@@ -62,7 +64,7 @@ export struct ChatMessageSubAgentStep {
       .accessibilityText(`@${subAgentNameFromTools(this.tools)}，${subAgentStatusLabel(subAgentStatusFromTools(this.tools))}，查看任务和输出`)
       if (subAgentStatusFromTools(this.tools) === 'completed') {
         SubAgentResultCard({
-          runId: this.runId, tools: this.tools,
+          runId: this.runId, tools: this.tools, viewState: this.viewState,
           onToggleResult: (): void => { this.onResultToggle(); },
         }).margin({ top: 8 })
       }

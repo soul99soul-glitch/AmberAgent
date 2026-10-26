@@ -20,6 +20,7 @@ import { JevApprovalFacts } from './JevApprovalFacts.ets';
 import { NovelChapterPlanProposalCard } from './NovelChapterPlanProposalCard.ets';
 import { parseNovelChapterPlanProposal } from '../platform_impl/NovelPlanProposalProjection.ets';
 import { ToolApprovalSummaryCard } from './ToolApprovalSummary.ets';
+import type { MessageRowViewState } from './MessageRowViewState.ets';
 import {
   AgentToolCallCapsule,
   ToolStatus,
@@ -35,6 +36,7 @@ const CONTENT_INSET: number = 32;
 export struct ChatMessageTools {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop part: UIMessagePartTool;
+  viewState: MessageRowViewState | null = null;
   @Prop jevSubjectHash: string = '';
   onApprove: (toolCallId: string) => void = (): void => {};
   onDeny: (toolCallId: string) => void = (): void => {};
@@ -51,6 +53,29 @@ export struct ChatMessageTools {
   @State sshColors: SSHUIColors = new SSHUIColors();
   @StorageProp('darkMode') @Watch('refreshSSHColors') darkMode: boolean = false;
   @StorageProp('themePackId') @Watch('refreshSSHColors') themePackId: string = '';
+
+  aboutToAppear(): void {
+    if (this.viewState !== null && this.part.toolCallId.length > 0) {
+      this.outputExpanded = this.viewState.toolOutputExpanded.get(this.part.toolCallId) ?? false;
+    }
+  }
+
+  aboutToDisappear(): void {
+    this.saveOutputState();
+  }
+
+  private saveOutputState(): void {
+    if (this.viewState !== null && this.part.toolCallId.length > 0) {
+      this.viewState.toolOutputExpanded.set(this.part.toolCallId, this.outputExpanded);
+    }
+  }
+
+  private toggleOutput(): void {
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.outputExpanded = !this.outputExpanded;
+      this.saveOutputState();
+    });
+  }
 
   private refreshSSHColors(): void { this.sshColors = new SSHUIColors(); }
 
@@ -275,11 +300,7 @@ export struct ChatMessageTools {
               .fontColor(INK3)
               .padding({ right: 12, top: 10, bottom: 6 })
               .margin({ top: 2 })
-              .onClick((): void => {
-                this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
-                  this.outputExpanded = !this.outputExpanded;
-                });
-              })
+              .onClick((): void => { this.toggleOutput(); })
               .accessibilityText(this.outputExpanded ? '收起工具输出' : '展开工具输出')
           }
           .width('100%')

@@ -12,6 +12,7 @@
   let three = false;
   let disposed = false;
   let measurement = 0;
+  let threeReady = 0;
   let lastReport = '';
   let lastSafeSvg = null;
   let lastSafeSvgHeight = 180;
@@ -159,6 +160,8 @@
 
   function update(payload) {
     if (disposed) return;
+    if (threeReady) cancelAnimationFrame(threeReady);
+    threeReady = 0;
     latest = payload;
     revision = payload.revision;
     if (payload.renderer !== 'threejs') fallbackError = '';
@@ -197,7 +200,12 @@
       const result = threeApi.update(payload.scene || { objects: [] }, payload.dark, scene);
       if (threeApi.setActive) threeApi.setActive(active);
       if (result.ok) {
-        report(280, true, result.objectCount > 0, '');
+        if (typeof payload.view === 'string' && threeApi.restoreView) threeApi.restoreView(payload.view);
+        // Cross a browser frame boundary before native code captures or reveals the canvas.
+        threeReady = requestAnimationFrame(() => {
+          threeReady = 0;
+          if (!disposed && three) report(280, true, result.objectCount > 0, '');
+        });
       } else {
         three = false;
         fallbackError = result.error || '三维预览不可用，显示静态预览';
@@ -249,6 +257,12 @@
   }
 
   frame?.addEventListener('load', () => { if (latest) update(latest); });
+  if (hasThree && threeApi.setFrameListener) threeApi.setFrameListener(() => {
+    if (!disposed && three && active && window.AmberVisualHost &&
+      typeof window.AmberVisualHost.postMessage === 'function') {
+      window.AmberVisualHost.postMessage(JSON.stringify({ kind: 'three-frame', revision }));
+    }
+  });
   window.AmberVisual = {
     update,
     setActive(value) {
@@ -262,6 +276,9 @@
       disposed = true;
       if (observer) observer.disconnect();
       if (measurement) cancelAnimationFrame(measurement);
+      if (threeReady) cancelAnimationFrame(threeReady);
+      threeReady = 0;
+      if (hasThree && threeApi.setFrameListener) threeApi.setFrameListener(null);
       if (hasThree && threeApi.dispose) threeApi.dispose();
       latest = null;
       lastSafeSvg = null;
@@ -270,7 +287,9 @@
   window.addEventListener('pagehide', () => {
     if (observer) observer.disconnect();
     if (measurement) cancelAnimationFrame(measurement);
+    if (threeReady) cancelAnimationFrame(threeReady);
     measurement = 0;
+    threeReady = 0;
   });
   window.addEventListener('pageshow', () => {
     if (!disposed && latest) {

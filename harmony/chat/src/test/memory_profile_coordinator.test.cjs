@@ -37,12 +37,15 @@ const harness = async () => {
   const imports = { '@amber/chat-domain': domain,
     '@kit.BasicServicesKit': { batteryInfo: { chargingStatus: 1, BatteryChargeState: { ENABLE: 1, FULL: 3 } } },
     '../di/AppContainer.ets': { getChatKvStore: () => kv, prepareProviderApi: async () => ({
-      generateText: async (...args) => { modelCalls.push(args); return modelResponse(); } }) },
+      generateText: async (...args) => { modelCalls.push(args); return modelResponse(); } }),
+      currentChatModelReference: async () => ({ kind: 'fixed', providerId: 'p', modelId: 'memory-model' }),
+      readTaskModelReference: async () => ({ kind: 'auto' }),
+      TASK_COMPRESS_MODEL_KEY: 'compress',
+      resolveTaskModelReferenceChain: async () => ({
+        provider: domain.makeProviderSettingOpenAI(), model: domain.makeProviderModel({ modelId: 'memory-model' }) }) },
     './AgentRuntimePrefs.ets': { loadAgentRuntimeSnapshot: async () => ({ memoryWorker: worker }) },
     './AtomicJsonFile.ets': { sharedKvMutex: { withLock: async (_, action) => action() } },
     './EntryAbortController.ets': { EntryAbortController: Controller },
-    './MemoryDreamOps.ets': { resolveMemoryDaydreamChoice: async () => ({
-      provider: domain.makeProviderSettingOpenAI(), model: domain.makeProviderModel({ modelId: 'memory-model' }) }) },
     './MemoryStore.ets': { getMemoryTopicStoreOps: () => ops, MemoryDocumentRefreshError } };
   const filename = path.resolve(__dirname, '../../../entry/src/main/ets/platform_impl/MemoryTopicOps.ets');
   const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {

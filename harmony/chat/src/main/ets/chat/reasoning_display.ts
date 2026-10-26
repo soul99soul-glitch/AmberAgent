@@ -20,7 +20,7 @@ import { reasoningLevelBudgetTokens } from './provider_model.ts';
 
 // ChatMessageReasoning.kt:69-71
 export const REASONING_PREVIEW_CHAR_LIMIT: number = 1600;
-export const REASONING_EXPANDED_STREAM_CHAR_LIMIT: number = 6000;
+export const REASONING_EXPANDED_STREAM_CHAR_LIMIT: number = 1500;
 export const REASONING_EXPANDED_FINAL_CHAR_LIMIT: number = 18000;
 
 // ChatMessageReasoning.kt:77-81(expanded 标志经 reasoningCardStateExpanded 取)

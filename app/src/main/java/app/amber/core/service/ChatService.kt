@@ -228,7 +228,6 @@ class ChatService(
     private val memoryExtractor: MemoryExtractor,
     private val pendingMessageStore: PendingMessageStore,
     private val userInputPreprocessor: UserInputPreprocessor,
-    private val agentRunner: app.amber.core.agent.runtime.AgentRunner? = null,
     private val agentEventStore: app.amber.core.agent.runtime.AgentEventStore? = null,
 ) : ConversationAccess {
     // 统一会话管理
@@ -720,82 +719,8 @@ class ChatService(
             return true
         }
 
-        if (useKernelPath && agentRunner != null) {
-            launchViaKernel(conversationId, pendingMessage)
-        } else {
-            launchPendingMessageLoop(conversationId, pendingMessage)
-        }
+        launchPendingMessageLoop(conversationId, pendingMessage)
         return true
-    }
-
-    var useKernelPath = false
-
-    private val activeKernelRuns =
-        MutableStateFlow<Map<Uuid, app.amber.core.agent.runtime.AgentRunId>>(emptyMap())
-
-    /** Latest active kernel-path run for a conversation, or null if none. */
-    fun getActiveKernelRunFlow(conversationId: Uuid): StateFlow<app.amber.core.agent.runtime.AgentRunId?> =
-        activeKernelRuns
-            .map { it[conversationId] }
-            .stateIn(appScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, null)
-
-    /** Exposes the AgentRunner for UI ViewModels to call observe() directly. */
-    fun kernelRunner(): app.amber.core.agent.runtime.AgentRunner? = agentRunner
-
-    private fun launchViaKernel(conversationId: Uuid, message: PendingUserMessage) {
-        val runner = agentRunner ?: return launchPendingMessageLoop(conversationId, message)
-        val session = getOrCreateSession(conversationId)
-        val job = appScope.launch {
-            try {
-                val dispatchMessage = session.preparePendingMessageForDispatch(conversationId, message)
-                recordPendingMessageEvent(
-                    conversationId = conversationId,
-                    event = "dequeue",
-                    messageId = dispatchMessage.id,
-                    detail = dispatchMessage.mode.name.lowercase(),
-                )
-                if (resolveIdleToolBlockerBeforeDispatch(conversationId, dispatchMessage)) {
-                    _generationDoneFlow.emit(conversationId)
-                    return@launch
-                }
-
-                val userNode = appendUserMessage(conversationId, dispatchMessage)
-                if (!dispatchMessage.answer) {
-                    _generationDoneFlow.emit(conversationId)
-                    return@launch
-                }
-
-                val input = app.amber.feature.chat.api.ChatTurnInput(
-                    conversationId = app.amber.core.agent.runtime.ConversationId(conversationId.toString()),
-                    messageNodeId = app.amber.core.agent.runtime.MessageNodeId(userNode.id.toString()),
-                    assistantId = app.amber.core.agent.runtime.AssistantId("default"),
-                    userMessageText = dispatchMessage.previewText(maxChars = 4000),
-                )
-                val handle = runner.launch(
-                    app.amber.feature.chat.api.ChatTurnDescriptor.ID,
-                    input,
-                ).getOrElse { e ->
-                    addError(e, conversationId, title = "Kernel dispatch failed")
-                    handleMessageComplete(conversationId)
-                    return@launch
-                }
-                activeKernelRuns.update { it + (conversationId to handle.runId) }
-                runner.observe(handle.runId).first { snapshot ->
-                    snapshot.status !in setOf(
-                        app.amber.core.agent.runtime.AgentRunStatus.RUNNING,
-                        app.amber.core.agent.runtime.AgentRunStatus.AWAITING_PERMISSION,
-                    )
-                }
-                _generationDoneFlow.emit(conversationId)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                addError(e, conversationId, title = "Kernel dispatch failed")
-            } finally {
-                activeKernelRuns.update { it - conversationId }
-            }
-        }
-        session.setJob(job)
     }
 
     private fun launchPendingMessageLoop(

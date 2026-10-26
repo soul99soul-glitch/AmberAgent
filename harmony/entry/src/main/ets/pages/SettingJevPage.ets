@@ -411,7 +411,8 @@ struct SettingJevPage {
       if (this.loadError.length > 0 || this.saveError.length > 0) {
         Text(this.loadError.length > 0 ? this.loadError : this.saveError).fontSize(LABEL)
           .fontColor(this.colors.error).width('100%').padding({ left: GUTTER, right: GUTTER, top: 8 })
-        Text('重试').fontSize(META).fontColor(this.accentColorStore).constraintSize({ minHeight: 44 })
+        Text('重试').fontSize(META).fontColor(this.accentColorStore).width('100%')
+          .padding({ left: GUTTER, right: GUTTER }).constraintSize({ minHeight: 44 })
           .onClick((): void => { if (this.loaded) this.persist(); else this.refresh(); })
       }
       if (this.loaded) {

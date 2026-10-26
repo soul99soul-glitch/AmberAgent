@@ -11,7 +11,6 @@ import type {
   MemoryCandidate, MemoryEvent, MemoryEventType, MemoryRecord,
 } from '../main/ets/chat/memory_models.ts';
 import { buildMemoryExtractionPrompt } from '../main/ets/chat/memory_extraction_prompt.ts';
-import { filterMemoryCandidates } from '../main/ets/chat/memory_candidate_filter.ts';
 import type { MemoryExtractionDeps, MemoryWorkerModelResolution } from '../main/ets/chat/memory_extractor.ts';
 import {
   autoWriteEventMessage, isDurableAutoWriteCandidate, parseMemoryCandidates,
@@ -60,50 +59,6 @@ test('extraction prompt: 用户证据带时间 + 上文只读 + text take(4000)'
   assert.ok(prompt.indexOf('Use these source_message_ids when relevant: m-1, m-2.\n') >= 0);
   assert.ok(prompt.includes('x'.repeat(4000)));
   assert.ok(!prompt.includes('x'.repeat(4001)));
-});
-
-// ===== 过滤器 =====
-
-test('filter: sensitive(自带或内容命中)→ rejected + reason 拼接顺序', () => {
-  const out = filterMemoryCandidates([
-    candidate({ content: '把银行卡号记住 123456', reason: '原始理由' }),
-    candidate({ content: '普通偏好内容文本甲乙丙丁', sensitive: true }),
-  ], []);
-  assert.equal(out.accepted.length, 0);
-  assert.equal(out.rejected.length, 2);
-  assert.equal(out.rejected[0].status, 'filtered');
-  assert.equal(out.rejected[0].sensitive, true);
-  assert.equal(out.rejected[0].reason, '原始理由; sensitive'); // 原 reason 在前
-  assert.equal(out.rejected[1].reason, 'sensitive');
-});
-
-test('filter: tooWeak(trim<12 或 confidence<0.45)与 duplicate(既有/本批)', () => {
-  const out = filterMemoryCandidates([
-    candidate({ content: '太短' }),                                    // trim < 12
-    candidate({ content: '足够长但置信不足文本', confidence: 0.4 }),     // < 0.45
-    candidate({ content: '既有记忆内容甲乙丙丁戊己' }),                    // 与 existing 重
-    candidate({ content: '重复项内容文本甲乙丙丁戊' }),
-    candidate({ content: '重复项内容文本甲乙丙丁戊' }),                    // 本批内重
-  ], [record({ content: '既有记忆内容甲乙丙丁戊己' })]);
-  assert.equal(out.rejected.length, 4);
-  assert.equal(out.accepted.length, 1);
-  assert.equal(out.rejected[0].reason, 'low_value');
-  assert.equal(out.rejected[2].reason, 'duplicate');
-  assert.equal(out.rejected[3].reason, 'duplicate'); // 本批内重(首条已收)
-  // normalize:大小写/符号忽略
-  const out2 = filterMemoryCandidates(
-    [candidate({ content: 'Hello, WORLD!! 你好' })],
-    [record({ content: 'hello world你好' })]);
-  assert.equal(out2.rejected.length, 1);
-});
-
-test('filter: 接受副本 kind NOTE→PROJECT,其余不动;候选本体不突变', () => {
-  const c1: MemoryCandidate = candidate({ kind: 'note', content: '接受的候选内容甲乙丙丁戊' });
-  const c2: MemoryCandidate = candidate({ kind: 'feedback', content: '接受的反馈内容甲乙丙丁戊' });
-  const out = filterMemoryCandidates([c1, c2], []);
-  assert.equal(out.accepted[0].kind, 'project');
-  assert.equal(out.accepted[1].kind, 'feedback');
-  assert.equal(c1.kind, 'note');
 });
 
 // ===== parse =====

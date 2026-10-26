@@ -3,32 +3,34 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('../../../chat/node_modules/typescript');
-const { actualPage } = require('../../../deepread/src/test/deepread_ui_fixture.cjs');
+const { actualPage, loadPureModule } = require('../../../deepread/src/test/deepread_ui_fixture.cjs');
 
-const source = fs.readFileSync(path.join(__dirname, '../main/ets/pages/NovelWorkspacePage.ets'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../main/ets/components/novel/NovelDiscussionView.ets'), 'utf8');
+const writingSource = fs.readFileSync(path.join(__dirname,
+  '../main/ets/platform_impl/novel/NovelWritingControlSession.ets'), 'utf8');
 
 test('a retained active message row reads each current snapshot, including reasoning and body growth', () => {
-  const row = source.slice(source.indexOf('ForEach(this.novelTimelineMessages()'));
-  const binding = row.match(/AgentMessageRow\(\{\s*message(?:\s*:\s*([^\n]+?))?,/);
+  const row = source.slice(source.indexOf('ForEach(this.session.novelTimelineMessages(this.project)'));
+  const binding = row.match(/AgentMessageRow\(\{\s*message\s*:\s*([^\n]+),/);
   assert.ok(binding, 'active row binding must exist');
-  const page = actualPage('pages/NovelWorkspacePage.ets',
-    source.includes('  private activeRunMessage(') ? ['activeRunMessage', 'novelTimelineMessageUi', 'novelTimelineMessageLive', 'savedTimelineMessage'] : [], { makeUIMessage: () => { throw Error('unexpected quick start'); } });
+  const page = actualPage('platform_impl/novel/NovelDiscussionSession.ets',
+    ['activeRunMessage', 'novelTimelineMessageUi', 'novelTimelineMessageLive', 'savedTimelineMessage'], { makeUIMessage: () => { throw Error('unexpected quick start'); } });
   page.activeQuickStart = false; page.activeRunId = 'run';
   const seed = { id: 'assistant', role: 'assistant', parts: [{ type: 'reasoning', reasoning: 'first' }] };
   const read = new Function('message', 'return ' + (binding[1] || 'message'));
   page.activeMessages = [seed];
-  assert.strictEqual(read.call(page, { id: seed.id, uiMessage: seed }), seed);
+  assert.strictEqual(read.call({ session: page }, { id: seed.id, uiMessage: seed }), seed);
   for (const parts of [[{ type: 'reasoning', reasoning: 'first second' }],
     [{ type: 'reasoning', reasoning: 'first second', finishedAt: 'done' }, { type: 'text', text: 'chapter grows' }]]) {
     const current = { ...seed, parts };
     page.activeMessages = [current];
-    assert.strictEqual(read.call(page, { id: seed.id, uiMessage: seed }), current,
+    assert.strictEqual(read.call({ session: page }, { id: seed.id, uiMessage: seed }), current,
       'ForEach retains the seed; the row must resolve the latest same-ID message');
   }
 });
 
 test('quick start streams current thinking while keeping the structured JSON out of the visible message', () => {
-  const page = actualPage('pages/NovelWorkspacePage.ets', ['activeRunMessage', 'activeRunTimelineMessages'], {
+  const page = actualPage('platform_impl/novel/NovelDiscussionSession.ets', ['activeRunMessage', 'activeRunTimelineMessages'], {
     makeUIMessage: (role, parts, identity) => ({ role, parts, ...identity }),
   });
   page.activeQuickStart = true;
@@ -41,7 +43,6 @@ test('quick start streams current thinking while keeping the structured JSON out
   page.activeMessages = [{ ...current, parts: [current.parts[1]] }];
   assert.deepEqual(page.activeRunTimelineMessages(), []);
 });
-const between = (start, end) => source.slice(source.indexOf(start), source.indexOf(end)).replace(/private /g, '');
 const defaultsSource = fs.readFileSync(path.join(__dirname,
   '../../../deepread/src/main/ets/novel/standalone_defaults.ts'), 'utf8');
 const resolveSource = defaultsSource.slice(defaultsSource.indexOf('export const resolveNovelDefaultTarget'),
@@ -53,14 +54,20 @@ const fixed = { kind: 'fixed', providerId: 'provider', modelId: 'model' };
 const defaults = () => ({ writing: global, review: global, stateSync: global });
 const option = { providerId: 'provider', modelId: 'model', label: 'Writer', providerLabel: 'Service', available: true };
 
+// Execute the complete production owner, including its real async service calls.
+const writingExports = {};
+new Function('require', 'exports', ts.transpileModule(writingSource.replace('@Observed', ''), { compilerOptions: {
+  target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
+} }).outputText)(spec => {
+  if (spec === '@amber/deepread-domain') return { defaultNovelModelDefaults: defaults, resolveNovelDefaultTarget };
+  if (spec.endsWith('NovelPlanDraftState')) return loadPureModule(path.join(__dirname,
+    '../main/ets/novel/NovelPlanDraftState.ts'));
+  if (spec.endsWith('NovelComposerState')) return loadPureModule(path.join(__dirname,
+    '../main/ets/novel/NovelComposerState.ts'));
+  throw Error('unexpected writing owner dependency: ' + spec);
+}, writingExports);
+
 function fixture({ product = 'novel', reads = {} } = {}) {
-  const code = compile('class Page {' +
-    between('  private writingModelLabel()', '  private workspaceSubtitle()') +
-    between('  private async openControlSheet()', '  private selectWritingTarget(') +
-    between('  private async savePlanPrefs()', '  // 写作模型选项行') +
-    between('  private branchSettingsWith(', '  private async addStoryForeshadow()') +
-    between('  private async loadProjectModelOptions()', '  private ghostwriteModelsReady()') +
-    '} return Page;');
   const modelWrites = [], planWrites = [], draftWrites = [];
   const draftValues = reads.draftValues ?? new Map();
   let finishModel, failModel;
@@ -72,43 +79,63 @@ function fixture({ product = 'novel', reads = {} } = {}) {
   const effect = () => ({ combine() { return this; }, animation(options) { this.options = options; return this; } });
   const transitions = { IDENTITY: 'identity', get OPACITY() { return effect(); }, move: effect,
     asymmetric: (enter, exit) => ({ enter, exit }) };
-  const Page = new Function('getProductKind', 'resolveNovelDefaultTarget', 'composerOwner',
-    'loadNovelModelOptions', 'loadNovelModelDefaults', 'describeChatModel', 'defaultNovelModelDefaults',
-    'TransitionEffect', 'TransitionEdge', 'Curve', 'sameControlPlanDraft', code)(
-    () => product, resolveNovelDefaultTarget, (p, b) => p + ':' + b,
-    () => read('options', [option]), () => read('defaults', defaults()), () => read('chat', 'Chat / Current'),
-    defaults, transitions, { BOTTOM: 'bottom' }, { EaseOut: 'out', EaseIn: 'in' },
-    (a, b) => a.thisChapterPlan === b.thisChapterPlan && a.futurePlan === b.futurePlan && a.preferences === b.preferences);
-  const page = new Page();
+  const view = actualPage('components/novel/NovelWritingControlView.ets', ['composerModelTransition'], {
+    TransitionEffect: transitions, TransitionEdge: { BOTTOM: 'bottom' }, Curve: { EaseOut: 'out', EaseIn: 'in' },
+  });
+  const story = actualPage('platform_impl/novel/NovelCompendiumSession.ets', ['branchSettingsWith'], {});
+  const page = new writingExports.NovelWritingControlSession();
+  // Canonical page state lives outside the owner in production. The fixture keeps
+  // it here so the regression scenarios can replace project snapshots directly.
   Object.assign(page, { projectId: 'project', project: { modelPolicy: defaults(), branchSettings: {
     thisChapterPlan: 'published', futurePlan: 'future', preferences: 'style', foreshadows: [], confirmedDecisions: [] } },
     workspaceStatus: { activeBranchId: 'main' }, pageAlive: true, studioPageVisible: true, studioBackgrounded: false,
-    reduceMotion: false, busy: false, errorMsg: '', modelOptions: [option], modelOptionsLoadToken: 0,
-    modelOptionsReady: true, modelOptionsLoading: false, modelOptionsError: '', novelModelDefaults: defaults(),
-    chatModelLabel: 'Chat / Current', composerModelSheetOpen: false, composerModelSession: 0, composerModelError: '',
-    controlPlanOwner: '', controlPlanBaseline: { thisChapterPlan: '', futurePlan: '', preferences: '' },
-    controlPlanDrafts: new Map(), planThisChapter: '', planFuture: '', planPreferences: '', ghostwriteJob: null,
-    controlSheetOpen: false, controlNotice: '', controlPlanReady: false, controlPlanSession: 0, controlPlanWriteRevision: 0,
-    planDraftStore: { load: async owner => {
-      if (reads.draftReadFailure) throw new Error('draft read failed');
-      if (reads.delayedDraft) return reads.delayedDraft;
-      return draftValues.get(owner) ?? null;
-    }, save: async (owner, value) => {
-      draftWrites.push({ owner, value });
-      if (reads.draftWriteFailure) throw new Error('draft write failed');
-      if (value === null) draftValues.delete(owner); else draftValues.set(owner, value);
-    } },
-    saveNovelModelPolicy: async policy => {
-      page.busy = true; modelWrites.push(policy);
-      try { await modelCommit; page.project.modelPolicy = policy; page.errorMsg = ''; }
-      catch (error) { page.errorMsg = String(error); }
-      finally { page.busy = false; }
-    },
+    reduceMotion: false, busy: false, errorMsg: '', ghostwriteJob: null,
+    modelOptions: [option], modelOptionsReady: true, chatModelLabel: 'Chat / Current',
+    composerModelTransition: view.composerModelTransition,
+    branchSettingsWith: story.branchSettingsWith,
     saveNovelBranchSettings: async settings => {
       planWrites.push(settings);
-      if (reads.planFailure) { page.errorMsg = 'plan commit failed'; return; }
+      if (reads.planFailure) throw new Error('plan commit failed');
       page.project.branchSettings = settings; page.errorMsg = '';
     },
+  });
+  page.start({
+    creation: {
+      setModelPolicy: async (_id, policy) => {
+        modelWrites.push(policy); await modelCommit;
+        page.project.modelPolicy = policy;
+      },
+      setBranchSettings: async (_id, settings) => page.saveNovelBranchSettings(settings),
+    },
+    planDraftStore: {
+      load: async owner => {
+        if (reads.draftReadFailure) throw new Error('draft read failed');
+        if (reads.delayedDraft) return reads.delayedDraft;
+        return draftValues.get(owner) ?? null;
+      },
+      save: async (owner, value) => {
+        draftWrites.push({ owner, value });
+        if (reads.draftWriteFailure) throw new Error('draft write failed');
+        if (value === null) draftValues.delete(owner); else draftValues.set(owner, value);
+      },
+    },
+    isNovelProduct: product === 'novel',
+    loadModelOptions: () => read('options', [option]),
+    loadModelDefaults: () => read('defaults', defaults()),
+    describeChatModel: () => read('chat', 'Chat / Current'),
+    currentProject: () => page.project,
+    workspaceStatus: () => page.workspaceStatus,
+    projectId: () => page.projectId,
+    hasGhostwriteJob: () => page.ghostwriteJob !== null,
+    isBusy: () => page.busy,
+    setBusy: value => { page.busy = value; },
+    isAlive: () => page.pageAlive,
+    isVisible: () => page.studioPageVisible,
+    isBackgrounded: () => page.studioBackgrounded,
+    getError: () => page.errorMsg,
+    setError: value => { page.errorMsg = value; },
+    showOperationError: (action, error) => { page.errorMsg = action + ': ' + String(error); },
+    reload: async () => {},
   });
   return { page, modelWrites, planWrites, draftWrites, draftValues, finishModel, failModel };
 }
@@ -126,6 +153,20 @@ test('composer shows the effective novel default while preserving a missing or d
   assert.match(f.page.writingModelLabel(), /模型已移除.*model/);
   const host = fixture({ product: 'agent' });
   assert.equal(host.page.writingModelLabel(), '跟随全局');
+});
+
+test('writing model queries honor an explicit same-name project snapshot', () => {
+  const f = fixture();
+  const snapshot = { ...f.page.project, modelPolicy: { ...f.page.project.modelPolicy, writing: fixed } };
+  assert.equal(f.page.writingTargetSelected(option, snapshot), true);
+  assert.equal(f.page.writingTargetSelected(null, snapshot), false);
+  assert.equal(f.page.writingModelLabel(snapshot), 'Writer');
+  assert.equal(f.page.writingTargetSelected(null), true, 'query must not copy the rendered snapshot into canonical state');
+  assert.equal(f.page.writingModelLabel(), '小说默认 · Chat / Current');
+  const viewSource = fs.readFileSync(path.join(__dirname,
+    '../main/ets/components/novel/NovelWritingControlView.ets'), 'utf8');
+  assert.match(viewSource, /writingTargetSelected\(null, this\.project\)/);
+  assert.match(viewSource, /writingTargetSelected\(option, this\.project\)/);
 });
 
 test('model selection persists only writing and closes after commit; Back cannot interrupt the pending sheet', async () => {
@@ -269,11 +310,11 @@ test('old sheet reads cannot overwrite a later sheet and failed autosave keeps e
   assert.match(f.page.controlPlanError, /draft write failed/);
   reads.draftWriteFailure = false; f.page.retryControlPlanDraft(); await Promise.resolve(); await Promise.resolve();
   assert.equal(f.page.controlPlanError, '');
-  assert.equal(f.draftValues.get('project:main').thisChapterPlan, 'new author input');
+  assert.equal(f.draftValues.get(JSON.stringify(['project', 'main'])).thisChapterPlan, 'new author input');
 });
 
 test('a failed clear never resurrects a withdrawn disk draft and successful retry allows later formal edits', async () => {
-  const reads = { draftValues: new Map([['project:main', { thisChapterPlan: 'withdrawn draft', futurePlan: 'future', preferences: 'style' }]]) };
+  const reads = { draftValues: new Map([[JSON.stringify(['project', 'main']), { thisChapterPlan: 'withdrawn draft', futurePlan: 'future', preferences: 'style' }]]) };
   const f = fixture({ reads }); await f.page.openControlSheet();
   reads.draftWriteFailure = true;
   f.page.changeControlPlan('chapter', 'published');
@@ -303,13 +344,36 @@ test('reopening an autosave failure retries the retained snapshot before a new p
   assert.equal(f.page.controlPlanError, '');
 });
 
+test('hiding writing control retains the plan and rejects an in-flight model reload', async () => {
+  let finishOptions;
+  const reads = { options: new Promise(resolve => { finishOptions = resolve; }) };
+  const f = fixture({ reads });
+  await f.page.openControlSheet();
+  f.page.changeControlPlan('chapter', 'retained while navigating');
+  f.page.composerModelSheetOpen = true; f.page.composerModelSession = 1;
+  const loading = f.page.loadProjectModelOptions();
+  f.page.hide();
+  finishOptions([{ ...option, label: 'stale model' }]);
+  await loading;
+  assert.equal(f.page.controlSheetOpen, false);
+  assert.equal(f.page.composerModelSheetOpen, false);
+  assert.equal(f.page.modelOptionsReady, false);
+  assert.equal(f.page.modelOptions[0].label, 'Writer');
+  reads.options = [option];
+  await f.page.loadProjectModelOptions();
+  assert.equal(f.page.modelOptionsReady, true);
+  await f.page.openControlSheet();
+  assert.equal(f.page.planThisChapter, 'retained while navigating');
+});
+
 test('classified quick-start proposals retain the existing editable adoption and rejection paths', async () => {
   const rejected = [], adopted = [];
-  const page = actualPage('pages/NovelWorkspacePage.ets', [
+  const page = actualPage('platform_impl/novel/NovelCompendiumSession.ets', [
     'pendingSettingProposalsIn', 'resolveSettingProposal',
   ], { getNovelCreation: () => ({ resolveSettingProposal: async (...args) => { rejected.push(args); } }) });
   const proposal = (id, kind, status = 'pending') => ({ id, kind, status, title: id, content: 'editable proposal' });
-  Object.assign(page, { projectId: 'project', project: { settingProposals: [
+  Object.assign(page, { creation: { resolveSettingProposal: async (...args) => { rejected.push(args); } },
+    projectId: 'project', project: { settingProposals: [
     proposal('world', 'world'), proposal('outline', 'outline'), proposal('other', 'other'),
     proposal('requirement', 'requirement'), proposal('accepted', 'other', 'accepted'),
   ] }, busy: false, hasBlockingNovelRun: () => false, reload: async () => {},

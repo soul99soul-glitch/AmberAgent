@@ -142,3 +142,129 @@ test('selected configured service cancels only its actual HTTP request and skips
   assert.equal(calls, 1); assert.equal(cancelled, 1); assert.equal(released, 1);
   await provider.search(['already cancelled'], owner.signal); assert.equal(calls, 1);
 });
+
+test('failed selected API switches once to an enabled usable service and keeps it for later angles', async () => {
+  const f = fixture(); const failures: string[] = [];
+  const disabled = makeSearchServiceOptions('exa');
+  if (disabled.type !== 'exa') throw new Error('fixture type');
+  disabled.apiKey = 'disabled-key';
+  const unconfigured = makeSearchServiceOptions('brave');
+  f.settings.searchServices = [f.settings.searchServices[0], disabled, unconfigured, f.settings.searchServices[1]];
+  f.settings.searchEnabledServiceIds.push(unconfigured.id);
+  initSearchSdk({ ...f.http, fetch: async request => {
+    if (request.url.includes('serper')) {
+      f.requests.push(request);
+      return { status: 401, headers: {}, body: 'expired key' };
+    }
+    return f.http.fetch(request);
+  } });
+  const provider = createDeepReadSearchProviders(f.settings, { ensureSdk: () => {}, freeProviders: [] })[0];
+  const hits = await provider.search(['first angle', 'https://skip.test', 'next angle'], undefined,
+    (_query, error) => failures.push(error));
+  assert.deepEqual(f.requests.map(request => new URL(request.url).hostname),
+    ['google.serper.dev', 'api.tavily.com', 'api.tavily.com']);
+  assert.deepEqual(hits.map(item => item.url), ['https://other.test', 'https://other.test']);
+  assert.equal(failures.length, 1);
+  assert.match(failures[0], /Serper/);
+});
+
+test('all failing configured candidates are attempted once without restarting on another angle', async () => {
+  const f = fixture(); const failures: string[] = [];
+  initSearchSdk({ ...f.http, fetch: async request => {
+    f.requests.push(request);
+    return { status: request.url.includes('serper') ? 401 : 429, headers: {}, body: 'unavailable' };
+  } });
+  const provider = createDeepReadSearchProviders(f.settings, { ensureSdk: () => {}, freeProviders: [] })[0];
+  assert.deepEqual(await provider.search(['first', 'later'], undefined, (_query, error) => failures.push(error)), []);
+  assert.deepEqual(f.requests.map(request => new URL(request.url).hostname), ['google.serper.dev', 'api.tavily.com']);
+  assert.equal(failures.length, 2);
+});
+
+test('successful empty results keep the selected API, and later failure retains earlier hits', async () => {
+  const empty = fixture();
+  initSearchSdk({ ...empty.http, fetch: async request => {
+    empty.requests.push(request);
+    return { status: 200, headers: {}, body: '{"organic":[]}' };
+  } });
+  const emptyProvider = createDeepReadSearchProviders(empty.settings, { ensureSdk: () => {}, freeProviders: [] })[0];
+  assert.deepEqual(await emptyProvider.search(['first', 'later']), []);
+  assert.equal(empty.requests.length, 2);
+  assert.equal(empty.requests.every(request => request.url.includes('serper')), true);
+
+  const partial = fixture(); let selectedCalls = 0;
+  initSearchSdk({ ...partial.http, fetch: async request => {
+    if (request.url.includes('serper') && ++selectedCalls === 2) {
+      partial.requests.push(request);
+      return { status: 503, headers: {}, body: 'unavailable' };
+    }
+    return partial.http.fetch(request);
+  } });
+  const provider = createDeepReadSearchProviders(partial.settings, { ensureSdk: () => {}, freeProviders: [] })[0];
+  const hits = await provider.search(['first', 'later']);
+  assert.deepEqual(hits.map(item => item.url), ['https://selected.test', 'https://other.test']);
+  assert.equal(partial.requests.length, 3);
+});
+
+test('fallback uses the same total budget and cancellation prevents the next candidate', async t => {
+  let clock = 100;
+  t.mock.method(Date, 'now', () => clock);
+  const budget = fixture();
+  initSearchSdk({ ...budget.http, fetch: async request => {
+    budget.requests.push(request); clock += 9000;
+    return { status: 503, headers: {}, body: 'unavailable' };
+  } });
+  const budgetProvider = createDeepReadSearchProviders(budget.settings, { ensureSdk: () => {}, freeProviders: [] })[0];
+  assert.deepEqual(await budgetProvider.search(['first', 'later']), []);
+  assert.equal(budget.requests.length, 1);
+
+  const cancelled = fixture(); const owner = new AbortController();
+  initSearchSdk({ ...cancelled.http, fetch: async request => {
+    cancelled.requests.push(request);
+    return { status: 401, headers: {}, body: 'unavailable' };
+  } });
+  const provider = createDeepReadSearchProviders(cancelled.settings, { ensureSdk: () => {}, freeProviders: [] })[0];
+  assert.deepEqual(await provider.search(['first', 'later'], owner.signal, () => owner.abort()), []);
+  assert.equal(cancelled.requests.length, 1);
+});
+
+test('a Bing fallback retains the existing free aggregate and native Google policy', async () => {
+  const f = fixture(); const bing = makeSearchServiceOptions('bing_local');
+  f.settings.searchServices = [f.settings.searchServices[0], bing, f.settings.searchServices[1]];
+  f.settings.searchEnabledServiceIds.push(bing.id);
+  let freeCalls = 0; let googleCalls = 0;
+  initSearchSdk({ ...f.http, fetch: async request => {
+    f.requests.push(request);
+    return { status: 401, headers: {}, body: 'expired key' };
+  } });
+  const provider = createDeepReadSearchProviders(f.settings, { ensureSdk: () => {},
+    freeProviders: [{ name: 'free', search: async queries => {
+      freeCalls++; assert.deepEqual(queries, ['first', 'later']); return [hit('https://free.test')];
+    } }], searchGoogle: async () => { googleCalls++; return [hit('https://google.test')]; } })[0];
+  assert.deepEqual((await provider.search(['first', 'later'])).map(item => item.url),
+    ['https://free.test', 'https://google.test']);
+  assert.deepEqual(f.requests.map(request => new URL(request.url).hostname), ['google.serper.dev', 'api.tavily.com']);
+  assert.equal(freeCalls, 1); assert.equal(googleCalls, 2);
+});
+
+test('configured API fallbacks are tried before a Bing entry in the remaining catalog', async () => {
+  const f = fixture(); const bing = makeSearchServiceOptions('bing_local');
+  const serper = f.settings.searchServices[0]; const tavily = f.settings.searchServices[1];
+  f.settings.searchServices = [tavily, bing, serper];
+  f.settings.searchEnabledServiceIds.push(bing.id);
+  let freeCalls = 0; let googleCalls = 0;
+  initSearchSdk({ ...f.http, fetch: async request => {
+    if (request.url.includes('tavily')) {
+      f.requests.push(request);
+      return { status: 401, headers: {}, body: 'expired key' };
+    }
+    return f.http.fetch(request);
+  } });
+  const provider = createDeepReadSearchProviders(f.settings, { ensureSdk: () => {},
+    freeProviders: [{ name: 'free', search: async () => { freeCalls++; return []; } }],
+    searchGoogle: async () => { googleCalls++; return []; } })[0];
+  assert.deepEqual((await provider.search(['first', 'later'])).map(item => item.url),
+    ['https://selected.test', 'https://selected.test']);
+  assert.deepEqual(f.requests.map(request => new URL(request.url).hostname),
+    ['api.tavily.com', 'google.serper.dev', 'google.serper.dev']);
+  assert.equal(freeCalls, 0); assert.equal(googleCalls, 0);
+});

@@ -2,35 +2,24 @@ import { Context } from '@kit.AbilityKit';
 // MemoryStore — 记忆记录 JSON 文件存储(D-085b,读路径 + touch)
 // Android 基准:MemoryRepository.kt(Room)→ 本文件以 JSON 文件持久化;
 //   DAO 无 ORDER BY → 数组序即插入序;id 自增语义留待写路径切片(addMemory 等)。
-//   查询/更新语义纯函数在 HAR(filterActiveMemoryRecords/touchMemoryRecords)。import { Context } from '@kit.AbilityKit';
-import { fileIo } from '@kit.CoreFileKit';
-import {
-  createMemoryDreamPlanStore, memoryDreamPlanSummaryText,
-  DREAM_NOTIFICATION_ID, DREAM_NOTIFY_FAILED_TITLE, DREAM_NOTIFY_PENDING_TITLE,
-  DREAM_NOTIFY_RUNNING_TEXT, DREAM_NOTIFY_RUNNING_TITLE,
-} from '@amber/chat-domain';
+//   查询/更新语义纯函数在 HAR(filterActiveMemoryRecords/touchMemoryRecords)。
 import type {
   AssistantMemory, MemoryAddParams, MemoryCandidate, MemoryEvent, MemoryEventType,
-  MemoryExportFs, MemoryImportExportDeps, MemoryReadRepository, MemoryRecord, MemoryScope,
+  MemoryReadRepository, MemoryRecord, MemoryScope,
   MemoryToolDeps, MemoryToolWriteRequest, MemoryDerivedDocument, MemoryTopicApplyResult,
   MemoryTopicSuggestion, MemoryExtractionAction, MemoryExtractionApplyResult, MemoryProfile, MemoryProfilePassOutput, MemorySemanticMerge,
-} from '@amber/chat-domain';
-import type {
-  MemoryDreamPlan, MemoryDreamPlanDaoPort, MemoryDreamPlanEntity,
-  MemoryDreamPlanStore, MemoryDreamReviewNotifier,
 } from '@amber/chat-domain';
 
 import {
   appendMemoryRecord, deleteMemoryRecord, filterActiveMemoryRecords, memoriesOfAssistant,
   memoryRecordToAssistantMemory, touchMemoryRecords, updateMemoryRecordContent,
-  upsertMemoryRecord, applyMemoryExtractionActions, reinforceMemoryRecords, restoreMemoryRecord, isMemoryActive, makeMemoryEvent,
+  applyMemoryExtractionActions, reinforceMemoryRecords, restoreMemoryRecord, isMemoryActive, makeMemoryEvent,
   applyMemoryTopicSuggestions, makeMemoryRecord, pruneMemoryTopics, memoryProfileSources, buildMemoryProfile,
   nearDuplicateCandidates, planConfirmedMemoryMerges, remapMemoryProfileItems, invalidateMemoryTopicsForSource,
   nextMemoryId,
 } from '@amber/chat-domain';
 import { writeTextFileAtomic, readGuardedJson } from './AtomicJsonFile.ets';
 import type { GuardedJsonRead } from './AtomicJsonFile.ets';
-import { publishBasicNotification, cancelNotification } from './NotificationNotifier.ets';
 import { listMemoryDocuments, readMemoryDocument, syncMemoryDocuments } from './MemoryDocumentStore.ets';
 
 import { refreshMemoryProfile, writeMemoryProfile } from './MemoryOptimizationStore.ets';
@@ -391,8 +380,6 @@ export const getMemoryExtractionStoreOps = (): MemoryExtractionStoreOps => ({
   getAllActiveRecords,
 });
 
-// ===== D-085e:导出导入存储面 + FS 实现 =====
-
 // getRecentEvents(MemoryEventDAO :15-16)— created_at DESC LIMIT :limit
 const getRecentEvents = async (limit: number): Promise<MemoryEvent[]> => {
   const all: MemoryEvent[] = await readJsonArray<MemoryEvent>(memoryPath(EVENTS_FILE));
@@ -400,136 +387,6 @@ const getRecentEvents = async (limit: number): Promise<MemoryEvent[]> => {
     b.createdAt - a.createdAt);
   return sorted.slice(0, limit);
 };
-
-// upsertRecord(MemoryRepository.kt:135-143)
-const upsertRecord = (record: MemoryRecord): Promise<MemoryRecord> =>
-  enqueueWrite(async (): Promise<MemoryRecord> => {
-    const snapshot: MemorySnapshot = await readSnapshotForWrite();
-    const out = upsertMemoryRecord(snapshot.records, record, Date.now(),
-      record.id === 0 ? allocateMemoryId(snapshot) : record.id);
-    await saveRecords(snapshot, out.records);
-    return out.record;
-  });
-
-// MemoryExportFs 的 fileIo 实现(任意目录 — 导出目标由调用方选,
-//   设置面 UI 移植后接 picker 路径)
-const walkFilesRec = async (dir: string, out: string[]): Promise<void> => {
-  let names: string[];
-  try {
-    names = await fileIo.listFile(dir);
-  } catch {
-    return; // 不存在/不可读 → 空(File.walkTopDown 对不存在目录产出空序列)
-  }
-  for (const name of names) {
-    const full: string = `${dir}/${name}`;
-    try {
-      const stat: fileIo.Stat = await fileIo.stat(full);
-      if (stat.isDirectory()) {
-        await walkFilesRec(full, out);
-      } else {
-        out.push(full);
-      }
-    } catch {
-      // 单点失败跳过
-    }
-  }
-};
-
-const entryMemoryExportFs: MemoryExportFs = {
-  mkdirs: async (path: string): Promise<void> => {
-    try {
-      await fileIo.mkdir(path, true);
-    } catch {
-      // 已存在
-    }
-  },
-  writeText: async (path: string, content: string): Promise<void> => {
-    const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC;
-    const file: fileIo.File = await fileIo.open(path, mode);
-    try {
-      await fileIo.write(file.fd, content);
-    } finally {
-      await fileIo.close(file);
-    }
-  },
-  readText: (path: string): Promise<string> => fileIo.readText(path),
-  exists: (path: string): Promise<boolean> => fileIo.access(path),
-  walkFiles: async (path: string): Promise<string[]> => {
-    const out: string[] = [];
-    await walkFilesRec(path, out);
-    return out;
-  },
-};
-
-// exportMemoriesTo/importMemoriesFrom 的 deps(UI 触发随设置面切片)
-export const getMemoryImportExportDeps = (): MemoryImportExportDeps => ({
-  fs: entryMemoryExportFs,
-  getAllRecords: readAll,
-  getRecentEvents,
-  upsertRecord,
-});
-
-// ===== D-085f:dream 存储面 =====
-
-// getPendingCandidates(MemoryCandidateDAO :19-20)— status='pending' ORDER created_at DESC
-// (显式排序:文件序不保证 createdAt 序,reverse() 假设不成立)
-const candidateByCreatedDesc = (a: MemoryCandidate, b: MemoryCandidate): number =>
-  b.createdAt - a.createdAt;
-
-const getPendingCandidates = async (): Promise<MemoryCandidate[]> => {
-  const all: MemoryCandidate[] = await readJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
-  return all.filter((c: MemoryCandidate): boolean => c.status === 'pending')
-    .sort(candidateByCreatedDesc);
-};
-
-// getAllCandidates(DAO :22-23)— ORDER created_at DESC
-const getAllCandidates = async (): Promise<MemoryCandidate[]> => {
-  const all: MemoryCandidate[] = await readJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
-  return [...all].sort(candidateByCreatedDesc);
-};
-
-// updateCandidate(MemoryRepository.kt:174-176)— copy(updatedAt=now) 后 update;
-//   Room @Update 未命中 = 0 行(no-op)
-const updateCandidate = (candidate: MemoryCandidate): Promise<void> =>
-  enqueueWrite(async (): Promise<void> => {
-    const all: MemoryCandidate[] =
-      await requireArrayForWrite<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
-    const index: number = all.findIndex((c: MemoryCandidate): boolean => c.id === candidate.id);
-    if (index < 0) return;
-    const updated: MemoryCandidate = {
-      id: candidate.id, content: candidate.content, scope: candidate.scope,
-      kind: candidate.kind, sourceConversationId: candidate.sourceConversationId,
-      sourceMessageIds: candidate.sourceMessageIds, expiresAt: candidate.expiresAt,
-      confidence: Math.min(1, Math.max(0, candidate.confidence)), reason: candidate.reason,
-      sensitive: candidate.sensitive, status: candidate.status,
-      createdAt: candidate.createdAt, updatedAt: Date.now(),
-    };
-    const next: MemoryCandidate[] = [...all];
-    next[index] = updated;
-    await writeJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE), next);
-  });
-
-export interface MemoryDreamStoreOps {
-  getAllRecords: () => Promise<MemoryRecord[]>;
-  getPendingCandidates: () => Promise<MemoryCandidate[]>;
-  getAllCandidates: () => Promise<MemoryCandidate[]>;
-  upsertRecord: (record: MemoryRecord) => Promise<MemoryRecord>;
-  addMemory: (params: MemoryAddParams) => Promise<MemoryRecord>;
-  updateCandidate: (candidate: MemoryCandidate) => Promise<void>;
-  addEvent: (event: MemoryEvent) => Promise<void>;
-}
-
-// runMemoryDreamPlan/runMemoryDreamApply 的存储面 deps
-//   (模型解析/generateText/调度触发随 dream 调度切片与设置面,P1 登记)
-export const getMemoryDreamStoreOps = (): MemoryDreamStoreOps => ({
-  getAllRecords: readAll,
-  getPendingCandidates,
-  getAllCandidates,
-  upsertRecord,
-  addMemory,
-  updateCandidate,
-  addEvent,
-});
 
 // ===== D-089:记忆库面(MemoryPage 三桶列表 + CRUD + 事件) =====
 
@@ -698,149 +555,3 @@ export const getMemoryTopicStoreOps = (): MemoryTopicStoreOps => {
   };
   return ops;
 };
-
-// ===== D-085g:dream plan JSON 持久化 + Store/Notifier =====
-
-const DREAM_PLANS_FILE: string = 'memory_dream_plans.json';
-
-// MemoryDreamPlanDAO 查询语义的 JSON 数组等价:
-//   getPendingPlan = status='pending' ORDER created_at DESC LIMIT 1
-//   countPlansSince = source 匹配 && created_at >= after
-//   updatePendingStatus = 全量 pending 行
-//   insert = REPLACE by id
-const dreamPlanDao: MemoryDreamPlanDaoPort = {
-  getPendingPlan: async (): Promise<MemoryDreamPlanEntity | null> => {
-    const all: MemoryDreamPlanEntity[] =
-      await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
-    let best: MemoryDreamPlanEntity | null = null;
-    for (const row of all) {
-      if (row.status === 'pending' && (best === null || row.createdAt > best.createdAt)) {
-        best = row;
-      }
-    }
-    return best;
-  },
-  countPlansSince: async (source: string, createdAfter: number): Promise<number> => {
-    const all: MemoryDreamPlanEntity[] =
-      await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
-    return all.filter((row: MemoryDreamPlanEntity): boolean =>
-      row.source === source && row.createdAt >= createdAfter).length;
-  },
-  // 原子「dismiss 全量 pending + insert」:单次 enqueueWrite,防并发交错留多个 pending
-  replacePendingAndInsert: (status: string, dismissedAt: number,
-    entity: MemoryDreamPlanEntity): Promise<void> =>
-    enqueueWrite(async (): Promise<void> => {
-      const all: MemoryDreamPlanEntity[] =
-        await requireArrayForWrite<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
-      const next: MemoryDreamPlanEntity[] = all.map(
-        (row: MemoryDreamPlanEntity): MemoryDreamPlanEntity => {
-          if (row.status !== 'pending') return row;
-          return {
-            id: row.id, planJson: row.planJson, status, source: row.source,
-            mergeCount: row.mergeCount, promoteCount: row.promoteCount,
-            archiveCount: row.archiveCount, supersedeCount: row.supersedeCount,
-            ignoreCandidateCount: row.ignoreCandidateCount, createdAt: row.createdAt,
-            appliedAt: row.appliedAt, dismissedAt,
-          };
-        });
-      const replaced: number = next.findIndex(
-        (row: MemoryDreamPlanEntity): boolean => row.id === entity.id);
-      if (replaced >= 0) next[replaced] = entity;
-      else next.push(entity);
-      await writeJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE), next);
-    }),
-  updatePendingStatus: (status: string, dismissedAt: number): Promise<void> =>
-    enqueueWrite(async (): Promise<void> => {
-      const all: MemoryDreamPlanEntity[] =
-        await requireArrayForWrite<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
-      const next: MemoryDreamPlanEntity[] = all.map(
-        (row: MemoryDreamPlanEntity): MemoryDreamPlanEntity => {
-          if (row.status !== 'pending') return row;
-          return {
-            id: row.id, planJson: row.planJson, status, source: row.source,
-            mergeCount: row.mergeCount, promoteCount: row.promoteCount,
-            archiveCount: row.archiveCount, supersedeCount: row.supersedeCount,
-            ignoreCandidateCount: row.ignoreCandidateCount, createdAt: row.createdAt,
-            appliedAt: row.appliedAt, dismissedAt,
-          };
-        });
-      await writeJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE), next);
-    }),
-  markApplied: (id: string, appliedAt: number): Promise<void> =>
-    enqueueWrite(async (): Promise<void> => {
-      const all: MemoryDreamPlanEntity[] =
-        await requireArrayForWrite<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
-      const index: number = all.findIndex(
-        (row: MemoryDreamPlanEntity): boolean => row.id === id);
-      if (index < 0) return;
-      const row: MemoryDreamPlanEntity = all[index];
-      const updated: MemoryDreamPlanEntity = {
-        id: row.id, planJson: row.planJson, status: 'applied', source: row.source,
-        mergeCount: row.mergeCount, promoteCount: row.promoteCount,
-        archiveCount: row.archiveCount, supersedeCount: row.supersedeCount,
-        ignoreCandidateCount: row.ignoreCandidateCount, createdAt: row.createdAt,
-        appliedAt, dismissedAt: row.dismissedAt,
-      };
-      const next: MemoryDreamPlanEntity[] = [...all];
-      next[index] = updated;
-      await writeJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE), next);
-    }),
-  markDismissed: (id: string, dismissedAt: number): Promise<void> =>
-    enqueueWrite(async (): Promise<void> => {
-      const all: MemoryDreamPlanEntity[] =
-        await requireArrayForWrite<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
-      const index: number = all.findIndex(
-        (row: MemoryDreamPlanEntity): boolean => row.id === id);
-      if (index < 0) return;
-      const row: MemoryDreamPlanEntity = all[index];
-      const updated: MemoryDreamPlanEntity = {
-        id: row.id, planJson: row.planJson, status: 'dismissed', source: row.source,
-        mergeCount: row.mergeCount, promoteCount: row.promoteCount,
-        archiveCount: row.archiveCount, supersedeCount: row.supersedeCount,
-        ignoreCandidateCount: row.ignoreCandidateCount, createdAt: row.createdAt,
-        appliedAt: row.appliedAt, dismissedAt,
-      };
-      const next: MemoryDreamPlanEntity[] = [...all];
-      next[index] = updated;
-      await writeJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE), next);
-    }),
-  insert: (entity: MemoryDreamPlanEntity): Promise<void> =>
-    enqueueWrite(async (): Promise<void> => {
-      const all: MemoryDreamPlanEntity[] =
-        await requireArrayForWrite<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
-      const index: number = all.findIndex(
-        (row: MemoryDreamPlanEntity): boolean => row.id === entity.id);
-      const next: MemoryDreamPlanEntity[] = [...all];
-      if (index >= 0) next[index] = entity;
-      else next.push(entity);
-      await writeJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE), next);
-    }),
-};
-
-// runMemoryDreamRun / 设置面手动触发的存储面 deps
-export const getMemoryDreamPlanStore = (): MemoryDreamPlanStore =>
-  createMemoryDreamPlanStore(dreamPlanDao);
-
-// MemoryDreamReviewNotifier 真实适配:notificationManager 发布(与 deepread
-//   NotificationNotifier 同策略;文案逐字,同 DREAM_NOTIFICATION_ID 覆盖更新)。
-class MemoryDreamNotifierImpl implements MemoryDreamReviewNotifier {
-  notifyRunning(): void {
-    publishBasicNotification(DREAM_NOTIFICATION_ID, DREAM_NOTIFY_RUNNING_TITLE, DREAM_NOTIFY_RUNNING_TEXT);
-  }
-
-  notifyPendingReview(plan: MemoryDreamPlan): void {
-    publishBasicNotification(DREAM_NOTIFICATION_ID, DREAM_NOTIFY_PENDING_TITLE, memoryDreamPlanSummaryText(plan));
-  }
-
-  notifyFailed(message: string): void {
-    // contentText=take(120)(MemoryDreamNotifier.kt:64-65)
-    publishBasicNotification(DREAM_NOTIFICATION_ID, DREAM_NOTIFY_FAILED_TITLE, message.slice(0, 120));
-  }
-
-  cancel(): void {
-    cancelNotification(DREAM_NOTIFICATION_ID);
-  }
-}
-
-export const createMemoryDreamNotifier = (): MemoryDreamReviewNotifier =>
-  new MemoryDreamNotifierImpl();

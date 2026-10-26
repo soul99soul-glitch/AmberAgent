@@ -15,7 +15,7 @@
 //   ForEach 回调内 if/else 必须包裹 UI 组件(不能裸 const)。
 
 import { newId, parseMarkdown, MarkdownCache } from '@amber/chat-domain';
-import type { MarkdownBlock, MarkdownBlockTable, InlineToken, HighlightToken,
+import type { MarkdownBlock, MarkdownBlockTable, InlineToken,
   MarkdownCacheResult } from '@amber/chat-domain';
 import { BODY, INK, META, lineHeightForSize } from '../design/tokens.ets';
 import { FONT_SANS } from '../design/fonts.ets';
@@ -25,6 +25,7 @@ import { common } from '@kit.AbilityKit';
 import { ImagePreviewDialog } from './ui/ImagePreviewDialog.ets';
 import { MarkdownBlockSlot, MarkdownBlockView } from './MarkdownBlockView.ets';
 import { cachedMediaUrl } from '../platform_impl/MediaCache.ets';
+import type { MessageRowViewState } from './MessageRowViewState.ets';
 
 // 正文随上游 48ms 累计快照同步排版，不叠加 reveal/parse 计时门。
 // 全局 Markdown 增量解析缓存(32 条目 / 200k 字符,精确 + 前缀增量,有界)。
@@ -32,6 +33,7 @@ const markdownCache: MarkdownCache = new MarkdownCache();
 
 @Component
 export struct MarkdownText {
+  viewState: MessageRowViewState | null = null;
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop @Watch('onContentChanged') content: string = '';
   @Prop fontSize: number = BODY;
@@ -61,7 +63,6 @@ export struct MarkdownText {
   @State private hasDisplayContent: boolean = false;
   @State private displaySlots: MarkdownBlockSlot[] = [];
   private parsedBlocks: MarkdownBlock[] = [];
-  private highlightCache: Map<string, HighlightToken[]> = new Map<string, HighlightToken[]>();
   private lastParsedText: string = '';
   @State private previewUrl: string = '';
   @State private previewImages: string[] = [];
@@ -138,13 +139,14 @@ export struct MarkdownText {
         } else {
           ForEach(this.displaySlots, (slot: MarkdownBlockSlot): void => {
             MarkdownBlockView({
+              viewState: this.viewState,
               slot: slot, fontSize: this.fontSize, fontColor: this.fontColor,
               lineHeightScale: this.lineHeightScale, readingMode: this.readingMode,
               serifForReading: this.serifForReading, chatFontFamily: this.chatFontFamily,
               enableLatexRendering: this.enableLatexRendering, fillWidth: this.fillWidth,
               streaming: this.streaming, streamKey: this.streamKey,
               codeBlockAutoCollapse: this.codeBlockAutoCollapse, showLineNumbers: this.showLineNumbers,
-              highlightCache: this.highlightCache, mermaidInstanceId: this.mermaidInstanceId,
+              mermaidInstanceId: this.mermaidInstanceId,
               onCopyText: (text: string, message: string): void => { this.copyText(text, message); },
               onOpenLink: (url: string): void => { this.showLinkActions(url); },
               onOpenImage: (url: string): void => { this.showImagePreview(url); },
@@ -303,10 +305,12 @@ export struct MarkdownText {
 
   @Builder
   ImagePreviewOverlay(): void {
-    if (this.previewUrl.length > 0) {
-      ImagePreviewDialog({ images: this.previewImages,
-        onDismiss: (): void => { this.closeImagePreview(); } })
-    }
+    Column() {
+      if (this.previewUrl.length > 0) {
+        ImagePreviewDialog({ images: this.previewImages,
+          onDismiss: (): void => { this.closeImagePreview(); } })
+      }
+    }.width('100%').height('100%')
   }
 
 }

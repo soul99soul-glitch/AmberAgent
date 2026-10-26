@@ -24,11 +24,11 @@
         material: {
           certpath: '/Users/arquiel/.ohos/config/default_harmony_5ZNrrDPsh8bhZDvNg1eA2lRJ1vXsCP9onQ66dnpr1o=.cer',
           keyAlias: 'debugKey',
-          keyPassword: '0000001bd2a7d458742b4e78a061f1486e26992bcae6600c90379809cc5d60d8777f75aa45c68f50567f12',
+          keyPassword: '00000019f93bcf406de50a8933a578c1c7e672e1315beeaa4b72bd406b1cc422fdd367f299ef46dfea',
           profile: '/Users/arquiel/.ohos/config/default_harmony_5ZNrrDPsh8bhZDvNg1eA2lRJ1vXsCP9onQ66dnpr1o=.p7b',
           signAlg: 'SHA256withECDSA',
           storeFile: '/Users/arquiel/.ohos/config/default_harmony_5ZNrrDPsh8bhZDvNg1eA2lRJ1vXsCP9onQ66dnpr1o=.p12',
-          storePassword: '0000001bd2a7d458742b4e78a061f1486e26992bcae6600c90379809cc5d60d8777f75aa45c68f50567f12',
+          storePassword: '00000019f93bcf406de50a8933a578c1c7e672e1315beeaa4b72bd406b1cc422fdd367f299ef46dfea',
         },
       },
     ],

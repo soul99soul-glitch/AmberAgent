@@ -121,24 +121,29 @@ struct SettingCronTasksPage {
           }
 
           Row() {
-            Text(t.cronExpression)
-              .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
-              .fontFamily(FONT_MONO).fontColor(INK3)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(`下次 ${this.fmtTime(t.nextRunAtMs)}`)
-              .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
-              .fontFamily(FONT_MONO).fontColor(INK4).margin({ left: 12 })
-            Text(`已跑 ${t.runCount} 次`)
-              .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
-              .fontFamily(FONT_MONO).fontColor(INK4).margin({ left: 12 })
-            if (this.statusLabel(t).length > 0) {
-              Text(this.statusLabel(t))
-                .fontSize(MONO_SMALL).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
-                .fontFamily(FONT_MONO)
-                .fontColor(t.lastStatus === 'Failed' ? ERROR : INK3)
-                .margin({ left: 12 })
+            Row() {
+              Text(t.cronExpression)
+                .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
+                .fontFamily(FONT_MONO).fontColor(INK3)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              Text(`下次 ${this.fmtTime(t.nextRunAtMs)}`)
+                .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
+                .fontFamily(FONT_MONO).fontColor(INK4).margin({ left: 10 })
+                .maxLines(1)
+              Text(`已跑 ${t.runCount} 次`)
+                .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
+                .fontFamily(FONT_MONO).fontColor(INK4).margin({ left: 10 })
+                .maxLines(1)
+              if (this.statusLabel(t).length > 0) {
+                Text(this.statusLabel(t))
+                  .fontSize(MONO_SMALL).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+                  .fontFamily(FONT_MONO)
+                  .fontColor(t.lastStatus === 'Failed' ? ERROR : INK3)
+                  .margin({ left: 10 })
+                  .maxLines(1)
+              }
             }
-            Blank()
+            .layoutWeight(1).clip(true).alignItems(VerticalAlign.Center)
             // R17:运行中提供「停止本轮」入口(停当前生成;下一周期仍按计划保留)
             if (this.isRunning(t)) {
               Text('停止本轮')

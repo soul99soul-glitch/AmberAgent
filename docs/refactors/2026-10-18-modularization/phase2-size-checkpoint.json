@@ -1,0 +1,96 @@
+{
+  "scope": "Harmony production ArkTS/TS; generated build/third party/resources/test excluded",
+  "stage": "Phase2 stage accepted; measured UI passed, limitations in phase-2.md",
+  "over1000": 22,
+  "over1500": 6,
+  "files": [
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets",
+      "lines": 4641
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/repository.ts",
+      "lines": 3498
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/creation.ts",
+      "lines": 2362
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets",
+      "lines": 1638
+    },
+    {
+      "path": "harmony/chat/src/main/ets/index.ts",
+      "lines": 1553
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets",
+      "lines": 1506
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_prompt_config.ts",
+      "lines": 1231
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatPage.ets",
+      "lines": 1200
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/device_schedule_tools.ts",
+      "lines": 1199
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/skills.ts",
+      "lines": 1191
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingExperimentalWebMountPage.ets",
+      "lines": 1178
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/context_compact.ts",
+      "lines": 1117
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunService.ets",
+      "lines": 1109
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_cron.ts",
+      "lines": 1101
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeviceSchedulePort.ets",
+      "lines": 1096
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/BoardPage.ets",
+      "lines": 1084
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/workspace_artifacts.ts",
+      "lines": 1082
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets",
+      "lines": 1064
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelProjectsPage.ets",
+      "lines": 1024
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/PageTemplate.ets",
+      "lines": 1022
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/section_writer_tools.ts",
+      "lines": 1014
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets",
+      "lines": 1012
+    }
+  ]
+}

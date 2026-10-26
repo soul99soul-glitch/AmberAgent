@@ -1,13 +1,15 @@
 // One observed block owns its UI dependencies. Frozen siblings never read the growing array.
 import { tokenizeCode, orderedListLabel } from '@amber/chat-domain';
 import type { MarkdownBlock, MarkdownBlockTable, MarkdownBlockHeading, MarkdownBlockList,
-  MarkdownBlockCode, InlineToken, InlineMathToken, HighlightToken } from '@amber/chat-domain';
+  MarkdownBlockCode, InlineToken, InlineImageToken, InlineMathToken, HighlightToken } from '@amber/chat-domain';
 import { MOTION_OVERLAY, ACCENT, BODY, INK, LABEL, LINE, META, MONO_SMALL, SURFACE2,
   lineHeightForSize } from '../design/tokens.ets';
 import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_MONO, FONT_SERIF } from '../design/fonts.ets';
 import { MermaidBlock } from './MermaidBlock.ets';
 import { MathRichBlock } from './MathRichBlock.ets';
 import { NativeMarkdownText } from './NativeMarkdownText.ets';
+import { MediaImage } from './MediaImage.ets';
+import type { MessageRowViewState } from './MessageRowViewState.ets';
 
 // API 12 V1: ForEach keeps this object; ObjectLink observes replacement of block.
 @Observed
@@ -51,6 +53,13 @@ interface MarkdownCodeBlockBinding {
   index: number;
 }
 
+interface CodeRenderRevision {
+  lang: string;
+  code: string;
+  sourceLines: string[];
+  highlightLines: HighlightToken[][] | null;
+}
+
 interface MarkdownTableBinding {
   block: MarkdownBlockTable;
   index: number;
@@ -82,6 +91,7 @@ const INLINE_CODE_FG: string = ACCENT;
 
 @Component
 export struct MarkdownBlockView {
+  viewState: MessageRowViewState | null = null;
   @StorageProp('themeEpoch') themeEpoch: number = 0;
   @ObjectLink slot: MarkdownBlockSlot;
   @Prop fontSize: number = BODY;
@@ -97,14 +107,39 @@ export struct MarkdownBlockView {
   @Prop codeBlockAutoCollapse: boolean = false;
   @Prop showLineNumbers: boolean = false;
   @State private codeExpanded: Record<string, boolean> = {};
-  // Shared by the parent message, retaining the existing 16-entry highlight bound.
-  highlightCache: Map<string, HighlightToken[]> = new Map<string, HighlightToken[]>();
+  // A stable block retains only its current source revision, including prepared lines.
+  private cachedCode: CodeRenderRevision | null = null;
   mermaidInstanceId: string = '';
   onCopyText: (text: string, message: string) => void = (_text: string, _message: string): void => {};
   onOpenLink: (url: string) => void = (_url: string): void => {};
   onOpenImage: (url: string) => void = (_url: string): void => {};
   onVisibleGrow: () => void = (): void => {};
   @Prop imageSources: Record<string, string> = {};
+
+  aboutToAppear(): void {
+    const saved: Record<string, boolean> | undefined = this.viewState?.codeExpanded.get(this.codeStateKey());
+    if (saved === undefined) return;
+    const copy: Record<string, boolean> = {};
+    for (const key of Object.keys(saved)) copy[key] = saved[key];
+    this.codeExpanded = copy;
+  }
+
+  aboutToDisappear(): void {
+    this.saveCodeState();
+  }
+
+  private codeStateKey(): string {
+    return `${this.streamKey}#${this.slot.key}`;
+  }
+
+  private saveCodeState(): void {
+    if (this.viewState === null) return;
+    const keys: string[] = Object.keys(this.codeExpanded);
+    if (keys.length === 0) return;
+    const copy: Record<string, boolean> = {};
+    for (const key of keys) copy[key] = this.codeExpanded[key];
+    this.viewState.codeExpanded.set(this.codeStateKey(), copy);
+  }
 
   private imageSource(url: string): string {
     const value: string | undefined = this.imageSources[url];
@@ -176,24 +211,22 @@ export struct MarkdownBlockView {
   private getCodeLines(block: MarkdownBlock): HighlightToken[][] {
     if (block.kind !== 'code_block') return [];
     if (block.lang.length === 0) return [];
-    const key: string = JSON.stringify([block.lang, block.code]);
-    const cached: HighlightToken[] | undefined = this.highlightCache.get(key);
-    if (cached !== undefined) return this.splitTokensByLine(cached);
-    const tokens: HighlightToken[] = tokenizeCode(block.code, block.lang);
-    this.highlightCache.set(key, tokens);
-    while (this.highlightCache.size > 16) {
-      let eldest: string = '';
-      let found: boolean = false;
-      this.highlightCache.forEach((_v: HighlightToken[], cacheKey: string): void => {
-        if (!found) {
-          eldest = cacheKey;
-          found = true;
-        }
-      });
-      if (!found) break;
-      this.highlightCache.delete(eldest);
-    }
-    return this.splitTokensByLine(tokens);
+    const revision: CodeRenderRevision = this.codeRevision(block);
+    const cached: HighlightToken[][] | null = revision.highlightLines;
+    if (cached !== null) return cached;
+    const lines: HighlightToken[][] = this.splitTokensByLine(tokenizeCode(revision.code, revision.lang));
+    revision.highlightLines = lines;
+    return lines;
+  }
+
+  private codeRevision(block: MarkdownBlockCode): CodeRenderRevision {
+    const cached: CodeRenderRevision | null = this.cachedCode;
+    if (cached !== null && cached.code === block.code && cached.lang === block.lang) return cached;
+    const revision: CodeRenderRevision = {
+      lang: block.lang, code: block.code, sourceLines: block.code.split('\n'), highlightLines: null,
+    };
+    this.cachedCode = revision;
+    return revision;
   }
 
   private headingSize(level: number): number {
@@ -230,12 +263,12 @@ export struct MarkdownBlockView {
 
   private codeKey(block: MarkdownBlock, bi: number): string {
     if (block.kind !== 'code_block') return '';
-    return `${bi}:${block.lang}:${block.code.length}`;
+    return `${bi}:${block.lang}`;
   }
 
   private codeSourceLines(block: MarkdownBlock): string[] {
     if (block.kind !== 'code_block') return [];
-    return block.code.split('\n');
+    return this.codeRevision(block).sourceLines;
   }
 
   private codeLineCount(block: MarkdownBlock): number {
@@ -256,6 +289,7 @@ export struct MarkdownBlockView {
     copy[key] = !(this.codeExpanded[key] === true);
     this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
       this.codeExpanded = copy;
+      this.saveCodeState();
     });
   }
 
@@ -265,11 +299,15 @@ export struct MarkdownBlockView {
   }
 
   private visibleHighlightLines(block: MarkdownBlock, bi: number): HighlightToken[][] {
-    return this.getCodeLines(block).slice(0, this.visibleCodeLineCap(block, bi));
+    const lines: HighlightToken[][] = this.getCodeLines(block);
+    const cap: number = this.visibleCodeLineCap(block, bi);
+    return cap >= lines.length ? lines : lines.slice(0, cap);
   }
 
   private visiblePlainLines(block: MarkdownBlock, bi: number): string[] {
-    return this.codeSourceLines(block).slice(0, this.visibleCodeLineCap(block, bi));
+    const lines: string[] = this.codeSourceLines(block);
+    const cap: number = this.visibleCodeLineCap(block, bi);
+    return cap >= lines.length ? lines : lines.slice(0, cap);
   }
 
   private splitTokensByLine(tokens: HighlightToken[]): HighlightToken[][] {
@@ -349,14 +387,54 @@ export struct MarkdownBlockView {
   @Builder
   RenderParagraph(params: MarkdownBlockBinding): void {
     Column() {
-      this.RenderTextInlines({ inlines: this.blockInlines(params.block),
-        size: this.fontSize, weight: FontWeight.Normal, family: this.bodyFamily(),
-        lineHeight: this.effLineHeight(this.fontSize),
-        align: this.isDisplayMathParagraph(params.block) ? TextAlign.Center : (this.readingMode ? TextAlign.JUSTIFY : TextAlign.Start),
-        fillWidth: this.fillWidth })
+      if (this.paragraphImageRows(params.block).length > 0) {
+        this.RenderParagraphImages(params.block)
+      } else {
+        this.RenderTextInlines({ inlines: this.blockInlines(params.block),
+          size: this.fontSize, weight: FontWeight.Normal, family: this.bodyFamily(),
+          lineHeight: this.effLineHeight(this.fontSize),
+          align: this.isDisplayMathParagraph(params.block) ? TextAlign.Center : (this.readingMode ? TextAlign.JUSTIFY : TextAlign.Start),
+          fillWidth: this.fillWidth })
+      }
     }
     .width(this.fillWidth ? '100%' : 'auto').alignItems(HorizontalAlign.Start)
     .margin({ top: this.readingMode ? 0 : 2, bottom: this.readingMode ? 12 : 4 })
+  }
+
+  private paragraphImageRows(block: MarkdownBlock): InlineImageToken[][] {
+    if (block.kind !== 'paragraph') return [];
+    const images: InlineImageToken[] = [];
+    for (const token of block.inlines) {
+      if (token.type === 'image' && token.url.trim().length > 0) images.push(token);
+      else if (token.type !== 'text' || token.text.trim().length > 0) return [];
+    }
+    const rows: InlineImageToken[][] = [];
+    for (let index: number = 0; index < images.length; index += 2) {
+      rows.push(images.slice(index, index + 2));
+    }
+    return rows;
+  }
+
+  @Builder
+  private RenderParagraphImages(block: MarkdownBlock): void {
+    Column({ space: 8 }) {
+      ForEach(this.paragraphImageRows(block), (row: InlineImageToken[], rowIndex: number): void => {
+        Row({ space: 8 }) {
+          ForEach(row, (image: InlineImageToken): void => {
+            MediaImage({ url: this.imageSource(image.url), frameWidth: '100%', frameHeight: 0,
+              fit: ImageFit.Contain,
+              onOpen: (_url: string): void => { this.showImagePreview(image.url); },
+            }).layoutWeight(1)
+          }, (image: InlineImageToken, index: number): string => `${index}-${image.url}`)
+          if (rowIndex > 0 && row.length === 1) {
+            Blank().layoutWeight(1)
+          }
+        }.width('100%').alignItems(VerticalAlign.Top)
+      }, (row: InlineImageToken[], index: number): string => `${index}-${JSON.stringify(row)}`)
+    }
+    // Shrink-wrapped user bubbles have no definite percentage width to resolve against.
+    .width(this.fillWidth ? '100%' : 220)
+    .alignItems(HorizontalAlign.Start)
   }
 
   @Builder
@@ -516,6 +594,8 @@ export struct MarkdownBlockView {
             .fontSize(MONO_SMALL)
             .fontColor('#9AA3B2')
             .fontFamily(FONT_MONO)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
           if (this.codeBlockAutoCollapse && this.codeLineCount(params.block) > CODE_COLLAPSE_THRESHOLD) {
             Text(this.codeIsCollapsed(params.block, params.index) ? '展开' : '收起')
@@ -543,7 +623,7 @@ export struct MarkdownBlockView {
         }
         .width('100%')
         .height(44)
-        .padding({ right: 4 })
+        .padding({ left: 8, right: 4 })
         .alignItems(VerticalAlign.Center)
         .backgroundColor(CODE_HEADER_BG)
         .border({ width: { bottom: 0.5 }, color: '#3A404B' })

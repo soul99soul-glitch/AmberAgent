@@ -3,6 +3,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { inflateRawSync } from 'node:zlib';
+import * as skillExports from '../main/ets/chat/skills.ts';
+import { SkillManager as InstalledSkillManager } from '../main/ets/chat/skill_library.ts';
+import { skillParseFrontmatter as parseSkillMetadata } from '../main/ets/chat/skill_metadata.ts';
+import { buildSkillMobileRuntimePrompt as mobilePrompt } from '../main/ets/chat/skill_mobile_prompt.ts';
+import { createSkillTools as skillToolFactory } from '../main/ets/chat/skill_tools.ts';
+import { MAX_SKILL_FILE_BYTES, unzipSkillFiles as unpackSkill } from '../main/ets/chat/skill_package.ts';
 import {
   SkillManager,
   skillParseFrontmatter,
@@ -26,6 +32,7 @@ import type {
   BuiltinSkillAssetPort,
 } from '../main/ets/chat/skills.ts';
 import type { AgentTool } from '../main/ets/chat/tool.ts';
+import type { JsonObject } from '../main/ets/chat/json.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
 import type {
   CreateSkillToolsDeps,
@@ -817,4 +824,127 @@ test('installBuiltinSkillsIfMissing:拷贝失败 → log + deleteRecursively 回
     logs[0].startsWith('installBuiltinSkillsIfMissing: Failed to install bad-skill:'), true);
   // 其余技能照常安装(逐个 try,互不影响)
   assert.equal(fs.exists('/files/skills/good-skill/SKILL.md'), true);
+});
+
+
+// Refactor contracts cross the same public library/tool interfaces as production.
+test('skill exports preserve the single library constructor and concrete implementations', () => {
+  assert.strictEqual(SkillManager, InstalledSkillManager);
+  assert.strictEqual(skillExports.skillParseFrontmatter, parseSkillMetadata);
+  assert.strictEqual(skillExports.buildSkillMobileRuntimePrompt, mobilePrompt);
+  assert.strictEqual(createSkillTools, skillToolFactory);
+  assert.strictEqual(unzipSkillFiles, unpackSkill);
+  assert.deepEqual(Object.keys(skillExports).sort(), [
+    'MAX_SKILL_FILE_BYTES', 'SkillManager', 'buildSkillMobileRuntimePrompt',
+    'canonicalSkillFileName', 'collectSkillFilesFromDirectory', 'collectWorkspaceSkillFiles',
+    'createSkillTools', 'isLikelyTextSkillFile', 'makeSkillMetadata', 'resolveSkillDirPath',
+    'resolveSkillFilePath', 'skillEnsureDescription', 'skillExtractBody',
+    'skillIsPlaceholderDescription', 'skillParseFrontmatter', 'skillResolveDescription', 'unzipSkillFiles',
+  ].sort());
+});
+
+test('package replacement restores old files and keeps its catalog cache after a failed rename', () => {
+  for (const failure of ['false', 'throw']) {
+    const fs: MemFs = new MemFs();
+    seedSkill(fs, 'demo', GOOD_MD, new Map([['refs/old.md', 'OLD REFERENCE']]));
+    const manager: SkillManager = makeManager(fs);
+    const cached: SkillMetadata[] = manager.listSkills();
+    const rename = fs.renameTo.bind(fs);
+    fs.renameTo = (from: string, to: string): boolean => {
+      if (from.includes('.staging.')) {
+        if (failure === 'throw') throw new Error('rename failed');
+        return false;
+      }
+      return rename(from, to);
+    };
+    assert.equal(manager.saveSkillFilesAtomically('demo', new Map([
+      ['SKILL.md', GOOD_MD.replace('Do things.', 'NEW BODY')], ['refs/new.md', 'NEW REFERENCE'],
+    ])), false, failure);
+    assert.equal(fs.files.get('/files/skills/demo/SKILL.md'), GOOD_MD, failure);
+    assert.equal(fs.files.get('/files/skills/demo/refs/old.md'), 'OLD REFERENCE', failure);
+    assert.equal(fs.exists('/files/skills/demo/refs/new.md'), false, failure);
+    assert.strictEqual(manager.listSkills(), cached, failure);
+    assert.equal(fs.exists('/files/skills/.demo.staging.0.tmp'), false, failure);
+    assert.equal(fs.exists('/files/skills/.demo.backup.0.tmp'), false, failure);
+  }
+});
+
+test('backup rename refusal and an escaped package entry leave the installed package intact', () => {
+  const fs: MemFs = new MemFs();
+  seedSkill(fs, 'demo', GOOD_MD);
+  const manager: SkillManager = makeManager(fs);
+  const cached: SkillMetadata[] = manager.listSkills();
+  const rename = fs.renameTo.bind(fs);
+  fs.renameTo = (from: string, to: string): boolean =>
+    to.includes('.backup.') ? false : rename(from, to);
+  assert.equal(manager.saveSkillFilesAtomically('demo', new Map([['SKILL.md', GOOD_MD]])), false);
+  assert.equal(fs.files.get('/files/skills/demo/SKILL.md'), GOOD_MD);
+  assert.equal(fs.exists('/files/skills/.demo.staging.0.tmp'), false);
+  assert.equal(fs.exists('/files/skills/.demo.backup.0.tmp'), false);
+  assert.equal(manager.saveSkillFilesAtomically('demo', new Map([
+    ['SKILL.md', GOOD_MD], ['../escape.md', 'outside'],
+  ])), false);
+  assert.equal(fs.exists('/files/skills/escape.md'), false);
+  assert.equal(fs.files.get('/files/skills/demo/SKILL.md'), GOOD_MD);
+  assert.strictEqual(manager.listSkills(), cached);
+});
+
+test('successful replacement invalidates only the owning library cache and replaces the whole package', () => {
+  const fs: MemFs = new MemFs();
+  seedSkill(fs, 'demo', GOOD_MD, new Map([['refs/old.md', 'OLD REFERENCE']]));
+  const manager: SkillManager = makeManager(fs);
+  const cached: SkillMetadata[] = manager.listSkills();
+  const nextMarkdown: string = GOOD_MD.replace('A demo skill', 'Replacement skill.');
+  assert.notEqual(nextMarkdown, GOOD_MD);
+  assert.equal(manager.saveSkillFilesAtomically('demo', new Map([['SKILL.md', nextMarkdown]])), true);
+  const refreshed: SkillMetadata[] = manager.listSkills();
+  assert.notStrictEqual(refreshed, cached);
+  assert.strictEqual(manager.listSkills(), refreshed);
+  assert.equal(refreshed[0].description, 'Replacement skill.');
+  assert.equal(fs.exists('/files/skills/demo/refs/old.md'), false);
+});
+
+test('installed package read methods keep canonical files, path limits and a bounded missing-file list', () => {
+  const fs: MemFs = new MemFs();
+  seedSkill(fs, 'demo', GOOD_MD, new Map([['refs/a.md', 'REFERENCE'], ['image.png', 'binary']]));
+  const manager: SkillManager = makeManager(fs);
+  assert.equal(manager.readSkillFileText('demo', 'refs/./a.md'), 'REFERENCE');
+  assert.equal(manager.readSkillFileText('demo', '../escape.md'), null);
+  assert.equal(manager.readSkillFileText('demo', 'missing.md'), null);
+  assert.deepEqual(manager.listSkillFiles('demo', 1), ['SKILL.md']);
+  assert.deepEqual(manager.listSkillFiles('../demo'), []);
+  const collected = manager.collectFilesFromDirectory(manager.getSkillDir('demo'));
+  assert.deepEqual(Array.from(collected), [['SKILL.md', GOOD_MD], ['refs/a.md', 'REFERENCE']]);
+  assert.deepEqual(Array.from(collectSkillFilesFromDirectory(manager, manager.getSkillDir('demo'))),
+    Array.from(collected));
+});
+
+test('use_skill keeps the byte cap on both default instructions and nested references', async () => {
+  for (const relativePath of ['SKILL.md', 'refs/a.md']) {
+    const fs: MemFs = new MemFs();
+    seedSkill(fs, 'demo', GOOD_MD, new Map([['refs/a.md', 'REFERENCE']]));
+    const deps = makeToolDeps(fs, ['demo'], []);
+    const readBytes = fs.readBytes.bind(fs);
+    fs.readBytes = (path: string): Uint8Array => path === `/files/skills/demo/${relativePath}`
+      ? new Uint8Array(MAX_SKILL_FILE_BYTES + 1) : readBytes(path);
+    const tool: AgentTool = findTool(createSkillTools(deps), 'use_skill');
+    const input: JsonObject = relativePath === 'SKILL.md' ? { name: 'demo' } : { name: 'demo', path: relativePath };
+    await assert.rejects(tool.execute(input), {
+      message: `Skill archive entry ${relativePath.split('/').pop()} exceeds ${MAX_SKILL_FILE_BYTES} bytes`,
+    });
+  }
+});
+
+test('skill_import retains its installed package when the later enable-settings write fails', async () => {
+  const fs: MemFs = new MemFs();
+  const deps = makeToolDeps(fs, [], []);
+  deps.workspace = {
+    readBytes: async (): Promise<Uint8Array> => te.encode(GOOD_MD),
+    list: async (): Promise<SkillWorkspaceEntry[]> => [],
+  };
+  deps.setSkillEnabled = async (): Promise<void> => { throw new Error('settings write failed'); };
+  const tool: AgentTool = findTool(createSkillTools(deps), 'skill_import');
+  await assert.rejects(tool.execute({ workspace_path: 'SKILL.md' }), /settings write failed/);
+  assert.equal(fs.files.get('/files/skills/demo/SKILL.md'), GOOD_MD);
+  assert.equal(deps.skillManager.listSkills()[0].name, 'demo');
 });

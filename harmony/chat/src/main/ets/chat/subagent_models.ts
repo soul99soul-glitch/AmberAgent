@@ -1,10 +1,10 @@
 // subagent_models — 子代理运行时模型(D-132a Task 1)
 // Android 基准: feature/subagent/api/.../SubAgentModels.kt(全文)
 // D-128 已有 SubAgentRuntimeSetting/SubAgentMode/SubAgentOverride/
-// SubAgentDefinition 及四个默认常量继续以 agent_prompt_config.ts 为唯一事实源。
+// SubAgentDefinition 及四个默认常量由 subagent_definitions.ts 统一定义。
 // Uuid → string，沿用 Harmony chat-domain 既有适配。
 
-import type { SubAgentDefinition } from './agent_prompt_config.ts';
+import type { SubAgentDefinition } from './subagent_definitions.ts';
 
 export const EXTENDED_SUB_AGENT_TIMEOUT_MS: number = 20 * 60000;
 export const EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS: number = 200000;

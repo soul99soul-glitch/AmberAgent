@@ -22,8 +22,6 @@ ksp {
 }
 
 dependencies {
-    api(project(":core:agent-runtime"))
-
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)

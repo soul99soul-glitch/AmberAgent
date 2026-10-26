@@ -1,23 +1,18 @@
-// Run actual ChatPage picker/read methods; ArkUI rendering is outside this port-level regression.
+// Run the actual Composer owner and attachment IO; ArkUI rendering is outside this port-level regression.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('../../../chat/node_modules/typescript');
+const { loadChatComposerSession } = require('./chat_composer_fixture.cjs');
 
-const page = fs.readFileSync(path.resolve(__dirname, '../main/ets/pages/ChatPage.ets'), 'utf8');
-const pick = page.slice(page.indexOf('  private async pickFiles():'), page.indexOf('  // 长文本粘贴为文件'));
-const readStart = page.indexOf('  private readUriBytes(');
-const read = page.slice(readStart, page.indexOf('\n  // 末条 assistant', readStart));
-const source = ts.transpileModule(`class Fixture {
-  pickerToken = 0; pendingDocs = []; errorMsg = '';
-  ${pick}\n${read}\n
-}\nexports.Fixture = Fixture;`, {
+const ioSource = ts.transpileModule(fs.readFileSync(
+  path.resolve(__dirname, '../main/ets/platform_impl/chat/ChatAttachmentIO.ets'), 'utf8'), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
 
 function fixture({ select = async () => [], files = {} } = {}) {
-  const exports = {};
+  const state = { errorMsg: '' };
   const closed = [];
   const fileIo = {
     OpenMode: { READ_ONLY: 1 },
@@ -29,12 +24,22 @@ function fixture({ select = async () => [], files = {} } = {}) {
     readSync: (uri, buffer) => { new Uint8Array(buffer).set(Buffer.from(files[uri])); },
     closeSync: file => closed.push(file.fd),
   };
-  new Function('exports', 'picker', 'fileIo', 'util', 'mimeByName', source)(exports, {
-    DocumentViewPicker: class { select(options) { assert.equal(options.maxSelectNumber, 3); return select(); } },
-    DocumentSelectOptions: class {},
-  }, fileIo, { Base64Helper: class { encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } } },
-  () => 'text/plain');
-  return { page: new exports.Fixture(), closed };
+  const util = { Base64Helper: class { encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } } };
+  const io = {};
+  new Function('exports', 'require', ioSource)(io, name => {
+    if (name === '@kit.CoreFileKit') return { fileIo };
+    if (name === '@kit.ArkTS') return { util };
+    throw new Error(`Unexpected attachment IO dependency: ${name}`);
+  });
+  const Composer = loadChatComposerSession({}, {
+    picker: {
+      DocumentViewPicker: class { select(options) { assert.equal(options.maxSelectNumber, 3); return select(); } },
+      DocumentSelectOptions: class {},
+    }, util, attachmentIO: io,
+  });
+  const page = new Composer();
+  page.start({ error: message => { state.errorMsg = message; } });
+  return { page, state, closed };
 }
 
 for (const [label, failure, message] of [
@@ -49,21 +54,22 @@ for (const [label, failure, message] of [
     f.page.pendingDocs = [{ fileName: 'existing.txt' }];
     await f.page.pickFiles();
     assert.deepEqual(f.page.pendingDocs.map(doc => doc.fileName), ['existing.txt', 'first.txt', 'last.txt']);
-    assert.match(f.page.errorMsg, /bad\.txt/);
-    assert.match(f.page.errorMsg, message);
+    assert.match(f.state.errorMsg, /bad\.txt/);
+    assert.match(f.state.errorMsg, message);
     assert.equal(f.closed.includes('file://first.txt'), true);
     assert.equal(f.closed.includes('file://last.txt'), true);
+    if (typeof failure === 'number') assert.equal(f.closed.includes('file://bad.txt'), true);
   });
 }
 
 test('empty selection and picker cancellation stay silent and preserve the current composer', async () => {
   for (const select of [async () => [], async () => { throw new Error('cancel'); }]) {
-    const { page } = fixture({ select });
+    const { page, state } = fixture({ select });
     page.pendingDocs = [{ fileName: 'existing.txt' }];
-    page.errorMsg = 'existing error';
+    state.errorMsg = 'existing error';
     await page.pickFiles();
     assert.deepEqual(page.pendingDocs, [{ fileName: 'existing.txt' }]);
-    assert.equal(page.errorMsg, 'existing error');
+    assert.equal(state.errorMsg, 'existing error');
   }
 });
 
@@ -71,10 +77,10 @@ test('a stale picker callback cannot append documents or replace a current error
   let complete;
   const f = fixture({ select: () => new Promise(resolve => { complete = resolve; }) });
   const task = f.page.pickFiles();
-  f.page.pickerToken++;
-  f.page.errorMsg = 'new composer';
+  f.page.invalidatePicker();
+  f.state.errorMsg = 'new composer';
   complete(['file://stale.txt']);
   await task;
   assert.deepEqual(f.page.pendingDocs, []);
-  assert.equal(f.page.errorMsg, 'new composer');
+  assert.equal(f.state.errorMsg, 'new composer');
 });

@@ -12,6 +12,7 @@ export struct InteractiveMessageTimeline {
   @Prop topPadding: number = 0;
   @Prop bottomPadding: number = 0;
   @Prop cachedItems: number = 0;
+  @Prop preserveVisibleContent: boolean = false;
   @Prop showOlderLoader: boolean = false;
   @Prop showDivider: boolean = false;
   @Prop showScrollBar: boolean = true;
@@ -55,6 +56,7 @@ export struct InteractiveMessageTimeline {
     .width('100%')
     .layoutWeight(1)
     .cachedCount(this.cachedItems)
+    .maintainVisibleContentPosition(this.preserveVisibleContent)
     .scrollBar(this.showScrollBar ? BarState.Auto : BarState.Off)
     .enableScrollInteraction(this.scrollInteractionEnabled)
     .padding({

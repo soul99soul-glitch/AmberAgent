@@ -779,6 +779,7 @@ struct MiniAppRunnerPage {
               .onClick((): void => { this.dismissSourceDialog(); })
           }
           .width('100%')
+          .alignItems(VerticalAlign.Center)
           if (this.sourceError.length > 0) {
             Text(this.sourceError)
               .fontSize(11).fontColor(ERROR)

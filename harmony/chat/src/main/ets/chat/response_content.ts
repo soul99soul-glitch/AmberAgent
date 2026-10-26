@@ -67,7 +67,7 @@ export type ResponseContentAssetRegistry = ReadonlyArray<VisualArtifact>;
 
 const ID_PATTERN: RegExp = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
 const MAX_SVG_CHARS: number = 120_000;
-const MAX_THREE_BYTES: number = 120_000;
+const MAX_THREE_BYTES: number = 384_000;
 const LEGACY_LANGUAGES: string[] = ['show-widget', 'widget', 'generative-ui'];
 
 type DeclaredKind = 'ui' | 'svg' | 'three' | 'legacy';

@@ -1,3 +1,4 @@
+import { DeepReadSettingsSession } from '../../platform_impl/deepread_settings/DeepReadSettingsSession.ets';
 import { router, curves } from '@kit.ArkUI';
 import { makeSearchServiceOptions, loadDisplaySetting, saveDisplaySetting } from '@amber/chat-domain';
 import type { SearchSettings, SearchServiceOptions, SearchServiceOptionsType, DisplaySetting } from '@amber/chat-domain';
@@ -35,23 +36,11 @@ export struct DeepReadSettingsForm {
   @Prop modelError: string = '';
   @Prop templates: DeepReadTemplateDef[] = [];
   @StorageProp('reduceMotion') reduceMotion: boolean = false;
-  @Link fontModeIndex: number;
-  @Link fontScalePercent: number;
-  @Link templateId: string;
-  @Prop notice: string = '';
-  @Link search: SearchSettings;
-  @Link searchLoaded: boolean;
-  @Link selectedSearchId: string;
-  @Link searchError: string;
-  @State saving: boolean = false;
-  @State error: string = '';
+  @ObjectLink settings: DeepReadSettingsSession;
   private alive: boolean = false;
 
   onModel: () => void = (): void => {};
   onSearchEdit: (serviceId: string) => void = (_serviceId: string): void => {};
-  onSearchRetry: () => void = (): void => {};
-  onEdited: () => void = (): void => {};
-  onSave: () => Promise<void> = async (): Promise<void> => {};
 
   aboutToAppear(): void { this.alive = true; }
   aboutToDisappear(): void { this.alive = false; }
@@ -62,7 +51,7 @@ export struct DeepReadSettingsForm {
 
   private openTemplates(): void {
     router.pushUrl({ url: 'pages/DeepReadTemplateSettingsPage', params: {
-      readerFontMode: this.fontModeIndex === 1 ? 'serif' : 'default', readerFontScale: this.fontScalePercent,
+      readerFontMode: this.settings.fontModeIndex === 1 ? 'serif' : 'default', readerFontScale: this.settings.fontScalePercent,
     } });
   }
 
@@ -77,62 +66,62 @@ export struct DeepReadSettingsForm {
         AppStorage.setOrCreate<string>('accentColor', choice.light);
         setAccentColor(choice.light);
       });
-    } catch (error) { if (this.alive) this.error = '强调色保存失败：' + String(error); }
+    } catch (error) { if (this.alive) this.settings.error = '强调色保存失败：' + String(error); }
   }
 
   private changeSearchFlag(index: number, enabled: boolean): void {
     DeepReadHaptics.selection();
-    this.onEdited();
-    const next: SearchSettings = JSON.parse(JSON.stringify(this.search)) as SearchSettings;
+    this.settings.markSettingsEdited();
+    const next: SearchSettings = JSON.parse(JSON.stringify(this.settings.standaloneSearch)) as SearchSettings;
     if (index === 0) next.searchBuiltinDuckDuckGoEnabled = enabled;
     else if (index === 1) next.searchBuiltinBingEnabled = enabled;
     else if (index === 2) next.searchBuiltinJinaEnabled = enabled;
     else if (index === 3) next.searchBuiltinWikipediaEnabled = enabled;
     else if (index === 4) next.searchBuiltinHackerNewsEnabled = enabled;
     else next.searchGoogleWebViewFallbackEnabled = enabled;
-    this.search = next;
+    this.settings.standaloneSearch = next;
   }
 
   private selectSearch(index: number): void {
     DeepReadHaptics.selection();
-    this.onEdited();
-    const next: SearchSettings = JSON.parse(JSON.stringify(this.search)) as SearchSettings;
+    this.settings.markSettingsEdited();
+    const next: SearchSettings = JSON.parse(JSON.stringify(this.settings.standaloneSearch)) as SearchSettings;
     next.searchServiceSelected = index;
-    this.selectedSearchId = next.searchServices[index]?.id ?? '';
-    this.searchError = '';
-    this.search = next;
+    this.settings.selectedSearchId = next.searchServices[index]?.id ?? '';
+    this.settings.standaloneSearchError = '';
+    this.settings.standaloneSearch = next;
   }
 
   private changeResultSize(delta: number): void {
     DeepReadHaptics.selection();
-    this.onEdited();
-    const next: SearchSettings = JSON.parse(JSON.stringify(this.search)) as SearchSettings;
+    this.settings.markSettingsEdited();
+    const next: SearchSettings = JSON.parse(JSON.stringify(this.settings.standaloneSearch)) as SearchSettings;
     next.searchCommonOptions.resultSize = Math.max(1, Math.min(50, next.searchCommonOptions.resultSize + delta));
-    this.search = next;
+    this.settings.standaloneSearch = next;
   }
 
   private addSearch(type: SearchServiceOptionsType): void {
     const service: SearchServiceOptions = makeSearchServiceOptions(type);
-    const next: SearchSettings = JSON.parse(JSON.stringify(this.search)) as SearchSettings;
+    const next: SearchSettings = JSON.parse(JSON.stringify(this.settings.standaloneSearch)) as SearchSettings;
     next.searchServices = next.searchServices.concat([service]);
     next.searchEnabledServiceIds = next.searchEnabledServiceIds.concat([service.id]);
     next.searchServiceSelected = next.searchServices.length - 1;
-    this.search = next;
-    this.selectedSearchId = service.id;
-    this.searchError = '';
-    this.onEdited();
+    this.settings.standaloneSearch = next;
+    this.settings.selectedSearchId = service.id;
+    this.settings.standaloneSearchError = '';
+    this.settings.markSettingsEdited();
     DeepReadHaptics.selection();
   }
 
   private deleteSearch(serviceId: string): void {
-    const next: SearchSettings = JSON.parse(JSON.stringify(this.search)) as SearchSettings;
+    const next: SearchSettings = JSON.parse(JSON.stringify(this.settings.standaloneSearch)) as SearchSettings;
     next.searchServices = next.searchServices.filter((service: SearchServiceOptions): boolean => service.id !== serviceId);
     next.searchEnabledServiceIds = next.searchEnabledServiceIds.filter((id: string): boolean => id !== serviceId);
-    if (this.selectedSearchId === serviceId) this.selectedSearchId = '';
-    next.searchServiceSelected = next.searchServices.findIndex((service: SearchServiceOptions): boolean => service.id === this.selectedSearchId);
-    this.search = next;
-    this.searchError = '';
-    this.onEdited();
+    if (this.settings.selectedSearchId === serviceId) this.settings.selectedSearchId = '';
+    next.searchServiceSelected = next.searchServices.findIndex((service: SearchServiceOptions): boolean => service.id === this.settings.selectedSearchId);
+    this.settings.standaloneSearch = next;
+    this.settings.standaloneSearchError = '';
+    this.settings.markSettingsEdited();
   }
 
   @Builder
@@ -153,13 +142,7 @@ export struct DeepReadSettingsForm {
   }
 
   private async saveSettings(): Promise<void> {
-    if (!this.searchLoaded || this.saving) return;
-    this.saving = true;
-    this.error = '';
-    try {
-      await this.onSave();
-    } catch (error) { if (this.alive) this.error = '保存设置失败：' + String(error); }
-    finally { if (this.alive) this.saving = false; }
+    await this.settings.submit();
   }
 
   @Builder
@@ -205,20 +188,20 @@ export struct DeepReadSettingsForm {
 
   @Builder
   Search(): void {
-    DeepReadSettingsPicker({ label: '首选搜索服务', selected: this.search.searchServices.findIndex(
-      (service: SearchServiceOptions): boolean => service.id === this.selectedSearchId) + 1,
-      options: ['请选择服务'].concat(this.search.searchServices.map((service: SearchServiceOptions): string => deepReadSearchTitle(service.type))),
+    DeepReadSettingsPicker({ label: '首选搜索服务', selected: this.settings.standaloneSearch.searchServices.findIndex(
+      (service: SearchServiceOptions): boolean => service.id === this.settings.selectedSearchId) + 1,
+      options: ['请选择服务'].concat(this.settings.standaloneSearch.searchServices.map((service: SearchServiceOptions): string => deepReadSearchTitle(service.type))),
       onSelect: (index: number): void => { this.selectSearch(index - 1); } })
-    ForEach(this.search.searchServices, (service: SearchServiceOptions): void => {
+    ForEach(this.settings.standaloneSearch.searchServices, (service: SearchServiceOptions): void => {
       DeepReadSettingsRow({ label: deepReadSearchTitle(service.type),
-        value: this.search.searchEnabledServiceIds.includes(service.id) ? '启用' : '停用',
+        value: this.settings.standaloneSearch.searchEnabledServiceIds.includes(service.id) ? '启用' : '停用',
         onTap: (): void => { this.onSearchEdit(service.id); } })
         .bindContextMenu(this.ServiceActions(service), ResponseType.LongPress)
     }, (service: SearchServiceOptions): string => service.id)
     DeepReadSettingsRow({ label: '添加搜索服务', action: true, chevron: false })
       .bindMenu(this.AddSearchMenu())
     Row({ space: 4 }) {
-      Text(`每次搜索最多 ${this.search.searchCommonOptions.resultSize} 条`).fontSize(17).fontColor(D.ink).layoutWeight(1)
+      Text(`每次搜索最多 ${this.settings.standaloneSearch.searchCommonOptions.resultSize} 条`).fontSize(17).fontColor(D.ink).layoutWeight(1)
       Button('−').width(44).height(44).fontSize(22).fontColor(D.ink).backgroundColor(D.paper)
         .onClick((): void => { this.changeResultSize(-1); })
       Button('+').width(44).height(44).fontSize(22).fontColor(D.ink).backgroundColor(D.paper)
@@ -228,34 +211,34 @@ export struct DeepReadSettingsForm {
 
   @Builder
   FreeSources(): void {
-    DeepReadSettingsToggle({ label: 'DuckDuckGo', checked: this.search.searchBuiltinDuckDuckGoEnabled,
+    DeepReadSettingsToggle({ label: 'DuckDuckGo', checked: this.settings.standaloneSearch.searchBuiltinDuckDuckGoEnabled,
       onChange: (value: boolean): void => { this.changeSearchFlag(0, value); } })
-    DeepReadSettingsToggle({ label: 'Bing', checked: this.search.searchBuiltinBingEnabled,
+    DeepReadSettingsToggle({ label: 'Bing', checked: this.settings.standaloneSearch.searchBuiltinBingEnabled,
       onChange: (value: boolean): void => { this.changeSearchFlag(1, value); } })
-    DeepReadSettingsToggle({ label: 'Jina 搜索与正文补充读取', checked: this.search.searchBuiltinJinaEnabled,
+    DeepReadSettingsToggle({ label: 'Jina 搜索与正文补充读取', checked: this.settings.standaloneSearch.searchBuiltinJinaEnabled,
       onChange: (value: boolean): void => { this.changeSearchFlag(2, value); } })
-    DeepReadSettingsToggle({ label: 'Wikipedia', checked: this.search.searchBuiltinWikipediaEnabled,
+    DeepReadSettingsToggle({ label: 'Wikipedia', checked: this.settings.standaloneSearch.searchBuiltinWikipediaEnabled,
       onChange: (value: boolean): void => { this.changeSearchFlag(3, value); } })
-    DeepReadSettingsToggle({ label: 'Hacker News', checked: this.search.searchBuiltinHackerNewsEnabled,
+    DeepReadSettingsToggle({ label: 'Hacker News', checked: this.settings.standaloneSearch.searchBuiltinHackerNewsEnabled,
       onChange: (value: boolean): void => { this.changeSearchFlag(4, value); } })
-    DeepReadSettingsToggle({ label: 'Google 网页补充搜索', checked: this.search.searchGoogleWebViewFallbackEnabled, last: true,
+    DeepReadSettingsToggle({ label: 'Google 网页补充搜索', checked: this.settings.standaloneSearch.searchGoogleWebViewFallbackEnabled, last: true,
       onChange: (value: boolean): void => { this.changeSearchFlag(5, value); } })
   }
 
   @Builder
   Reading(): void {
-    DeepReadSettingsPicker({ label: '字体', options: ['系统字体', '衬线字体'], selected: this.fontModeIndex,
-      onSelect: (index: number): void => { DeepReadHaptics.selection(); this.fontModeIndex = index; this.onEdited(); } })
+    DeepReadSettingsPicker({ label: '字体', options: ['系统字体', '衬线字体'], selected: this.settings.fontModeIndex,
+      onSelect: (index: number): void => { DeepReadHaptics.selection(); this.settings.fontModeIndex = index; this.settings.markSettingsEdited(); } })
     Row() {
       Text('字号').fontSize(17).fontColor(D.ink).layoutWeight(1)
-      Text(`${Math.round(this.fontScalePercent)}%`).fontSize(17).fontColor(D.muted)
+      Text(`${Math.round(this.settings.fontScalePercent)}%`).fontSize(17).fontColor(D.muted)
     }.width('100%').height(48).padding({ left: 16, right: 16 })
-    Slider({ value: this.fontScalePercent, min: 70, max: 180, step: 5 }).selectedColor(D.accent)
+    Slider({ value: this.settings.fontScalePercent, min: 70, max: 180, step: 5 }).selectedColor(D.accent)
       .width('100%').padding({ left: 16, right: 16, bottom: 8 })
-      .onChange((value: number): void => { this.fontScalePercent = Math.round(value); this.onEdited(); })
+      .onChange((value: number): void => { this.settings.fontScalePercent = Math.round(value); this.settings.markSettingsEdited(); })
     DeepReadSettingsPicker({ label: '生成模板', options: this.templates.map((template: DeepReadTemplateDef): string => template.name),
-      selected: Math.max(0, this.templates.findIndex((template: DeepReadTemplateDef): boolean => template.id === this.templateId)),
-      onSelect: (index: number): void => { DeepReadHaptics.selection(); this.templateId = this.templates[index].id; this.onEdited(); } })
+      selected: Math.max(0, this.templates.findIndex((template: DeepReadTemplateDef): boolean => template.id === this.settings.templateId)),
+      onSelect: (index: number): void => { DeepReadHaptics.selection(); this.settings.templateId = this.templates[index].id; this.settings.markSettingsEdited(); } })
     DeepReadSettingsRow({ label: '管理与创建模板', last: true,
       onTap: (): void => { this.openTemplates(); } })
   }
@@ -270,28 +253,28 @@ export struct DeepReadSettingsForm {
       DeepReadSettingsNote({ text: '使用你自己的 API 凭据。生成模型与模板 AI 共用已配置的服务商。' })
       if (this.modelError.length > 0) { DeepReadSettingsNote({ text: this.modelError }) }
       DeepReadSettingsSection({ title: '多来源搜索' })
-      DeepReadSettingsGroup({ content: (): void => { this.Search(); } }).enabled(this.searchLoaded && !this.saving)
+      DeepReadSettingsGroup({ content: (): void => { this.Search(); } }).enabled(this.settings.standaloneSearchLoaded && !this.settings.saving)
       DeepReadSettingsNote({ text: '优先使用选中的搜索服务；不可用时，选择其他已启用的可用服务。' })
-      if (this.searchError.length > 0) {
-        Text(this.searchError).fontSize(13).fontColor(D.danger).width('100%')
+      if (this.settings.standaloneSearchError.length > 0) {
+        Text(this.settings.standaloneSearchError).fontSize(13).fontColor(D.danger).width('100%')
           .padding({ left: 16, right: 16, top: 8 })
         Button('重新读取搜索配置').fontSize(14).fontColor(D.accent).backgroundColor(Color.Transparent)
-          .height(44).onClick((): void => { this.onSearchRetry(); })
+          .height(44).onClick((): void => { this.settings.refreshStandaloneSearch(); })
       }
       DeepReadSettingsSection({ title: '免费聚合与正文读取' })
-      DeepReadSettingsGroup({ content: (): void => { this.FreeSources(); } }).enabled(this.searchLoaded && !this.saving)
+      DeepReadSettingsGroup({ content: (): void => { this.FreeSources(); } }).enabled(this.settings.standaloneSearchLoaded && !this.settings.saving)
       DeepReadSettingsSection({ title: '阅读与排版' })
       DeepReadSettingsGroup({ content: (): void => { this.Reading(); } })
-      DeepReadSettingsButton({ label: this.saving ? '保存中…' : '保存并应用', icon: 'check_circle', success: this.notice.startsWith('已保存'), disabled: !this.searchLoaded || this.saving,
+      DeepReadSettingsButton({ label: this.settings.saving ? '保存中…' : '保存并应用', icon: 'check_circle', success: this.settings.saved.startsWith('已保存'), disabled: !this.settings.standaloneSearchLoaded || this.settings.saving,
         onTap: (): void => { this.saveSettings(); } }).margin({ top: 28 })
-      if (this.notice.length > 0) {
-        DeepReadSettingsNote({ text: this.notice })
+      if (this.settings.saved.length > 0) {
+        DeepReadSettingsNote({ text: this.settings.saved })
           .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: this.reduceMotion ? 0 : -10 }))
             .animation({ duration: this.reduceMotion ? 0 : 300, curve: Curve.EaseOut }))
       }
-      if (this.error.length > 0) {
-        Text(this.error).fontSize(13).fontColor(D.danger).width('100%').padding({ top: 10, left: 16, right: 16 })
+      if (this.settings.error.length > 0) {
+        Text(this.settings.error).fontSize(13).fontColor(D.danger).width('100%').padding({ top: 10, left: 16, right: 16 })
       }
-    }.width('100%').enabled(!this.saving)
+    }.width('100%').enabled(!this.settings.saving)
   }
 }

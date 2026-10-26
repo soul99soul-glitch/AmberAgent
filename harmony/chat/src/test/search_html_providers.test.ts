@@ -73,6 +73,16 @@ test('bing:主解析 b_algo + u= 跳转解码 + distinctBy(url) + take', async (
   assert.equal(r.items[1].text, 'second');
 });
 
+test('bing:实搜日期摘要中的 ensp 实体按文本空白规范化', async () => {
+  const page = '<ol id="b_results"><li class="b_algo">'
+    + '<h2><a href="https://www.openharmony.cn/">OpenAtom OpenHarmony</a></h2>'
+    + '<div class="b_caption"><p>2026年10月16日&ensp;·&ensp;OpenAtom OpenHarmony</p></div>'
+    + '</li></ol>';
+  initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: page }], []));
+  const result = await bingSearchService.search({ query: 'OpenHarmony documentation' }, { resultSize: 10 }, bingOptions());
+  assert.equal(result.items[0].text, '2026年10月16日 · OpenAtom OpenHarmony');
+});
+
 test('bing:人机校验页 → blocked 文案逐字', async () => {
   initSearchSdk(mockHttpSeq(
     [{ status: 200, headers: {}, body: '<html>Please verify you are human</html>' }], []));
@@ -80,6 +90,20 @@ test('bing:人机校验页 → blocked 文案逐字', async () => {
     bingSearchService.search({ query: 'q' }, { resultSize: 10 }, bingOptions()),
     (e: Error): boolean => e.message === 'Bing blocked the request with a verification page',
   );
+});
+
+test('bing:验证码相关的正常标题和摘要仍返回自然结果', async () => {
+  for (const fallback of [false, true]) {
+    const result = '<h2><a href="https://example.com/captcha">CAPTCHA guide</a></h2>'
+      + '<p>How sites verify you are human and detect unusual traffic.</p>';
+    const page = `<main><ol id="b_results">${fallback ? result : `<li class="b_algo">${result}</li>`}</ol></main>`;
+    initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: page }], []));
+    const response = await bingSearchService.search({ query: 'captcha' }, { resultSize: 10 }, bingOptions());
+    assert.equal(response.items.length, 1);
+    assert.equal(response.items[0].title, 'CAPTCHA guide');
+    assert.equal(response.items[0].url, 'https://example.com/captcha');
+    assert.match(response.items[0].text, /verify you are human/);
+  }
 });
 
 test('bing:无 b_algo → fallback h2 a;全空 → no results 文案逐字', async () => {

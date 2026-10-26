@@ -383,8 +383,8 @@ struct ChatModelParamsPage {
             else if (tool === 'url_context') this.toolUrlContext = value;
             else this.toolImageGen = value;
           })
-      }.constraintSize({ minWidth: 44, minHeight: 44 }).justifyContent(FlexAlign.End).margin({ left: 12 })
-    }.width('100%').constraintSize({ minHeight: 64 }).padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      }.constraintSize({ minWidth: 44, minHeight: 44 }).justifyContent(FlexAlign.End).alignItems(VerticalAlign.Center).margin({ left: 12 })
+    }.width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 64 }).padding({ top: 12, bottom: 12 })
     if (!last) Row().width('100%').height(1).backgroundColor(this.colors.line)
   }
 
@@ -682,32 +682,35 @@ struct ChatModelParamsPage {
                 selected: this.modelTypeIndex(),
                 onSelect: (idx: number): void => { this.modelType = MODEL_TYPE_VALUES[idx]; },
               })
-              if (this.modelType === 'chat') {
-                ToggleRow({
-                  label: '工具调用', checked: this.toolCallingEnabled, isLast: true,
-                  onToggle: (): void => { this.toolCallingEnabled = !this.toolCallingEnabled; },
-                })
-                Text('默认开启，允许模型调用搜索、MCP 等工具。模型不支持工具调用时可关闭。')
-                  .fontSize(TEXT_STYLES.secondary.size).fontColor(this.colors.muted)
-                  .width('100%').padding({ left: 16, right: 16, bottom: 8 })
-              }
-              Text('输入模态')
-                .fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
-                .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-                .fontColor(this.colors.muted).margin({ top: 12, bottom: 4 })
+            }
+            .width('100%').alignItems(HorizontalAlign.Start)
+            .padding({ left: 16, right: 16, top: 12, bottom: 4 })
+            if (this.modelType === 'chat') {
               ToggleRow({
-                label: '文本', checked: this.inputText, isLast: false,
-                onToggle: (): void => { this.inputText = !this.inputText; },
+                label: '工具调用', checked: this.toolCallingEnabled, isLast: true,
+                onToggle: (): void => { this.toolCallingEnabled = !this.toolCallingEnabled; },
               })
-              ToggleRow({
-                label: '图片', checked: this.inputImage, isLast: false,
-                onToggle: (): void => { this.inputImage = !this.inputImage; },
-              })
-              ToggleRow({
-                label: '音频', checked: this.inputAudio, isLast: true,
-                onToggle: (): void => { this.inputAudio = !this.inputAudio; },
-              })
-              Column().height(12)
+              Text('默认开启，允许模型调用搜索、MCP 等工具。模型不支持工具调用时可关闭。')
+                .fontSize(TEXT_STYLES.secondary.size).fontColor(this.colors.muted)
+                .width('100%').padding({ left: 16, right: 16, bottom: 8 })
+            }
+            Text('输入模态')
+              .fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+              .fontColor(this.colors.muted).width('100%').padding({ left: 16, right: 16 }).margin({ top: 12, bottom: 4 })
+            ToggleRow({
+              label: '文本', checked: this.inputText, isLast: false,
+              onToggle: (): void => { this.inputText = !this.inputText; },
+            })
+            ToggleRow({
+              label: '图片', checked: this.inputImage, isLast: false,
+              onToggle: (): void => { this.inputImage = !this.inputImage; },
+            })
+            ToggleRow({
+              label: '音频', checked: this.inputAudio, isLast: true,
+              onToggle: (): void => { this.inputAudio = !this.inputAudio; },
+            })
+            Column() {
               this.textField('上下文窗口(tokens)', this.contextWindowText, '留空 = 未知',
                 (v: string): void => { this.contextWindowText = v; })
             }
@@ -765,7 +768,7 @@ struct ChatModelParamsPage {
                   Blank()
                   BtnGhost({ label: '删除', onTap: (): void => { this.removeHeader(i); } })
                 }
-                .width('100%').margin({ bottom: 8 })
+                .width('100%').alignItems(VerticalAlign.Center).margin({ bottom: 8 })
                 this.textField('Header 名称', this.headerNames[i] ?? '', 'Header 名称',
                   (v: string): void => { this.setHeaderName(i, v); })
                 this.textField('Header 值', this.headerValues[i] ?? '', 'Header 值',
@@ -793,7 +796,7 @@ struct ChatModelParamsPage {
                   Blank()
                   BtnGhost({ label: '删除', onTap: (): void => { this.removeBody(i); } })
                 }
-                .width('100%').margin({ bottom: 8 })
+                .width('100%').alignItems(VerticalAlign.Center).margin({ bottom: 8 })
                 this.textField('Body Key', this.bodyKeys[i] ?? '', 'Body Key',
                   (v: string): void => { this.setBodyKey(i, v); })
                 Column() {
@@ -824,7 +827,7 @@ struct ChatModelParamsPage {
             }
             .padding({ left: 16, right: 16, top: 8, bottom: 24 })
           }
-          .width('100%').padding({ left: 16, right: 16, bottom: 16 }).justifyContent(FlexAlign.Start)
+          .width('100%').padding({ bottom: 16 }).justifyContent(FlexAlign.Start)
         }
         .align(Alignment.TopStart)
         .layoutWeight(1).enabled(!this.saving)

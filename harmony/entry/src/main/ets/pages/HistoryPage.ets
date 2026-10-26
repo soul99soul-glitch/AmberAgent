@@ -243,6 +243,9 @@ struct HistoryPage {
               .width('100%')
             }
           }, (g: HistoryGroup): string => g.date)
+          ListItem() {
+            PageSpacer()
+          }
         }
         .width('100%').layoutWeight(1)
         .divider({ strokeWidth: 0, color: Color.Transparent })
@@ -267,7 +270,6 @@ struct HistoryPage {
         .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 }))
           .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
-      PageSpacer()
     
       }, (e: number): string => `theme-${e}`)
 }

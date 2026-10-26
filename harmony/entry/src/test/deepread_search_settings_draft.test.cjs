@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { actualPage } = require('../../../deepread/src/test/deepread_ui_fixture.cjs');
+const { actualPage } = require('../../../deepread/src/test/deepread_settings_fixture.cjs');
 const file = 'pages/SettingDeepReadPage.ets';
 function settings(key = 'draft-key') {
   return { enableWebSearch: true, searchServices: [{ id: 'service', type: 'tavily', apiKey: key }],

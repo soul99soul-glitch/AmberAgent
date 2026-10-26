@@ -480,8 +480,11 @@ struct SettingAppearancePage {
             }
 
             // D0-11:AMOLED 纯黑(深色模式画布)
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.AmoledCard(); } })
-              .margin({ left: 16, right: 16, top: 12 })
+            Row() {
+              CardGroup({ radius: 18, stroke: true, content: (): void => { this.AmoledCard(); } })
+            }
+            .width('100%')
+            .padding({ left: 16, right: 16, top: 12 })
 
             // ── 主题包(内置 + 导入;iOS 主题库对齐:双列迷你样张卡) ──
             PlainSection({ label: '主题包' })

@@ -20,7 +20,6 @@ kotlin {
 }
 
 dependencies {
-    api(project(":feature:terminal:api"))
     api(project(":core:app-infra"))
     api(project(":core:settings"))
     api(project(":feature:runtime:api"))

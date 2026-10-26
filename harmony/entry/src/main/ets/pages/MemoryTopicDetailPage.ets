@@ -117,7 +117,7 @@ struct MemoryTopicDetailPage {
             .fontColor(this.accentColor).constraintSize({ minHeight: 44 })
             .onClick((): void => { router.pushUrl({ url: 'pages/MemoryDocumentPage', params: { relativePath: this.documentPath } }); })
           Blank()
-        }.width('100%').margin({ top: 2 })
+        }.width('100%').alignItems(VerticalAlign.Center).margin({ top: 2 })
       } else {
         Text('该主题当前没有有效派生文档。').fontSize(12).fontColor(this.colors.secondary).width('100%')
       }
@@ -178,7 +178,7 @@ struct MemoryTopicDetailPage {
       Scroll() {
         Column() {
           if (this.error.length > 0) {
-            Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
+            Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').padding({ left: 16, right: 16 }).wordBreak(WordBreak.BREAK_ALL)
           }
           if (!this.loaded) {
             Text('正在读取主题…').fontSize(13).fontColor(this.colors.secondary).width('100%')
@@ -188,14 +188,14 @@ struct MemoryTopicDetailPage {
               .textAlign(TextAlign.Center).padding({ top: 44 })
           } else {
             PlainSection({ label: '主题' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SummaryCard(); } })
+            Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.SummaryCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
             PlainSection({ label: `源记忆成员 · ${this.members.length}` })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.MembersCard(); } })
+            Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.MembersCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
             PlainSection({ label: '操作' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.DangerCard(); } })
+            Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.DangerCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
           }
           PageSpacer()
-        }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
+        }.width('100%').padding({ top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart)
     
       }, (e: number): string => `theme-${e}`)

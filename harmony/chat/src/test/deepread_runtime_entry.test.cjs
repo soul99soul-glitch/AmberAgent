@@ -14,11 +14,21 @@ const names = new Set([
   'makeProviderChoice', 'effectiveProvider', 'buildProviderApi', 'loadDeepReadModelOptions',
 ]);
 const actualFactories = () => {
-  const source = fs.readFileSync(entryFile, 'utf8');
-  const file = ts.createSourceFile(entryFile, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  return file.statements.filter(statement => ts.isVariableStatement(statement)
-    && statement.declarationList.declarations.some(declaration => names.has(declaration.name.getText(file))))
-    .map(statement => statement.getText(file)).join('\n');
+  const picked = [];
+  for (const owner of ['ProviderModelRuntime.ets', 'DeepReadRuntime.ets']) {
+    const filename = path.join(path.dirname(entryFile), owner);
+    const file = ts.createSourceFile(filename, fs.readFileSync(filename, 'utf8'),
+      ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const visit = statement => {
+      if (ts.isVariableStatement(statement)
+        && statement.declarationList.declarations.some(declaration => names.has(declaration.name.getText(file)))) {
+        picked.push(statement.getText(file));
+      }
+      ts.forEachChild(statement, visit);
+    };
+    visit(file);
+  }
+  return picked.join('\n') + '\n' + [...names].map(name => `exports.${name} = ${name};`).join('\n');
 };
 const harness = async () => {
   const domain = await import('../main/ets/index.ts');
@@ -73,9 +83,17 @@ const harness = async () => {
     encodeImageForChat: () => '', encodeImageDetailed: () => ({}),
     resolveEntryGoogleAuth: async () => null,
   };
+  host.ports = host;
+  host.getHttpClient = () => http;
+  host.getStorage = () => storage;
+  host.getRepository = () => repository;
+  host.getPrefetcher = () => ({});
+  host.getAiClient = () => ({});
+  host.getNotifier = () => ({});
   vm.runInNewContext(ts.transpileModule(actualFactories(), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText, host, { filename: entryFile });
+  host.resolveDeepReadRuntimeCore = exports.resolveDeepReadRuntimeCore;
   return { domain, kv, requests, lifecycle, histories, exports, captures, snapshot,
     setCached: output => { cached = output === null ? null : { topicId: 'topic', title: 'title', output }; },
     setDefaultTemplateId: id => { defaultTemplateId = id; },

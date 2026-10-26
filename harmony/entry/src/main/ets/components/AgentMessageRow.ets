@@ -39,6 +39,7 @@ import { ChatUserBubble } from './ChatUserBubble.ets';
 import { ImagePreviewDialog } from './ui/ImagePreviewDialog.ets';
 import { MediaImage } from './MediaImage.ets';
 import { MessageVideoCard } from './MessageVideoCard.ets';
+import { MessageRowViewState } from './MessageRowViewState.ets';
 
 const EMPTY_SMART_UI_ACCESSOR: SmartUiStateAccessor = {
   get: (_sourceKey: string, _stateId: string): SmartUiScalar | undefined => undefined,
@@ -52,6 +53,19 @@ interface MessageSvgValidation {
   snapshot: string;
   ok: boolean;
   error: string;
+}
+
+interface MessageResponseText {
+  partIndex: number;
+  text: string;
+}
+
+interface MessageResponseProjection {
+  messageId: string;
+  streaming: boolean;
+  texts: MessageResponseText[];
+  assets: VisualArtifact[];
+  declaredIds: string[];
 }
 
 export interface AgentMessageRowHostCapabilities {
@@ -99,6 +113,7 @@ export struct AgentMessageRow {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('darkMode') darkMode: boolean = false;
   @Prop @Watch('onMessageChanged') message: UIMessage;
+  viewState: MessageRowViewState | null = null;
   @Prop capabilities: AgentMessageRowHostCapabilities = NO_AGENT_MESSAGE_ROW_CAPABILITIES;
   @Prop branchCount: number = 1;
   @Prop selectIndex: number = 0;
@@ -192,6 +207,7 @@ export struct AgentMessageRow {
   // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)
   @State reasoningStates: Record<string, string> = {};
   private cachedBlocks: MessagePartBlock[] | null = null;
+  private cachedResponseProjection: MessageResponseProjection | null = null;
   // D-105:ask_user 草稿态(题 id → 文本/单选值;:102;题 id → 多选集;:104)
   @State askAnswers: Record<string, string> = {};
   @State askMultiAnswers: Record<string, string[]> = {};
@@ -221,12 +237,42 @@ export struct AgentMessageRow {
 
   @Builder
   private MessageImagePreview(): void {
-    ImagePreviewDialog({ images: this.imagePreviewUrls, initialIndex: this.imagePreviewIndex,
-      onDismiss: (): void => { this.imagePreviewOpen = false; } })
+    Column() {
+      ImagePreviewDialog({ images: this.imagePreviewUrls, initialIndex: this.imagePreviewIndex,
+        onDismiss: (): void => { this.imagePreviewOpen = false; } })
+    }.width('100%').height('100%')
   }
 
   aboutToAppear(): void {
+    this.restoreViewState();
     if (this.streaming) this.sawStream = true;
+    if (this.viewState !== null) this.viewState.sawStream = this.sawStream;
+  }
+
+  aboutToDisappear(): void {
+    this.saveViewState();
+  }
+
+  private restoreViewState(): void {
+    const state: MessageRowViewState | null = this.viewState;
+    if (state === null) return;
+    this.reasoningStates = MessageRowViewState.copyTextValues(state.reasoningStates);
+    this.askAnswers = MessageRowViewState.copyTextValues(state.askAnswers);
+    this.askMultiAnswers = MessageRowViewState.copySelections(state.askMultiAnswers);
+    this.sawStream = state.sawStream;
+    this.lastMiniAppStreamText = state.lastMiniAppStreamText;
+    this.lastMiniAppStreamMessageId = state.lastMiniAppStreamMessageId;
+  }
+
+  private saveViewState(): void {
+    const state: MessageRowViewState | null = this.viewState;
+    if (state === null) return;
+    state.reasoningStates = MessageRowViewState.copyTextValues(this.reasoningStates);
+    state.askAnswers = MessageRowViewState.copyTextValues(this.askAnswers);
+    state.askMultiAnswers = MessageRowViewState.copySelections(this.askMultiAnswers);
+    state.sawStream = this.sawStream;
+    state.lastMiniAppStreamText = this.lastMiniAppStreamText;
+    state.lastMiniAppStreamMessageId = this.lastMiniAppStreamMessageId;
   }
 
   private onMessageChanged(): void {
@@ -237,6 +283,7 @@ export struct AgentMessageRow {
   private onStreamingChange(_propName: string): void {
     if (this.streaming) {
       this.sawStream = true;
+      if (this.viewState !== null) this.viewState.sawStream = true;
       this.captureMiniAppStreamText();
     }
   }
@@ -250,6 +297,10 @@ export struct AgentMessageRow {
       const part: UIMessagePart = this.message.parts[index];
       if (part.type === 'text' && mightContainMiniApp(part.text)) {
         this.lastMiniAppStreamText = part.text;
+        if (this.viewState !== null) {
+          this.viewState.lastMiniAppStreamText = this.lastMiniAppStreamText;
+          this.viewState.lastMiniAppStreamMessageId = this.lastMiniAppStreamMessageId;
+        }
         return;
       }
     }
@@ -313,6 +364,7 @@ export struct AgentMessageRow {
     for (const k of keys) copy[k] = this.askAnswers[k];
     copy[qid] = value;
     this.askAnswers = copy;
+    this.saveViewState();
   }
 
   private toggleAskMulti(qid: string, option: string): void {
@@ -325,11 +377,13 @@ export struct AgentMessageRow {
     else cur.push(option);
     copy[qid] = cur;
     this.askMultiAnswers = copy;
+    this.saveViewState();
   }
 
   private clearAskDrafts(): void {
     this.askAnswers = {};
     this.askMultiAnswers = {};
+    this.saveViewState();
   }
 
   private submitAskAnswers(t: UIMessagePartTool): void {
@@ -353,6 +407,7 @@ export struct AgentMessageRow {
     for (const k of keys) copy[k] = this.reasoningStates[k];
     copy[idx] = next;
     this.reasoningStates = copy;
+    this.saveViewState();
   }
 
   private autoCollapseReasoning(idx: string): void {
@@ -362,6 +417,7 @@ export struct AgentMessageRow {
     for (const k of keys) copy[k] = this.reasoningStates[k];
     copy[idx] = 'collapsed';
     this.reasoningStates = copy;
+    this.saveViewState();
   }
 
   private thinkingStepsAt(bi: number): ThinkingStep[] {
@@ -426,13 +482,39 @@ export struct AgentMessageRow {
   }
 
   private responseAssets(): VisualArtifact[] {
-    const assets: VisualArtifact[] = [];
+    return this.responseProjection().assets;
+  }
+
+  private responseDeclaredIds(): string[] {
+    return this.responseProjection().declaredIds;
+  }
+
+  private responseProjectionMatches(blocks: MessagePartBlock[], projection: MessageResponseProjection): boolean {
+    if (projection.messageId !== this.message.id || projection.streaming !== this.streaming) return false;
+    let textIndex: number = 0;
+    for (const block of blocks) {
+      if (block.kind !== 'content' || block.part.type !== 'text') continue;
+      const previous: MessageResponseText | undefined = projection.texts[textIndex];
+      if (previous === undefined || previous.partIndex !== block.index || previous.text !== block.part.text) return false;
+      textIndex++;
+    }
+    return textIndex === projection.texts.length;
+  }
+
+  private responseProjection(): MessageResponseProjection {
     const blocks: MessagePartBlock[] = this.getBlocks();
+    // Cache hits still read the V1 state so XML results retain their Builder dependency.
     const validations: MessageSvgValidation[] = this.svgValidationResults;
+    // V1 @Prop copies message objects on parent updates; compare text values and source offsets.
+    if (this.cachedResponseProjection !== null &&
+      this.responseProjectionMatches(blocks, this.cachedResponseProjection)) return this.cachedResponseProjection;
+    const assets: VisualArtifact[] = [];
+    const texts: MessageResponseText[] = [];
     const declaredIds: string[] = declaredResponseContentIds(this.message.parts);
     for (let index: number = 0; index < blocks.length; index++) {
       const block: MessagePartBlock = blocks[index];
       if (block.kind !== 'content' || block.part.type !== 'text') continue;
+      texts.push({ partIndex: block.index, text: block.part.text });
       let segments = parseResponseContent(block.part.text,
         this.streaming && this.isLastTextBlock(blocks, index), undefined, !this.streaming, declaredIds);
       for (const result of validations) {
@@ -443,7 +525,15 @@ export struct AgentMessageRow {
         if (segment.artifact !== null) assets.push(segment.artifact);
       }
     }
-    return assets;
+    const projection: MessageResponseProjection = {
+      messageId: this.message.id,
+      streaming: this.streaming,
+      texts,
+      assets,
+      declaredIds,
+    };
+    this.cachedResponseProjection = projection;
+    return projection;
   }
 
   private validatedArtifact(partIndex: number, start: number, id: string,
@@ -452,6 +542,7 @@ export struct AgentMessageRow {
       (result: MessageSvgValidation): boolean => result.partIndex === partIndex && result.start === start && result.id === id);
     if (previous?.snapshot === snapshot && previous.ok === ok && previous.error === error) return;
     const result: MessageSvgValidation = { partIndex, start, id, snapshot, ok, error };
+    this.cachedResponseProjection = null;
     this.svgValidationResults = this.svgValidationResults.filter(
       (item: MessageSvgValidation): boolean => item.partIndex !== partIndex || item.start !== start || item.id !== id).concat([result]);
   }
@@ -493,6 +584,7 @@ export struct AgentMessageRow {
   @Builder
   UserTextContent(partIndex: number): void {
     MarkdownText({
+      viewState: this.viewState,
       content: this.contentTextAt(partIndex),
       fontSize: this.bodyFontSize(),
       fontColor: USER_INK,
@@ -508,6 +600,8 @@ export struct AgentMessageRow {
   @Builder
   private MiniAppCard(index: number): void {
     MiniAppChatCard({
+      viewState: this.viewState,
+      viewStateKey: `${this.message.id}#miniapp-${index}`,
       // Builder arguments capture values; read the current message through the stable index.
       part: this.miniAppPartAt(index),
       streamText: this.miniAppTextAt(index),
@@ -576,6 +670,7 @@ export struct AgentMessageRow {
                 })
               } else {
                 ChatMessageTools({
+                  viewState: this.viewState,
                   part: this.toolPartAt(bi, si),
                   jevSubjectHash: this.jevSubjectHashForPart(this.toolPartAt(bi, si), this.locatorFor(this.toolPartAt(bi, si))),
                   canApprove: this.capabilities.approveTool && this.packageAskUserPart(this.toolPartAt(bi, si)) === null,
@@ -644,9 +739,10 @@ export struct AgentMessageRow {
             Column() {
               if (this.enableGenerativeWidgets) {
               WidgetMessageContent({
+                viewState: this.viewState,
                 content: this.contentTextAt(block.index),
                 assets: this.responseAssets(), messageStreaming: this.streaming,
-                declaredContentIds: declaredResponseContentIds(this.message.parts),
+                declaredContentIds: this.responseDeclaredIds(),
                 smartUiSourcePrefix: JSON.stringify([this.smartUiConversationId, this.message.id, block.index]),
                 smartUiNodeId: this.smartUiNodeId,
                 smartUiStateAccessor: this.smartUiStateAccessor,
@@ -694,6 +790,7 @@ export struct AgentMessageRow {
               })
               } else {
                 MarkdownText({
+                  viewState: this.viewState,
                   content: this.contentTextAt(block.index), fontSize: this.bodyFontSize(), fontColor: INK,
                   streaming: this.streaming && this.textDeltasLive && this.isLastTextBlock(this.getBlocks(), bi),
                   chatFontFamily: this.chatFontFamily, enableLatexRendering: this.enableLatexRendering,
@@ -739,6 +836,7 @@ export struct AgentMessageRow {
         }
       } else if (block.kind === 'subagent') {
         ChatMessageSubAgentStep({
+          viewState: this.viewState,
           tools: block.step.tools,
           runId: block.step.runId,
           canOpenRun: this.capabilities.openSubAgentRun,
@@ -747,6 +845,7 @@ export struct AgentMessageRow {
         })
       } else if (block.kind === 'council') {
         ChatMessageCouncilStep({
+          viewState: this.viewState,
           tools: block.step.tools,
           runId: block.step.runId,
           canOpenRun: this.capabilities.openToolPreview,
@@ -763,6 +862,7 @@ export struct AgentMessageRow {
   private MessageContent(): void {
     if (this.message.role === 'user' && this.capabilities.edit && this.capabilities.openActions) {
       Column() { this.MessageBlocks(); }
+        .width('100%').alignItems(HorizontalAlign.End)
         .gesture(GestureGroup(
           GestureMode.Exclusive,
           LongPressGesture().onAction((): void => { this.onOpenActions(); }),
@@ -770,16 +870,21 @@ export struct AgentMessageRow {
         ))
     } else if (this.message.role === 'user' && this.capabilities.edit) {
       Column() { this.MessageBlocks(); }
+        .width('100%').alignItems(HorizontalAlign.End)
         .gesture(TapGesture().onAction((): void => { this.onEdit(); }))
     } else if (this.message.role === 'user' && this.capabilities.openActions) {
       Column() { this.MessageBlocks(); }
+        .width('100%').alignItems(HorizontalAlign.End)
         .gesture(LongPressGesture().onAction((): void => { this.onOpenActions(); }))
     } else if (this.message.role === 'assistant' && this.capabilities.openActions) {
       Column() { this.MessageBlocks(); }
+        .width('100%').alignItems(HorizontalAlign.Start)
         // 正文的原生 Text 支持选区；先打开操作面板，再由「选择文字」进入选区页。
         .priorityGesture(LongPressGesture().onAction((): void => { this.onOpenActions(); }))
     } else {
       Column() { this.MessageBlocks(); }
+        .width('100%')
+        .alignItems(this.message.role === 'user' ? HorizontalAlign.End : HorizontalAlign.Start)
     }
   }
 

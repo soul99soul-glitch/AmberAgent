@@ -1,0 +1,214 @@
+{
+  "baselineHead": "cf02929297ab53cbbf954aa91486880bde45bf81",
+  "counting": "Git tracked UTF-8 text, physical lines including blank lines and comments; strictly greater than threshold",
+  "excluded": [
+    "docs and .workflow snapshots",
+    "third-party mermaid.min.js and three.min.js",
+    "tests"
+  ],
+  "scopeNote": "Production directories include retained host/reference and Web paths; reachability is checked per phase.",
+  "over1000": 50,
+  "over1500": 17,
+  "files": [
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatPage.ets",
+      "lines": 5471
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets",
+      "lines": 4637
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/repository.ts",
+      "lines": 3498
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt",
+      "lines": 3476
+    },
+    {
+      "path": "app/src/main/java/app/amber/core/service/ChatService.kt",
+      "lines": 2554
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/creation.ts",
+      "lines": 2362
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/board/DeepReadScreen.kt",
+      "lines": 2076
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCard.kt",
+      "lines": 1995
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/AppContainer.ets",
+      "lines": 1990
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatPage.kt",
+      "lines": 1709
+    },
+    {
+      "path": "harmony/chat/src/main/ets/index.ts",
+      "lines": 1668
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt",
+      "lines": 1641
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets",
+      "lines": 1620
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/HomeListPane.ets",
+      "lines": 1590
+    },
+    {
+      "path": "app/src/main/assets/webmount/bridge.js",
+      "lines": 1578
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/components/richtext/MarkdownNew.kt",
+      "lines": 1555
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets",
+      "lines": 1504
+    },
+    {
+      "path": "feature/office/api/src/main/kotlin/app/amber/feature/office/FeishuOfficeEnhancementModels.kt",
+      "lines": 1369
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalWebMountPage.kt",
+      "lines": 1330
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAgentMemoryPage.kt",
+      "lines": 1316
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/board/BoardPage.kt",
+      "lines": 1303
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/components/ai/ModelList.kt",
+      "lines": 1260
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_prompt_config.ts",
+      "lines": 1231
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingModelPage.kt",
+      "lines": 1220
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderConfigPage.kt",
+      "lines": 1210
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/device_schedule_tools.ts",
+      "lines": 1199
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/skills.ts",
+      "lines": 1191
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingExperimentalWebMountPage.ets",
+      "lines": 1178
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/extensions/PromptPage.kt",
+      "lines": 1176
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInputSandbox.kt",
+      "lines": 1161
+    },
+    {
+      "path": "app/src/main/java/app/amber/core/ai/GenerationHandler.kt",
+      "lines": 1141
+    },
+    {
+      "path": "web-ui/app/routes/conversations.tsx",
+      "lines": 1132
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadAgentRunManager.kt",
+      "lines": 1129
+    },
+    {
+      "path": "ai/src/main/java/app/amber/ai/provider/providers/openai/ResponseAPI.kt",
+      "lines": 1118
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/context_compact.ts",
+      "lines": 1117
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunService.ets",
+      "lines": 1108
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/tools/FeishuOfficeTools.kt",
+      "lines": 1107
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_cron.ts",
+      "lines": 1101
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeviceSchedulePort.ets",
+      "lines": 1096
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/BoardPage.ets",
+      "lines": 1084
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/workspace_artifacts.ts",
+      "lines": 1082
+    },
+    {
+      "path": "feature/modelcouncil/src/main/kotlin/app/amber/feature/modelcouncil/ModelCouncilManager.kt",
+      "lines": 1080
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadSectionWriterTools.kt",
+      "lines": 1074
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets",
+      "lines": 1064
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInputComposers.kt",
+      "lines": 1030
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelProjectsPage.ets",
+      "lines": 1022
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/section_writer_tools.ts",
+      "lines": 1014
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets",
+      "lines": 1012
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/PageTemplate.ets",
+      "lines": 1008
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingMcpPage.kt",
+      "lines": 1004
+    }
+  ]
+}

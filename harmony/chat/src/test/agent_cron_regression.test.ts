@@ -9,19 +9,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  AgentCronManager, makeAgentCronTask,
+  AgentCronManager,
   type AgentCronPersistencePort, type AgentCronSchedulerPort, type AgentCronTask,
 } from '../main/ets/chat/agent_cron.ts';
 import { AgentTaskStore, type AgentTaskFilePort } from '../main/ets/chat/agent_task.ts';
-import {
-  runCronTaskOnce, type CronRunExecutorDeps, type CronNotifierPort,
-} from '../main/ets/chat/agent_cron_run_executor.ts';
-import type { AbortSignalLike } from '@amber/deepread-domain';
-import { createMemoryConversationRepository } from '../main/ets/chat/persistence.ts';
-import { createMemoryConversationStore } from '../main/ets/chat/chat_turn.ts';
-import { makeAssistant } from '../main/ets/chat/assistant.ts';
-import { makeAssistantMessage } from '../main/ets/chat/message.ts';
-import type { ChatTurnDeps } from '../main/ets/chat/chat_turn.ts';
 
 const ZONE: string = 'UTC';
 
@@ -153,49 +144,4 @@ test('R17: 已删除任务的 markRunCancelled/scheduleNextRun 不复活(无副�
   await manager.markRunCancelled(task.id);
   await manager.scheduleNextRun(task.id);
   assert.deepEqual(await manager.listTasks(), []);
-});
-
-// ===== R17:run_executor signal 透传 =====
-
-test('R17: runCronTaskOnce 将 signal 透传给 provider', async () => {
-  const { manager } = await makeManager();
-  const repository = createMemoryConversationRepository();
-  const events: string[] = [];
-  const notifier: CronNotifierPort = {
-    notifyRunning: () => { events.push('running'); },
-    notifyCompleted: () => { events.push('completed'); },
-    notifyFailed: () => { events.push('failed'); },
-    cancel: () => {},
-  };
-  const task = makeAgentCronTask({
-    id: 'sig-1', title: 't', prompt: 'p', cronExpression: '* * * * *',
-    timezoneId: ZONE, conversationId: 'conv-sig', enabled: true,
-    createdAtMs: 0, updatedAtMs: 0,
-  });
-  let seenSignal: AbortSignalLike | undefined = undefined;
-  const deps: CronRunExecutorDeps = {
-    manager,
-    repository,
-    notifier,
-    buildTurnDeps: (): ChatTurnDeps => ({
-      assistant: makeAssistant({ name: 'cron' }),
-      inputTransformers: [],
-      outputTransformers: [],
-      provider: {
-        streamText: async (_m, onChunk, opts): Promise<void> => {
-          seenSignal = opts?.signal;
-          onChunk({
-            id: 'c', model: 'm', usage: null,
-            choices: [{ index: 0, delta: makeAssistantMessage('done'), message: null, finishReason: null }],
-          });
-        },
-      },
-      store: createMemoryConversationStore(),
-    }),
-  };
-  const signal: AbortSignalLike = { aborted: false };
-  const result = await runCronTaskOnce(deps, task, signal);
-  assert.equal(result.ok, true);
-  assert.equal(seenSignal, signal, 'provider received the run signal');
-  assert.deepEqual(events, ['running', 'completed']);
 });

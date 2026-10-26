@@ -23,7 +23,6 @@ dependencies {
     api(project(":ai"))
     api(project(":core:model"))
     api(project(":core:settings"))
-    api(project(":core:ai:transformers:api"))
     api(project(":feature:runtime:api"))
     api(libs.kotlinx.coroutines.core)
     api(libs.kotlinx.serialization.json)

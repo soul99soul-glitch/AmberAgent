@@ -23,8 +23,10 @@ export struct GeneratedImageCarousel {
 
   @Builder
   private ImagePreview(): void {
-    ImagePreviewDialog({ images: this.imageUrls, initialIndex: this.currentIndex,
-      onDismiss: (): void => { this.previewOpen = false; } })
+    Column() {
+      ImagePreviewDialog({ images: this.imageUrls, initialIndex: this.currentIndex,
+        onDismiss: (): void => { this.previewOpen = false; } })
+    }.width('100%').height('100%')
   }
 
   private async shareCurrentImage(): Promise<void> {

@@ -55,7 +55,6 @@ val chatModule = module {
             memoryExtractor = get(),
             pendingMessageStore = get(),
             userInputPreprocessor = get(),
-            agentRunner = get(),
             agentEventStore = get(),
         )
     }

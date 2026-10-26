@@ -12,7 +12,7 @@ async function fixture() {
   const source = fs.readFileSync(file, 'utf8');
   const names = ['displayedReasoningText', 'updateThinkingContentHeight', 'updateThinkingViewportHeight',
     'requestThinkingFollow', 'stopThinkingFollow', 'beginThinkingTouch', 'endThinkingTouch',
-    'pauseThinkingFollow', 'resumeThinkingFollow', 'reasoningLines', 'updateReasoningSlots'];
+    'pauseThinkingFollow', 'resumeThinkingFollow', 'reasoningLines', 'updateReasoningSlots', 'onStateChanged'];
   const methods = names.map(name => {
     const match = source.match(new RegExp(`  private ${name}\\([^]*?\\n  \\}`));
     assert.ok(match, `${name} must be a real component method`);
@@ -40,8 +40,9 @@ async function fixture() {
   const compiled = ts.transpileModule(`class Probe {${methods}\n}\nexports.Probe = Probe;`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText;
-  vm.runInNewContext(compiled, { exports: exportsObject, ReasoningLineSlot: ObservedSlot, Math, Curve: { Linear: 'linear' },
+  const environment = vm.createContext({ exports: exportsObject, ReasoningLineSlot: ObservedSlot, Math, Curve: { Linear: 'linear' },
     toDisplayReasoningText: domain.toDisplayReasoningText, reasoningDisplayLimit: domain.reasoningDisplayLimit });
+  vm.runInContext(compiled, environment);
   const writes = [];
   let offset = 0;
   const probe = Object.assign(new exportsObject.Probe(), {
@@ -61,8 +62,41 @@ async function fixture() {
     set: value => { slotAssignments++; slots = value; },
   });
   return { probe, writes, offset: value => { offset = value; }, slotWrites,
-    slotCreations: () => slotCreations, slotAssignments: () => slotAssignments };
+    slotCreations: () => slotCreations, slotAssignments: () => slotAssignments,
+    stringPrototype: vm.runInContext('String.prototype', environment) };
 }
+
+test('long streaming thoughts split only the bounded display window', async () => {
+  const f = await fixture();
+  f.probe.part.reasoning = 'old completed line\n'.repeat(10000) + 'current tail';
+  const split = f.stringPrototype.split;
+  let largestSplit = 0;
+  f.stringPrototype.split = function(...args) {
+    largestSplit = Math.max(largestSplit, this.length);
+    return split.apply(this, args);
+  };
+  const lines = f.probe.reasoningLines();
+  assert.equal(lines.map(line => line.text).join('\n'), f.probe.displayedReasoningText());
+  assert.ok(largestSplit <= 1500, `split processed ${largestSplit} characters outside the display window`);
+});
+
+test('collapsed thinking skips text projection and catches up once when reopened', async () => {
+  const f = await fixture();
+  f.probe.state = 'collapsed';
+  f.probe.part.reasoning = 'old\n'.repeat(10000);
+  let projections = 0;
+  const project = f.probe.reasoningLines.bind(f.probe);
+  f.probe.reasoningLines = () => { projections++; return project(); };
+  f.probe.updateReasoningSlots();
+  f.probe.part.reasoning += 'latest';
+  f.probe.updateReasoningSlots();
+  assert.equal(projections, 0);
+  assert.equal(f.slotCreations(), 0);
+  f.probe.state = 'expanded';
+  f.probe.onStateChanged();
+  assert.equal(projections, 1);
+  assert.equal(f.probe.reasoningSlots.map(slot => slot.text).join('\n'), f.probe.displayedReasoningText());
+});
 
 test('thinking text preserves raw line breaks and Markdown symbols, matching the iOS plain text view', async () => {
   const { probe } = await fixture();
@@ -149,21 +183,21 @@ test('reasoning freezes completed text blocks while preserving every original ne
   assert.equal(after.map(line => line.text).join('\n'), probe.displayedReasoningText());
 });
 
-test('a 6000-character thought with 200 short lines uses bounded native text blocks', async () => {
+test('a long thought with 200 short lines keeps a bounded 1500-character tail', async () => {
   const { probe } = await fixture();
   probe.part.reasoning = Array.from({ length: 200 }, (_, i) => `${i}:` + 'a'.repeat(27)).join('\n');
   const before = probe.reasoningLines();
-  assert.ok(before.length < 20, `${before.length} native Text nodes recreate the long-thought layout bottleneck`);
+  assert.ok(before.length <= 5, `${before.length} native Text nodes exceed the short tail window`);
   assert.equal(before.map(line => line.text).join('\n'), probe.displayedReasoningText());
   probe.part.reasoning += '\nnew partial line';
   const after = probe.reasoningLines();
   const stable = before.slice(2, -1);
-  assert.ok(stable.length > 5);
+  assert.ok(stable.length >= 1, 'the short window must retain a completed interior block');
   for (const block of stable) assert.ok(after.some(next => next.key === block.key));
   assert.equal(after.map(line => line.text).join('\n'), probe.displayedReasoningText());
 });
 
-test('the stream-to-body handoff preserves the 6000-character window until explicit reopen', async () => {
+test('the stream-to-body handoff preserves the 1500-character window until explicit reopen', async () => {
   const { probe } = await fixture();
   probe.part.reasoning = Array.from({ length: 250 }, (_, i) => `${i}:` + 'z'.repeat(29)).join('\n');
   probe.preserveStreamLines = true;
@@ -178,7 +212,8 @@ test('the stream-to-body handoff preserves the 6000-character window until expli
 
 test('window boundaries, blank lines and long unbroken paragraphs retain exact raw text', async () => {
   const { probe } = await fixture();
-  for (const text of ['', '\n', 'a\n\n', 'x'.repeat(6500), 'a'.repeat(511) + '\n\n' + 'b'.repeat(6000),
+  for (const text of ['', '\n', 'a\n\n', 'x'.repeat(1499), 'x'.repeat(1500), 'x'.repeat(1501),
+    'x'.repeat(6500), 'a'.repeat(511) + '\n\n' + 'b'.repeat(6000),
     Array.from({ length: 500 }, (_, i) => i % 3 ? 'line-' + i : '').join('\n')]) {
     probe.part.reasoning = text;
     assert.equal(probe.reasoningLines().map(line => line.text).join('\n'), probe.displayedReasoningText());
@@ -207,7 +242,7 @@ test('each delta updates the existing tail slot without republishing the ForEach
   assert.equal(f.slotWrites.length, 1, 'metadata-only updates must not invalidate text');
 });
 
-test('a moving 6000-character window retains notice and clipped-edge slots by absolute source position', async () => {
+test('a moving 1500-character window retains notice and clipped-edge slots by absolute source position', async () => {
   const f = await fixture();
   f.probe.part.reasoning = Array.from({ length: 250 }, (_, i) => `${i}:` + 'z'.repeat(29)).join('\n');
   f.probe.updateReasoningSlots();

@@ -18,7 +18,7 @@ import {
   defaultReasoningLevelForModel, mergeCustomParams, resolveSessionDefaults, toChatModel,
 } from './context_assembly.ts';
 import type { GenerationRetrySetting } from './generation_retry.ts';
-import type { SubAgentDefinition } from './agent_prompt_config.ts';
+import type { SubAgentDefinition } from './subagent_definitions.ts';
 import type { SubAgentTaskSpec, SubAgentResult } from './subagent_models.ts';
 import { makeSubAgentResult } from './subagent_models.ts';
 import { SubAgentReportCapture } from './subagent_report_tool.ts';

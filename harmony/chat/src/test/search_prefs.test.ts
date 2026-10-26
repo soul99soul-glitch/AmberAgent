@@ -90,6 +90,16 @@ test('prefs:decode 失败 → 默认;`!= false` 语义;selected 解析失败 →
   assert.equal(d.searchBuiltinBingEnabled, true);
 });
 
+test('prefs: historical result counts use the execution range without rewriting storage on read', async () => {
+  const store = createMemoryKeyValueStore();
+  for (const [stored, expected] of [[50, 40], [41, 40], [0, 1], [10.8, 10], [20, 20]]) {
+    const raw = JSON.stringify({ resultSize: stored });
+    await store.put(SEARCH_PREFS_KEYS.searchCommon, raw);
+    assert.equal((await loadSearchPrefs(store)).searchCommonOptions.resultSize, expected);
+    assert.equal(store.entries.get(SEARCH_PREFS_KEYS.searchCommon), raw);
+  }
+});
+
 test('prefs:update — next == current 短路不写;变化才写', async () => {
   const store = createMemoryKeyValueStore();
   let puts: number = 0;

@@ -398,11 +398,6 @@ export {
   GROK_OAUTH_REDIRECT_URI, GROK_OAUTH_SCOPE, GROK_REFRESH_SKEW_MS,
 } from './chat/grok_oauth.ts';
 export type { GrokOAuthTokens, GrokAuthStatus, GrokAuthStatusCode, GrokTokenStore } from './chat/grok_oauth.ts';
-export {
-  classifyGoogleAuthForm, GoogleAuthNotImplementedError, isGoogleAuthNotImplementedError,
-  throwGoogleAuthNotImplemented,
-} from './chat/google_oauth_contracts.ts';
-export type { GoogleAuthNotImplementedKind, GoogleProviderAuthForm } from './chat/google_oauth_contracts.ts';
 
 // Kernel façade (Phase 3)
 export {
@@ -423,60 +418,17 @@ export type { ConversationExportOptions, ConversationExportJson, ChatMessageArch
 export { parseGenerativeWidgets, widgetDocument, widgetActionPrompt, sanitizeWidgetHtml } from './chat/generative_widget.ts';
 export type { GenerativeWidget, GenerativeWidgetAction, GenerativeWidgetSegment } from './chat/generative_widget.ts';
 export type { ThreeSceneSpec, ThreeSceneObject, ThreeSceneObjectType } from './chat/three_scene.ts';
+export { renderThreeSceneCover } from './chat/three_scene.ts';
 export { GENERATIVE_WIDGET_INSTRUCTION } from './chat/generative_widget_prompt.ts';
-export { parseSmartUi, validateSmartUiNode, validateSmartUiState } from './chat/smart_ui/protocol.ts';
-export {
-  SMART_UI_COMPONENT_KINDS, SMART_UI_COMPONENT_CATALOG, componentKindAllowsChildren, componentKindRequiresState,
-  componentKindIsPresentationState, componentKindHasOptions, componentKindIsNumeric,
-  componentKindIsMultiSelection, componentNumberMin, componentNumberMax, componentNumberStep,
-  decodeSmartUiSelection, encodeSmartUiSelection, smartUiComponentValueValid, smartUiComponentDisplayText,
-} from './chat/smart_ui/components.ts';
-export type {
-  SmartUiComponent, SmartUiComponentKind, SmartUiComponentRow, SmartUiComponentStyle,
-  SmartUiStudyItem, SmartUiStudyOption,
-  SmartUiComponentTone, SmartUiComponentEmphasis, SmartUiComponentDensity,
-  SmartUiComponentAlignment, SmartUiComponentSpace, SmartUiComponentCatalogEntry, SmartUiComponentFamily,
-} from './chat/smart_ui/components.ts';
-export type { StudyProgress } from './chat/smart_ui/study.ts';
-export {
-  emptyStudyProgress, gradedItemCount, hasGradedItems, chooseStudyOption, revealStudyAnswer,
-  nextStudy, previousStudy, restartStudy, parseStudyProgress, serializeStudyProgress,
-  shouldAdoptStudyProgress, studyProgressFrom,
-} from './chat/smart_ui/study.ts';
-export {
-  smartUiContinuationSnapshot, appendSmartUiContinuation, isExplicitSmartUiContinuation,
-  latestSmartUiContinuationSource, isSmartUiTaskState, smartUiContinuationDocumentForSource,
-  SMART_UI_MAX_CONTINUATION_SNAPSHOT_CHARS,
-} from './chat/smart_ui/continuation.ts';
-export type { SmartUiContinuationCandidate } from './chat/smart_ui/continuation.ts';
-export type {
-  SmartUiDocument, SmartUiNode, SmartUiState, SmartUiScalar, SmartUiOption, SmartUiDiagnostic,
-  SmartUiDraftAction, SmartUiResetAction, SmartUiAction, SmartUiVisibilityCondition, SmartUiNodeType, SmartUiValueType,
-  SmartUiVariant, SmartUiLayout, SmartUiTone,
-  SmartUiDocumentStatus, SmartUiDiagnosticSeverity,
-} from './chat/smart_ui/protocol.ts';
-export {
-  appendSmartUiDraft, createSmartUiController, limitSmartUiDraftPrompt,
-  SMART_UI_MAX_INPUT_VALUE_CHARS, SMART_UI_MAX_DRAFT_PROMPT_CHARS,
-} from './chat/smart_ui/interaction.ts';
-export type {
-  SmartUiStateAccessor, SmartUiStateValue, SmartUiStateReconciliation, SmartUiStateChange, SmartUiController,
-  SmartUiAssetDiagnostic,
-} from './chat/smart_ui/interaction.ts';
+
+// Smart UI capability public surface.
+export * from './public/smart_ui.ts';
 export { parseResponseContent, validateResponseContentReferences, stripDeclaredResponseBlocks, applySvgValidation,
   declaredResponseContentIds } from './chat/response_content.ts';
 export type {
   ResponseContentSegment, ResponseContentDiagnostic, VisualArtifact, ResponseContentAssetRegistry,
   ResponseContentStatus, ResponseContentSegmentType, VisualArtifactType,
 } from './chat/response_content.ts';
-export {
-  runCronTaskOnce, fireDueCronTasks, isCronTaskDue,
-} from './chat/agent_cron_run_executor.ts';
-export type { CronNotifierPort, CronRunExecutorDeps, CronRunResult } from './chat/agent_cron_run_executor.ts';
-export {
-  evaluateWebMountWait, parseWaitProbeJson,
-} from './chat/webmount_wait.ts';
-export type { WebMountWaitConditions, WebMountWaitProbe, WebMountWaitResult } from './chat/webmount_wait.ts';
 export {
   createSyncBackup, restoreSyncBackup, inspectSyncArchive, buildSyncPayload, decodeArchive,
   conversationFromSyncDto, settingsFromSyncPayload,
@@ -626,28 +578,6 @@ export {
 } from './chat/mention_roles.ts';
 export type { MentionRoleItem, MentionRoleKind, MentionContext } from './chat/mention_roles.ts';
 
-// G2-S1:流式文本显示 pacing/buffer/safe-slice 纯逻辑(StreamingDisplay.kt + StreamingCharReveal.kt)
-export {
-  StreamingCharRevealClock,
-  streamingDisplayTargetSpeed, streamingDisplayMaxCharsPerEmit,
-  streamingDisplayBacklogCatchUpEnd, safeStreamingDisplayEnd,
-  safeStreamingTerminalEnd, streamingImmediateDisplayText,
-  streamingTailActiveWhen,
-} from './chat/streaming_display.ts';
-
-// Phase 3:流式逐字 reveal 状态驱动(可注入时间,对齐 rememberStreamingDisplayText)
-export {
-  StreamingDisplayState,
-  STREAM_DISPLAY_SPEED_ALPHA,
-  STREAM_DISPLAY_MIN_EMIT_INTERVAL_MS,
-  STREAM_DISPLAY_MIN_FRAME_DELTA_MS,
-  STREAM_DISPLAY_MAX_FRAME_DELTA_MS,
-  STREAM_DISPLAY_INITIAL_FRAME_DELTA_SECONDS,
-} from './chat/streaming_display.ts';
-export type {
-  StreamingDisplaySliceProxy,
-} from './chat/streaming_display.ts';
-
 // Phase 3:Markdown 增量解析缓存(精确 + 前缀/增量,代码围栏/表格边界安全回退)
 export {
   MarkdownCache,
@@ -659,13 +589,6 @@ export {
 export type {
   MarkdownCacheEntry, MarkdownCacheResult, MarkdownCacheStats,
 } from './chat/markdown_cache.ts';
-
-// G2-S3:模型推理能力推断(ChatInputUsage.kt:509-660)
-export {
-  reasoningFamilyOf, reasoningOptionsForModel, coerceToReasoningOptions,
-  providerRoutingKey,
-} from './chat/reasoning_family.ts';
-export type { ReasoningFamily, ReasoningOption } from './chat/reasoning_family.ts';
 
 // G3-S1:显示偏好设置(PreferencesStore.kt:315-355)
 export {
@@ -835,7 +758,7 @@ export type {
   SearchService, SearchSdkRuntime, KeyRoulette, LruKeyRouletteStore,
 } from './search/search_service.ts';
 export {
-  DEFAULT_SEARCH_COMMON_OPTIONS, SEARCH_SERVICE_TYPES, GROK_DEFAULT_SYSTEM_PROMPT,
+  DEFAULT_SEARCH_COMMON_OPTIONS, MAX_SEARCH_RESULTS, SEARCH_SERVICE_TYPES, GROK_DEFAULT_SYSTEM_PROMPT,
   DEFAULT_SEARCH_SERVICE_OPTIONS,
   makeSearchServiceOptions, searchServiceOptionsToJson, searchServiceOptionsFromJson,
   searchResultToJson, scrapedResultToJson,
@@ -1017,159 +940,11 @@ export {
 } from './chat/tool_profile_filter.ts';
 export type { ToolProfileFilterResult } from './chat/tool_profile_filter.ts';
 
-// ===== D-085a:记忆子系统读路径纯模块 =====
-// memory_models(MemoryModels.kt)/memory_time_anchor(MemoryTimeAnchorParser.kt)/
-// memory_prompt_builder(MemoryPromptBuilder.kt)/memory_recall(MemoryRecallStore.kt
-// 的 rank/score/tokenize 纯函数)。Store 编排与接线留 D-085b。
-export {
-  DEFAULT_MEMORY_RECALL_SETTING,
-  memoryCandidateStatusFromWireName, memoryEventTypeFromWireName,
-  memoryKindFromWireName, memoryScopeFromWireName,
-  makeMemoryCandidate, makeMemoryEvent, makeMemoryRecord,
-} from './chat/memory_models.ts';
-export type {
-  MemoryCandidate, MemoryCandidateStatus, MemoryEvent, MemoryEventType,
-  MemoryKind, MemoryRecallSetting, MemoryRecord, MemoryScope,
-} from './chat/memory_models.ts';
-export {
-  applyMemoryTopicSuggestions, buildMemoryTopicPrompt,
-  decodeMemoryTopicSuggestions, isMemoryTopicSource, pruneMemoryTopics,
-} from './chat/memory_topics.ts';
-export type {
-  MemoryTopicSuggestion, MemoryTopicApplyResult, MemoryTopicPruneResult,
-} from './chat/memory_topics.ts';
-export { renderMemoryDocuments } from './chat/memory_documents.ts';
-export type {
-  MemoryDocumentProjection, MemoryDerivedDocument,
-} from './chat/memory_documents.ts';
-export {
-  classifyMemoryFreshness, deriveMemoryExpiresAt,
-} from './chat/memory_time_anchor.ts';
-export type { MemoryFreshness } from './chat/memory_time_anchor.ts';
-export {
-  buildMemoryContext, isSensitiveMemoryContent, SENSITIVE_MEMORY_TERMS,
-} from './chat/memory_prompt_builder.ts';
-export {
-  memoryRecallScoreToDebugText, rankMemoryRecords, scoreMemoryRecord,
-  tokenizeMemoryQuery, USER_ALWAYS_ELIGIBLE_CONFIDENCE,
-} from './chat/memory_recall.ts';
-export type {
-  MemoryRecallFreshness, MemoryRecallScore, MemoryRecallSelection,
-} from './chat/memory_recall.ts';
-
-// ===== D-085b:记忆召回编排(MemoryRecallStore.kt:14-53)+ 动态块通道 =====
-export {
-  buildMemoryRecallPrompt, recallMemoryRecords, recallMemorySelections,
-} from './chat/memory_recall_store.ts';
-export type {
-  MemoryReadRepository, MemoryRecallRuntimeGate,
-} from './chat/memory_recall_store.ts';
-export {
-  filterActiveMemoryRecords, touchMemoryRecords,
-} from './chat/memory_recall_store.ts';
-
-// ===== D-085c:memory_* 工具(MemoryTools.kt 全文)+ 写路径纯函数 =====
-export {
-  createMemoryTools, makeAssistantMemory,
-} from './chat/builtin_memory_tools.ts';
-export type {
-  AssistantMemory, MemoryToolDeps, MemoryToolWriteRequest,
-} from './chat/builtin_memory_tools.ts';
-export {
-  appendMemoryRecord, deleteMemoryRecord, memoriesOfAssistant,
-  memoryBucketForScope, memoryKindForBucketAdd, memoryRecordToAssistantMemory,
-  memoryScopeForBucket, nextMemoryId, updateMemoryRecordContent,
-  MEMORY_BUCKET_GLOBAL, MEMORY_BUCKET_LONG_TERM, MEMORY_BUCKET_SHORT_TERM,
-} from './chat/memory_write.ts';
-export type { MemoryAddParams, MemoryWriteResult } from './chat/memory_write.ts';
-
-// ===== D-085d:记忆抽取(MemoryExtractionPrompt/CandidateFilter/MemoryExtractor) =====
-export { buildMemoryExtractionPrompt } from './chat/memory_extraction_prompt.ts';
-export { filterMemoryCandidates } from './chat/memory_candidate_filter.ts';
-export type { MemoryFilterResult } from './chat/memory_candidate_filter.ts';
-export {
-  autoWriteEventMessage, isDurableAutoWriteCandidate, parseMemoryCandidates,
-  resetMemoryExtractionDebounce, resolveCandidateExpiresAt, runMemoryExtraction,
-  shouldAutoWriteCandidate,
-  DURABLE_AUTO_WRITE_CONFIDENCE, SHORT_TERM_PROJECT_AUTO_WRITE_CONFIDENCE,
-} from './chat/memory_extractor.ts';
-export type {
-  MemoryExtractionDeps, MemoryWorkerGate, MemoryWorkerModelResolution,
-  ParsedMemoryCandidate,
-} from './chat/memory_extractor.ts';
-
-// ===== D-085e:记忆导出导入(FrontmatterCodec + ImportExportManager) =====
-export {
-  decodeMemoryFrontmatter, encodeMemoryFrontmatter,
-} from './chat/memory_frontmatter.ts';
-export type { MemoryFrontmatterCodecDeps } from './chat/memory_frontmatter.ts';
-export {
-  exportMemoriesTo, importMemoriesFrom, memoryEventToJsonText,
-  memoryExportFileName, resolveMemoryExportRoot,
-} from './chat/memory_import_export.ts';
-export type {
-  MemoryExportFs, MemoryExportResult, MemoryImportExportDeps, MemoryImportResult,
-} from './chat/memory_import_export.ts';
-export { upsertMemoryRecord } from './chat/memory_write.ts';
-
-// ===== D-085f:dream 子系统核心(Gate/Prompt/Planner/Applier) =====
-export { buildMemoryDreamPrompt } from './chat/memory_dream_prompt.ts';
+// Memory capability public surface.
+export * from './public/memory.ts';
 export {
   buildAgentSoulPrompt, DEFAULT_AGENT_SOUL_MARKDOWN,
 } from './chat/agent_soul_prompt.ts';
-export { memorySummaryGroups } from './chat/memory_summary.ts';
-export type { MemorySummaryGroups } from './chat/memory_summary.ts';
-export {
-  dreamPlanOnlyApplicable, isAnyDreamEnabled, isDreamMaintenanceEnabled,
-  isDreamModelEnabled, makeMemoryDreamPlan, memoryDreamPlanHasChanges,
-  memoryDreamPlanSummaryText, mergeDreamPlanWith, parseDreamModelPlanJson,
-  planDreamMaintenance, runMemoryDreamApply, runMemoryDreamPlan,
-} from './chat/memory_dream.ts';
-export type {
-  MemoryDaydreamModelResolution, MemoryDreamApplierDeps, MemoryDreamPlan,
-  MemoryDreamPlannerDeps, MemoryDreamWorkerGate, MemoryMergeSuggestion,
-  MemorySupersedeSuggestion,
-} from './chat/memory_dream.ts';
-
-// ===== D-085g:dream plan 持久化 + 运行编排(Coordinator/Scheduler/Worker) =====
-export {
-  createMemoryDreamPlanStore, decodeDreamPlanJson, encodeDreamPlanJson,
-  memoryDreamPlanSourceFromWireName, memoryDreamPlanStatusFromWireName,
-  persistedDreamPlanSummary,
-} from './chat/memory_dream_plan_store.ts';
-export type {
-  MemoryDreamPlanDaoPort, MemoryDreamPlanEntity, MemoryDreamPlanSource,
-  MemoryDreamPlanStatus, MemoryDreamPlanStore, PersistedMemoryDreamPlan,
-} from './chat/memory_dream_plan_store.ts';
-export {
-  computeDelayUntilNextNightWindowMs, dreamSyncShouldSchedule, localDayStart,
-  runMemoryDreamRun, runMemoryDreamWorkerOnce,
-  DREAM_EXTRA_OPEN_AGENT_MEMORY, DREAM_NOTIFICATION_ID, DREAM_NOTIFY_FAILED_BIGTEXT_TAKE,
-  DREAM_NOTIFY_FAILED_TEXT_TAKE, DREAM_NOTIFY_FAILED_TITLE, DREAM_NOTIFY_PENDING_TITLE,
-  DREAM_NOTIFY_RUNNING_TEXT, DREAM_NOTIFY_RUNNING_TITLE,
-  MEMORY_DREAM_MANUAL_RUN_NAME, MEMORY_DREAM_WORK_NAME,
-} from './chat/memory_dream_run.ts';
-export type {
-  MemoryDreamReviewNotifier, MemoryDreamRunCoordinatorDeps, MemoryDreamRunGate,
-  MemoryDreamRunOutcome, MemoryDreamWorkerRunDeps,
-} from './chat/memory_dream_run.ts';
-
-// ===== D-088:Memory 页 dream/候选操作编排(SettingAgentMemoryVM 操作段) =====
-export {
-  acceptMemoryCandidate, applyMemoryDreamPlanOp, dismissMemoryDreamPlanOp,
-  ignoreLowConfidenceMemoryCandidates, ignoreMemoryCandidate,
-  memoryDreamApplyFailureMessage, memoryDreamPlanFailureMessage,
-  memoryDreamReviewSummaryText, memoryLowConfidenceIgnoredMessage,
-  planMemoryDreamOp,
-  LOW_CONFIDENCE_CANDIDATE_THRESHOLD,
-  MEMORY_DREAM_APPLIED_MESSAGE, MEMORY_DREAM_APPLY_EMPTY_MESSAGE,
-  MEMORY_DREAM_PLAN_EMPTY_MESSAGE, MEMORY_DREAM_PLAN_REPLACED_MESSAGE,
-  MEMORY_DREAM_PLAN_SAVED_MESSAGE, MEMORY_NO_LOW_CONFIDENCE_MESSAGE,
-} from './chat/memory_dream_ops.ts';
-export type {
-  MemoryCandidateOpsDeps, MemoryDreamApplyOpDeps, MemoryDreamApplyOpResult,
-  MemoryDreamPlanOpDeps, MemoryDreamPlanOpResult, MemoryIgnoreLowConfidenceResult,
-} from './chat/memory_dream_ops.ts';
 
 // ===== D-086:FilesRepository 跟踪(managed_files) =====
 export {
@@ -1366,7 +1141,6 @@ export type {
   InlineImageToken,
   InlineMathToken,
 } from './chat/markdown_blocks.ts';
-export { composeLatex } from './chat/math_compose.ts';
 
 // ===== Phase C5:Jev 判断服务 =====
 export {
@@ -1607,7 +1381,6 @@ export { createCouncilTools } from './chat/council_tools.ts';
 export type { CouncilToolsDeps } from './chat/council_tools.ts';
 export { councilRunFromTools } from './chat/council_display.ts';
 
-export * from './chat/native_timeline_motion';
 export { makeNovelTextGenerationParams, resolveNovelMaxOutputTokens } from './chat/novel_request_config.ts';
 export { applyNovelStateReasoning } from './chat/novel_state_reasoning.ts';
 export { freezeNovelRuntimeConfiguration, readNovelRuntimeConfiguration } from './chat/novel_runtime_snapshot.ts';
@@ -1632,37 +1405,4 @@ export type {
 
 export { createNovelProjectOperationTools, executeNovelProjectOperation } from './chat/novel_project_operations.ts';
 export type { NovelProjectOperationPort } from './chat/novel_project_operations.ts';
-
-// Memory optimization: temporal history, reinforcement and derived profiles.
-export { restoreMemoryRecord } from './chat/memory_restore.ts';
-export { reinforceMemoryRecords } from './chat/memory_recall_store.ts';
-export { isMemoryActive, canPromoteMemory, shouldArchiveIdleMemory, memoryLocalDate, memoryDateLabel } from './chat/memory_lifecycle.ts';
-export { applyMemoryExtractionActions, collectMemoryExtractionSources, memoryExpiryOn,
-  normalizeMemoryRelativeDates, isGroundedMemoryRewrite } from './chat/memory_extraction_actions.ts';
-export type { MemoryExtractionAction, MemoryExtractionApplyResult, MemoryExtractionSource } from './chat/memory_extraction_actions.ts';
-
-export { memoryProfileSources, buildMemoryProfile, coveredMemoryProfileRecords,
-  isMemoryProfileCurrent, selectMemoryProfile, MINIMUM_MEMORY_PROFILE_SOURCES, MAX_MEMORY_PROFILE_ITEMS } from './chat/memory_profile.ts';
-export type { MemoryProfile, MemoryProfileItem, MemoryProfileSelection, MemoryProfileSourceSnapshot } from './chat/memory_profile.ts';
-export { nearDuplicateCandidates, planConfirmedMemoryMerges, remapMemoryProfileItems,
-  buildMemoryProfilePassPrompt, parseMemoryProfilePassOutput } from './chat/memory_semantic_dedup.ts';
-export type { MemoryNearDuplicateCandidate, MemorySemanticMerge, MemoryProfilePassOutput } from './chat/memory_semantic_dedup.ts';
-
-export { createMemoryCitationTransformer, readMemoryCitationIds, memoryCitationIds, stripMemoryCitations } from './chat/memory_citations.ts';
-export { invalidateMemoryTopicsForSource } from './chat/memory_topics.ts';
-
-export { parseStoredMemoryProfile } from './chat/memory_profile.ts';
-
-export { extractionMessagesContaminated } from './chat/memory_extractor.ts';
-
-export type { SmartUiTextBinding, SmartUiTextBindingPath } from './chat/smart_ui/protocol.ts';
-export { SMART_UI_MAX_TEXT_BINDINGS } from './chat/smart_ui/protocol.ts';
-export { smartUiDefinitionFingerprint, smartUiDraftKey, smartUiConversationKeyPrefix,
-  restoreSmartUiDraft, serializeSmartUiDraft } from './chat/smart_ui/persistence.ts';
-export type { SmartUiDraftSource, SmartUiDraftRestore } from './chat/smart_ui/persistence.ts';
-export { createSmartUiDraftStore } from './chat/smart_ui/store.ts';
-export type { SmartUiDraftStore, SmartUiDraftSaveResult } from './chat/smart_ui/store.ts';
-export { projectWeatherReadTool, resolveWeatherBinding, annotateSmartUiWeatherBindings,
-  weatherBindingRef } from './chat/smart_ui/binding.ts';
-export type { SmartUiWeatherProjection, SmartUiToolSource } from './chat/smart_ui/binding.ts';
 export { resolveGenerativeWidgetInstruction } from './chat/generative_widget_prompt.ts';

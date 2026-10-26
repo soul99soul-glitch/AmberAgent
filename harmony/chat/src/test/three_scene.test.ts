@@ -26,6 +26,33 @@ test('rejects malformed, non-finite, duplicate and giant geometry before renderi
   assert.equal(normalizeThreeScene({ objects: [object(), object()] }), null);
   assert.equal(normalizeThreeScene({ objects: [object({ type: 'box', size: [1, 2] })] }), null);
   assert.equal(normalizeThreeScene({ objects: [object({ id: 'bad-color', color: 'red' })] }), null);
-  assert.equal(normalizeThreeScene({ objects: Array.from({ length: 49 }, (_value, index) => object({ id: `o-${index}` })) }), null);
+  assert.equal(normalizeThreeScene({ objects: Array.from({ length: 513 }, (_value, index) => object({ id: `o-${index}` })) }), null);
 });
+
+test('supports multi-hundred voxel scenes, box defaults, and compact voxels tuples', () => {
+  const shorthand = normalizeThreeSceneObject({ id: 'v1', color: '#36f', position: [1, 2, 3] });
+  assert.deepEqual(shorthand, {
+    id: 'v1',
+    type: 'box',
+    color: '#3366ff',
+    position: [1, 2, 3],
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    size: [1, 1, 1],
+  });
+  const dense = normalizeThreeScene({
+    objects: Array.from({ length: 200 }, (_v, i) => ({ id: `b-${i}`, color: '#4caf50', position: [i % 10, Math.floor(i / 10), 0] })),
+    voxels: [
+      [0, 5, 0, '#f80'],
+      [1, 5, 0, '#ff8800', 2],
+      [2, 5, 0, '#112233', 2, 3, 4],
+    ],
+  });
+  assert.ok(dense !== null);
+  assert.equal(dense.objects.length, 203);
+  assert.deepEqual(dense.objects[200].size, [1, 1, 1]);
+  assert.deepEqual(dense.objects[201].size, [2, 2, 2]);
+  assert.deepEqual(dense.objects[202].size, [2, 3, 4]);
+});
+
 

@@ -7,15 +7,22 @@ const ts = require('../../../chat/node_modules/typescript');
 const { projectPolishOutcomes } = require('../../../deepread/src/main/ets/novel/polish_outcomes.ts');
 
 const fixture = () => {
-  const filename = path.resolve(__dirname, '../main/ets/di/AppContainer.ets');
+  const filename = path.resolve(__dirname, '../main/ets/di/NovelRuntime.ets');
   const source = ts.createSourceFile(filename, fs.readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true);
-  const declaration = source.statements.find(statement => ts.isVariableStatement(statement)
-    && statement.declarationList.declarations.some(item => item.name.getText(source) === 'getNovelCreation'));
+  const declarations = [];
+  const visit = node => {
+    if (ts.isVariableStatement(node) && node.declarationList.declarations.some(
+      item => item.name.getText(source) === 'getNovelCreation')) declarations.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  assert.equal(declarations.length, 1, 'Read the real Novel creation owner');
+  const declaration = declarations[0];
   assert.ok(declaration);
   let effects;
   const published = [];
   const exports = {};
-  vm.runInNewContext(ts.transpileModule(`let novelCreation = null;\n${declaration.getText(source)}`, {
+  vm.runInNewContext(ts.transpileModule(`let novelCreation = null;\n${declaration.getText(source)}\nexports.getNovelCreation = getNovelCreation;`, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText, {
     exports, Promise, projectPolishOutcomes,

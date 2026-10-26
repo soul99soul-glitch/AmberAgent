@@ -5,8 +5,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('../../../chat/node_modules/typescript');
+const { loadProviderSessions } = require('./provider_session_fixture.cjs');
+const { ProviderEditSession } = loadProviderSessions();
 const source = fs.readFileSync(path.resolve(__dirname,
-  '../main/ets/pages/ChatProviderDetailPage.ets'), 'utf8');
+  '../main/ets/components/provider/ProviderConnectionForm.ets'), 'utf8');
 function fieldCalls() {
   const result = [];
   for (const match of source.matchAll(/this\.field\(/g)) {
@@ -38,14 +40,14 @@ test('UI-12 Detail field Builder uses one typed object literal and retains nativ
     assert.equal(expression.arguments.length, 1);
     assert.ok(ts.isObjectLiteralExpression(expression.arguments[0]), 'pass the literal directly for Builder reference binding');
     const object = expression.arguments[0].getText(parsed);
-    const owner = { name: 'old-name', apiKey: 'old-key', baseUrl: 'old-url', chatPath: 'old-path',
-      provider: { type: 'claude' } };
+    const owner = { edit: Object.assign(new ProviderEditSession(), { name: 'old-name', apiKey: 'old-key', baseUrl: 'old-url', chatPath: 'old-path',
+      provider: { type: 'claude' } }) };
     const js = ts.transpileModule('return (' + object + ');', {
       compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
     const options = new Function(js).call(owner);
-    assert.equal(options.value, owner[states[index]]);
+    assert.equal(options.value, owner.edit[states[index]]);
     assert.equal(options.obscure, index === 1); assert.equal(options.mono, index !== 0);
     options.onChange('typed-draft');
-    assert.equal(owner[states[index]], 'typed-draft');
+    assert.equal(owner.edit[states[index]], 'typed-draft');
   });
 });

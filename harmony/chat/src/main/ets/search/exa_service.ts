@@ -71,7 +71,7 @@ export const exaSearchService: SearchService = {
           title: strOrNull(o['title']) ?? '',
           url: strOrNull(o['url']) ?? '',
           text: strOrNull(o['text']) ?? '',
-          publishedAt: null,
+          publishedAt: strOrNull(o['publishedDate']),
           images: [],
         };
       }),

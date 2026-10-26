@@ -64,18 +64,41 @@ test('state rescue runtime failure is visible and retry delegates persisted curs
 test('persisted failed rescue result never claims completed',async()=>{
  const{page}=state({startStateRebuild:async()=>({status:'failed',error:'严格 JSON 失败'})});await page.rebuild(false);assert.equal(page.notice,'');
 });
+// These operations moved out of the page; execute each complete production owner with shared workspace ports.
 function workspace(creation={}) {
- const code=ts.transpileModule('class Page {'+methods('pages/NovelWorkspacePage.ets',['openGhostwriteBrief','submitGhostwriteBrief','repairAuditIssue','repairAuditIssues','cancelAuditRepair','openAuditEvidence'])+'}\nreturn Page;', {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
- const pushes=[];const Page=new Function('getNovelCreation','router','verifyAuditCanonicalReferences','defaultGhostwriteDigest',code)(()=>creation,{pushUrl:async x=>{pushes.push(x);}},verifyAuditCanonicalReferences,defaultGhostwriteDigest);
- const page=new Page();Object.assign(page,{projectId:'p',pageAlive:true,pageHiddenOnce:false,ghostwriteBusy:false,ghostwriteBriefOpenToken:0,ghostwriteJob:{jobId:'j',branchId:'main',stage:'paused',currentChapterOrdinal:2,candidate:{digest:'candidate'}},ghostwriteBriefOpen:false,ghostwriteBriefCas:null,ghostwritePollToken:0,ghostwriteBriefError:'',auditRepairBusy:false,auditRepairToken:0,auditBranchId:'main',busy:false,hasBlockingNovelRun:()=>false,auditReportStale:()=>false,reload:async()=>{},scheduleGhostwritePoll:()=>{},showWorkspaceOperationError:(_label,e)=>{page.error=String(e);}});return{page,pushes};
+ const pushes=[];
+ const domain={verifyAuditCanonicalReferences,defaultGhostwriteDigest,
+  ...require('../../../deepread/src/main/ets/novel/chapter_contract.ts')};
+ function owner(name){
+  const source=fs.readFileSync(path.join(__dirname,'../main/ets/platform_impl/novel',`${name}.ets`),'utf8').replace(/^@Observed\s*$/gm,'');
+  const code=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+  const exports={};
+  new Function('exports','require',code)(exports,name=>{
+   if(name==='@amber/deepread-domain')return domain;
+   if(name==='@kit.ArkUI')return {router:{pushUrl:async value=>{pushes.push(value);}}};
+   if(name.includes('ProductIdentity'))return {getProductKind:()=> 'novel'};
+   throw Error(`Unexpected workspace owner dependency: ${name}`);
+  });
+  return new exports[name]();
+ }
+ const state={project:null,status:{cas,activeBranchId:'main'},busy:false};
+ const ports={creation,projectId:()=> 'p',currentProject:()=>state.project,currentStatus:()=>state.status,
+  requestedPolishJobId:()=>'',clearRequestedPolishJob:()=>{},isBusy:()=>state.busy,setBusy:value=>{state.busy=value;},
+  hasBlockingNovelRun:()=>false,hasOrdinaryRun:()=>false,publishWorkspace:(project,status)=>{state.project=project;state.status=status;},
+  reload:async()=>{},error:value=>{state.error=value;},operationError:(_label,error)=>{state.error=String(error);},
+  closeControl:()=>{},showJobSettings:()=>{}};
+ const jobs=owner('NovelJobSession');jobs.start(ports);
+ jobs.ghostwriteJob={jobId:'j',branchId:'main',stage:'paused',currentChapterOrdinal:2,candidate:{digest:'candidate'}};
+ const audit=owner('NovelAuditSession');audit.start(ports);audit.auditBranchId='main';
+ return{jobs,audit,state,pushes};
 }
 test('ghostwrite brief freezes job candidate and snapshot CAS and failed submit preserves sheet',async()=>{
- let args;const{page}=workspace({readWorkspaceSnapshot:async()=>({status:{cas,activeBranchId:'main',activeBranchName:'主线'}}),reviseGhostwriteWithBrief:async(...a)=>{args=a;throw Error('候选已变化');}});
- await page.openGhostwriteBrief();assert.equal(page.ghostwriteBriefOpen,true);assert.match(page.ghostwriteBriefDetail,/第 2 章/);await page.submitGhostwriteBrief('明确改写人物决定');assert.deepEqual(args,['p','j','明确改写人物决定',cas,'candidate']);assert.equal(page.ghostwriteBriefOpen,true);assert.match(page.ghostwriteBriefError,/候选已变化/);
+ let args;const{jobs}=workspace({readWorkspaceSnapshot:async()=>({status:{cas,activeBranchId:'main',activeBranchName:'主线'}}),reviseGhostwriteWithBrief:async(...a)=>{args=a;throw Error('候选已变化');}});
+ await jobs.openGhostwriteBrief();assert.equal(jobs.ghostwriteBriefOpen,true);assert.match(jobs.ghostwriteBriefDetail,/第 2 章/);await jobs.submitGhostwriteBrief('明确改写人物决定');assert.deepEqual(args,['p','j','明确改写人物决定',cas,'candidate']);assert.equal(jobs.ghostwriteBriefOpen,true);assert.match(jobs.ghostwriteBriefError,/候选已变化/);
 });
 test('late ghostwrite dialog and audit repair result cannot open on hidden page',async()=>{
- let release;let pending=new Promise(r=>{release=r;});const{page,pushes}=workspace({readWorkspaceSnapshot:()=>pending,repairContinuityIssues:()=>pending});let done=page.openGhostwriteBrief();page.ghostwriteBriefOpenToken++;release({status:{cas,activeBranchId:'main',activeBranchName:'主线'}});await done;assert.equal(page.ghostwriteBriefOpen,false);
- pending=new Promise(r=>{release=r;});done=page.repairAuditIssue({chapterId:'c'});page.pageHiddenOnce=true;page.auditRepairToken++;release({proposalId:'repair'});await done;assert.equal(pushes.length,0);
+ let release;let pending=new Promise(r=>{release=r;});const{jobs,audit,pushes}=workspace({readWorkspaceSnapshot:()=>pending,repairContinuityIssues:()=>pending,cancelContinuityRepair:async()=>{}});let done=jobs.openGhostwriteBrief();jobs.hide();release({status:{cas,activeBranchId:'main',activeBranchName:'主线'}});await done;assert.equal(jobs.ghostwriteBriefOpen,false);
+ pending=new Promise(r=>{release=r;});done=audit.repairAuditIssue({chapterId:'c'});audit.hide();release({proposalId:'repair'});await done;assert.equal(pushes.length,0);
 });
 
 test('external branch change cannot rebind unsent paragraph draft to a fresh CAS',async()=>{
@@ -110,9 +133,9 @@ test('approving proposal A after editing draft B updates accepted card but retai
 
 test('all audit issues use a single proposal and user cancellation waits for the real model cancellation without routing',async()=>{
  let release,finishCancel;const pending=new Promise(r=>{release=r;});const cancelled=new Promise(r=>{finishCancel=r;});let args;
- const {page,pushes}=workspace({repairContinuityIssues:async(...a)=>{args=a;return pending;},cancelContinuityRepair:async()=>cancelled});
- const issues=[{chapterId:'c1'},{chapterId:'c2'}];const repair=page.repairAuditIssues(issues);assert.deepEqual(args,['p',issues]);assert.equal(page.auditRepairBusy,true);
- const stop=page.cancelAuditRepair();release({proposalId:'never-open'});await repair;assert.equal(page.auditRepairBusy,true);assert.equal(pushes.length,0);finishCancel();await stop;assert.equal(page.auditRepairBusy,false);assert.equal(page.error,undefined);
+ const {audit,state,pushes}=workspace({repairContinuityIssues:async(...a)=>{args=a;return pending;},cancelContinuityRepair:async()=>cancelled});
+ const issues=[{chapterId:'c1'},{chapterId:'c2'}];const repair=audit.repairAuditIssues(issues);assert.deepEqual(args,['p',issues]);assert.equal(audit.auditRepairBusy,true);
+ const stop=audit.cancelAuditRepair();release({proposalId:'never-open'});await repair;assert.equal(audit.auditRepairBusy,true);assert.equal(pushes.length,0);finishCancel();await stop;assert.equal(audit.auditRepairBusy,false);assert.equal(state.error,undefined);
 });
 test('actual Timeline builder renders unassigned environmental events in chapter order alongside person events',()=>{
  const code=ts.transpileModule('class Page {'+methods('pages/NovelStatePage.ets',['timelineEvents','Timeline'])+'}\nreturn Page;',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
@@ -140,14 +163,14 @@ test('identity confirmation accurately describes future extraction and never pro
 test('canonical c2 -> c3 evidence routes to earlier chapter with its exact quote/range and current branch',async()=>{
  const chapters=[{id:'c2',ordinal:2,title:'先文',content:'前缀。先文已确认的事实。尾声'},{id:'c3',ordinal:3,title:'后文',content:'矛盾的后文'}];const quote='先文已确认的事实。';const start=chapters[0].content.indexOf(quote);
  const reference={chapterId:'c2',sourceDigest:defaultGhostwriteDigest(chapters[0].content),quote,start,end:start+quote.length,chapterOrdinal:2,chapterTitle:'先文'};
- const{page,pushes}=workspace({readWorkspaceSnapshot:async()=>({project:{chapters},status:{cas,activeBranchId:'main'}})});await page.openAuditEvidence(reference,'c3');assert.equal(pushes.length,1);assert.deepEqual(pushes[0].params,{projectId:'p',chapterId:'c2',evidenceQuote:quote,evidenceStart:start,evidenceEnd:start+quote.length,evidenceDigest:reference.sourceDigest,evidenceBranchId:'main'});
+ const{audit,pushes}=workspace({readWorkspaceSnapshot:async()=>({project:{chapters},status:{cas,activeBranchId:'main'}})});await audit.openAuditEvidence(reference,'c3');assert.equal(pushes.length,1);assert.deepEqual(pushes[0].params,{projectId:'p',chapterId:'c2',evidenceQuote:quote,evidenceStart:start,evidenceEnd:start+quote.length,evidenceDigest:reference.sourceDigest,evidenceBranchId:'main'});
 });
 test('canonical stale chapter, changed range or different branch refuses navigation and reports visible error',async()=>{
  const original='先文事实';const reference={chapterId:'c2',sourceDigest:defaultGhostwriteDigest(original),quote:original,start:0,end:original.length,chapterOrdinal:2,chapterTitle:'先文'};
  for(const variant of ['digest','range','branch']){
   const chapters=[{id:'c2',title:'先文',content:variant==='digest'?'已经重写':original},{id:'c3',title:'后文',content:'后文'}];
-  const {page,pushes}=workspace({readWorkspaceSnapshot:async()=>({project:{chapters},status:{cas:variant==='branch'?{...cas,branchId:'other'}:cas,activeBranchId:variant==='branch'?'other':'main'}})});
-  await page.openAuditEvidence(variant==='range'?{...reference,start:1}:reference,'c3');assert.equal(pushes.length,0);assert.match(page.error??page.errorMsg,/变化|证据|旧稿/);
+  const {audit,state,pushes}=workspace({readWorkspaceSnapshot:async()=>({project:{chapters},status:{cas:variant==='branch'?{...cas,branchId:'other'}:cas,activeBranchId:variant==='branch'?'other':'main'}})});
+  await audit.openAuditEvidence(variant==='range'?{...reference,start:1}:reference,'c3');assert.equal(pushes.length,0);assert.match(state.error,/变化|证据|旧稿/);
  }
 });
 test('actual canonical evidence builder displays earlier ordinal/title/quote and delegates its source pointer',()=>{
@@ -180,11 +203,10 @@ test('actual Timeline builder changes key for same-id new summary, and retains k
 
 test('author ghostwrite preview hides only exact confirmed model headers and preserves raw legacy Digest text',()=>{
  const {makeNovelChapterContract,confirmedChapterPlanText,chapterContractMarkdown}=require('../../../deepread/src/main/ets/novel/chapter_contract.ts');
- const code=ts.transpileModule('class Page {'+methods('pages/NovelWorkspacePage.ets',['ghostwriteAuthorPlanPreview'])+'}\nreturn Page;',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
- const Page=new Function('confirmedChapterPlanText','chapterContractMarkdown',code)(confirmedChapterPlanText,chapterContractMarkdown);const page=new Page();
+ const {jobs,state}=workspace();
  const contract=makeNovelChapterContract({outlinePlacement:'第二幕',goalAndConflict:'找出使者',mustHappen:['收到来信'],mustNotHappen:['揭露主谋'],endingHook:'敲门声',visibleFacts:['Digest: 是作者主动写的线索']},'confirmed','main',100,'contract');
- const settings={chapterContract:contract,thisChapterPlan:''};settings.thisChapterPlan=confirmedChapterPlanText(settings);const modelPlan=settings.thisChapterPlan;page.project={branchSettings:settings};page.ghostwritePreview={planContent:modelPlan};
- assert.equal(page.ghostwriteAuthorPlanPreview(),'本章计划已确认\n\n'+chapterContractMarkdown(contract));assert.doesNotMatch(page.ghostwriteAuthorPlanPreview(),/Status: confirmed|Digest: [0-9a-f]{8}/);assert.match(page.ghostwriteAuthorPlanPreview(),/Digest: 是作者主动写的线索/);assert.equal(page.ghostwritePreview.planContent,modelPlan,'model and frozen source remain unchanged');
- const raw='Status: confirmed\nDigest: 作者自己写的编号\n原有完整计划';page.project={branchSettings:{thisChapterPlan:raw}};page.ghostwritePreview={planContent:raw};assert.equal(page.ghostwriteAuthorPlanPreview(),raw);
- page.project={branchSettings:settings};page.ghostwritePreview={planContent:raw};assert.equal(page.ghostwriteAuthorPlanPreview(),raw,'typed plan mismatch cannot rewrite author text');
+ const settings={chapterContract:contract,thisChapterPlan:''};settings.thisChapterPlan=confirmedChapterPlanText(settings);const modelPlan=settings.thisChapterPlan;state.project={branchSettings:settings};jobs.ghostwritePreview={planContent:modelPlan};
+ assert.equal(jobs.ghostwriteAuthorPlanPreview(),'本章计划已确认\n\n'+chapterContractMarkdown(contract));assert.doesNotMatch(jobs.ghostwriteAuthorPlanPreview(),/Status: confirmed|Digest: [0-9a-f]{8}/);assert.match(jobs.ghostwriteAuthorPlanPreview(),/Digest: 是作者主动写的线索/);assert.equal(jobs.ghostwritePreview.planContent,modelPlan,'model and frozen source remain unchanged');
+ const raw='Status: confirmed\nDigest: 作者自己写的编号\n原有完整计划';state.project={branchSettings:{thisChapterPlan:raw}};jobs.ghostwritePreview={planContent:raw};assert.equal(jobs.ghostwriteAuthorPlanPreview(),raw);
+ state.project={branchSettings:settings};jobs.ghostwritePreview={planContent:raw};assert.equal(jobs.ghostwriteAuthorPlanPreview(),raw,'typed plan mismatch cannot rewrite author text');
 });

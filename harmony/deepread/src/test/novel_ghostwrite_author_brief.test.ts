@@ -22,6 +22,8 @@ const setup = async () => {
   let writerCalls = 0;
   let reviewerCalls = 0;
   let releaseRevision: (() => void) | null = null;
+  let markRevisionHeld!: () => void;
+  const revisionHeld = new Promise<void>(resolve => { markRevisionHeld = resolve; });
   const model: NovelModelRunning = {
     validate: async () => {},
     start(request) {
@@ -36,8 +38,10 @@ const setup = async () => {
           if (request.systemPrompt.includes('正文写作者')) {
             writerCalls += 1;
             const body = JSON.stringify({ title: '第一章', content: writerCalls === 1 ? '旧稿：骑马逃离。' : '新稿：步行逃离。' });
-            if (writerCalls === 2) releaseRevision = () => emit(body);
-            else emit(body);
+            if (writerCalls === 2) {
+              releaseRevision = () => emit(body);
+              markRevisionHeld();
+            } else emit(body);
           } else {
             reviewerCalls += 1;
             const input = JSON.parse(request.operation.kind === 'turn' ? request.operation.userPrompt : '{}');
@@ -63,7 +67,7 @@ const setup = async () => {
   await creation.setUpcomingArc(project.id, ['返航']);
   const job = await creation.startGhostwrite(project.id, 2);
   await waitFor(async () => (await repository.loadGhostwriteJob(project.id, job.jobId)).stage === 'failed');
-  return { files, repository, requests, creation, projectId: project.id, jobId: job.jobId,
+  return { files, repository, requests, creation, projectId: project.id, jobId: job.jobId, revisionHeld,
     release: () => { if (releaseRevision === null) throw new Error('writer not held'); releaseRevision(); } };
 };
 test('作者 brief 从失败候选到实际 writer：冻结、保留来源、新稿检查点清除，下一章不泄漏', async () => {
@@ -72,7 +76,8 @@ test('作者 brief 从失败候选到实际 writer：冻结、保留来源、新
   const cas = (await env.creation.readWorkspaceSnapshot(env.projectId)).status.cas;
   const revised = await env.creation.reviseGhostwriteWithBrief(env.projectId, env.jobId, '改为步行；允许修正马匹事实。', cas);
   assert.equal(revised.stage, 'writing');
-  await waitFor(async () => env.requests.filter(request => request.systemPrompt.includes('正文写作者')).length === 2);
+  await env.revisionHeld;
+  assert.equal(env.requests.filter(request => request.systemPrompt.includes('正文写作者')).length, 2);
   const durable = await createFileNovelRepository(env.files).loadGhostwriteJob(env.projectId, env.jobId);
   assert.equal(durable.authorBrief, '改为步行；允许修正马匹事实。');
   assert.deepEqual(durable.candidate, failed.candidate, '新稿成功前原候选保持完整');

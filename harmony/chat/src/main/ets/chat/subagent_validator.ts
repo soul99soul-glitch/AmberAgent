@@ -4,10 +4,10 @@
 
 import type {
   SubAgentDefinition, SubAgentRuntimeSetting,
-} from './agent_prompt_config.ts';
+} from './subagent_definitions.ts';
 import {
   makeSubAgentDefinition, subAgentApplyOverride, subAgentFindDefinition,
-} from './agent_prompt_config.ts';
+} from './subagent_definitions.ts';
 import type { JsonObject, JsonValue } from './json.ts';
 import type { ReasoningLevel } from './provider_model.ts';
 import type {

@@ -46,19 +46,33 @@ async function fixture() {
     aliases: ['阿舟'], tags: ['主角'], injectionMode: 'smart' });
   await repository.createProject({ ...models.makeNovelProject({ id: 'material-ui', name: '资料测试', now: 1 }), materials: [base] });
   const creation = createNovelCreation({ repository, modelRunning: { validate: async () => {}, start() { throw new Error('unused'); }, cancel() {} } });
-  const page = instance('pages/NovelWorkspacePage.ets', ['openNewMaterial', 'openEditMaterial', 'saveMaterial', 'deleteMaterial',
-    'hiddenSharedMaterialsIn', 'restoreMaterialInheritance', 'openMaterialAdoption', 'confirmMaterialAdoption'], {
-    getNovelCreation: () => creation, ...helpers, makeNovelMaterial: models.makeNovelMaterial,
-    buildSettingProposalAdoption: adoptionApi.buildSettingProposalAdoption,
-    buildSuggestionAdoption: adoptionApi.buildSuggestionAdoption,
-    materialAdoptionTargetDigest: adoptionApi.materialAdoptionTargetDigest,
+  const ownerSource = fs.readFileSync(path.join(sourceRoot, 'platform_impl/novel/NovelCompendiumSession.ets'), 'utf8');
+  const ownerCode = ts.transpileModule(ownerSource, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  const exported = {};
+  new Function('exports', 'require', 'Observed', ownerCode)(exported, name => {
+    if (name === '@amber/deepread-domain') return { ...models, ...adoptionApi };
+    if (name.endsWith('/NovelMaterialEditorSheet.ets')) return helpers;
+    if (name.endsWith('/design/tokens.ets')) return { ERROR: 'red' };
+    throw new Error('Unexpected compendium owner dependency: ' + name);
+  }, constructor => constructor);
+  const page = new exported.NovelCompendiumSession();
+  const state = { project: null, workspaceStatus: null, busy: false, error: '', alive: true };
+  page.start({
+    creation, projectId: () => 'material-ui', currentProject: () => state.project,
+    currentStatus: () => state.workspaceStatus, pageAlive: () => state.alive,
+    isBusy: () => state.busy, setBusy: value => { state.busy = value; },
+    readError: () => state.error, setError: value => { state.error = value; },
+    hasBlockingNovelRun: () => false,
+    showOperationError: (_title, error) => { state.error = error.message; },
+    reload: async () => {
+      const snapshot = await creation.readWorkspaceSnapshot('material-ui');
+      state.project = snapshot.project; state.workspaceStatus = snapshot.status;
+    },
   });
-  Object.assign(page, { projectId: 'material-ui', pageAlive: true, busy: false, materialOpenToken: 0,
-    materialEditorOpen: false, hasBlockingNovelRun: () => false,
-    showWorkspaceOperationError: (_title, error) => { page.errorMsg = error.message; } });
-  page.reload = async () => { const snapshot = await creation.readWorkspaceSnapshot('material-ui'); page.project = snapshot.project; page.workspaceStatus = snapshot.status; };
   await page.reload();
-  return { page, creation, repository, base };
+  return { page, creation, repository, base, state };
 }
 
 test('shared editor loads the actual base while branch editor loads the override, each with its snapshot CAS', async () => {
@@ -157,4 +171,34 @@ test('editor IME fields commit before saving and a replaced draft invalidates it
   assert.equal(saved[0].injectionMode, 'smart');
   sheet.confirm(); sheet.resetDraft(); callbacks.shift()();
   assert.equal(saved.length, 1);
+});
+
+
+test('a material snapshot completing after the owner is invalidated cannot reopen its editor', async () => {
+  const { page, creation } = await fixture();
+  const snapshot = await creation.readWorkspaceSnapshot(page.projectId);
+  let finishRead;
+  creation.readWorkspaceSnapshot = () => new Promise(resolve => { finishRead = resolve; });
+  const opening = page.openNewMaterial('character');
+  page.invalidateMaterialOpen();
+  finishRead(snapshot);
+  await opening;
+  assert.equal(page.materialEditorOpen, false);
+  assert.equal(page.editingMaterialId, '');
+});
+
+test('adoption keeps the preview target digest when the repository changes before confirmation', async () => {
+  const { page, creation, repository, base } = await fixture();
+  const chapter = models.makeNovelChapter({ id: 'chapter', title: '第一章', content: '林舟走入城门', now: 2 });
+  const suggestion = models.makeNovelSuggestion({ id: 'suggestion', sourceChapterId: chapter.id,
+    kind: 'character', title: '林舟', content: '候选稿', now: 2 });
+  await repository.commitProject(page.projectId, (await creation.workspaceStatus(page.projectId)).cas,
+    'source', 'manual_edit', project => ({ ...project, chapters: [chapter], materialSuggestions: [suggestion] }));
+  await page.reload();
+  page.openMaterialAdoption(suggestion.id, false);
+  await creation.upsertMaterial(page.projectId, base.id, base.kind, base.title, '预览后修改的目标', true);
+  await page.confirmMaterialAdoption(base.kind, base.title, '过期的采用内容', base.id, {});
+  assert.equal(page.adoptionOpen, true);
+  assert.ok(page.adoptionError.length > 0);
+  assert.equal((await creation.open(page.projectId)).materials[0].content, '预览后修改的目标');
 });

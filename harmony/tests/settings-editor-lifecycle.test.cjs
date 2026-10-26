@@ -43,22 +43,24 @@ function controlledStore() {
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
-function searchFixture() {
+const { loadSearchSettings } = require('../entry/src/test/chat_search_settings_fixture.cjs');
+const searchOwners = loadSearchSettings({ ...prefs, ...services });
+async function searchFixture() {
   const kv = controlledStore();
-  const { page, routes } = loadPage('ChatSearchSettingsPage', kv);
+  const { page, modes } = searchOwners.create(kv);
+  await page.settings.refresh();
   const pending = [];
-  const apply = page.applyPatch.bind(page);
-  // Observe the actual production Promise, including the pre-fix ignored rejection.
-  page.applyPatch = patch => {
+  const apply = page.settings.applyPatch.bind(page.settings);
+  page.settings.applyPatch = patch => {
     const operation = apply(patch);
     operation.catch(() => {});
     pending.push(operation);
     return operation;
   };
-  page.openAdd();
-  page.dType = 'exa';
-  page.dApiKey = 'fixture-secret';
-  return { page, routes, kv, pending };
+  page.editor.openAdd();
+  page.editor.dType = 'exa';
+  page.editor.dApiKey = 'fixture-secret';
+  return { page, kv, pending, modes };
 }
 
 test('quick-message system back closes its editor before leaving the page', () => {
@@ -88,47 +90,47 @@ test('quick-message save A cannot close a subsequently opened editor B', async (
 });
 
 test('search save remains open until real preference writes complete', async () => {
-  const { page, kv, pending } = searchFixture();
-  page.confirmAdd();
-  const remainedOpen = page.editorVisible;
+  const { page, kv, pending } = await searchFixture();
+  page.editor.confirmAdd();
+  const remainedOpen = page.editor.editorVisible;
   await settle();
   assert.ok(kv.writes > 0, 'the production prefs writer reached the controlled KV');
   kv.resolve();
   await Promise.allSettled(pending);
   await settle();
   assert.equal(remainedOpen, true);
-  assert.equal(page.editorVisible, false);
-  assert.equal(page.s.searchServices[0].apiKey, 'fixture-secret');
+  assert.equal(page.editor.editorVisible, false);
+  assert.equal(page.settings.s.searchServices[0].apiKey, 'fixture-secret');
 });
 
 test('search failed add retains the editor and draft with a visible error', async () => {
-  const { page, kv, pending } = searchFixture();
-  page.confirmAdd();
+  const { page, kv, pending } = await searchFixture();
+  page.editor.confirmAdd();
   await settle();
   kv.reject(new Error('fixture_write_failed'));
   await Promise.allSettled(pending);
   await settle();
-  assert.equal(page.editorVisible, true);
-  assert.equal(page.dApiKey, 'fixture-secret');
-  assert.ok(page.editorError.length > 0);
-  assert.equal(page.editorSaving, false);
+  assert.equal(page.editor.editorVisible, true);
+  assert.equal(page.editor.dApiKey, 'fixture-secret');
+  assert.ok(page.editor.editorError.length > 0);
+  assert.equal(page.editor.editorSaving, false);
 });
 
 for (const outcome of ['resolve', 'reject']) {
   test(`search old ${outcome} cannot close or annotate a reopened editor`, async () => {
-    const { page, kv, pending } = searchFixture();
-    page.confirmAdd();
+    const { page, kv, pending } = await searchFixture();
+    page.editor.confirmAdd();
     await settle();
     page.onBackPress();
-    page.openAdd();
-    page.dApiKey = 'new-draft';
+    page.editor.openAdd();
+    page.editor.dApiKey = 'new-draft';
     kv[outcome](outcome === 'reject' ? new Error('old_write_failed') : undefined);
     await Promise.allSettled(pending);
     await settle();
-    assert.equal(page.editorVisible, true);
-    assert.equal(page.dApiKey, 'new-draft');
-    assert.equal(page.editorError ?? '', '');
-    assert.equal(page.editorSaving ?? false, false);
+    assert.equal(page.editor.editorVisible, true);
+    assert.equal(page.editor.dApiKey, 'new-draft');
+    assert.equal(page.editor.editorError ?? '', '');
+    assert.equal(page.editor.editorSaving ?? false, false);
   });
 }
 
@@ -144,79 +146,79 @@ test('quick-message top back follows the same editor/list boundary', () => {
 
 for (const action of ['confirmEdit', 'confirmDelete']) {
   test(`search ${action} failure retains the current editor and allows retry`, async () => {
-    const { page, kv, pending } = searchFixture();
+    const { page, kv, pending } = await searchFixture();
     const current = services.makeSearchServiceOptions('exa');
-    const list = [page.s.searchServices[0], current];
+    const list = [page.settings.s.searchServices[0], current];
     kv.entries.set(prefs.SEARCH_PREFS_KEYS.searchServices,
       JSON.stringify(list.map(services.searchServiceOptionsToJson)));
-    page.s.searchServices = list;
-    page.openEdit(current, 1);
-    page.dApiKey = 'edited-draft';
-    page[action]();
+    page.settings.s.searchServices = list;
+    page.editor.openEdit(current, 1);
+    page.editor.dApiKey = 'edited-draft';
+    page.editor[action]();
     await settle();
     assert.ok(kv.writes > 0);
     kv.reject(new Error('fixture_write_failed'));
     await Promise.allSettled(pending);
     await settle();
-    assert.equal(page.editorVisible, true);
-    assert.equal(page.dApiKey, 'edited-draft');
-    assert.ok(page.editorError.length > 0);
-    assert.equal(page.editorSaving, false);
+    assert.equal(page.editor.editorVisible, true);
+    assert.equal(page.editor.dApiKey, 'edited-draft');
+    assert.ok(page.editor.editorError.length > 0);
+    assert.equal(page.editor.editorSaving, false);
     kv.put = async (key, value) => { kv.entries.set(key, value); };
-    page[action]();
+    page.editor[action]();
     await Promise.allSettled(pending);
     await settle();
-    assert.equal(page.editorVisible, false, 'retry closes only after its successful write');
-    assert.equal(page.editorError, '');
+    assert.equal(page.editor.editorVisible, false, 'retry closes only after its successful write');
+    assert.equal(page.editor.editorError, '');
   });
 }
 
 test('search ignores repeat saves during a single in-flight submission', async () => {
-  const { page, kv, pending } = searchFixture();
-  page.confirmAdd();
-  page.confirmAdd();
+  const { page, kv, pending } = await searchFixture();
+  page.editor.confirmAdd();
+  page.editor.confirmAdd();
   assert.equal(pending.length, 1);
   kv.resolve();
   await Promise.allSettled(pending);
   await settle();
-  assert.equal(page.s.searchServices.filter(item => item.apiKey === 'fixture-secret').length, 1);
+  assert.equal(page.settings.s.searchServices.filter(item => item.apiKey === 'fixture-secret').length, 1);
 });
 
 test('search completion A does not clear the saving state of a newer submission B', async () => {
-  const { page, kv, pending } = searchFixture();
-  page.confirmAdd();
+  const { page, kv, pending } = await searchFixture();
+  page.editor.confirmAdd();
   await settle();
   page.onBackPress();
-  page.openAdd();
-  page.dType = 'exa';
-  page.dApiKey = 'new-draft';
+  page.editor.openAdd();
+  page.editor.dType = 'exa';
+  page.editor.dApiKey = 'new-draft';
   const nextWrite = controlledStore();
   kv.put = async (key, value) => { await nextWrite.put(key, value); kv.entries.set(key, value); };
-  page.confirmAdd();
+  page.editor.confirmAdd();
   kv.resolve();
   await pending[0];
   await settle();
-  const openWhileBPending = page.editorVisible;
-  const savingWhileBPending = page.editorSaving;
-  const errorWhileBPending = page.editorError;
+  const openWhileBPending = page.editor.editorVisible;
+  const savingWhileBPending = page.editor.editorSaving;
+  const errorWhileBPending = page.editor.editorError;
   nextWrite.resolve();
   await Promise.allSettled(pending);
   await settle();
   assert.equal(openWhileBPending, true);
   assert.equal(savingWhileBPending, true);
   assert.equal(errorWhileBPending, '');
-  assert.equal(page.editorVisible, false);
-  assert.equal(page.s.searchServices[0].apiKey, 'new-draft');
+  assert.equal(page.editor.editorVisible, false);
+  assert.equal(page.settings.s.searchServices[0].apiKey, 'new-draft');
 });
 
 test('search completion after page destruction does not mutate the discarded page', async () => {
-  const { page, kv, pending } = searchFixture();
-  page.confirmAdd();
+  const { page, kv, pending } = await searchFixture();
+  page.editor.confirmAdd();
   await settle();
   page.aboutToDisappear();
   kv.resolve();
   await Promise.allSettled(pending);
   await settle();
-  assert.equal(page.editorVisible, true, 'a discarded page is not closed by late completion');
-  assert.equal(page.s.searchServices.some(item => item.apiKey === 'fixture-secret'), false);
+  assert.equal(page.editor.editorVisible, true, 'a discarded page is not closed by late completion');
+  assert.equal(page.settings.s.searchServices.some(item => item.apiKey === 'fixture-secret'), false);
 });

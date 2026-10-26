@@ -4,7 +4,7 @@ import { getAppContainer } from '../di/AppContainer.ets';
 import type { Storage } from '@amber/deepread-domain';
 import { BUILTIN_TEMPLATES, loadCustomTemplates } from '../platform_impl/DeepReadTemplate.ets';
 import type { DeepReadTemplateDef, CustomTemplateDef } from '../platform_impl/DeepReadTemplate.ets';
-import { BG, INK3, ERROR, GUTTER } from '../design/tokens.ets';
+import { BG, INK3, LINE, ERROR, GUTTER } from '../design/tokens.ets';
 import { CenteredTitleBar, PlainSection, CardGroup, CardRow, FooterNote, PageSpacer } from '../components/PageTemplate.ets';
 import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
 import { DeepReadHaptics } from '../design/DeepReadHaptics.ets';
@@ -212,11 +212,14 @@ struct DeepReadTemplateSettingsPage {
   CustomRows(): void {
     ForEach(this.templates, (t: CustomTemplateDef): void => {
       CardRow({ label: t.name, desc: this.selectedId === t.id ? '已选用 · 点按编辑' : '点按编辑模板', valueText: '编辑',
-        onRowClick: (): void => { this.edit(t.id); } })
+        isLast: true, onRowClick: (): void => { this.edit(t.id); } })
       Text(this.selectedId === t.id ? '已用于新文章 ✓' : '用于新文章')
         .fontSize(13).fontColor(INK3).width('100%').textAlign(TextAlign.End)
         .constraintSize({ minHeight: 44 }).padding({ left: 14, right: 14 })
         .onClick((): void => { this.select(t.id); })
+      Row() {
+        Row().width('100%').height(1).backgroundColor(LINE)
+      }.width('100%').padding({ left: 14, right: 14 })
     }, (t: CustomTemplateDef): string => this.customRowKey(t))
     CardRow({ label: '新建 HTML 模板', desc: '从可直接预览的基础版式开始，也可用 AI 生成', isLast: true,
       onRowClick: (): void => { this.edit(); } })

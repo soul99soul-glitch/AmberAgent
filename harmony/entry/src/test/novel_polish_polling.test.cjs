@@ -19,17 +19,9 @@ function polishPage(creation) {
 }
 
 function workspacePage(creation) {
-  const timers = [];
-  const page = actualPage('pages/NovelWorkspacePage.ets',
-    ['polishStageRuns', 'polishRuns', 'schedulePolishPoll', 'pollPolish', 'onPageHide'], {
-      getNovelCreation: () => creation,
-      setTimeout: action => { timers.push(action); return timers.length; },
-    });
-  Object.assign(page, { pageAlive: true, studioPageVisible: true, projectId: 'project', requestedPolishJobId: '',
-    polishJob: { jobId: 'polish', stage: 'waiting_system', progress: [] }, polishPollToken: 0,
-    closeControlSheet() {}, clearStudioFeedback() {}, flushComposerDraft() {}, restoreKeyboardAvoidance() {},
-  });
-  return { page, timers };
+  const { owner: page, state, timers } = require('./novel_job_session_fixture.cjs').session(creation);
+  page.polishJob = { jobId: 'polish', stage: 'waiting_system', progress: [] };
+  return { page, state, timers };
 }
 
 test('polish page observes waiting_system through external resume and completion without treating it as running', async () => {
@@ -111,8 +103,8 @@ test('workspace hide invalidates a pending polish refresh before the page is sho
   const { page, timers } = workspacePage({ polishJob: () => reading });
   const pending = page.pollPolish(page.polishPollToken);
   const original = page.polishJob;
-  page.onPageHide();
-  page.studioPageVisible = true;
+  page.hide();
+  page.show();
   release({ jobId: 'polish', stage: 'writing', progress: [] });
   await pending;
   assert.equal(page.polishJob, original);
@@ -124,19 +116,19 @@ test('workspace hide prevents an old progress refresh from replacing the newly s
   let opened;
   const atOpen = new Promise(resolve => { opened = resolve; });
   const reading = new Promise(resolve => { release = resolve; });
-  const { page } = workspacePage({
+  const { page, state } = workspacePage({
     polishJob: async () => ({ jobId: 'polish', stage: 'writing', progress: [] }),
     open: () => { opened(); return reading; },
     workspaceStatus: async () => ({ activeBranchId: 'old' }),
   });
   const pending = page.pollPolish(page.polishPollToken);
   await atOpen;
-  page.onPageHide();
-  page.studioPageVisible = true;
-  page.project = { id: 'new' };
-  page.workspaceStatus = { activeBranchId: 'new' };
+  page.hide();
+  page.show();
+  state.project = { id: 'new' };
+  state.status = { activeBranchId: 'new' };
   release({ id: 'old' });
   await pending;
-  assert.equal(page.project.id, 'new');
-  assert.equal(page.workspaceStatus.activeBranchId, 'new');
+  assert.equal(state.project.id, 'new');
+  assert.equal(state.status.activeBranchId, 'new');
 });

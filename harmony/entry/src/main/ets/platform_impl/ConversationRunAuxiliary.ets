@@ -4,17 +4,29 @@ import { conversationHasPendingOrUnexecutedTools, currentMessages, makeTextGener
   runSuggestion, toChatModel, toText, readMemoryCitationIds } from '@amber/chat-domain';
 import type { AutoTitleDeps, Conversation, ConversationStore, MemoryExtractionDeps,
   MemoryWorkerModelResolution, MessageChunk, OpenAIChatApi, ReasoningLevel, SuggestionDeps, UIMessage } from '@amber/chat-domain';
-import { prepareProviderApi, readTaskModelReference, TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY,
-  TASK_COMPRESS_MODEL_KEY, loadTaskPrompts, resolveTaskModelReference,
-  resolveTaskModelReferenceChain, taskModelReferenceForChoice } from '../di/AppContainer.ets';
-import type { ChatProviderChoice, TaskPrompts } from '../di/AppContainer.ets';
+import type { ChatProviderChoice, TaskPrompts } from '../di/ChatRuntimeContracts.ets';
 import type { DetachedConversationContext } from './ConversationRunService.ets';
 import { systemLanguage } from './AgentRuntimePrefs.ets';
 import { beginConversationRun } from './ConversationRunGuard.ets';
-import { getMemoryExtractionStoreOps, getMemoryReadRepository } from './MemoryStore.ets';
-import { canCommitMemoryExtraction } from './MemoryExtractionCommitGuard.ets';
-import { notifyGenerationDone } from './NotificationNotifier.ets';
-import { getConversationRecapService } from './ConversationRecapSupport.ets';
+
+import type { MemoryReadRepository, ProviderSetting, TaskModelReference } from '@amber/chat-domain';
+import type { MemoryExtractionStoreOps } from './MemoryStore.ets';
+
+export interface ConversationAuxiliaryPorts {
+  loadTaskPrompts: () => Promise<TaskPrompts>;
+  readTitleReference: () => Promise<TaskModelReference>;
+  readSuggestionReference: () => Promise<TaskModelReference>;
+  readCompressReference: () => Promise<TaskModelReference>;
+  resolveTaskChoice: (reference: TaskModelReference, fallback: ChatProviderChoice) => Promise<ChatProviderChoice | null>;
+  resolveTaskChoiceChain: (references: TaskModelReference[], fallback: ChatProviderChoice) => Promise<ChatProviderChoice | null>;
+  referenceForChoice: (choice: ChatProviderChoice) => TaskModelReference;
+  prepareProviderApi: (provider: ProviderSetting, headers: Record<string, string>) => Promise<OpenAIChatApi>;
+  extractionStore: MemoryExtractionStoreOps;
+  memoryRepository: MemoryReadRepository;
+  canCommitExtraction: (snapshot: Conversation) => Promise<boolean>;
+  requestRecap: (conversationId: string) => Promise<string>;
+  notifyGenerationDone: (title: string, text: string) => void;
+}
 
 const HILOG_DOMAIN: number = 0x0000;
 const HILOG_TAG: string = 'AmberChat';
@@ -33,32 +45,32 @@ const chunkText = (chunk: MessageChunk): string => {
   return message === null ? '' : toText(message);
 };
 const generateAuxiliaryText = async (
-  choice: ChatProviderChoice, prompt: string, reasoningLevel: ReasoningLevel = 'auto',
+  ports: ConversationAuxiliaryPorts, choice: ChatProviderChoice, prompt: string, reasoningLevel: ReasoningLevel = 'auto',
 ): Promise<string> => {
   const headers: Record<string, string> = {};
   for (const header of choice.model.customHeaders) {
     const name: string = header.name.trim();
     if (name.length > 0) headers[name] = header.value.trim();
   }
-  const api: OpenAIChatApi = await prepareProviderApi(choice.provider, headers);
+  const api: OpenAIChatApi = await ports.prepareProviderApi(choice.provider, headers);
   return chunkText(await api.generateText([makeUserMessage(prompt)], makeTextGenerationParams({
     model: toChatModel(choice.model), reasoningLevel, customBody: choice.model.customBodies,
   })));
 };
 
-const maybeAutoTitle = async (ctx: DetachedConversationContext, snapshot: Conversation): Promise<void> => {
+const maybeAutoTitle = async (ctx: DetachedConversationContext, snapshot: Conversation, ports: ConversationAuxiliaryPorts): Promise<void> => {
   if (snapshot.title.trim().length > 0) return;
   let releaseRun: () => void;
   try { releaseRun = beginConversationRun(snapshot.id); } catch { return; }
   try {
-    const prompts: TaskPrompts = await loadTaskPrompts();
+    const prompts: TaskPrompts = await ports.loadTaskPrompts();
     const deps: AutoTitleDeps = {
       generateText: async (prompt: string): Promise<string> => {
-        const reference = await readTaskModelReference(TASK_TITLE_MODEL_KEY);
-        const choice: ChatProviderChoice | null = await resolveTaskModelReference(
+        const reference = await ports.readTitleReference();
+        const choice: ChatProviderChoice | null = await ports.resolveTaskChoice(
           reference, ctx.seed.runtime.resolvedChoice);
         if (choice === null) throw new Error('no title model');
-        return generateAuxiliaryText(choice, prompt, 'off');
+        return generateAuxiliaryText(ports, choice, prompt, 'off');
       },
       store: auxiliaryCandidateStore, locale: '简体中文', template: prompts.titlePrompt,
     };
@@ -74,18 +86,18 @@ const maybeAutoTitle = async (ctx: DetachedConversationContext, snapshot: Conver
   } finally { releaseRun(); }
 };
 
-const maybeSuggestions = async (ctx: DetachedConversationContext, snapshot: Conversation): Promise<void> => {
+const maybeSuggestions = async (ctx: DetachedConversationContext, snapshot: Conversation, ports: ConversationAuxiliaryPorts): Promise<void> => {
   let releaseRun: () => void;
   try { releaseRun = beginConversationRun(snapshot.id); } catch { return; }
   try {
-    const prompts: TaskPrompts = await loadTaskPrompts();
+    const prompts: TaskPrompts = await ports.loadTaskPrompts();
     const deps: SuggestionDeps = {
       generateText: async (prompt: string): Promise<string> => {
-        const reference = await readTaskModelReference(TASK_SUGGESTION_MODEL_KEY);
-        const choice: ChatProviderChoice | null = await resolveTaskModelReference(
+        const reference = await ports.readSuggestionReference();
+        const choice: ChatProviderChoice | null = await ports.resolveTaskChoice(
           reference, ctx.seed.runtime.resolvedChoice);
         if (choice === null) throw new Error('no suggestion model');
-        return generateAuxiliaryText(choice, prompt, 'off');
+        return generateAuxiliaryText(ports, choice, prompt, 'off');
       },
       store: auxiliaryCandidateStore, locale: '简体中文', template: prompts.suggestionPrompt,
     };
@@ -100,17 +112,17 @@ const maybeSuggestions = async (ctx: DetachedConversationContext, snapshot: Conv
   } finally { releaseRun(); }
 };
 
-const maybeMemoryExtraction = (ctx: DetachedConversationContext, finalized: Conversation): void => {
+const maybeMemoryExtraction = (ctx: DetachedConversationContext, finalized: Conversation, ports: ConversationAuxiliaryPorts): void => {
   if (conversationHasPendingOrUnexecutedTools(finalized)) return;
-  const ops = getMemoryExtractionStoreOps();
+  const ops = ports.extractionStore;
   let choicePromise: Promise<ChatProviderChoice | null> | null = null;
   const resolveExtractionChoice = (): Promise<ChatProviderChoice | null> => {
     if (choicePromise === null) {
       choicePromise = (async (): Promise<ChatProviderChoice | null> => {
-        const compressReference = await readTaskModelReference(TASK_COMPRESS_MODEL_KEY);
+        const compressReference = await ports.readCompressReference();
         const fallback: ChatProviderChoice = ctx.seed.runtime.resolvedChoice;
-        return resolveTaskModelReferenceChain(memoryWorkerModelReferences(
-          ctx.seed.agentRuntime.memoryWorker, compressReference, taskModelReferenceForChoice(fallback)), fallback);
+        return ports.resolveTaskChoiceChain(memoryWorkerModelReferences(
+          ctx.seed.agentRuntime.memoryWorker, compressReference, ports.referenceForChoice(fallback)), fallback);
       })();
     }
     return choicePromise;
@@ -124,14 +136,14 @@ const maybeMemoryExtraction = (ctx: DetachedConversationContext, finalized: Conv
     generateText: async (prompt: string): Promise<string> => {
       const choice: ChatProviderChoice | null = await resolveExtractionChoice();
       if (choice === null) throw new Error('no model');
-      return generateAuxiliaryText(choice, prompt);
+      return generateAuxiliaryText(ports, choice, prompt);
     },
     getAllActiveRecords: ops.getAllActiveRecords, addCandidates: ops.addCandidates,
     addCandidate: ops.addCandidate, addMemory: ops.addMemory, addEvent: ops.addEvent,
     tryStartExtraction: ops.tryStartExtraction,
-    canApply: (): Promise<boolean> => canCommitMemoryExtraction(finalized),
+    canApply: (): Promise<boolean> => ports.canCommitExtraction(finalized),
     applyActions: (actions, now) => ops.applyActions(actions, now, async (): Promise<void> => {
-      if (!await canCommitMemoryExtraction(finalized)) throw new Error('提炼来源或自动记忆设置已改变，结果未写入');
+      if (!await ports.canCommitExtraction(finalized)) throw new Error('提炼来源或自动记忆设置已改变，结果未写入');
     }),
   };
   runMemoryExtraction(finalized, deps).catch((error: Error): void => {
@@ -140,9 +152,9 @@ const maybeMemoryExtraction = (ctx: DetachedConversationContext, finalized: Conv
 };
 
 export const completeConversationAuxiliary = (
-  ctx: DetachedConversationContext, finalized: Conversation, manualToolCallId: string,
+  ctx: DetachedConversationContext, finalized: Conversation, manualToolCallId: string, ports: ConversationAuxiliaryPorts,
 ): void => {
-  const reinforce = getMemoryReadRepository().reinforceMemories;
+  const reinforce = ports.memoryRepository.reinforceMemories;
   if (reinforce !== undefined && ctx.recalledMemoryIds.length > 0) {
     for (const message of currentMessages(finalized)) {
       const ids: number[] = readMemoryCitationIds(message, ctx.runId, ctx.recalledMemoryIds);
@@ -153,14 +165,12 @@ export const completeConversationAuxiliary = (
     }
   }
   if (manualToolCallId.length === 0) {
-    maybeAutoTitle(ctx, finalized);
-    maybeSuggestions(ctx, finalized);
-    maybeMemoryExtraction(ctx, finalized);
+    maybeAutoTitle(ctx, finalized, ports);
+    maybeSuggestions(ctx, finalized, ports);
+    maybeMemoryExtraction(ctx, finalized, ports);
   }
   if (recapEligible(finalized) && !conversationHasPendingOrUnexecutedTools(finalized)) {
-    const recapService = getConversationRecapService();
-    recapService.request(finalized.id).then((): void => {
-      const error: string = recapService.state(finalized.id).error;
+    ports.requestRecap(finalized.id).then((error: string): void => {
       if (error.length > 0) hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'conversation recap failed: %{public}s', error);
     }).catch((error: Error): void => {
       hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'conversation recap failed: %{public}s', error.message);
@@ -170,5 +180,5 @@ export const completeConversationAuxiliary = (
   const messages: UIMessage[] = currentMessages(finalized);
   const last: UIMessage | null = messages.length > 0 ? messages[messages.length - 1] : null;
   const text: string = last === null ? '' : toText(last).slice(0, 50).trim();
-  notifyGenerationDone(ctx.seed.runtime.assistant.name, text);
+  ports.notifyGenerationDone(ctx.seed.runtime.assistant.name, text);
 };

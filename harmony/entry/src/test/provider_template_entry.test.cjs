@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('../../../chat/node_modules/typescript');
+const { loadProviderSessions, providerPage } = require('./provider_session_fixture.cjs');
 const base = path.resolve(__dirname, '../main/ets');
 const sheet = fs.readFileSync(path.join(base, 'components/ProviderTemplatePickerSheet.ets'), 'utf8');
 const settings = fs.readFileSync(path.join(base, 'pages/ChatProviderSettingsPage.ets'), 'utf8');
@@ -85,22 +86,25 @@ function appStorageHost() {
     delete: key => values.delete(key) };
 }
 function actualDraftHandoff(AppStorage = appStorageHost()) {
-  const source = fs.readFileSync(path.join(base, 'pages/ChatProviderDetailPage.ets'), 'utf8');
+  const slot = fs.readFileSync(path.join(base, 'platform_impl/provider/PendingProviderDraft.ets'), 'utf8');
   const exports = {};
-  const slot = source.slice(source.indexOf('// 模板新增流'), source.indexOf('// Provider 导出载荷'));
   evaluate(slot, { exports, AppStorage });
   assert.equal(typeof exports.takePendingProvider, 'function', 'drafts must be consumed through the accessor');
-  const start = source.indexOf('  aboutToAppear(): void {');
-  const brace = source.indexOf('{', start);
-  let depth = 1, end = brace + 1;
-  for (; depth; end++) { if (source[end] === '{') depth++; if (source[end] === '}') depth--; }
   let resolve;
   const loaded = new Promise(r => { resolve = r; });
-  const page = evaluate('class Detail { ' + source.slice(start, end) + ' } return new Detail();', {
+  const owners = loadProviderSessions({ loadProviders: () => loaded });
+  const env = {
     ...exports, router: { getParams: () => ({ isNew: '1' }) },
-    getChatKvStore: () => ({}), loadProviders: () => loaded,
+    getChatKvStore: () => ({}), getAppContainer: () => ({ httpClient: {} }),
+    promptAction: { showToast() {} }, cleanupDeletedGoogleProvider: async () => {},
+    loadCodexTokens: async () => null, loadGrokTokens: async () => null,
+    requestCodexDeviceCode() {}, pollCodexDeviceCode() {}, fetchCodexModels() {},
+    buildGrokAuthorization() {}, extractGrokCode() {}, exchangeGrokCode() {}, GROK_FALLBACK_MODELS: [],
+    loadGoogleModelCatalog() {},
+  };
+  const page = providerPage(['aboutToAppear'], env, {
+    edit: new owners.ProviderEditSession(), login: new owners.ProviderLoginSession(), catalog: new owners.ProviderModelCatalogSession(),
   });
-  page.applyProvider = p => { page.provider = p; };
   return { ...exports, page, resolve };
 }
 test('UI-11 pending accessor consumes and clears a provider exactly once', () => {
@@ -110,13 +114,13 @@ test('UI-11 pending accessor consumes and clears a provider exactly once', () =>
   assert.equal(f.takePendingProvider(), null);
 });
 test('UI-11 Detail consumes its draft before asynchronous providers load', async () => {
-  const f = actualDraftHandoff(), draft = { id: 'codex-draft', authMode: 'codex_oauth' };
+  const f = actualDraftHandoff(), draft = { id: 'codex-draft', type: 'openai', authMode: 'codex_oauth', models: [] };
   f.setPendingProvider(draft); f.page.aboutToAppear();
   assert.equal(f.takePendingProvider(), null);
   const nextDraft = { id: 'next-draft' }; f.setPendingProvider(nextDraft);
   f.resolve([{ id: 'existing-openai' }]);
   await Promise.resolve(); await Promise.resolve();
-  assert.equal(f.page.provider, draft);
+  assert.equal(f.page.edit.provider, draft);
   assert.equal(f.takePendingProvider(), nextDraft);
 });
 test('UI-11 separate routing module contexts share only the process draft slot', () => {

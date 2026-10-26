@@ -7,6 +7,8 @@ const ts = require('typescript');
 
 const pageFile = path.resolve(__dirname, '../../../entry/src/main/ets/components/HomeListPane.ets');
 const pageSource = fs.readFileSync(pageFile, 'utf8');
+const sessionFile = path.resolve(__dirname, '../../../entry/src/main/ets/platform_impl/home/HomeContinueSupport.ets');
+const sessionSource = fs.readFileSync(sessionFile, 'utf8');
 const transpile = (source) => ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
@@ -61,12 +63,24 @@ function harness(initiallyActive = false) {
     getChatKvStore: () => ({}),
     markWantRoutingReady: () => {},
   };
+  const sessionAst = ts.createSourceFile(sessionFile, sessionSource, ts.ScriptTarget.Latest, true);
+  const sessionClass = sessionAst.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'HomeContinueSession');
+  assert.ok(sessionClass, 'Execute the production continuation owner');
+  const sessionExports = {};
+  vm.runInNewContext(transpile(sessionClass.getText(sessionAst).replace('@Observed', '')), {
+    ...context, exports: sessionExports,
+  }, { filename: sessionFile });
+  context.continuation = new sessionExports.HomeContinueSession(context);
+  context.continuation.activate(false);
   const code = `module.exports = class {
-    pageAlive = true; firstShowDone = false; hostVisible = true; twoPane = false; continueSeq = 0; continueItem = null;
-    observeRunning() {} refresh() {} loadLastOpened() {} loadUserProfile() {} stopRunningSubscription() {}
+    pageAlive = true; firstShowDone = false; hostVisible = true; twoPane = false;
+    continuation = continuation;
+    collection = { observeRunning() {}, refresh() {}, stopRunningSubscription() {} };
+    loadLastOpened() {} loadUserProfile() {}
     getUIContext() { return { getRouter: () => ({}) }; }
     ${method('onHostVisibleChange')}
-    ${method('loadContinue')}
+    loadContinue() { this.continuation.refresh(); }
+    get continueItem() { return this.continuation.candidate; }
   };`;
   vm.runInNewContext(transpile(code), context, { filename: pageFile });
   return { page: new module.exports(), setActive: value => { active = value; },

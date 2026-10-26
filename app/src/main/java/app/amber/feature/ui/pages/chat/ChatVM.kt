@@ -130,30 +130,6 @@ class ChatVM(
         .getConversationJobs()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
-    /**
-     * Kernel-path run id for this conversation, or null when running on the
-     * legacy path or no run is active. UI can subscribe to runner.observe(id)
-     * via [kernelRunStatus] for run lifecycle (running/completed/failed/cancelled).
-     */
-    val activeKernelRunId: StateFlow<app.amber.core.agent.runtime.AgentRunId?> =
-        chatService.getActiveKernelRunFlow(_conversationId)
-
-    /**
-     * Latest snapshot from runner.observe(activeKernelRunId). Null status when
-     * no kernel run is active. Surface only reacts when kernel path is in use.
-     */
-    val kernelRunStatus: StateFlow<app.amber.core.agent.runtime.AgentRunStatus?> =
-        activeKernelRunId
-            .flatMapLatest { runId ->
-                if (runId == null) {
-                    kotlinx.coroutines.flow.flowOf(null)
-                } else {
-                    chatService.kernelRunner()?.observe(runId)?.map { it.status }
-                        ?: kotlinx.coroutines.flow.flowOf(null)
-                }
-            }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
-
     init {
         // 添加对话引用
         chatService.addConversationReference(_conversationId)

@@ -831,7 +831,7 @@ struct NovelProjectsPage {
               .margin({ top: 12 })
           }
           .width('100%').padding({ top: 64, left: 18, right: 18 })
-          .alignItems(HorizontalAlign.Start)
+          .alignItems(HorizontalAlign.Center)
         } else if (this.projects.length === 0 && this.projectFailures.length === 0) {
           if (getProductKind() === 'novel') {
             this.StudioEmptyLibrary()
@@ -933,7 +933,7 @@ struct NovelProjectsPage {
             Text('重命名')
               .fontSize(TEXT_STYLES.screenTitle.size).fontWeight(TEXT_STYLES.screenTitle.weight)
               .lineHeight(TEXT_STYLES.screenTitle.lineHeight).fontFamily(TEXT_STYLES.screenTitle.family)
-              .fontColor(INK).margin({ bottom: 16 })
+              .fontColor(INK).width('100%').margin({ bottom: 16 })
             TextInput({ text: this.nameInput, placeholder: '例如：长夜来信' })
               .height(46).fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
               .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
@@ -942,12 +942,13 @@ struct NovelProjectsPage {
               .onChange((v: string) => { this.nameInput = v; })
             if (this.errorMsg.length > 0) {
               Text(this.errorMsg).fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
-                .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(TEXT_STYLES.meta.family).fontColor(ERROR).margin({ top: 10 })
+                .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(TEXT_STYLES.meta.family).fontColor(ERROR)
+                .width('100%').margin({ top: 10 })
             }
             Row() {
               Text('取消').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
                 .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-                .fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
+                .fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
                 .onClick(() => {
                   animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
                     this.renameDialogOpen = false; this.errorMsg = '';
@@ -955,12 +956,12 @@ struct NovelProjectsPage {
                 })
               Text('确定').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
                 .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-                .fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center)
+                .fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
                 .onClick(() => { this.submitRename(); })
             }
             .width('100%').margin({ top: 20 })
           }
-          .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+          .width('80%').alignItems(HorizontalAlign.Start).padding(22).backgroundColor(SURFACE).borderRadius(16)
           .shadow({ radius: 24, color: SHADOW_OVERLAY, offsetY: 8 })
           .onClick((): void => {})
         }
@@ -981,25 +982,26 @@ struct NovelProjectsPage {
           Column() {
             Text('删除项目？').fontSize(TEXT_STYLES.screenTitle.size).fontWeight(TEXT_STYLES.screenTitle.weight)
               .lineHeight(TEXT_STYLES.screenTitle.lineHeight).fontFamily(TEXT_STYLES.screenTitle.family)
-              .fontColor(INK).margin({ bottom: 12 })
+              .fontColor(INK).width('100%').margin({ bottom: 12 })
             Text('删除后可在本页「恢复删除的项目」找回。').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
-              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK3)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK3).width('100%')
             Row() {
               Text('取消').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
                 .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-                .fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
+                .fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
                 .onClick(() => {
                   animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
                     this.confirmDeleteId = '';
                   });
                 })
               Text('删除').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
-                .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family).fontColor(ERROR).layoutWeight(1).textAlign(TextAlign.Center)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+                .fontColor(ERROR).layoutWeight(1).textAlign(TextAlign.Center).constraintSize({ minHeight: 44 })
                 .onClick(() => { this.confirmDelete(); })
             }
             .width('100%').margin({ top: 20 })
           }
-          .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+          .width('80%').alignItems(HorizontalAlign.Start).padding(22).backgroundColor(SURFACE).borderRadius(16)
           .shadow({ radius: 24, color: SHADOW_OVERLAY, offsetY: 8 })
           .onClick((): void => {})
         }

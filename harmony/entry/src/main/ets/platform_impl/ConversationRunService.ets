@@ -21,24 +21,17 @@ import {
   loadPendingQueue, persistPendingQueue, persistPendingQueueWithEvent, recordPendingQueueEvent,
   invalidateCompacts, AgentToolActivityStore, applyUserInputRegexes, jevUnverifiedChanges, jevCompletionBindingMatches,
 } from '@amber/chat-domain';
-import type { ChatRuntime, ChatProviderChoice, TaskPrompts } from '../di/AppContainer.ets';
-import { getChatRepository, getChatKvStore, getCompactStore, getChatAssistants } from '../di/AppContainer.ets';
+import type { ChatRuntime, ChatProviderChoice, TaskPrompts } from '../di/ChatRuntimeContracts.ets';
+import type { ConversationRunStorage, ConversationRunExecution } from './ConversationRunPorts.ets';
 import type { AgentRuntimeSnapshot } from './AgentRuntimePrefs.ets';
 import type { OcrSeed } from './OcrSupport.ets';
 import { EntryAbortController } from './EntryAbortController.ets';
 import { beginConversationRun, beginConversationCompaction, isConversationCompacting } from './ConversationRunGuard.ets';
 import { reportGenerationProgress } from './BackgroundGenerationKeepAlive.ets';
 import { GenerationProgressTracker } from './GenerationProgressTracker.ets';
-import { prepareConversationSeed, buildConversationTurnDeps } from './ConversationRunDependencies.ets';
-import { buildConversationToolLoop } from './ConversationRunTools.ets';
-import { completeConversationAuxiliary } from './ConversationRunAuxiliary.ets';
 import { releaseConversationBrowserRun } from './ConversationBrowserGuard.ets';
 import { cancelNativePluginJsConversation } from './NativePluginJsTransport.ets';
-import { evaluateJevCompletion } from './JevCompletionSupport.ets';
-import { cancelJevApprovalTriage, scheduleJevApprovalTriage } from './JevApprovalTriage.ets';
-import { compactConversationNow } from './ContextCompactionSupport.ets';
 import type { ManualCompactionOutcome } from './ContextCompactionSupport.ets';
-import { materializeDocumentParts, materializeConversationDocuments } from './DocumentAttachmentSupport.ets';
 
 export interface ConversationRunSnapshot {
   conversationId: string; runId: string; phase: KernelPhase; sending: boolean;
@@ -203,6 +196,14 @@ const copySnapshot = (s: ConversationRunSnapshot): ConversationRunSnapshot => ({
 });
 
 export class ConversationRunService {
+  private readonly storage: ConversationRunStorage;
+  private readonly execution: ConversationRunExecution;
+
+  constructor(storage: ConversationRunStorage, execution: ConversationRunExecution) {
+    this.storage = storage;
+    this.execution = execution;
+  }
+
   private readonly sessions: Map<string, ConversationSession> = new Map<string, ConversationSession>();
   private runningListeners: Array<(ids: string[]) => void> = [];
   private generating: boolean = false;
@@ -263,7 +264,7 @@ export class ConversationRunService {
   }
   private async ensureQueue(session: ConversationSession): Promise<void> {
     if (session.queueLoaded) return;
-    session.queue = await loadPendingQueue(getChatKvStore(), session.id, Date.now,
+    session.queue = await loadPendingQueue(this.storage.kv, session.id, Date.now,
       (error: Error): void => { session.state.errorMsg = error.message; });
     session.queueLoaded = true;
     this.emit(session);
@@ -341,7 +342,7 @@ export class ConversationRunService {
         const conversation: Conversation | null = await this.loadCanonical(session);
         if (conversation === null) throw new Error('会话不存在或已删除');
         this.applyConversation(session, conversation);
-        const result: ManualCompactionOutcome = await compactConversationNow(conversation);
+        const result: ManualCompactionOutcome = await this.execution.compactConversation(conversation);
         session.state.contextCompacts = result.compacts;
         if (result.contextWindowTokens !== null) session.state.contextWindowTokens = result.contextWindowTokens;
         this.emit(session);
@@ -376,7 +377,7 @@ export class ConversationRunService {
     };
   }
   forgetDeletedConversation(conversationId: string): void {
-    cancelJevApprovalTriage(conversationId);
+    this.execution.cancelApprovalTriage(conversationId);
     const session: ConversationSession | undefined = this.sessions.get(conversationId);
     if (session !== undefined) this.clearCompletion(session);
     if (session === undefined) { cancelNativePluginJsConversation(conversationId); return; }
@@ -404,12 +405,12 @@ export class ConversationRunService {
     this.releaseIdle(session);
   }
   private async loadCanonical(session: ConversationSession): Promise<Conversation | null> {
-    const saved: Conversation | null = await getChatRepository().getById(session.id);
+    const saved: Conversation | null = await this.storage.repository.getById(session.id);
     if (saved !== null) {
       session.newConversation = null;
-      const materialized: Conversation = await materializeConversationDocuments(saved);
+      const materialized: Conversation = await this.execution.materializeConversationDocuments(saved);
       if (materialized !== saved) {
-        await getChatRepository().save(materialized);
+        await this.storage.repository.save(materialized);
         this.applyConversation(session, materialized);
       }
       return materialized;
@@ -418,7 +419,7 @@ export class ConversationRunService {
     if (created === null) return null;
     const release: () => void = beginConversationRun(session.id);
     try {
-      await getChatRepository().save(created);
+      await this.storage.repository.save(created);
       session.newConversation = null;
       return created;
     } finally { release(); }
@@ -467,7 +468,7 @@ export class ConversationRunService {
     if (session.record !== null || session.appendActive || (session.drainActive && !fromDrain)) {
       throw new Error('该会话仍在运行，请先停止或将消息排队');
     }
-    cancelJevApprovalTriage(session.id);
+    this.execution.cancelApprovalTriage(session.id);
     this.clearCompletion(session);
     const release: () => void = beginConversationRun(session.id);
     const id: string = newId();
@@ -541,7 +542,7 @@ export class ConversationRunService {
       const effective: Conversation = latest === null ? conversation : patchConversation(conversation, {
         title: latest.title, chatSuggestions: latest.chatSuggestions, isPinned: latest.isPinned,
       });
-      await getChatRepository().save(effective);
+      await this.storage.repository.save(effective);
       if (!record.resumeMode) {
         const messages: UIMessage[] = currentMessages(effective);
         if (messages.length > record.historyCount && messages[record.historyCount].role === 'user') {
@@ -577,7 +578,7 @@ export class ConversationRunService {
       const updated: Conversation | null = await update(latest);
       if (updated === null) return null;
       if (updated.id !== conversationId) throw new Error('字段变更保存目标不匹配');
-      await getChatRepository().save(updated);
+      await this.storage.repository.save(updated);
       this.applyConversation(session, updated);
       return updated;
     }).finally(release);
@@ -619,7 +620,7 @@ export class ConversationRunService {
     this.emit(session);
   }
   private async refreshCompacts(session: ConversationSession, record: ActiveRun): Promise<void> {
-    const values: ConversationCompact[] = await getCompactStore().getCompacts(session.id);
+    const values: ConversationCompact[] = await this.storage.compactStore.getCompacts(session.id);
     if (session.record === record || session.state.runId === record.id) {
       session.state.contextCompacts = values; this.emit(session);
     }
@@ -699,7 +700,7 @@ export class ConversationRunService {
       });
       if (loaded === null) throw new Error('会话不存在或已删除');
       await this.queueOperation(session, async (): Promise<void> => {});
-      const seed: PreparedConversationSeed = await prepareConversationSeed(loaded);
+      const seed: PreparedConversationSeed = await this.execution.prepareSeed(loaded);
       if (record.controller.signal.aborted) throw new Error('会话运行已取消');
       // Auxiliary field mutations may have completed while provider/seed hydration awaited.
       const hydrated: Conversation = session.latest ?? loaded;
@@ -730,10 +731,10 @@ export class ConversationRunService {
         if (original === null) throw new Error('待编辑消息已不存在');
         const editParts: UIMessagePart[] = makeUserMessage(command.text).parts.concat(
           original.parts.filter((part: UIMessagePart): boolean => part.type !== 'text'));
-        const accepted: UIMessagePart[] = await materializeDocumentParts(
+        const accepted: UIMessagePart[] = await this.execution.materializeDocumentParts(
           applyUserInputRegexes(editParts, seed.runtime.assistant.regexes));
         conversation = editMessage(conversation, command.messageId, accepted);
-        await invalidateCompacts(getCompactStore(), session.id, 'message_edited');
+        await invalidateCompacts(this.storage.compactStore, session.id, 'message_edited');
         await context.save(conversation);
         record.regenerateNodeId = command.nodeId; record.visualNodeId = command.nodeId;
       } else if (command.kind === 'regenerate') {
@@ -768,7 +769,7 @@ export class ConversationRunService {
           record.branchBase = context.conversation;
           session.state.visualConversation = context.conversation;
         }
-        await invalidateCompacts(getCompactStore(), session.id, 'message_regenerated');
+        await invalidateCompacts(this.storage.compactStore, session.id, 'message_regenerated');
       }
       if (command.kind === 'send') {
         const pureText: boolean = userParts.every((part: UIMessagePart): boolean => part.type === 'text');
@@ -776,7 +777,7 @@ export class ConversationRunService {
           .map((part: UIMessagePart): string => (part as UIMessagePartText).text).join('\n');
         const blocker = resolveIdleToolBlocker(conversation, answer, pureText);
         if (blocker.changed) {
-          await this.queueOperation(session, async (): Promise<void> => recordPendingQueueEvent(getChatKvStore(), session.id, {
+          await this.queueOperation(session, async (): Promise<void> => recordPendingQueueEvent(this.storage.kv, session.id, {
             event: blocker.event ?? 'pending_tool_cancel', messageId: command.dispatchMessageId,
             detail: blocker.blockingToolNames.join(','),
           }));
@@ -800,10 +801,10 @@ export class ConversationRunService {
       this.emit(session);
       if (record.controller.signal.aborted) throw new Error('会话运行已取消');
       if (finalized === null) {
-        const deps: ChatTurnDeps = buildConversationTurnDeps(context);
+        const deps: ChatTurnDeps = this.execution.buildTurnDeps(context);
         deps.onUpdate = (messages: UIMessage[]): void => this.updateVisual(session, record, messages);
         deps.onRawFlushSnapshot = (messages: UIMessage[]): void => this.captureRaw(session, record, messages);
-        const loop: ToolLoopOptions = await buildConversationToolLoop(context);
+        const loop: ToolLoopOptions = await this.execution.buildToolLoop(context);
         if (manualToolCallId.length > 0) loop.manualToolCallId = manualToolCallId;
         if (record.controller.signal.aborted) throw new Error('会话运行已取消');
         const host: ChatKernelHost = createChatKernelHost({
@@ -819,7 +820,7 @@ export class ConversationRunService {
             if (record.resumeMode) return await runToolLoopContinuation(
               context.conversation, runtimeDeps, loop, record.visualNodeId);
             if (command.kind !== 'send') throw new Error('会话命令没有生成入口');
-            const accepted: UIMessagePart[] = await materializeDocumentParts(userParts);
+            const accepted: UIMessagePart[] = await this.execution.materializeDocumentParts(userParts);
             if (record.controller.signal.aborted) throw new Error('会话运行已取消');
             return await runChatTurnWithTools(context.conversation, accepted, runtimeDeps, loop);
           });
@@ -857,7 +858,7 @@ export class ConversationRunService {
       }
       if (record.writeError !== null) failure = record.writeError;
       try {
-        const saved: Conversation | null = await getChatRepository().getById(session.id);
+        const saved: Conversation | null = await this.storage.repository.getById(session.id);
         if (saved !== null) this.applyConversation(session, saved);
       } catch (reloadError) { failure = reloadError instanceof Error ? reloadError : new Error(String(reloadError)); }
     } finally {
@@ -885,10 +886,10 @@ export class ConversationRunService {
     }
     if (failure !== null) { this.drain(session); this.releaseIdle(session); throw failure; }
     if (!record.controller.signal.aborted && session.state.awaitingTools) {
-      scheduleJevApprovalTriage(session.id, record.controller.signal);
+      this.execution.scheduleApprovalTriage(session.id, record.controller.signal);
     }
     if (finalized !== null && record.context !== null && !record.controller.signal.aborted && !session.state.awaitingTools) {
-      completeConversationAuxiliary(record.context, finalized, manualToolCallId);
+      this.execution.completeAuxiliary(record.context, finalized, manualToolCallId);
       if (manualToolCallId.length === 0 && session.state.phase === 'completed') {
         this.scheduleCompletion(session, record.id, finalized);
       }
@@ -917,7 +918,7 @@ export class ConversationRunService {
     const controller: EntryAbortController = new EntryAbortController();
     session.completionController = controller;
     session.completionSourceFingerprint = facts.sourceFingerprint;
-    evaluateJevCompletion(conversation, controller.signal).then((candidate: JevCompletionFacts | null): void => {
+    this.execution.evaluateCompletion(conversation, controller.signal).then((candidate: JevCompletionFacts | null): void => {
       if (candidate === null || controller.signal.aborted || this.sessions.get(session.id) !== session
         || session.completionController !== controller || session.record !== null || session.state.runId !== runId
         || session.state.phase !== 'completed' || session.state.awaitingTools || session.latest === null
@@ -931,7 +932,7 @@ export class ConversationRunService {
   }
 
   cancel(conversationId: string, runId: string): void {
-    cancelJevApprovalTriage(conversationId);
+    this.execution.cancelApprovalTriage(conversationId);
     const session: ConversationSession | undefined = this.sessions.get(conversationId);
     const record: ActiveRun | null = session?.record ?? null;
     if (session !== undefined) this.clearCompletion(session);
@@ -942,7 +943,7 @@ export class ConversationRunService {
       const converted = convertSteerToFollowup(session.queue);
       if (!converted.changed) return;
       const previous: PendingUserMessage[] = session.queue; session.queue = converted.messages;
-      try { await persistPendingQueue(getChatKvStore(), session.id, session.queue); }
+      try { await persistPendingQueue(this.storage.kv, session.id, session.queue); }
       catch (error) { session.queue = previous; throw error instanceof Error ? error : new Error(String(error)); }
       this.emit(session);
     });
@@ -962,14 +963,14 @@ export class ConversationRunService {
       if (steers.length === 0) return [];
       const accepted: UIMessage[] = [];
       for (const message of steers) {
-        const parts: UIMessagePart[] = await materializeDocumentParts(
+        const parts: UIMessagePart[] = await this.execution.materializeDocumentParts(
           applyUserInputRegexes(message.parts, context.seed.runtime.assistant.regexes));
         accepted.push(makeUIMessage('user', parts));
       }
       session.queue = previous.filter((message): boolean => message.mode !== 'STEER');
       try {
-        await persistPendingQueue(getChatKvStore(), session.id, session.queue);
-        for (const message of steers) await recordPendingQueueEvent(getChatKvStore(), session.id, {
+        await persistPendingQueue(this.storage.kv, session.id, session.queue);
+        for (const message of steers) await recordPendingQueueEvent(this.storage.kv, session.id, {
           event: 'dequeue', messageId: message.id, detail: 'steer',
         });
       } catch (error) { session.queue = previous; this.emit(session); throw error instanceof Error ? error : new Error(String(error)); }
@@ -988,7 +989,7 @@ export class ConversationRunService {
       if (!result.accepted) throw new Error('消息队列已满，请先等待或取消一些排队消息。');
       const previous: PendingUserMessage[] = session.queue; session.queue = result.messages;
       try {
-        await persistPendingQueueWithEvent(getChatKvStore(), session.id, session.queue, {
+        await persistPendingQueueWithEvent(this.storage.kv, session.id, session.queue, {
           event: 'enqueue', messageId: message.id, detail: message.mode.toLowerCase(),
         });
       } catch (error) { session.queue = previous; throw error instanceof Error ? error : new Error(String(error)); }
@@ -1001,7 +1002,7 @@ export class ConversationRunService {
       const result = cancelPendingUserMessage(session.queue, messageId);
       if (!result.changed) return;
       const previous: PendingUserMessage[] = session.queue; session.queue = result.messages;
-      try { await persistPendingQueueWithEvent(getChatKvStore(), session.id, session.queue, { event: 'cancel', messageId: messageId }); }
+      try { await persistPendingQueueWithEvent(this.storage.kv, session.id, session.queue, { event: 'cancel', messageId: messageId }); }
       catch (error) { session.queue = previous; throw error instanceof Error ? error : new Error(String(error)); }
       this.emit(session);
     });
@@ -1014,7 +1015,7 @@ export class ConversationRunService {
       const previous: PendingUserMessage[] = session.queue;
       session.queue = previous.filter((item): boolean => item.id !== messageId);
       try {
-        await persistPendingQueueWithEvent(getChatKvStore(), session.id, session.queue, {
+        await persistPendingQueueWithEvent(this.storage.kv, session.id, session.queue, {
           event: 'cancel', messageId: messageId, detail: 'restore_to_input',
         });
       } catch (error) { session.queue = previous; throw error instanceof Error ? error : new Error(String(error)); }
@@ -1028,7 +1029,7 @@ export class ConversationRunService {
       const previous: PendingUserMessage[] = session.queue;
       if (previous.length === 0) return;
       session.queue = [];
-      try { await persistPendingQueueWithEvent(getChatKvStore(), session.id, [], { event: 'clear', count: previous.length }); }
+      try { await persistPendingQueueWithEvent(this.storage.kv, session.id, [], { event: 'clear', count: previous.length }); }
       catch (error) { session.queue = previous; throw error instanceof Error ? error : new Error(String(error)); }
       this.emit(session);
     });
@@ -1042,10 +1043,10 @@ export class ConversationRunService {
       await this.write(session, async (): Promise<void> => {
         const latest: Conversation | null = await this.loadCanonical(session);
         if (latest === null) throw new Error('会话不存在或已删除');
-        const assistants: Assistant[] = await getChatAssistants();
+        const assistants: Assistant[] = await this.storage.loadAssistants();
         const assistant: Assistant = assistants.find((item): boolean => item.id === latest.assistantId) ?? assistants[0];
-        const accepted: UIMessagePart[] = await materializeDocumentParts(applyUserInputRegexes(parts, assistant.regexes));
-        const out: Conversation = await runAppendUserMessage(latest, accepted, getChatRepository());
+        const accepted: UIMessagePart[] = await this.execution.materializeDocumentParts(applyUserInputRegexes(parts, assistant.regexes));
+        const out: Conversation = await runAppendUserMessage(latest, accepted, this.storage.repository);
         this.applyConversation(session, out);
       });
     } finally { session.appendActive = false; release(); this.releaseIdle(session); }
@@ -1073,7 +1074,7 @@ export class ConversationRunService {
         const prepared = preparePendingMessageForDispatch(next.rest, next.next);
         const previous: PendingUserMessage[] = session.queue;
         session.queue = prepared.rest;
-        try { await persistPendingQueueWithEvent(getChatKvStore(), session.id, session.queue, {
+        try { await persistPendingQueueWithEvent(this.storage.kv, session.id, session.queue, {
           event: 'dequeue', messageId: prepared.dispatch.id, detail: prepared.dispatch.mode.toLowerCase(),
         }); }
         catch (error) { session.queue = previous; this.emit(session); throw error instanceof Error ? error : new Error(String(error)); }
@@ -1097,7 +1098,7 @@ export class ConversationRunService {
           // Put the dispatched item in front of the current queue, preserving new arrivals.
           session.queue = [message].concat(session.queue);
           this.emit(session);
-          await persistPendingQueueWithEvent(getChatKvStore(), session.id, session.queue, {
+          await persistPendingQueueWithEvent(this.storage.kv, session.id, session.queue, {
             event: 'enqueue', messageId: message.id, detail: message.mode.toLowerCase(),
           });
         });

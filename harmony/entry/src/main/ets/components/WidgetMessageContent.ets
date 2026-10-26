@@ -5,6 +5,7 @@ import type {
 } from '@amber/chat-domain';
 import { parseResponseContent, applySvgValidation } from '@amber/chat-domain';
 import { MarkdownText } from './MarkdownText.ets';
+import type { MessageRowViewState } from './MessageRowViewState.ets';
 import { GenerativeWidgetCard } from './GenerativeWidgetCard.ets';
 import { VisualArtifactCard } from './VisualArtifactCard.ets';
 import { NativeSmartUiCard } from './NativeSmartUiCard.ets';
@@ -20,8 +21,31 @@ interface SmartUiValueSnapshot {
   values: SmartUiStateValue[];
 }
 
+interface PreparedVisualAssetInput {
+  type: string;
+  id: string;
+  closed: boolean;
+  status: string;
+  sourceStart: number;
+  raw: string;
+  content: string;
+  snapshot: string | null;
+}
+
+interface PreparedResponseInput {
+  content: string;
+  streaming: boolean;
+  messageStreaming: boolean;
+  streamKey: string;
+  smartUiSourcePrefix: string;
+  smartUiNodeId: string;
+  declaredContentIds: string[];
+  assets: PreparedVisualAssetInput[];
+}
+
 @Component
 export struct WidgetMessageContent {
+  viewState: MessageRowViewState | null = null;
   @StorageProp('themeEpoch') themeEpoch: number = 0;
   @Prop @Watch('prepare') content: string = '';
   @Prop @Watch('prepare') streaming: boolean = false;
@@ -60,12 +84,10 @@ export struct WidgetMessageContent {
   @State segments: ResponseContentSegment[] = [];
   @State smartUiValueSnapshots: SmartUiValueSnapshot[] = [];
   @State revealSourcePrefix: string = '';
-  private previousContent: string = '';
-  private previousSourcePrefix: string = '';
+  private preparedInput: PreparedResponseInput | null = null;
   private previousSmartUiDefinitions: Map<string, string> = new Map<string, string>();
 
   aboutToAppear(): void {
-    this.previousSourcePrefix = this.smartUiSourcePrefix;
     this.prepare();
   }
 
@@ -77,17 +99,62 @@ export struct WidgetMessageContent {
     }
   }
 
+  private matchesPreparedInput(): boolean {
+    const previous: PreparedResponseInput | null = this.preparedInput;
+    if (previous === null || previous.content !== this.content || previous.streaming !== this.streaming ||
+      previous.messageStreaming !== this.messageStreaming || previous.streamKey !== this.streamKey ||
+      previous.smartUiSourcePrefix !== this.smartUiSourcePrefix || previous.smartUiNodeId !== this.smartUiNodeId) return false;
+    const declaredIds: string[] = this.declaredContentIds;
+    const assets: VisualArtifact[] = this.assets;
+    if (previous.declaredContentIds.length !== declaredIds.length || previous.assets.length !== assets.length) return false;
+    for (let index: number = 0; index < declaredIds.length; index++) {
+      if (previous.declaredContentIds[index] !== declaredIds[index]) return false;
+    }
+    for (let index: number = 0; index < assets.length; index++) {
+      const asset: VisualArtifact = assets[index];
+      const prior: PreparedVisualAssetInput = previous.assets[index];
+      if (prior.type !== asset.type || prior.id !== asset.id || prior.closed !== asset.closed ||
+        prior.status !== asset.status || prior.sourceStart !== asset.sourceStart || prior.raw !== asset.raw ||
+        prior.content !== asset.content || prior.snapshot !== asset.snapshot) return false;
+    }
+    return true;
+  }
+
+  private snapshotPreparedInput(): PreparedResponseInput {
+    const assets: PreparedVisualAssetInput[] = [];
+    const inputs: VisualArtifact[] = this.assets;
+    for (const asset of inputs) {
+      // scene is derived from canonical content; retaining its object identity would miss V1 copies.
+      assets.push({ type: asset.type, id: asset.id, closed: asset.closed, status: asset.status,
+        sourceStart: asset.sourceStart, raw: asset.raw, content: asset.content, snapshot: asset.snapshot });
+    }
+    return {
+      content: this.content,
+      streaming: this.streaming,
+      messageStreaming: this.messageStreaming,
+      streamKey: this.streamKey,
+      smartUiSourcePrefix: this.smartUiSourcePrefix,
+      smartUiNodeId: this.smartUiNodeId,
+      declaredContentIds: this.declaredContentIds.slice(),
+      assets,
+    };
+  }
+
   private prepare(): void {
+    // V1 @Prop copies arrays when unrelated parent state changes, including 3D interaction ownership.
+    if (this.matchesPreparedInput()) return;
+    const input: PreparedResponseInput = this.snapshotPreparedInput();
+    const previous: PreparedResponseInput | null = this.preparedInput;
     if (this.messageStreaming) this.revealSourcePrefix = this.smartUiSourcePrefix;
-    if (this.previousSourcePrefix.length > 0 && this.previousSourcePrefix !== this.smartUiSourcePrefix) {
-      this.clearSmartUiDefinitions(this.previousSourcePrefix);
-      this.onSmartUiSourceReplaced(this.previousSourcePrefix);
-    } else if (this.previousContent.length > 0 && !this.content.startsWith(this.previousContent)) {
+    if (previous !== null && previous.smartUiSourcePrefix.length > 0 &&
+      previous.smartUiSourcePrefix !== this.smartUiSourcePrefix) {
+      this.clearSmartUiDefinitions(previous.smartUiSourcePrefix);
+      this.onSmartUiSourceReplaced(previous.smartUiSourcePrefix);
+    } else if (previous !== null && previous.content.length > 0 && !this.content.startsWith(previous.content)) {
       this.clearSmartUiDefinitions(this.smartUiSourcePrefix);
       this.onSmartUiSourceReplaced(this.smartUiSourcePrefix);
     }
-    this.previousSourcePrefix = this.smartUiSourcePrefix;
-    this.previousContent = this.content;
+    this.preparedInput = input;
     let segments: ResponseContentSegment[] = parseResponseContent(this.content, this.streaming,
       this.assets.length > 0 ? this.assets : undefined, !this.messageStreaming,
       this.declaredContentIds.length > 0 ? this.declaredContentIds : undefined);
@@ -227,7 +294,7 @@ export struct WidgetMessageContent {
 
   @Builder
   private TextSegment(index: number): void {
-    MarkdownText({ content: this.segmentContentAt(index), fontSize: this.fontSize, fontColor: this.fontColor,
+    MarkdownText({ viewState: this.viewState, content: this.segmentContentAt(index), fontSize: this.fontSize, fontColor: this.fontColor,
       streaming: this.streaming && index === this.segments.length - 1,
       chatFontFamily: this.chatFontFamily, enableLatexRendering: this.enableLatexRendering,
       codeBlockAutoCollapse: this.codeBlockAutoCollapse, showLineNumbers: this.showLineNumbers,

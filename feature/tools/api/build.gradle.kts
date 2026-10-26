@@ -23,7 +23,5 @@ dependencies {
     api(project(":ai"))
     api(project(":core:model"))
     api(project(":core:agent-utils"))
-    api(project(":feature:modelcouncil:api"))
-    api(project(":feature:subagent:api"))
     api(libs.kotlinx.serialization.json)
 }

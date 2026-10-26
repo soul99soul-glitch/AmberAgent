@@ -1,0 +1,104 @@
+{
+  "scope": "Harmony only; user explicitly excluded Android and Web on continuation",
+  "head": "cf02929297ab53cbbf954aa91486880bde45bf81",
+  "over1000": 24,
+  "over1500": 9,
+  "files": [
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatPage.ets",
+      "lines": 5471
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets",
+      "lines": 4641
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/repository.ts",
+      "lines": 3498
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/creation.ts",
+      "lines": 2362
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/AppContainer.ets",
+      "lines": 1990
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets",
+      "lines": 1638
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/HomeListPane.ets",
+      "lines": 1593
+    },
+    {
+      "path": "harmony/chat/src/main/ets/index.ts",
+      "lines": 1553
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets",
+      "lines": 1506
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_prompt_config.ts",
+      "lines": 1231
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/device_schedule_tools.ts",
+      "lines": 1199
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/skills.ts",
+      "lines": 1191
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingExperimentalWebMountPage.ets",
+      "lines": 1178
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/context_compact.ts",
+      "lines": 1117
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunService.ets",
+      "lines": 1108
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_cron.ts",
+      "lines": 1101
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeviceSchedulePort.ets",
+      "lines": 1096
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/BoardPage.ets",
+      "lines": 1084
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/workspace_artifacts.ts",
+      "lines": 1082
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets",
+      "lines": 1064
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelProjectsPage.ets",
+      "lines": 1024
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/PageTemplate.ets",
+      "lines": 1022
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/section_writer_tools.ts",
+      "lines": 1014
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets",
+      "lines": 1012
+    }
+  ]
+}

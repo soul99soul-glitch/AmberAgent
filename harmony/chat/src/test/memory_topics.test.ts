@@ -9,15 +9,9 @@ import { renderMemoryDocuments } from '../main/ets/chat/memory_documents.ts';
 import {
   appendMemoryRecord, deleteMemoryRecord, updateMemoryRecordContent, upsertMemoryRecord,
 } from '../main/ets/chat/memory_write.ts';
-import { decodeMemoryFrontmatter, encodeMemoryFrontmatter } from '../main/ets/chat/memory_frontmatter.ts';
 import { parseMemoryCandidates } from '../main/ets/chat/memory_extractor.ts';
-import {
-  dreamPlanOnlyApplicable, parseDreamModelPlanJson, planDreamMaintenance,
-} from '../main/ets/chat/memory_dream.ts';
-import { exportMemoriesTo, importMemoriesFrom } from '../main/ets/chat/memory_import_export.ts';
-import type { MemoryImportExportDeps } from '../main/ets/chat/memory_import_export.ts';
 
-test('saved source → topic/documents → edit invalidation/refresh → source-only roundtrip', async () => {
+test('saved source → topic/documents → edit invalidation/refresh', async () => {
   const now: number = 1780000000000;
   const sources: MemoryRecord[] = [1, 2, 3].map((id: number): MemoryRecord => makeMemoryRecord({
     id, content: `保留源记忆正文 ${id}`, scope: 'long_term', kind: 'reference',
@@ -62,8 +56,6 @@ test('saved source → topic/documents → edit invalidation/refresh → source-
   assert.throws(() => updateMemoryRecordContent(persisted, topic.id, '篡改', now));
   assert.throws(() => upsertMemoryRecord(persisted, { ...topic, kind: 'note' }, now));
   assert.throws(() => deleteMemoryRecord(persisted, topic.id, now));
-  assert.throws(() => encodeMemoryFrontmatter(topic));
-  assert.throws(() => decodeMemoryFrontmatter('---\nkind: "topic"\n---\n派生摘要'));
   assert.deepEqual(parseMemoryCandidates('{"candidates":[{"content":"伪主题","kind":"topic"}]}', 'c', [], now), []);
   assert.equal(parseMemoryCandidates('{"candidates":[{"content":"伪主题","kind":"topic"},{"content":"正常源记忆","kind":"user"}]}', 'c', [], now).length, 1);
 
@@ -93,49 +85,4 @@ test('saved source → topic/documents → edit invalidation/refresh → source-
   assert.deepEqual(deleted.find((record: MemoryRecord): boolean => record.id === topic.id)?.memberIds, [1, 3]);
   assert.equal(deleted.find((record: MemoryRecord): boolean => record.id === topic.id)?.archived, true);
   assert.deepEqual(renderMemoryDocuments([], now), []);
-  const embedded = [{ ...sources[0], content: encodeMemoryFrontmatter(sources[0]) }, sources[1]];
-  assert.throws(() => decodeMemoryFrontmatter(renderMemoryDocuments(embedded, now)[0].content));
-
-  const maliciousPlan = parseDreamModelPlanJson(JSON.stringify({
-    merge: [{ target_memory_id: topic.id, duplicate_memory_ids: [1], merged_content: '错误合并主题到源' }],
-    archive: [topic.id], supersede: [{ old_memory_ids: [1], new_content: '不能生成一个派生主题', kind: 'topic' }],
-  }), persisted, []);
-  assert.deepEqual(maliciousPlan.mergeSuggestions, []);
-  assert.deepEqual(maliciousPlan.archiveMemoryIds, []);
-  assert.deepEqual(maliciousPlan.supersedeSuggestions, []);
-  const maintenance = dreamPlanOnlyApplicable(planDreamMaintenance([
-    ...sources, { ...topic, content: sources[0].content },
-  ], [], now), persisted);
-  assert.deepEqual(maintenance.mergeSuggestions, []);
-
-  const files: Map<string, string> = new Map<string, string>();
-  let roundtripRecords: MemoryRecord[] = [];
-  const deps: MemoryImportExportDeps = {
-    fs: {
-      exists: async (path: string): Promise<boolean> => files.has(path)
-        || [...files.keys()].some((key: string): boolean => key.startsWith(path + '/')),
-      mkdirs: async (): Promise<void> => {},
-      writeText: async (path: string, text: string): Promise<void> => { files.set(path, text); },
-      readText: async (path: string): Promise<string> => { const text = files.get(path); if (text === undefined) throw new Error(path); return text; },
-      walkFiles: async (path: string): Promise<string[]> => [...files.keys()].filter((key: string): boolean => key.startsWith(path + '/')),
-    },
-    getAllRecords: async (): Promise<MemoryRecord[]> => roundtripRecords.length > 0 ? roundtripRecords : persisted,
-    getRecentEvents: async () => [],
-    upsertRecord: async (record: MemoryRecord): Promise<MemoryRecord> => {
-      const result = upsertMemoryRecord(roundtripRecords, record, now);
-      roundtripRecords = result.records;
-      return result.record;
-    },
-    now: (): number => now,
-  };
-  const exported = await exportMemoriesTo('workspace/export', deps);
-  assert.equal(exported.memoryCount, 3);
-  assert.equal(files.size > 0, true);
-  assert.equal([...files.keys()].some((path: string): boolean => path.includes('/topic/')), false);
-  assert.equal(JSON.parse(files.get(exported.root + '/manifest.json') ?? '{}').count, '3');
-  const importDeps: MemoryImportExportDeps = { ...deps, getAllRecords: async (): Promise<MemoryRecord[]> => roundtripRecords };
-  const imported = await importMemoriesFrom(exported.root, importDeps);
-  assert.equal(imported.importedCount, 3);
-  assert.deepEqual(roundtripRecords.map((record: MemoryRecord): string => record.content), sources.map((record: MemoryRecord): string => record.content));
-  assert.ok(roundtripRecords.every((record: MemoryRecord): boolean => record.topicTitle === null && record.memberIds.length === 0));
 });

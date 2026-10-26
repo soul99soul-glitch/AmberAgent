@@ -9,7 +9,7 @@
 //     块边界空格规则简化登记)
 //   - 解析:容错(未闭合自动闭合于文档尾/close-tag 弹栈至匹配);void 元素;
 //     script/style rawtext 不解析;属性单双引号/无引号;实体 &amp;/&lt;/&gt;/
-//     &quot;/&#39;/&apos;/&nbsp;/&#nnn;/&#xhh;
+//     &quot;/&#39;/&apos;/&nbsp;/&ensp;/&#nnn;/&#xhh;
 //   - 不做 HTML5 implied-close 规则(<li> 相邻不互闭 — 与 Jsoup 树形差异登记)
 
 export interface HtmlElement {
@@ -51,7 +51,7 @@ const codePointEntity = (value: number): string => {
 };
 
 const decodeEntities = (s: string): string =>
-  s.replace(/&(amp|lt|gt|quot|apos|nbsp|#39|#x27|#\d+|#[xX][0-9A-Fa-f]+);/g,
+  s.replace(/&(amp|lt|gt|quot|apos|nbsp|ensp|#39|#x27|#\d+|#[xX][0-9A-Fa-f]+);/g,
     (whole: string, body: string): string => {
       switch (body) {
         case 'amp': return '&';
@@ -62,6 +62,7 @@ const decodeEntities = (s: string): string =>
         case '#39':
         case '#x27': return '\'';
         case 'nbsp': return ' ';
+        case 'ensp': return '\u2002';
         default: {
           if (body.startsWith('#x') || body.startsWith('#X')) {
             return codePointEntity(parseInt(body.slice(2), 16));

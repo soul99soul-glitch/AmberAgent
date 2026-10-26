@@ -3,9 +3,17 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('../../../chat/node_modules/typescript');
-const source = fs.readFileSync(path.join(__dirname, '../main/ets/di/AppContainer.ets'), 'utf8');
-const factory = source.slice(source.indexOf('export const getDeepReadScheduler ='), source.indexOf('const mapCacheEntryObservable ='))
-  .replace('export const', 'const');
+const filename = path.join(__dirname, '../main/ets/di/DeepReadRuntime.ets');
+const source = ts.createSourceFile(filename, fs.readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true);
+const declarations = [];
+const visit = node => {
+  if (ts.isVariableStatement(node) && node.declarationList.declarations.some(
+    declaration => declaration.name.getText(source) === 'getDeepReadScheduler')) declarations.push(node);
+  ts.forEachChild(node, visit);
+};
+visit(source);
+assert.equal(declarations.length, 1, 'Read the real DeepRead scheduler owner');
+const factory = declarations[0].getText(source);
 const code = ts.transpileModule('let deepReadScheduler=null; let deepReadSchedulerInit=null;\n' + factory + '\nreturn getDeepReadScheduler;',
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 
@@ -32,7 +40,15 @@ async function fixture({ cached = null, globalId = 'none', abilities = [], captu
     hooks => { calls.hooks = hooks; return { generateText: async params => { calls.generation.push(params); return []; } }; },
     (...args) => calls.steps.push(args), (...args) => calls.snapshots.push(args), { info() {} }, 1, 'test', () => product, tool => tool,
     deps => { configured = deps; return { id: 'scheduler' }; }, () => ({}), () => false, () => {}];
-  const getScheduler = new Function(...names, code)(...values);
+  const ports = Object.fromEntries(names.map((name, index) => [name, values[index]]));
+  const resources = ports.getAppContainer();
+  ports.getRepository = () => resources.repository;
+  ports.getHttpClient = () => resources.httpClient;
+  ports.getStorage = () => resources.storage;
+  ports.getPrefetcher = () => resources.prefetcher;
+  ports.getAiClient = () => resources.aiClient;
+  ports.getNotifier = () => resources.notifier;
+  const getScheduler = new Function(...names, 'ports', code)(...values, ports);
   await getScheduler();
   return { calls, configured, runtime };
 }

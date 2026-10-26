@@ -1,0 +1,5026 @@
+{
+  "scope": "This repository Harmony hand-maintained TS/ArkTS production sources in entry/chat/deepread src/main/ets; excludes native vendors, resources, tests and build outputs",
+  "head": "cf02929297ab53cbbf954aa91486880bde45bf81",
+  "file_count": 977,
+  "over1000": 11,
+  "over1500": 0,
+  "max": {
+    "path": "harmony/chat/src/main/ets/index.ts",
+    "lines": 1407,
+    "sha256": "e022db120d6cb1e5458bbe96b5d461583411e350229af9aaa76a9e534f2bab22"
+  },
+  "max_business": {
+    "path": "harmony/entry/src/main/ets/pages/ChatPage.ets",
+    "lines": 1200,
+    "sha256": "1d8e4dddce86303ea42e3b6a80bc6c6cb214de12793679746adb3e720fb6fe0f"
+  },
+  "baseline_comparison": [
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatPage.ets",
+      "before": 5471,
+      "after": 1200
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets",
+      "before": 4641,
+      "after": 1063
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/repository.ts",
+      "before": 3498,
+      "after": 26
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/creation.ts",
+      "before": 2362,
+      "after": 1121
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/AppContainer.ets",
+      "before": 1990,
+      "after": 387
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets",
+      "before": 1638,
+      "after": 187
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/HomeListPane.ets",
+      "before": 1593,
+      "after": 877
+    },
+    {
+      "path": "harmony/chat/src/main/ets/index.ts",
+      "before": 1553,
+      "after": 1407
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets",
+      "before": 1506,
+      "after": 304
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_prompt_config.ts",
+      "before": 1231,
+      "after": 46
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/device_schedule_tools.ts",
+      "before": 1199,
+      "after": 49
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/skills.ts",
+      "before": 1191,
+      "after": 22
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingExperimentalWebMountPage.ets",
+      "before": 1178,
+      "after": 876
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/context_compact.ts",
+      "before": 1117,
+      "after": 1117
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunService.ets",
+      "before": 1108,
+      "after": 1109
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_cron.ts",
+      "before": 1101,
+      "after": 760
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeviceSchedulePort.ets",
+      "before": 1096,
+      "after": 105
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/BoardPage.ets",
+      "before": 1084,
+      "after": 1084
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/workspace_artifacts.ts",
+      "before": 1082,
+      "after": 56
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets",
+      "before": 1064,
+      "after": 1064
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelProjectsPage.ets",
+      "before": 1024,
+      "after": 1024
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/PageTemplate.ets",
+      "before": 1022,
+      "after": 1022
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/section_writer_tools.ts",
+      "before": 1014,
+      "after": 532
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets",
+      "before": 1012,
+      "after": 1012
+    }
+  ],
+  "files": [
+    {
+      "path": "harmony/chat/src/main/ets/index.ts",
+      "lines": 1407,
+      "sha256": "e022db120d6cb1e5458bbe96b5d461583411e350229af9aaa76a9e534f2bab22"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatPage.ets",
+      "lines": 1200,
+      "sha256": "1d8e4dddce86303ea42e3b6a80bc6c6cb214de12793679746adb3e720fb6fe0f"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/creation.ts",
+      "lines": 1121,
+      "sha256": "4ac22f868d77a5091ec60e1355e921bcc0761b52fd6d12471fdf5107ca7dcdff"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/context_compact.ts",
+      "lines": 1117,
+      "sha256": "5e3d48e4413360584c79bab8c82a0a833f866ae4c565d8253a04d39850f1c079"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunService.ets",
+      "lines": 1109,
+      "sha256": "b53196a594f67189310da55952d69c50d243c82f618d1d88f67c22eae5aa6ce6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/BoardPage.ets",
+      "lines": 1084,
+      "sha256": "282ac23d977f233f8effa8bcce77b41b54612fda4e94d5bb92c03603f91e0fae"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadArticlePage.ets",
+      "lines": 1064,
+      "sha256": "99e9787e29b1131991d7e4fb81269d272d9258430a847ca44d22cd0e442423cf"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelWorkspacePage.ets",
+      "lines": 1063,
+      "sha256": "7c8612414cd3636ca9006c2578a17aa8d832229c56fde4f9a1f3de334da9ba36"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelProjectsPage.ets",
+      "lines": 1024,
+      "sha256": "8c2042aaafa4272cc188c0a8fd2e668c2790a75cb90cca72ccf0bd61b0e2d054"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/PageTemplate.ets",
+      "lines": 1022,
+      "sha256": "e3e531e373eb0ca75d873c63134241fa6ec318d67e17b8a3437001db9e6a98b9"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelChapterReaderPage.ets",
+      "lines": 1012,
+      "sha256": "6fb4575ae3e28040397cfe2c8324fd49f5b85cf6dc4431426d2c4ca57c4d3945"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/context_engine.ts",
+      "lines": 991,
+      "sha256": "feca76e00ecb91e43583b62d5b3cd7ca6d694b28fc7661db3894eb5f4a78ec13"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WebMountTools.ets",
+      "lines": 948,
+      "sha256": "802e9f2f5610e1f13074ef86a0c83be9372cb5dde2327d8b6d685b2b1c0c5491"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WebMountParityTools.ets",
+      "lines": 939,
+      "sha256": "5b3b6f9b2b0d7909004a81ddb226b01904dd414aae9cef594c39b58da1c9cacb"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/CouncilRunPage.ets",
+      "lines": 912,
+      "sha256": "842b5a93ec368451026255e5f00f75ad49c14c13396b58308410c11e5bb4d5f6"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/polish.ts",
+      "lines": 894,
+      "sha256": "e8bf71719098e1b5d87e948264f20465cc0ca78dafef5d093e25bcc78d45d966"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/HomeListPane.ets",
+      "lines": 877,
+      "sha256": "9d6122adbcede3decdac6140833bc08e6d5af272e17ac43ec49764bb78a21389"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingExperimentalWebMountPage.ets",
+      "lines": 876,
+      "sha256": "3db3475ed9953329d626a553c2d78552464b687afc9d444755ac108dc6bfd7ba"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/webmount/parity.ts",
+      "lines": 866,
+      "sha256": "ceb54608f9c1404a9767bb69ecb6a9332861c7e67748b37b9f078607d174d221"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/MiniAppRunnerPage.ets",
+      "lines": 865,
+      "sha256": "9f18ab386acf443663a90a9e1c6eb686be78e9803c24dea7a864a96d09dea6b1"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_task.ts",
+      "lines": 861,
+      "sha256": "99ae535db2c95f941cc3edc483a59d2b7c2ad5b7f58815045a9f8be5871837eb"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadTemplateWorkbench.ets",
+      "lines": 853,
+      "sha256": "3bfdd71013ae1e22d8e68f44bdc920ddbd7af387526ca3ec434c7d4c5649d93c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/novel/NovelDiscussionSession.ets",
+      "lines": 852,
+      "sha256": "4edf9d631f6b85aff8c410f8fa3ae620aca6ebce81d33aad12a6817a450af73d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatModelParamsPage.ets",
+      "lines": 851,
+      "sha256": "f3c0993ffe82fc99adcd84e10c8925be751ccb1b0562a470099fbe5af346d043"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/smart_ui/protocol.ts",
+      "lines": 850,
+      "sha256": "1dd5f39d1b395ca05a96df1ac2b33c822d690d731876afdb49e0c6f8383942cd"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/AgentMessageRow.ets",
+      "lines": 847,
+      "sha256": "e2530e78759339749863c4162919654a0a30dcc3eff6fe17971da75f446546cb"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool_activity.ts",
+      "lines": 841,
+      "sha256": "8e104e8445a573242d1185bfdb52045908a960dac2644b65bdda6a4466a885ad"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WebMountSession.ets",
+      "lines": 831,
+      "sha256": "55f713267e8e02ab148a677e9acbc83629211e71e760a376b01f9c018d117bd2"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/subagent_manager.ts",
+      "lines": 829,
+      "sha256": "ae2590389de04a4a55a1e0a095800b020dac336d2dd5971a47b3655c794db75e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/search_orchestrator.ts",
+      "lines": 824,
+      "sha256": "7c60453caad5a4609a42faf5498239e00db2bee504e37eda0ae09300d0c86f1e"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/ordinary_run_service.ts",
+      "lines": 798,
+      "sha256": "7456a7e1fb63514803c73cacb7afd54127103bd77f911abf4c7d53a0f554bbd4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/PluginsPage.ets",
+      "lines": 773,
+      "sha256": "bc9999f14972f60c745cccfc57a22bd90932832201e0c81432ab2a1b743f59c3"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/MarkdownBlockView.ets",
+      "lines": 769,
+      "sha256": "209d34fa111fb89ec72ffcd3c783911a90e7c60ea034c268965fe3f96412dfaa"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/workspace.ts",
+      "lines": 767,
+      "sha256": "a60ed11a179f320665f4c34a617036cba024f8be279bed702125465c2ab706f2"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_cron.ts",
+      "lines": 760,
+      "sha256": "24ae905a96bda527b99a12622dbb132e1db08abee7395bf8be60cddf593e8942"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/subagent_validator.ts",
+      "lines": 738,
+      "sha256": "f9719a230eb022fe5516a3a5c9faf6bbe61c407e8797934930f484c2b00f2c2a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatMcpSettingsPage.ets",
+      "lines": 733,
+      "sha256": "7969093d4bf816b0697607d6a55dce6b5696dcc99ebf3f2207d7e88adb07c4c0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/design/theme_pack_import.ets",
+      "lines": 726,
+      "sha256": "c601f3817c7a6129aae03659d4261dd1f8d3f44ceaea8b6f3c9a78e2347a1d1d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingSubAgentPage.ets",
+      "lines": 726,
+      "sha256": "ed064fe34da3e36499869ad376eee4c502697c6cd8ac3f8e9b08778f02a08bea"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool_policy.ts",
+      "lines": 717,
+      "sha256": "2f829852062f9f77023c5512149da1af91c14874b10c09f87a17db8dcd6fd865"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingModelCouncilPage.ets",
+      "lines": 706,
+      "sha256": "8f190e78baaba9820dc5ac428012b7998e4b5175d062712aa0296c0449366f12"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mcp_manager.ts",
+      "lines": 699,
+      "sha256": "4f3410180292d1ab27a832bbc3ba3913cf9579aa262b835dff1fc551370d7d02"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/council/manager.ts",
+      "lines": 691,
+      "sha256": "ff4cb9b3b91d63019d49c0e4b90cb84527c3273f7c07b9acfb87628756fc9a0d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ProfilePage.ets",
+      "lines": 686,
+      "sha256": "c6bad2df61176f18066a5d1e4228b5431be838ea038ff5ddc1eb91a1d6377105"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingBackupPage.ets",
+      "lines": 683,
+      "sha256": "4b87c1228d020018357e12bec9f825f17d2a7dd98cd1a80d8e0ae248a855b796"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool_loop.ts",
+      "lines": 682,
+      "sha256": "25d4dede6e3cf84d35c0be985581b0b98db348be5a4ca3fb5c0329f4744917ff"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/sync_snapshot.ts",
+      "lines": 673,
+      "sha256": "a8835d580156e67acb9c594cb10a0572e65be1b632d98dc731292c36e77fbc0d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NativeSmartUiNode.ets",
+      "lines": 663,
+      "sha256": "ec5a0469d0fa96a87bb32f1a7f674d663542b3dce2163da8e33426c9145f0b3e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/MiniAppBridgeImpl.ets",
+      "lines": 659,
+      "sha256": "2c8b3ae06522f418fa205d6bb2f47784063f80c22b721080a4b5d16e259b52b2"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mcp_transports.ts",
+      "lines": 657,
+      "sha256": "9778514c5e7bbd06230ac13b8138565e3d99044f329b2e55e424893bca6bc3ae"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/MiniAppChatCard.ets",
+      "lines": 651,
+      "sha256": "53e2fcf310f06195901ef700bf461cf8b1e4ebb9501186f42dcda57de5e31529"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/markdown_blocks.ts",
+      "lines": 650,
+      "sha256": "cf371aa98c949b37d3f2ad641533d77a3bc8078ce83c5f97a16c47a96aaaa246"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/AgentRuntimePrefs.ets",
+      "lines": 644,
+      "sha256": "dae772dff716be297aa2b7750b4c79943dc57ff2f792cec10b396141dbd82428"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/openai_responses_parse.ts",
+      "lines": 642,
+      "sha256": "ace4525ec98392d69d480c85e593297eb404a55bdfa72e233b2ebba41e701b7c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool_dispatcher.ts",
+      "lines": 641,
+      "sha256": "3a5108add299308e3b578573aaad4df3f25b3c56579d2dff01ea0a935c734b0c"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/run_manager.ts",
+      "lines": 639,
+      "sha256": "78dd59699ef9b8c7ef5f59e86953fa02cd17b6705673c327751064b1d84628b1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/chat/ChatComposerSession.ets",
+      "lines": 639,
+      "sha256": "be5a46963d9f08623937db3e66a9622c59b8358608a18a83b048794d4c35e368"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_codec.ts",
+      "lines": 633,
+      "sha256": "3188558e7246f7800539aca581c58b8e2b214fe7fe2b12401fc1415a573da7a3"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ChatRdbRepository.ets",
+      "lines": 622,
+      "sha256": "4243cc8b6144e90901c723c9d40471c1578c1d68569e0c74b526d5f60c5989fd"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatProviderSettingsPage.ets",
+      "lines": 619,
+      "sha256": "9d0af7b8ff95dab08027b5db487cf71c6a8254a8b69bd7beb1165dd66d2538a8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/InlineMiniAppRuntime.ets",
+      "lines": 617,
+      "sha256": "387cfed69235353d9565b1d2870e6d86c646173182dcb794973d947e4b84723d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/chat/ChatTimelineSession.ets",
+      "lines": 611,
+      "sha256": "8d47182101f921e1d7852a1e8b3830e23d2b36e16b703e2cdc4c1848ac66491f"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_transaction.ts",
+      "lines": 610,
+      "sha256": "bd31c5aecb748755107a92ea61b36a890315a09b85ca428b227ff5047c3e1fd7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelSettingsPane.ets",
+      "lines": 609,
+      "sha256": "7d429f71a2bfaf9ecd305a3f01bc5d932c765cc4076198aec6013b0496642550"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatArtifactShelf.ets",
+      "lines": 608,
+      "sha256": "3eb3cef137c8c7045476201b091f6b92bddef57c7675d91a0184efa4977e66a4"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/builtin_introspection_tools.ts",
+      "lines": 599,
+      "sha256": "309ab16956362487fec3e07c24b70f442be9c33763f98a0db5c89e4ff43f0dfd"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/webmount/goal.ts",
+      "lines": 596,
+      "sha256": "5a94db2e5714e6289e9b2060f828484fa7a1ded6ba08c1a1e1bb1cf059b2521d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingAppearancePage.ets",
+      "lines": 593,
+      "sha256": "859887e5b2bfc203d009274348f3217bf4c9591a4c03edf1811c6f6f5471a02f"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/ghostwrite.ts",
+      "lines": 579,
+      "sha256": "fc825b21756adba4bf9cf27808e73bc71baf276c85d1ad415a6fbf8905783f3f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/design/components.ets",
+      "lines": 576,
+      "sha256": "195552d4a4519fdb4bd869f682410c37e7436b4363a25fccca20a4884083f9dd"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/GoogleProviderAuthPage.ets",
+      "lines": 573,
+      "sha256": "fee00a8bf149c68cf3842f7ca8e8dc183bfe1460018c9ac05677ccddd69d589e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/response_content.ts",
+      "lines": 561,
+      "sha256": "4e899ade732acba6e87aa5b55534dce1c4fd111a6ca07a67cd987289d36d20bc"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/MiniAppListPage.ets",
+      "lines": 561,
+      "sha256": "d3316a27ee046e9f7e08a4fab9ff79ccb769d7f8ebebe31c047bac3ff3cb543f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/MiniAppFiles.ets",
+      "lines": 561,
+      "sha256": "62f9b17029152c9cd5860450bd0d5151a035cb030822d442c00ab0084373846e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadHostSettingsView.ets",
+      "lines": 560,
+      "sha256": "a65a5c3861bd194b2e9eab345067cda583f52ed085f75d9acaf5bf9de756ece5"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/MemoryStore.ets",
+      "lines": 557,
+      "sha256": "1aa4fdd404c60eea1138d11cf078ad091b8447067f8858ceed40eb252804de9f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/novel/NovelDiscussionView.ets",
+      "lines": 551,
+      "sha256": "08ee3d18a75f87567caa5074a38eb69a16bea79a55c28fdaf42df0e01ae025ec"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadHistoryPage.ets",
+      "lines": 550,
+      "sha256": "b7fc43fb62a8561c72c48a013a4c9abc1564beec89ca4207400e93c77c311a9a"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_interop.ts",
+      "lines": 549,
+      "sha256": "286ddf2c9bde268287327534101ea946bc227ae2f1f0f8d03d56e1a2c60837fc"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/device_schedule/DeviceCalendarAdapter.ets",
+      "lines": 539,
+      "sha256": "3432f236175e8868d0e5e2d85b2b070a4e01a1abdc580b2a770fbe781ce426df"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/weather_tool.ts",
+      "lines": 538,
+      "sha256": "a1fd1ae8a95efde5c83464137709d9d27bccb88623f57ea69b3ca85291eebe0c"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/section_writer_tools.ts",
+      "lines": 532,
+      "sha256": "7520ed456f394b01bfa14da6635e987e2477dbd88aa5f25d9da73939e9a2185a"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/durable_job_coordinator.ts",
+      "lines": 524,
+      "sha256": "f89a0d70657d2c8851526bb538a8114e14a431457f4a927f4c98a5abb19ff0e3"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadTemplate.ets",
+      "lines": 522,
+      "sha256": "78b63a3f69507e9f5a384a46f9df79961dc09e544de4787bfde58e5c074b5605"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatInput.ets",
+      "lines": 519,
+      "sha256": "9712107f073ca47ec750929852a4a55dee0bf01ca6510289ca3bbc6802de8e2b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/permission_status.ts",
+      "lines": 518,
+      "sha256": "67ea1f97b95952d7582f7da97f79e61e2571075d8a5133b05589dc70b50f309d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageToolPreviewSheet.ets",
+      "lines": 512,
+      "sha256": "8618664dd96951283cb723000feb408f8980a1566da9bf7e11eb7fd1d9ed3228"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mcp_protocol.ts",
+      "lines": 509,
+      "sha256": "e68269776649ed8af887dc8371d80d9f6f57ebb3f62e9452f0b90937cea5ca14"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/models.ts",
+      "lines": 508,
+      "sha256": "8d0ee93c60832de635936a265a0fd06d72c7189025721bd6e5274d556be73ac8"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/search_aggregator.ts",
+      "lines": 507,
+      "sha256": "d9265a34fc8d0c7489d474d6a03dc09d10b48a12368bdacc64e89023fff3496e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_repository.ts",
+      "lines": 506,
+      "sha256": "73e74e064c7393c362eb695d29c9d1cb065b84902296ccbe674661c276dfa383"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WebMountOAuthRuntime.ets",
+      "lines": 506,
+      "sha256": "900bc188741992befe69d930b8e391313609705675882af1195ddf71c1d1f56d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingAgentMemoryPageFull.ets",
+      "lines": 505,
+      "sha256": "3d6140b16a2dd9aa71309a5458de4e29cc007d370ba8971bbeedb6577772d785"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/ProviderModelRuntime.ets",
+      "lines": 502,
+      "sha256": "57d36c2c944cba2c872b5ed18daa437eae9d941cd3a76dfa421d5ee6a74cf85f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/RecipesPage.ets",
+      "lines": 499,
+      "sha256": "1ee8e717b0c99aec80ad57326d8e8aeec716e9c1682829d81ba9b81415623b8b"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NativeSmartUiComponent.ets",
+      "lines": 498,
+      "sha256": "5d92ba3005af88045ed40bb362592c8d288e9eac02d2fa463fca0e708849e3aa"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/chat/ChatConversationPresentation.ets",
+      "lines": 497,
+      "sha256": "02d933eb2080316fb6e1e6dbce9a9f3c5cc71461ab159bed8891077de0d0e087"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/openai_request.ts",
+      "lines": 496,
+      "sha256": "7e6d1de89fbe8ca9b6be926ddba9b4e1f5a673300ee2bdfcf585fd8c620db46b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/search_service.ts",
+      "lines": 493,
+      "sha256": "48cd65fef987439b831b8a947c747c1e70347cba5d7ab345641cbb6d276855cc"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/McpHttpPortImpl.ets",
+      "lines": 492,
+      "sha256": "de3013abb42882e05be6b9ac0049929d9f703839590bf2593b0baadec8045983"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingMacGatewayPage.ets",
+      "lines": 488,
+      "sha256": "e498937412e4c19278a7174fe614b601a384e89ef7c6d2551a3ab56d6f9d7627"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_extractor.ts",
+      "lines": 485,
+      "sha256": "d2baa9174538fc4f11b28a43ebc3a6c856554d02eef6cb084748bf6a5fdd0099"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/stream_accumulator.ts",
+      "lines": 485,
+      "sha256": "97567f3710bf7ffcd385d46e711323f2f44e1dee7d319d1b3d20abdf2523700f"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_archive_repository.ts",
+      "lines": 485,
+      "sha256": "bc41975ce77adc90da6c7787bfaa1a6b0574e7b37b9c8b8bb02a4f0af2e9465f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/chat/ChatModelContextSession.ets",
+      "lines": 481,
+      "sha256": "4e8c6afa99bc515dee3b44a7470d06eb035d5dfba82131fc87ee7aa43bcf3ead"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/RdbRepository.ets",
+      "lines": 480,
+      "sha256": "0ddf7cacc75294e4d5fdb4b3ae8fde6ab99bc3a628f63bef7df2c6300886e408"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/SearchRegistry.ets",
+      "lines": 479,
+      "sha256": "35cccc5f2be60a64f502fe5e758577a435b93cdcb122a939e3dcb563660d93ec"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingSandboxPage.ets",
+      "lines": 478,
+      "sha256": "af5865fa81feaa825c58700cc1126a2bfa8290fbeb34b2755b68b98c45869623"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/provider/ProviderConnectionForm.ets",
+      "lines": 477,
+      "sha256": "44c8602de1fa9484302907c0f7ba0a53344c246c6309f10a863bca2248774622"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingSSHProfilesPage.ets",
+      "lines": 477,
+      "sha256": "8737f46d349971fa1ee6877d76ec18e8ccec2a28fbfa0ed9dcc5f956751b02a2"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_history.ts",
+      "lines": 475,
+      "sha256": "161f6856221497a3291971b87257685084bf81a2c7f384400342ccac6f5f9f7b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool_display.ts",
+      "lines": 470,
+      "sha256": "d3026bee0bbb6adabe48aaa0e4f6559dfead0c7d15996b985b983ecae7865c0d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatTaskModelsPage.ets",
+      "lines": 470,
+      "sha256": "a41d35a7b827e0496331b2ae30a1d1c2734fb948097b03be60aaf5e4ab4390f6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingJevPage.ets",
+      "lines": 470,
+      "sha256": "643728487bc95ebeafec2d68fc1976cdda380c256f7ca2c647f9b87be14136d0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/design/theme_packs.ets",
+      "lines": 468,
+      "sha256": "b0ccdfc434e8cbcebe5746b32323c0f4e8563a48d95c53bed6b49dada4422c56"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/builtin_session_tools.ts",
+      "lines": 466,
+      "sha256": "a92c7424d5b6c210d56390e011494218d538e6af5794e6600a472aa550ae80db"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/conversation_artifacts.ts",
+      "lines": 461,
+      "sha256": "24307b49b24af1c8c785ad91f98adf4300ad0632dd33f804d08dd3b76548e0ba"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/plugins/runner.ts",
+      "lines": 461,
+      "sha256": "efe3640c784364f7a3c52b3c4bb9abf400bb125ea70714b95db483cf7ad157d0"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/supervisor_loop.ts",
+      "lines": 458,
+      "sha256": "916da0ddf719255133f54ebaae5da52b3626bb75cc0e8a82222836fbd4d41696"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/polish_runner.ts",
+      "lines": 457,
+      "sha256": "15368febe62c185d48edc60871e99653ec483fd362c42b586ab7359ae78fb0d1"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/ghostwrite_repository.ts",
+      "lines": 456,
+      "sha256": "a21ff490302b459d86b9f618324473dbf5c25251f47eca1122f5f92fa2c34f12"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ManagedFileStore.ets",
+      "lines": 456,
+      "sha256": "678f440e29185e237fff4b3144d6a6236139735a11271b6e7a124c06bd5642d8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/novel/NovelCompendiumSession.ets",
+      "lines": 453,
+      "sha256": "40c938fe5a9b6734bcac89a7baa5ca9c50e2fe74bce471a1fe207e64e5ab5fa2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/entryability/EntryAbility.ets",
+      "lines": 452,
+      "sha256": "72e5c6f31b2ed75d2119f8a992b1789ead2f4f386c9c5ea6e23572f2532b28aa"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/subagent_runner.ts",
+      "lines": 449,
+      "sha256": "ffd68ca40c1e9720821bd382485c522efefb6e7740e3c9647c8551b4dcd2d8a6"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/ghostwrite_runner.ts",
+      "lines": 447,
+      "sha256": "aea861f92cddabe3f5497080bae3b9228945d1854b43bea8cf3b2f832173b546"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunDependencies.ets",
+      "lines": 447,
+      "sha256": "57f818bbe7f839cef625a795dbba76bbdd035e3c0058a319575d29c9d2bd8df1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingFilesPage.ets",
+      "lines": 443,
+      "sha256": "7a5dec91281a6c2838e01238ca16f5de1761da1bfe3df081c73f613e459b3c70"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingDisplayPage.ets",
+      "lines": 441,
+      "sha256": "23075bd0f8158f41a580888eb105e8f33ed5193467ad6d96c807c5e7d7d15328"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/DeepReadExportPanel.ets",
+      "lines": 437,
+      "sha256": "2cdea565397751d0e3952c180675bce9f003cdbf886c2ef7c2c2bdfc620a5476"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/MediaCache.ets",
+      "lines": 436,
+      "sha256": "b078b349292358d91aed529ab1934c49b1b73c7be39f88258cdc159ef7e19edf"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/TerminalPage.ets",
+      "lines": 434,
+      "sha256": "838e7cc71a767f7e95de9370b339f74420935d0c8a6e7b0cf865dec4ee7e7486"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/PluginStore.ets",
+      "lines": 433,
+      "sha256": "e0bca93a4efeff29e89619effdeb54b72b3c0b760dc127e66d0f1f3e68c90e5d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/OpenAiCompatibleAiClient.ets",
+      "lines": 428,
+      "sha256": "263aff46424dfbe2e4461bd781dcc9901d987651f6281111ab864feacb6e857a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatExportSheet.ets",
+      "lines": 427,
+      "sha256": "e5c7355d3c0a0d2757f1ab30e36e9d1dfbaba359a594c2cab6f0d2bc152d2aab"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SearchPage.ets",
+      "lines": 427,
+      "sha256": "9b6bbf4c0a24288d574a25b992ea8e3f1a111b9ac2f336922b5566f25d073e0a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/novel/NovelJobSession.ets",
+      "lines": 426,
+      "sha256": "271d918d0e063eab6bc37b2b2fba9789a0389c4dc0bb749b4fa73da80729cf6e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/html_dom.ts",
+      "lines": 425,
+      "sha256": "edbc51824cc5dfc6b09f117b31a8e38561440ed843be9d8bc2243a8288bfbd9d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/RcpHttpClient.ets",
+      "lines": 425,
+      "sha256": "a0c42987de9d7a43313b528eb62452109cc321358215df427667b36707de902e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/device_schedule_support.ts",
+      "lines": 424,
+      "sha256": "92c1a3a47ac52ec1fa65a7fb02cd3ee91d3db4dc09796ef7f9b586f84583f22a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/chat/ChatSmartUiSession.ets",
+      "lines": 418,
+      "sha256": "709074bc01ca426f9d5eb8891c3d78cd1635d7e2544499148e6c1b1def3dda6e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/builtin_local_tools.ts",
+      "lines": 412,
+      "sha256": "8fdc57611dc4fe7b64037d7c64e2ba3feb898b59242dd00fe8c7c0a5d23e1c97"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/novel_interactive_adapter.ts",
+      "lines": 410,
+      "sha256": "52f5cb9e0ca464cc5d8625cf815f5d2a4b262fae47903c22be622ca8240148d1"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/smart_ui/components.ts",
+      "lines": 410,
+      "sha256": "5e86d266c5247e74e1ec98cf158bde754c6cc628f62163fab63b774cd1ae290a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/deepread_settings/DeepReadSettingsSession.ets",
+      "lines": 409,
+      "sha256": "d17a70c85b5ea1c8e63c79bf67e3f2c784e5047afc3c0ab51cb8f349a2fe6927"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NativeSmartUiCard.ets",
+      "lines": 402,
+      "sha256": "7f1354c20558ed088a844422e37918bc8646b5dac5e6da4239b132af9e174de3"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/PromptConfigStore.ets",
+      "lines": 401,
+      "sha256": "a76e767b36228432213da6b29c0fc721b40beb67267d5a10b02d9abaa7cf0d7a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelPolishJobCard.ets",
+      "lines": 398,
+      "sha256": "f30c4e12240f115efad70df8a98a4e417d7daf763a42ebfff874578974b75f74"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/novel/NovelCompendiumView.ets",
+      "lines": 396,
+      "sha256": "ec2b7764e29016935c0af11990fb9824d71f830922653ecabcaf7a7b7c57c3a8"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/subagent_definitions.ts",
+      "lines": 393,
+      "sha256": "56bacc3b7c8e1b92f6991b09001ffb6c0650e3a3994eda6e4ff2373e62e17033"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/chat/ChatRunDetailsView.ets",
+      "lines": 393,
+      "sha256": "5848ffb18671b8e74d4d8eb9937e70ccf180b1b138e4b7aa62e04fbdec94cc5f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelStandaloneSettingsPage.ets",
+      "lines": 392,
+      "sha256": "17ed469bd13181bb4c83a4f9d1ddfc01a670ccc63fe2d7c024e6818b720deafa"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/chat/ChatTimelineView.ets",
+      "lines": 391,
+      "sha256": "9756a7db946aa97196bde8884b970b3452dfdde349e233de21cd27e29e66fb39"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/chat_turn.ts",
+      "lines": 387,
+      "sha256": "257af352f76a5dfdb39307c4a679f777cbbfcaffdff291696bfb426dc156966c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/AppContainer.ets",
+      "lines": 387,
+      "sha256": "df4b79f290624afca2005ccc4397ef66bd33c61844d7df8536d3074a77c1d0a7"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/workspace_archive_ops.ts",
+      "lines": 386,
+      "sha256": "b121260547fb7dc428482416e57c68f0234156780c4278fec54c2b279c11f75f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/design/tokens.ets",
+      "lines": 386,
+      "sha256": "fc17dfb7bf2909e4ff50a679b926e8a880b25a2743fa40e1c4d69d41c5082941"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/device_schedule/DeviceAgentReminderAdapter.ets",
+      "lines": 386,
+      "sha256": "7b569b2bc2e91dc4cb863bc1b5d491d5567da4e8c39a34aa5a4d3d6e03a37027"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/builtin_memory_tools.ts",
+      "lines": 384,
+      "sha256": "bdd887c0ccf02462afe4654d8cb41df24c6fba6b15725a3ef233a725b967b4c6"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/scheduler.ts",
+      "lines": 384,
+      "sha256": "e2aed1e77bf7c3c0ffc5e20f2912a4f91b55a66444026e55b9ac1cf1572f026a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/GoogleAuthSupport.ets",
+      "lines": 383,
+      "sha256": "2fdafe6771a95ae3a9aa4518b0b706717a5ea0249f1001abb050a41bcde7fb1e"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/research/source_prefetcher.ts",
+      "lines": 381,
+      "sha256": "b95693e695dd658a109eb02b932b110bbe13c1043f786476cf3147e9f0bed013"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatSearchSettingsPage.ets",
+      "lines": 380,
+      "sha256": "498643a885b19596eff2fded265f5dfb308cdd3c464aea3b1680be9f8f7fe996"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelPolishPage.ets",
+      "lines": 379,
+      "sha256": "f75474cedf4b66742289ed463a0687e8d4189570f2cdbd7b23d92106c2ac6296"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/google_request.ts",
+      "lines": 378,
+      "sha256": "dc37cef015548022beee7973b9f6548b4b8d0a1c3e8ebe8d0d34291f1992c016"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/pptx_parser.ts",
+      "lines": 377,
+      "sha256": "a2f40b659bd999eab58e4a6c06389f3a06e921ed2a40d25465f440efca416b29"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/DeepReadNativeArticleBody.ets",
+      "lines": 377,
+      "sha256": "e34fa251de9ac409d002eb68ea8292c1f0745b8fd6346d64f375df5cb8177ce2"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mcp_tools.ts",
+      "lines": 376,
+      "sha256": "a0f5ee00f67c0dfab1367b606b144ef440fccfa7bd23ed836f9fb6728df0f49a"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/personal_context_tools.ts",
+      "lines": 373,
+      "sha256": "c9e257ccf6894d842dac068e77ac8a859e638e88b3cb7aec422c75f75b74d855"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/polish_repository.ts",
+      "lines": 372,
+      "sha256": "aa21cd1c30d0a93da71742abb7e64cb64de129ad2001091c371a2a8c84c8cfcb"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/CodexOAuthClient.ets",
+      "lines": 371,
+      "sha256": "a926df76cb6cf2fa9a872352aea11e2c9528a179647e65eac953a1c691c843b1"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/persistence.ts",
+      "lines": 368,
+      "sha256": "8157cace0751333a48856705d413a67b56facb877a5c790617ad27b3a255ebe4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadTemplateSettingsPage.ets",
+      "lines": 368,
+      "sha256": "63f69ddf6456cad053db7b7a58507f4ad504ded7eb7ebca9e6e8461a679cac18"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/novel/NovelWritingControlSession.ets",
+      "lines": 366,
+      "sha256": "74339394d0983262cb03ffeec9833807d1207100f966cc1be76515f376772d19"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/WorkspaceFileSheet.ets",
+      "lines": 364,
+      "sha256": "02d4dc1a504e7d2a72b89f3f36d584b489075bf50c975e455f0eb696f9e15ba3"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageReasoning.ets",
+      "lines": 363,
+      "sha256": "78c4f19c8b8c418954025943c75d78ea25f66a5f62b0de0c4b907b23882b7744"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_prompt_repository.ts",
+      "lines": 362,
+      "sha256": "32ec0ec75d2bee4c1a3aa282d16f8a2329f55764f4b875c1ac0d692b54190f4c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/novel/NovelManuscriptSession.ets",
+      "lines": 362,
+      "sha256": "30789017633d14adcc81e219c787e2e7ea96ec6d18bf82e2263bec7bab9f8127"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_tree.ts",
+      "lines": 356,
+      "sha256": "de8bb2445827c3f05c5a0f23750446b227dd0d3c3e92fbcc47396048af54b199"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadArticleMagazine.ets",
+      "lines": 354,
+      "sha256": "6ac47e5e0013cb8267965fd13777fb9bfbcb898ab1de584b12288dfb8c6ec808"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/jev_context.ts",
+      "lines": 352,
+      "sha256": "69ed4b5d3c68004c167172f01e94a0bb2e9156b9d9542249c9157054ae9a4580"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/openai_responses_api.ts",
+      "lines": 352,
+      "sha256": "641de9b6bef51759982f954a33d6598d9eb5e9e95d3d53c312e88066333a5009"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelChapterContractPage.ets",
+      "lines": 350,
+      "sha256": "7add6610417bdaea459237acca2eae5b61bde153f1d684822ac091f689ec06d4"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/subagent_tools.ts",
+      "lines": 349,
+      "sha256": "92bfd57c296cc04a915412ac7b343fbfaf8931e3dbbe3dcef1b3314c22d5beda"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/mutations.ts",
+      "lines": 349,
+      "sha256": "86a73e9e134d9ed360a0cfcea2c7a3777e6f5e5420b47603ca9b7465ae71a6c3"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ChatVisualFixture.ets",
+      "lines": 348,
+      "sha256": "dffd40427ce6de74d25865eef223f44180a00590759d81b5d3700f46e628fa38"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ImageGenTool.ets",
+      "lines": 347,
+      "sha256": "97400634fe62a2e62d195127f053154776fb469f7bbdee6f0e64c7f34f9c477d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/chat/ChatRunDetailsSession.ets",
+      "lines": 347,
+      "sha256": "ffbd0f6190ed03b2dff0f19f1cb44419663247764c6d6417e8db2d13192de001"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/openai_responses_request.ts",
+      "lines": 346,
+      "sha256": "bedb57a2661321c7960c8195e54325c8c401869d8d1504d114bf678bc694d12c"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/index.ts",
+      "lines": 345,
+      "sha256": "baf04b54fc13a8bef8e44c11bdc635f6bb7d9fe59767f0f6ac6dfaf7a2eca16d"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/continuity_audit.ts",
+      "lines": 345,
+      "sha256": "ab84326cae16c381e7e59ad9808381e402b1ba4d289ce31bf828b5f9170754cc"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadSearchServiceEditorPage.ets",
+      "lines": 345,
+      "sha256": "5fcab8e0f4f8bf5bad4768806016275b3663d605449f5b6b432f951a30cff70e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/plugins/validation.ts",
+      "lines": 343,
+      "sha256": "512d8ff46603b4cf55f9ef6fe161655c85a2d78c1608a44c4bd918549d039015"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/recipes/runner.ts",
+      "lines": 342,
+      "sha256": "f70a626ad94f939ef8f96ab75d843d91c8e5ce6fea31ce7e57882c30311a7bd9"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/structured_state.ts",
+      "lines": 340,
+      "sha256": "59bcaa6f6c0a24da859d13045e3cdabb2a62ec07471380b0d959fbc72d812722"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_url_guard.ts",
+      "lines": 338,
+      "sha256": "670021c29e077af6e60a9bd91e052c8d950c3f35a57ee08359f3ac79be621112"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/AgentCronStore.ets",
+      "lines": 337,
+      "sha256": "35a2acbd5107b48a5526ab3c99eef8125c0bc1ff900541830234093552dc2f21"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/ConversationToolComposition.ets",
+      "lines": 335,
+      "sha256": "fbbccd556dceb432c65430da254015c7f29f9864eb6e7cafca9c43db3edb750c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/generative_widget.ts",
+      "lines": 333,
+      "sha256": "f39be9a20189509d67439c9306caa0bd4d6e8dc653f67b9630a3f0638ff676ce"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/markdown_cache.ts",
+      "lines": 333,
+      "sha256": "b7c03d5e8a956f88724a7a62210e343906cca8dc2fcdb1bc7f6297513d9df0a4"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/regenerate.ts",
+      "lines": 333,
+      "sha256": "ca5bce4827cfed436ad5918e0a182b8fe1125c64712bd994b4822c59a12722fc"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadDiscoverySettingsPage.ets",
+      "lines": 332,
+      "sha256": "f13a9abdf40d86e7c0fee8d27b9276687dcffcee858e236257a05e44ea04451c"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_project_repository.ts",
+      "lines": 331,
+      "sha256": "927a2af8adae2081091ce44d14aa2a2c73e0c8306f09afd008ae7c79c4d5aee0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelGhostwriteCard.ets",
+      "lines": 330,
+      "sha256": "061f44510fb85d74852f1b1ea4715b1e499685da6fe2a8035ca0ca9c075ee6dc"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/VisualArtifactPreview.ets",
+      "lines": 330,
+      "sha256": "29f9b08f6f70b44aa1314008aa19c60b312d0a024f53ca1ca595055533d1346e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadComposerSheet.ets",
+      "lines": 328,
+      "sha256": "730588301c2bfe5cdd68e09cbd73d2ccd429a1c4be1bdff50e3cbe16ba00cae7"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/message_grouping.ts",
+      "lines": 326,
+      "sha256": "bc8cc6ccbef7d556b79f0f70c9d3a01c20876b71a67c1116b4f0ede36f4595a7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/SSHRuntimeFixture.ets",
+      "lines": 325,
+      "sha256": "596439706a1f81ada81e0df982d11b6232e48bb322c462b68755361e64bc8b8c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelPolishCreateSheet.ets",
+      "lines": 320,
+      "sha256": "199d2aed974531c8571928fdb17e591e2c8d6445191bf1de6fe78dd79b1bf30a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/WidgetMessageContent.ets",
+      "lines": 320,
+      "sha256": "607dc51014fd3ee11ac391814bd98ca5cf58215a87eebdff7a860e419c078e1e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WebMountAdvancedTools.ets",
+      "lines": 320,
+      "sha256": "de8f472cfdf8b2a24c1524d8607a41add2584f61827cce3a83b6568d2d82a208"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/google_parse.ts",
+      "lines": 319,
+      "sha256": "84fa17fdfa20ac4789f182e047dd010deee58bcce0bd2054efb6630e76d1515a"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/skill_package.ts",
+      "lines": 319,
+      "sha256": "6072d4628bb1367c3b4b697526e9e62505aa4c7ca349b7d33642004fa47a9f11"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/free_web_engines.ts",
+      "lines": 319,
+      "sha256": "77cd13afb00df454c0945ec59352f53f436a5c8d8c34637fc73bf43bf82eab1a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/MemoryRecordPage.ets",
+      "lines": 319,
+      "sha256": "8d8b2f97ff0931eabb76c4421573cf9c8685c289e4b366e76a396e0449f02942"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/smart_ui/persistence.ts",
+      "lines": 317,
+      "sha256": "17987ccbf0eea1a0b18827447b8c863f979d00019277469febcf1097dd55a5ac"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/markdown_html.ts",
+      "lines": 315,
+      "sha256": "b81ff8fedcbb0fb9f989f1983c04a181161dbf450922473df7b8e8f7d90e238e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/deepread_settings/DeepReadHostSettings.ets",
+      "lines": 314,
+      "sha256": "19c0d9e03b8d4aa9558693123d7908f12c15502d122be008e74360fd83055ecd"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/docx_parser.ts",
+      "lines": 312,
+      "sha256": "bf6a25442bf5e24b36c3e3226c41f40db7cb964e8fc124a31bcb2020d4b18576"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/MarkdownText.ets",
+      "lines": 312,
+      "sha256": "ce68b31c181d20f8f4ebbbda2701924793b3d0c4277334c7de543a4f716ce4d4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/TagsInput.ets",
+      "lines": 312,
+      "sha256": "a15fbed61fc22a481a19706cdf37b591cce5afba58f60e952d5d2b73885ba86b"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/ProviderPrimitives.ets",
+      "lines": 310,
+      "sha256": "b9dc2a7cdab9b535b4b0a1356b49fede537330b6e4472553fa13501c4bc1b2a2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ArticleRenderer.ets",
+      "lines": 309,
+      "sha256": "da549564d54120b7a4f2e667be03a244991e0bbfa61a281173ba847afe5ebde3"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/skill_tools.ts",
+      "lines": 308,
+      "sha256": "ef2b0c66f673c1f483ce66e85f19607f5a69d5d55809486ec67dc1ce10a0470f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/MemoryTopicsPage.ets",
+      "lines": 308,
+      "sha256": "964b5f1fb40031a27ed795a92f2b8a179f48f716baac3a522a6362d8731e157c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/provider_tools.ts",
+      "lines": 307,
+      "sha256": "cb9dfa4071537a79c500079936bbe23e691c010014c802f61e108ff0585279c5"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_proposal_repository.ts",
+      "lines": 305,
+      "sha256": "886684a0cb24abbb5214537c21f4803c6056dc9c9a868a51fdda6d5e477d66e5"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/files.ts",
+      "lines": 304,
+      "sha256": "4e31ca1e41ecd3e34ab33cb094e2c1e1047eb60d0ff6343c14aca2221fe4c2c2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelBranchHistoryPage.ets",
+      "lines": 304,
+      "sha256": "10c1d3fa90d03da5a83250cedfe0030ec34020af2c9b89fa9afd2ec44c167cbf"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingDeepReadPage.ets",
+      "lines": 304,
+      "sha256": "ac262bf92e158f8535a40aea953798e43d25c13e78dde30394bda05c1c2f236b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/skill_library.ts",
+      "lines": 303,
+      "sha256": "fc2d100bf30c0d4b00c374a66b89e60fbaf16bb3acbefb61ff430ca3641c7d6f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/provider/ProviderLoginSession.ets",
+      "lines": 303,
+      "sha256": "47cf70061e4cc6a0e244d3417ae218ed2f2bfc6196f4c3c048d2e6ee340b3c88"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageTools.ets",
+      "lines": 302,
+      "sha256": "c0055613a13bdaacfd6ea134f55eedc5fea4e8377a573439e37435747975ad74"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/MiniAppSettingsPage.ets",
+      "lines": 302,
+      "sha256": "8dcf5f932192ac56a2ccb58992d0f71c23184da83950b19723e35bde2c08f311"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingPage.ets",
+      "lines": 302,
+      "sha256": "4b272d7b0ca8fab9493b0e20e8303149b1d78260cab624f27ea665dc6b0a9f2c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/provider_settings.ts",
+      "lines": 301,
+      "sha256": "fc316fc8e2093da8aabfdd1ecb3020145f8c88de94c9a48c5c1837631a83f416"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/google_chat_api.ts",
+      "lines": 299,
+      "sha256": "5c4d61ab95c6bb71bf63b2951177727d397018a95ea9a21a227c9f7741609750"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/claude_request.ts",
+      "lines": 296,
+      "sha256": "8fe8419a8eb29697a9857c1ad9f36c8c721023ca86f00d690fa5a17d80cbc362"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/MacGatewayClient.ets",
+      "lines": 293,
+      "sha256": "00ce659636aed6888030e356543f6e6e7d01f20f40ab67cefecdb48a0409425d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NewsNowProvider.ets",
+      "lines": 293,
+      "sha256": "0bfb95bbfedac1e542d94d59b5b1b7a9608b3d758bc757100048c3e4cae1c13b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/openai_parse.ts",
+      "lines": 292,
+      "sha256": "68e4b2be6b90cd657f519277073a52a10e8ef8b00798bdb5339199472afad8da"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/provider/ProviderEditSession.ets",
+      "lines": 290,
+      "sha256": "2c12d3529d30704e8a2cb5fba404ff8097f8e674fadeaddcf64b5095fc88c585"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool_permission.ts",
+      "lines": 286,
+      "sha256": "24a69a0e73143fe9c89e837bff32bc3fe201850d67632627dbbb3b3899f6683d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingCronTasksPage.ets",
+      "lines": 285,
+      "sha256": "a3f21c3f781cb7cb558a03beeaa13ab1626ee2d2656502dc4cc9ec42ee7ae41e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/provider_settings_serialize.ts",
+      "lines": 284,
+      "sha256": "c209041fd9c6719124bf4632652f9b000db788f1706dff8c9a90fb2eb1c0e1a9"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/GoogleSecureStore.ets",
+      "lines": 284,
+      "sha256": "62b4e752e4d6b452c05a37ef5d3ebd46c012c295effda3701626e09c248b1645"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/search_settings/ChatSearchServiceEditorSession.ets",
+      "lines": 284,
+      "sha256": "a3221be5e341e830ea4cd6d31cc5a76a80a6be25016973710487593744b7e51e"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/research/article_plan.ts",
+      "lines": 283,
+      "sha256": "837e87989b195b9044159f656d80bde9b3fedd18b5893f7cf2b7bb1bec9225ef"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/JevSupport.ets",
+      "lines": 283,
+      "sha256": "f357946dcd7a79ae8a01f97bbec0ca543333af4e85e618b84c028755dd47cc98"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/CouncilAssembly.ets",
+      "lines": 282,
+      "sha256": "adc178f854e319088179dd32e5df7c375f50c44afd4f6b3197da358ead7411dd"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadSettingsForm.ets",
+      "lines": 280,
+      "sha256": "0b978bd7d9034fc047553535a0b7bc187c01411a0b586413cb3cbf5f4afd0836"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NativeSmartUiInputs.ets",
+      "lines": 279,
+      "sha256": "eff97ec6aa88684f23d5cfae403933dca793e30dc92feb82e50e684e993b7715"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadSourcesPage.ets",
+      "lines": 279,
+      "sha256": "73ed92bef67b786b0aa5455c9924d44f359c98b562e81b934dfcd8c3af3c0634"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/HistoryPage.ets",
+      "lines": 279,
+      "sha256": "86cdd352e08507d5e7e49b389b674a851b192f769b1ae375af326530673756ad"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/MiniAppPlatform.ets",
+      "lines": 279,
+      "sha256": "0fbc41ba6f66d8ce68464b740fec50e49ccb7cbc841fa1978baf9638f9f7e6bf"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ProviderTemplatePickerSheet.ets",
+      "lines": 278,
+      "sha256": "adcc2ed0d75996bd4ceca89e8890911e5d505317325239290dfe9e36e1549b36"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/BackgroundGenerationKeepAlive.ets",
+      "lines": 277,
+      "sha256": "ef5c38e40b9b2b4465262713c32151ea04ec3c0b0b6f6b6472223dafdc66e7dc"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool_approval.ts",
+      "lines": 275,
+      "sha256": "b302a0b285da72c57fc9965f783af6a9bb56278645ecab05ffdc33c89ad783c8"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/specialized_operations.ts",
+      "lines": 271,
+      "sha256": "5bbd9eb4dda93b99487743d0e52f3396c989148060bd9bb8153514f9ea77737d"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/assistant_serialize.ts",
+      "lines": 270,
+      "sha256": "f59ebb29f41d87f61408491e767ac97c9e920911d3b640781c09504be20101da"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/message.ts",
+      "lines": 270,
+      "sha256": "4391024c12686d65b087095284593e3e6bb832f433afdd3fbd9ae5407b0301ef"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/tool_execution.ts",
+      "lines": 270,
+      "sha256": "459d55e9cc6f3f20199d5f374452a6470b53e3238c13ce46c085a421e84a6f73"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/search_tools.ts",
+      "lines": 268,
+      "sha256": "58bc5dc5a54326c3ef3f8fbe799a329a227de76ea5afbb72b4af3dce9c652c4b"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelMaterialAdoptionSheet.ets",
+      "lines": 267,
+      "sha256": "292d5984ea526231cdba47a842cf3aa7bf1f3deadda570c6f4a1c90d3dcbe69e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/smart_ui/interaction.ts",
+      "lines": 265,
+      "sha256": "02db22869093de16b99b9bf3e209e28697835a9bfb682d9a750cfe6d1f8422c7"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/jev_models.ts",
+      "lines": 264,
+      "sha256": "b05cf7599e1f0706bbd096bc30f6932943a30a000e0c75ae1897c72a7a4c6bfa"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ArtifactPorts.ets",
+      "lines": 264,
+      "sha256": "a889b28af490b032d9d1240842352a6f737a0abe6cde9f15738feccbf908d03b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/serialize.ts",
+      "lines": 263,
+      "sha256": "a42ec5edf78a4202ce937e05964a9c397e9226903c5a9824c58208d31900f7b8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/RuntimeE3Fixture.ets",
+      "lines": 263,
+      "sha256": "48a64482ee7d4bee59435812ae2bb856c7dd973be25c89ea509ee899171865b1"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_task_tools.ts",
+      "lines": 262,
+      "sha256": "3bc759d0e97550836246f7e279287bd930f0186ed8c113fa7351f65751403c24"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/conversation_recap.ts",
+      "lines": 259,
+      "sha256": "20bb33806f42c5a04b9ee438d3be523d5b3a9fc3b06d7576a2b6efeac356bce8"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/google_auth.ts",
+      "lines": 259,
+      "sha256": "d2b33d835e855d8924fb3a49efba3f3e80ff4428e08bbe7f7c0d9b005de66540"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelBranchSheet.ets",
+      "lines": 257,
+      "sha256": "f24e648601d348e0c7b2bee35066174daedf4eb922012a33e18ac59e8f0413be"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelStatePage.ets",
+      "lines": 257,
+      "sha256": "221096211c630b60256a4f184775d1bc16a737393d3d8cf63a83506f44f1d008"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/FileStore.ets",
+      "lines": 257,
+      "sha256": "ef14561afd073f79ed648e9facc49a7115695c201bbc9a0e26c34b034f8ac224"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/SkillStore.ets",
+      "lines": 257,
+      "sha256": "b10cb81065dffbb157878e5012a70b45cfbff67484948aa945bd8590ca8041b9"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/QuickMessagesPage.ets",
+      "lines": 256,
+      "sha256": "8739ffea0ad932035148140270d18a76ec63739fe5902bc22a34e64176874b3e"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_history_repository.ts",
+      "lines": 255,
+      "sha256": "58557e5a2e1f2283c2bdbc0dcec25353280c07ff67124c106e57a4e127cab14f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/TopModelMenu.ets",
+      "lines": 254,
+      "sha256": "4c2b3dfc2bcd567d1ab5ff454a08833740744e08aed3f542d13020efe748e804"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/council/models.ts",
+      "lines": 253,
+      "sha256": "29315e9632586b1a9731fbda57d48a7be66257e7af522ecaa9d44bd3b6ed29f8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ToolResultPreview.ets",
+      "lines": 251,
+      "sha256": "9dcf829fe5cf95f478a22dfcaf51ab903645253245c565dfaf7746e16711d47f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NativeUiGenerationOverlay.ets",
+      "lines": 249,
+      "sha256": "b925bd7e02a1317e059bd1fc69a22e6b72eec547c921c039a3d04b4a0ad89fef"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/GrokOAuthClient.ets",
+      "lines": 249,
+      "sha256": "5547255a98c03b5900421c1dc46d2d65a895f80ed8925665b693b30c6acf29b3"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/helpers.ts",
+      "lines": 248,
+      "sha256": "26d214b85bbff19763be1ea742376ae456b2efa7b234680f31b08f7b5ea2ec39"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NotificationNotifier.ets",
+      "lines": 248,
+      "sha256": "ac313ca470dd92a86d5f24fe2264eda1adbb4a7c4b9aee3c71205ae267a9aff9"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/pending_queue.ts",
+      "lines": 246,
+      "sha256": "bc250d570bb9de29d23675998e07c95733708e6e6671c6b46d9af6954dd68221"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelOperationsPage.ets",
+      "lines": 246,
+      "sha256": "bb62226b4faa4dbd667957042c42e81e0b6000e28d70034a96b83570874b4a3b"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/state_rebuild.ts",
+      "lines": 245,
+      "sha256": "63f98292ee41033df4c7063662cdaf133ef73f9dad4020a7d42b245ef22574ed"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/novel/NovelWritingControlView.ets",
+      "lines": 245,
+      "sha256": "dc9bb8538efc05adf7f160dc0c66b93281b722739a89cf6ad1f875d654ef9926"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/PersonalContextPort.ets",
+      "lines": 245,
+      "sha256": "5aa3e17592ad4a675273ea0702804471de789c0c23f123b444428ddf639754ed"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/HotListAggregator.ets",
+      "lines": 243,
+      "sha256": "33355fb4febed883499fd3cf0987b65cadd49276412a1dfe698d7114a3dfc427"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/SubAgentAvatar.ets",
+      "lines": 242,
+      "sha256": "84217ba4a3522eaf030d7e0c168b6a0759a9abf7a185d763aa3cdca91256df60"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingSystemAccessPage.ets",
+      "lines": 242,
+      "sha256": "44918879fc6213c23cda038e5414862e4b12392d5d8491492c26c7e042c129c2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SkillsPage.ets",
+      "lines": 242,
+      "sha256": "74195f41cecfa29a13842c79898f182a7b04f10eca729d27708d7f0a1aa8db12"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/conversation.ts",
+      "lines": 241,
+      "sha256": "d5841381fe25a78b3877399e460a222ef683cf61e12862838141f9611834a41a"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/smart_ui/store.ts",
+      "lines": 241,
+      "sha256": "783df4d52d1b8c4246322fa0985e96c612f5e7bf1921190815df8ee5557826b9"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/section_writer_codec.ts",
+      "lines": 241,
+      "sha256": "8e5606f80122ea6ad496683fff2352c740ff194fae7f10b32a761481807a9938"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/conversation_export.ts",
+      "lines": 240,
+      "sha256": "63712b86dec324a39703ba7b5c1db62ec04ff11b5e28e36c1a36b3fbe9a80809"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/openai_chat_api.ts",
+      "lines": 240,
+      "sha256": "5fcd19a9601baba6caf839a0c8a8b1698e5d418a0b0c55c37e6619de6cd29917"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/native_backup.ts",
+      "lines": 240,
+      "sha256": "835fb57766c678e74b25dd276d35002aee9515de4e627213be269c5badbefd56"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_exchange.ts",
+      "lines": 238,
+      "sha256": "19a6ba565f30e519ca0e6a72ecd0f464cdb1db317b20a3aae8708627c7da85f8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/MemoryDocumentPage.ets",
+      "lines": 238,
+      "sha256": "385187da1bd204776ed20226e106eac36980753daf320e38368ca7d2b899681c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NativeMarkdownText.ets",
+      "lines": 236,
+      "sha256": "8c1873539891e7154dd7dfdb581a42019fb4b272d0b44229e08dfdb1aacf8241"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/jev_approval.ts",
+      "lines": 235,
+      "sha256": "f9ed26de358a8c5b167c2068e5ad145ba06b5ec268c00600e1fc0af62f1e84b4"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/playbook.ts",
+      "lines": 235,
+      "sha256": "3f1eb6e72550de8ff42414fb963ad3a08d0b864d958bd816b5f6eb46e2aa84e4"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/webmount/oauth.ts",
+      "lines": 234,
+      "sha256": "bc802a870f0d32ea027d584e0eb18441bfe3c5453b20620b168a8c891e8b736b"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/home/HomeConversationCollection.ets",
+      "lines": 234,
+      "sha256": "0f9506119249bee2d1f23677ad1ce8206ae5d90cb1dcbac72f8836bf530ab529"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/search/ChatSearchServiceEditor.ets",
+      "lines": 232,
+      "sha256": "5756029855ab50f371ad675982a6a2090771a5a61ae503bab7fff9b8244e9c02"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WebMountSecureStore.ets",
+      "lines": 232,
+      "sha256": "2fc2eeb2d6824705e6eb2a270cea525b8e80de0c592e2e879c08b7353b9bacee"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_book_export.ts",
+      "lines": 231,
+      "sha256": "9323a9fca96ffc78cccc8027061ecf37f8b06c73a13f9b23fcd0fbcf2c1fa07e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/WorkspaceFilePreview.ets",
+      "lines": 231,
+      "sha256": "2d0868999ee8ed6f5c8a003aef00a29d0bf185561766e0a44f06d00aee7a4565"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/chat/ChatMessageActionsSession.ets",
+      "lines": 231,
+      "sha256": "66f2dc733e552193998e0b2b46ef38c3d931aa457cb16b8fd7787741a3bd0a7e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/chat/ChatComposerPane.ets",
+      "lines": 230,
+      "sha256": "cf4066041d02a9255e582cdff1df1ce9f3d9b8678c82fc61244aca636cf7221a"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/conversation_blobs.ts",
+      "lines": 229,
+      "sha256": "363e91bdc5174e28e3f3892e463d3b5decabb0c1cbc436b9b2502c3ae7fed510"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_prompt_codec.ts",
+      "lines": 228,
+      "sha256": "373f396a8d67b32120284b2c4b01d46acee62e4a84d406115ccdefca66b7d55c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DocumentSupport.ets",
+      "lines": 227,
+      "sha256": "f3bdecd4a3dbb956e6a7fef729b7e96ba9ad8ac6a9314c884b992d710fecd321"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/export.ts",
+      "lines": 226,
+      "sha256": "6274d0ea0c0c7ef8c2af6eb59d2cafcc1401bb98d344cb68d29d527310cfefa7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/EntryDocumentParser.ets",
+      "lines": 224,
+      "sha256": "5a05f379c7a6c5df3f2e4a446328be774b75298d246ec962d2a6736722a98ba1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NativeSmartUiData.ets",
+      "lines": 223,
+      "sha256": "eb9a0f7b75422e86f0ec125972cc421c2a3ba5ac53c97d51cc252c1f1c48ea6a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/ToolCapabilityRuntime.ets",
+      "lines": 223,
+      "sha256": "932309c10971bc16dadee40ec25a86821513e1102743e7515477f49a92dcfb29"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/OcrSupport.ets",
+      "lines": 223,
+      "sha256": "98e801f1fa5407c47974cc1e6cab0f0d148115d40e3aad6042f15aa74649fe99"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_models.ts",
+      "lines": 222,
+      "sha256": "25369c80a99d798778ea05cc432120dee6c2b3cb6d3b9f3f51928b53d470e005"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/suggestion_engine.ts",
+      "lines": 222,
+      "sha256": "6fe64fbf935c015f7142fb7ba112ba0b10f555a5788999975259130ccf429260"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadDiscoveryShake.ets",
+      "lines": 221,
+      "sha256": "a9bfda148a191cbd2ad9a8d0532486735f8a02b0432f1ceb79d98120d32f166b"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatTaskModelPickerPage.ets",
+      "lines": 221,
+      "sha256": "d31f83cc9a0a23507c9d66f71175e191c2ccb398464882b1403e9ad4210f0e1e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/FeishuDocsTools.ets",
+      "lines": 221,
+      "sha256": "2caf432e15a2459036294f7f2c3aaf4025c85a0133f2ba2c4840d15169f305d8"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/speculative_tool_runner.ts",
+      "lines": 219,
+      "sha256": "7922ab4cd886dc308c7a4fc8ccc633d5e14adf5ccfad15b3858c301385128a20"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelContextPreviewPage.ets",
+      "lines": 219,
+      "sha256": "bf2b4275934fd9eb3384ede3a9acf3361269ee1a47ffc88a609f16dca27e16ec"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageCouncilStep.ets",
+      "lines": 218,
+      "sha256": "dd6f3ec2ca7b7f00145d24a278ee8ad79ebbcd2a614e9daee5d2e6740a064032"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/subagent_transcript.ts",
+      "lines": 217,
+      "sha256": "bd78888c13303a1e94c56b2ef1d22636122b0f64bf11310029527d9e869ee157"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/transformers.ts",
+      "lines": 216,
+      "sha256": "c31118020e0de0d2910189f4b7bba9e49745d950f1a54d090d0d7e8200c4248c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadDiscoveryHeader.ets",
+      "lines": 216,
+      "sha256": "b5f3acd4a1604b4ff8b94022ee80157663e9f91d12ee150579a380f105b9109e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/novel/NovelManuscriptSheets.ets",
+      "lines": 216,
+      "sha256": "308e527ec6114504435205f2e4d61f24beeab9652bbd597b7120eea602ba69c3"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/MemoryTopicOps.ets",
+      "lines": 216,
+      "sha256": "b650403954e88b5da525972f41a44c6ec68db1e4a359828acfe491e28dafbdb3"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_prompt_tool.ts",
+      "lines": 215,
+      "sha256": "eaf384ff6732a38b490c8c630f4d4c6342da66e249bd6d19c051eab387ebcf43"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WorkspaceStore.ets",
+      "lines": 215,
+      "sha256": "7eb3658e68f8cd39de17097101139db50e8900f653ece5fd0fa08d5773c6d0bb"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_prompt_transformer.ts",
+      "lines": 214,
+      "sha256": "670fb7518cfe72a503cef96f102f35626ee2dcc8c28b59517a1cd5745a36688b"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageAskUserStep.ets",
+      "lines": 214,
+      "sha256": "8edd52231ba10f9f4862ba9c4a167c560be824ceb3ff4d43838f2922bee746bf"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/chat/ChatModelContextView.ets",
+      "lines": 214,
+      "sha256": "b7f002f51312ff03a98544a596a45407c20eea2f0f71ddb2cb39f28c349f1a3e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadSynthesisHtml.ets",
+      "lines": 214,
+      "sha256": "3988fdaf89f5a9614775cad56778343210ed746c8395adc81ba3c8ac2b84dcfe"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatInputUsage.ets",
+      "lines": 213,
+      "sha256": "39e5a1e4434735ca2d8d7eb6ba60713734e062fde501b379017e00957025d591"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/NovelRuntime.ets",
+      "lines": 213,
+      "sha256": "8509ea19c76d223c8aeb1efdc7982516272e7c316cc9f1bf52723edabf35c71c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_write.ts",
+      "lines": 212,
+      "sha256": "587bf5726c49c8a4a7aed4e43ab5058cbb84e84460f79ca45349d200fd2402d7"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/model_slot_tool.ts",
+      "lines": 212,
+      "sha256": "33f56a8d5af5f41a073c6d867b733f041a5b24a528adfd9ec7b030de54230eb4"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/novel_workspace_tools.ts",
+      "lines": 212,
+      "sha256": "40a37ad615e83f7b6a05ec8cac0c9fd85c3fe2b76d3aee4a0b981afe0112a4a5"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/PressGlowButton.ets",
+      "lines": 211,
+      "sha256": "a34aa6b64823f6e0c382fbced4580bc3b6c7f38c453267ed01b2f7a9d9d747c4"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/epub_parser.ts",
+      "lines": 210,
+      "sha256": "81b419cc15271e260050883952b391748388fc1e2971c24e384024c52b8eef5f"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/managed_files.ts",
+      "lines": 210,
+      "sha256": "fe11e0cc4827045d57ef4be2d4fd394195d195956c4e25068c94aa8260214bb1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadNewsroomDesk.ets",
+      "lines": 210,
+      "sha256": "05c68bfb4f36b1838afb1d81c76db31555c84e8730412f3fd4f141fd3b6d5e61"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_recall.ts",
+      "lines": 209,
+      "sha256": "25821f841b4c1419ecb837dc824eaf526945e23e720ee5b520cfd5ceddd7ce3e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/recipes/validation.ts",
+      "lines": 209,
+      "sha256": "8c57eabeda0fa68c8d6a70ab9ad71f4af4caccc30dd42e2a4ae9b536f5d02d05"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/skill_metadata.ts",
+      "lines": 209,
+      "sha256": "515aa20ec64b843350d0a8c8716bd665e1025864a767b04badb913149b8dbfe5"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/JsonTree.ets",
+      "lines": 208,
+      "sha256": "be4d633737450ad2c09e824cbea843e41eaf17decc412f58791985bb278a1f03"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/CouncilToolRunner.ets",
+      "lines": 208,
+      "sha256": "67533e7e422d25d265449a7dd5ba35e222ea7639c74073286e65e79e8ead9ef8"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_models.ts",
+      "lines": 207,
+      "sha256": "187376b967272f5e40b8ac0a7f734862015c8a9b4ec3515eee40988326b93d5a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/Icon.ets",
+      "lines": 207,
+      "sha256": "af6c8949db26be85c7c7e089ff0f24ae99598ea912d59d11e5579e504ddbb538"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_topics.ts",
+      "lines": 205,
+      "sha256": "151d8bd5be6471547c46a2a054b07ddd4e8626342001343a1bb020eb8e6d8a87"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatModelPickerPage.ets",
+      "lines": 205,
+      "sha256": "81e0109c32f5e34e59f444bf5e3fc3b83142a33a36cbae0459ca7aafbb9050d0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/MemoryTopicDetailPage.ets",
+      "lines": 205,
+      "sha256": "2ce88b741be54ef981317eed0e857a85a7f3577bee8822f37f06fbaecd2caa9a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/FavoriteStore.ets",
+      "lines": 205,
+      "sha256": "262e971bc1034d55c8b27fcc819daad5c246bc069c141e87b149de5f261a3c55"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/SoulTools.ets",
+      "lines": 205,
+      "sha256": "818b51aa42405eba953ffda9281dd589b5f1b48a448f586bc61224baad2c3351"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/council/validator.ts",
+      "lines": 204,
+      "sha256": "c66a5b49f7ca7a1adf3f33245af0e178a8af48e4bf7187f626bccd26489374f3"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_tool_proposals.ts",
+      "lines": 204,
+      "sha256": "b62a5ee7d5287565f2701465cbcaf4fd8afb172d830cb121a9fd1cf1ce2bf928"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/AgentToolCapsule.ets",
+      "lines": 204,
+      "sha256": "cacd8b0af1731fc7153711067b64f291d725e4bacd54a430a0c5a46fd2a7e9da"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/models.ts",
+      "lines": 203,
+      "sha256": "f86cf8fc76fb9c351642a09037b53b9568cfd58375ee0feeb799ce2bc7838ce8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WeatherPort.ets",
+      "lines": 202,
+      "sha256": "59224649e89935d11dade9ae72914a2f273042452a1f98ef4c6aeae75ffa84df"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelDiscussionArchiveSheet.ets",
+      "lines": 200,
+      "sha256": "7cc72cdd31e41193722f10df9ed8665088fed5ec3f702ca0c9ace1ee9e21ed08"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mosh/runtime.ts",
+      "lines": 199,
+      "sha256": "d051b01664bf29cd1a28a80d9a117064a0925d356d4cd8171e5e78b41b36adc2"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/claude_parse.ts",
+      "lines": 197,
+      "sha256": "a8572b6277e919311acb56e18e62e133c08bffa846d926971a38d9d69f97268f"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/research/url_filter.ts",
+      "lines": 197,
+      "sha256": "9e84cfd4310a4e01319f993c8695bb948950f3d158e0c160c52df9a3562c4811"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelAppearancePage.ets",
+      "lines": 197,
+      "sha256": "33203343782e13eb9737df84d0fb42aac32f88465f911e255a8508786b80650c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatCouncilRunSheet.ets",
+      "lines": 196,
+      "sha256": "6533797d5bc42c7966d085db43074db8e425391e4be0fb7abd1d57b7c373bef1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/provider/ProviderReadingForm.ets",
+      "lines": 196,
+      "sha256": "23913dbbb9baa260277ddc837b497667856f1c373b1bd8b23b50125ce3cdd79c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadSettingsVisual.ets",
+      "lines": 195,
+      "sha256": "843a6616c905bf29eb92c3534e1f4790fd7e3a7d7cea3e4eedb6b3f75943b873"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/webmount_settings/WebMountOAuthSettingsSession.ets",
+      "lines": 195,
+      "sha256": "2caf596b0ae74b44e7e874a8e78b525e14227275c3f6fd3d21f1efc6291ec2b6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/ProviderDefaults.ets",
+      "lines": 194,
+      "sha256": "3b8c3657c9e0c00aaa8b1287130c809740ae250bb154f4f91a0176a8717ef2e0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/webmount/WebMountOAuthSettingsView.ets",
+      "lines": 193,
+      "sha256": "d264f934f8d19e23cdab60157a41c56ac7f9c8ca5bc95d0db0e4607a132de438"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/cron_expression.ts",
+      "lines": 191,
+      "sha256": "d465ee90132883329edec2cab6af8233c57e873fbf6e96501c1af746076821a7"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/research/page_image_candidates.ts",
+      "lines": 191,
+      "sha256": "a0569fdb410d2c51f6015143a90e011477f19d9228add3fe0d639a89ff5a96e6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/MermaidBlock.ets",
+      "lines": 191,
+      "sha256": "5a9310095d235eecec278dad162996e271c967963663baadd10e8e630cd80614"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/FavoritePage.ets",
+      "lines": 191,
+      "sha256": "2f85cb895907e700db651041259dbeebbd8e531627781b9234daa662d6c3771f"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_output_parser.ts",
+      "lines": 190,
+      "sha256": "fc6190edf218f3cf2f549ad24babfc66d14127f35d8d3360e3a74d2f683477ca"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/device_schedule_contracts.ts",
+      "lines": 189,
+      "sha256": "a1e6c58b7f1b852dc29c079e45297110c970d7ad81808486c86bb893d340f8ea"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_extraction_actions.ts",
+      "lines": 189,
+      "sha256": "9a402c47efa651dd6d4dc8eea6384d50f19c4ab5ca38fd558dfb052fd7188795"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/pending_queue_store.ts",
+      "lines": 189,
+      "sha256": "5e1372407a5d886e0270e7a08868aaeb1ce2109472c01f1563eb52d4cb71cae8"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/repository_contract.ts",
+      "lines": 189,
+      "sha256": "5698ffbd61ba44e334c289f60958fd3f71fd346be681e5a7ea2fa38d8496a73e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/DeepReadRuntime.ets",
+      "lines": 189,
+      "sha256": "e92add912467ec9c9c821cd8f2f811440fafa42c0e76cd0f55b499538714d976"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/search_prefs.ts",
+      "lines": 188,
+      "sha256": "0da66e697a1398eb641c549adb4dd5f588511f5cd3a391eb337ed620cf4fffae"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NativeSmartUiStudy.ets",
+      "lines": 188,
+      "sha256": "48cca2791bc14d6f82ba7dc72db77d0841ca39aca587930b6d95a90e4fe28c26"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatListGrouped.ets",
+      "lines": 187,
+      "sha256": "7c75a6daa63585900ec5625654db98bc187e48937f4f81f8a54ed80d22e945f9"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/SubAgentRuntime.ets",
+      "lines": 187,
+      "sha256": "e3af5a216130b873853cf0d131898ade803ea8c2a529793baa920f2af8d2554d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatProviderDetailPage.ets",
+      "lines": 187,
+      "sha256": "8e0827e0846dd6d9c88eaa077ecfdf26f8800a9c9f80965f0d91a8d23cd5692c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/PythonPage.ets",
+      "lines": 187,
+      "sha256": "6eb94d897fbfa9601f423df318bcde8bd27f15f970161f0a59aede3e11a22b01"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ChatSmartUiComponentFixture.ets",
+      "lines": 187,
+      "sha256": "b6f313c95ac3fa6e4280cc0d38cdd05e0971ed5be64e1fad4585c89f0bf78e3f"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/interactive_turn_runtime.ts",
+      "lines": 186,
+      "sha256": "f51bf2773442262cf1079069762907b449e08531837d8858a4608e340b91eca7"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/sync_webdav.ts",
+      "lines": 186,
+      "sha256": "2570493c3a3a0a73b73b28ebecb6e73ac6b90898cce76acda993dc3d1f1fb35a"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/sse_assembler.ts",
+      "lines": 186,
+      "sha256": "0f273805b3973ac5349c948fbad95f6989e0dd628a460c4ae45838892b24e931"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadSearchSettingsPage.ets",
+      "lines": 186,
+      "sha256": "23240e4fdc64381653d9308bc20eabdec2295aff7bd30a8ab7c6d7b86fc7bbf8"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/section_writer_visuals.ts",
+      "lines": 185,
+      "sha256": "74ff1f3900e513408b2e82ff49bc9807c26e13f550954ed9c265dd0829ffe1af"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/chat_kernel_host.ts",
+      "lines": 184,
+      "sha256": "cc6085851480d551f1c72438a84430091bf02b932307be7b75261601113530ef"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/workspace_http_tools.ts",
+      "lines": 184,
+      "sha256": "263d2b72c29555645453ba6dffc62fea56d774a8432a48828fb16591b9e413dd"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunAuxiliary.ets",
+      "lines": 184,
+      "sha256": "4cc6a3d08baf6d71c92f014e5338b887b944dd6e9d7a4ab7d113b13ff0557468"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/context_assembly.ts",
+      "lines": 183,
+      "sha256": "a8495e9480aef0890a2159122110667796fbc26d9b56b68ad613d306984540fc"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/jev_client.ts",
+      "lines": 183,
+      "sha256": "c5fa14a6f272135d55f92013604964d2ef9f8e1b2bdba9680b4468f32a4196c6"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/smart_ui/binding.ts",
+      "lines": 183,
+      "sha256": "931f3156c41f8ccb699d82f983b2d029121392ab1b9d29aeeb80873a65e70c7a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/JsSandboxTool.ets",
+      "lines": 182,
+      "sha256": "ba5e8c6ed0eeaabf936d47d8b6eaa484f884f3283d20faf94d2843a720ae2379"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/chat/ChatArtifactSession.ets",
+      "lines": 182,
+      "sha256": "79cea26cce164624b6fef76f314afee56409952e5981146392c128b9940ed6e9"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/generation_retry.ts",
+      "lines": 180,
+      "sha256": "4f327589e46886b00ee3c4aa067331e67be66f48dec24364c7ec82539729d14b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_profile.ts",
+      "lines": 180,
+      "sha256": "3ca5a392fbafe262763cb05fa6c6939e4958e79864ed9ea20b262366f84848f2"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool_profile_filter.ts",
+      "lines": 180,
+      "sha256": "fb3620f355b751136772ceaf044b4c875281f384450d03d7d8cd4c132de00afe"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatAgentPermissionsPage.ets",
+      "lines": 180,
+      "sha256": "1d3706d7432df430660023444163bd81affa3dee01d5a5cc49dfa92e7da195dd"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_shell.ts",
+      "lines": 179,
+      "sha256": "9bfe755a01f90cb917414736688ebb5910857480bb7c9f689c71a54880c84e00"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadDiscoveryCards.ets",
+      "lines": 179,
+      "sha256": "24c3ecaf667c473c673b0f038e541320bd92f33a30fc6265dcf6b877530f2b9e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadRootPage.ets",
+      "lines": 179,
+      "sha256": "7f48e5ff4d68d9f94b89cf878ab6deec01bff4c90f045ff8e66c24709bbbb80f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageActionsSheet.ets",
+      "lines": 178,
+      "sha256": "325ce038a8ba69860244d509f9100a9151aabba2f26c87c894aa1fc8d816c9b4"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/subagent_models.ts",
+      "lines": 177,
+      "sha256": "e340bb90979ea2a710ba0adcc3ef41d01f03b6308a250efff53f1b44eec38191"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/continuity_repair.ts",
+      "lines": 177,
+      "sha256": "21c93f9413adb6d71c3b2c6d6e07f9dff1fe7da6626664f532a2e37235991955"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/code_highlight.ts",
+      "lines": 176,
+      "sha256": "8375de0d5e97f4e7d928ef18c0407769aaca317bd10df65ea8a9fbc34c00cae7"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_semantic_dedup.ts",
+      "lines": 176,
+      "sha256": "89547b33147e731ff919c7bf4809af32a30be0b6ff52e48aba11d88c8172f0d5"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatRecapPanel.ets",
+      "lines": 176,
+      "sha256": "7efc459bfa0756c122c37788494bfb0bd75b4e59448c70ffe6185fc16f2fccba"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WebMountSites.ets",
+      "lines": 176,
+      "sha256": "744908c4c7c4c0d9b320adc15a6b67d1e61e29589b99b92107b591fb22c5eebf"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/assistant.ts",
+      "lines": 175,
+      "sha256": "883b041eedb1062c03a59bbb6af786268c00a6b17f3db303f438a31f120e4322"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/provider_model.ts",
+      "lines": 174,
+      "sha256": "1afd6aec269490b8ba985df45ff8fabc6e53dd8349ecd50ab053b290b8e431b8"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/discussion_archive.ts",
+      "lines": 174,
+      "sha256": "8e11629887a23a610d7b16941b8666b902d129e8cbbcdbed270bc04603cbefec"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/AtomicJsonFile.ets",
+      "lines": 174,
+      "sha256": "19fab47737a45a760a0108d3cd30580e2097142fd84dceb5abf9d4ac374fa9b7"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal/runtime.ts",
+      "lines": 173,
+      "sha256": "90a56bd90ee3b4a01041d4fea4be79bae94bb0708483b62ccba0abdc2ae7cf0e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/TerminalView.ets",
+      "lines": 173,
+      "sha256": "d6bd7d6b8834b02234142ebdddfd44241420ddc43f40949751ffec11ef02f9e4"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/firecrawl_service.ts",
+      "lines": 172,
+      "sha256": "b448bae68ee01d2c97ae01c1479eb7723bfbd6d5d2bcf665dc1769a1835964ae"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/CouncilRunPreparation.ets",
+      "lines": 171,
+      "sha256": "7840d7a744e870f2ae2596c3c33374e3486bd13b008cbd32b7ced9501d670f11"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal/tools.ts",
+      "lines": 170,
+      "sha256": "6517ae6bcbe6a8cf5274be64e2e03611096602af5764c780bda708c4fbf79e6a"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_contract.ts",
+      "lines": 170,
+      "sha256": "eafc980fb18333ddc1819e40141bf5b1b47448b4549a9c2359d27d2a2ea82a14"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/home/HomeContinueSupport.ets",
+      "lines": 170,
+      "sha256": "d9cd766dc27991acf6aca03164917fbab09ac64acbeb58edc4199ea7576399a4"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/research/evidence_pack.ts",
+      "lines": 169,
+      "sha256": "edcf6ff19a8d523fa5a386d5847ebf3fd98d8671a78aa8a382b944599fadc7b6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelMaterialEditorSheet.ets",
+      "lines": 169,
+      "sha256": "71b26e6686b636c6517cdd21c295f81a30fe6640e8c0e2e2bff55469e5c40554"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/builtin_conversation_tools.ts",
+      "lines": 168,
+      "sha256": "9522be0072a5c206e4cc5f41718d3e0f03b467ecb3f0838965422f68d00a008c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/three_scene.ts",
+      "lines": 168,
+      "sha256": "1f7cc7cf7eab45e1b874ce0d4a05e1c54abe80796c820592f3e12880b20df41b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/transformer_pipeline.ts",
+      "lines": 168,
+      "sha256": "37ef4dd0aa942b0b0330a597a430d8fb9fa67031480b89c22c69828cbe7a93e6"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_bridge_js.ts",
+      "lines": 167,
+      "sha256": "0b4ac69bad0cdd3d774790124a17cb899a1ff5504c82bf89b6353ec46cfc88b9"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/native_context_tokens.ts",
+      "lines": 167,
+      "sha256": "1589b97038d3ff8cf8ac836788f6fd66c4985678572b4a5d8398c11316c6e1e2"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/smart_ui/continuation.ts",
+      "lines": 167,
+      "sha256": "e70ac163b7e7268babea5131179259719af3844fcd64f18dfcc7bfabc4afaf4d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/AmberTextArea.ets",
+      "lines": 167,
+      "sha256": "3e59e78b6fef5588d3d94e7a29aed795d7aa077e89e8d9f753af0f1f94ad235b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/subagent_tool_scope.ts",
+      "lines": 166,
+      "sha256": "24ab2414d289e0e4b5a0cd47a7fb4fe91957e0118ccc81b1a5b9d4497f442a35"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/webmount/har.ts",
+      "lines": 166,
+      "sha256": "fa070a5a1d23ff2304cb975984db0ac7576cdad0d64749cdb11f2ca9248babb7"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/chapter_contract.ts",
+      "lines": 166,
+      "sha256": "2055582c4b6c6200afb3a63ea2004cb69e6fd083c2f874bf94379a469a9382d9"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/device_schedule_calendar_tools.ts",
+      "lines": 165,
+      "sha256": "1323b7b4cf2326ac47148ed11b9ddc52d4a1bb3ea60032687ff7d6c871895e69"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/provider/ProviderModelCatalogSession.ets",
+      "lines": 165,
+      "sha256": "edf99d315aa29f48bec9af1f32a409875d018541428348fb5376fed590dffaa3"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/workspace_image_tools.ts",
+      "lines": 164,
+      "sha256": "d79f9d9798b32a9d216fc47b44149297e26b3ae85e237f11fba3741177bd9004"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/url_codec.ts",
+      "lines": 164,
+      "sha256": "059485f8895dd9b7999cfe954973e23aa5e76e728464e5155f9671b44f6b3d07"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/ImagePreviewDialog.ets",
+      "lines": 164,
+      "sha256": "f42c85523e6a8d690c02887738cfe29174083ac19bb0430f596977ce2511ef0f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/design/DesignCanvasLayer.ets",
+      "lines": 164,
+      "sha256": "7ba84e4efc9ee7a7fbb6d60cb61c6b50f636cbf8c838c91c25475072ab82d7ff"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/SSHCredentialStore.ets",
+      "lines": 164,
+      "sha256": "3025fca55a022107dab5144c5aba489b0552597368c8337e78a3c1dbeebe66c5"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_cron_tools.ts",
+      "lines": 163,
+      "sha256": "bdeda3bb754778a2dfbf6f8d0d5830684b131bd9d234e6c6528f19944f1c6674"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/claude_chat_api.ts",
+      "lines": 162,
+      "sha256": "b3421d4f92384aea85a38e7e974d1a635fa6f530d4c379f1868cc76f4a6c5c89"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_runtime.ts",
+      "lines": 162,
+      "sha256": "9b776aa093925247c38293fea6915f8cbb87c62e11f98ca51d250768e8b992db"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/subagent_report_tool.ts",
+      "lines": 162,
+      "sha256": "8fa2cb703dd7f99f2fd08a3dbb5b92272bc92ea43f4e0aac41088b23d3fc8b11"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelChapterVerdictCard.ets",
+      "lines": 162,
+      "sha256": "07cbe719047210bad36719ef602acf0e9239de48d106258dac68a732e33779bd"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/device_schedule_codec.ts",
+      "lines": 161,
+      "sha256": "887736d1f59d27f3fdc56a6db8cd8a7814708c106577cc832f68f83c4339736b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/device_schedule_reminder_tools.ts",
+      "lines": 161,
+      "sha256": "a51cdf644925fd5905bbec06e4fb7844c2c7a312c10235bb2692607fc1017e6d"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/research/image_scorer.ts",
+      "lines": 161,
+      "sha256": "8b2b8b55925131a046e0616a393e1dd76dd3ba084def96488b6106ca0080df0a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/CronRuntime.ets",
+      "lines": 161,
+      "sha256": "88f351b870ede643398bb46ffd120a2baa2575d1b82951dda239b91409c4e91b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_output_transformer.ts",
+      "lines": 160,
+      "sha256": "1909a0ba7dcb01333cbf79307dbc570a1650150a51e8e38999bd546971e87ede"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/AmberPrimitives.ets",
+      "lines": 160,
+      "sha256": "b0c44b2085f2fecd9f268338fadc36ba5d76f0e7e23140f024d7c2553edaa62d"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/builtin_deepread_playbook_tools.ts",
+      "lines": 159,
+      "sha256": "21d0981a1fd047986de3cc90ce99303e61f38a73b1712f737913a8ef550917a2"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal/stream.ts",
+      "lines": 159,
+      "sha256": "17bd349ff3b3e5fd2574e605a2df044acf1a525471cde8e6a5b38242f120f326"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WebMountRestrictedHttp.ets",
+      "lines": 159,
+      "sha256": "b9f788ebe1049093467e62211f7dd11c2ccc886afd7205ca1200c498a9663cca"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/workspace_document_tools.ts",
+      "lines": 158,
+      "sha256": "8d2a89c2b58832463e3677f726497bb774b220e1abd85564b0ceb9a5dd9d5da2"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/bing_service.ts",
+      "lines": 158,
+      "sha256": "729b0b048454777da3305dcd4ee76000947bcf9fdbcdf8ac8fefa977080d012e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelProjectSetupPage.ets",
+      "lines": 158,
+      "sha256": "1ece5d899fb73434fa955bf016c75b89f71d04090adbd04c7f1ebd46401ec8fb"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/HotListState.ets",
+      "lines": 157,
+      "sha256": "3c716384f6c2e8b10f09330e1d6dcd8f99317eedadfa7c0c84c898f0b45e719f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ImageCompress.ets",
+      "lines": 157,
+      "sha256": "3205c3a1d5438bf979b52761c53eba9a51428e9ab428f11ec2ea6210f403342e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal/profile_store.ts",
+      "lines": 156,
+      "sha256": "f895f2554fbb70198a2f8baa943745a142e513aae49de2ba6351d2f209ad3c1c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/vision_fallback.ts",
+      "lines": 156,
+      "sha256": "727beeda947ee23d0f21b4d40e5b0d2e5709808a2efc00d5367290028143ff2b"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatWorkspacePanel.ets",
+      "lines": 156,
+      "sha256": "bd4bf99a34d465649e5af80a63acf67f093e25fa2c2c3ec6c5127db775c81443"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/SubAgentStore.ets",
+      "lines": 156,
+      "sha256": "d1a608ddfba1d0b8818263b7e0b64c17048baa5b50b1f48df549f9e098abe3ef"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/novel/NovelAuditSession.ets",
+      "lines": 156,
+      "sha256": "be9ef59f6da52c207c54aba3d36d87277110edafecc6f68c103704190f9c0128"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/vision_cache.ts",
+      "lines": 155,
+      "sha256": "23b943b977b13473b9d9df1a17983c0e2e14199a90c9b101d3ddb5d8dc534af1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NativeMarkdownInline.ts",
+      "lines": 155,
+      "sha256": "6cb36590cfc1d094c8be364d570fdabca5c060ffa357e2f37cc18211c4370174"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/DotMatrix.ets",
+      "lines": 155,
+      "sha256": "bc0c62bb301cef84d15aee7c863a617b53556a19c809508bb9293543750b8015"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/PluginArchive.ets",
+      "lines": 155,
+      "sha256": "38cb36e44af15271f008bae08e8a486d680714a3697ce0d1b5b24718dc31305f"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_time_anchor.ts",
+      "lines": 154,
+      "sha256": "429c873ff8a6f7a3ed5366e1fb6efccfb876f841009c224898d89f055b6a2b6f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatDrawer.ets",
+      "lines": 154,
+      "sha256": "2c0e7b9ac86fa93da24830545ee5128d5b7ad7469b8382803e47e234f33df241"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadDiscoveryMotion.ets",
+      "lines": 154,
+      "sha256": "107d89d598e78c99c9ac4f97e5b49d8012784305754ffe3d3bbfb994abf27c6b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/stream_checkpoint.ts",
+      "lines": 152,
+      "sha256": "d7a41c9446482f8b29c2a7d1bac6444264c21aab75fc978fa6aaa390a02086d8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/device_schedule/DeviceScheduleAccess.ets",
+      "lines": 152,
+      "sha256": "cfdb0b529648347af871a34b3678ae6be3f2fa08a3d3853247a23ebe4d17864d"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/image_attachment_guard.ts",
+      "lines": 151,
+      "sha256": "f062ee2ffde296f0b3aebcbff61f8eb891006b5adc32912dcb9bb047a4f05811"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/PluginHttpPort.ets",
+      "lines": 151,
+      "sha256": "156668973380f94dee065bedc0a5f0545ba9675adac9d6433f038456d8605f14"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/ask_user_questions.ts",
+      "lines": 150,
+      "sha256": "c6d1a2dcc69bf2abb5466f82c6b18c6c1331edf650fb3261ec67c8409b6485da"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool_image_budget.ts",
+      "lines": 149,
+      "sha256": "d458ad5a132d39b670b510393decc30d054dd1894bb94cf2729f33e7733db389"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/MemoryRecordsPage.ets",
+      "lines": 149,
+      "sha256": "ed372e53e772ca3f75911d5638896f245099cac00a18ec86fabccea46e10a4ee"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_task_scheduler.ts",
+      "lines": 148,
+      "sha256": "cd2868d47ec2611bb35aa894f2f5758cb7707e677481ed9240707cefaf26de9e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WebMountOAuthSupport.ets",
+      "lines": 148,
+      "sha256": "aad632b47f77ad33911c1216c3e71f39a2e6c0920c3f9b62c2b363547c6d870b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/grok_oauth.ts",
+      "lines": 147,
+      "sha256": "6502ee86e0a70a1b5c1bfa1bee5ca830a1c2ea5e1814a989da38916165ad8a2d"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mcp_config.ts",
+      "lines": 147,
+      "sha256": "2c6768816408873b4793ef39f9a548a3f75bf51d03d4517afb7c35af7cfdb176"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/SlashCommandPanel.ets",
+      "lines": 147,
+      "sha256": "e38b102a08926eb1e34d96fe79fcf91be1aa04ec640dba8261d0fc5875e45a66"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ProviderConnectionTester.ets",
+      "lines": 146,
+      "sha256": "bb978bb6ad7813506738f1374ac654d988ee134557ecdd5f017633a4a1f88cb6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadAppearancePage.ets",
+      "lines": 145,
+      "sha256": "af8e703c1882290ffb358e7754b395719542f748d411ecb0ce583f403090dc70"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/webmount/profiles.ts",
+      "lines": 144,
+      "sha256": "0fe71de9bcfb1dd7a825a0757771b9d24e17ec6548a3f387ef41e258f5ff9fea"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/DeepReadDiagram.ets",
+      "lines": 143,
+      "sha256": "c65ef652834972d2e88e4b84bf5713ae7c07b23b3840f3c4cbdc08c3b7bd342a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelChapterPlanProposalCard.ets",
+      "lines": 143,
+      "sha256": "fdfad00a50747575672eda19fb9d88f0145d5149ca188f019bbe0f99c3f367d0"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/plugins/json_schema.ts",
+      "lines": 142,
+      "sha256": "b04deb127aa686193452aa4a777d7c006e6c0478f8feede6aa6564fbb1a88fe6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DocumentAttachmentSupport.ets",
+      "lines": 142,
+      "sha256": "9454be43763b76e382dabc08635f29ffb91bf8b467b834e377defc3182df8183"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/GoogleProviderConfigSupport.ets",
+      "lines": 142,
+      "sha256": "130581c48f7065960ae21c03fb098ae7c8bf2dfca7e22ebc9deef6eb32b2acbf"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/McpSettingsStore.ets",
+      "lines": 142,
+      "sha256": "0c0b131edac69942e773f6d23795c327371e97d804060df62f1db43f0c7fe1ae"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mcp_config_serialize.ts",
+      "lines": 141,
+      "sha256": "60611ec075f0ad18fd6841b4ad392d1334ed025337583040dbe43009c52df175"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/zip_archive.ts",
+      "lines": 141,
+      "sha256": "d4b7fe1b4b93a251f669765cf0fd3a0e62d6203c6a4b9c950a642da5f643a3a6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/WorkspaceFileVM.ets",
+      "lines": 141,
+      "sha256": "9714ccebdfdaebbe54911bb2f7e75362b89155429e6ea9dae3d5d03880338a7b"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/JevApprovalTriage.ets",
+      "lines": 141,
+      "sha256": "08b32417f818581649db23f82f00b844ff70093e2c9a314c9867d4bf6322ea10"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NovelWorkspaceService.ets",
+      "lines": 141,
+      "sha256": "733791981ba2bc08c814e52c4432590ad3b12ba8a29ed6d882987b8dc00969df"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/home/HomePresentation.ets",
+      "lines": 141,
+      "sha256": "fe48201b3095e5b6a8834a8a2396cb265e2867dd66e2c77c7e99b4c946481475"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/EntryCompactStore.ets",
+      "lines": 140,
+      "sha256": "43489a76ea408c55cb0ba56beb086985722cf298f1f4a53e409d9588ce96d8cc"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/arkts_shims.ts",
+      "lines": 139,
+      "sha256": "a64ef47201f5abe3b4b2aa74c8ccfdae24a493e2cb046a1caec1c4be06b08368"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/RecipeStore.ets",
+      "lines": 139,
+      "sha256": "3217fbda55dae4fb530e45308ae3b9fb9917a3fa904e9f8ce2b3a80b112b5658"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/openai_stream.ts",
+      "lines": 138,
+      "sha256": "73eecd42f6b92cdb73e6104886ef84f74bd46ba72ee2cf11afab80bcb390afb8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/CouncilSeatTools.ets",
+      "lines": 138,
+      "sha256": "8e90dfb97acb3c014fbcfefde506050d8fe55f1ed05fd853c3cf458fb3fb7199"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadAppearance.ets",
+      "lines": 138,
+      "sha256": "80ddc99fb15e152050dc47c96567b59209c8ab7f130a5971087a26131e0cecd4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadExportFiles.ets",
+      "lines": 137,
+      "sha256": "e464c6e54edd9bef60b26b26811e0749f5049654790c5bde7c765242390c6df7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NativeTokenCounterFixture.ets",
+      "lines": 136,
+      "sha256": "9cda340a87705321ee2a10875f07f3ade2d878ee5e89bf605badc4cf7967f3f8"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mosh/tools.ts",
+      "lines": 135,
+      "sha256": "b732ed78c0162941b5dde6bd72dde1dbf410338d8c65eb477c85a39b67c6b9b8"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/jina_service.ts",
+      "lines": 135,
+      "sha256": "21ba5faae57c3c92c85a0c3ac28125ed55b428713e536837b669846f303bb870"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/generative_widget_specs.ts",
+      "lines": 134,
+      "sha256": "69acc8c1560cb40e35423f8008244c97ef24871d56f2934d24038337a8bc6b1a"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/novel_project_operations.ts",
+      "lines": 134,
+      "sha256": "e2c621d29d1632dbb3088f81f68f0abbe945bcb279dd6b90a2b9c20bba5866d2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/CouncilPage.ets",
+      "lines": 134,
+      "sha256": "17060dfc20084f91c57ca3f106792e4b4bef3abecd268daaea1be520d70e1ce4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/search_settings/ChatSearchSettingsSession.ets",
+      "lines": 134,
+      "sha256": "37970fae701ed4af55e6d904b12a49019aac252d3bfa3c5949437a8a3c3a8c9a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/chat/ChatConversationDrawerSession.ets",
+      "lines": 133,
+      "sha256": "56b5e3491727e47b0f76f480aa04bd11d0a604901f38d388d996e9e8068b838c"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/material_adoption.ts",
+      "lines": 132,
+      "sha256": "356e07b4ae5dc095f2a5c8669ad9b67b77e83a44fe8d70a21053a86e5c0667b2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadArticlePressMoment.ets",
+      "lines": 132,
+      "sha256": "fa75b8aa2986de39a8ba4f515f306df557d2ded1ad0b094d324f9c47075ea6a7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/AppResources.ets",
+      "lines": 132,
+      "sha256": "50826673ceed72af582474b9160a23bffc39ff936661828244727bea4f805073"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/SyncCryptoPort.ets",
+      "lines": 132,
+      "sha256": "14f57ff2b0102d3e5a9889e593d3128b02b568f776a06880bd6f11af3015700b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/timeline_follow.ts",
+      "lines": 131,
+      "sha256": "3f37ead8ff11c85a4854bf2a0b6ce0fd57cba2fb46efb497cd6f47adf929b92d"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool_registry.ts",
+      "lines": 131,
+      "sha256": "e891067d9bce15809ca694d6a2590d2884112b65924f203b65763cba8b52d878"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/enums.ts",
+      "lines": 131,
+      "sha256": "c24ed3589ecc4d1984764e9bac77d454c524b1e5e841f2746ae7745eff902269"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/document_transformer.ts",
+      "lines": 130,
+      "sha256": "8cb3cb969c008d191015d9ba3a90d1a11b5c679a2b5d0b0466e3267775be08da"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/novel_context_policy.ts",
+      "lines": 130,
+      "sha256": "178738295f81c295afc2cba9e757058486c5b84f7da98fedb0ad640e80937c8f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationBlobStore.ets",
+      "lines": 129,
+      "sha256": "18cbed680c2ddac7075d8647fcc68ca90169aa81314b685914c5e914f650a8e3"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/agent_loop.ts",
+      "lines": 128,
+      "sha256": "c966e33349b9976c319b5af36f5effd31af25afe63d2d233d518f40e6f265adc"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/plugins/models.ts",
+      "lines": 127,
+      "sha256": "b327a7005e1efa8b6c49f56a8b06e567a85bbb5382cd1fbd54fe04aa30f0e571"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/tavily_service.ts",
+      "lines": 127,
+      "sha256": "3815ae8289fe2ca2ca1a03f379011900c9be873a8b7eebb2e9f4fb0a59253fd9"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/SubAgentActivityStrip.ets",
+      "lines": 127,
+      "sha256": "55f9272afe72eecb176f6b83f0f67be126511735e46f591859cd23a6646a8c69"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadMarkdownHtml.ets",
+      "lines": 127,
+      "sha256": "e787c65b41937dbcf7360c61b032eb7b21a8e639e3ca8589c039e5a24dc3131e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal/job_runtime.ts",
+      "lines": 126,
+      "sha256": "e7e4690d09b147aba261f293f5040105dd9b1fd281ed156644517cd3da7ef22c"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/input_sources.ts",
+      "lines": 126,
+      "sha256": "e7611566227d14efd417ecd7369da6f03a6f6314caf6bea0b4599c7951b57eb7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/home/HomeConversationRow.ets",
+      "lines": 126,
+      "sha256": "5cf5928c25755990da822d87f9bdba3509dd264e1dfb575b40241ee9d4fe5f4c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/provider/ProviderLoginOverlays.ets",
+      "lines": 126,
+      "sha256": "3a45f818383ef9a65136db056ed649452bbb6d1965bb11e7924461b98f12f329"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ChatModelSelectionSupport.ets",
+      "lines": 126,
+      "sha256": "c7e1cb858d2363bca023f4ad36e232221ac9e53d07e757557a21c0f81a2ddfac"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool_exposure.ts",
+      "lines": 125,
+      "sha256": "b5209d684beeec50535cc7646f399f338c55d4f06dabc127590d84680e323ca5"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadTabBar.ets",
+      "lines": 125,
+      "sha256": "43d02a8c2cfff99ed390dbd0aa7eb250090e68df46d00be06fa543ce0afc913a"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_streaming_preview.ts",
+      "lines": 124,
+      "sha256": "4ab9c119480832aa850a817b0f9e07db8212e288b89c19a9e137800dd1d187e2"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/retry_classifier.ts",
+      "lines": 124,
+      "sha256": "ff9d210be8aeae4854fb960bf0c95fb51b08c233e1c337830935562e65a65f97"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/session_grant_store.ts",
+      "lines": 123,
+      "sha256": "ebfd50ea80df45e677c832d4edec68c57823ec8c79f6aec4e89612a5d420c5f8"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/model_running.ts",
+      "lines": 123,
+      "sha256": "29887b41f8172307502a3ac74b9eaed597c3773922b58f4f8535a1bb3a64deb9"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/SubAgentRunSheet.ets",
+      "lines": 123,
+      "sha256": "db46db5f02161a443648cae886f739c4e3e50aa87ca1fd676c68b3ee8af3b549"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/image_compress.ts",
+      "lines": 122,
+      "sha256": "68d9fb06b48d21d51cefd357541ada6a93ffaa0875fd4eb88547ff215b05cbf0"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_network_policy.ts",
+      "lines": 122,
+      "sha256": "69ef111432736d10370ae4e94aa75f87b1f7aa6d759a0018fd7a26976647b676"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/smart_ui/study.ts",
+      "lines": 122,
+      "sha256": "28e84bb63514cf9fbd713b06850273d8afcab0077f6b886c8ee09a1987c43fe4"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal/session_runtime.ts",
+      "lines": 122,
+      "sha256": "a296082a2783e41d3246f413a51e087a650475d93f2902485f44820d19d0b882"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/McpPaperRows.ets",
+      "lines": 122,
+      "sha256": "e92eec356d9c1bed70be72ed3d22e8a7b95c764bc221de4b57d006f0507cbcfb"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/deepread_ai_client.ts",
+      "lines": 121,
+      "sha256": "ed2f74291d7d784c5551326a8b0a488ded47955029776282e5946017566574f4"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/health_summary.ts",
+      "lines": 121,
+      "sha256": "aa542a0646c674158e1d5d101fd187533a6015be015eb750a691925cbd4ba98f"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mosh/stream.ts",
+      "lines": 121,
+      "sha256": "ede9a7ffe98975a55b3140fec465be493fe1936bb00622daef5e366e6241cbff"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/webmount/models.ts",
+      "lines": 121,
+      "sha256": "d5d40925e689dd0bf73ce3aba397fef28585e9b5d8a6ac8fedd0dd6d3c559037"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/device_schedule_alert_tools.ts",
+      "lines": 120,
+      "sha256": "55cf8a74b18080fc967562dd8d4f34d7f29b84fb95d98d41703e25ed8834571e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_setting.ts",
+      "lines": 120,
+      "sha256": "cfb5c2b017ef00dd05653e3617f1f583c0e6e73e22ece8017bc95cdbf7325667"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/ocr_transformer.ts",
+      "lines": 120,
+      "sha256": "91af89f0cbd08766bc6dd422c7a810a97c3ecb0cf09125cddc0b899ec1f8748e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/reasoning_display.ts",
+      "lines": 120,
+      "sha256": "3cf5f89b9a316d59e769abf067ee6d78aa69924b0ee5892dea25671037fcb042"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal_approval.ts",
+      "lines": 120,
+      "sha256": "be04717305de8ff65b4a87b90b411f2b112988350b29da5893a3818993a39ecf"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/DataTable.ets",
+      "lines": 120,
+      "sha256": "c5ea2c3ad647285ccf391b8affb9b5cfd1c28ea2e6159fb3bca4284832b33511"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/GoogleServiceAccountToken.ets",
+      "lines": 120,
+      "sha256": "95a97d64d4d618511429b1cc0ca979ff615cf8289d481b1f18a9be237c14609a"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mention_roles.ts",
+      "lines": 119,
+      "sha256": "2f9c506b8b6b8ea385ded80066f90bc068ff0fc8c9950ee00251767e488e9dc8"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/council/approval_wait.ts",
+      "lines": 119,
+      "sha256": "060d412cd6356c3a41b8acb52bd12a8b4021a00047103b2323b1876fc03dcd5c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadTemplateWorkbenchPage.ets",
+      "lines": 119,
+      "sha256": "5db04027d07f3d7767988a9759008417411def7719a926b271ada9c1ee95aef0"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_storage.ts",
+      "lines": 118,
+      "sha256": "f0875568391d72af7f78ff15b38a80b9df575ea7e296b32501c22f46d89c2bfc"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/webmount_oauth.ts",
+      "lines": 118,
+      "sha256": "529439be5d5dd539ffd49f3923129044c2c903960fd83c40e70348f674f4feb1"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/zip_writer.ts",
+      "lines": 118,
+      "sha256": "81aeed3522682a10045a23dfea61b56d2b9ec22a3c2482a1a8c23bdcb28ddb52"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/builtin_queue_tools.ts",
+      "lines": 117,
+      "sha256": "9dcb887c44408340ffcb5b2e16c7a5bebdbfd77a0fa5a0f8846f5d99f9e44bcc"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/model_config.ts",
+      "lines": 117,
+      "sha256": "2194f418484d5291cea762dbad669cd131a7723cc9b99bf74f7e05c02a3f6684"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ProviderCard.ets",
+      "lines": 117,
+      "sha256": "c229c17a4dec9be7820532ba0d29addf191fd6afaa468f7faf66317da1b5d5d8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/GoogleOAuthCallback.ets",
+      "lines": 117,
+      "sha256": "d2108a12aabe72a09ea25714d693191874b1cbe4d28ee1c51e4d56c3a06ee22e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_recall_store.ts",
+      "lines": 116,
+      "sha256": "33f4eaff2a965ccabd38ddd2f0f01807ec0cb0e69b7ea30eb1284b51abe9badf"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/timeline_load.ts",
+      "lines": 116,
+      "sha256": "1a7f20dfee7635190780aac5e99509d5db596541037c29a75e2e720892e2057b"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/continuity_repair_service.ts",
+      "lines": 116,
+      "sha256": "71e009a179b8630aca0461772ef7423e4b1cba209e3594c91d7ca1af503d93f6"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/duckduckgo_service.ts",
+      "lines": 115,
+      "sha256": "8df047d85e281165450ce42b188238ec5463eb2f127deca99690e29106947f13"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageAvatar.ets",
+      "lines": 115,
+      "sha256": "ef974b91510a06ab81407be2ae5b78bebffe8767919989cbfb255eaa79fe3162"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageCopySheet.ets",
+      "lines": 115,
+      "sha256": "a32758afdb6ac43529a95e120c8a24f30e99814d5065f6229f79b8774f77593d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/GeneratedImageCarousel.ets",
+      "lines": 115,
+      "sha256": "a29e1b7710cf487a10035dcb56629265ef9c7ad5ac855c9a9de384844215f7e9"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/plugins/tools.ts",
+      "lines": 114,
+      "sha256": "e584e88f040f17209322dd93d804e96ff164b73dba731695da12595be88b9fa0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/GoogleAuthHttp.ets",
+      "lines": 114,
+      "sha256": "d7cf8b8ff1de1425705c31362f04683271268ca7e23c6c2c48a5bea9a25b332c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/provider/ProviderExport.ets",
+      "lines": 114,
+      "sha256": "258da00270f7bbc4cdc17a170ce444dae6cceb855cf3ff7308ce233c9d566125"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/jev_completion.ts",
+      "lines": 113,
+      "sha256": "11c0304e898c73408aeae320ced5c0d37849b7a7cc85977e0638fab07b80c186"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/subagent_display.ts",
+      "lines": 113,
+      "sha256": "ec2cb882c810d1f1672a205df9d306a1deca5af708eed07495f2587180d7ba05"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool_merge.ts",
+      "lines": 113,
+      "sha256": "2a498c7bec664aff147aaa2c19fecbe7b38f18e0146b7f8d3c7031cf2ddde583"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/recipe_loop.ts",
+      "lines": 112,
+      "sha256": "5b872a899544a0fe0ce69484ccae4d631fa3af4d89ca54fde09f660e0d390197"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/linkup_service.ts",
+      "lines": 112,
+      "sha256": "a00fdaa27a36301dba9edc5466dd6aebe1a230e9bb4326f52bdd16ec7c0eff4e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ModelCouncilRunner.ets",
+      "lines": 111,
+      "sha256": "835f3896dcfa2b56b7dceaf66d9e2c0106076bb4a1b76db267c7ae9137a4485c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/feishu_docs_client.ts",
+      "lines": 110,
+      "sha256": "01094bcc2f103d2d778feefebbe035075b2b85f84b761bf064fe9dd07948411e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/UIGenerationMotion.ets",
+      "lines": 110,
+      "sha256": "ef877a8d6ebbad3275618dd5bd1ec39552b1e18e646785fc52b84f84e3ec2420"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/time_reminder_transformer.ts",
+      "lines": 109,
+      "sha256": "c5aca98fe6b09eb91b5da969557a70fa6fcd16ef3d67af46b500909c09f32068"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/phosphor_paths.ets",
+      "lines": 109,
+      "sha256": "b0b52d40d7b3f620c897eb6c90fa86829e9efc1192e6324e83d0d0029f5beeb1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NativePluginJsTransport.ets",
+      "lines": 109,
+      "sha256": "cca08dfcfb7217e0509555f3939d4ceb3e3d8b2314ea5829ae59c07a6a5a391a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NovelPlanProposalProjection.ets",
+      "lines": 109,
+      "sha256": "3fed7977fc548c89efcbe5723e637ea62b0f7631dd0ca8203846ed35d95f5aac"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/base64_image_transformer.ts",
+      "lines": 108,
+      "sha256": "7018a7c8747b2b6257aeb78bd5f84a61383be830752e68412512a03968af6b24"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/context_builder.ts",
+      "lines": 108,
+      "sha256": "d9d079ac1a0d8749e8ea67c4643c9124d8ad623b7fb6648d00eb9eac14352938"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/placeholder_transformer.ts",
+      "lines": 107,
+      "sha256": "2e8724a4c309569b14a1dd31d0733759cf79445eca0a969bc20f9b3311503c55"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ToolApprovalSummary.ets",
+      "lines": 107,
+      "sha256": "5626b6ed79110a243664905505d8b786d10ab82d6335506beb6c8d00ee388be8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadArticleStatusPanel.ets",
+      "lines": 107,
+      "sha256": "3f7a4440cef29de158fdbc9d53752c7de74935c8060f74b22cfdb79ba2e72a4e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationBrowserGuard.ets",
+      "lines": 107,
+      "sha256": "52a2fa42d8d8af92cdf7803c0ffb656008bee4f1b1e980d7e86f01c0997f7945"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/generative_widget_prompt.ts",
+      "lines": 106,
+      "sha256": "80dd2e9c28181ab848b8ff2048e4cae4355deb10ea9631d59673206657a5d55a"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/searxng_service.ts",
+      "lines": 106,
+      "sha256": "372971b338b052719677414d745cc76f53af678570b0772eac35b943866ac90e"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/council/prompts.ts",
+      "lines": 106,
+      "sha256": "8f458b3e610e321c9dc7f36adda04b9c7b732a8ae6f94d4ee903578d96b69756"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/json_schema_validator.ts",
+      "lines": 106,
+      "sha256": "0ee6485e3019e55090898d44584db94eea0422a63b1bc42335ec7c3f8cecaf58"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ImageSaveSupport.ets",
+      "lines": 106,
+      "sha256": "ba226725ee7fc83fb241e553af4a868afc05329b0e8b065d00846ad848b2c379"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/MathRichBlock.ets",
+      "lines": 105,
+      "sha256": "99535f6a61ed9e905f9d94374a18d5a22e34ff07b1ad350a0b493ee1db003e13"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeviceSchedulePort.ets",
+      "lines": 105,
+      "sha256": "77580ddb0d49479833204af672ecfb7e3b4d8395405f91330d85f806f5483a37"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/GoogleOAuthClient.ets",
+      "lines": 105,
+      "sha256": "c33061f57af9e5d084c66cb7f6b18167a627647d08ff6085e52cb6bf77e09c80"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NovelChatRunAdapter.ets",
+      "lines": 105,
+      "sha256": "cd7c51c829df8a5d774ca671d5522e9e741ab8210dbb5dc8df7711a67405e52f"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/tool.ts",
+      "lines": 104,
+      "sha256": "5cc10f1f6290381a5cb33fc96c2083ec878a9c61ed28fe9e5c3b83c439c97e06"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/public/memory.ts",
+      "lines": 104,
+      "sha256": "373fdbbef11323da521fac210e590a8211f9211f230c32fae2d5ac281c66aad7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelRunRecoveryCard.ets",
+      "lines": 104,
+      "sha256": "5d524afcbaadc97099eb1f32fa1a8ba8686177292070141d4cb34186621e1c6b"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageActionFooter.ets",
+      "lines": 103,
+      "sha256": "25a9c6960d9e1232dec10d37c2fc7b986614f8cfc145e7477936f170c09428f7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/AgentSettingsRuntime.ets",
+      "lines": 103,
+      "sha256": "fe0da2dbb6fd047e98926fef3e237b813c7c76c83cf25fffe991f3348b87a7e6"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/task_model.ts",
+      "lines": 102,
+      "sha256": "f9e6ac2d0c5999d1a159a2d639e0f96dcae3476298b787dddf97083aaf2d3abe"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/grok_service.ts",
+      "lines": 102,
+      "sha256": "6855274221f9c2721ed2de3fcd1a3e0f67c3020ff6e8835fc5cda07424e1c445"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/design/novel_themes.ets",
+      "lines": 102,
+      "sha256": "e8a33dd0ed43c37b0362bebac7b3b64f25a623c03512a5305aa3b8685f96aec4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/PlaceholderSupport.ets",
+      "lines": 102,
+      "sha256": "e693986f153f298b40662fed09da35a52a108fd47a357b5a7a866bbb1004ca56"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/DeepReadConfirmationDialog.ets",
+      "lines": 101,
+      "sha256": "cfaf8e2656ae10852f19c354da003a5fa69c562d8e51b18579fa47a99bbbbf97"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/Base64ImageSupport.ets",
+      "lines": 101,
+      "sha256": "cf9ddf3ee6a4e3e41e7444ea2c4abceb8464d66a9500db3d21f0f566043a2483"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/display_setting.ts",
+      "lines": 100,
+      "sha256": "bf7dc9e9c5e6732c6cc686d645597ac4b74d25a0918e5f06b2ebbb203d92eb99"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/perplexity_service.ts",
+      "lines": 100,
+      "sha256": "ea70a5ceb3d8a634ffe0f8430e75535fdfa9603ce77db22143691ec834c5e28c"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/research/search_provider.ts",
+      "lines": 100,
+      "sha256": "c3fa731633cb835a75fd02d2131cc38a13e7090f72690913198d1ff5cf312023"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelRevisionBriefSheet.ets",
+      "lines": 100,
+      "sha256": "d9d370b6961af2a34cb06486f23d30e6af79938745f7107a0fb4593dc0f7c7a1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadArticleToolbar.ets",
+      "lines": 100,
+      "sha256": "6147ff4e3e08d2f7d9ec43fdab8bd373da99027c86a4ce38684c73658d7452f6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/BalanceSupport.ets",
+      "lines": 100,
+      "sha256": "c2ef242e0e162f0d69d2ac392576580e08694dded30f3ce0a050a4e861b14262"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/research/reader_extractor.ts",
+      "lines": 99,
+      "sha256": "4222c976b470cb92ad79d96b196c1dc6a2ae7d458bb3256f9b68d6c87ad486d1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatListIndicators.ets",
+      "lines": 99,
+      "sha256": "91465e83a6542ba1455a22375ad77dc303546b82ba77e7c88845558a45e59289"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NativeTimelineFollow.ets",
+      "lines": 99,
+      "sha256": "8f963265d2caa1e4b79e933d92b7e865e9010bc83bbde672acbd604328f6ce64"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/SubAgentResultCard.ets",
+      "lines": 99,
+      "sha256": "9519e51f32600a77f2ab9591330d885e05bf06bcef94a2056695db0ec4ad4297"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/MarkdownRichText.ets",
+      "lines": 98,
+      "sha256": "d95f1cca7fdaa0fc7d292be9b0e7d223ec446bbc56d7f5eef35e12ccfddcee11"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/LocalExecutionResources.ets",
+      "lines": 98,
+      "sha256": "98c33e4fa4f020243f42d7e672a700b8a39dfae032f44e0c382c1f8eb1fe47d9"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/council_tools.ts",
+      "lines": 97,
+      "sha256": "3b04b1c18f911a4e64c6969baf38096b6fcd1ef22384920cf2919dc817154cb4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/novel/NovelManuscriptView.ets",
+      "lines": 97,
+      "sha256": "f42286d4a8a3df3c77a7b54a1ea4da5342cf5aa95db33538dd65b87ae2b31278"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/material_injection.ts",
+      "lines": 96,
+      "sha256": "404c5bbf42883b826b17f7fab558dd458d69895dc8424cc7572c1f993f6852a5"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/CouncilToolSources.ets",
+      "lines": 96,
+      "sha256": "88e763f2ac594d602a30ce110f74aa6e6460ec91969178e3f02aa44806c15ef8"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal/models.ts",
+      "lines": 95,
+      "sha256": "92bf89fe6cc31fae98bf161a17c8f9d20fb375f21bc02daa2b789effb8e8f565"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageCommon.ets",
+      "lines": 95,
+      "sha256": "09a30acfa3f91d07b352d934cdece368c038561a8d23ffa4e28e44c82dc3c970"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadArticleHostRecovery.ets",
+      "lines": 95,
+      "sha256": "3d5182b23739fec72ec5b4116a1b0d8d7536de6eddfc157a7b2a1434300ade0a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/EntryImageEncoder.ets",
+      "lines": 95,
+      "sha256": "95fa556eaba7995e73466156124b7939192a3ec03ca3ccd9d3afd190a84e495b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mcp_describe_tool.ts",
+      "lines": 94,
+      "sha256": "5a32e07617e503f60c41d6cfb7590d39befda5a9c4ea0b8b5025d970e40a24d9"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelApprovalShell.ets",
+      "lines": 94,
+      "sha256": "7096533df71bef601c6bee58696178982c6b55a30e7e5f6619ad6193aef00bbc"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/python/runtime.ts",
+      "lines": 93,
+      "sha256": "344cac943d00feb8cbd3ac516b93790da66ac8afc7352a641bac9701b9147ee1"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/setting_proposal_parser.ts",
+      "lines": 93,
+      "sha256": "8c63165fc81f4af805f2cdd36221af1d82a354a6fb7ce761fc6b8723ae0b2fdc"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/kv_store.ts",
+      "lines": 92,
+      "sha256": "ad019e613408dfe4657050c690882c9a4964f121c06f8429b2aa6798095477da"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/chat/ChatArtifactPanels.ets",
+      "lines": 92,
+      "sha256": "2bc87427df82a4fde7cc12dc1487e40729b38e1149dccc505127386b136b8122"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ImageSourceSupport.ets",
+      "lines": 92,
+      "sha256": "87b874e675913e890595ce19dbea80242af5c068c4e455edf78ac2304423137e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/jev_auto_approval.ts",
+      "lines": 91,
+      "sha256": "fe2aafd459632f0b956a176377b6c7a1c2c4098cfd70e719e636ee6d3d0bc87c"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/ordinary_run.ts",
+      "lines": 90,
+      "sha256": "73c5a5cc9fadbde29e3659d95941e23f1d51d24257a55fd81ea67bb6a3bfb1f6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/PluginApprovalSummary.ets",
+      "lines": 90,
+      "sha256": "ad53eaa48f390a571a7441de95fbf4c9d1e95ebb75aecdc4dfa02dc9721122c6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/home/HomeConversationExport.ets",
+      "lines": 90,
+      "sha256": "9fa4a6b0ab6cadd9bbe5ecabe82efc73c5e145e01f2fa58d2efc9e060555f1b1"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/stop_generation.ts",
+      "lines": 89,
+      "sha256": "ab3d9ce0406588e47fe5010567d10c44e3348abcdab9c375903e806751fb5d64"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/novel/NovelComposerState.ts",
+      "lines": 89,
+      "sha256": "bc41b413edf18ea27823bc834e585d2102d971f9c0d5252e3f27b3bfbdb69e21"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/chat/ChatAttachmentIO.ets",
+      "lines": 89,
+      "sha256": "8afc02e027eb6624d704f4f2828b76a9654b891b9617f750f152deb14ad0a952"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/timeline_rows.ts",
+      "lines": 88,
+      "sha256": "5beb866f3f1054b8898fa39027b4edc7a53b9f2d0ad05050c47754c9d735a77d"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/exa_service.ts",
+      "lines": 87,
+      "sha256": "51158d3790d51cc031f37eb859b9425f670b5e2e7cade9030f2af688729241b8"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/section_writer_fallback.ts",
+      "lines": 87,
+      "sha256": "eeeb13a3550e7024ee3387ac6775ff2b35a67c685ff06e158645c896f7cdc789"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/prompt_catalog.ts",
+      "lines": 87,
+      "sha256": "ea620f0ac3b6b2e4e8f605e59490efff8c8d9187c52a61b75345aa38946e7962"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WebMountTemplateSupport.ets",
+      "lines": 87,
+      "sha256": "2ec141e41ce6eb8049fff762c46c9205c492a5f6c971fc0858e00f70af98de7f"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_html_validator.ts",
+      "lines": 86,
+      "sha256": "5120da714c2f51b517910db93d27de4700793dc1f7106a9818c291767138aabc"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/provider_import.ts",
+      "lines": 86,
+      "sha256": "aa65b8a693b33ca6558b03a8a83b6c505bd40b0a1df1284074c38f9870973c1c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageActions.ets",
+      "lines": 86,
+      "sha256": "fc9212be8a18710992de06a2bd3515da2618e6d17f49740013fcddd6a6c2af77"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/MediaImage.ets",
+      "lines": 86,
+      "sha256": "e61635a3a12ef2c9abace19f8d0655c3708d62fc5497175ba8bee8402a156b04"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelChapterVersionPreview.ets",
+      "lines": 86,
+      "sha256": "d52018a4d7ca098f0b61fe97a8936c78ddb0dd0b135c8274b4613c0a558d1aea"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/recipes/tools.ts",
+      "lines": 85,
+      "sha256": "f30abe328742e6c4defdd01f633cc3840c0cf7ad372a46a063d1b8238953a72d"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/structured_stage.ts",
+      "lines": 85,
+      "sha256": "b684246ce48ed05971945417d20824b51aa3e36e2ce643b1d9af89fc09d36281"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/discovery.ts",
+      "lines": 85,
+      "sha256": "3aaa981b7abdbe87d60d5cc043f47cf5441e7c58f56fa7047f00c1b9e0a4ccf1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/InteractiveMessageTimeline.ets",
+      "lines": 85,
+      "sha256": "a392b895b61f7e83b775f8d444739e88fbecbbac9430fe75de52ab5b07da4cb8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/MessageVideoCard.ets",
+      "lines": 85,
+      "sha256": "c4f8a92ab41ad2566d7640bbd87f3252e707f5bc03edcc89f8cb53bd51c0f1e2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/McpFilesStore.ets",
+      "lines": 85,
+      "sha256": "4af56549d56474fbb4d45bd270fb49fc2c9a89a7365c885e9836862c4c168b6a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NativeSSHTransport.ets",
+      "lines": 85,
+      "sha256": "0ce965da9d0d416e93dca46a9f5ec34b75761f19ff2e5aa8f903f7b1fddf3070"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/top_model_menu.ts",
+      "lines": 84,
+      "sha256": "d7fe26fc95996c87bbab30734a3e9bb19abfa50faabb9c0a42bb3baf1516a43c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/bocha_service.ts",
+      "lines": 84,
+      "sha256": "40431930345af8aef66324b4e8cb494a6559cd5f559a69423211286f30337967"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/home/HomeContinueCard.ets",
+      "lines": 84,
+      "sha256": "645df71fa6cb2297ad058e3e65d8e8d2b2aa660085ec6343d631b31813d33cb7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/PdfDocumentParser.ets",
+      "lines": 84,
+      "sha256": "db97a563f3e26a3fa3d13eb9f8d568f2ffe75e8cae3cd11d142fcd988f80091b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/vision_health.ts",
+      "lines": 83,
+      "sha256": "13fc8d64ebd50742d97486ea2dbc5d30353ba22d0b11ded8479b7fb07252b622"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/library.ts",
+      "lines": 83,
+      "sha256": "bb73a2588d18f89282bc6de798be3bcb868e88e4fd175df2dc51976c8d5b6571"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/observable.ts",
+      "lines": 83,
+      "sha256": "4a7f8b3b0e46a8d01378d6c9bc3c58f28fea2c4a17193ec1603fbfbaa7f91bd7"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/deepread_search_registry.ts",
+      "lines": 82,
+      "sha256": "8e05997958a5a95d7310127577f6ae498c5aab3fa10d3bb3837036ea679d837b"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/deep_read_progress.ts",
+      "lines": 82,
+      "sha256": "908ba5b954b79fc64924cccf5e2cea94ff1b5589bd868d666f14f0b091bdb018"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationRecapSupport.ets",
+      "lines": 82,
+      "sha256": "84f31ea47e050e4fb49365f193c4e10996f87254fbbabb35e3c711234258e0d2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/GenerationProgressTracker.ets",
+      "lines": 82,
+      "sha256": "5cb0c2869ff5520aaa392831ef13e2b6b0f0967b0e95292ed27a18e74a3d1dcb"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/PreferencesStorage.ets",
+      "lines": 82,
+      "sha256": "f2bf505531f941b1717437b91baaa4dfa6ed9b950f1c7be53009e75d41af7c11"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/metaso_service.ts",
+      "lines": 81,
+      "sha256": "fac83dc08e245a0cdcdc568fc4997c4da77113cb24d046e146ae72e6bb6eec86"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/zhipu_service.ts",
+      "lines": 81,
+      "sha256": "f6923921efbd7af076517bca591f2180753b3381af921b90a42fd8df58e08e44"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/synthesis_templates.ts",
+      "lines": 81,
+      "sha256": "0723c883a92b3fa686b48d7ffdf24c3091ffbee7919dcd237e5d71a8b85ddbf9"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelAuditReportView.ets",
+      "lines": 81,
+      "sha256": "91b7cfe8e838d985d328784aa08555ab3b27286c3fabdd5fc5adebd5a03bf47e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadLibraryCard.ets",
+      "lines": 81,
+      "sha256": "39bf75ee7260fff5d465bc4a420882d756def1566c87cb7f807bb55b1968b3d7"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/plugins/broker.ts",
+      "lines": 80,
+      "sha256": "e93e8ec83feac2ca7c02f97c28647ba62c4e09c5a550a7a90aa7fc4b8027339d"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/serpapi_service.ts",
+      "lines": 80,
+      "sha256": "532ffc1adbf51eed6f2807225faee35a6c7b62e6f0b6569abe71603df2359dbd"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/studio/StudioInkStamp.ets",
+      "lines": 80,
+      "sha256": "b78951d549c2af949fdb3739d2278d536313ff2e890e206a635b5391b0384253"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/amberagent_service.ts",
+      "lines": 79,
+      "sha256": "ff098881f175fb8b8e83301f6a30fd19c9a10f5f63dd33c49d1fced666b1d0e4"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/task_model_reference.ts",
+      "lines": 78,
+      "sha256": "a80a08db0ceefeb941257eacdbdf626f4372151845f62ce5c2ba9f7032d3c9cd"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/ConfirmDialog.ets",
+      "lines": 78,
+      "sha256": "d8c4d262968139a424a2f374c5e21e2d8b6268defc3a4982d648d6396541fdb4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/ChatListPage.ets",
+      "lines": 78,
+      "sha256": "e188953674b6aeb7afc4bdeda08d527ebbbaf1d491e2ca5d6004910006727b41"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/NovelRecoveryPreviewPage.ets",
+      "lines": 78,
+      "sha256": "bdb590f0995b4aa2339350937b49a2fa18109bdd4d7e81387e30017b3085ef73"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingAboutPage.ets",
+      "lines": 78,
+      "sha256": "e327b72337b11908b83713c648b8b2e066b7226c5c5bdf627d6ae718fd11ec9a"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/continue_candidate.ts",
+      "lines": 77,
+      "sha256": "d5d6a00b919b1e06cc6611e0c72082d576ded060c189e654a1c1747312497976"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/serper_service.ts",
+      "lines": 77,
+      "sha256": "842af6a9bb1ff66db7b07165a203827977e1c5d59e390b9cf5a165997779e4e0"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/material_fields.ts",
+      "lines": 77,
+      "sha256": "e3357d2b9d384e49e32b477c66871cdcbcb4a9a4baa4c26f813153492120cea4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelMaterialCard.ets",
+      "lines": 77,
+      "sha256": "6938a6ed5b0b4227ac1f02f0ae0d32a8d94cf4f66a0bc23720e0b6b8501c357c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/brave_service.ts",
+      "lines": 76,
+      "sha256": "8604508e594b47043b337cf8b98c617a5e069e97cd08cfac1d553eb885751618"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/history_selection.ts",
+      "lines": 76,
+      "sha256": "7dbad5b63dfc97f50963f31c61c144fdf29af0850f7ee6decc82f54e481ac841"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelMaterialMetadataFields.ets",
+      "lines": 76,
+      "sha256": "fd297c75e8dfd15093d669b7c78fddde0b28ab8100c798e8544266dca6620f8d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/CardGroup.ets",
+      "lines": 76,
+      "sha256": "72a12670b9ba3210004a1fdccd4a1c46005907aa736a1afbd5eb4242c185bd51"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageSubAgentStep.ets",
+      "lines": 75,
+      "sha256": "90340bb348db800d6afbba81ffc4c4c5d1a69672855a50bbc0202150a491e4ad"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/MemoryPresentation.ets",
+      "lines": 75,
+      "sha256": "c65758efdf065b545011fd22bc0498aa15981c5545ca4e9792deaf433b17f57e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadRunRepository.ets",
+      "lines": 75,
+      "sha256": "90cb2731faea94ff693aa1f88a4367215151f3064fb1a7a9454aa9cee79f6fe0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadDiscoverySymbol.ets",
+      "lines": 74,
+      "sha256": "9486602d4cbbab4e55c81ccb252d7a22ee8b2e534d1a5d72a11187c2522e2bc2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/Select.ets",
+      "lines": 74,
+      "sha256": "9904e91c0b8baa9d48c4d6cb149fece7b1d6a2230d744d03866a553ac31f9a1b"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/synthesis_article.ts",
+      "lines": 73,
+      "sha256": "0f99e370023808ad518de5f9db78650956e3394d18e31de06434658720478f53"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/DeepReadNewsroomCard.ets",
+      "lines": 73,
+      "sha256": "062105a5c281b1350137b2b17daafb20415d32f855b85bcc3f9f2c2a2cd5e8c2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ModelSlotPort.ets",
+      "lines": 73,
+      "sha256": "66d99001233b518886dad9d1e03ef2bf55fb03d1f13ec2e43824c255465de304"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NativePythonTransport.ets",
+      "lines": 73,
+      "sha256": "ae027036fcf5600f693c414c0524d16fb3507be3a7410c8cbb7420de37a70b97"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_documents.ts",
+      "lines": 72,
+      "sha256": "4bf9ce23c607c1b84166812676926def292d9110eb7c76eee3bdf3a6050e1027"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/candidate_provenance.ts",
+      "lines": 72,
+      "sha256": "605214eb1bfcdce8dda4ad6810db99ea9f5ee33a89c2ca673eb47f8382346453"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/material_inheritance.ts",
+      "lines": 71,
+      "sha256": "ad3266185b2482a09f5a97a073ba429be6c04457e0ecc49a76c69c2d9d12c753"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ContentAttachmentChip.ets",
+      "lines": 71,
+      "sha256": "6e2774d64dab046e9eb0dad24e5884e24ace8b5ddd08ecda7fd4d86bd4333573"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/FlatTextField.ets",
+      "lines": 71,
+      "sha256": "2f2dc7b720d6a602742ea84c0c9e8fe28303b174d92b58199f10d76ae626b2c4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadGoogleSearch.ets",
+      "lines": 71,
+      "sha256": "6f0911a8d7c84c16364b1d0db4fc6b2e94ddd988798df99c03f23a9d20e9cdae"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/settings_backup.ts",
+      "lines": 70,
+      "sha256": "ede3d3b1f051a0e624a712191ed350aa76cebe8c351956951d4a43707de7c09c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/workspace_artifact_tool.ts",
+      "lines": 70,
+      "sha256": "f76299a473e63b3c95e40f1220911fba769b793b10b99e25dddd83ff820852b0"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/ollama_service.ts",
+      "lines": 70,
+      "sha256": "658d647eeab2fb3aec3bc1ac0a3ee8e370afaf36b0301606c1779e5e76e5e870"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ContextRing.ets",
+      "lines": 70,
+      "sha256": "5e6f62775d5297f5332139d0a2494dce202c9f11917143f7cc871ca162fd5b15"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ContextCompactionSupport.ets",
+      "lines": 70,
+      "sha256": "dd38846a6c08651aa358204c4140da02930942e603b9d7b30a679b7d7a2e284d"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/reasoning_levels.ts",
+      "lines": 69,
+      "sha256": "c2a2a1bddb473e00a081503dcd0c3a88ee3a74b574ce121e07b823791a47d06a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatListSnackbar.ets",
+      "lines": 69,
+      "sha256": "9e6ff2e8b8d2f1b67bb06efbf004ee15da616c6771b13bf49db5df5c38dcb6b2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/chat/ChatMessageActionsView.ets",
+      "lines": 69,
+      "sha256": "1c769148fee1621e27239f8a6a7c1708993bfe0979bd5732af999b829b838e4e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/Switch.ets",
+      "lines": 69,
+      "sha256": "29530882bc8d4a1ae37ce9eeb357d52073c08f62f989747b2eb3497a6997d7b3"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadArtifactStore.ets",
+      "lines": 69,
+      "sha256": "20b2436a8415abac02284c63b2ccbc75f106a9d2faab4c7cf2abba83797f80c3"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/builtin_time_tool.ts",
+      "lines": 68,
+      "sha256": "56d4b51161f3a41eaecd9542558091163ed39aae92d51af202032624be55f0ea"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_prompt_builder.ts",
+      "lines": 68,
+      "sha256": "3fc2a2ce32871fb41d5a70d62ba3661e2b99b55a8d7b6bfd2228bcc2f44c47fe"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/native_backup_copy.ts",
+      "lines": 68,
+      "sha256": "4c31b8f7ab6a08d1d615bcdedc5b356a21efba50be4368662607cb19101471d7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/studio/StudioHero.ets",
+      "lines": 68,
+      "sha256": "b7a0c4c1e826910b720974213807794764858a118cb8dd59087447df9d89511e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadSourceImporter.ets",
+      "lines": 68,
+      "sha256": "c264ace079d823d1fdcd7d3897c738c7fcc950b149efb46dd412df04cc9caead"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/novel_runtime_snapshot.ts",
+      "lines": 67,
+      "sha256": "2c436a15d1d3548417e1a9d27adb5d6a4dbcde8b7648a28b4f150bd1ecb52b82"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/suggestion.ts",
+      "lines": 67,
+      "sha256": "985f5d0b9aa651377ce2696b6e23811144118cf4286e69825536a0627914fdde"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/wikipedia_service.ts",
+      "lines": 67,
+      "sha256": "1a15f0628e966fecd30cef343145d2dd8e1d5586094780f2e7c2f90223d13440"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/VisualArtifactCard.ets",
+      "lines": 67,
+      "sha256": "0e598111e2093a44fd828abdf59ec658fe78eb85e43c873a51442dae6f1911f2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunTools.ets",
+      "lines": 67,
+      "sha256": "ed76f068b0a5560cccdfbdbf4a4d52f4e1dbb148abf7d8521d7609048a1504a0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/MemoryDocumentStore.ets",
+      "lines": 67,
+      "sha256": "983f5b4f662fc3c46de8b4109b4d67bbe0b7449f959bf21bb73ed4e0245b908a"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_storage.ts",
+      "lines": 66,
+      "sha256": "d0145acaf5b03d12b7ba72400183fae0a89f3def395c1aa8d66d8776f830c3a9"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/GoogleSearchSuggestions.ets",
+      "lines": 66,
+      "sha256": "8677faa02e4016ca117fa59010e6a34196eba7975654fd339d59579f206be519"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/MentionPanel.ets",
+      "lines": 66,
+      "sha256": "351c74298462239529de29f3e1042abd968243b99641007b245f541052f9eb10"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/design/fonts.ets",
+      "lines": 66,
+      "sha256": "50c7b2dcdaac02516b1a23e4d15f572367230f265c3dcbeeeb88a0f3017f2e87"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/CouncilSeatStore.ets",
+      "lines": 66,
+      "sha256": "1d417919dc03baa44eaeb9d0671947990e3d99e90cbe5c5ca1f2f5e2a0867bc0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/SearchSdkInit.ets",
+      "lines": 66,
+      "sha256": "d44d31cea1d96d6c84e87f31fe078a6769f8e6f0385c37f2666625ccca475dc0"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/auto_title.ts",
+      "lines": 65,
+      "sha256": "88ec26dd2f87bd71fec5673b109b09cbbeb0f57da25d0c339fe74211f6d4e525"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/polish_context.ts",
+      "lines": 65,
+      "sha256": "49e6cc57765c85ac5596acf664572555cb6b77178f5e988656f8154e79909dd3"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/quick_start_proposals.ts",
+      "lines": 65,
+      "sha256": "1ae77787dca6b7fdcde535a610363cc45a608119ec1a053583f6e657de1280e7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ChatDeepReadDraft.ets",
+      "lines": 65,
+      "sha256": "aacac326d8e4c90b733452bef7fee0dd3a3b67a8459dd92f093af4e31e753d22"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadContinueSupport.ets",
+      "lines": 65,
+      "sha256": "b434349ac537e1e762230b42d0cc92ef5a5d1ad036628df22dd3b89ac9f090c2"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/novel_request_config.ts",
+      "lines": 64,
+      "sha256": "8ec159389d6ed07ce3eb8f1ef98f2723c49ad3ce77e55ddbb3347a0da7d4ba18"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/provider_runtime.ts",
+      "lines": 64,
+      "sha256": "40ef5fc3d00ee8294c3eb5cf05a0dc9d2b649fd4a77ac078cbb360f379c2cdf7"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/plot_projection.ts",
+      "lines": 64,
+      "sha256": "a064502709d5ec2f687bb74aeb3b6f2a19a7fbe5c236870b555053f691edb2cd"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/standalone_defaults.ts",
+      "lines": 64,
+      "sha256": "eb863f52f6735824f1ccd75ad25d815f8cbdaec5d7175debd9fc9996aca3cee2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadTemplateCodeEditor.ets",
+      "lines": 64,
+      "sha256": "261c5f91a23aa06e2a10486758383bd9968594185fda1ffd9b28684a3a4dc8f0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadGenerationActivity.ets",
+      "lines": 64,
+      "sha256": "79a59e26254b34b022020d36934404bf2dd17c1c9baaacf1fd4855124e301b05"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/JevTriageHost.ets",
+      "lines": 64,
+      "sha256": "e57ae78a95f7aa6110af14d0645b0d929fa41ec21752044c80ebe8e9e7a63de2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NovelWorkspaceArchiveCodec.ets",
+      "lines": 64,
+      "sha256": "994d35a715146cc69091f656adff814d81d5d8ce039bf55d8676da866aa32d63"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/webmount/url.ts",
+      "lines": 62,
+      "sha256": "30d7a6a6531ccf27a7fb08e1866b12c92f0f9f1f6ddf1a0c22336fb46bff4ee7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatPendingQueueSheet.ets",
+      "lines": 62,
+      "sha256": "a55c9856b0b64473171c6caa711698aa0ab22ee067db79a5e9cf03448163dc1f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/UIAvatar.ets",
+      "lines": 62,
+      "sha256": "1a77363b06bdca5733f46f1c9ca7ee695aab3af64466806c8b9798a432fe5eb9"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunGuard.ets",
+      "lines": 62,
+      "sha256": "1c620178742e64f95ea09cd4f5127433d060061fbd5860b26b2aacfaa68219e3"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal/control.ts",
+      "lines": 61,
+      "sha256": "f9af3fcacc1ed7ed3696fd798ce608bcf5d1cd33336521f1c48b7ef2f407e595"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/chat/ChatConversationDrawerView.ets",
+      "lines": 61,
+      "sha256": "97a1eebc28742ad529ed1b0c17b96aa97ec4fb2b8e58a1688109602fe75af314"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/studio/StudioButton.ets",
+      "lines": 61,
+      "sha256": "0993797fec30f88dcc80d2633a7e299dedd034c19581b55260e38afcd122682f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/RecipePageLaunch.ets",
+      "lines": 61,
+      "sha256": "6dff67aeec5ad1b7bfbe7a707a3bc47f8d151977f5596d2f03fc527c720f747b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mcp_import.ts",
+      "lines": 60,
+      "sha256": "172841ad09765789497e05aa252d1e920c4d109a1b51dbc56a92d98addc7e457"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_citations.ts",
+      "lines": 60,
+      "sha256": "74badeb6f484cf98934b48f92a26438278bb3363866ff69661cc3165639ebe51"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/GenerativeWidgetCard.ets",
+      "lines": 60,
+      "sha256": "a201c809cce0e0edf2c2bbbc10548744af0ea43e627cea268a98baabbe8ba4b6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelSettingProposalCard.ets",
+      "lines": 60,
+      "sha256": "6a72f27315ed94029bd365b076c628758bfb0eb9fa5c8aa0ced80cf2a45be1a0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/works/NovelPolishWorkAbility.ets",
+      "lines": 60,
+      "sha256": "ea3af8f3102b7e033c407d6f5ff7d92f0773a366aaed5260556230328f42a330"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/message_copy.ts",
+      "lines": 59,
+      "sha256": "85691c3a17d54c96473ef57cbba91b20ac766a80c882b3f7273efae85af7e0df"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/python/tools.ts",
+      "lines": 58,
+      "sha256": "4e4930b79b3043c528206fc9ff3676a6000512ca17c5776b16af350964807ec7"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/topic_id.ts",
+      "lines": 58,
+      "sha256": "114ce8de6626f1fa89dd6cc858d4dfd9045c51adc098760ad69533874fc3b88e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/ErrorCard.ets",
+      "lines": 58,
+      "sha256": "4182aeec810c1fe6818e40537bcfe81463f386bb1051361d74d7b2025e95d923"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadModelSelection.ets",
+      "lines": 58,
+      "sha256": "3a559c8484aba348aa7bc9fa579b2e3fdaf36747a838c2dabc41b5191d77522c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NovelPolishWorkScheduler.ets",
+      "lines": 58,
+      "sha256": "c55b82e8c608951470df4cc996980fb79fbf817e8f61637fa6baa31c8c317b3a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/PluginWebMountGate.ets",
+      "lines": 58,
+      "sha256": "da51e80a7400b49665bb0e566561a685e168c2a3e71a838d232442d5bf32f872"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal/utf8.ts",
+      "lines": 57,
+      "sha256": "c12132de530248e98230e22aee8ba6d697a81a189f1cd917b005a55c78189b2f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NativeSmartUiValues.ets",
+      "lines": 57,
+      "sha256": "94f9e971c0a06ee5e64d74301d21ea2c48013f01cfafde45e222da15e99a29f0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/Favicon.ets",
+      "lines": 57,
+      "sha256": "725588a69825e6e3895df0e3945212fc68a6cccf3a0ef3d58b576d65aeb81630"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/FullScreenTextEditor.ets",
+      "lines": 57,
+      "sha256": "98b031dd522a52b2e7a941ae3159204844cb137e1b6709d52cc0ea14c26784f8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NovelShareSupport.ets",
+      "lines": 57,
+      "sha256": "a627089cd40cac53390ab9510d573a1e628661ed2070121494ae1f0dfa971a2e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/PermissionStatusPortImpl.ets",
+      "lines": 57,
+      "sha256": "515f233aa4a1f9ad62f08960acf9fd1214b072ffeaec0981b21855a9914b3e66"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/council_display.ts",
+      "lines": 56,
+      "sha256": "07208b711b9afc6f722b0c4391191054c004822bd9b17b914419e007b8862cdf"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/workspace_artifacts.ts",
+      "lines": 56,
+      "sha256": "61f6ae5098b1b37c190323b2482997668c709290dda56c7d2ca9edee989c05c0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/BackupReminderCard.ets",
+      "lines": 56,
+      "sha256": "1eba95e9ca17e82698e44210313817741db80b6390f7a19cb2a03668468b4ab3"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/NotionSlider.ets",
+      "lines": 56,
+      "sha256": "393a3a5aaae97a623e062e129968c4d6ca504e1beb7b853fbd7eafedf92ad521"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/TerminalLogPort.ets",
+      "lines": 56,
+      "sha256": "1353f64c64f07503d13c886cbea3954ee998bce389530dcaa766dab4a89300a0"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/delete_message.ts",
+      "lines": 55,
+      "sha256": "62ac3bb426efec917d3cc04d0148d063b23b4ee78a9f165c2c27b68fe77a70db"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/miniapp/miniapp_sandbox.ts",
+      "lines": 55,
+      "sha256": "1844e158848f42bc9e6b24ed4151728262077329a364e741c2cbd2ba60245761"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadArticleHostToolbar.ets",
+      "lines": 55,
+      "sha256": "3b86b2e3d9a3d6ed5f7e7615eb8fc9e612223028cc09e9088d70a1f0c17324f2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/AmberWordmark.ets",
+      "lines": 55,
+      "sha256": "aaa1d67c98a4f4bca4d2f3b225943e224d4bf93869148e66ce89e9c67b3e80c9"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/design/DeepReadDesign.ets",
+      "lines": 55,
+      "sha256": "b121a22b99c1812426735291af42715ff0c8f445cc71e1ff2849a861d733ba18"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelGhostwriteStartSheet.ets",
+      "lines": 54,
+      "sha256": "32215ff3749a5d78a6c875c78d82de1111e9ceed79374adb474747963201f1b7"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/skill_mobile_prompt.ts",
+      "lines": 53,
+      "sha256": "022a8a7a5950825555b0a9c38fee8fadb11aaee7cca58a7e02efaf450f90f569"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/stream_snapshot_gate.ts",
+      "lines": 53,
+      "sha256": "6851316a82184f3a29a0381354162149a5fe2546f76b6e02ea26e0f032ec33e7"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/try_fallback.ts",
+      "lines": 53,
+      "sha256": "2c76df28dad603eb43b74e89853fa7eeea95a7d371866405b9c00e99ecabead2"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/error.ts",
+      "lines": 53,
+      "sha256": "fc78d32c905fdcecb28ae5b0a4f04806eb553dce0b641581de78dcd800eabe86"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/PluginJSONEditor.ets",
+      "lines": 53,
+      "sha256": "2c1438b18a41857999ea40bdca8320a363ed35c6fad3f8b43c93851419aa5c74"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadArticleHierarchy.ets",
+      "lines": 53,
+      "sha256": "617ac100d405be0c291958da18eb537146097c3c5bb46e06b6a9d6679ac93509"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/AssistantLocalPrimitives.ets",
+      "lines": 53,
+      "sha256": "8f1c2019c5c371e45878ad8d9ff9f664eded60c0e1cb25779ec50d49828a7183"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/KeyRouletteSupport.ets",
+      "lines": 53,
+      "sha256": "f65eda28556eae619f85a137466b74c440677ef09422e2e50867ae4c63427de7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ModelEnterpriseCa.ets",
+      "lines": 53,
+      "sha256": "3f6b7ae799a71525474b30ce077c1620a662582cfbd00b14902378b1ef6b19c3"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/public/smart_ui.ts",
+      "lines": 52,
+      "sha256": "750d9c45b983fc1690f45ee218d9a1d0c804d15d1e67bbcd14530bd2e0c8d855"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/EntryAbortController.ets",
+      "lines": 52,
+      "sha256": "5fe1a1c85a0fa52f04745c32533e3ca231f89c40e09567a13dd8ea6596bdb5da"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/hackernews_service.ts",
+      "lines": 51,
+      "sha256": "3e1299b23e400d09f1878e82ebb1b355c5d122f43bbb799f2f630494843f12ce"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadPaperBackground.ets",
+      "lines": 51,
+      "sha256": "5889a4306d427b73f423dd82f192bb78b0eba05d61469c5c904e9eba72d7baa2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadMotionPreferences.ets",
+      "lines": 51,
+      "sha256": "4dd004b8b8cd08a78ffeed5a5107011296ffb5148be5dd673d9ee270a25bb633"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/VisualArtifactExport.ets",
+      "lines": 51,
+      "sha256": "e01bf37502fdac07726a2d1bcb9dedc16ecafc1f10053c58873f0214f592f181"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_loop_budget.ts",
+      "lines": 50,
+      "sha256": "7b820e9711638f9c45da6fc2c2262d44cdd6ad69285ec8eab7aca94816bf9b27"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/plugins/ports.ts",
+      "lines": 50,
+      "sha256": "91751e4af5b5c76cab70f81f79191e2af36341570194d42d575c10ff3fcfa91b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/builtin_ask_user_tool.ts",
+      "lines": 49,
+      "sha256": "0b1d3bbb0667b435159402ab053eaf546b7d4311e054f19cb75c19687d2ed692"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/device_schedule_tools.ts",
+      "lines": 49,
+      "sha256": "d3f4be414535aef7ffbb1e80c394ce9766f2229702dfe94a2e996db76c3d0a8d"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/budget_prompt.ts",
+      "lines": 49,
+      "sha256": "f16c4023ebc555696e00e2276be0bfd4aa4cd8a4affcf43bbd8d9d2fa99d58ae"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/WorkspaceSearchField.ets",
+      "lines": 49,
+      "sha256": "8ce6fef4d3c63a3ee38920f9763dbab96383dd57984c30f1e5db5061ce9b9fe8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/AgentTaskRuntime.ets",
+      "lines": 49,
+      "sha256": "4201e3cc04f6771514815d138ea775e9995e1bd92246808518390edd96e591a4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunPorts.ets",
+      "lines": 49,
+      "sha256": "f995a69b5372c861873c881169e451be7e679a7f59581739af7d4c856828474c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/PluginPageLaunch.ets",
+      "lines": 49,
+      "sha256": "e781c7ba06d3e2ec36c9fa8c01bda38a5f09e0331a6869b36742fe20f90ee427"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/AgentMessageActionsSheet.ets",
+      "lines": 48,
+      "sha256": "86bd9aa2ad4c7ccda494ef94b79b6984b44c7ce682078ad2476db4e83af49968"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/MemoryChangeLog.ets",
+      "lines": 48,
+      "sha256": "49e034246dbfa83745bdb6f8c8f579d4aee27cfe8a458a7877a33d5683237311"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/StandaloneSettingsPage.ets",
+      "lines": 48,
+      "sha256": "b60744b7aa7f0082c8dfb9a9ff65942567d22d66538c11f7d2819888b448f8de"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NativeMoshTransport.ets",
+      "lines": 48,
+      "sha256": "21a6140c368bdfbbe88e738c2056b29f7f4ee7121358d5446f0b21cdc73daeac"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_soul_prompt.ts",
+      "lines": 47,
+      "sha256": "e15f00fa8243a4ab044720c3e396f3c73c0935ea4167a599fef4bc726fb3ce05"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/edit_message.ts",
+      "lines": 47,
+      "sha256": "b198933f328ef21ae37998016c84f23776fd00d4e70390801e1a79fdfaa265a7"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/agent_prompt_config.ts",
+      "lines": 46,
+      "sha256": "063194af86cf806325ceed7c70e0cc56be19fcef876beba8b01d17a064df6e80"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/DotRingLoading.ets",
+      "lines": 46,
+      "sha256": "b5354cab3871bbe4189a72dbfd6e3680fb8282834426b638d5733a9305f71c84"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/ProviderBalanceText.ets",
+      "lines": 46,
+      "sha256": "b6ea4da3ef57c56a680663b6e13a56deeeb899478cbda1f2d61f17022d5ab004"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/CouncilRuntime.ets",
+      "lines": 46,
+      "sha256": "775d9c91dfe6b8b70d4704a332aa737a2672c94f5e0986c4f786eb960f389493"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/AssistantMutation.ets",
+      "lines": 46,
+      "sha256": "6a407d02ab25d8e2bad18a9a23c8b4354e4c7064f2948f8368742cc451dbd359"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/EntryLocalToolPorts.ets",
+      "lines": 46,
+      "sha256": "9454e08345e070ee08d7343e134dbd740053e602816a37d2dc80f666e030e602"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mosh/bootstrap.ts",
+      "lines": 45,
+      "sha256": "4f2ffa51d3fe23a6391f225902f312594081b528a0357d2922e8b0486852b3eb"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mosh/models.ts",
+      "lines": 45,
+      "sha256": "505586026deb84253deaad569962ac24ae16ee8e0c9f875e3f0d08cce0f899a9"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/hierarchy_fields.ts",
+      "lines": 45,
+      "sha256": "af5df8d031a818095c1477402b45e3147ff4488fd01c0bcc88fc44ce281fe6bb"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/RecipeApprovalSummary.ets",
+      "lines": 45,
+      "sha256": "755fc265330bce58f6681c7c7ababda1e4cddbd9c250484d9bc1f557cb92aa6c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/HotListRss.ets",
+      "lines": 45,
+      "sha256": "4713ed0df676d64e26c7219851e1f6dc6e01996f5e6277d260d4100cad48787b"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/JevWebDecision.ets",
+      "lines": 45,
+      "sha256": "4bf37a61a7aadbc60cd43ee229c8f239cf2b73e304ea67da5c5fcff47fafb892"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/council/semaphore.ts",
+      "lines": 44,
+      "sha256": "1bd033f491ba4d056c489cd9412b9c57ef4de3e25a41c5e7a248f767bf497a46"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatUserBubble.ets",
+      "lines": 44,
+      "sha256": "5a4195ec1d58038765800a7dcda9a5d89eb03123f2ef639abb45f78a8ccd829f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/di/ChatRuntimeContracts.ets",
+      "lines": 44,
+      "sha256": "d9615509818ed2d742346bcf6d065e49fcae150c72e153fef394263aca295418"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ChatExportFiles.ets",
+      "lines": 44,
+      "sha256": "389dcf79a530a2d4d959ede3507b2a34d5533238f312018c01350374624c63b4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/RunToolCatalog.ets",
+      "lines": 44,
+      "sha256": "a0f62ea1569fb990d94ce2d275fa267b454150245230f5fe9c70cea4ba54daee"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/novel_response_resume.ts",
+      "lines": 43,
+      "sha256": "9fd89d5d46ae2ce3e635acf217996746a9d7edd7ec30aa33a606668b6cd8ce0f"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/service_registry.ts",
+      "lines": 43,
+      "sha256": "8ff77f6ff365b4f9a6d7a051db0a13f9498429c4ce9575d275f6fc668d9c26de"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ChatMessageBranch.ets",
+      "lines": 43,
+      "sha256": "0c311fd7e4d31b10afc891faa6a3ba8f3059b4cca86bbe638aca5dbc66ae1fd8"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/recipes/models.ts",
+      "lines": 42,
+      "sha256": "30e9afe9d22a1d874c35c9a36019b70ccb3555f39d261c87eb9d34fdc07f8986"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadTemplateNavigation.ets",
+      "lines": 41,
+      "sha256": "97a26a8572b5aea0527288885614af32e72aa3727f9a9fa06a421556db11452e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ScopedRecipeLoop.ets",
+      "lines": 41,
+      "sha256": "2b7bae528b3bb4713faa240fc7221e6e267e4260a191ba522872492d322374bf"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/fork.ts",
+      "lines": 40,
+      "sha256": "0b2c71343d4341b27dba4e3a24942b023c76ce1e5b57baa79b977b4b4944d2d0"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/python/control.ts",
+      "lines": 40,
+      "sha256": "daf7e0dab8447fb52402d894a201939885a24e9b5c9f495cb97f19fd6e4bacef"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/discovery_input.ts",
+      "lines": 40,
+      "sha256": "0f1d9edfcbca99ca1958c27bfed50056214736eb94a12b2499b3d43535f099d2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/CouncilToolModePicker.ets",
+      "lines": 40,
+      "sha256": "4f926a9a94f5a2b0a69c0367ede168b289d58de1a1f92d1aad1d3cf867da0382"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadLibraryFilters.ets",
+      "lines": 40,
+      "sha256": "91475487393b485e4b34e979d16981ae6b4a5daecb669f2bd7503adf277cf44d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ArtifactInteraction.ets",
+      "lines": 40,
+      "sha256": "3ff263042a4928298e0feccced6f1d7d4fce59158fd1d9264b6b8491ff84adf6"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_extraction_prompt.ts",
+      "lines": 39,
+      "sha256": "c82779333d1f53b29a409b14954a7d11eaba4e8df5d14346e52e2774c34d6896"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/openai_responses_resume_store.ts",
+      "lines": 39,
+      "sha256": "f1fa76a99e786a246f0c860b88a28a0cefe4926c850f51964301958ac6c9b01d"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/polish_outcomes.ts",
+      "lines": 39,
+      "sha256": "29f123cfa19295caadd90e62b5b8859280ddbe7e327868f351dca4b344025cbf"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/repository.ts",
+      "lines": 39,
+      "sha256": "f9ac53f1872d204545ada695e679c7b93f0e40f7b83191af2f6e17a6ff851a8a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ReasoningPicker.ets",
+      "lines": 39,
+      "sha256": "355bfcbe811d1f437629ecc974ca69dac217fb12d7ace887dcfae8dea45bf111"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NovelStandaloneDefaults.ets",
+      "lines": 39,
+      "sha256": "0ccc1782a66646acb82ea45529bb06d8fbdd0ad158b52f4155fa5b50fa36753f"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_lifecycle.ts",
+      "lines": 38,
+      "sha256": "f58b293f56a7079224dc8d92a2847d2859c72c3e4ecefb8a14508d5849d95b98"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/recipes/ports.ts",
+      "lines": 38,
+      "sha256": "2aaaf0000e00050f747fd2e907a2060363e31f81c3112202d6fc9cd3c901a1fc"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal/target_resolver.ts",
+      "lines": 38,
+      "sha256": "6399528e20d4f53b67fe40256e7e25eeaddfd62822afa5d5c75b79eb56f3a345"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/reasoning_metadata.ts",
+      "lines": 38,
+      "sha256": "31ba438c1d402dfc0589f57831ed7e53263c94104595507d12ceaadcbbdc34b6"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/workspace_projection.ts",
+      "lines": 38,
+      "sha256": "4905ad28d81e35248c0d957b1a018a351c60832f2bcc61253f32c1713b716320"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/JevApprovalFacts.ets",
+      "lines": 38,
+      "sha256": "0b8d30e9edb9162a3515e8d3407c1aaaa9cc38f02ffa33046c3d3196984e6a13"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/novel/NovelPlanDraftState.ts",
+      "lines": 38,
+      "sha256": "b6b102833803090c51c155dfb2cc9cdb46298158905b2bf8175c055a5e3c35da"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ChatKvStore.ets",
+      "lines": 38,
+      "sha256": "92738684d0340c7fb0dc6858bbba7af4c279277415ef2b7ffd41c024e009476a"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/GoogleRS256Signer.ets",
+      "lines": 38,
+      "sha256": "420d4a55394728e30b9e7dce9693ccb8699867f00c9c34eaa97c0504394d67bf"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/JevContextSupport.ets",
+      "lines": 38,
+      "sha256": "61cb46d0930ca67f941bae4bf6a408f387fa71b9274fa059f48247c5c5617357"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/collected_candidates.ts",
+      "lines": 37,
+      "sha256": "019f640f374492c103cc22ba518ccc68823819e20f261ffaa3faa1e99742c1dd"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/ghostwrite_start_preview.ts",
+      "lines": 37,
+      "sha256": "2b230eac294cc3616df51ee39114a820de27c78c817986f6d1a87b3432814c79"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/DeepReadGoogleSearchHost.ets",
+      "lines": 37,
+      "sha256": "ec67f664be67f8a73d4422605f7e8ca38865843ba38c660d2a3c0faaf0948ac1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/DeepReadSearchDraft.ets",
+      "lines": 37,
+      "sha256": "d47eec38a048ca7bc0e7dcf1869db043c10e25e0ca31f479dd760ec67292dd22"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/MemoryOptimizationStore.ets",
+      "lines": 37,
+      "sha256": "3212115269346a54e7efdcc64f5aed9c305fd47d4068aab71020532d785b8c9c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/format_number.ts",
+      "lines": 36,
+      "sha256": "524cb0e75627e98198c9ad00c8a4416fe9aff7bf73c27b8d77732c1ebae745ef"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/recent_chats_prompt.ts",
+      "lines": 36,
+      "sha256": "77831f55f8d2626b4ad219e8f4fa4fde98bd195818981a12e2e25a944ef1568f"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/workspace_artifact_files.ts",
+      "lines": 36,
+      "sha256": "91a2a447b5d60ae9f0840df0877e01f95e993e8428a150c7b048583ceaaa1887"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/council/runner.ts",
+      "lines": 36,
+      "sha256": "5a9664843b8821ab7d58d194dc1d0741b1a2858c54a3c5203b4eae0d89e005d1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/studio/StudioTabs.ets",
+      "lines": 36,
+      "sha256": "e6f69756400a5a0ab12615d47aae78f0c4efeda358364037fa5b2f51ee76f06f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/DotLoading.ets",
+      "lines": 36,
+      "sha256": "58d91a923c7fe5dbcb80c2c72fe5a9d16da400770000775b26755cc743a957bb"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/search/json_pick.ts",
+      "lines": 34,
+      "sha256": "502b19cfdb4d8b8079a7898bb2ec5c3baec4c847f1a0bdfd3d07299203e5df37"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/ai_client.ts",
+      "lines": 34,
+      "sha256": "be880d49cdc06a261694e755033c87fcb1627a8c345acd2f61d9e44d6f114088"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/http.ts",
+      "lines": 34,
+      "sha256": "9673f9939c976d32e3735269bde59727e6e838148cada16a6d4dc558d572b532"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/JevCompletionSupport.ets",
+      "lines": 34,
+      "sha256": "e06fdbe7de9f14b8075cd24c9c0cf8263e7a2600c7f2e98f628e72e5e46d5596"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/search.ts",
+      "lines": 33,
+      "sha256": "9cc268154411a227b99f7972a74312d74815fbe1ce4cd4188e20d34cce933b35"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/reasoning_level_metadata.ts",
+      "lines": 32,
+      "sha256": "cc8f261c7f2c15d2bece64dd9cc31bd3f47bf103cdf2328d76bcdbf5d62b22ec"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/project_metadata.ts",
+      "lines": 32,
+      "sha256": "2c3ad63e8551efe13c852fb014720e5c18dc4f35d1162c1dbaef5fcbfcdb296b"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/SSHApprovalSummary.ets",
+      "lines": 32,
+      "sha256": "eccb7c7fd7d7d93ac0797a32e0356f0c89a7e321e7aae065ba86c285017625d1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/JevAutoApprovalSupport.ets",
+      "lines": 32,
+      "sha256": "6355bfb8e447653a59e3af2991b24afd9050147bdef4b5352e02dcfcffbec91c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/webmount_request.ts",
+      "lines": 31,
+      "sha256": "3de0a3a0c7cec60aad48889af357211bab3c9e84695bfe305b329b0bf13e38dc"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/transcript.ts",
+      "lines": 31,
+      "sha256": "5f5b1a54184b520b516d155e73988bca4c51ef123decbbd391af7ad4daf4ba37"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/EntryPluginRuntime.ets",
+      "lines": 31,
+      "sha256": "a2183114b8cc61f5d7d41e83a2330eac0f1afbe8d4a49126fe7bddeb4e0c9a28"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/HotListTitleTranslator.ets",
+      "lines": 31,
+      "sha256": "fcf3169331909c3ec2e43ebc115a57c9ab0c64ec6b41cf320b79ee1a059b314f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ImageShareSupport.ets",
+      "lines": 31,
+      "sha256": "6f2a79d4989d87bbc01c474765dca570a9252a1869e7e1bbd4c7478e4164a07c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/openai_normalize.ts",
+      "lines": 30,
+      "sha256": "478ed53e7fc8a1fc98b58b483f3e26e6324fbde15c9630ec99b5efd5c239acf2"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/usage.ts",
+      "lines": 30,
+      "sha256": "681ea3ed2f8702ae5d46edf7fdbf41d0ed70a8161e29ce11162b7c4f8fc1c249"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/research/search_merger.ts",
+      "lines": 30,
+      "sha256": "89706184580944b261a42dadcac13632a16b6961c4e56f825912ed344712e2ea"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/JevCompletionNotice.ets",
+      "lines": 30,
+      "sha256": "0472c0aed9e2e526d5f511341a41051799c9e683deb2152fc76d2fa7b777dfc2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelGhostwriteReportCard.ets",
+      "lines": 30,
+      "sha256": "15128347091a9260b4ff290d77b03f94e127f38ed94525da8c104f579cd46791"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/PluginPageProjection.ets",
+      "lines": 30,
+      "sha256": "f7dc3d297a7bfab8103944c38c867121d738f4af507795c2e7995e7501fac05e"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/generation_retry_wait.ts",
+      "lines": 29,
+      "sha256": "f2b068fc053126e7d119ebe73ab91853a2cdc37212bc194dd06f32e4fd888797"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/python/models.ts",
+      "lines": 29,
+      "sha256": "1fb8428fede6d4e5dd4f387c1ce7bf6470fe513ee9f5cae9d40f0a5b790006bf"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/xml_pull.ts",
+      "lines": 29,
+      "sha256": "9a0daf501142cfd6b25ef178183bcb1be4b6ff5e4b4d1e1e2cb77fe21d4fdf9d"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/council/archive.ts",
+      "lines": 28,
+      "sha256": "82269bbc2adab68c30abf395a3ab09cdd054ab2fe6576f02ea07945cb48ceef8"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/import_conflicts.ts",
+      "lines": 28,
+      "sha256": "e307241f4ef1b2fcdba101b8f54e4feaf1b5d1bcf359cdf2d0cbe7760ec3ddf6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WebDavTransport.ets",
+      "lines": 28,
+      "sha256": "c49feffb62e3a9a85e1f9f893706296530e413578bd3f4fc0c5a2b7986b18885"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal/ports.ts",
+      "lines": 27,
+      "sha256": "c278034b23e54b781bb3ab90ccdb6fdf1670e83de1db61901f53f2cdf89485ce"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadEdgeFade.ets",
+      "lines": 27,
+      "sha256": "1c87a90ac7ada34013ba924efa8c8c44567fe5d719779462fd53e478d2b6c83c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingModelPage.ets",
+      "lines": 27,
+      "sha256": "0ca274a274424be09dac22c68b0608ea7049cf199298849386af379149342414"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingSearchListCards.ets",
+      "lines": 27,
+      "sha256": "5aa92ed25ebef166d36119a10a965e2ccf9be65116cf381573731fe1b588e824"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/SettingSearchServiceEditorSheet.ets",
+      "lines": 27,
+      "sha256": "785b0d2c1153ab4539d481a147a9a946c42ed1cc210c431a15772b1bbafd2cca"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/ids.ts",
+      "lines": 26,
+      "sha256": "a900bc09666f6099fc7136c8a89e03658692e357373b7d544f67fbe4b2db971e"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/repository.ts",
+      "lines": 26,
+      "sha256": "001b54d2877c148bd98f697713bd4cc31217876c61ded0b90ba266d4ec2d34e0"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/MemoryExtractionCommitGuard.ets",
+      "lines": 26,
+      "sha256": "6b1d09c01e06211017d93029e50c60c0ea1ceeacc849c712997093aa007ae9be"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ProductIdentity.ets",
+      "lines": 26,
+      "sha256": "29d8623d251c213e69ec5e703c9360bfd2e9c257065cbd71494c543a757f83ff"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadSubpageDock.ets",
+      "lines": 25,
+      "sha256": "b15e21b0d8081b57f8004985c7f7f6304ff683fc1f2bb0f4c6e19f83d4d4d20f"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/image_export_pages.ts",
+      "lines": 24,
+      "sha256": "ea3c3b13ea8232cd7ec3a9196df6fe553023c9e3b47314b2fc185987c204c1a1"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/job_report.ts",
+      "lines": 24,
+      "sha256": "1de66fed086097623f590b1cabb517b8989f63660bce33f36ec4d85fac7f9b3d"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/http_response_status.ts",
+      "lines": 24,
+      "sha256": "6dd54014ec8ae855968cb46386274dac10980f30a3046910c3a11b0ba7bb31cb"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/Greeting.ets",
+      "lines": 24,
+      "sha256": "eb5078919c766502f9051603177354b6c7b10f29203a6007ff701f7983028d29"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/recap_request.ts",
+      "lines": 23,
+      "sha256": "13922f1979ace773d9de58f5b3c4641998199b0024370675957b2c3671333fd3"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/terminal/credential_codec.ts",
+      "lines": 23,
+      "sha256": "dde9a22eac9b0f2bec4c47d91254dc8202cdcadce86e7a1071248368fdb83102"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/novel/chapter_find_replace.ts",
+      "lines": 23,
+      "sha256": "281afad553d215d0c69815a54bf4f3b768d804e7ce2ee22f3f7d94f6cf452e3d"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/jev_web.ts",
+      "lines": 22,
+      "sha256": "b4ea426215ac1aba4e7708fad4b50d5bbd38c25f43be40157b5c5f1ffceee465"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/message.ts",
+      "lines": 22,
+      "sha256": "41f5474047ae385f560490b3b2aa4ed9f8283d30a2ccd68adbcb2e114603f37c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/skills.ts",
+      "lines": 22,
+      "sha256": "f3ab6390e49ecc789e837f33384bab804b2274be17080fc1e33197af54f05983"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/notifier.ts",
+      "lines": 22,
+      "sha256": "1a62095b9c19b5bf7a454908b98a147e1824f29b2fb2d0687b33c49752e120b7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/design/adaptive.ets",
+      "lines": 22,
+      "sha256": "cf715a9f137e2f1121f26496d3902f75d33786114754430762c18468aa31a56c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/HealthReadPort.ets",
+      "lines": 22,
+      "sha256": "47008c78e1bd23513e3ae5e63d9014f5fc1a4c8646a0d627757a2aa287621568"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelDiscussionArchiveCard.ets",
+      "lines": 21,
+      "sha256": "b0c97b21c2aede6cca5a0fdc2e96c046aad445a2f7c8b2b325878c38702226c7"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/ToggleSurface.ets",
+      "lines": 21,
+      "sha256": "eaee96cfa24492f1ce9a53512096f67f475b1d4b2491892d2b0f3da51aa3164c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/SSHPageErrors.ets",
+      "lines": 20,
+      "sha256": "67fde08b5309b1da683b561a938063ea0d2086394ba07f205bd0e91931aef3e6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/ui/RabbitLoading.ets",
+      "lines": 20,
+      "sha256": "1f73752c11075d36fdc0fe663780cebc686e50d8c62a79b3032e7ed91b02eaec"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/CouncilChatSupport.ets",
+      "lines": 20,
+      "sha256": "f3c1670c148fa1661148acb4add7e15c86b748fcb1ae13b11fcf246d8e00e790"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/TaskModelSelectionSupport.ets",
+      "lines": 20,
+      "sha256": "d70239cb4e766fe4be2017aaf22535b2695daa491684f0031d29c66d7b43990e"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/SSHUIColors.ets",
+      "lines": 19,
+      "sha256": "0fec812bb0cd3d7addf5583fad8c6fd3101e7863a1ab5031785cd80dbd642f8f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/StreamingFrameRate.ets",
+      "lines": 19,
+      "sha256": "0f4ac16a83a65a26112510ad931d3f23bc35debe54d0f4eb23fdc68d98500ced"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/chat/ChatCompactionSupport.ets",
+      "lines": 19,
+      "sha256": "2e2931c7b2e1d4da996c285b4fa786686da141bb4da4542ad2b59c96f77023f0"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/novel_state_reasoning.ts",
+      "lines": 18,
+      "sha256": "796bf4bc925223346f9f63313e5c3c2ed87203115da57712fbb550891e5aed88"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/design/DeepReadHaptics.ets",
+      "lines": 18,
+      "sha256": "523341be388966edb43c04e1ce25f142757fa40d69258fc3abd9c4197acc11e6"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ChatMessageArchive.ets",
+      "lines": 18,
+      "sha256": "c418d4e054aafe7c715fa3237292f1e5259d63015d47b800dbf7398da08704f8"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NovelResearchSupport.ets",
+      "lines": 18,
+      "sha256": "c5c393fe19fd91cce2bbb11561a9f676a8236de61fbec13364e2b8f3f9ce62d0"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/database.ts",
+      "lines": 17,
+      "sha256": "19dff6e0f685be12190aa019eda73740d9d4e7b200e3167c5844b0faf354990d"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/runtime_api.ts",
+      "lines": 17,
+      "sha256": "901c44d8f02b7a2ae723a4549ada43d2f7ac73b2ee0c3e04c1e7df951e1d47a4"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ChatVisualWeatherFixture.ets",
+      "lines": 17,
+      "sha256": "d68ce26a9032d863bd83862ca8aed27b937ba06c8e11b7d4cc4056018886997c"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/user_input.ts",
+      "lines": 16,
+      "sha256": "07c4b0225fc539289852cc12ca6426b4ce2a930efcb1d99320b7b3bca6a0338f"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NovelSettingProposalProjection.ets",
+      "lines": 16,
+      "sha256": "151317056c63def564d84928df87a2184fc5e462734929adf7168e6359510ce1"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/provider/PendingProviderDraft.ets",
+      "lines": 16,
+      "sha256": "3cec0f757031413ef523b85236a3ed02703e220d70a541bc816fdc00cc89ba47"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/provider_response_error.ts",
+      "lines": 14,
+      "sha256": "d1666754ec1f1a5e02d5e3e301f4db96ae41cdce68cf1c94554788964cc730cb"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/ConversationRunToolScope.ets",
+      "lines": 14,
+      "sha256": "fa666bba811923e5976cd6ce9febb51faad82b3c3ea7248882d2ebd2b114f465"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/json.ts",
+      "lines": 13,
+      "sha256": "f2feee12bf8f2fa34e32366d02ffd46801b3afba7870b7bd60e6991dc0729565"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/platform/storage.ts",
+      "lines": 13,
+      "sha256": "b249a822a1f0098928b12a805c4f93b0400e867a1c557682e021743c1939e115"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/memory_restore.ts",
+      "lines": 12,
+      "sha256": "944f465bc97642f7fea1fadfdba88f49347008503f516bb0268aa556ac859d8c"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/ids.ts",
+      "lines": 12,
+      "sha256": "5d9c380832fa38ab42a05631bc51824c3fe030b66f25bbe36cdef13f30363c21"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/WidgetArtifactExport.ets",
+      "lines": 12,
+      "sha256": "eae81652450fa6022e3772833bf59a053bbe9ed9fcb119dff7253a4888e5160d"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/json.ts",
+      "lines": 11,
+      "sha256": "b6c48542986c5af0c919644cf7980db3405ca919dcc19de7c232f73cba8223c2"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/deepread/DeepReadDockScroll.ets",
+      "lines": 11,
+      "sha256": "2842c59548c9bfa82c0437274771e8a0008125ea4efe49f0ac7eaa3c84c37a25"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/mosh/ports.ts",
+      "lines": 10,
+      "sha256": "acf11b328055ae7dddfc0027a87b3ec8997b1941d1ad3a8b61179674ac1f284b"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/provider_balance.ts",
+      "lines": 10,
+      "sha256": "6d6a416c7454581afc56fea5b97feee612a9ad2e3582656d2de4f4245b64a108"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/domain/index.ts",
+      "lines": 10,
+      "sha256": "cc99c1071f99e8443b7b3faf26c59ba3521469ded07513d1c0a0af6fa4019181"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/pages/DeepReadComposePage.ets",
+      "lines": 10,
+      "sha256": "2b76c3867832a8b9b7b40994ed912836b8be109f574f8e3852666d4e8ca2f758"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/SmartUiDraftSupport.ets",
+      "lines": 10,
+      "sha256": "0352f7ede5d801e31e8bc7626344e1e0c6d9a028f06ae693dac8fa0e498b2e83"
+    },
+    {
+      "path": "harmony/chat/src/main/ets/chat/python/ports.ts",
+      "lines": 9,
+      "sha256": "34b84e12061db805c04eabb7fa50164c69a013c0b8e90da4f9c9be0cecb632f9"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/components/NovelArchivePresentation.ets",
+      "lines": 9,
+      "sha256": "443289f3d1ee8294eebb7a1e054700782cd554c2269df2d7b4002c270f64f90e"
+    },
+    {
+      "path": "harmony/deepread/src/main/ets/agent/usage.ts",
+      "lines": 8,
+      "sha256": "a76cf1166237bd4d98bdc712ba88e7c6331eec3b578c3f006dde3d9cdd576bc3"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/SubAgentRunDisplaySupport.ets",
+      "lines": 8,
+      "sha256": "f939b5dab128f9b8ccbce2637a4bef4e1edc957e4c547f4828ec6a01313bec7c"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/platform_impl/NativeTokenCounter.ets",
+      "lines": 7,
+      "sha256": "5c36b9c39d433dce55d89af53864184d8149fe4878ffb791c70cb62662b1287d"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/novel/NovelComposerDraftStore.ets",
+      "lines": 6,
+      "sha256": "fe7b0ec5f44726a6348ab8f06af6e3fa43702329fde50b985d5a8dbe62921d93"
+    },
+    {
+      "path": "harmony/entry/src/main/ets/novel/NovelPlanDraftStore.ets",
+      "lines": 5,
+      "sha256": "7d8a733b4692efabf9aea2092b52ffd02422c33a66ae741fc7b4aec65923514a"
+    }
+  ]
+}

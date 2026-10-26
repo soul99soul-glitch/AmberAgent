@@ -2,7 +2,7 @@ import { DeepReadSubpageDock, DeepReadDockLayout } from '../components/deepread/
 import { getAppContainer } from '../di/AppContainer.ets';
 import { DEEPREAD_DISCOVERY_CATEGORIES, DEEPREAD_DISCOVERY_SOURCES } from '@amber/deepread-domain';
 import type { Storage, DeepReadDiscoveryCategory } from '@amber/deepread-domain';
-import { BG, INK, INK3, INK4, SURFACE2, ERROR, GUTTER, META } from '../design/tokens.ets';
+import { BG, INK, INK3, INK4, LINE, SURFACE2, ERROR, GUTTER, META } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { CenteredTitleBar, PlainSection, CardGroup, CardToggleRow, FooterNote, BtnFill } from '../components/PageTemplate.ets';
 import { PillSelect } from '../components/ui/Select.ets';
@@ -196,6 +196,9 @@ struct DeepReadDiscoverySettingsPage {
           .width(112)
       }.width('100%').alignItems(VerticalAlign.Center).constraintSize({ minHeight: 52 })
         .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+      Row() {
+        Row().width('100%').height(1).backgroundColor(LINE)
+      }.width('100%').padding({ left: 14, right: 14 })
       CardToggleRow({ label: '仅在 Wi-Fi 下刷新', desc: '移动网络下保留缓存与当前榜单', checked: this.wifiOnly,
         onToggle: (): void => { this.wifiOnly = !this.wifiOnly; this.notice = ''; } })
       CardToggleRow({ label: '显示中文标题', desc: '翻译英文标题，保留原始来源资料', checked: this.translateZh, isLast: true,

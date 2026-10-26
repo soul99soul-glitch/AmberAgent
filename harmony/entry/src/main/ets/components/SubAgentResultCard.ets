@@ -6,11 +6,13 @@ import { SubAgentAvatar } from './SubAgentAvatar.ets';
 import { MarkdownText } from './MarkdownText.ets';
 import { Icon } from './ui/Icon.ets';
 import { loadSubAgentHistoricalText } from '../platform_impl/SubAgentRunDisplaySupport.ets';
+import type { MessageRowViewState } from './MessageRowViewState.ets';
 
 @Component
 export struct SubAgentResultCard {
   @StorageProp('themeEpoch') themeEpoch: number = 0;
   @Prop runId: string = '';
+  viewState: MessageRowViewState | null = null;
   @Prop @Watch('refreshResult') tools: UIMessagePartTool[];
   onToggleResult: () => void = (): void => {};
   @State expanded: boolean = false;
@@ -21,12 +23,22 @@ export struct SubAgentResultCard {
 
   aboutToAppear(): void {
     this.alive = true;
-    this.resultText = subAgentFinalTextFromTools(this.runId, this.tools);
+    if (this.viewState !== null && this.runId.length > 0) {
+      this.expanded = this.viewState.subAgentResultExpanded.get(this.runId) ?? false;
+    }
+    this.refreshResult();
   }
 
   aboutToDisappear(): void {
+    this.saveExpandedState();
     this.alive = false;
     this.readSequence++;
+  }
+
+  private saveExpandedState(): void {
+    if (this.viewState !== null && this.runId.length > 0) {
+      this.viewState.subAgentResultExpanded.set(this.runId, this.expanded);
+    }
   }
 
   private refreshResult(): void {
@@ -48,6 +60,7 @@ export struct SubAgentResultCard {
     this.onToggleResult();
     this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
       this.expanded = !this.expanded;
+      this.saveExpandedState();
     });
     if (this.expanded) this.refreshResult();
   }
@@ -78,7 +91,8 @@ export struct SubAgentResultCard {
         if (this.expanded) {
           Column() {
             if (this.resultText.trim().length > 0) {
-              MarkdownText({ content: this.resultText, fontSize: 14, fontColor: INK2 })
+              MarkdownText({ content: this.resultText, fontSize: 14, fontColor: INK2,
+                viewState: this.viewState, streamKey: `subagent:${this.runId}` })
             } else {
               Text(this.loading ? '正在读取子代理结果…' : '暂无结果').fontSize(META).fontColor(INK3)
             }

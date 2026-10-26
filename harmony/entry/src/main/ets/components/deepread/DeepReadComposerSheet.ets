@@ -197,10 +197,10 @@ export struct DeepReadComposerSheet {
                 Column({ space: 4 }) {
                   Text(source.title).fontSize(BODY).fontColor(INK).width('100%').maxLines(2)
                   Text(inputSourceLabel(source)).fontSize(META).fontColor(source.status === 'failed' ? ERROR : INK3).width('100%')
-                }.layoutWeight(1)
+                }.alignItems(HorizontalAlign.Start).layoutWeight(1)
                 Text('移除').fontSize(META).fontColor(INK3).width(44).height(44).textAlign(TextAlign.Center)
                   .enabled(!this.busy && this.pendingTopicId.length === 0).onClick((): void => { this.removeFile(source.id); })
-              }.width('100%').padding(12).backgroundColor(SURFACE2).borderRadius(12)
+              }.width('100%').alignItems(VerticalAlign.Center).padding(12).backgroundColor(SURFACE2).borderRadius(12)
             }, (source: DeepReadInputSource): string => source.id)
             Text('本篇版式').fontSize(BODY).fontColor(INK).width('100%')
             ForEach(this.templateChoices, (item: DeepReadTemplateDef): void => {
@@ -252,7 +252,7 @@ export struct DeepReadComposerSheet {
       Row({ space: 9 }) {
         Icon({ name: 'file', iconSize: 20, color: D.accent })
         Text(this.busy ? '正在读取文件…' : '导入文件').fontSize(17).fontColor(D.accent)
-      }.width('100%').height(50).padding({ left: 16, right: 16 }).enabled(!this.busy && this.pendingTopicId.length === 0)
+      }.width('100%').height(50).alignItems(VerticalAlign.Center).padding({ left: 16, right: 16 }).enabled(!this.busy && this.pendingTopicId.length === 0)
         .onClick((): void => { this.pickFiles(); })
       ForEach(this.files, (source: DeepReadInputSource): void => {
         Column() {
@@ -265,10 +265,10 @@ export struct DeepReadComposerSheet {
               .width('100%').maxLines(3)
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
           Row() { Icon({ name: 'close', iconSize: 19, color: D.muted }) }
-            .width(44).height(44).justifyContent(FlexAlign.Center).enabled(!this.busy && this.pendingTopicId.length === 0)
+            .width(44).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center).enabled(!this.busy && this.pendingTopicId.length === 0)
             .accessibilityText('移除 ' + source.title)
             .onClick((): void => { this.removeFile(source.id); })
-        }.width('100%').padding({ left: 16, right: 8, top: 8, bottom: 8 })
+        }.width('100%').alignItems(VerticalAlign.Center).padding({ left: 16, right: 8, top: 8, bottom: 8 })
 
         }.width('100%').transition(TransitionEffect.OPACITY
           .combine(TransitionEffect.translate({ x: this.reduceMotion ? 0 : -24 }))

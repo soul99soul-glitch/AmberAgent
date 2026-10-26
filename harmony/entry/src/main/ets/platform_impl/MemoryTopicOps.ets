@@ -1,21 +1,42 @@
 // One foreground model pass for topics, profile and confirmed duplicates.
 import { batteryInfo } from '@kit.BasicServicesKit';
 import type { AbortSignalLike } from '@amber/deepread-domain';
-import type { MemoryProfilePassOutput, MemoryRecord, MessageChunk, OpenAIChatApi } from '@amber/chat-domain';
+import type {
+  MemoryProfilePassOutput, MemoryRecord, MessageChunk, OpenAIChatApi, TaskModelWorkerGate,
+} from '@amber/chat-domain';
 import {
-  buildMemoryProfilePassPrompt, buildMemoryTopicPrompt, decodeMemoryTopicSuggestions, isMemoryTopicSource,
-  makeTextGenerationParams, makeUserMessage, memoryProfileSources, toChatModel, toText,
+  buildMemoryProfilePassPrompt, buildMemoryTopicPrompt, daydreamModelReferences, decodeMemoryTopicSuggestions,
+  isMemoryTopicSource, makeTextGenerationParams, makeUserMessage, memoryProfileSources, toChatModel, toText,
   nearDuplicateCandidates, parseMemoryProfilePassOutput,
 } from '@amber/chat-domain';
 import type { ChatProviderChoice } from '../di/AppContainer.ets';
-import { prepareProviderApi, getChatKvStore } from '../di/AppContainer.ets';
+import {
+  prepareProviderApi, getChatKvStore, currentChatModelReference, readTaskModelReference,
+  TASK_COMPRESS_MODEL_KEY, resolveTaskModelReferenceChain,
+} from '../di/AppContainer.ets';
 import type { MemoryWorkerGateSnapshot } from './AgentRuntimePrefs.ets';
 import { loadAgentRuntimeSnapshot } from './AgentRuntimePrefs.ets';
 import { sharedKvMutex } from './AtomicJsonFile.ets';
 import { EntryAbortController } from './EntryAbortController.ets';
-import { resolveMemoryDaydreamChoice } from './MemoryDreamOps.ets';
 import { getMemoryTopicStoreOps, MemoryDocumentRefreshError } from './MemoryStore.ets';
 import type { MemoryOptimizationApplyResult } from './MemoryOptimizationStore.ets';
+
+const toTaskGate = (w: MemoryWorkerGateSnapshot): TaskModelWorkerGate => ({
+  modelId: w.modelId,
+  providerId: w.providerId,
+  followCompressModel: w.followCompressModel,
+  daydreamModelId: w.daydreamModelId,
+  daydreamProviderId: w.daydreamProviderId,
+  daydreamFollowCompressModel: w.daydreamFollowCompressModel,
+});
+
+export const resolveMemoryDaydreamChoice = async (
+  worker: MemoryWorkerGateSnapshot,
+): Promise<ChatProviderChoice | null> => {
+  const compressReference = await readTaskModelReference(TASK_COMPRESS_MODEL_KEY);
+  const chatRef = await currentChatModelReference();
+  return resolveTaskModelReferenceChain(daydreamModelReferences(toTaskGate(worker), compressReference, chatRef));
+};
 
 export type MemoryTopicRunStatus = 'idle' | 'running' | 'completed' | 'skipped'
   | 'missing_model' | 'cancelled' | 'timed_out' | 'failed';

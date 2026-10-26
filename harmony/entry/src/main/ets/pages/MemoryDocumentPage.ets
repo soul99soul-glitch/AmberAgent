@@ -134,7 +134,7 @@ struct MemoryDocumentPage {
             .fontColor(this.accentColor).constraintSize({ minHeight: 44 })
             .onClick((): void => { router.pushUrl({ url: 'pages/MemoryTopicDetailPage', params: { topicId: this.selected?.topicId?.toString() ?? '' } }); })
           Blank()
-        }.width('100%').margin({ top: 2 })
+        }.width('100%').alignItems(VerticalAlign.Center).margin({ top: 2 })
       }
     }.width('100%').padding({ left: 14, right: 14, top: 12, bottom: 10 })
   }
@@ -188,7 +188,7 @@ struct MemoryDocumentPage {
       CenteredTitleBar({ title: '记忆文档', subtitle: this.relativePath.length > 0 ? this.selected?.title ?? '' : '' })
       Scroll() {
         Column() {
-          if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
+          if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').padding({ left: 16, right: 16 }).wordBreak(WordBreak.BREAK_ALL)
           if (!this.loaded) {
             Text('正在读取记忆文档…').fontSize(13).fontColor(this.colors.secondary).width('100%')
               .textAlign(TextAlign.Center).padding({ top: 44 })
@@ -200,16 +200,16 @@ struct MemoryDocumentPage {
                 .textAlign(TextAlign.Center).padding({ top: 24, bottom: 12 })
             } else {
               PlainSection({ label: '文档' })
-              CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocumentHeaderCard(); } })
+              Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocumentHeaderCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
               PlainSection({ label: '内容' })
-              CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocumentBodyCard(); } })
+              Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocumentBodyCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
             }
             if (this.visibleDocuments().length > 0) {
               PlainSection({ label: '其他记忆文档' })
-              CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocumentRows(); } })
+              Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocumentRows(); } }) }.width('100%').padding({ left: 16, right: 16 })
             }
             PlainSection({ label: '操作' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SyncCard(); } })
+            Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.SyncCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
           } else {
             PlainSection({ label: '记忆文档' })
             if (this.documents.length === 0) {
@@ -221,14 +221,14 @@ struct MemoryDocumentPage {
               }
               .width('100%').padding({ top: 44, bottom: 24 }).alignItems(HorizontalAlign.Center)
             } else {
-              CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocumentRows(); } })
+              Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocumentRows(); } }) }.width('100%').padding({ left: 16, right: 16 })
               FooterNote({ text: '只读 Markdown 文档，内容来自当前真实源记忆。' })
             }
             PlainSection({ label: '操作' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SyncCard(); } })
+            Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.SyncCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
           }
           PageSpacer()
-        }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
+        }.width('100%').padding({ top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart)
     
       }, (e: number): string => `theme-${e}`)

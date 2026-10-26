@@ -20,7 +20,6 @@ kotlin {
 }
 
 dependencies {
-    api(project(":feature:subagent:api"))
     api(project(":ai"))
     api(project(":core:model"))
     api(project(":core:settings"))

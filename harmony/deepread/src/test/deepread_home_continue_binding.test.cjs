@@ -5,8 +5,10 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 
-const filename = path.resolve(__dirname, '../../../entry/src/main/ets/components/HomeListPane.ets');
+const filename = path.resolve(__dirname, '../../../entry/src/main/ets/components/home/HomeContinueCard.ets');
 const source = fs.readFileSync(filename, 'utf8');
+const paneSource = fs.readFileSync(path.resolve(__dirname, '../../../entry/src/main/ets/components/HomeListPane.ets'), 'utf8');
+const supportSource = fs.readFileSync(path.resolve(__dirname, '../../../entry/src/main/ets/platform_impl/home/HomeContinueSupport.ets'), 'utf8');
 function block(start) {
   assert.ok(start >= 0);
   const open = source.indexOf('{', start);
@@ -18,10 +20,10 @@ function block(start) {
   return source.slice(start, end);
 }
 const method = name => block(source.search(new RegExp('^  (?:private )?' + name + '\\(', 'm')));
-const row = method('ContinueRow');
+const row = method('build');
 const parameters = row.slice(row.indexOf('(') + 1, row.indexOf(')'));
 const displayExpressions = ['continueTitle', 'continueMeta', 'continueCta', 'continueIcon'].map(name => {
-  const call = row.match(new RegExp('this\\.' + name + '\\([^)]*\\)'));
+  const call = row.match(new RegExp(name + '\\([^)]*\\)'));
   assert.ok(call, `${name} must come from the actual row consumer`);
   return call[0];
 });
@@ -30,15 +32,21 @@ const click = block(clickStart);
 
 function harness() {
   const module = { exports: {} };
-  const code = `module.exports = class {
+  const supportAst = ts.createSourceFile('HomeContinueSupport.ets', supportSource, ts.ScriptTarget.Latest, true);
+  const displayNames = ['continueTitle', 'continueMeta', 'continueCta', 'continueIcon'];
+  const displayDeclarations = supportAst.statements.filter(node => ts.isVariableStatement(node)
+    && node.declarationList.declarations.some(declaration => displayNames.includes(declaration.name.getText(supportAst))));
+  assert.equal(displayDeclarations.length, displayNames.length, 'Use the real continue presentation functions');
+  const paneRouteStart = paneSource.search(/^  private openContinue\(/m);
+  const paneRouteEnd = paneSource.indexOf('\n  private ', paneRouteStart + 1);
+  const openContinue = paneSource.slice(paneRouteStart, paneRouteEnd);
+  const code = `${displayDeclarations.map(node => node.getText(supportAst).replace(/^export /, '')).join('\n')}
+  module.exports = class {
     bind(${parameters}) {
       return { render: () => [${displayExpressions.join(', ')}], tap: ${click} };
     }
-    ${method('continueTitle')}
-    ${method('continueMeta')}
-    ${method('continueCta')}
-    ${method('continueIcon')}
-    ${method('openContinue')}
+    ${openContinue}
+    onOpen(item) { this.openContinue(item); }
     pushOnce(options) { this.opened = options; }
   };`;
   vm.runInNewContext(ts.transpileModule(code, {
@@ -46,14 +54,14 @@ function harness() {
   }).outputText, { module }, { filename });
   const page = new module.exports();
   let current, tracking = false, rowReadsState = false;
-  Object.defineProperty(page, 'continueItem', {
+  Object.defineProperty(page, 'candidate', {
     get: () => { if (tracking) rowReadsState = true; return current; },
     set: value => { current = value; },
   });
-  page.continueItem = candidate('agents', 'Agents300K', false);
+  page.candidate = candidate('agents', 'Agents300K', false);
   // The real V1 compiler registers these render/click closures once in the non-null If branch.
   // Evaluate the actual row expressions, collecting reads only inside its element callbacks.
-  const callbacks = page.bind(page.continueItem);
+  const callbacks = page.bind(page.candidate);
   tracking = true;
   let visible = callbacks.render();
   tracking = false;
@@ -61,7 +69,7 @@ function harness() {
     page, tap: callbacks.tap,
     visible: () => Array.from(visible),
     commit(value) {
-      page.continueItem = value;
+      page.candidate = value;
       if (rowReadsState) visible = callbacks.render();
     },
   };

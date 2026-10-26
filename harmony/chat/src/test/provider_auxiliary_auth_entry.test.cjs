@@ -11,7 +11,10 @@ const evaluate = (relative, names, host) => {
   const filename = path.join(entry, relative);
   const source = fs.readFileSync(filename, 'utf8');
   const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const picked = file.statements.filter(statement => {
+  const declarations = [];
+  const visit = statement => { declarations.push(statement); ts.forEachChild(statement, visit); };
+  visit(file);
+  const picked = declarations.filter(statement => {
     if (ts.isVariableStatement(statement)) return statement.declarationList.declarations.some(
       declaration => names.includes(declaration.name.getText(file)));
     return ts.isClassDeclaration(statement) && names.includes(statement.name?.text);
@@ -70,10 +73,13 @@ const harness = async mode => {
     getValidCodexToken: async id => { refreshed.push(['codex', id]); return { accessToken: 'fresh-codex', accountId: 'account' }; },
     getValidGrokToken: async id => { refreshed.push(['grok', id]); return { accessToken: 'fresh-grok' }; },
     resolveTaskModelReference: async () => choice, resolveMemoryDaydreamChoice: async () => choice,
+    currentChatModelReference: async () => ({ kind: 'fixed', providerId: 'provider', modelId: 'fixture' }),
+    resolveTaskModelReferenceChain: async () => choice,
     readTaskModelReference: async () => ({ kind: 'auto' }), TASK_COMPRESS_MODEL_KEY: 'compress',
     loadTaskPrompts: async () => ({ compressPrompt: '' }),
+    beginJevContext: (conversationId, runId, signal) => jevContext.beginRun(conversationId, runId, signal),
+    storage: { compactStore: store },
     loadAgentRuntimeSnapshot: async () => ({ contextCompaction: { keepRecentTurns: 1 }, memoryWorker: worker }),
-    getMemoryDreamStoreOps: () => ({}), getMemoryDreamPlanStore: () => ({}),
     resolveChatProviderChoice: async () => choice,
     ChatStreamSubAgentGenerationPort: class { constructor(config) { this.config = config; } },
     AppStorage: { get: () => false }, EntryAbortController: AbortController,
@@ -85,10 +91,13 @@ const harness = async mode => {
     decodeMemoryTopicSuggestions: () => [],
   };
   // The auth wrapper is introduced by the fix; baseline factories still run without it.
-  const appSource = fs.readFileSync(path.join(entry, 'di/AppContainer.ets'), 'utf8');
-  const authNames = ['buildProviderApi', 'buildSubAgentGenerationPort'];
-  if (appSource.includes('export const prepareProviderApi')) authNames.push('prepareProviderApi');
-  evaluate('di/AppContainer.ets', authNames, host);
+  host.ports = host;
+  host.compactStore = store;
+  host.getHttpClient = () => http;
+  host.prepareChoiceAuth = provider => domain.prepareProviderAuth({ provider,
+    refreshCodex: host.getValidCodexToken, refreshGrok: host.getValidGrokToken });
+  evaluate('di/ProviderModelRuntime.ets', ['buildProviderApi', 'prepareProviderApi'], host);
+  evaluate('di/SubAgentRuntime.ets', ['buildSubAgentGenerationPort'], host);
   const runtime = { resolvedChoice: choice, modelContextWindowTokens: 128000 };
   host.resolveChatRuntime = async () => runtime;
   return { domain, requests, refreshed, choice, store, host, runtime };
@@ -98,24 +107,21 @@ const runTask = async (h, task) => {
   const { host, domain, choice } = h;
   if (task === 'auxiliary') {
     evaluate('platform_impl/ConversationRunAuxiliary.ets', ['chunkText', 'generateAuxiliaryText'], host);
-    await host.generateAuxiliaryText(choice, 'auxiliary prompt', 'off');
+    await host.generateAuxiliaryText(host, choice, 'auxiliary prompt', 'off');
   } else if (task === 'ocr') {
     evaluate('platform_impl/OcrSupport.ets', ['generateVisionText'], host);
     await host.generateVisionText(choice.provider, choice.model, [domain.makeUserMessage('ocr')]);
   } else if (task === 'automatic compaction') {
     evaluate('platform_impl/ConversationRunDependencies.ets', ['buildConversationCompressProvider'], host);
-    await host.buildConversationCompressProvider({ runtime: h.runtime, compressChoice: choice })
+    await host.buildConversationCompressProvider({ runtime: h.runtime, compressChoice: choice }, host)
       .streamText([domain.makeUserMessage('compress')], () => {});
   } else if (task === 'manual compaction') {
     evaluate('platform_impl/ContextCompactionSupport.ets', ['skippedMessage', 'compactConversationNow'], host);
     const nodes = Array.from({ length: 8 }, (_, i) => domain.makeMessageNode([
       domain.makeUIMessage(i % 2 ? 'assistant' : 'user', [{ type: 'text', text: `message ${i}`, metadata: null }]) ]));
     await host.compactConversationNow(domain.makeConversation('conversation', nodes));
-  } else if (task === 'daydream') {
-    evaluate('platform_impl/MemoryDreamOps.ets', ['loadMemoryDreamPlanOpDeps'], host);
-    await (await host.loadMemoryDreamPlanOpDeps()).planner.generateText('daydream');
   } else if (task === 'topic') {
-    evaluate('platform_impl/MemoryTopicOps.ets', ['result', 'runState', 'TopicGateError', 'awaitAbortable', 'MemoryTopicCoordinator'], host);
+    evaluate('platform_impl/MemoryTopicOps.ets', ['toTaskGate', 'resolveMemoryDaydreamChoice', 'result', 'runState', 'TopicGateError', 'awaitAbortable', 'MemoryTopicCoordinator'], host);
     const outcome = await new host.MemoryTopicCoordinator().run(true);
     assert.equal(outcome.status, 'completed', outcome.error);
   } else {
@@ -128,7 +134,7 @@ const runTask = async (h, task) => {
 };
 
 for (const mode of ['codex_oauth', 'grok_oauth', 'api_key']) {
-  for (const task of ['auxiliary', 'ocr', 'automatic compaction', 'manual compaction', 'daydream', 'topic', 'subagent']) {
+  for (const task of ['auxiliary', 'ocr', 'automatic compaction', 'manual compaction', 'topic', 'subagent']) {
     test(`Entry ${task} ${mode}: fresh auth reaches real HTTP and task parameters remain intact`, async () => {
       const h = await harness(mode);
       await runTask(h, task);
@@ -143,7 +149,7 @@ for (const mode of ['codex_oauth', 'grok_oauth', 'api_key']) {
       assert.equal(request.headers['X-Model'], task === 'ocr' ? undefined : 'task-header');
       assert.equal(body.task_body, task === 'ocr' ? undefined : 'task-body');
       if (task === 'subagent' && mode !== 'codex_oauth') assert.equal(body.temperature, 0.3);
-      if (['daydream', 'topic'].includes(task)) assert.equal(mode === 'codex_oauth' ? body.reasoning.effort : body.reasoning_effort, 'high');
+      if (task === 'topic') assert.equal(mode === 'codex_oauth' ? body.reasoning.effort : body.reasoning_effort, 'high');
     });
   }
 }
@@ -182,10 +188,46 @@ test('Entry foreground context preparation forwards the owning run signal to the
     signal, conversation: h.domain.makeConversation('conversation'), publish() {},
     activeConversation() { return this.conversation; },
     seed: { runtime: h.runtime, compressChoice: h.choice, agentRuntime: { contextCompaction: {} } } };
-  await h.host.prepareMessages(ctx)(messages);
+  await h.host.prepareMessages(ctx, h.host)(messages);
   assert.equal(captured.abortSignal, signal);
   const prepared = await captured.prepareToolResults(messages, 4);
   assert.equal(prepared.messages, messages, 'Disabled Jev preserves the same prepared source');
   assert.equal(prepared.retainedToolCallIds.size, 0);
   assert.equal(h.requests.length, 0, 'No compaction request should be made until the domain admits it');
+});
+
+test('Entry run tools wire the captured compress provider into the context tool', async () => {
+  const h = await harness('api_key');
+  let capturedProvider;
+  const marker = { streamText: async () => 'captured-compress-provider' };
+  const host = h.host;
+  for (const name of ['createAssistantLocalPrimitives', 'createMcpManagementTools',
+    'createProviderManagementTools', 'createMcpServerTools', 'createConversationHistoryTools',
+    'createConversationQueueTools', 'createSoulTools', 'createPersonalContextTools',
+    'createDeviceScheduleTools', 'createDeepReadPlaybookTools']) host[name] = () => [];
+  for (const name of ['createWebMountGoalAdapter', 'createEntryModelSlotPort', 'createModelSlotTool',
+    'createMcpDescribeTool', 'getPermissionsStatusTool', 'createJevStatusTool',
+    'createRunPlanUpdateTool', 'createHealthSummaryTool', 'createEntryHealthReadPort',
+    'createEntryPersonalContextPort', 'createEntryWeatherPort', 'createWeatherReadTool',
+    'createEntryDeviceSchedulePort', 'getAgentPromptConfigTool', 'getDeepReadPlaybookRepository',
+    'createDeepReadOpenTool', 'getWorkspaceManager', 'getMcpSettingsStore', 'getMcpManager',
+    'getSkillManager', 'getChatRepository', 'getSessionGrantStore']) host[name] = () => ({});
+  host.getChatCouncilTools = async () => [];
+  host.getWebMountSession = () => ({});
+  host.guardConversationBrowserTools = tools => tools;
+  host.filterToolProfile = tools => ({ tools });
+  host.systemLanguage = () => 'zh-CN';
+  host.sha256HexUtf8 = () => '';
+  host.PROVIDERS_KEY = 'providers';
+  host.createConversationContextTools = deps => { capturedProvider = deps.compactEngineDeps.provider; return []; };
+  evaluate('di/ConversationToolComposition.ets', ['mcpActivityPort', 'prepareTools'], host);
+  const ctx = { conversationId: 'conversation', activityStore: {},
+    activeConversation: () => h.domain.makeConversation('conversation'),
+    seed: { runtime: { ...h.runtime, assistant: h.domain.makeAssistant({ localTools: [] }),
+      modelSupportsImageInput: false }, agentRuntime: { contextCompaction: {} },
+      agentTaskTools: [], agentCronTools: [], taskPrompts: { compressPrompt: 'captured' },
+      searchSettings: { enableWebSearch: false } } };
+  await host.prepareTools(ctx, marker);
+  assert.equal(capturedProvider, marker, 'The context tool receives this run\'s constructed provider');
+  assert.equal(await capturedProvider.streamText(), 'captured-compress-provider');
 });

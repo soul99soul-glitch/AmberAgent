@@ -10,6 +10,16 @@ import {
 
 describe('toDisplayReasoningText(:398-406)', () => {
 
+  it('流式展开保留末尾 1500 字并准确提示省略长度', () => {
+    for (const length of [1499, 1500]) {
+      const text: string = '新'.repeat(length);
+      assert.equal(toDisplayReasoningText(text, true, true), text);
+    }
+    const tail: string = '新'.repeat(1500);
+    assert.equal(toDisplayReasoningText('旧'.repeat(6000) + tail, true, true),
+      '… 已省略前 6000 字，以保持流式思考界面流畅。\n\n' + tail);
+  });
+
   it('超限 → 「… 已省略前 N 字，以保持流式思考界面流畅。」+ takeLast(limit)', () => {
     const text: string = 'x'.repeat(1700);
     const out: string = toDisplayReasoningText(text, false, false);

@@ -55,7 +55,7 @@ export const tavilySearchService: SearchService = {
       },
       body: JSON.stringify({
         query,
-        max_results: commonOptions.resultSize,
+        max_results: Math.min(Math.max(commonOptions.resultSize, 1), 20),
         search_depth: opts.depth.length > 0 ? opts.depth : 'advanced',
         topic,
         include_answer: 'advanced',
@@ -85,7 +85,7 @@ export const tavilySearchService: SearchService = {
           title: strOrNull(o['title']) ?? '',
           url: strOrNull(o['url']) ?? '',
           text: strOrNull(o['content']) ?? '',
-          publishedAt: null,
+          publishedAt: strOrNull(o['published_date']),
           images: imgs,
         };
       });

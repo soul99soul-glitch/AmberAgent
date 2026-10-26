@@ -2,11 +2,11 @@
   'use strict';
 
   // The domain layer owns schema normalization; this boundary still caps work before it reaches WebGL.
-  var MAX_OBJECTS = 48;
+  var MAX_OBJECTS = 512;
   var MAX_ID_CHARS = 48;
-  var MAX_COORDINATE = 100;
-  var MAX_SIZE = 40;
-  var MAX_SCALE = 10;
+  var MAX_COORDINATE = 200;
+  var MAX_SIZE = 100;
+  var MAX_SCALE = 20;
   var TYPES = { box: true, sphere: true, cylinder: true, cone: true, torus: true, plane: true };
   var SIZE_LENGTH = {
     box: 3, sphere: 1, cylinder: 2, cone: 2, torus: 2, plane: 2
@@ -37,6 +37,7 @@
     disposed: true,
     contextLost: false,
     listenersInstalled: false,
+    frameListener: null,
     errorNode: null
   };
 
@@ -64,21 +65,65 @@
     return array;
   }
 
+  function sanitizeColor(value) {
+    if (typeof value !== 'string') return null;
+    var trimmed = value.trim().toLowerCase();
+    if (/^#[0-9a-f]{6}$/.test(trimmed)) return trimmed;
+    if (/^#[0-9a-f]{3}$/.test(trimmed)) {
+      return '#' + trimmed.charAt(1) + trimmed.charAt(1) +
+        trimmed.charAt(2) + trimmed.charAt(2) +
+        trimmed.charAt(3) + trimmed.charAt(3);
+    }
+    return null;
+  }
+
+  function sanitizeVoxelTuple(value, index) {
+    if (!Array.isArray(value) || (value.length !== 4 && value.length !== 5 && value.length !== 7)) return null;
+    var position = boundedArray(value.slice(0, 3), 3, MAX_COORDINATE, false);
+    var color = sanitizeColor(value[3]);
+    if (position === null || color === null) return null;
+    var sizeInput = [1, 1, 1];
+    if (value.length === 5) sizeInput = [value[4], value[4], value[4]];
+    else if (value.length === 7) sizeInput = [value[4], value[5], value[6]];
+    var size = boundedArray(sizeInput, 3, MAX_SIZE, true);
+    if (size === null) return null;
+    return {
+      id: 'vox-' + index,
+      type: 'box',
+      color: color,
+      position: position,
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      size: size
+    };
+  }
+
   function sanitizeObject(value) {
     if (!value || typeof value !== 'object' || typeof value.id !== 'string') return null;
     var id = value.id.trim();
-    var type = value.type;
-    if (!id || id.length > MAX_ID_CHARS || !TYPES[type] ||
-      typeof value.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(value.color)) return null;
+    var type = value.type === undefined ? 'box' : String(value.type).trim().toLowerCase();
+    var color = sanitizeColor(value.color);
+    if (!id || id.length > MAX_ID_CHARS || !TYPES[type] || color === null) return null;
     var position = boundedArray(value.position, 3, MAX_COORDINATE, false);
-    var rotation = boundedArray(value.rotation, 3, MAX_COORDINATE, false);
-    var scale = boundedArray(value.scale, 3, MAX_SCALE, true);
-    var size = boundedArray(value.size, SIZE_LENGTH[type], MAX_SIZE, true);
+    var rotationInput = value.rotation === undefined ? [0, 0, 0] : value.rotation;
+    var scaleInput = value.scale === undefined
+      ? [1, 1, 1]
+      : typeof value.scale === 'number' ? [value.scale, value.scale, value.scale] : value.scale;
+    var sizeInput = value.size;
+    if (sizeInput === undefined && type === 'box') {
+      sizeInput = [1, 1, 1];
+    } else if (typeof sizeInput === 'number') {
+      if (type === 'box') sizeInput = [sizeInput, sizeInput, sizeInput];
+      else if (type === 'sphere') sizeInput = [sizeInput];
+    }
+    var rotation = boundedArray(rotationInput, 3, MAX_COORDINATE, false);
+    var scale = boundedArray(scaleInput, 3, MAX_SCALE, true);
+    var size = boundedArray(sizeInput, SIZE_LENGTH[type], MAX_SIZE, true);
     if (position === null || rotation === null || scale === null || size === null) return null;
     return {
       id: id,
       type: type,
-      color: value.color,
+      color: color,
       position: position,
       rotation: rotation,
       scale: scale,
@@ -87,14 +132,27 @@
   }
 
   function sanitizeSpec(spec) {
-    if (!spec || typeof spec !== 'object' || !Array.isArray(spec.objects)) return null;
+    if (!spec || typeof spec !== 'object') return null;
+    var hasObjects = spec.objects !== undefined;
+    var hasVoxels = spec.voxels !== undefined;
+    if (!hasObjects && !hasVoxels) return null;
+    if (hasObjects && !Array.isArray(spec.objects)) return null;
+    if (hasVoxels && !Array.isArray(spec.voxels)) return null;
+    var rawObjects = hasObjects ? spec.objects : [];
+    var rawVoxels = hasVoxels ? spec.voxels : [];
     var objects = [];
     var seen = Object.create(null);
-    for (var index = 0; index < spec.objects.length && objects.length < MAX_OBJECTS; index += 1) {
-      var object = sanitizeObject(spec.objects[index]);
+    for (var index = 0; index < rawObjects.length && objects.length < MAX_OBJECTS; index += 1) {
+      var object = sanitizeObject(rawObjects[index]);
       if (!object || seen[object.id]) return null;
       seen[object.id] = true;
       objects.push(object);
+    }
+    for (var voxelIndex = 0; voxelIndex < rawVoxels.length && objects.length < MAX_OBJECTS; voxelIndex += 1) {
+      var voxel = sanitizeVoxelTuple(rawVoxels[voxelIndex], voxelIndex);
+      if (!voxel || seen[voxel.id]) return null;
+      seen[voxel.id] = true;
+      objects.push(voxel);
     }
     return { objects: objects };
   }
@@ -175,6 +233,8 @@
     if (!state.renderer || !state.scene || !state.camera || !state.active || state.hidden || state.pageHidden || state.contextLost) return;
     try {
       state.renderer.render(state.scene, state.camera);
+      // Event-driven draws have no animation-frame boundary to flush queued GPU work.
+      state.renderer.getContext().flush();
     } catch (error) {
       state.contextLost = true;
       releaseGpu(true, true);
@@ -200,23 +260,51 @@
     render();
   }
 
+  function objectHalfExtents(object) {
+    var s = object.size;
+    var sc = object.scale;
+    if (object.type === 'box') return [s[0] * sc[0] * 0.5, s[1] * sc[1] * 0.5, s[2] * sc[2] * 0.5];
+    if (object.type === 'sphere') return [s[0] * sc[0], s[0] * sc[1], s[0] * sc[2]];
+    if (object.type === 'cylinder' || object.type === 'cone') return [s[0] * sc[0], s[1] * sc[1] * 0.5, s[0] * sc[2]];
+    if (object.type === 'torus') {
+      var outer = s[0] + s[1];
+      return [outer * sc[0], outer * sc[1], s[1] * sc[2]];
+    }
+    var m = Math.max(s[0], s[1]) * 0.5;
+    return [m * sc[0], m * sc[1], m * sc[2]];
+  }
+
   function fitCamera(objects) {
     if (!state.camera || !state.controls || state.userInteracted) return;
-    var extent = 1;
+    if (!objects || objects.length === 0) {
+      state.camera.position.set(3, 2.2, 3.8);
+      state.controls.target.set(0, 0, 0);
+      state.controls.update();
+      state.cameraReady = true;
+      return;
+    }
+    var minX = Infinity, minY = Infinity, minZ = Infinity;
+    var maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     for (var index = 0; index < objects.length; index += 1) {
       var object = objects[index];
-      var largestSize = 1;
-      for (var sizeIndex = 0; sizeIndex < object.size.length; sizeIndex += 1) {
-        largestSize = Math.max(largestSize, object.size[sizeIndex]);
-      }
-      for (var scaleIndex = 0; scaleIndex < object.scale.length; scaleIndex += 1) {
-        largestSize = Math.max(largestSize, object.size[scaleIndex % object.size.length] * object.scale[scaleIndex]);
-      }
-      extent = Math.max(extent, Math.abs(object.position[0]), Math.abs(object.position[1]), Math.abs(object.position[2]), largestSize);
+      var half = objectHalfExtents(object);
+      minX = Math.min(minX, object.position[0] - half[0]);
+      maxX = Math.max(maxX, object.position[0] + half[0]);
+      minY = Math.min(minY, object.position[1] - half[1]);
+      maxY = Math.max(maxY, object.position[1] + half[1]);
+      minZ = Math.min(minZ, object.position[2] - half[2]);
+      maxZ = Math.max(maxZ, object.position[2] + half[2]);
     }
-    var distance = clamp(extent * 3.1, 3, 180);
-    state.camera.position.set(distance * 0.9, distance * 0.65, distance * 1.15);
-    state.controls.target.set(0, 0, 0);
+    var cx = (minX + maxX) * 0.5;
+    var cy = (minY + maxY) * 0.5;
+    var cz = (minZ + maxZ) * 0.5;
+    var dx = maxX - minX;
+    var dy = maxY - minY;
+    var dz = maxZ - minZ;
+    var radius = Math.max(1, Math.sqrt(dx * dx + dy * dy + dz * dz) * 0.5);
+    var distance = clamp(radius * 2.1, 3, 400);
+    state.camera.position.set(cx + distance * 0.78, cy + distance * 0.56, cz + distance * 0.98);
+    state.controls.target.set(cx, cy, cz);
     state.controls.update();
     state.cameraReady = true;
   }
@@ -287,13 +375,17 @@
   function installControls() {
     if (!state.controls || !state.controls.addEventListener) return;
     state.controls.enableDamping = false;
-    state.controls.enablePan = false;
+    state.controls.enablePan = true;
     state.controls.minDistance = 0.4;
-    state.controls.maxDistance = 240;
+    state.controls.maxDistance = 500;
     state.controls.addEventListener('start', function () {
       state.userInteracted = true;
     });
     state.controls.addEventListener('change', render);
+    state.controls.addEventListener('end', function () {
+      if (state.active && state.interacting && state.userInteracted && !state.hidden &&
+        !state.pageHidden && !state.contextLost && state.frameListener) state.frameListener();
+    });
   }
 
   function createRenderer(container) {
@@ -317,7 +409,7 @@
     });
     renderer.setPixelRatio(Math.min(2, Math.max(1, finite(root.devicePixelRatio, 1))));
     var scene = new library.Scene();
-    var camera = new library.PerspectiveCamera(38, 1, 0.01, 500);
+    var camera = new library.PerspectiveCamera(38, 1, 0.05, 1000);
     var ambient = new library.AmbientLight(0xffffff, 1.8);
     var keyLight = new library.DirectionalLight(0xffffff, 2.6);
     keyLight.position.set(4, 6, 8);
@@ -442,6 +534,49 @@
     return result(true, null, 0);
   }
 
+  function captureFrame() {
+    var empty = { snapshot: '', view: '' };
+    if (!state.renderer || !state.canvas || !state.active || state.hidden || state.pageHidden) return empty;
+    try {
+      render();
+      if (!state.canvas || !state.camera || !state.controls) return empty;
+      var position = state.camera.position;
+      var target = state.controls.target;
+      return {
+        snapshot: state.canvas.toDataURL('image/png'),
+        view: JSON.stringify({ position: [position.x, position.y, position.z], target: [target.x, target.y, target.z] })
+      };
+    } catch (_) {
+      return empty;
+    }
+  }
+
+  function snapshot() {
+    return captureFrame().snapshot;
+  }
+
+  function restoreView(view) {
+    if (typeof view !== 'string' || !state.camera || !state.controls) return false;
+    var parsed;
+    try { parsed = JSON.parse(view); } catch (_) { return false; }
+    if (!parsed || typeof parsed !== 'object') return false;
+    var position = boundedArray(parsed.position, 3, Number.MAX_VALUE, false);
+    var target = boundedArray(parsed.target, 3, Number.MAX_VALUE, false);
+    if (!position || !target) return false;
+    var distance = Math.hypot(position[0] - target[0], position[1] - target[1], position[2] - target[2]);
+    if (!isFinite(distance) || distance < 0.000001) return false;
+    state.camera.position.set(position[0], position[1], position[2]);
+    state.controls.target.set(target[0], target[1], target[2]);
+    state.userInteracted = true;
+    state.controls.update();
+    render();
+    return true;
+  }
+
+  function setFrameListener(listener) {
+    state.frameListener = typeof listener === 'function' ? listener : null;
+  }
+
   function setActive(value) {
     state.active = value === true;
     if (!state.active) setInteracting(false);
@@ -481,5 +616,7 @@
   }
 
   installGlobalListeners();
-  root.AmberThree = { update: update, dispose: dispose, setActive: setActive, setInteracting: setInteracting };
+  root.AmberThree = { update: update, dispose: dispose, snapshot: snapshot,
+    captureFrame: captureFrame, restoreView: restoreView, setFrameListener: setFrameListener,
+    setActive: setActive, setInteracting: setInteracting };
 }(typeof globalThis === 'object' ? globalThis : window));

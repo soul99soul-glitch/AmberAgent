@@ -7,7 +7,6 @@ const vm = require('node:vm');
 const ts = require('typescript');
 
 async function fixture({ sdk = 24, refreshRate = 60, supported = [30, 60, 90, 120] } = {}) {
-  const domain = await import('../main/ets/chat/native_timeline_motion.ts');
   const file = path.resolve(__dirname, '../../../entry/src/main/ets/components/NativeTimelineFollow.ets');
   const source = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },

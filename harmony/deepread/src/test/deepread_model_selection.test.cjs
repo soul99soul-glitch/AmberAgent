@@ -72,24 +72,16 @@ test('unavailable choices are rejected and store failures remain failures', asyn
 });
 
 const loadSettingsSaveMethod = (saveSelection) => {
-  const filename = path.join(ENTRY, 'pages/SettingDeepReadPage.ets');
-  const source = fs.readFileSync(filename, 'utf8');
-  const start = source.indexOf('  private async selectTaskModel(');
-  const end = source.indexOf('\n  private taskModelSelected(', start);
-  assert.ok(start >= 0 && end > start);
-  const exports = {};
+  const { actualPage } = require('./deepread_settings_fixture.cjs');
   const toasts = [];
-  const fixture = `class SettingsFixture {
-    savingModel = false; loadToken = 1; modelLoadToken = 0; pageAlive = true;
-    taskModelReference = { kind: 'auto' }; taskModelLabel = 'previous'; taskModelDetail = 'previous detail';
-    modelError = ''; modelSheetOpen = true; saved = ''; async refreshTaskModelSelection() {}
-    ${source.slice(start, end)}
-  } exports.SettingsFixture = SettingsFixture;`;
-  vm.runInNewContext(transpile(fixture), {
-    exports, Promise, Error, String, getProductKind: () => 'agent', saveDeepReadModelSelection: saveSelection,
-    promptAction: { showToast: (value) => toasts.push(value.message) },
-  }, { filename });
-  return { page: new exports.SettingsFixture(), toasts };
+  const page = actualPage('pages/SettingDeepReadPage.ets', ['selectTaskModel'], {
+    getProductKind: () => 'agent', saveDeepReadModelSelection: saveSelection,
+    promptAction: { showToast: value => toasts.push(value.message) },
+  });
+  Object.assign(page, { pageAlive: true, loadToken: 1, modelLoadToken: 0, savingModel: false,
+    taskModelReference: { kind: 'auto' }, taskModelLabel: 'previous', taskModelDetail: 'previous detail',
+    modelError: '', modelSheetOpen: true, saved: '', refreshTaskModelSelection: async () => {} });
+  return { page, toasts };
 };
 
 test('settings save failure retains the prior selection and keeps the selector open with a visible error', async () => {

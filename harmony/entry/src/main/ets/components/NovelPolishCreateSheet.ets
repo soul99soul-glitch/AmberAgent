@@ -127,8 +127,9 @@ export struct NovelPolishCreateSheet {
   private rangeSection(): void {
     Column() {
       Text(this.singleChapter ? '本次章节' : '章节范围').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK)
+        .width('100%')
       Text(this.singleChapter ? '确认本章及上下文后开始；审稿通过才收录正文。' : '仅处理勾选的未废弃章节；未勾选的正文保持原样。')
-        .fontSize(11).fontColor(INK3).lineHeight(16).margin({ top: 3, bottom: 8 })
+        .fontSize(11).fontColor(INK3).lineHeight(16).width('100%').margin({ top: 3, bottom: 8 })
       if (this.activeChapters().length === 0) {
         Text('当前没有可润色的章节。').fontSize(13).fontColor(INK3)
           .width('100%').padding({ top: 12, bottom: 12 })
@@ -149,7 +150,7 @@ export struct NovelPolishCreateSheet {
           .width('100%').margin({ top: 8 })
       }
     }
-    .width('100%').padding({ top: 2, bottom: 14 })
+    .width('100%').alignItems(HorizontalAlign.Start).padding({ top: 2, bottom: 14 })
   }
 
   @Builder
@@ -178,21 +179,21 @@ export struct NovelPolishCreateSheet {
       }
       .width('100%')
     }
-    .width('100%').constraintSize({ maxHeight: '24%' }).align(Alignment.TopStart)
+    .width('100%').constraintSize({ maxHeight: 200 }).align(Alignment.TopStart)
   }
 
   @Builder
   private contextSection(): void {
     Column() {
-      Text('冻结上下文').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK)
+      Text('冻结上下文').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK).width('100%')
       Text('启动时会将勾选来源连同原稿范围一起冻结，后续修改不会悄悄混入本次任务。')
-        .fontSize(11).fontColor(INK3).lineHeight(16).margin({ top: 3, bottom: 7 })
+        .fontSize(11).fontColor(INK3).lineHeight(16).width('100%').margin({ top: 3, bottom: 7 })
       this.contextToggle('剧情摘要', 'includePlot', this.includePlot)
       this.contextToggle('伏笔', 'includeForeshadows', this.includeForeshadows)
       this.contextToggle('角色资料', 'includeCharacters', this.includeCharacters)
       this.contextToggle('已确认决策', 'includeDecisions', this.includeDecisions)
     }
-    .width('100%').padding({ top: 12, bottom: 10 })
+    .width('100%').alignItems(HorizontalAlign.Start).padding({ top: 12, bottom: 10 })
     .border({ width: { top: 0.5 }, color: { top: LINE } })
   }
 
@@ -211,13 +212,13 @@ export struct NovelPolishCreateSheet {
   @Builder
   private safetySection(): void {
     Column() {
-      Text('安全收录').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK)
+      Text('安全收录').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK).width('100%')
       Text('原稿会以内容摘要冻结；候选、审稿与最多两次定向重写都不会直接改正文。')
-        .fontSize(12).fontColor(INK2).lineHeight(18).margin({ top: 5 })
+        .fontSize(12).fontColor(INK2).lineHeight(18).width('100%').margin({ top: 5 })
       Text('审稿通过后会一起保存版本、正文与进度；可在版本记录中恢复原稿。')
-        .fontSize(12).fontColor(INK2).lineHeight(18).margin({ top: 5 })
+        .fontSize(12).fontColor(INK2).lineHeight(18).width('100%').margin({ top: 5 })
     }
-    .width('100%').padding({ top: 12, bottom: 12 })
+    .width('100%').alignItems(HorizontalAlign.Start).padding({ top: 12, bottom: 12 })
     .border({ width: { top: 0.5 }, color: { top: LINE } })
   }
 

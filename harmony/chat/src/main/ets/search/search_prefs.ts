@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from '../chat/json.ts';
 import type { KeyValueStore } from '../chat/kv_store.ts';
 import type { SearchCommonOptions, SearchServiceOptions } from './search_service.ts';
 import {
-  DEFAULT_SEARCH_COMMON_OPTIONS, DEFAULT_SEARCH_SERVICE_OPTIONS,
+  DEFAULT_SEARCH_COMMON_OPTIONS, DEFAULT_SEARCH_SERVICE_OPTIONS, MAX_SEARCH_RESULTS,
   searchServiceOptionsFromJson, searchServiceOptionsToJson,
 } from './search_service.ts';
 import type { SearchSettings } from './search_aggregator.ts';
@@ -76,7 +76,9 @@ const parseCommon = (raw: string | null): SearchCommonOptions => {
       return { ...DEFAULT_SEARCH_COMMON_OPTIONS };
     }
     const rs: JsonValue | undefined = (j as JsonObject)['resultSize'];
-    return { resultSize: typeof rs === 'number' ? rs : DEFAULT_SEARCH_COMMON_OPTIONS.resultSize };
+    return { resultSize: typeof rs === 'number' && Number.isFinite(rs)
+      ? Math.min(MAX_SEARCH_RESULTS, Math.max(1, Math.trunc(rs)))
+      : DEFAULT_SEARCH_COMMON_OPTIONS.resultSize };
   } catch {
     return { ...DEFAULT_SEARCH_COMMON_OPTIONS };
   }

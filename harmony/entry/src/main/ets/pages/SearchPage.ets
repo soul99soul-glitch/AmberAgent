@@ -11,6 +11,8 @@ import type {
 import { currentMessages, loadSearchPrefs, searchOrchestratorSearch } from '@amber/chat-domain';
 import { getChatKvStore, getChatRepository } from '../di/AppContainer.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
+import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import { DotLoading } from '../components/ui/DotLoading.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, TITLE } from '../design/tokens.ets';
@@ -159,6 +161,7 @@ struct SearchPage {
   private pageAlive: boolean = false;
   private searchSeq: number = 0;
   private debounceTimer: number = -1;
+  private searchController: EntryAbortController | null = null;
 
   aboutToAppear(): void {
     this.pageAlive = true;
@@ -169,7 +172,23 @@ struct SearchPage {
 
   aboutToDisappear(): void {
     this.pageAlive = false;
+    this.cancelPendingSearch();
+  }
+
+  onPageHide(): void {
+    this.pageAlive = false;
+    this.cancelPendingSearch();
+    this.loading = false;
+  }
+
+  onPageShow(): void {
+    this.pageAlive = true;
+  }
+
+  private cancelPendingSearch(): void {
     this.searchSeq++;
+    this.searchController?.abort();
+    this.searchController = null;
     if (this.debounceTimer >= 0) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = -1;
@@ -185,17 +204,19 @@ struct SearchPage {
     return `${monthDay} ${date.getHours()}:${date.getMinutes() < 10 ? '0' : ''}${date.getMinutes()}`;
   }
 
-  private async executeWebSearch(query: string): Promise<SearchExecution> {
+  private async executeWebSearch(query: string, signal: AbortSignalLike): Promise<SearchExecution> {
     try {
       const settings: SearchSettings = await loadSearchPrefs(getChatKvStore());
+      if (signal.aborted) return { results: [], errorMsg: '' };
       ensureSearchSdk();
       const params: JsonObject = { query: query, max_results: 20 };
-      const payload: JsonObject = await searchOrchestratorSearch(settings, params);
+      const payload: JsonObject = await searchOrchestratorSearch(settings, params, undefined, {}, { signal });
       const results: SearchResult[] = webResultsFrom(payload);
       let errorMsg: string = stringValue(payload['error']).trim();
       if (errorMsg.length === 0) errorMsg = stringValue(payload['message']).trim();
       return { results, errorMsg };
     } catch (error) {
+      if (signal.aborted) return { results: [], errorMsg: '' };
       return { results: [], errorMsg: errorMessage(error as Error) };
     }
   }
@@ -238,12 +259,9 @@ struct SearchPage {
   private onSearch(text: string): void {
     this.searchText = text;
     const query: string = text.trim();
-    const seq: number = ++this.searchSeq;
+    this.cancelPendingSearch();
+    const seq: number = this.searchSeq;
     this.errorMsg = '';
-    if (this.debounceTimer >= 0) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = -1;
-    }
     if (query.length === 0) {
       this.results = [];
       this.searched = false;
@@ -255,6 +273,8 @@ struct SearchPage {
     this.results = [];
     this.debounceTimer = setTimeout((): void => {
       this.debounceTimer = -1;
+      const controller: EntryAbortController = new EntryAbortController();
+      this.searchController = controller;
       const isCurrent: () => boolean = (): boolean => this.pageAlive && seq === this.searchSeq;
       const localPromise: Promise<SearchExecution> = this.executeLocalSearch(query, isCurrent,
         (titleResults: SearchResult[]): void => {
@@ -271,7 +291,7 @@ struct SearchPage {
           }
           return outcome;
         });
-      const webPromise: Promise<SearchExecution> = this.executeWebSearch(query).then(
+      const webPromise: Promise<SearchExecution> = this.executeWebSearch(query, controller.signal).then(
         (outcome: SearchExecution): SearchExecution => {
           if (isCurrent()) {
             this.results = [...this.results.filter(
@@ -281,6 +301,7 @@ struct SearchPage {
           return outcome;
         });
       Promise.allSettled([localPromise, webPromise]).then((): void => {
+        if (this.searchController === controller) this.searchController = null;
         if (isCurrent()) this.loading = false;
       });
     }, SEARCH_DEBOUNCE_MS);
@@ -344,20 +365,22 @@ struct SearchPage {
       ForEach([this.themeEpoch], (_e: number): void => {
       CenteredTitleBar({ title: '搜索' })
 
-      Row() {
-        Icon({ name: 'search', iconSize: 14, color: INK3 }).margin({ right: 8 })
-        TextInput({ text: this.searchText, placeholder: '搜索话题、文章、关键词…' })
-          .fontSize(BODY).fontColor(INK).backgroundColor(Color.Transparent).layoutWeight(1)
-          .onChange((value: string): void => { this.onSearch(value); })
-        if (this.searchText.length > 0) {
-          Text('✕').fontSize(12).fontColor(INK3)
-            .padding({ left: 8, right: 4 })
-            .onClick((): void => { this.onSearch(''); })
+      Column() {
+        Row() {
+          Icon({ name: 'search', iconSize: 14, color: INK3 }).margin({ right: 8 })
+          TextInput({ text: this.searchText, placeholder: '搜索话题、文章、关键词…' })
+            .fontSize(BODY).fontColor(INK).backgroundColor(Color.Transparent).layoutWeight(1)
+            .onChange((value: string): void => { this.onSearch(value); })
+          if (this.searchText.length > 0) {
+            Text('✕').fontSize(12).fontColor(INK3)
+              .padding({ left: 8, right: 4 })
+              .onClick((): void => { this.onSearch(''); })
+          }
         }
+        .width('100%').padding({ left: 12, right: 12, top: 8, bottom: 8 })
+        .backgroundColor(SURFACE2).borderRadius(8)
       }
-      .width('100%').padding({ left: 12, right: 12, top: 8, bottom: 8 })
-      .backgroundColor(SURFACE2).borderRadius(8)
-      .margin({ left: 16, right: 16, top: 12, bottom: 8 })
+      .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 8 })
 
       if (this.loading && this.results.length === 0) {
         Column() {

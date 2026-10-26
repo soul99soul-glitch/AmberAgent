@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { actualPage } = require('./deepread_ui_fixture.cjs');
+const { actualPage } = require('./deepread_settings_fixture.cjs');
 const KEY = 'deepreadSettingsSessionDraft';
 const freshSearch = () => ({ searchCommonOptions: { resultSize: 10, language: 'zh' },
   searchServices: [{ id: 'a', type: 'tavily', apiKey: 'old-a' }, { id: 'b', type: 'bocha', apiKey: 'old-b' }],

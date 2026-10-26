@@ -41,7 +41,11 @@ function fixture() {
 
   class Canvas extends Node {
     constructor() { super('canvas'); }
-    getContext(type, options) { this.contextOptions = options; return type === 'webgl2' ? {} : null; }
+    getContext(type, options) {
+      this.contextOptions = options;
+      return type === 'webgl2' ? { flushCount: 0, flush() { this.flushCount++; } } : null;
+    }
+    toDataURL(type) { assert.equal(type, 'image/png'); return 'data:image/png;base64,thumbnail'; }
   }
 
   class Color {
@@ -92,6 +96,7 @@ function fixture() {
   class Renderer {
     constructor(options) {
       this.canvas = options.canvas;
+      this.context = options.context;
       this.options = options;
       this.disposed = false;
       this.contextLost = false;
@@ -99,6 +104,7 @@ function fixture() {
       Renderer.instances.push(this);
     }
     setPixelRatio() {}
+    getContext() { return this.context; }
     setSize() {}
     setClearColor(color) { this.clearColor = color; }
     render() { this.renderCount += 1; }
@@ -108,11 +114,15 @@ function fixture() {
   Renderer.instances = [];
 
   class Controls {
-    constructor(camera, element) { this.camera = camera; this.element = element; this.target = vector(); this.listeners = {}; this.disposed = false; }
+    constructor(camera, element) {
+      this.camera = camera; this.element = element; this.target = vector(); this.listeners = {}; this.disposed = false;
+      Controls.instances.push(this);
+    }
     addEventListener(name, listener) { this.listeners[name] = listener; }
     update() {}
     dispose() { this.disposed = true; }
   }
+  Controls.instances = [];
 
   const rootListeners = Object.create(null);
   const document = {
@@ -185,19 +195,32 @@ test('Three runtime incrementally retains meshes, removes stale objects, and dis
 test('Three runtime caps object count and sanitizes non-finite values at the WebGL boundary', () => {
   const f = fixture();
   const objects = [];
-  for (let index = 0; index < 80; index += 1) {
+  for (let index = 0; index < 540; index += 1) {
     objects.push(object(`object-${index}`, 'box', {
       position: [100, -100, 100], rotation: [100, -100, 100], scale: [10, 10, 10], size: [40, 40, 40],
     }));
   }
   const result = f.api.update({ objects }, false, f.container);
   assert.equal(result.ok, true);
-  assert.equal(result.objectCount, 48);
-  assert.equal(f.library.Mesh.instances.length, 48);
+  assert.equal(result.objectCount, 512);
+  assert.equal(f.library.Mesh.instances.length, 512);
   assert.equal(f.library.Mesh.instances[0].position.x, 100);
   assert.equal(f.library.Mesh.instances[0].rotation.y, -100);
   assert.equal(f.library.Mesh.instances[0].scale.x, 10);
   assert.equal(f.library.Mesh.instances[0].geometry.args[0], 40);
+  f.api.dispose();
+});
+
+test('Three runtime supports compact voxels and centers camera target on 3D bounding box', () => {
+  const f = fixture();
+  const result = f.api.update({
+    objects: [{ id: 'base', color: '#4caf50', position: [0, 0, 0], size: [10, 2, 10] }],
+    voxels: [[0, 10, 0, '#ff8800', 2, 2, 2]],
+  }, false, f.container);
+  assert.equal(result.ok, true);
+  assert.equal(result.objectCount, 2);
+  const scene = f.library.Mesh.instances[0].parent;
+  assert.ok(scene);
   f.api.dispose();
 });
 
@@ -221,4 +244,99 @@ test('Static frames survive the interval between scene updates', () => {
   const renderer = f.library.WebGLRenderer.instances[0];
   assert.equal(renderer.canvas.contextOptions.preserveDrawingBuffer, true);
   assert.equal(renderer.options.preserveDrawingBuffer, true);
+  assert.equal(renderer.context.flushCount, renderer.renderCount);
+});
+
+test('a native cover snapshot comes from the rendered canvas and retains no extra WebGL context', () => {
+  const f = fixture();
+  assert.equal(f.api.snapshot(), '');
+  f.api.update({ objects: [object('box', 'box')] }, false, f.container);
+  const renderer = f.library.WebGLRenderer.instances[0];
+  const before = renderer.renderCount;
+  assert.equal(f.api.snapshot(), 'data:image/png;base64,thumbnail');
+  assert.equal(renderer.renderCount, before + 1);
+  assert.equal(f.library.WebGLRenderer.instances.length, 1);
+  f.api.setActive(false);
+  assert.equal(f.api.snapshot(), '');
+  f.api.dispose();
+  assert.equal(f.api.snapshot(), '');
+  assert.equal(renderer.disposed, true);
+});
+
+test('cover frames retain the matching camera and restore it without subsequent auto-fit', () => {
+  const f = fixture();
+  assert.equal(f.api.captureFrame().snapshot, '');
+  assert.equal(f.api.restoreView('{"position":[3,4,5],"target":[1,2,3]}'), false);
+  f.api.update({ objects: [object('box', 'box')] }, false, f.container);
+  const controls = f.library.OrbitControls.instances[0];
+  const view = '{"position":[3,4,5],"target":[1,2,3]}';
+  assert.equal(f.api.restoreView(view), true);
+  const frame = f.api.captureFrame();
+  assert.equal(frame.snapshot, 'data:image/png;base64,thumbnail');
+  assert.equal(frame.view, view);
+  for (const invalid of ['null', '{}', '{', '{"position":[1,2,3],"target":[1,2,3]}',
+    '{"position":[null,4,5],"target":[1,2,3]}']) {
+    assert.equal(f.api.restoreView(invalid), false);
+    assert.equal(f.api.captureFrame().view, view);
+  }
+  f.api.update({ objects: [object('box', 'box', { position: [100, 0, 0] })] }, false, f.container);
+  assert.equal(f.api.captureFrame().view, view, 'stream updates retain the restored view');
+
+  let frames = 0;
+  f.api.setFrameListener(() => { frames++; });
+  controls.listeners.end();
+  assert.equal(frames, 0, 'passive previews do not notify native');
+  f.api.setInteracting(true);
+  controls.listeners.end();
+  assert.equal(frames, 1);
+  f.api.setActive(false);
+  controls.listeners.end();
+  assert.equal(frames, 1);
+  assert.equal(f.api.captureFrame().view, '');
+  f.api.dispose();
+});
+
+test('the Three host restores the view before a single deferred ready report', () => {
+  const hostPath = path.join(__dirname, '../main/resources/rawfile/visual/host.js');
+  const scene = { style: {} };
+  const pending = new Map();
+  const messages = [];
+  const calls = [];
+  let nextFrame = 0;
+  let frameListener;
+  const sandbox = {
+    document: { getElementById(id) { return id === 'scene' ? scene : null; } },
+    requestAnimationFrame(callback) { const id = ++nextFrame; pending.set(id, callback); return id; },
+    cancelAnimationFrame(id) { pending.delete(id); },
+    AmberThree: {
+      update() { calls.push('update'); return { ok: true, objectCount: 1 }; },
+      setActive() {},
+      restoreView(view) { calls.push(view); },
+      setFrameListener(listener) { frameListener = listener; },
+      dispose() {},
+    },
+    AmberVisualHost: { postMessage(message) { messages.push(JSON.parse(message)); } },
+    addEventListener() {},
+  };
+  sandbox.window = sandbox;
+  vm.runInNewContext(fs.readFileSync(hostPath, 'utf8'), sandbox, { filename: hostPath });
+  sandbox.AmberVisual.update({ renderer: 'threejs', revision: 1, scene: {}, view: 'saved-view' });
+  assert.deepEqual(calls, ['update', 'saved-view']);
+  assert.equal(messages.length, 0, 'native cannot capture until the first frame boundary');
+  sandbox.AmberVisual.update({ renderer: 'threejs', revision: 2, scene: {} });
+  assert.equal(pending.size, 1, 'new updates replace the pending ready report');
+  for (const callback of pending.values()) callback();
+  pending.clear();
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].revision, 2);
+  assert.equal(messages[0].ok, true);
+  frameListener();
+  assert.deepEqual(messages[1], { kind: 'three-frame', revision: 2 });
+  sandbox.AmberVisual.setActive(false);
+  frameListener();
+  assert.equal(messages.length, 2);
+  sandbox.AmberVisual.update({ renderer: 'threejs', revision: 3, scene: {} });
+  sandbox.AmberVisual.dispose();
+  assert.equal(pending.size, 0);
+  assert.equal(frameListener, null);
 });

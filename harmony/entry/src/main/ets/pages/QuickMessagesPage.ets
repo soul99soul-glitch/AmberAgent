@@ -5,9 +5,8 @@ import { router } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
 import type { KeyValueStore } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_LIGHT, BODY, META, TITLE, GUTTER, RADIUS, MOTION_OVERLAY } from '../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_INK, ACCENT_LIGHT, ERROR, BODY, META, TITLE, GUTTER, RADIUS, MOTION_OVERLAY } from '../design/tokens.ets';
 
-const DANGER: string = 'ERROR';
 const QUICK_MESSAGES_KEY: string = 'quick_messages';
 
 interface QuickMessage {
@@ -71,7 +70,7 @@ struct QuickMessagesPage {
     this.pageAlive = false;
   }
 
-  onBackPress(): boolean {
+  onBackPress(): void | boolean {
     if (!this.editing) return false;
     this.cancelEdit();
     return true;
@@ -169,7 +168,7 @@ struct QuickMessagesPage {
   swipeActions(item: QuickMessage): void {
     Row() {
       Text('删除').fontSize(13).fontColor(Color.White).textAlign(TextAlign.Center)
-        .width(72).height('100%').backgroundColor(DANGER)
+        .width(72).height('100%').backgroundColor(ERROR)
         .onClick((): void => { this.deleteItem(item); });
     }
   }
@@ -204,7 +203,7 @@ struct QuickMessagesPage {
                 .padding({ top: 14, bottom: 14 }).backgroundColor(SURFACE)
                 .border({ width: 1, color: LINE }).borderRadius(12)
                 .onClick((): void => { this.cancelEdit(); })
-              Text('保存').fontSize(BODY).fontColor(SURFACE).layoutWeight(1).textAlign(TextAlign.Center)
+              Text('保存').fontSize(BODY).fontColor(ACCENT_INK).layoutWeight(1).textAlign(TextAlign.Center)
                 .padding({ top: 14, bottom: 14 }).backgroundColor(ACCENT).borderRadius(12)
                 .margin({ left: 12 }).onClick((): void => { this.saveEdit(); })
             }.width('100%').margin({ top: 24 })

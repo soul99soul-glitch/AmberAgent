@@ -274,14 +274,5 @@ test('actual topic source/model/document chain is durable, idempotent, guarded a
     const secondTopic = await topicOps.applyTopics(batch.records, [{ title: '旅行', summary: '用户的旅行安排',
       memberIds: batch.added.map(row => row.id) }], Date.now());
     assert.ok(secondTopic.topicIds[0] > firstTopic.topicIds[0]);
-    const importRoot = path.join(directory, 'import');
-    await fsp.mkdir(path.join(importRoot, 'memories/note'), { recursive: true });
-    await fsp.writeFile(path.join(importRoot, 'manifest.json'), '{}');
-    await fsp.writeFile(path.join(importRoot, 'memories/note/import.mem.md'), domain.encodeMemoryFrontmatter(
-      domain.makeMemoryRecord({ id: removed.id, content: '导入的另一条独立记忆', scope: 'long_term', kind: 'note' })));
-    await domain.importMemoriesFrom(importRoot, emptyRestart.getMemoryImportExportDeps());
-    const imported = (await emptyRestart.getMemoryLibraryOps().getAllRecords()).find(row => row.content === '导入的另一条独立记忆');
-    assert.ok(imported.id > secondTopic.topicIds[0], 'Import allocates in the target library instead of restoring an exported ID');
-
   } finally { await fsp.rm(directory, { recursive: true, force: true }); }
 });

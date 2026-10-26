@@ -570,7 +570,15 @@ export struct ChatArtifactShelf {
           }, (artifact: ConversationMiniAppArtifact): string => artifact.id)
         }
       }.width('100%').alignItems(HorizontalAlign.Start)
-    }.layoutWeight(1).width('100%').align(Alignment.TopStart)
+    }.width('100%').align(Alignment.TopStart)
+  }
+
+  @Builder
+  private ImagePreviewCover(): void {
+    Column() {
+      ImagePreviewDialog({ images: this.imagePreviewImages,
+        onDismiss: (): void => { this.imagePreview = ''; } })
+    }.width('100%').height('100%')
   }
 
   build(): void {
@@ -598,11 +606,11 @@ export struct ChatArtifactShelf {
         } else {
           this.ArtifactList()
         }
-      }.width('100%').height('100%')
+      }.width('100%')
         .padding({ left: 20, right: 20, top: 12, bottom: 20 + this.navBarHeight }).backgroundColor(BG)
-      if (this.imagePreview.length > 0) {
-        ImagePreviewDialog({ images: this.imagePreviewImages, onDismiss: (): void => { this.imagePreview = ''; } })
-      }
-    }.width('100%').height('100%')
+    }.width('100%')
+      .bindContentCover(this.imagePreview.length > 0, this.ImagePreviewCover(), {
+        onWillDismiss: (): void => { this.imagePreview = ''; },
+      })
   }
 }

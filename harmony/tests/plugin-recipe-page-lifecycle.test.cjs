@@ -109,14 +109,21 @@ function launchFixture(kind, action) {
   const primitives = [{ name: 'file_read' }];
   const assistant = domain.makeAssistant({ id: 'fixture-assistant' });
 
-  // Extract the exact two DI exports, including their real forwarding signatures.
-  const diSource = read('di/AppContainer.ets');
+  // Execute the real capability owner launch methods with controlled platform ports.
+  const diSource = read('di/ToolCapabilityRuntime.ets');
   const parsed = ts.createSourceFile('AppContainer.ts', diSource, ts.ScriptTarget.ES2022, true);
   const exportName = kind === 'plugin' ? 'startPluginFromPage' : 'startRecipeFromPage';
-  const declaration = parsed.statements.find(statement => ts.isVariableStatement(statement)
-    && statement.declarationList.declarations.some(item => item.name.getText(parsed) === exportName));
+  const declarations = [];
+  const visit = node => {
+    if (ts.isVariableStatement(node) && node.declarationList.declarations.some(
+      item => item.name.getText(parsed) === exportName)) declarations.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  assert.equal(declarations.length, 1, `Unique production capability method ${exportName}`);
+  const declaration = declarations[0];
   assert.ok(declaration, `production DI export ${exportName}`);
-  const di = evaluate(declaration.getText(parsed), {
+  const dependencies = {
     ...helper, newId: domain.newId,
     getChatAssistants: async () => [assistant], getChatRepository: () => repository,
     resolveChatRuntime: async () => ({}),
@@ -124,7 +131,15 @@ function launchFixture(kind, action) {
     getPluginStore: async () => ({ listInstalled: async () => [plugin] }),
     getRecipeStore: async () => ({ listInstalled: async () => [{ descriptor, enabled: true }] }),
     createEntryPluginAdapter: () => ({ supports: () => true, prepare: async parent => parent }),
-  });
+  };
+  dependencies.ports = dependencies;
+  const owner = evaluate(declaration.getText(parsed) + `\nexports.${exportName} = ${exportName};`, dependencies);
+  // Keep the caller-facing root alias in this production path too.
+  const rootSource = ts.createSourceFile('AppContainer.ts', read('di/AppContainer.ets'), ts.ScriptTarget.ES2022, true);
+  const rootExport = rootSource.statements.find(statement => ts.isVariableStatement(statement)
+    && statement.declarationList.declarations.some(item => item.name.getText(rootSource) === exportName));
+  assert.ok(rootExport, `Compatibility DI export ${exportName}`);
+  const di = evaluate(rootExport.getText(rootSource), { capabilities: owner });
   const f = createPage(kind, di);
   if (kind === 'plugin') {
     f.page.selectedToolId = tool.toolId;

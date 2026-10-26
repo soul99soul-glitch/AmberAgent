@@ -5,34 +5,44 @@ const path = require('node:path');
 const ts = require('../../../chat/node_modules/typescript');
 require('../../../chat/node_modules/tsx/dist/cjs/index.cjs');
 const { novelComposerRunKind } = require('../../../deepread/src/main/ets/novel/context_builder.ts');
-const { canRestoreFailedInput } = require('../main/ets/novel/NovelComposerState.ts');
-const source = fs.readFileSync(path.join(__dirname, '../main/ets/pages/NovelWorkspacePage.ets'), 'utf8');
-
-function method(name) {
-  const match = new RegExp('^  (?:private )?(?:async )?' + name + '\\(', 'm').exec(source);
-  assert.ok(match, 'missing production method ' + name);
-  let depth = 1, end = source.indexOf('{', match.index) + 1;
-  for (; depth && end < source.length; end++) {
-    if (source[end] === '{') depth++;
-    if (source[end] === '}') depth--;
-  }
-  return source.slice(match.index, end);
-}
+const composer = require('../main/ets/novel/NovelComposerState.ts');
+const source = fs.readFileSync(path.join(__dirname, '../main/ets/platform_impl/novel/NovelDiscussionSession.ets'), 'utf8');
 
 function fixture() {
   let params = {};
   const calls = [];
   const creation = { validateWritingModel: async () => {}, generate: (...args) => { calls.push(args); return { id: 'run' }; } };
-  const code = ts.transpileModule('class UI {\n' + ['consumeContextOverrides', 'send'].map(method).join('\n') + '\n}\nreturn new UI();',
-    { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  const page = new Function('router', 'getNovelCreation', 'novelComposerRunKind', 'canRestoreFailedInput', code)(
-    { getParams: () => params }, () => creation, novelComposerRunKind, canRestoreFailedInput);
-  Object.assign(page, { projectId: 'project', project: { messages: [] }, workspaceStatus: { activeBranchId: 'main' },
-    lastContextReceiptToken: '', contextOverrides: null, pageAlive: true, busy: false, draft: '作者当前输入',
-    composerDraftOwner: 'project:main', composeMode: 'discuss', sendStarting: false, activeRunId: '', composerRevision: 0,
-    hasBlockingNovelRun: () => false, novelJobLocksWorkspace: () => false, flushComposerDraft() {}, attachNovelRun() {} });
-  page.setComposerDraft = value => { page.draft = value; page.composerRevision++; };
-  return { page, calls, creation, result(value) { params = { novelContextOverrides: JSON.stringify(value) }; } };
+  const code = ts.transpileModule(source, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  const exported = {};
+  new Function('exports', 'require', 'Observed', 'Scroller', 'setTimeout', code)(exported, name => {
+    if (name === '@amber/deepread-domain') return { novelComposerRunKind };
+    if (name === '@amber/chat-domain') return {};
+    if (name === '../../novel/NovelComposerState') return composer;
+    if (name === '@kit.ArkUI') return { router: { getParams: () => params }, promptAction: { showToast() {} } };
+    if (name === '@kit.BasicServicesKit') return { pasteboard: {} };
+    if (name.endsWith('/NativeTimelineFollow.ets') || name.endsWith('/NovelArchivePresentation.ets')
+      || name.endsWith('/NovelSettingProposalProjection.ets')) return {};
+    throw new Error('Unexpected discussion dependency: ' + name);
+  }, constructor => constructor, class {}, () => 0);
+  const page = new exported.NovelDiscussionSession();
+  const state = { errorMsg: '', busy: false };
+  page.start({
+    creation, projectId: () => 'project', currentProject: () => ({ messages: [] }),
+    currentStatus: () => ({ activeBranchId: 'main' }), isBusy: () => state.busy,
+    setBusy: value => { state.busy = value; }, error: value => { state.errorMsg = value; },
+    operationError: (action, error) => { state.errorMsg = `${action}: ${error}`; },
+    hasBlockingNovelRun: () => false, jobLocksWorkspace: () => false,
+    currentGhostwriteJob: () => null, currentGhostwriteReport: () => null,
+    reload: async () => {}, reloadToken: () => 0, selectedTab: () => 0,
+    backgrounded: () => false, closeControl() {}, uiContext: () => ({}),
+    composerDraftStore: { load: async () => ({ text: '', mode: 'whole_chapter' }), save: async () => {} },
+  });
+  Object.assign(page, { draft: '作者当前输入', composerDraftOwner: 'project:main', composeMode: 'discuss' });
+  // Streaming attachment is beyond the selection/send boundary covered by this fixture.
+  page.attachNovelRun = () => {};
+  return { page, calls, creation, state, result(value) { params = { novelContextOverrides: JSON.stringify(value) }; } };
 }
 const selected = { projectId: 'project', branchId: 'main', forceIncludeMaterialIds: ['include'], forceExcludeMaterialIds: ['exclude'], receiptToken: 'return-1' };
 
@@ -47,11 +57,11 @@ test('a matching preview return is applied once; later page shows cannot reimpor
 
 test('preview return from another project or branch cannot populate the current composer', () => {
   for (const change of [{ projectId: 'other' }, { branchId: 'alternate' }]) {
-    const { page, result } = fixture();
+    const { page, result, state } = fixture();
     page.contextOverrides = { branchId: 'main', forceIncludeMaterialIds: ['old'], forceExcludeMaterialIds: [] };
     result({ ...selected, ...change }); page.consumeContextOverrides();
     assert.equal(page.contextOverrides, null);
-    assert.match(page.errorMsg, /其他项目或分支/);
+    assert.match(state.errorMsg, /其他项目或分支/);
   }
 });
 
@@ -74,12 +84,12 @@ for (const [composeMode, mode, granularity, runKind] of [
 }
 
 test('model validation failure retains both author input and unconsumed one-run overrides', async () => {
-  const { page, result, calls, creation } = fixture();
+  const { page, result, calls, creation, state } = fixture();
   result(selected); page.consumeContextOverrides();
   creation.validateWritingModel = async () => { throw new Error('模型未配置'); };
   await page.send();
   assert.equal(calls.length, 0);
   assert.equal(page.draft, '作者当前输入');
   assert.deepEqual(page.contextOverrides.forceIncludeMaterialIds, ['include']);
-  assert.match(page.errorMsg, /模型未配置/);
+  assert.match(state.errorMsg, /模型未配置/);
 });

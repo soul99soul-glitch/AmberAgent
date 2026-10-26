@@ -1,5 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { providerPage } = require('./provider_session_fixture.cjs');
 const { actualPage } = require('../../../deepread/src/test/deepread_ui_fixture.cjs');
 function fixture() {
   const model = { id: 'model', modelId: 'api-id', displayName: 'Saved', type: 'chat',
@@ -70,12 +71,14 @@ test('immediate override removal keeps draft fields pending and latest models in
 test('DeepRead disclosure toggles animate both directions and settle immediately under motion policy or saving', () => {
   const cases = [
     ['ChatProviderSettingsPage', 'toggleUnconfigured', 'unconfiguredExpanded', { loaded: true }, { loaded: false }],
-    ['ChatProviderDetailPage', 'toggleReadingAdvanced', 'advancedOpen', { ioBusy: false }, { ioBusy: true }],
+    ['ChatProviderDetailPage', 'toggleReadingAdvanced', 'advancedOpen', { edit: { ioBusy: false } }, { edit: { ioBusy: true } }],
     ['ChatModelParamsPage', 'toggleReadingAdvanced', 'advancedExpanded', { saving: false }, { saving: true }],
   ];
   for (const [name, method, state, ready, blocked] of cases) {
     const animations = [];
-    const page = actualPage(`pages/${name}.ets`, [method], { Curve: { EaseOut: 'ease-out' } });
+    const env = { Curve: { EaseOut: 'ease-out' } };
+    const page = name === 'ChatProviderDetailPage' ? providerPage([method], env)
+      : actualPage(`pages/${name}.ets`, [method], env);
     page.getUIContext = () => ({ animateTo: (options, change) => { animations.push(options); change(); } });
     Object.assign(page, ready, { [state]: false, reduceMotion: false, appBackgrounded: false });
     page[method](); assert.equal(page[state], true, name);
@@ -93,7 +96,7 @@ test('DeepRead disclosure toggles animate both directions and settle immediately
 
 test('DeepRead login overlays honor reduced motion without changing the host overlay contract', () => {
   let product = 'deepread';
-  const page = actualPage('pages/ChatProviderDetailPage.ets', ['loginOverlayDuration', 'loginOverlayScale'], {
+  const page = actualPage('components/provider/ProviderLoginOverlays.ets', ['loginOverlayDuration', 'loginOverlayScale'], {
     getProductKind: () => product, MOTION_OVERLAY: 200,
   });
   Object.assign(page, { reduceMotion: false, appBackgrounded: false });

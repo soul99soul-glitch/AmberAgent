@@ -35,7 +35,12 @@ import { WEBMOUNT_HAR_MAX_BYTES } from '@amber/chat-domain';
 import {
   getWebMountOAuthRuntime, importWebMountHar, listWebMountHarArchives, removeWebMountHarArchive,
 } from '../platform_impl/WebMountOAuthRuntime.ets';
+import type { WebMountOAuthRuntime } from '../platform_impl/WebMountOAuthRuntime.ets';
 import type { WebMountHarArchive } from '@amber/chat-domain';
+
+import { WebMountOAuthSettingsSession } from '../platform_impl/webmount_settings/WebMountOAuthSettingsSession.ets';
+import type { WebMountOAuthSettingsPorts } from '../platform_impl/webmount_settings/WebMountOAuthSettingsSession.ets';
+import { WebMountOAuthSettingsView } from '../components/webmount/WebMountOAuthSettingsView.ets';
 
 interface HarArchiveRow { id: string; count: number; }
 
@@ -70,151 +75,33 @@ struct SettingExperimentalWebMountPage {
   @State feishuBusy: boolean = false;
   private feishuPkce: WebMountPkce | null = null;
   private feishuToken: WebMountOAuthToken | null = null;
-  // E12:站点 OAuth(通用)与 HAR 导入
-  @State oauthApps: WebMountOAuthApplication[] = [];
-  @State oauthStates: Map<string, WebMountOAuthState> = new Map();
-  @State oauthSiteId: string = '';
-  @State oauthAuthEndpoint: string = '';
-  @State oauthTokenEndpoint: string = '';
-  @State oauthClientId: string = '';
-  @State oauthRedirect: string = '';
-  @State oauthScope: string = '';
-  @State oauthEncoding: string = 'form';
-  @State oauthClientAuth: string = 'body';
-  @State oauthApiOrigins: string = '';
-  @State oauthSecret: string = '';
-  @State oauthNote: string = '';
-  @State oauthBusy: boolean = false;
-  // 长表单默认收起(有已配置应用时);添加/编辑展开,保存成功收起
-  @State oauthFormOpen: boolean = false;
+  @State oauth: WebMountOAuthSettingsSession = new WebMountOAuthSettingsSession();
+  // HAR 导入
   @State harArchives: HarArchiveRow[] = [];
   @State harNote: string = '';
   @State harBusy: boolean = false;
-  private oauthUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
     this.refresh();
     this.refreshFeishu();
-    this.refreshOauth();
+    const runtime: WebMountOAuthRuntime = getWebMountOAuthRuntime();
+    const ports: WebMountOAuthSettingsPorts = {
+      loadApplications: (): Promise<WebMountOAuthApplication[]> => runtime.loadApplications(),
+      saveApplication: (draft: WebMountOAuthApplicationDraft): Promise<WebMountOAuthApplication> => runtime.saveApplication(draft),
+      readState: (siteId: string): Promise<WebMountOAuthState> => runtime.readState(siteId),
+      subscribe: (siteId: string, listener: (state: WebMountOAuthState) => void): (() => void) => runtime.subscribe(siteId, listener),
+      connect: (siteId: string): Promise<WebMountOAuthState> => runtime.connect(siteId),
+      cancel: (siteId: string): void => runtime.cancel(siteId),
+      disconnect: (siteId: string): Promise<void> => runtime.disconnect(siteId),
+      animateForm: (apply: () => void): void => {
+        this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, apply);
+      },
+    };
+    this.oauth.start(ports);
     this.refreshHar();
   }
 
-  aboutToDisappear(): void {
-    for (const unsubscribe of this.oauthUnsubscribers) unsubscribe();
-    this.oauthUnsubscribers = [];
-  }
-
-  // ── E12:站点 OAuth ──
-
-  private refreshOauth(): void {
-    for (const unsubscribe of this.oauthUnsubscribers) unsubscribe();
-    this.oauthUnsubscribers = [];
-    getWebMountOAuthRuntime().loadApplications().then((apps: WebMountOAuthApplication[]): void => {
-      this.oauthApps = apps;
-      for (const app of apps) {
-        getWebMountOAuthRuntime().readState(app.siteId).then((state: WebMountOAuthState): void => {
-          this.oauthStates.set(app.siteId, state);
-          this.oauthStates = new Map(this.oauthStates);
-        }).catch((): void => {});
-        this.oauthUnsubscribers.push(getWebMountOAuthRuntime().subscribe(app.siteId,
-          (state: WebMountOAuthState): void => {
-            this.oauthStates.set(app.siteId, state);
-            this.oauthStates = new Map(this.oauthStates);
-          }));
-      }
-    }).catch((): void => {});
-  }
-
-  private oauthStatusText(siteId: string): string {
-    const state: WebMountOAuthState | undefined = this.oauthStates.get(siteId);
-    if (state === undefined) return '状态未知';
-    if (state.status === 'connected') return '已连接';
-    if (state.status === 'awaiting_callback') return '等待浏览器回调…';
-    if (state.status === 'expired') return '已过期';
-    if (state.status === 'failed') return `失败：${state.message ?? state.errorCode ?? ''}`;
-    if (state.status === 'disconnected') return '未连接';
-    return '未配置';
-  }
-
-  private oauthParseClientAuth(value: string): 'none' | 'body' | 'basic' {
-    const trimmed: string = value.trim().toLowerCase();
-    if (trimmed === 'none' || trimmed === 'basic') return trimmed;
-    return 'body';
-  }
-
-  private editOauth(app: WebMountOAuthApplication): void {
-    this.oauthSiteId = app.siteId;
-    this.oauthAuthEndpoint = app.authorizationEndpoint;
-    this.oauthTokenEndpoint = app.tokenEndpoint;
-    this.oauthClientId = app.clientId;
-    this.oauthRedirect = app.redirectUri;
-    this.oauthScope = app.scope;
-    this.oauthEncoding = app.tokenEncoding;
-    this.oauthClientAuth = app.clientAuthentication;
-    this.oauthApiOrigins = app.apiOrigins.join(',');
-    this.oauthSecret = '';
-    this.oauthNote = `编辑 ${app.siteId}；密钥留空则保留`;
-    this.setOauthFormOpen(true);
-  }
-
-  private saveOauth(): void {
-    if (this.oauthBusy) return;
-    this.oauthBusy = true;
-    this.oauthNote = '保存中…';
-    const application: WebMountOAuthApplication = {
-      siteId: this.oauthSiteId.trim(),
-      bindingHash: '',
-      authorizationEndpoint: this.oauthAuthEndpoint.trim(),
-      tokenEndpoint: this.oauthTokenEndpoint.trim(),
-      clientId: this.oauthClientId.trim(),
-      redirectUri: this.oauthRedirect.trim().length > 0 ? this.oauthRedirect.trim() : 'http://127.0.0.1:53682/callback',
-      scope: this.oauthScope.trim(),
-      tokenEncoding: this.oauthEncoding.trim().toLowerCase() === 'json' ? 'json' : 'form',
-      clientAuthentication: this.oauthParseClientAuth(this.oauthClientAuth),
-      apiOrigins: this.oauthApiOrigins.split(',').map((item: string): string => item.trim())
-        .filter((item: string): boolean => item.length > 0),
-      clientSecretRef: null,
-    };
-    const draft: WebMountOAuthApplicationDraft = {
-      application: application,
-      secretAction: this.oauthSecret.trim().length > 0 ? 'replace' : 'keep',
-      clientSecret: this.oauthSecret.trim().length > 0 ? this.oauthSecret.trim() : null,
-    };
-    getWebMountOAuthRuntime().saveApplication(draft).then((saved: WebMountOAuthApplication): void => {
-      this.oauthNote = `已保存 ${saved.siteId}(绑定 ${saved.bindingHash.substring(0, 8)}…)`;
-      this.oauthSecret = '';
-      this.setOauthFormOpen(false);
-      this.refreshOauth();
-    }).catch((error: Error): void => {
-      this.oauthNote = `保存失败：${error.message}`;
-    }).finally((): void => {
-      this.oauthBusy = false;
-    });
-  }
-
-  private connectOauth(siteId: string): void {
-    if (this.oauthBusy) return;
-    this.oauthBusy = true;
-    this.oauthNote = '';
-    getWebMountOAuthRuntime().connect(siteId).then((state: WebMountOAuthState): void => {
-      if (state.status === 'awaiting_callback') this.oauthNote = '已在系统浏览器打开授权页，完成后自动回填';
-    }).catch((error: Error): void => {
-      this.oauthNote = `连接失败：${error.message}`;
-    }).finally((): void => {
-      this.oauthBusy = false;
-    });
-  }
-
-  private cancelOauth(siteId: string): void {
-    getWebMountOAuthRuntime().cancel(siteId);
-    this.oauthNote = '已取消本次授权';
-  }
-
-  private disconnectOauth(siteId: string): void {
-    getWebMountOAuthRuntime().disconnect(siteId).then((): void => {
-      this.oauthNote = `已断开 ${siteId}`;
-    }).catch((): void => {});
-  }
+  aboutToDisappear(): void { this.oauth.dispose(); }
 
   // ── E12:HAR 导入 ──
 
@@ -454,12 +341,6 @@ struct SettingExperimentalWebMountPage {
   private setAddOpen(open: boolean): void {
     this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
       this.addOpen = open;
-    });
-  }
-
-  private setOauthFormOpen(open: boolean): void {
-    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
-      this.oauthFormOpen = open;
     });
   }
 
@@ -770,191 +651,8 @@ struct SettingExperimentalWebMountPage {
   }
 
   @Builder
-  OauthRow(app: WebMountOAuthApplication, isLast: boolean): void {
-    Column() {
-      Row() {
-        Column() {
-          Text(app.siteId)
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
-            .lineHeight(lineHeightForSize(16))
-            .fontFamily(FONT_SANS_MEDIUM)
-            .fontColor(INK)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(this.oauthStatusText(app.siteId))
-            .fontSize(12)
-            .lineHeight(lineHeightForSize(12))
-            .fontFamily(FONT_SANS_MEDIUM)
-            .fontColor(INK3)
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .margin({ top: 2 })
-        }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-
-        Text('编辑')
-          .fontSize(14).fontColor(this.accentColorStore)
-          .constraintSize({ minWidth: 44, minHeight: 44 })
-          .onClick((): void => { this.editOauth(app); })
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
-
-      Row({ space: 12 }) {
-        BtnFill({
-          label: '连接',
-          onTap: (): void => { this.connectOauth(app.siteId); },
-        })
-        Text('取消')
-          .fontSize(14).fontColor(INK3)
-          .constraintSize({ minWidth: 44, minHeight: 44 })
-          .onClick((): void => { this.cancelOauth(app.siteId); })
-        Text('断开')
-          .fontSize(14).fontColor(ERROR)
-          .constraintSize({ minWidth: 44, minHeight: 44 })
-          .onClick((): void => { this.disconnectOauth(app.siteId); })
-      }
-      .width('100%')
-      .justifyContent(FlexAlign.Start)
-
-      if (!isLast) {
-        Row() {
-          Row().width('100%').height(1).backgroundColor(LINE)
-        }
-        .width('100%')
-        .padding({ top: 8 })
-      }
-    }
-    .width('100%')
-    .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-  }
-
-  @Builder
   OauthCard(): void {
-    Column() {
-      ForEach(this.oauthApps, (app: WebMountOAuthApplication, index: number): void => {
-        this.OauthRow(app, index >= this.oauthApps.length - 1);
-      }, (app: WebMountOAuthApplication): string => app.siteId)
-
-      if (!this.oauthFormOpen && this.oauthApps.length > 0) {
-        Row() {
-          Icon({ name: 'plus', iconSize: 14, color: this.accentColorStore })
-          Text('添加 OAuth 应用')
-            .fontSize(14).fontColor(this.accentColorStore).fontFamily(FONT_SANS_MEDIUM)
-            .margin({ left: 6 })
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-        .constraintSize({ minHeight: 44 })
-        .padding({ left: 14, right: 14, top: 6, bottom: 6 })
-        .onClick((): void => {
-          this.oauthSiteId = '';
-          this.oauthAuthEndpoint = '';
-          this.oauthTokenEndpoint = '';
-          this.oauthClientId = '';
-          this.oauthRedirect = '';
-          this.oauthScope = '';
-          this.oauthApiOrigins = '';
-          this.oauthSecret = '';
-          this.oauthNote = '';
-          this.setOauthFormOpen(true);
-        })
-      }
-
-      if (this.oauthFormOpen || this.oauthApps.length === 0) {
-        Column() {
-          Text('站点 ID')
-            .fontSize(12).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
-            .width('100%').padding({ left: 14, right: 14, top: 12 })
-          TextInput({ text: this.oauthSiteId, placeholder: '如 hackernews(与该站点的注册应用一致)' })
-            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-            .backgroundColor(SURFACE2).borderRadius(8)
-            .margin({ left: 14, right: 14, top: 6 })
-            .onChange((v: string): void => { this.oauthSiteId = v; })
-          TextInput({ text: this.oauthAuthEndpoint, placeholder: '授权端点 https://…/authorize' })
-            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-            .backgroundColor(SURFACE2).borderRadius(8)
-            .margin({ left: 14, right: 14, top: 8 })
-            .onChange((v: string): void => { this.oauthAuthEndpoint = v; })
-          TextInput({ text: this.oauthTokenEndpoint, placeholder: '令牌端点 https://…/token' })
-            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-            .backgroundColor(SURFACE2).borderRadius(8)
-            .margin({ left: 14, right: 14, top: 8 })
-            .onChange((v: string): void => { this.oauthTokenEndpoint = v; })
-          TextInput({ text: this.oauthClientId, placeholder: 'Client ID' })
-            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-            .backgroundColor(SURFACE2).borderRadius(8)
-            .margin({ left: 14, right: 14, top: 8 })
-            .onChange((v: string): void => { this.oauthClientId = v; })
-          TextInput({ text: this.oauthRedirect, placeholder: '回调地址(默认 http://127.0.0.1:53682/callback)' })
-            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-            .backgroundColor(SURFACE2).borderRadius(8)
-            .margin({ left: 14, right: 14, top: 8 })
-            .onChange((v: string): void => { this.oauthRedirect = v; })
-          TextInput({ text: this.oauthScope, placeholder: 'Scope(可空)' })
-            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-            .backgroundColor(SURFACE2).borderRadius(8)
-            .margin({ left: 14, right: 14, top: 8 })
-            .onChange((v: string): void => { this.oauthScope = v; })
-          Row({ space: 12 }) {
-            Text('编码')
-              .fontSize(13).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
-            Text('form')
-              .fontSize(14)
-              .fontColor(this.oauthEncoding === 'form' ? this.accentColorStore : INK3)
-              .constraintSize({ minWidth: 44, minHeight: 44 })
-              .onClick((): void => { this.oauthEncoding = 'form'; })
-            Text('json')
-              .fontSize(14)
-              .fontColor(this.oauthEncoding === 'json' ? this.accentColorStore : INK3)
-              .constraintSize({ minWidth: 44, minHeight: 44 })
-              .onClick((): void => { this.oauthEncoding = 'json'; })
-            Blank().layoutWeight(1)
-            Text('密钥方式')
-              .fontSize(13).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
-            ForEach(['none', 'body', 'basic'], (mode: string): void => {
-              Text(mode)
-                .fontSize(14)
-                .fontColor(this.oauthClientAuth === mode ? this.accentColorStore : INK3)
-                .constraintSize({ minWidth: 44, minHeight: 44 })
-                .onClick((): void => { this.oauthClientAuth = mode; })
-            }, (mode: string): string => mode)
-          }
-          .width('100%')
-          .alignItems(VerticalAlign.Center)
-          .padding({ left: 14, right: 14, top: 8 })
-          TextInput({ text: this.oauthApiOrigins, placeholder: '允许注入 Bearer 的 API origins，逗号分隔(仅 https)' })
-            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-            .backgroundColor(SURFACE2).borderRadius(8)
-            .margin({ left: 14, right: 14, top: 8 })
-            .onChange((v: string): void => { this.oauthApiOrigins = v; })
-          TextInput({ text: this.oauthSecret, placeholder: 'Client Secret(留空保留；none 方式不需要)' })
-            .type(InputType.Password)
-            .height(44).fontSize(15).fontColor(INK).placeholderColor(INK3)
-            .backgroundColor(SURFACE2).borderRadius(8)
-            .margin({ left: 14, right: 14, top: 8 })
-            .onChange((v: string): void => { this.oauthSecret = v; })
-          if (this.oauthNote.length > 0) {
-            Text(this.oauthNote)
-              .fontSize(12).fontColor(INK3).fontFamily(FONT_SANS_MEDIUM)
-              .width('100%')
-              .padding({ left: 14, right: 14, top: 8 })
-          }
-          Row() {
-            Blank().layoutWeight(1)
-            BtnFill({ label: '保存配置', onTap: (): void => { this.saveOauth(); } })
-          }
-          .width('100%')
-          .padding({ left: 14, right: 14, top: 10, bottom: 14 })
-        }
-        .width('100%')
-        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
-          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
-      }
-    }
-    .width('100%')
+    WebMountOAuthSettingsView({ session: this.oauth })
   }
 
   @Builder

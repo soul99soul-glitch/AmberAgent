@@ -5,8 +5,8 @@
 //
 // 纯逻辑:零 UI/零 IO,可单测。
 
-import type { SubAgentDefinition } from './agent_prompt_config.ts';
-import { SUB_AGENT_BUILT_INS } from './agent_prompt_config.ts';
+import type { SubAgentDefinition } from './subagent_definitions.ts';
+import { SUB_AGENT_BUILT_INS } from './subagent_definitions.ts';
 
 export type MentionRoleKind = 'subagent' | 'council';
 

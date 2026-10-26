@@ -29,8 +29,8 @@ import { toText } from './message.ts';
 import type { AgentTool } from './tool.ts';
 import type { SubAgentRunner } from './subagent_runner.ts';
 import { makeAgentTool, makeInputSchemaObj } from './tool.ts';
-import type { SubAgentDefinition, SubAgentMode } from './agent_prompt_config.ts';
-import { subAgentExtractMentions } from './agent_prompt_config.ts';
+import type { SubAgentDefinition, SubAgentMode } from './subagent_definitions.ts';
+import { subAgentExtractMentions } from './subagent_definitions.ts';
 import type { SubAgentManager } from './subagent_manager.ts';
 
 // ExternalCliToolRegistry.kt:31-126 — supportedToolIds = tools.map { it.id } 逐字顺序

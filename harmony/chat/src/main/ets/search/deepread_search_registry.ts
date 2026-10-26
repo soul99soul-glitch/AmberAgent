@@ -35,33 +35,21 @@ export const createDeepReadSearchProviders = (
   const services = enabledServices(settings).filter(usable);
   const preferred = preferredSearchId === undefined ? settings.searchServices[settings.searchServiceSelected]?.id : preferredSearchId;
   const selected = services.find(options => options.id === preferred) ?? services[0];
-  if (selected !== undefined && selected.type !== 'bing_local') return [{ name: SEARCH_SERVICE_TYPES[selected.type],
-    search: async (queries, signal, onFailure): Promise<SearchHit[]> => {
-      if (aborted(signal)) return [];
-      deps.ensureSdk(); const hits: SearchHit[] = []; const started = Date.now();
-      for (const query of queries.filter(query => !/^https?:\/\//i.test(query))) {
-        const remaining = 9000 - (Date.now() - started);
-        if (aborted(signal) || remaining <= 0) break;
-        try {
-          const result = await withinBudget(getSearchService(selected).search({ query }, settings.searchCommonOptions, selected, { signal }), remaining);
-          if (aborted(signal)) break;
-          hits.push(...result.items.map(item => ({ title: item.title, url: item.url, snippet: item.text,
-            source: SEARCH_SERVICE_TYPES[selected.type], publishedAt: item.publishedAt })));
-        } catch (error) {
-          if (aborted(signal)) break;
-          onFailure?.(query, `${SEARCH_SERVICE_TYPES[selected.type]}: ${String(error)}`);
-        }
-      }
-      return hits;
-    },
-  }];
-  return [{ name: 'free_aggregate', search: async (queries, signal, onFailure): Promise<SearchHit[]> => {
+  const searchFree = async (
+    queries: string[], started: number, signal?: AbortSignalLike,
+    onFailure?: (query: string, error: string) => void,
+  ): Promise<SearchHit[]> => {
     if (aborted(signal)) return [];
-    const started = Date.now();
-    const buckets = await Promise.all(deps.freeProviders.map(provider => provider.search(queries, signal, onFailure).catch(error => {
-      if (!aborted(signal)) onFailure?.(queries[0] ?? '', `${provider.name}: ${String(error)}`);
-      return [] as SearchHit[];
-    })));
+    const buckets = await Promise.all(deps.freeProviders.map(async (provider: SearchProvider): Promise<SearchHit[]> => {
+      const remaining = 9000 - (Date.now() - started);
+      if (aborted(signal) || remaining <= 0) return [];
+      try {
+        return await withinBudget(provider.search(queries, signal, onFailure), remaining);
+      } catch (error) {
+        if (!aborted(signal)) onFailure?.(queries[0] ?? '', `${provider.name}: ${String(error)}`);
+        return [];
+      }
+    }));
     let hits = mergeHits(buckets);
     if (hits.length < 3 && settings.searchGoogleWebViewFallbackEnabled && deps.searchGoogle !== undefined) {
       for (const query of queries.filter(query => !/^https?:\/\//i.test(query))) {
@@ -78,5 +66,52 @@ export const createDeepReadSearchProviders = (
       }
     }
     return hits;
-  } }];
+  };
+  if (selected === undefined || selected.type === 'bing_local') {
+    return [{ name: 'free_aggregate', search: (queries, signal, onFailure): Promise<SearchHit[]> =>
+      searchFree(queries, Date.now(), signal, onFailure) }];
+  }
+  const candidates: SearchServiceOptions[] = [selected];
+  // Exhaust configured APIs before the Bing entry delegates to the free aggregate.
+  for (const options of services) {
+    if (options.id !== selected.id && options.type !== 'bing_local') candidates.push(options);
+  }
+  for (const options of services) {
+    if (options.type === 'bing_local') candidates.push(options);
+  }
+  return [{ name: SEARCH_SERVICE_TYPES[selected.type],
+    search: async (queries, signal, onFailure): Promise<SearchHit[]> => {
+      if (aborted(signal)) return [];
+      deps.ensureSdk();
+      const hits: SearchHit[] = []; const started = Date.now();
+      const picked = queries.filter(query => !/^https?:\/\//i.test(query));
+      let candidateIndex = 0;
+      for (let queryIndex = 0; queryIndex < picked.length; queryIndex++) {
+        const query = picked[queryIndex];
+        while (candidateIndex < candidates.length) {
+          const remaining = 9000 - (Date.now() - started);
+          if (aborted(signal) || remaining <= 0) return hits;
+          const options = candidates[candidateIndex];
+          if (options.type === 'bing_local') {
+            return hits.concat(await searchFree(picked.slice(queryIndex), started, signal, onFailure));
+          }
+          try {
+            const result = await withinBudget(getSearchService(options).search(
+              { query }, settings.searchCommonOptions, options, { signal }), remaining);
+            if (aborted(signal)) return hits;
+            hits.push(...result.items.map(item => ({ title: item.title, url: item.url, snippet: item.text,
+              source: SEARCH_SERVICE_TYPES[options.type], publishedAt: item.publishedAt })));
+            break;
+          } catch (error) {
+            if (aborted(signal)) return hits;
+            onFailure?.(query, `${SEARCH_SERVICE_TYPES[options.type]}: ${String(error)}`);
+            // A failed configuration is not retried for later research angles in this run.
+            candidateIndex++;
+          }
+        }
+        if (candidateIndex >= candidates.length) break;
+      }
+      return hits;
+    },
+  }];
 };

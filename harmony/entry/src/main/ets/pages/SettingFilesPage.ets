@@ -427,14 +427,13 @@ struct SettingFilesPage {
             }
             .width('100%').padding({ left: 16, right: 16 })
 
-            Column().height(24)
+            PageSpacer()
           }
           .width('100%')
         }
         .align(Alignment.TopStart)
         .width('100%').layoutWeight(1)
       }
-      PageSpacer()
     
       }, (e: number): string => `theme-${e}`)
 }

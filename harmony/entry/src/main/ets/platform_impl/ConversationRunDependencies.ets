@@ -1,4 +1,3 @@
-import { beginJevContextRun } from './JevContextSupport.ets';
 import { beginConversationCompaction } from './ConversationRunGuard.ets';
 // Detached Chat dependencies: existing Entry loaders and chat-domain factories.
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -22,28 +21,62 @@ import {
   recallMemorySelections, memoryRecallScoreToDebugText, selectMemoryProfile, createMemoryCitationTransformer,
   annotateSmartUiWeatherBindings,
 } from '@amber/chat-domain';
-import {
-  prepareProviderApi, getAgentCronTools, getAgentTaskTools, getChatKvStore,
-  getChatRepository, getCompactStore, hydrateSubAgentSetting, initMcpManager,
-  readTaskModelReference, TASK_COMPRESS_MODEL_KEY, loadTaskPrompts, resolveChatRuntime, resolveTaskModelReference,
-} from '../di/AppContainer.ets';
-import type { ChatRuntime, TaskPrompts } from '../di/AppContainer.ets';
+import type { ChatRuntime, ChatProviderRuntime, ChatProviderChoice, TaskPrompts } from '../di/ChatRuntimeContracts.ets';
 import type {
   DetachedConversationContext, PreparedConversationSeed,
 } from './ConversationRunService.ets';
 import { loadAgentRuntimeSnapshot, systemLanguage } from './AgentRuntimePrefs.ets';
-import { createEntryBase64ImageTransformer } from './Base64ImageSupport.ets';
-import { createEntryDocumentReader } from './DocumentSupport.ets';
-import { imageGenToolAvailable } from './ImageGenTool.ets';
-import { jevNoulBatch } from './JevSupport.ets';
 import type { JevNoulBatchResult } from './JevSupport.ets';
-import { getMemoryReadRepository, getMemoryLibraryOps, getMemoryTopicStoreOps } from './MemoryStore.ets';
-import { getMiniAppPlatform, getMiniAppRepositorySync } from './MiniAppPlatform.ets';
-import type { MiniAppPlatform } from './MiniAppPlatform.ets';
-import { createEntryOcrTransformer, loadOcrSeed } from './OcrSupport.ets';
 import type { OcrSeed } from './OcrSupport.ets';
-import { createEntryPlaceholderValues } from './PlaceholderSupport.ets';
-import { ensureSearchSdk } from './SearchSdkInit.ets';
+
+import type { AbortSignalLike } from '@amber/deepread-domain';
+import type {
+  AgentTool, CompactStore, ConversationRepository, DocumentReaderDeps, JevContextRun, KeyValueStore,
+  MiniAppRepository, OpenAIChatApi, PlaceholderValues, ProviderSetting, TaskModelReference,
+  TerminalRuntime, MoshRuntime, PythonRuntime, SSHProfileStore, SkillMetadata, OutputMessageTransformer,
+} from '@amber/chat-domain';
+import type { MemoryLibraryOps, MemoryTopicStoreOps } from './MemoryStore.ets';
+
+export interface ChatExecutionResources {
+  getTerminalRuntime: () => Promise<TerminalRuntime>;
+  getMoshRuntime: () => Promise<MoshRuntime | null>;
+  getPythonRuntime: () => Promise<PythonRuntime | null>;
+  getSSHProfileStore: () => Promise<SSHProfileStore>;
+  listSkills: () => SkillMetadata[];
+}
+
+export interface ConversationPreparationPorts extends ChatExecutionResources {
+  kv: KeyValueStore;
+  resolveProviderRuntime: (assistantId: string) => Promise<ChatProviderRuntime | null>;
+  ensureSearchSdk: () => void;
+  initializeMcp: () => Promise<void>;
+  readCompressReference: () => Promise<TaskModelReference>;
+  resolveTaskChoice: (reference: TaskModelReference, fallback: ChatProviderChoice) => Promise<ChatProviderChoice | null>;
+  loadTaskPrompts: () => Promise<TaskPrompts>;
+  loadOcrSeed: (kv: KeyValueStore) => Promise<OcrSeed>;
+  hydrateSubAgentSetting: () => Promise<SubAgentRuntimeSetting>;
+  imageGenAvailable: () => Promise<boolean>;
+  loadAgentTaskTools: () => Promise<AgentTool[]>;
+  loadAgentCronTools: () => Promise<AgentTool[]>;
+}
+
+export interface ConversationTurnPorts {
+  repository: ConversationRepository;
+  compactStore: CompactStore;
+  memoryRepository: MemoryReadRepository;
+  memoryLibrary: MemoryLibraryOps;
+  memoryTopics: MemoryTopicStoreOps;
+  rerankContext: (purpose: string, query: string, keys: string[], candidates: Record<string, string>) => Promise<JevNoulBatchResult | null>;
+  loadTaskPrompts: () => Promise<TaskPrompts>;
+  prepareProviderApi: (provider: ProviderSetting, headers: Record<string, string>) => Promise<OpenAIChatApi>;
+  beginJevContextRun: (conversationId: string, runId: string, signal?: AbortSignalLike) => JevContextRun;
+  loadMiniApp: (id: string) => Promise<MiniAppRecord | null>;
+  miniAppRepository: MiniAppRepository;
+  createDocumentReader: () => DocumentReaderDeps;
+  createPlaceholderValues: (modelId: string, modelName: string, nicknameOf: () => string) => PlaceholderValues;
+  createOcrTransformer: (seed: OcrSeed, supportsImage: boolean) => MessageTransformer;
+  createBase64ImageTransformer: () => OutputMessageTransformer;
+}
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'Chat.RunDependencies';
@@ -57,26 +90,48 @@ const logProviderCompletion = (
   }));
 };
 
+// Provider resolution is side-effect free for local execution resources. Preparation
+// awaits the enabled resources before their tools can be exposed to the provider.
+export const prepareChatRuntime = async (
+  runtime: ChatProviderRuntime, ports: ChatExecutionResources,
+): Promise<ChatRuntime> => {
+  const assistant = runtime.assistant;
+  const terminalEnabled: boolean = assistant.localTools.includes('terminal');
+  const terminalRuntime: TerminalRuntime | null = terminalEnabled ? await ports.getTerminalRuntime() : null;
+  const moshRuntime: MoshRuntime | null = terminalEnabled ? await ports.getMoshRuntime() : null;
+  const pythonRuntime: PythonRuntime | null = assistant.localTools.includes('python') ? await ports.getPythonRuntime() : null;
+  const sshProfiles: SSHProfileStore | null = terminalEnabled ? await ports.getSSHProfileStore() : null;
+  return {
+    api: runtime.api, resolvedChoice: runtime.resolvedChoice, assistant, params: runtime.params,
+    contextMessageSize: runtime.contextMessageSize,
+    modelContextWindowTokens: runtime.modelContextWindowTokens,
+    modelSupportsImageInput: runtime.modelSupportsImageInput,
+    modelAbilities: runtime.modelAbilities,
+    allSkills: ports.listSkills(), terminalRuntime, pythonRuntime, moshRuntime, sshProfiles,
+  };
+};
+
 export const prepareConversationSeed = async (
-  conversation: Conversation,
+  conversation: Conversation, ports: ConversationPreparationPorts,
 ): Promise<PreparedConversationSeed> => {
-  const runtime: ChatRuntime | null = await resolveChatRuntime(conversation.assistantId);
-  if (runtime === null) throw new Error('未配置可用的 Provider/模型');
-  const kv = getChatKvStore();
-  ensureSearchSdk();
-  await initMcpManager().catch((e: Error): void => {
+  const provider: ChatProviderRuntime | null = await ports.resolveProviderRuntime(conversation.assistantId);
+  if (provider === null) throw new Error('未配置可用的 Provider/模型');
+  const runtime: ChatRuntime = await prepareChatRuntime(provider, ports);
+  const kv = ports.kv;
+  ports.ensureSearchSdk();
+  await ports.initializeMcp().catch((e: Error): void => {
     hilog.warn(DOMAIN, TAG, 'MCP initialization failed: %{public}s', e.message);
   });
   const display: DisplaySetting = await loadDisplaySetting(kv);
-  const compressReference = await readTaskModelReference(TASK_COMPRESS_MODEL_KEY);
+  const compressReference = await ports.readCompressReference();
   // Keep the existing optional OCR/subagent gates when their hydration fails.
-  const ocr: OcrSeed | null = await loadOcrSeed(kv).catch((): null => {
+  const ocr: OcrSeed | null = await ports.loadOcrSeed(kv).catch((): null => {
     hilog.warn(DOMAIN, TAG, 'OCR settings unavailable for this run');
     return null;
   });
   let subAgent: SubAgentRuntimeSetting;
   try {
-    subAgent = await hydrateSubAgentSetting();
+    subAgent = await ports.hydrateSubAgentSetting();
   } catch {
     subAgent = makeSubAgentRuntimeSetting();
     hilog.warn(DOMAIN, TAG, 'Subagent settings unavailable for this run');
@@ -84,8 +139,8 @@ export const prepareConversationSeed = async (
   return {
     runtime,
     agentRuntime: await loadAgentRuntimeSnapshot(kv),
-    compressChoice: await resolveTaskModelReference(compressReference, runtime.resolvedChoice),
-    taskPrompts: await loadTaskPrompts(),
+    compressChoice: await ports.resolveTaskChoice(compressReference, runtime.resolvedChoice),
+    taskPrompts: await ports.loadTaskPrompts(),
     searchSettings: await loadSearchPrefs(kv),
     ocrSeed: ocr,
     miniAppSetting: await loadMiniAppSetting(kv),
@@ -93,16 +148,16 @@ export const prepareConversationSeed = async (
     generativeWidgetsEnabled: display.enableGenerativeWidgets,
     webmountGlobalEnabled: (await kv.get('webmount_global_enabled')) === 'true',
     webmountEvalEnabled: (await kv.get('webmount_eval_enabled')) === 'true',
-    imageGenConfigured: await imageGenToolAvailable().catch((): boolean => false),
+    imageGenConfigured: await ports.imageGenAvailable().catch((): boolean => false),
     subAgentEnabled: subAgent.enabled,
     subAgentMode: subAgent.mode,
-    agentTaskTools: await getAgentTaskTools(),
-    agentCronTools: await getAgentCronTools(),
+    agentTaskTools: await ports.loadAgentTaskTools(),
+    agentCronTools: await ports.loadAgentCronTools(),
     enableGenerationNotification: display.enableNotificationOnMessageGeneration,
   };
 };
 
-const inputTransformers = (ctx: DetachedConversationContext): MessageTransformer[] => {
+const inputTransformers = (ctx: DetachedConversationContext, ports: ConversationTurnPorts): MessageTransformer[] => {
   const seed: PreparedConversationSeed = ctx.seed;
   const rt: ChatRuntime = seed.runtime;
   const list: MessageTransformer[] = [
@@ -114,16 +169,15 @@ const inputTransformers = (ctx: DetachedConversationContext): MessageTransformer
     createMiniAppPromptTransformer({
       enabled: (): boolean => seed.miniAppSetting.enabled,
       loadApp: (id: string): Promise<MiniAppRecord | null> =>
-        getMiniAppPlatform().then((platform: MiniAppPlatform): Promise<MiniAppRecord | null> =>
-          platform.repository.getById(id)),
+        ports.loadMiniApp(id),
     }),
     createTemplateTransformer(),
-    createPlaceholderTransformer(createEntryPlaceholderValues(
+    createPlaceholderTransformer(ports.createPlaceholderValues(
       rt.params.model.modelId, rt.params.model.displayName, (): string => seed.userNickname)),
-    createDocumentTransformer(createEntryDocumentReader()),
+    createDocumentTransformer(ports.createDocumentReader()),
   ];
   if (seed.ocrSeed !== null) {
-    list.push(createEntryOcrTransformer(seed.ocrSeed, rt.modelSupportsImageInput));
+    list.push(ports.createOcrTransformer(seed.ocrSeed, rt.modelSupportsImageInput));
   }
   return list;
 };
@@ -136,11 +190,11 @@ const latestUserQuery = (conversation: Conversation, fallback: string = ''): str
   return fallback;
 };
 
-const extraSystemBlocks = async (ctx: DetachedConversationContext): Promise<string[]> => {
+const extraSystemBlocks = async (ctx: DetachedConversationContext, ports: ConversationTurnPorts): Promise<string[]> => {
   const blocks: string[] = ctx.seed.generativeWidgetsEnabled
     ? [resolveGenerativeWidgetInstruction('declared-content-v1')] : [];
   if (!ctx.seed.agentRuntime.enableRecentChatsReference) return blocks;
-  let recent: ConversationSummary[] = await getChatRepository().listRecent(RECENT_CHATS_PROMPT_LIMIT);
+  let recent: ConversationSummary[] = await ports.repository.listRecent(RECENT_CHATS_PROMPT_LIMIT);
   if (recent.length > 1) {
     const query: string = latestUserQuery(ctx.activeConversation(), ctx.conversation.title);
     const keys: string[] = [];
@@ -149,7 +203,7 @@ const extraSystemBlocks = async (ctx: DetachedConversationContext): Promise<stri
       keys.push(summary.id);
       candidates[summary.id] = summary.title.substring(0, 120);
     }
-    const batch: JevNoulBatchResult | null = await jevNoulBatch('context_selection', query, keys, candidates);
+    const batch: JevNoulBatchResult | null = await ports.rerankContext('context_selection', query, keys, candidates);
     if (batch !== null && !batch.shadow) {
       const filtered: ConversationSummary[] = recent.filter(
         (summary: ConversationSummary): boolean => (batch.probabilities[summary.id] ?? 1) >= 0.5);
@@ -166,7 +220,7 @@ const extraSystemBlocks = async (ctx: DetachedConversationContext): Promise<stri
   return blocks;
 };
 
-const memoryReranker = (query: string):
+const memoryReranker = (query: string, ports: ConversationTurnPorts):
   ((selections: MemoryRecallSelection[]) => Promise<MemoryRecallSelection[]>) =>
   async (selections: MemoryRecallSelection[]): Promise<MemoryRecallSelection[]> => {
     if (selections.length === 0) return selections;
@@ -177,7 +231,7 @@ const memoryReranker = (query: string):
       keys.push(key);
       candidates[key] = selection.record.content.substring(0, 120);
     }
-    const batch: JevNoulBatchResult | null = await jevNoulBatch('memory_recall', query, keys, candidates);
+    const batch: JevNoulBatchResult | null = await ports.rerankContext('memory_recall', query, keys, candidates);
     if (batch === null || batch.shadow) return selections;
     const kept: MemoryRecallSelection[] = selections.filter(
       (selection: MemoryRecallSelection): boolean =>
@@ -185,7 +239,7 @@ const memoryReranker = (query: string):
     return kept;
   };
 
-const memorySystemBlocks = async (ctx: DetachedConversationContext): Promise<string[]> => {
+const memorySystemBlocks = async (ctx: DetachedConversationContext, ports: ConversationTurnPorts): Promise<string[]> => {
   const runtime = ctx.seed.agentRuntime;
   const gate: MemoryRecallRuntimeGate = {
     enableCoreMemory: runtime.enableCoreMemory,
@@ -195,10 +249,10 @@ const memorySystemBlocks = async (ctx: DetachedConversationContext): Promise<str
   };
   const conversation: Conversation = ctx.activeConversation();
   const now: number = Date.now();
-  const repository: MemoryReadRepository = getMemoryReadRepository();
+  const repository: MemoryReadRepository = ports.memoryRepository;
   let selections: MemoryRecallSelection[] = await recallMemorySelections(
     gate, currentMessages(conversation), repository, now);
-  try { selections = await memoryReranker(latestUserQuery(conversation))(selections); }
+  try { selections = await memoryReranker(latestUserQuery(conversation), ports)(selections); }
   catch (_error) { /* Keep local selections when the optional reranker fails. */ }
   const scopes: MemoryScope[] = [];
   if (gate.enableCoreMemory) scopes.push('core');
@@ -208,8 +262,8 @@ const memorySystemBlocks = async (ctx: DetachedConversationContext): Promise<str
   let profile: MemoryProfileSelection = { prompt: '', coveredIds: [] };
   if (selections.length > 0) {
     try {
-      profile = selectMemoryProfile(await getMemoryTopicStoreOps().snapshotProfile(),
-        await getMemoryLibraryOps().getAllRecords(), scopes,
+      profile = selectMemoryProfile(await ports.memoryTopics.snapshotProfile(),
+        await ports.memoryLibrary.getAllRecords(), scopes,
         selections.map((selection: MemoryRecallSelection): number => selection.record.id), now, maxChars);
     } catch (_error) { /* Individual records remain usable if the optional profile is unavailable. */ }
   }
@@ -236,7 +290,7 @@ const memorySystemBlocks = async (ctx: DetachedConversationContext): Promise<str
   return blocks;
 };
 
-export const buildConversationCompressProvider = (seed: PreparedConversationSeed): ChatStreamProvider => {
+export const buildConversationCompressProvider = (seed: PreparedConversationSeed, ports: ConversationTurnPorts): ChatStreamProvider => {
   const rt: ChatRuntime = seed.runtime;
   const choice = seed.compressChoice;
   if (choice === null) return asChatStreamProvider(rt.api, () => rt.params);
@@ -251,16 +305,16 @@ export const buildConversationCompressProvider = (seed: PreparedConversationSeed
   return {
     streamText: async (messages: UIMessage[], onChunk: (chunk: MessageChunk) => void,
       opts?: StreamOpts): Promise<void> => {
-      const api = await prepareProviderApi(choice.provider, headers);
+      const api = await ports.prepareProviderApi(choice.provider, headers);
       await api.streamText(messages, params, onChunk, opts);
     },
   };
 };
 
-const prepareMessages = (ctx: DetachedConversationContext):
+const prepareMessages = (ctx: DetachedConversationContext, ports: ConversationTurnPorts):
   ((messages: UIMessage[]) => Promise<UIMessage[]>) => {
   const rt: ChatRuntime = ctx.seed.runtime;
-  const jev = beginJevContextRun(ctx.conversationId, ctx.runId, ctx.signal);
+  const jev = ports.beginJevContextRun(ctx.conversationId, ctx.runId, ctx.signal);
   const cc = ctx.seed.agentRuntime.contextCompaction;
   const policy: CompactPolicy = makeCompactPolicy({
     enabled: cc.enabled,
@@ -270,7 +324,7 @@ const prepareMessages = (ctx: DetachedConversationContext):
     keepRecentTurns: cc.keepRecentTurns,
     maxSummaryTokens: cc.maxSummaryTokens,
   });
-  const provider: ChatStreamProvider = buildConversationCompressProvider(ctx.seed);
+  const provider: ChatStreamProvider = buildConversationCompressProvider(ctx.seed, ports);
   let compactActiveCount: number = 0;
   const changeCompactCount = (change: number): void => {
     compactActiveCount = Math.max(0, compactActiveCount + change);
@@ -279,13 +333,13 @@ const prepareMessages = (ctx: DetachedConversationContext):
   return async (messages: UIMessage[]): Promise<UIMessage[]> => {
     const effective: Conversation = conversationWithMessagesAsNodes(ctx.activeConversation(), messages);
     // Keep the original compress-prompt refresh; the provider/model remains this run's seed.
-    const prompts: TaskPrompts = await loadTaskPrompts();
+    const prompts: TaskPrompts = await ports.loadTaskPrompts();
     const prepared: PreparedContext = await prepareContext(effective, policy,
       rt.modelContextWindowTokens, messages, rt.contextMessageSize, {
         abortSignal: ctx.signal,
         prepareToolResults: (source: UIMessage[], keep: number): Promise<JevPreparedToolResults> => jev.prepare(source, keep),
         provider,
-        store: getCompactStore(),
+        store: ports.compactStore,
         compressPrompt: prompts.compressPrompt,
         launchPrecompact: (run: () => Promise<CompactResult>): void => {
           const release: () => void = beginConversationCompaction(ctx.conversationId);
@@ -301,7 +355,7 @@ const prepareMessages = (ctx: DetachedConversationContext):
   };
 };
 
-export const buildConversationTurnDeps = (ctx: DetachedConversationContext): ChatTurnDeps => {
+export const buildConversationTurnDeps = (ctx: DetachedConversationContext, ports: ConversationTurnPorts): ChatTurnDeps => {
   const seed: PreparedConversationSeed = ctx.seed;
   const rt: ChatRuntime = seed.runtime;
   const window: number = estimateContextWindow(rt.modelContextWindowTokens);
@@ -309,15 +363,15 @@ export const buildConversationTurnDeps = (ctx: DetachedConversationContext): Cha
     assistant: rt.assistant,
     finalTokenBudget: Math.max(Math.trunc(window * seed.agentRuntime.contextCompaction.forceRatio), 4000),
     agentSoul: buildAgentSoulPrompt(seed.agentRuntime.agentSoulMarkdown),
-    inputTransformers: inputTransformers(ctx),
+    inputTransformers: inputTransformers(ctx, ports),
     modelSupportsImageInput: rt.modelSupportsImageInput,
     outputTransformers: [
       createThinkTagTransformer(),
       createReasoningLevelMetadataTransformer(rt.params.reasoningLevel, currentMessages(ctx.activeConversation())),
-      createEntryBase64ImageTransformer(),
+      ports.createBase64ImageTransformer(),
       createMiniAppOutputTransformer({
         enabled: (): boolean => seed.miniAppSetting.enabled,
-        repository: getMiniAppRepositorySync(),
+        repository: ports.miniAppRepository,
       }),
       regexOutputTransformer,
       createMemoryCitationTransformer(ctx.runId, currentMessages(ctx.activeConversation()), (): number[] => ctx.recalledMemoryIds),
@@ -380,9 +434,9 @@ export const buildConversationTurnDeps = (ctx: DetachedConversationContext): Cha
     }),
     store: { save: (conversation: Conversation): Promise<void> => ctx.save(conversation) },
     contextMessageSize: rt.contextMessageSize,
-    prepareContextMessages: prepareMessages(ctx),
-    memorySystemBlocks: (): Promise<string[]> => memorySystemBlocks(ctx),
-    extraSystemBlocks: (): Promise<string[]> => extraSystemBlocks(ctx),
+    prepareContextMessages: prepareMessages(ctx, ports),
+    memorySystemBlocks: (): Promise<string[]> => memorySystemBlocks(ctx, ports),
+    extraSystemBlocks: (): Promise<string[]> => extraSystemBlocks(ctx, ports),
     abortSignal: ctx.signal,
     retrySetting: makeGenerationRetrySetting({
       enabled: seed.agentRuntime.generationRetry.enabled,

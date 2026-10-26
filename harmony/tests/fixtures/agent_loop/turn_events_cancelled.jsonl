@@ -1,3 +1,0 @@
-{"type":"delta","text":"正在生成一个很长的回答"}
-{"type":"cancel_requested","source":"user","expectedStatus":"cancelling"}
-{"type":"cancelled","expectedStatus":"cancelled","persistPartialText":true}

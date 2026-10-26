@@ -274,12 +274,11 @@ test('firecrawl:sources/categories asStringList(数组/逗号串)条件落键;we
   assert.equal(r.items[1].text, 'ns\n2026-01-01'); // trimIndent 模板
 });
 
-test('firecrawl:**bug 钉住** search 失败文案为字面量;空 data 逐字;scrape 全链', async () => {
+test('firecrawl:search 失败保留 HTTP 状态;空 data 逐字;scrape 全链', async () => {
   initSearchSdk(mockHttpSeq([{ status: 500, headers: {}, body: '' }], []));
   await assert.rejects(
     firecrawlSearchService.search({ query: 'q' }, { resultSize: 10 }, opts('firecrawl')),
-    // Android "response failed #${'$'}{response.code}" — ${'$'} 渲染 $ 后其余为字面量
-    (e: Error): boolean => e.message === 'response failed #{response.code}',
+    (e: Error): boolean => e.message === 'response failed #500',
   );
   initSearchSdk(mockHttpSeq([{ status: 200, headers: {}, body: JSON.stringify({}) }], []));
   await assert.rejects(

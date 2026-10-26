@@ -58,9 +58,6 @@ ArkTS 模块级 `export let` 是可变绑定,重新赋值**不触发任何 UI �
 | `any`、未类型化对象字面量 | 显式 interface / class |
 | 解构赋值、对象展开、运行时 `typeof` 判型等 TS 动态特性 | 逐字段赋值 + `instanceof` |
 
-完整踩坑清单(含 RDB `ValuesBucket`、RCP `createSession` 签名、通知枚举等):
-`harmony/entry/TODO-compile-guide.md`。
-
 ### 4b. @BuilderParam:裸 lambda 禁止直接构造组件(运行期进程崩溃,编译不拦)
 
 - 已踩真 bug(2026-09-27 设置重排):`CardGroup({ content: (): void => { CardRow(...) } })` — 组件构造发生在

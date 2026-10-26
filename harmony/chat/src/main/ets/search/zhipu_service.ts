@@ -31,7 +31,8 @@ export const zhipuSearchService: SearchService = {
     context?: SearchRequestContext,
   ): Promise<SearchResult> => {
     const opts: ZhipuOptions = asOptions(serviceOptions);
-    const query: string = requireQuery(params);
+    // The orchestrator appends recency hints; Zhipu still limits the final query to 70 characters.
+    const query: string = Array.from(requireQuery(params)).slice(0, 70).join('');
     const resp = await searchSdkRuntime().http.fetch({
       url: 'https://open.bigmodel.cn/api/paas/v4/web_search',
       method: 'POST',
@@ -65,7 +66,7 @@ export const zhipuSearchService: SearchService = {
           title: strOrNull(o['title']) ?? '',
           url: strOrNull(o['link']) ?? '',
           text: strOrNull(o['content']) ?? '',
-          publishedAt: null,
+          publishedAt: strOrNull(o['publish_date']),
           images: [],
         };
       }),

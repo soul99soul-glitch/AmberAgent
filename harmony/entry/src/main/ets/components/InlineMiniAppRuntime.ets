@@ -588,6 +588,7 @@ export struct InlineMiniAppRuntime {
         }
         .width('100%').height(44)
         .justifyContent(FlexAlign.End)
+        .alignItems(VerticalAlign.Center)
       }
       if (this.errorMessage.length > 0) {
         Text(this.errorMessage).fontSize(12).fontColor(ERROR).width('100%').padding(8)

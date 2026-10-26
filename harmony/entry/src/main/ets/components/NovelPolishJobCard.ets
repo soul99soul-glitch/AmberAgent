@@ -120,11 +120,11 @@ export struct NovelPolishJobCard {
         this.detailToggle('candidate')
         if (this.candidateExpanded) {
           Column() {
-            Text('候选未原子收录前不会改变正文。').fontSize(11).fontColor(INK3).margin({ top: 8 })
+            Text('候选未原子收录前不会改变正文。').fontSize(11).fontColor(INK3).width('100%').margin({ top: 8 })
             Text(this.job!.candidate.content).fontSize(12).fontColor(INK2).lineHeight(18)
               .width('100%').margin({ top: 7 })
           }
-          .width('100%')
+          .width('100%').alignItems(HorizontalAlign.Start)
           .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
             .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         }
@@ -151,7 +151,7 @@ export struct NovelPolishJobCard {
                 .width('100%').margin({ top: 7 })
             }, (finding: GhostwriteFinding): string => `${finding.code}:${finding.location}`)
           }
-          .width('100%')
+          .width('100%').alignItems(HorizontalAlign.Start)
           .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
             .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         }

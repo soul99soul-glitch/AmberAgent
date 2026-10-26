@@ -42,7 +42,7 @@ const THOUGHT_CLOUD_PATH: string = 'M109 19.1C96.7 21.1 83.1 31 78.1 41.6L75.7 4
 export struct ChatMessageReasoning {
   @StorageProp('themeEpoch') themeEpoch: number = 0;
   @Prop @Watch('updateReasoningSlots') part: UIMessagePartReasoning;
-  @Prop state: string;
+  @Prop @Watch('onStateChanged') state: string;
   @Prop @Watch('onLoadingChanged') loading: boolean;
   @Prop autoCloseThinking: boolean = true;
   @Prop allowAutoCollapse: boolean = true;
@@ -99,6 +99,14 @@ export struct ChatMessageReasoning {
         }, 300);
       }
     }
+  }
+
+  private onStateChanged(): void {
+    if (this.state === 'collapsed') {
+      this.stopThinkingFollow();
+      return;
+    }
+    this.updateReasoningSlots();
   }
 
   private startDurationTicker(): void {
@@ -160,20 +168,19 @@ export struct ChatMessageReasoning {
       const notice: string = rendered.slice(0, rendered.length - (source.length - sourceStart) - 1);
       blocks.push({ key: 'notice', text: notice });
     }
-    const lines: string[] = source.split('\n');
-    let offset: number = 0;
-    let start: number = 0;
+    const lines: string[] = source.slice(sourceStart).split('\n');
+    let offset: number = sourceStart;
+    let start: number = sourceStart;
     let content: string = '';
     for (let index: number = 0; index < lines.length; index++) {
       const line: string = lines[index];
-      if (index > 0 && content.length + 1 + line.length > 512) {
-        // Bound the number of native Text nodes without inserting new line breaks.
-        // Partition from the original source so the moving tail window keeps IDs.
-        if (start + content.length >= sourceStart) {
-          const visibleStart: number = Math.max(start, sourceStart);
-          const visible: string = content.slice(visibleStart - start);
-          blocks.push({ key: `source-${start}`, text: visible });
-        }
+      if (index > 0 && (content.length + 1 + line.length > 512 ||
+        (line.length > 0 && Math.floor(start / 512) !== Math.floor(offset / 512)))) {
+        // Absolute buckets keep interior blocks stable without rescanning the
+        // omitted prefix. Splits remain at real newlines, preserving plain text.
+        const key: string = start === sourceStart && sourceStart > 0
+          ? `edge-${Math.floor(start / 512)}` : `source-${start}`;
+        blocks.push({ key, text: content });
         start = offset;
         content = line;
       } else {
@@ -181,16 +188,14 @@ export struct ChatMessageReasoning {
       }
       offset += line.length + 1;
     }
-    if (start + content.length >= sourceStart) {
-      const visibleStart: number = Math.max(start, sourceStart);
-      const visible: string = content.slice(visibleStart - start);
-      blocks.push({ key: `source-${start}`, text: visible });
-    }
+    const key: string = start === sourceStart && sourceStart > 0
+      ? `edge-${Math.floor(start / 512)}` : `source-${start}`;
+    blocks.push({ key, text: content });
     return blocks;
   }
 
   private updateReasoningSlots(): void {
-    if (!this.loading && !this.preserveStreamLines) return;
+    if (this.state === 'collapsed' || (!this.loading && !this.preserveStreamLines)) return;
     const previous: ReasoningLineSlot[] = this.reasoningSlots;
     const byKey: Map<string, ReasoningLineSlot> = new Map<string, ReasoningLineSlot>();
     for (const slot of previous) byKey.set(slot.key, slot);

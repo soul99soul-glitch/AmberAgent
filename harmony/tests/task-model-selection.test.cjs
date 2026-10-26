@@ -56,15 +56,21 @@ test('Task selection preserves legacy keys, exact provider pairs and memory fall
   const extract = (file, names) => {
     const text = fs.readFileSync(path.resolve(__dirname, '../entry/src/main/ets', file), 'utf8');
     const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
-    const statements = parsed.statements.filter((statement) => ts.isVariableStatement(statement)
+    const declarations = [];
+    const visit = node => { declarations.push(node); ts.forEachChild(node, visit); };
+    visit(parsed);
+    const statements = declarations.filter((statement) => ts.isVariableStatement(statement)
       && statement.declarationList.declarations.some((declaration) => names.includes(declaration.name.getText(parsed))));
     assert.equal(statements.length, names.length, `Required production declarations in ${file}`);
     return statements.map((statement) => statement.getText(parsed)).join('\n');
   };
   const diText = extract('platform_impl/OcrSupport.ets', ['findModelByIdInProviders']) + '\n'
-    + extract('di/AppContainer.ets', ['effectiveProvider', 'makeProviderChoice', 'resolveChatProviderChoice',
+    + extract('di/ProviderModelRuntime.ets', ['effectiveProvider', 'makeProviderChoice', 'resolveChatProviderChoice',
       'resolveConfiguredTaskChatModel', 'resolveConfiguredTaskModel', 'resolveTaskModelReference',
-      'taskModelReferenceForChoice']);
+      'taskModelReferenceForChoice'])
+    + '\nports.findModelByIdInProviders = findModelByIdInProviders;\n'
+    + ['resolveChatProviderChoice', 'resolveTaskModelReference', 'resolveConfiguredTaskModel',
+      'taskModelReferenceForChoice'].map(name => `exports.${name} = ${name};`).join('\n');
   const diOutput = ts.transpileModule(diText, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
   } }).outputText;
@@ -76,6 +82,7 @@ test('Task selection preserves legacy keys, exact provider pairs and memory fall
     getChatModelSelection: async () => ({ providerId: c.id, modelId: c.models[0].modelId }),
     hasUsableAuth: providers.hasUsableAuth, copyProviderSettingWithModels: providers.copyProviderSettingWithModels,
     findTaskProviderModel: refs.findTaskProviderModel, taskModelReferenceFromId: refs.taskModelReferenceFromId };
+  dependencies.ports = dependencies;
   new Function(...Object.keys(dependencies), diOutput)(...Object.values(dependencies));
   assert.equal((await di.resolveChatProviderChoice()).providerContainerId, c.id);
   const legacyChoice = await di.resolveTaskModelReference(legacy);

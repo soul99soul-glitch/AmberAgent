@@ -267,18 +267,18 @@ struct MemoryTopicsPage {
       Scroll() {
         Column() {
           PlainSection({ label: '整理设置' })
-          CardGroup({ radius: 18, stroke: true, content: (): void => { this.SettingsCard(); } })
+          Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.SettingsCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
           PlainSection({ label: '手动整理' })
-          CardGroup({ radius: 18, stroke: true, content: (): void => { this.RunCard(); } })
+          Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.RunCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
           FooterNote({ text: '手动整理跳过空闲、充电和每日调度限制，仍遵守模型开关、写入许可、取消与超时。自动整理只在应用前台运行。' })
           if (this.error.length > 0) {
             Column({ space: 4 }) {
               Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
               Text('重新读取').fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColor)
                 .constraintSize({ minHeight: 44 }).onClick((): void => { this.reload(); })
-            }.width('100%').padding({ left: 2, right: 2 })
+            }.width('100%').padding({ left: 18, right: 18 })
           }
-          if (this.notice.length > 0) Text(this.notice).fontSize(13).fontColor(this.colors.secondary).width('100%')
+          if (this.notice.length > 0) Text(this.notice).fontSize(13).fontColor(this.colors.secondary).width('100%').padding({ left: 16, right: 16 })
 
           PlainSection({ label: `主题 · ${this.topics.length}` })
           if (!this.loaded) {
@@ -289,16 +289,16 @@ struct MemoryTopicsPage {
               .fontSize(13).fontColor(this.colors.secondary).width('100%')
               .textAlign(TextAlign.Center).padding({ top: 24, bottom: 12 })
           } else {
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.TopicRows(); } })
+            Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.TopicRows(); } }) }.width('100%').padding({ left: 16, right: 16 })
           }
 
           PlainSection({ label: '源记忆' })
-          CardGroup({ radius: 18, stroke: true, content: (): void => { this.SourcesCard(); } })
+          Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.SourcesCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
 
           PlainSection({ label: '记忆文档' })
-          CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocsCard(); } })
+          Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.DocsCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
           PageSpacer()
-        }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
+        }.width('100%').padding({ top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart)
     
       }, (e: number): string => `theme-${e}`)

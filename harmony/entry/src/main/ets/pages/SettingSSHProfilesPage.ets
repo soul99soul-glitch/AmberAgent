@@ -1,14 +1,15 @@
 import { router } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
-import { SSHProfileStore, TerminalRuntime } from '@amber/chat-domain';
-import type { SSHProfile, SSHProfileDraft, SSHProfileSettings, SSHTrustProbe, SSHCredential } from '@amber/chat-domain';
-import { getSSHProfileStore, getTerminalRuntime } from '../di/AppContainer.ets';
+import { SSHProfileStore, TerminalRuntime, patchAssistant } from '@amber/chat-domain';
+import type { Assistant, LocalToolOption, SSHProfile, SSHProfileDraft, SSHProfileSettings, SSHTrustProbe, SSHCredential } from '@amber/chat-domain';
+import { getSSHProfileStore, getTerminalRuntime, getChatAssistants } from '../di/AppContainer.ets';
+import { mutateAssistant } from '../platform_impl/AssistantMutation.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { CenteredTitleBar, CardGroup, PlainSection, FooterNote, PageSpacer, Seg } from '../components/PageTemplate.ets';
 import { SSHUIColors } from '../components/SSHUIColors.ets';
 import { sshPageError } from '../components/SSHPageErrors.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { ACCENT, MOTION_OVERLAY } from '../design/tokens.ets';
+import { ACCENT, MOTION_OVERLAY, accentSoftBg } from '../design/tokens.ets';
 import { FONT_MONO, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 @Entry
@@ -16,6 +17,9 @@ import { FONT_MONO, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 struct SettingSSHProfilesPage {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @State profiles: SSHProfile[] = [];
+  @State assistants: Assistant[] = [];
+  @State assistantSavingId: string = '';
+  @State assistantError: string = '';
   @State defaultId: string = '';
   @State loaded: boolean = false;
   @State editing: boolean = false;
@@ -51,6 +55,7 @@ struct SettingSSHProfilesPage {
   aboutToAppear(): void {
     this.alive = true;
     this.load();
+    this.loadAssistantsForTools();
   }
 
   aboutToDisappear(): void {
@@ -105,6 +110,44 @@ struct SettingSSHProfilesPage {
   private applySettings(settings: SSHProfileSettings): void {
     this.profiles = settings.profiles;
     this.defaultId = settings.defaultProfileId ?? '';
+  }
+
+  private async loadAssistantsForTools(): Promise<void> {
+    this.assistantError = '';
+    try {
+      const assistants: Assistant[] = await getChatAssistants();
+      if (this.alive) this.assistants = assistants;
+    } catch (error) {
+      if (this.alive) this.assistantError = '加载聊天助手失败：' + (error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private assistantAllowsTerminal(assistant: Assistant): boolean {
+    return assistant.toolProfile === 'full' || assistant.toolProfile === 'coding';
+  }
+
+  private async setAssistantTerminal(assistantId: string, enabled: boolean): Promise<void> {
+    if (!this.alive || this.assistantSavingId.length > 0) return;
+    this.assistantSavingId = assistantId;
+    this.assistantError = '';
+    try {
+      const saved: Assistant | null = await mutateAssistant(assistantId, (current: Assistant): Assistant => {
+        if (enabled && !this.assistantAllowsTerminal(current)) {
+          throw new Error('当前助手的工具范围不包含终端');
+        }
+        const localTools: LocalToolOption[] = current.localTools.filter((option: LocalToolOption): boolean => option !== 'terminal');
+        if (enabled) localTools.push('terminal');
+        return patchAssistant(current, { localTools });
+      });
+      if (saved === null) throw new Error('助手已不存在，请重新打开此页');
+      if (this.alive) {
+        this.assistants = this.assistants.map((assistant: Assistant): Assistant => assistant.id === saved.id ? saved : assistant);
+      }
+    } catch (error) {
+      if (this.alive) this.assistantError = '保存终端工具设置失败：' + (error instanceof Error ? error.message : String(error));
+    } finally {
+      if (this.alive) this.assistantSavingId = '';
+    }
   }
 
   private edit(profile: SSHProfile | null): void {
@@ -276,6 +319,28 @@ struct SettingSSHProfilesPage {
   }
 
   @Builder
+  private AssistantToolRows(): void {
+    ForEach(this.assistants, (assistant: Assistant): void => {
+      Row() {
+        Column({ space: 4 }) {
+          Text(assistant.name.length > 0 ? assistant.name : '未命名助手')
+            .fontSize(16).fontColor(this.colors.ink).fontFamily(FONT_SANS_MEDIUM)
+          Text(!this.assistantAllowsTerminal(assistant) ? '当前助手的工具范围不包含终端'
+            : assistant.localTools.indexOf('terminal') >= 0 ? '已启用 SSH / Mosh 终端工具' : '尚未启用终端工具')
+            .fontSize(12).fontColor(this.colors.secondary)
+        }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Button(this.assistantSavingId === assistant.id ? '保存中…'
+          : assistant.localTools.indexOf('terminal') >= 0 ? '停用' : '启用')
+          .type(ButtonType.Normal).height(44).fontSize(14)
+          .fontColor(this.accentColor).backgroundColor(Color.Transparent)
+          .enabled(this.assistantSavingId.length === 0 && (this.assistantAllowsTerminal(assistant)
+            || assistant.localTools.indexOf('terminal') >= 0))
+          .onClick((): void => { this.setAssistantTerminal(assistant.id, assistant.localTools.indexOf('terminal') < 0); })
+      }.width('100%').padding(14).border({ width: { bottom: 0.5 }, color: this.colors.line })
+    }, (assistant: Assistant): string => `${assistant.id}-${assistant.localTools.indexOf('terminal') >= 0}`)
+  }
+
+  @Builder
   private ProfileRows(): void {
     ForEach(this.profiles, (profile: SSHProfile): void => {
       Column() {
@@ -294,11 +359,19 @@ struct SettingSSHProfilesPage {
         }.constraintSize({ minHeight: 52 }).width('100%')
         Row() {
           Button(profile.id === this.defaultId ? '已默认' : '设为默认')
-            .type(ButtonType.Normal).height(44).fontSize(13).fontColor(this.colors.secondary)
+            .type(ButtonType.Normal).height(44).padding({ left: 16, right: 16 })
+            .fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(this.colors.secondary)
+            .border({ width: 0.5, color: this.colors.line })
+            .borderRadius(22)
             .backgroundColor(this.colors.inset).enabled(profile.id !== this.defaultId)
             .onClick((): void => { this.makeDefault(profile); })
-          Button('终端').type(ButtonType.Normal).height(44).fontSize(13)
-            .fontColor(this.accentColor).backgroundColor(this.colors.inset)
+          Button({ type: ButtonType.Normal }) {
+            Row({ space: 6 }) {
+              Icon({ name: 'ph_terminalWindow', iconSize: 16, color: this.accentColor })
+              Text('终端').fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColor)
+            }.justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+          }.height(44).borderRadius(22).padding({ left: 16, right: 16 })
+            .backgroundColor(accentSoftBg(this.accentColor)).margin({ left: 8 })
             .enabled(profile.knownHostSHA256 !== null && profile.credentialRef !== null)
             .onClick((): void => { router.pushUrl({ url: 'pages/TerminalPage', params: { profileId: profile.id } }); })
           Blank()
@@ -461,6 +534,18 @@ struct SettingSSHProfilesPage {
                     .fontSize(14).fontColor(this.colors.secondary).width('100%').padding(24)
                 }
                 FooterNote({ text: '凭据只保存在本设备安全仓，备份恢复后需重新录入。切到后台会断开 SSH，回到前台不会自动重发命令。' })
+                PlainSection({ label: '供聊天助手使用' })
+                if (this.assistants.length > 0) {
+                  CardGroup({ radius: 18, stroke: true, content: (): void => { this.AssistantToolRows(); } }).margin({ left: 16, right: 16 })
+                }
+                if (this.assistantError.length > 0) {
+                  Text(this.assistantError).fontSize(14).fontColor(this.colors.error).width('100%').padding(16)
+                  if (this.assistants.length === 0) {
+                    Button('重新加载助手').height(44).fontColor(this.accentColor).backgroundColor(Color.Transparent)
+                      .onClick((): void => { this.loadAssistantsForTools(); })
+                  }
+                }
+                FooterNote({ text: '保存 SSH 配置后，还需为聊天助手启用终端工具。启用后从下一次发送消息起生效，执行远程命令仍需审批。' })
               }.width('100%')
               .transition(TransitionEffect.OPACITY
                 .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))

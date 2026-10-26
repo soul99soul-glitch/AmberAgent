@@ -371,7 +371,7 @@ test('regression: delete during generation waits for run to terminate', async ()
   const run = creation.generate(p.id, '写', 'write');
   await delay(10); // 进入运行态
   // delete 时还有活跃 run
-  assert.equal(creation['projectRuns'].has(p.id), true); // 内部状态:有活跃 run
+  assert.notEqual(creation.activeRun(p.id), null);
   const deleteP = creation.delete(p.id);
   // 让 run 因 interrupt 终止
   creation.interrupt(run.id);
@@ -380,16 +380,18 @@ test('regression: delete during generation waits for run to terminate', async ()
 });
 
 test('regression: collectMessage does not block on suggestion analysis', async () => {
-  // 建一个慢建议模型:分析要 100ms。collectMessage 应立即返回(suggestionCount=0)
+  let releaseSuggestion!: () => void;
+  const suggestionGate = new Promise<void>(resolve => { releaseSuggestion = resolve; });
+  let markSuggestionStarted!: () => void;
+  const suggestionStarted = new Promise<void>(resolve => { markSuggestionStarted = resolve; });
   const slowSuggestionModel: NovelModelRunning = {
     async validate(): Promise<void> {},
     start(req: NovelModelRequest) {
       const subs = new Set<(e: NovelModelEvent) => void>();
       const isSuggestion: boolean = req.systemPrompt.includes('资料整理助手');
       if (isSuggestion) {
-        setTimeout((): void => {
-          void publishCanonicalTurn(req, '{"suggestions":[]}', subs);
-        }, 100);
+        markSuggestionStarted();
+        void suggestionGate.then(() => publishCanonicalTurn(req, '{"suggestions":[]}', subs));
       } else {
         setTimeout((): void => {
           void publishCanonicalTurn(req, '正文', subs);
@@ -408,15 +410,22 @@ test('regression: collectMessage does not block on suggestion analysis', async (
   const after = await creation.open(p.id);
   const assistant = after.messages.find(m => m.role === 'assistant')!;
 
-  const t0 = Date.now();
   const result = await creation.collectMessage(p.id, assistant.id, { kind: 'new_chapter', title: '第一章' });
-  const elapsed = Date.now() - t0;
-  assert.ok(elapsed < 80, `collectMessage 应立即返回,实际 ${elapsed}ms(不应等 100ms 的建议分析)`);
+  let analysisCompleted = false;
+  void result.analysisFinished.then(() => { analysisCompleted = true; });
+  await suggestionStarted;
+  assert.equal(analysisCompleted, false, '收录已返回，建议分析仍等待模型结果');
   assert.equal(result.suggestionCount, 0);
   assert.equal(result.chapter.title, '第一章');
   // 章节已落库
   const reloaded = await creation.open(p.id);
   assert.equal(reloaded.chapters.length, 1);
+  releaseSuggestion();
+  const analysis = await result.analysisFinished;
+  assert.equal(analysisCompleted, true);
+  assert.deepEqual(analysis.suggestions, []);
+  assert.equal(analysis.count, 0);
+  assert.equal(analysis.warning, '本章暂无新的资料建议');
 });
 
 test('legacy fenced setting proposals stay transcript-only and do not bypass workspace tools', async () => {

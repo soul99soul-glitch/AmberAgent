@@ -26,10 +26,16 @@ test('skill management refreshes the real run catalog and discovery while preser
   let savedAssistant = originalAssistant;
   const originalApi = { identity: 'original provider' };
   const originalModel = domain.makeChatModel({ modelId: 'original-model' });
+  const compressProvider = { streamText: async () => {} };
   const dummy = name => domain.makeAgentTool({ name, description: name, execute: async () => [] });
   const fixtureDomain = { ...domain, asChatStreamProvider: (api, params) => ({ api, params: params() }) };
-  for (const name of ['createConversationContextTools', 'createConversationHistoryTools', 'createConversationQueueTools',
+  for (const name of ['createConversationHistoryTools', 'createConversationQueueTools',
     'createDeepReadPlaybookTools', 'createMcpManagementTools', 'createMcpServerTools', 'createMemoryTools']) fixtureDomain[name] = () => [];
+  fixtureDomain.createConversationContextTools = options => {
+    assert.equal(options.compactEngineDeps.provider, compressProvider);
+    assert.equal(typeof options.compactEngineDeps.provider.streamText, 'function');
+    return [];
+  };
   for (const name of ['createRunPlanUpdateTool', 'createHealthSummaryTool', 'createDeepReadOpenTool']) fixtureDomain[name] = () => dummy(name);
   const deps = {
     '@amber/chat-domain': fixtureDomain,
@@ -49,7 +55,7 @@ test('skill management refreshes the real run catalog and discovery while preser
     './AssistantMutation.ets': { mutateAssistant: async (id, update) => { assert.equal(id, 'owner'); savedAssistant = update(savedAssistant); } },
     './AssistantLocalPrimitives.ets': { createAssistantLocalPrimitives: () => Array.from({ length: 45 }, (_, i) => dummy(`file_fixture_${i}`)) },
     './ConversationBrowserGuard.ets': { guardConversationBrowserTools: tools => tools },
-    './ConversationRunDependencies.ets': { buildConversationCompressProvider: () => ({}) },
+    './ConversationRunDependencies.ets': { buildConversationCompressProvider: () => compressProvider },
     './EntryDocumentParser.ets': { inflateRawEntry: async value => value },
     './CouncilChatSupport.ets': { getChatCouncilTools: async () => [] },
     './EntryLocalToolPorts.ets': {}, './FeishuDocsTools.ets': {},
@@ -64,14 +70,15 @@ test('skill management refreshes the real run catalog and discovery while preser
       evaluate: async () => { throw new Error('Off Jev configuration must not evaluate'); },
     }) },
     './McpSettingsStore.ets': { getMcpSettingsStore: () => ({}) }, './MemoryStore.ets': {},
-    './SoulTools.ets': { createSoulTools: () => [] }, './WebMountSession.ets': {},
+    './SoulTools.ets': { createSoulTools: () => [] }, './WebMountSession.ets': {}, './WebMountSites.ets': {},
     './WebMountTools.ets': {}, './WebMountAdvancedTools.ets': {}, './WebMountParityTools.ets': {}, './JevWebDecision.ets': {},
     './EntryPluginRuntime.ets': { createEntryPluginAdapter: () => ({ supports: () => false }) },
   };
   const entry = path.resolve(__dirname, '../../../entry/src/main/ets/platform_impl');
   const cache = new Map();
   const load = name => {
-    const filename = path.join(entry, name);
+    const filename = name === 'ConversationToolComposition.ets'
+      ? path.join(entry, '../di', name) : path.join(entry, name);
     if (cache.has(filename)) return cache.get(filename);
     const exports = {};
     cache.set(filename, exports);
@@ -79,7 +86,9 @@ test('skill management refreshes the real run catalog and discovery while preser
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
     }).outputText;
     vm.runInNewContext(js, { exports, require: module => {
+      if (module.startsWith('../platform_impl/')) module = './' + module.slice('../platform_impl/'.length);
       if (module === './RunToolCatalog.ets') return load('RunToolCatalog.ets');
+      if (module === './ConversationRunToolScope.ets') return load('ConversationRunToolScope.ets');
       if (Object.hasOwn(deps, module)) return deps[module];
       throw new Error(`Unexpected import ${module}`);
     }, AppStorage: { get: () => undefined }, Error, Date, Intl, Promise, Map, Set, JSON, String, setTimeout, clearTimeout });
@@ -93,7 +102,21 @@ test('skill management refreshes the real run catalog and discovery while preser
       seed: { runtime: rt, searchSettings: { enableWebSearch: false }, agentRuntime: {
         contextCompaction: {}, speculativeToolExecution: {}, maxToolLoopSteps: 6 }, taskPrompts: {}, agentTaskTools: [], agentCronTools: [] },
       activityStore: new domain.AgentToolActivityStore(), publish: () => {}, pending: () => [], consumeSteer: async () => [] };
-    const loop = await load('ConversationRunTools.ets').buildConversationToolLoop(ctx);
+    const composition = load('ConversationToolComposition.ets').createConversationToolComposition({
+      ...deps['../di/AppContainer.ets'],
+      mutateAssistant: deps['./AssistantMutation.ets'].mutateAssistant,
+      getChatCouncilTools: deps['./CouncilChatSupport.ets'].getChatCouncilTools,
+      createEntryModelSlotPort: deps['./ModelSlotPort.ets'].createEntryModelSlotPort,
+      createEntryWeatherPort: deps['./WeatherPort.ets'].createEntryWeatherPort,
+      createJevStatusTool: deps['./JevSupport.ets'].createJevStatusTool,
+      jevToolSearchReranker: deps['./JevSupport.ets'].jevToolSearchReranker,
+      getMcpSettingsStore: deps['./McpSettingsStore.ets'].getMcpSettingsStore,
+      createSoulTools: deps['./SoulTools.ets'].createSoulTools,
+      createEntryJevAutoApprovalReview: deps['./JevAutoApprovalSupport.ets'].createEntryJevAutoApprovalReview,
+      getHttpClient: () => deps['../di/AppContainer.ets'].getAppContainer().httpClient,
+      compressProvider: deps['./ConversationRunDependencies.ets'].buildConversationCompressProvider,
+    });
+    const loop = await load('ConversationRunTools.ets').buildConversationToolLoop(ctx, composition);
     const byName = (tools, name) => tools.find(tool => tool.name === name);
     assert.equal(byName(loop.tools, 'use_skill'), undefined);
     await byName(loop.tools, 'skill_enable').execute({ name: 'demo' });
@@ -119,5 +142,79 @@ test('skill management refreshes the real run catalog and discovery while preser
     assert.equal(provider.params.temperature, 0.3);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const loadPreparation = domain => {
+  const filename = path.resolve(__dirname, '../../../entry/src/main/ets/platform_impl/ConversationRunDependencies.ets');
+  const js = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  const exports = {};
+  vm.runInNewContext(js, { exports, require: name => {
+    if (name === '@amber/chat-domain') return domain;
+    if (name === '@kit.PerformanceAnalysisKit') return { hilog: { warn: () => {} } };
+    if (name === './AgentRuntimePrefs.ets') return { systemLanguage: () => 'zh-CN' };
+    if (name === './ConversationRunGuard.ets') return {};
+    throw new Error(`Unexpected preparation runtime import: ${name}`);
+  }, Error, Promise });
+  return exports;
+};
+
+test('real runtime preparation awaits enabled execution resources and captures current skills once', async () => {
+  const domain = await import('../main/ets/index.ts');
+  const { prepareChatRuntime } = loadPreparation(domain);
+  const calls = [];
+  let finishTerminal;
+  const terminalReady = new Promise(resolve => { finishTerminal = resolve; });
+  const terminal = {}, mosh = {}, python = {}, sshProfiles = {};
+  const skills = [{ name: 'latest-skill' }];
+  const provider = { assistant: domain.makeAssistant({ localTools: ['terminal', 'python'] }),
+    api: {}, params: {}, resolvedChoice: {}, modelAbilities: ['tool'], modelContextWindowTokens: 16000,
+    contextMessageSize: 32, modelSupportsImageInput: true };
+  const preparing = prepareChatRuntime(provider, {
+    getTerminalRuntime: async () => { calls.push('terminal:start'); await terminalReady; calls.push('terminal:ready'); return terminal; },
+    getMoshRuntime: async () => { calls.push('mosh'); return mosh; },
+    getPythonRuntime: async () => { calls.push('python'); return python; },
+    getSSHProfileStore: async () => { calls.push('ssh'); return sshProfiles; },
+    listSkills: () => { calls.push('skills'); return skills; },
+  });
+  assert.deepEqual(calls, ['terminal:start']);
+  finishTerminal();
+  const runtime = await preparing;
+  assert.deepEqual(calls, ['terminal:start', 'terminal:ready', 'mosh', 'python', 'ssh', 'skills']);
+  assert.equal(runtime.api, provider.api);
+  assert.equal(runtime.assistant, provider.assistant);
+  assert.equal(runtime.params, provider.params);
+  assert.equal(runtime.resolvedChoice, provider.resolvedChoice);
+  assert.equal(runtime.modelContextWindowTokens, 16000);
+  assert.equal(runtime.contextMessageSize, 32);
+  assert.equal(runtime.modelSupportsImageInput, true);
+  assert.equal(runtime.modelAbilities, provider.modelAbilities);
+  assert.equal(runtime.terminalRuntime, terminal);
+  assert.equal(runtime.moshRuntime, mosh);
+  assert.equal(runtime.pythonRuntime, python);
+  assert.equal(runtime.sshProfiles, sshProfiles);
+  assert.equal(runtime.allSkills, skills);
+});
+
+test('real runtime preparation leaves disabled resources unopened and refreshes skills per run', async () => {
+  const domain = await import('../main/ets/index.ts');
+  const { prepareChatRuntime } = loadPreparation(domain);
+  const provider = { assistant: domain.makeAssistant({ localTools: [] }), api: {}, params: {}, resolvedChoice: {}, modelAbilities: [] };
+  let skills = [{ name: 'first' }];
+  const unexpected = async () => { throw new Error('Disabled execution resource was opened'); };
+  const ports = { getTerminalRuntime: unexpected, getMoshRuntime: unexpected,
+    getPythonRuntime: unexpected, getSSHProfileStore: unexpected, listSkills: () => skills };
+  const first = await prepareChatRuntime(provider, ports);
+  skills = [{ name: 'second' }];
+  const second = await prepareChatRuntime(provider, ports);
+  assert.equal(first.allSkills[0].name, 'first');
+  assert.equal(second.allSkills[0].name, 'second');
+  for (const runtime of [first, second]) {
+    assert.equal(runtime.terminalRuntime, null);
+    assert.equal(runtime.moshRuntime, null);
+    assert.equal(runtime.pythonRuntime, null);
+    assert.equal(runtime.sshProfiles, null);
   }
 });

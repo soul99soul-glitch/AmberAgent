@@ -12,7 +12,18 @@ const { normalizeNovelMaterialFields } = require('../deepread/src/main/ets/novel
 const { NovelComposerDraftStore } = require('../entry/src/main/ets/novel/NovelComposerState.ts');
 const { defaultNovelModelDefaults } = require('../deepread/src/main/ets/novel/standalone_defaults.ts');
 
-const modes = { OFFSET: 'OFFSET', RESIZE: 'RESIZE', NONE: 'NONE' };
+const modes = { DEFAULT: 'DEFAULT', OFFSET: 'OFFSET', RESIZE: 'RESIZE', NONE: 'NONE' };
+
+// Keyboard ownership belongs to the page. Session effects are isolated here; draft tests below load real owners.
+class WorkspaceLifecycleSession {
+  start(ports) { this.ports = ports; }
+  show() {}
+  hide() {}
+  dispose() {}
+  invalidateMaterialOpen() {}
+  consumeContextOverrides() {}
+  async loadProjectModelOptions() {}
+}
 
 function keyboardHost() {
   let mode = modes.NONE;
@@ -56,14 +67,18 @@ function fixture(name, host = keyboardHost()) {
   const body = source.slice(start, source.indexOf('\n  @Builder', start))
     .replace(`struct ${name}`, `class ${name}`)
     .replace(/^([ \t]*)(?:@\w+(?:\([^)]*\))?\s*)+/gm, '$1');
-  const controlMethods = name === 'NovelWorkspacePage'
-    ? source.slice(source.indexOf('  private async openControlSheet('), source.indexOf('  private selectWritingTarget('))
-      .replace(/private /g, '') : '';
-  const compiled = ts.transpileModule(`${body}\n${controlMethods}\n}\nreturn new ${name}();`, {
+  const compiled = ts.transpileModule(`${body}\n}\nreturn new ${name}();`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText;
   const dependencies = {
     KeyboardAvoidMode: modes,
+    NovelDiscussionSession: WorkspaceLifecycleSession,
+    NovelJobSession: WorkspaceLifecycleSession,
+    NovelAuditSession: WorkspaceLifecycleSession,
+    NovelWritingControlSession: WorkspaceLifecycleSession,
+    NovelManuscriptSession: WorkspaceLifecycleSession,
+    NovelCompendiumSession: WorkspaceLifecycleSession,
+    getProductKind: () => 'novel',
     Scroller: class {},
     TextInputController: class { stopEditing() {} },
     TextAreaController: class { stopEditing() {} },
@@ -85,6 +100,34 @@ function fixture(name, host = keyboardHost()) {
   page.aboutToAppear();
   page.onPageShow?.();
   return { page, host, project: () => project };
+}
+
+// Workspace draft validation executes the real draft owners against real domain mutations.
+const { loadSession } = require('../entry/src/test/novel_workspace_sessions_fixture.cjs');
+function workspaceEditorFixture(ownerName) {
+  let project = models.makeNovelProject({ id: 'novel-editor-fixture', name: '本地测试', now: 1 });
+  project = mutations.saveChapter(project, null, '已有章节', '原始正文', 2).project;
+  const editorCas = { branchId: 'main', head: 'fixture-head', treeDigest: 'fixture-tree' };
+  const state = { projectId: project.id, project, workspaceStatus: { activeBranchId: 'main', cas: editorCas },
+    pageAlive: true, pageHiddenOnce: false, busy: false, errorMsg: '',
+    reload: async () => { state.project = project; }, hasBlockingNovelRun: () => false };
+  const service = {
+    readWorkspaceSnapshot: async () => ({ project: structuredClone(project),
+      status: { cas: { ...editorCas }, activeBranchId: 'main' } }),
+    saveChapter: async (_projectId, chapterId, title, content) => {
+      const result = mutations.saveChapter(project, chapterId, title, content, 3);
+      project = result.project;
+      return result.value;
+    },
+    upsertMaterial: async (_projectId, materialId, kind, title, content, enabled, fields, expectedCas) => {
+      assert.deepEqual(expectedCas, editorCas, 'material saves use their opening snapshot CAS');
+      const result = mutations.upsertMaterial(project, materialId, kind, title, content, enabled, 3, fields);
+      project = result.project;
+      return result.value;
+    },
+  };
+  const session = loadSession(ownerName, state, service);
+  return { session, state, project: () => project };
 }
 
 for (const name of ['NovelWorkspacePage', 'NovelChapterReaderPage']) {
@@ -140,18 +183,18 @@ test('workspace -> reader -> retained workspace keeps RESIZE after reader cleanu
 });
 
 test('new chapter validation retains the draft, then a fresh editor clears the old error', async () => {
-  const { page, project } = fixture('NovelWorkspacePage');
+  const { session: page, state, project } = workspaceEditorFixture('NovelManuscriptSession');
   page.openNewChapter();
   page.chapterTitle = '';
   page.chapterContent = '未保存正文';
   await page.saveChapter();
   assert.equal(page.chapterEditorOpen, true);
   assert.equal(page.chapterContent, '未保存正文');
-  assert.equal(page.errorMsg, '标题不能为空');
+  assert.equal(state.errorMsg, '标题不能为空');
   assert.equal(project().chapters.length, 1, 'invalid input did not persist');
   page.chapterEditorOpen = false;
   page.openNewChapter();
-  assert.equal(page.errorMsg, '', 'a new editor must not inherit the previous failure');
+  assert.equal(state.errorMsg, '', 'a new editor must not inherit the previous failure');
   page.chapterTitle = '修正后的章节';
   await page.saveChapter();
   assert.equal(page.chapterEditorOpen, false);
@@ -159,23 +202,23 @@ test('new chapter validation retains the draft, then a fresh editor clears the o
 });
 
 test('material validation retains the draft and both new/edit openings clear stale errors', async () => {
-  const { page, project } = fixture('NovelWorkspacePage');
+  const { session: page, state, project } = workspaceEditorFixture('NovelCompendiumSession');
   await page.openNewMaterial('character');
   page.materialEditorDraft.content = '未保存人物';
   await page.saveMaterial(page.materialEditorDraft);
   assert.equal(page.materialEditorOpen, true);
   assert.equal(page.materialEditorDraft.content, '未保存人物');
-  assert.equal(page.errorMsg, '标题不能为空');
+  assert.equal(state.errorMsg, '标题不能为空');
   assert.equal(project().materials.length, 0);
   page.materialEditorOpen = false;
   await page.openNewMaterial('character');
-  assert.equal(page.errorMsg, '');
+  assert.equal(state.errorMsg, '');
   page.materialEditorDraft.title = '人物甲';
   await page.saveMaterial(page.materialEditorDraft);
   assert.equal(page.materialEditorOpen, false);
-  page.errorMsg = '旧错误';
+  state.errorMsg = '旧错误';
   await page.openEditMaterial(project().materials[0]);
-  assert.equal(page.errorMsg, '');
+  assert.equal(state.errorMsg, '');
   assert.equal(page.materialEditorDraft.title, '人物甲');
 });
 

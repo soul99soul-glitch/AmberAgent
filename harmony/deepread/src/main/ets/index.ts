@@ -37,7 +37,6 @@ export type { NovelRunKind } from './novel/prompt_catalog.ts';
 export { novelPromptTemplate, stripPolishSentinel, hasPolishSentinel, POLISH_COMPLETION_SENTINEL } from './novel/prompt_catalog.ts';
 export type { Observable } from './platform/observable.ts';
 export { pollingObservable } from './platform/observable.ts';
-export { DEEP_READ_SCHEMA_SQL } from './platform/database.ts';
 export type { Notifier, NotificationKind, NotificationRequest } from './platform/notifier.ts';
 export type { FileStore } from './platform/files.ts';
 export { joinPath, createMemoryFileStore } from './platform/files.ts';
@@ -72,11 +71,6 @@ export {
   getTools, latestAssistantText, isValidToUpload, hasBase64Part,
   isEmptyInputMessage, isEmptyUIMessage,
 } from './agent/message.ts';
-export type {
-  LegacyToolApprovalState, LegacyUIMessagePartText, LegacyUIMessagePartImage,
-  LegacyUIMessagePartReasoning, LegacyUIMessagePartTool, LegacyUIMessagePart, LegacyUIMessage,
-} from './agent/legacy_message.ts';
-export { migrateLegacyUIMessage } from './agent/legacy_message.ts';
 export { createScheduler, isInterruptedPhase } from './agent/scheduler.ts';
 export type { DeepReadScheduler, SchedulerRunOptions, DeepReadActiveRun } from './agent/scheduler.ts';
 export { createSourcePrefetcher } from './research/source_prefetcher.ts';

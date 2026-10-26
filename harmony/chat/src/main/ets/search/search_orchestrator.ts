@@ -5,7 +5,7 @@
 import type { JsonObject, JsonValue } from '../chat/json.ts';
 import { newId } from '../chat/ids.ts';
 import type { SearchCommonOptions, SearchRequestContext, SearchResult, SearchServiceOptions } from './search_service.ts';
-import { SEARCH_SERVICE_TYPES } from './search_service.ts';
+import { MAX_SEARCH_RESULTS, SEARCH_SERVICE_TYPES } from './search_service.ts';
 import { getSearchService } from './service_registry.ts';
 import type { FreeEngineId } from './free_web_engines.ts';
 import { looksTechnicalQuery, runFreeEngine } from './free_web_engines.ts';
@@ -25,6 +25,8 @@ const ALLOWED_DEPTHS: string[] = ['quick', 'standard', 'deep'];
 
 export interface OrchestratorDeps {
   today?: () => string;
+  // The entry owner checks the current tool catalog, visible host and site authorization.
+  browserFallback?: (url: string) => Promise<string | null>;
 }
 
 // ===== OrchestratorSource(:689-752)→ 判别联合 =====
@@ -521,15 +523,34 @@ const webViewFallbackItem = (source: string, engine: string, query: string): Jso
   return { source_service: source, engine, url };
 };
 
-const webViewFallback = (query: string): JsonObject => ({
-  status: 'available',
-  note: 'Use webview_search_open to open a visible search results page when ordinary sources are weak or blocked.',
-  suggestions: [
+const webViewFallback = async (query: string, deps: OrchestratorDeps): Promise<JsonObject> => {
+  const suggestions: JsonObject[] = [
     webViewFallbackItem('google_webview', 'google', query),
     webViewFallbackItem('duckduckgo_webview', 'duckduckgo', query),
     webViewFallbackItem('bing_webview', 'bing', query),
-  ],
-});
+  ];
+  for (const suggestion of suggestions) {
+    let reason: string | null = 'No browser host is available in this search context.';
+    if (deps.browserFallback !== undefined) {
+      try {
+        reason = await deps.browserFallback(suggestion['url'] as string);
+      } catch (_error) {
+        reason = 'Browser availability could not be checked.';
+      }
+    }
+    suggestion['available'] = reason === null;
+    if (reason === null) suggestion['tool'] = 'wm_open';
+    else suggestion['unavailable_reason'] = reason;
+  }
+  const available: boolean = suggestions.some((suggestion: JsonObject): boolean => suggestion['available'] === true);
+  return {
+    status: available ? 'available' : 'manual_only',
+    note: available
+      ? 'Open only suggestions marked available with wm_open({url}). If wm_open is not exposed, discover it with tool_search first. Existing browser and site permissions still apply.'
+      : 'Offer these links for manual opening. Browser fallback requires an available conversation host, WebMount enabled, and the search site registered in WebMount settings.',
+    suggestions,
+  };
+};
 
 // :587-593
 const sanitizeError = (throwable: Error): string => {
@@ -657,21 +678,27 @@ export const searchOrchestratorSearch = async (
     recencyRaw !== null ? Math.min(Math.max(recencyRaw, 1), 366) : null;
   const maxRaw: number | null = jsonIntOrNull(params, 'max_results');
   const maxResults: number = maxRaw !== null
-    ? Math.min(Math.max(maxRaw, 1), 40)
-    : Math.min(Math.max(settings.searchCommonOptions.resultSize, 1), 40);
+    ? Math.min(Math.max(maxRaw, 1), MAX_SEARCH_RESULTS)
+    : Math.min(Math.max(settings.searchCommonOptions.resultSize, 1), MAX_SEARCH_RESULTS);
   const allowWebView: boolean = jsonBoolStrictOrNull(params, 'allow_webview') ?? false;
   const requestedServices: string[] = serviceSelectors(params);
   const sources: OrchestratorSource[] =
     buildSources(settings, requestedServices, query, topic).slice(0, MAX_SOURCES);
 
   if (sources.length === 0) {
-    return {
+    const unavailable: JsonObject = {
       status: 'error',
       query,
       error: 'No search sources are enabled. Enable built-in free sources or at least one configured search service.',
       items: [],
       sources: [],
     };
+    if (settings.searchGoogleWebViewFallbackEnabled) {
+      unavailable['error'] = 'No ordinary search sources are enabled. Check webview_fallback for browser actions or manual search links.';
+      unavailable['webview_fallback'] = await webViewFallback(query, deps);
+      throwIfCancelled();
+    }
+    return unavailable;
   }
 
   const variants: string[] = buildQueryVariants(query, topic, timeRange, recencyDays, depth, deps);
@@ -699,13 +726,21 @@ export const searchOrchestratorSearch = async (
 
   const merged: OrchestratedSearchItem[] =
     mergeResults(sourceResults, query, topic, timeRange).slice(0, maxResults);
+  const answers: JsonObject[] = [];
+  for (const source of sourceResults) {
+    const answer: string | null = source.outcome.result?.answer ?? null;
+    if (!source.outcome.ok || answer === null || answer.trim().length === 0) continue;
+    answers.push({ service: source.request.source.name, service_id: source.request.source.id,
+      query: source.request.query, answer });
+  }
+  const hasContent: boolean = merged.length > 0 || answers.length > 0;
   const anyFailure: boolean = sourceResults.some((r: SourceSearchResult) => !r.outcome.ok);
   const shouldOfferWebView: boolean = settings.searchGoogleWebViewFallbackEnabled &&
     (allowWebView || depth === 'deep' || merged.length < Math.min(maxResults, 3));
 
   const out: JsonObject = {
-    status: merged.length > 0 && anyFailure ? 'partial'
-      : merged.length > 0 ? 'ok'
+    status: hasContent && anyFailure ? 'partial'
+      : hasContent ? 'ok'
       : 'empty',
     query,
     topic,
@@ -723,6 +758,7 @@ export const searchOrchestratorSearch = async (
     imagesBudget = Math.max(imagesBudget - toEmit, 0);
   });
   out['items'] = itemsJson;
+  if (answers.length > 0) out['answers'] = answers;
   const allImages: string[] = distinctKeepOrder(
     merged.flatMap((item: OrchestratedSearchItem) => item.images),
   ).slice(0, 5);
@@ -736,15 +772,16 @@ export const searchOrchestratorSearch = async (
   out['sources'] = sourceStatusJson(sourceResults, sources, calls);
   out['query_variants'] = variants;
   if (shouldOfferWebView) {
-    out['webview_fallback'] = webViewFallback(query);
+    out['webview_fallback'] = await webViewFallback(query, deps);
+    throwIfCancelled();
   }
   // 只靠免费源且结果偏少:提示用户配置有免费额度的 API(模型可转述给用户)
   if (merged.length < Math.min(maxResults, 5) && sources.every((s: OrchestratorSource) => s.builtin)) {
     out['setup_hint'] = FREE_TIER_SETUP_HINT;
   }
-  if (merged.length === 0) {
+  if (!hasContent) {
     out['message'] = shouldOfferWebView
-      ? 'No ordinary source produced results. Use webview_search_open with the suggested fallback URL, or enable more search services.'
+      ? 'No ordinary source produced results. Check webview_fallback for available browser actions or manual search links, or enable more search services.'
       : 'No source produced parseable results. Enable Google WebView fallback or another search service.';
   }
   return out;
@@ -818,7 +855,8 @@ export const searchOrchestratorExplain = (settings: SearchSettings, params: Json
       reason: source.reason,
     })),
     query_variants: variants,
-    webview_fallback_would_be_available:
+    webview_fallback_requested:
       settings.searchGoogleWebViewFallbackEnabled && (allowWebView || depth === 'deep'),
+    webview_fallback_requires_runtime_check: settings.searchGoogleWebViewFallbackEnabled,
   };
 };

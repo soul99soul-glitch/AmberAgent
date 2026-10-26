@@ -1,7 +1,7 @@
 // SectionWriterTools — 照搬 Android DeepReadSectionWriterTools.kt
 //
 // 7 个 tool:deep_read_write_{overview,narrative,analysis,extended_reading,visuals,diagram} + deep_read_finish
-// 所有 tool 共享 update(transform) 原语:writeMutex 串行(ArkTS 单线程 async,用闭包状态)
+// 所有 tool 共享 update(transform) 原语:同步完成读取、变换和替换;execute 虽为 async,更新过程没有 await
 //
 // ArkTS 约定:factory function createSectionWriterTools,闭包持有 DeepReadOutput 状态,
 // 不用 class mutation(对照 observable.ts / source_prefetch.ts)。不可变更新用 spread。
@@ -9,214 +9,36 @@
 // JSON 解析边界:tool input 是模型返回的 JSON 字符串,这里允许 Record<string, unknown>
 // 解析(对照 json_schema_validator.ts 的解析边界模式)。
 
-import { parseSourceNumbers, parseImpacts, parseUncertainties } from './hierarchy_fields.ts';
+import { parseImpacts, parseUncertainties } from './hierarchy_fields.ts';
 import type { UIMessagePartText } from './message.ts';
 import { makeSuccessOutput } from './tool_execution.ts';
 import type { ToolDefinition } from './tool_execution.ts';
 import type { DeepReadOutput } from '../domain/models.ts';
 import { makeEmptyDeepReadOutput } from '../domain/models.ts';
 import type { ScoredImageCandidate } from '../research/image_scorer.ts';
-import {
-  statusOf, withSectionStatus, withSectionQuality, sectionsReady,
-} from '../domain/helpers.ts';
+import { statusOf, withSectionStatus, withSectionQuality, sectionsReady } from '../domain/helpers.ts';
 import type { DeepReadGenerationStage } from '../domain/enums.ts';
 import {
-  WRITER_TOOL_NAMES, VISUALS_TOOL_NAME, DIAGRAM_TOOL_NAME, FINISH_TOOL_NAME,
-  IMAGE_CONFIDENCE, STAGE_ORDER,
-  OVERVIEW_SUMMARY_MIN_CHARS, OVERVIEW_SUMMARY_STORAGE_MAX_CHARS,
-  MAX_DIAGRAM_NODES, MAX_LINEAR_DIAGRAM_EDGES, MAX_RELATION_DIAGRAM_EDGES,
-  DIAGRAM_TITLE_MAX_CHARS, DIAGRAM_NODE_LABEL_MAX_CHARS, DIAGRAM_NODE_NOTE_MAX_CHARS,
-  DIAGRAM_NODE_GROUP_MAX_CHARS, DIAGRAM_EDGE_LABEL_MAX_CHARS,
-  TIMELINE_MAX, CORE_POINTS_MAX, PERSPECTIVES_MAX, QUOTES_MAX, IMAGE_ASSETS_MAX,
-  READING_LINKS_REF_MAX, EXTENDED_READING_MAX, KEY_ENTITIES_MAX,
-  TOPIC_TYPE_MAX, ENTITY_MAX_CHARS, READING_LINK_TITLE_MAX, READING_LINK_SOURCE_MAX,
-  TIMELINE_EVENT_MAX, CORE_POINT_MAX, CORE_SUPPORTING_MAX,
-  PERSPECTIVE_VIEWPOINT_MAX, PERSPECTIVE_HOLDER_MAX, QUOTE_TEXT_MAX, QUOTE_ATTR_MAX,
-  ANALYSIS_DISPUTE_MAX, ANALYSIS_IMPLICATIONS_MAX, HERO_CAPTION_MAX, HERO_REASON_MAX,
+  WRITER_TOOL_NAMES, VISUALS_TOOL_NAME, DIAGRAM_TOOL_NAME, FINISH_TOOL_NAME, IMAGE_CONFIDENCE,
+  STAGE_ORDER, OVERVIEW_SUMMARY_MIN_CHARS, OVERVIEW_SUMMARY_STORAGE_MAX_CHARS, TIMELINE_MAX,
+  CORE_POINTS_MAX, IMAGE_ASSETS_MAX, READING_LINKS_REF_MAX, EXTENDED_READING_MAX, KEY_ENTITIES_MAX,
+  TOPIC_TYPE_MAX, ENTITY_MAX_CHARS, ANALYSIS_DISPUTE_MAX, ANALYSIS_IMPLICATIONS_MAX, HERO_CAPTION_MAX,
+  HERO_REASON_MAX,
 } from '../domain/enums.ts';
-import type {
-  TimelineEvent, CorePoint, ReadingLink, Perspective, Quote, DeepAnalysis,
-  DeepReadImageAsset, DiagramNode, DiagramEdge, DeepReadDiagram,
-} from '../domain/models.ts';
+import type { ReadingLink, DeepAnalysis, DeepReadImageAsset } from '../domain/models.ts';
+import {
+  safeTake, cleanText, asObject, objString, objObjectList, stringListFrom, urlString,
+  parseReadingLinks, mergeStrings, mergeReadingLinks, hasOverviewContent, hasNarrativeContent,
+  hasAnalysisContent, hasExtendedReadingContent, statusReadyFor, parseTimeline, parseCorePoints,
+  parsePerspectives, parseQuotes, makeWriterOutput,
+} from './section_writer_codec.ts';
+import { buildFallbackBody, toFallbackCorePoints, sourcesToFallbackTimeline } from './section_writer_fallback.ts';
+import {
+  mergeImageAssets, parseImageAssets, parseDiagram, diagramDropReason, buildDiagramDropReasons,
+  candidateForUrl, isHeroCandidate, withCandidateEvidence, selectionReasonFor, buildVisualDiagnostics,
+} from './section_writer_visuals.ts';
 
-// ===== 文本工具(照搬 Android cleanText / safeTake) =====
-
-// safeTake — 照搬 Android:不切断 UTF-16 代理对(emoji 安全)
-export const safeTake = (s: string, n: number): string => {
-  if (n <= 0) return '';
-  if (s.length <= n) return s;
-  const cut = s.charCodeAt(n - 1) >= 0xD800 && s.charCodeAt(n - 1) <= 0xDBFF ? n - 1 : n;
-  return s.substring(0, cut);
-};
-
-// cleanText — 照搬 Android:\s+ → 单空格 + trim + safeTake
-export const cleanText = (s: string, max: number): string =>
-  safeTake(s.replace(/\s+/g, ' ').trim(), max);
-
-const isHttpUrl = (url: string): boolean =>
-  url.startsWith('http://') || url.startsWith('https://');
-
-// ===== JSON 解析边界(对照 json_schema_validator.ts) =====
-
-const asObject = (input: string): Record<string, unknown> => {
-  try {
-    const parsed = JSON.parse(input);
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch { /* 空 input → 空对象 */ }
-  return {};
-};
-
-const objString = (o: Record<string, unknown>, name: string): string | null => {
-  const v = o[name];
-  if (typeof v !== 'string') return null;
-  const trimmed = v.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
-
-const objBool = (o: Record<string, unknown>, name: string): boolean | null => {
-  const v = o[name];
-  if (typeof v === 'boolean') return v;
-  if (typeof v === 'string') {
-    if (v === 'true') return true;
-    if (v === 'false') return false;
-  }
-  return null;
-};
-
-const objArray = (o: Record<string, unknown>, name: string): unknown[] => {
-  const v = o[name];
-  return Array.isArray(v) ? v : [];
-};
-
-const objObjectList = (o: Record<string, unknown>, name: string): Record<string, unknown>[] => {
-  return objArray(o, name).filter((x): x is Record<string, unknown> =>
-    x !== null && typeof x === 'object' && !Array.isArray(x));
-};
-
-// stringList 从 array of string 提取(照搬 Android jsonPrimitive.contentOrNull)
-const stringListFrom = (o: Record<string, unknown>, name: string, max: number): string[] => {
-  const arr = objArray(o, name);
-  const out: string[] = [];
-  for (const el of arr) {
-    if (typeof el === 'string') {
-      const c = cleanText(el, max);
-      if (c.length > 0) out.push(c);
-    }
-  }
-  return out;
-};
-
-const urlString = (o: Record<string, unknown>, name: string): string | null => {
-  const s = objString(o, name);
-  return s !== null && isHttpUrl(s) ? s : null;
-};
-
-// ===== ReadingLink 解析(照搬 Android readingLinks) =====
-
-const parseReadingLinks = (o: Record<string, unknown>, name: string): ReadingLink[] => {
-  return objObjectList(o, name).map(obj => {
-    const url = urlString(obj, 'url');
-    if (url === null) return null;
-    const title = objString(obj, 'title');
-    const finalTitle = title !== null
-      ? cleanText(title, READING_LINK_TITLE_MAX)
-      : url.split('://')[1]?.split('/')[0] ?? url;
-    const source = objString(obj, 'source');
-    return {
-      title: finalTitle,
-      url,
-      source: source !== null ? cleanText(source, READING_LINK_SOURCE_MAX) : null,
-      publishedAt: null,
-    } as ReadingLink;
-  }).filter((x): x is ReadingLink => x !== null);
-};
-
-// ===== merge 辅助(照搬 Android mergeStrings/mergeReadingLinks/mergeImageAssets) =====
-
-export const mergeStrings = (existing: string[], incoming: string[], limit: number): string[] => {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of [...existing, ...incoming]) {
-    const c = cleanText(raw, ENTITY_MAX_CHARS);
-    if (c.length === 0) continue;
-    const key = c.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(c);
-    if (out.length >= limit) break;
-  }
-  return out;
-};
-
-const urlKey = (url: string): string => url.trim().replace(/\/+$/, '');
-
-export const mergeReadingLinks = (existing: ReadingLink[], incoming: ReadingLink[], limit: number): ReadingLink[] => {
-  const seen = new Set<string>();
-  const out: ReadingLink[] = [];
-  for (const link of [...existing, ...incoming]) {
-    if (!isHttpUrl(link.url)) continue;
-    const key = urlKey(link.url);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(link);
-    if (out.length >= limit) break;
-  }
-  return out;
-};
-
-const mergeImageAssets = (existing: DeepReadImageAsset[], incoming: DeepReadImageAsset[], limit: number): DeepReadImageAsset[] => {
-  const seen = new Set<string>();
-  const out: DeepReadImageAsset[] = [];
-  for (const asset of [...existing, ...incoming]) {
-    if (!isHttpUrl(asset.url)) continue;
-    const key = urlKey(asset.url);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(asset);
-    if (out.length >= limit) break;
-  }
-  return out;
-};
-
-// ===== content 检查(照搬 Android hasOverviewContent 等) =====
-
-const hasOverviewContent = (o: DeepReadOutput): boolean =>
-  o.summary.trim().length >= OVERVIEW_SUMMARY_MIN_CHARS;
-
-const hasNarrativeContent = (o: DeepReadOutput): boolean => {
-  const timeline = o.timeline ?? [];
-  if (timeline.some(e => e.event.trim().length >= 20)) return true;
-  const corePoints = o.corePoints ?? [];
-  return corePoints.some(p => p.point.trim().length >= 8 || (p.supporting?.trim().length ?? 0) >= 20);
-};
-
-const hasAnalysisContent = (o: DeepReadOutput): boolean => {
-  if ((o.analysis.coreDispute?.trim().length ?? 0) >= 20) return true;
-  if ((o.analysis.implications?.trim().length ?? 0) >= 20) return true;
-  if (o.analysis.perspectives.some(p => p.viewpoint.trim().length >= 20)) return true;
-  if (o.analysis.quotes.some(q => q.text.trim().length >= 8)) return true;
-  // The current editorial schema writes consequences into impacts rather than
-  // implications. A concise dispute/perspective can accompany that full analysis.
-  const hasPosition = (o.analysis.coreDispute?.trim().length ?? 0) > 0 ||
-    o.analysis.perspectives.some(p => p.viewpoint.trim().length > 0);
-  return hasPosition && (o.impacts?.some(impact => impact.effect.trim().length >= 20) ?? false);
-};
-
-const hasExtendedReadingContent = (o: DeepReadOutput): boolean =>
-  o.extendedReading.some(l => isHttpUrl(l.url))
-  || (o.heroImageUrl !== null && o.heroImageConfidence === IMAGE_CONFIDENCE.HERO)
-  || (o.diagram?.nodes.length ?? 0) >= 2;
-
-const statusReadyFor = (o: DeepReadOutput, stage: DeepReadGenerationStage): boolean => {
-  switch (stage) {
-    case 'OVERVIEW': return hasOverviewContent(o);
-    case 'NARRATIVE': return hasNarrativeContent(o);
-    case 'ANALYSIS': return hasAnalysisContent(o);
-    case 'EXTENDED_READING': return hasExtendedReadingContent(o);
-  }
-};
+export { safeTake, cleanText, mergeStrings, mergeReadingLinks } from './section_writer_codec.ts';
 
 // ===== writer 状态接口 =====
 
@@ -276,27 +98,6 @@ export const createSectionWriterTools = (
 
   const markVisibleWrite = (): void => {
     writeCount += 1;
-  };
-
-  const candidateForUrl = (url: string): ScoredImageCandidate | null =>
-    params.imageCandidates.find(c => c.url === url) ?? null;
-
-  const isHeroCandidate = (url: string): boolean =>
-    candidateForUrl(url)?.confidence === IMAGE_CONFIDENCE.HERO;
-
-  // withCandidateEvidence — 照搬 Android:asset 必须在候选池且非 reject
-  const withCandidateEvidence = (asset: DeepReadImageAsset): DeepReadImageAsset | null => {
-    const candidate = candidateForUrl(asset.url);
-    if (candidate === null) return null;
-    if (candidate.confidence === IMAGE_CONFIDENCE.REJECT) return null;
-    return {
-      ...asset,
-      source: asset.source ?? null,
-      confidence: candidate.confidence,
-      score: candidate.score,
-      qualityHint: asset.qualityHint ?? candidate.confidence,
-      selectionReason: asset.selectionReason ?? selectionReasonFor(candidate, params.topicTitle),
-    };
   };
 
   // ===== overview tool =====
@@ -456,7 +257,7 @@ export const createSectionWriterTools = (
         let links = parseReadingLinks(obj, 'links');
         if (links.length === 0) links = parseReadingLinks(obj, 'extended_reading');
         const incomingAssets = parseImageAssets(obj)
-          .map(a => withCandidateEvidence(a))
+          .map(a => withCandidateEvidence(a, params.imageCandidates, params.topicTitle))
           .filter((a): a is DeepReadImageAsset => a !== null);
         const next: DeepReadOutput = {
           ...current,
@@ -494,11 +295,11 @@ export const createSectionWriterTools = (
     execute: async (input: string): Promise<UIMessagePartText[]> => {
       const obj = asObject(input);
       const heroUrlRaw = urlString(obj, 'hero_image_url');
-      const heroUrl = heroUrlRaw !== null && isHeroCandidate(heroUrlRaw) ? heroUrlRaw : null;
+      const heroUrl = heroUrlRaw !== null && isHeroCandidate(params.imageCandidates, heroUrlRaw) ? heroUrlRaw : null;
       const incomingAssets = parseImageAssets(obj)
-        .map(a => withCandidateEvidence(a))
+        .map(a => withCandidateEvidence(a, params.imageCandidates, params.topicTitle))
         .filter((a): a is DeepReadImageAsset => a !== null);
-      const heroCandidate = heroUrl !== null ? candidateForUrl(heroUrl) : null;
+      const heroCandidate = heroUrl !== null ? candidateForUrl(params.imageCandidates, heroUrl) : null;
       const heroReasonRaw = objString(obj, 'hero_reason');
       const heroReason = heroReasonRaw !== null
         ? cleanText(heroReasonRaw, HERO_REASON_MAX)
@@ -729,286 +530,3 @@ export const createSectionWriterTools = (
     setCurrentForTest: (o: DeepReadOutput) => { output = o; },
   };
 };
-
-// ===== 子解析器(照搬 Android timeline/corePoints/perspectives/quotes/imageAssets/diagram) =====
-
-const parseTimeline = (o: Record<string, unknown>): TimelineEvent[] =>
-  objObjectList(o, 'timeline').map(obj => {
-    const event = objString(obj, 'event');
-    if (event === null) return null;
-    const date = objString(obj, 'date');
-    return {
-      date: date !== null ? cleanText(date, 80) : '',
-      event: cleanText(event, TIMELINE_EVENT_MAX),
-      isHighlight: objBool(obj, 'is_highlight') ?? false,
-      why: objString(obj, 'why') !== null ? cleanText(objString(obj, 'why')!, 180) : null,
-      imageUrl: urlString(obj, 'image_url'),
-      imageCaption: (() => { const c = objString(obj, 'image_caption'); return c !== null ? cleanText(c, HERO_CAPTION_MAX) : null; })(),
-    } as TimelineEvent;
-  }).filter((x): x is TimelineEvent => x !== null);
-
-const parseCorePoints = (o: Record<string, unknown>, sourceCount: number = 0): CorePoint[] =>
-  objObjectList(o, 'core_points').map(obj => {
-    const point = objString(obj, 'point');
-    if (point === null) return null;
-    const supporting = objString(obj, 'supporting');
-    return {
-      point: cleanText(point, CORE_POINT_MAX),
-      sources: parseSourceNumbers(obj, sourceCount),
-      supporting: supporting !== null ? cleanText(supporting, CORE_SUPPORTING_MAX) : null,
-      imageUrl: urlString(obj, 'image_url'),
-      imageCaption: (() => { const c = objString(obj, 'image_caption'); return c !== null ? cleanText(c, HERO_CAPTION_MAX) : null; })(),
-    } as CorePoint;
-  }).filter((x): x is CorePoint => x !== null);
-
-const parsePerspectives = (o: Record<string, unknown>, sourceCount: number = 0): Perspective[] =>
-  objObjectList(o, 'perspectives').map(obj => {
-    const viewpoint = objString(obj, 'viewpoint');
-    if (viewpoint === null) return null;
-    const holder = objString(obj, 'holder');
-    return {
-      viewpoint: cleanText(viewpoint, PERSPECTIVE_VIEWPOINT_MAX),
-      interest: objString(obj, 'interest') !== null ? cleanText(objString(obj, 'interest')!, 120) : null,
-      quote: objString(obj, 'quote') !== null ? cleanText(objString(obj, 'quote')!, QUOTE_TEXT_MAX) : null,
-      quoteBy: objString(obj, 'quote_by') !== null ? cleanText(objString(obj, 'quote_by')!, QUOTE_ATTR_MAX) : null,
-      sources: parseSourceNumbers(obj, sourceCount),
-      holder: holder !== null ? cleanText(holder, PERSPECTIVE_HOLDER_MAX) : null,
-    } as Perspective;
-  }).filter((x): x is Perspective => x !== null).slice(0, PERSPECTIVES_MAX);
-
-const parseQuotes = (o: Record<string, unknown>): Quote[] =>
-  objObjectList(o, 'quotes').map(obj => {
-    const text = objString(obj, 'text');
-    if (text === null) return null;
-    const attribution = objString(obj, 'attribution');
-    return {
-      text: cleanText(text, QUOTE_TEXT_MAX),
-      attribution: attribution !== null ? cleanText(attribution, QUOTE_ATTR_MAX) : null,
-    } as Quote;
-  }).filter((x): x is Quote => x !== null).slice(0, QUOTES_MAX);
-
-const parseImageAssets = (o: Record<string, unknown>): DeepReadImageAsset[] =>
-  objObjectList(o, 'image_assets').map(obj => {
-    const url = urlString(obj, 'url');
-    if (url === null) return null;
-    const caption = objString(obj, 'caption');
-    const source = objString(obj, 'source');
-    const qualityHint = objString(obj, 'quality_hint');
-    const selectionReason = objString(obj, 'selection_reason');
-    return {
-      url,
-      caption: caption !== null ? cleanText(caption, HERO_CAPTION_MAX) : null,
-      source: source !== null ? cleanText(source, READING_LINK_SOURCE_MAX) : null,
-      confidence: IMAGE_CONFIDENCE.INLINE,
-      score: null,
-      qualityHint: qualityHint !== null ? cleanText(qualityHint, 60) : null,
-      selectionReason: selectionReason !== null ? cleanText(selectionReason, HERO_REASON_MAX) : null,
-      relatedEntities: [],
-      relatedTimelineIndex: null,
-    } as DeepReadImageAsset;
-  }).filter((x): x is DeepReadImageAsset => x !== null).slice(0, IMAGE_ASSETS_MAX);
-
-const DIAGRAM_TYPES = new Set(['causal_chain', 'process_flow', 'stakeholder_map', 'system_structure', 'comparison_matrix']);
-
-const parseDiagram = (o: Record<string, unknown>): DeepReadDiagram | null => {
-  const typeRaw = objString(o, 'type');
-  const type = typeRaw !== null ? typeRaw.toLowerCase() : null;
-  if (type === null || !DIAGRAM_TYPES.has(type)) return null;
-  const titleRaw = objString(o, 'title');
-  if (titleRaw === null) return null;
-  const title = cleanText(titleRaw, DIAGRAM_TITLE_MAX_CHARS);
-  const seenIds = new Set<string>();
-  const nodes: DiagramNode[] = [];
-  for (const obj of objObjectList(o, 'nodes')) {
-    const id = objString(obj, 'id');
-    const label = objString(obj, 'label');
-    if (id === null || label === null) continue;
-    const idC = cleanText(id, 32);
-    const labelC = cleanText(label, DIAGRAM_NODE_LABEL_MAX_CHARS);
-    if (seenIds.has(idC)) continue;
-    seenIds.add(idC);
-    const note = objString(obj, 'note');
-    const group = objString(obj, 'group');
-    nodes.push({
-      id: idC,
-      label: labelC,
-      note: note !== null ? cleanText(note, DIAGRAM_NODE_NOTE_MAX_CHARS) : null,
-      group: group !== null ? cleanText(group, DIAGRAM_NODE_GROUP_MAX_CHARS) : null,
-    });
-    if (nodes.length >= MAX_DIAGRAM_NODES) break;
-  }
-  if (nodes.length < 2) return null;
-  const nodeIds = new Set(nodes.map(n => n.id));
-  const rawEdges: DiagramEdge[] = [];
-  for (const obj of objObjectList(o, 'edges')) {
-    const from = objString(obj, 'from');
-    const to = objString(obj, 'to');
-    if (from === null || to === null) continue;
-    const fromC = cleanText(from, 32);
-    const toC = cleanText(to, 32);
-    if (!nodeIds.has(fromC) || !nodeIds.has(toC) || fromC === toC) continue;
-    const label = objString(obj, 'label');
-    rawEdges.push({ from: fromC, to: toC, label: label !== null ? cleanText(label, DIAGRAM_EDGE_LABEL_MAX_CHARS) : null });
-  }
-  const limit = type === 'process_flow' || type === 'causal_chain' ? MAX_LINEAR_DIAGRAM_EDGES : MAX_RELATION_DIAGRAM_EDGES;
-  const edgeSeen = new Set<string>();
-  const edges: DiagramEdge[] = [];
-  for (const e of rawEdges) {
-    const key = `${e.from}->${e.to}`;
-    if (edgeSeen.has(key)) continue;
-    edgeSeen.add(key);
-    edges.push(e);
-    if (edges.length >= limit) break;
-  }
-  const reason = objString(o, 'reason');
-  const caption = objString(o, 'caption');
-  return {
-    type,
-    title,
-    reason: reason !== null ? cleanText(reason, 220) : null,
-    nodes,
-    edges,
-    caption: caption !== null ? cleanText(caption, HERO_CAPTION_MAX) : null,
-  };
-};
-
-const diagramDropReason = (o: Record<string, unknown>): string => {
-  const typeRaw = objString(o, 'type');
-  const type = typeRaw !== null ? typeRaw.toLowerCase() : null;
-  if (type === null || !DIAGRAM_TYPES.has(type)) return 'invalid type';
-  const titleRaw = objString(o, 'title');
-  if (titleRaw === null || cleanText(titleRaw, DIAGRAM_TITLE_MAX_CHARS).length === 0) return 'title missing';
-  const acceptedNodes = objObjectList(o, 'nodes').filter(obj => objString(obj, 'id') !== null && objString(obj, 'label') !== null);
-  if (acceptedNodes.length < 2) return 'nodes < 2';
-  return 'type, title, nodes';
-};
-
-const buildDiagramDropReasons = (rawNodes: number, nodes: number, rawEdges: number, edges: number): string[] => {
-  const out: string[] = [];
-  if (rawNodes > nodes) out.push(`nodes dropped: missing id/label, duplicate id, or truncated limit=${MAX_DIAGRAM_NODES}`);
-  if (rawEdges > edges) out.push('edges dropped: unknown node, self edge, duplicate edge, or truncated limit');
-  return out;
-};
-
-// ===== fallback 文本构造(照搬 Android fallbackBody/cleanAssistantFallback/isUsefulFallbackText) =====
-
-const fallbackTextMax = (stage: DeepReadGenerationStage): number => {
-  switch (stage) {
-    case 'OVERVIEW': return OVERVIEW_SUMMARY_STORAGE_MAX_CHARS;
-    case 'NARRATIVE': return 1_200;
-    case 'ANALYSIS': return ANALYSIS_IMPLICATIONS_MAX;
-    case 'EXTENDED_READING': return 600;
-  }
-};
-
-const isUsefulFallbackText = (text: string): boolean => {
-  const cjk = (text.match(/[\u4e00-\u9fff]/g) ?? []).length;
-  return text.length >= 24 && cjk >= 12;
-};
-
-const buildFallbackBody = (
-  stage: DeepReadGenerationStage,
-  assistantText: string,
-  sources: ReadingLink[],
-  topicTitle: string,
-): string => {
-  const cleaned = cleanAssistantFallbackPure(assistantText, fallbackTextMax(stage));
-  if (isUsefulFallbackText(cleaned)) return cleaned;
-  // 取第一个 source 的 excerpt(此处 source 是 ReadingLink,用 title 模拟)
-  const firstSource = sources.find(s => s.title.trim().length > 0);
-  if (firstSource !== undefined) {
-    const srcText = cleanText(firstSource.title, fallbackTextMax(stage));
-    if (srcText.length > 0) return srcText;
-  }
-  switch (stage) {
-    case 'OVERVIEW': return `围绕「${topicTitle}」，当前来源已经提供了可继续阅读的基础事实，但模型未按约定写入结构化概览。`;
-    case 'NARRATIVE': return `围绕「${topicTitle}」，现有来源显示事件已有多个公开节点，后续应优先沿时间线补齐关键进展。`;
-    case 'ANALYSIS': return `围绕「${topicTitle}」，核心分析应聚焦已公开事实、各方立场和可能影响，避免把未证实推断写成定论。`;
-    case 'EXTENDED_READING': return '';
-  }
-};
-
-// 纯净版 cleanAssistantFallback(不污染 String prototype)
-const cleanAssistantFallbackPure = (text: string, max: number): string => {
-  const withoutFences = text.replace(/```[\s\S]*?```/g, ' ');
-  const joined = withoutFences
-    .split('\n')
-    .map(line => line.trim().replace(/^[#\-*\s]+/, ''))
-    .filter(line => {
-      if (line.includes('deep_read_')) return false;
-      if (line.includes('调用') && line.includes('工具')) return false;
-      if (line.toLowerCase() === '好的') return false;
-      return true;
-    })
-    .join(' ');
-  return cleanText(joined, max);
-};
-
-const fallbackSentences = (text: string, limit: number): string[] =>
-  text.split(/[。！？!?]\s*|\n+/)
-    .map(s => cleanText(s, 220))
-    .filter(s => s.length > 0)
-    .slice(0, limit);
-
-const toFallbackCorePoints = (text: string): CorePoint[] =>
-  fallbackSentences(text, 4).map(sentence => ({
-    point: safeTake(sentence, 42),
-    supporting: sentence.length > 42 ? cleanText(sentence, 240) : null,
-    imageUrl: null,
-    imageCaption: null,
-  }));
-
-const sourcesToFallbackTimeline = (sources: ReadingLink[]): TimelineEvent[] =>
-  sources.slice(0, 4).map((source, index) => {
-    const date = source.source ?? `来源 ${index + 1}`;
-    const eventText = source.title;
-    return {
-      date: cleanText(date, 40),
-      event: cleanText(eventText, 260),
-      isHighlight: false,
-      imageUrl: null,
-      imageCaption: null,
-    } as TimelineEvent;
-  }).filter(t => t.event.trim().length > 0);
-
-// ===== visualDiagnostics 构造(照搬 Android buildVisualDiagnostics) =====
-const selectionReasonFor = (c: ScoredImageCandidate, topicTitle: string): string => {
-  switch (c.confidence) {
-    case IMAGE_CONFIDENCE.HERO: return `候选图与「${topicTitle}」的标题实体或事件词匹配，且未命中 logo/icon 风险。`;
-    case IMAGE_CONFIDENCE.INLINE: return '候选图可作为正文上下文图，但标题相关性不足以做头图。';
-    default: return c.riskFlags.length > 0 ? c.riskFlags.join('、') : '图片相关性或质量不足。';
-  }
-};
-
-const buildVisualDiagnostics = (
-  previous: DeepReadOutput['visualDiagnostics'],
-  heroCandidate: ScoredImageCandidate | null,
-  heroReason: string | null,
-  inlineAssets: DeepReadImageAsset[],
-  imageCandidates: ScoredImageCandidate[] = [],
-): DeepReadOutput['visualDiagnostics'] => {
-  // candidateCount/rejectedImages 基于完整候选池(inline 子集会低报,
-  // reject 候选此前恒空 — 诊断失真)
-  const prevCount = previous?.candidateCount ?? 0;
-  const selectedUrls = new Set<string>(inlineAssets.map(a => a.url));
-  if (heroCandidate !== null) selectedUrls.add(heroCandidate.url);
-  const rejected = imageCandidates
-    .filter(c => !selectedUrls.has(c.url) && c.confidence === 'reject')
-    .map(c => ({ url: c.url, reason: c.selectionReason, score: c.score }));
-  return {
-    candidateCount: Math.max(prevCount, Math.max(imageCandidates.length, inlineAssets.length)),
-    heroSelection: heroCandidate !== null ? {
-      url: heroCandidate.url,
-      reason: heroReason ?? selectionReasonFor(heroCandidate, ''),
-    } : (previous?.heroSelection ?? null),
-    inlineSelections: inlineAssets.map(a => ({ url: a.url, reason: a.selectionReason ?? '' })).slice(0, 6),
-    rejectedImages: rejected.length > 0 ? rejected : (previous?.rejectedImages ?? []),
-  };
-};
-
-// ===== Writer output 工厂(对应 Android ok/missing JSON) =====
-const makeWriterOutput = (status: string, payload: Record<string, unknown>): UIMessagePartText => ({
-  type: 'text',
-  text: JSON.stringify({ status, ...payload }),
-  metadata: null,
-});

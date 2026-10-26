@@ -473,9 +473,16 @@ export const searchAggregatorSearch = async (
 
   const items: AggregatedSearchItem[] =
     mergeResults(calls, query, topic, timeRange).slice(0, maxResults);
+  const answers: JsonObject[] = [];
+  for (const source of calls) {
+    const answer: string | null = source.outcome.result?.answer ?? null;
+    if (!source.outcome.ok || answer === null || answer.trim().length === 0) continue;
+    answers.push({ service: source.serviceName, service_id: source.options.id,
+      query: source.params['query'] ?? query, answer });
+  }
 
   const out: JsonObject = {
-    status: items.length > 0 ? 'ok' : 'empty',
+    status: items.length > 0 || answers.length > 0 ? 'ok' : 'empty',
     query,
     topic,
     time_range: timeRange,
@@ -492,6 +499,7 @@ export const searchAggregatorSearch = async (
     imagesBudget = Math.max(imagesBudget - emittedImages, 0);
   });
   out['items'] = itemsJson;
+  if (answers.length > 0) out['answers'] = answers;
   const allImages: string[] = distinctKeepOrder(
     items.flatMap((item: AggregatedSearchItem) => item.images),
   ).slice(0, 5);

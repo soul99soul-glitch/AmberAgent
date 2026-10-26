@@ -35,9 +35,11 @@ export const perplexitySearchService: SearchService = {
     const opts: PerplexityOptions = asOptions(serviceOptions);
     if (opts.apiKey.trim().length === 0) throw new Error('Perplexity API key is required');
     const query: string = requireQuery(params);
+    // The default web endpoint permits at most 20 results, including direct DeepRead calls.
+    const resultSize: number = Math.min(Math.max(commonOptions.resultSize, 1), 20);
     const body: JsonObject = {
       query,
-      max_results: commonOptions.resultSize,
+      max_results: resultSize,
     };
     // maxTokens/maxTokensPerPage 仅 >0 落键
     if (opts.maxTokens !== null && opts.maxTokens > 0) body['max_tokens'] = opts.maxTokens;
@@ -71,7 +73,7 @@ export const perplexitySearchService: SearchService = {
         const u: string | null = strOrNull(o['url']);
         return t !== null && t.trim().length > 0 && u !== null && u.trim().length > 0;
       })
-      .slice(0, commonOptions.resultSize);
+      .slice(0, resultSize);
     // 全部响应级图片挂首个有效结果(跨结果分发由聚合层处理)
     let imagesAttached: boolean = false;
     const items: SearchResultItem[] = rawItems.map((o: JsonObject): SearchResultItem => {
@@ -84,7 +86,7 @@ export const perplexitySearchService: SearchService = {
         title: strOrNull(o['title']) ?? '',
         url: strOrNull(o['url']) ?? '',
         text: strOrNull(o['snippet']) ?? strOrNull(o['text']) ?? '',
-        publishedAt: null,
+        publishedAt: strOrNull(o['date']),
         images: imgs,
       };
     });

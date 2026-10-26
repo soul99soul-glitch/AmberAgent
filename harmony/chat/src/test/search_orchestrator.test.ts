@@ -297,14 +297,15 @@ test('orchestrator:search — webview 兜底条件 + 建议 URL 形式编码 + e
     settings, { query: 'a b', allow_webview: true }, execFail, DEPS,
   );
   const fb = r['webview_fallback'] as JsonObject;
-  assert.equal(fb['status'], 'available');
+  assert.equal(fb['status'], 'manual_only');
+  assert.ok((fb['suggestions'] as JsonObject[]).every(s => s['available'] === false));
   const sug = fb['suggestions'] as JsonObject[];
   assert.equal(sug[0]['url'], 'https://www.google.com/search?q=a+b');
   assert.equal(sug[1]['url'], 'https://duckduckgo.com/?q=a+b');
   assert.equal(sug[2]['url'], 'https://www.bing.com/search?q=a+b');
   assert.equal(
     r['message'],
-    'No ordinary source produced results. Use webview_search_open with the suggested fallback URL, or enable more search services.',
+    'No ordinary source produced results. Check webview_fallback for available browser actions or manual search links, or enable more search services.',
   );
   // 'TRUE' 严格解析失败 → false;但 depth deep → 仍兜底
   const r2 = await searchOrchestratorSearch(
@@ -388,11 +389,11 @@ test('orchestrator:explain — 形状/空 query 无变体/webview 可用性判�
     ['builtin', 'id', 'kind', 'name', 'reason'],
   );
   // deep + fallback enabled → true
-  assert.equal(r['webview_fallback_would_be_available'], true);
+  assert.equal(r['webview_fallback_requested'], true);
   // 空 query → 空变体
   const r2 = searchOrchestratorExplain(settings, {}, DEPS);
   assert.deepEqual(r2['query_variants'], []);
-  assert.equal(r2['webview_fallback_would_be_available'], false);
+  assert.equal(r2['webview_fallback_requested'], false);
   // 变体落出(standard)
   const r3 = searchOrchestratorExplain(settings, { query: 'q' }, DEPS);
   assert.deepEqual(r3['query_variants'], ['q']);

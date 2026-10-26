@@ -31,6 +31,7 @@ export interface SearchCommonOptions {
 }
 
 export const DEFAULT_SEARCH_COMMON_OPTIONS: SearchCommonOptions = { resultSize: 10 };
+export const MAX_SEARCH_RESULTS: number = 40;
 
 export interface SearchResultItem {
   title: string;

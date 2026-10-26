@@ -54,10 +54,9 @@ test('a closing ghostwrite confirmation retains the frozen author plan after sel
     NovelGhostwriteStartSheet: props => { rendered = props; },
   });
   const preview = { branchName: 'main', targetChapterCount: 3, planContent: 'frozen author plan' };
-  Object.assign(page, { ghostwritePreview: preview, ghostwriteBusy: false, navBarHeight: 0,
-    ghostwriteAuthorPlanPreview: value => value.planContent,
-  });
-  page.GhostwriteStartPreviewSheet(preview); rendered.onClose(); assert.equal(page.ghostwritePreview, null);
+  Object.assign(page, { jobs: { ghostwritePreview: preview, ghostwriteBusy: false,
+    ghostwriteAuthorPlanPreview: value => value.planContent }, navBarHeight: 0 });
+  page.GhostwriteStartPreviewSheet(preview); rendered.onClose(); assert.equal(page.jobs.ghostwritePreview, null);
   page.GhostwriteStartPreviewSheet(preview);
   assert.equal(rendered.branchName, 'main'); assert.equal(rendered.chapterCount, 3);
   assert.equal(rendered.planContent, 'frozen author plan');

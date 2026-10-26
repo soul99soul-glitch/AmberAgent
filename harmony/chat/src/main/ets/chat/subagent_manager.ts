@@ -1,10 +1,10 @@
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import type {
   SubAgentDefinition, SubAgentMode, SubAgentRuntimeSetting,
-} from './agent_prompt_config.ts';
+} from './subagent_definitions.ts';
 import {
   SUB_AGENT_BUILT_INS, subAgentApplyOverride,
-} from './agent_prompt_config.ts';
+} from './subagent_definitions.ts';
 import type {
   AgentTaskSnapshot, AgentTaskStatus, AgentTaskStore,
 } from './agent_task.ts';

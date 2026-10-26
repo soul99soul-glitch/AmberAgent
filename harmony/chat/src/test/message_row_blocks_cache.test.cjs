@@ -35,6 +35,7 @@ async function fixture(initialParts) {
     miniAppStatusProjection,
   });
   const probe = new exports.Probe();
+  probe.viewState = null;
   probe.cachedBlocks = null;
   probe.lastMiniAppStreamText = '';
   probe.lastMiniAppStreamMessageId = '';

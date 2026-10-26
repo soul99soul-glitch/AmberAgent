@@ -32,6 +32,9 @@ export struct MermaidBlock {
   private controller: webview.WebviewController = new webview.WebviewController();
   private attached: boolean = false;
   private alive: boolean = false;
+  private visible: boolean = false;
+  // Keep measured geometry while clipped; submit only the latest pending content on return.
+  private renderPending: boolean = true;
   private renderRevision: number = 0;
   private screenHeightPx: number = 0;
   private renderTimer: number = -1;
@@ -49,11 +52,10 @@ export struct MermaidBlock {
   aboutToDisappear(): void {
     this.attached = false;
     this.alive = false;
+    this.visible = false;
+    this.renderPending = true;
     this.renderReady = false;
-    if (this.renderTimer !== -1) {
-      clearTimeout(this.renderTimer);
-      this.renderTimer = -1;
-    }
+    this.clearRenderTimer();
     if (this.frameTimer !== -1) clearTimeout(this.frameTimer);
     this.frameTimer = -1;
     if (this.finishFrame !== null) this.finishFrame();
@@ -62,17 +64,38 @@ export struct MermaidBlock {
 
   private onSourceChange(): void {
     this.renderRevision++;
+    this.renderPending = true;
     this.renderReady = false;
-    this.renderedHeight = 300;
-    if (this.renderTimer !== -1) clearTimeout(this.renderTimer);
+    this.clearRenderTimer();
+    if (!this.alive || !this.visible) return;
     this.renderTimer = setTimeout((): void => {
       this.renderTimer = -1;
       this.renderNow();
     }, 400);
   }
 
+  private clearRenderTimer(): void {
+    if (this.renderTimer !== -1) clearTimeout(this.renderTimer);
+    this.renderTimer = -1;
+  }
+
+  private onHostReady(): void {
+    if (!this.alive) return;
+    this.attached = true;
+    this.renderPending = true;
+    this.renderNow();
+  }
+
+  private onVisibilityChange(visible: boolean): void {
+    this.visible = visible;
+    if (visible) this.renderNow();
+    else this.clearRenderTimer();
+  }
+
   private renderNow(): void {
-    if (!this.attached || this.source.trim().length === 0) return;
+    if (!this.attached || !this.alive || !this.visible || !this.renderPending || this.source.trim().length === 0) return;
+    this.clearRenderTimer();
+    this.renderPending = false;
     const src: string = JSON.stringify(this.source)
       .replace(/\u2028/g, '\\u2028')
       .replace(/\u2029/g, '\\u2029');
@@ -165,9 +188,9 @@ export struct MermaidBlock {
           methodList: ['postMessage'],
           controller: this.controller,
         })
-        .onPageEnd((): void => {
-          this.attached = true;
-          this.renderNow();
+        .onPageEnd((): void => { this.onHostReady(); })
+        .onVisibleAreaChange([0.0, 0.01], (isVisible: boolean): void => {
+          this.onVisibilityChange(isVisible);
         })
       Row() {
         Text(this.exporting ? this.exportProgress : this.renderedHeight > this.displayHeight

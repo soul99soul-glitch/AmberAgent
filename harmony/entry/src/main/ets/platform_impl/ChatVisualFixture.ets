@@ -3,8 +3,8 @@ import { Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import BuildProfile from 'BuildProfile';
 import type {
-  Conversation, MiniAppGeneratedOutput, MiniAppRecord, ThreeSceneObject, ThreeSceneSpec,
-  UIMessage, UIMessagePartImage, UIMessagePartMiniApp, UIMessagePartTool, UIMessagePartVideo,
+  Conversation, MessageNode, MiniAppGeneratedOutput, MiniAppRecord, ThreeSceneObject, ThreeSceneSpec,
+  UIMessage, UIMessagePart, UIMessagePartImage, UIMessagePartMiniApp, UIMessagePartReasoning, UIMessagePartTool, UIMessagePartVideo,
 } from '@amber/chat-domain';
 import {
   makeConversation, makeUIMessage, makeUserMessage, makeMessageNode, nowIso, patchConversation, toMessageNode,
@@ -24,7 +24,7 @@ const FRAME_STEP_MS: number = 600;
 const DEBUG_APP_TITLE: string = 'Amber Debug';
 const ANSWER_SUFFIX: string = '-answer';
 
-type VisualFixtureCase = 'svg' | 'three' | 'miniapp' | 'widget-error' | 'raw-svg' | 'raw-three' | 'raw-three-error' | 'smart-ui' | 'ui-svg-error' | 'weather-ui' | 'style-gallery' | 'component-gallery' | 'task-ui' | 'study-ui' | 'linkage-ui' | 'media-ui' | 'mixed';
+type VisualFixtureCase = 'svg' | 'three' | 'miniapp' | 'widget-error' | 'raw-svg' | 'raw-three' | 'raw-three-error' | 'smart-ui' | 'ui-svg-error' | 'weather-ui' | 'style-gallery' | 'component-gallery' | 'task-ui' | 'study-ui' | 'linkage-ui' | 'media-ui' | 'mixed' | 'perf-reasoning' | 'perf-history' | 'perf-rich';
 
 interface VisualFixtureData {
   initial: Conversation;
@@ -38,7 +38,8 @@ const isVisualFixtureCase = (value: string): boolean =>
   value === 'svg' || value === 'three' || value === 'miniapp' || value === 'widget-error' ||
     value === 'raw-svg' || value === 'raw-three' || value === 'raw-three-error' || value === 'smart-ui' || value === 'ui-svg-error' ||
     value === 'weather-ui' || value === 'style-gallery' || value === 'component-gallery' || value === 'task-ui' ||
-    value === 'study-ui' || value === 'linkage-ui' || value === 'media-ui' || value === 'mixed';
+    value === 'study-ui' || value === 'linkage-ui' || value === 'media-ui' || value === 'mixed' ||
+    value === 'perf-reasoning' || value === 'perf-history' || value === 'perf-rich';
 
 const conversationIdFor = (runId: string): string => `${DEBUG_VISUAL_CONVERSATION_PREFIX}${runId}`;
 const answerIdFor = (runId: string): string => `debug-visual-${runId}${ANSWER_SUFFIX}`;
@@ -193,7 +194,79 @@ const baseConversation = (conversationId: string, prompt: string): Conversation 
   return makeConversation(conversationId, [toMessageNode(user)], { title: '视觉回放' });
 };
 
+const performanceRichContent = (): string => {
+  const paragraph: string = '这一段保持连续排版，用来检查长段落增长、自动换行以及返回底部时的阅读位置。'.repeat(80);
+  let code: string = '';
+  for (let index: number = 1; index <= 80; index++) {
+    code += `const section${index}: number = ${index}; // 稳定代码行应复用高亮，新增尾行继续显示\n`;
+  }
+  let table: string = '| 检查项 | 预期行为 | 状态 |\n| --- | --- | --- |\n';
+  for (let index: number = 1; index <= 12; index++) {
+    table += `| 第 ${index} 段 | 保持列宽和行距，允许横向查看完整内容 | 待检查 |\n`;
+  }
+  return '# 富文本性能回放\n\n' + paragraph + '\n\n```typescript\n' + code + '```\n\n' + table +
+    '\n$$\nE = mc^2 + \\sum_{i=1}^{n} i\n$$\n\n' +
+    '```mermaid\ngraph LR\n  Source[Source] --> Stable[Stable blocks]\n  Stable --> Tail[Active tail]\n```\n\n' +
+    '回放完成：原文、代码、表格和公式均保留。';
+};
+
+const performanceReasoningFixture = (runId: string): VisualFixtureData => {
+  const initial: Conversation = baseConversation(conversationIdFor(runId), '请逐步思考，并在完成后给出简短回答。');
+  const answerId: string = answerIdFor(runId);
+  const createdAt: string = nowIso();
+  const thoughtFinishedAt: string = new Date(Date.parse(createdAt) + 18 * FRAME_STEP_MS).toISOString();
+  const messageFinishedAt: string = new Date(Date.parse(createdAt) + FRAME_COUNT * FRAME_STEP_MS).toISOString();
+  let source: string = '';
+  for (let index: number = 1; index <= 180; index++) {
+    source += `推演 ${index}：保留完整原文和换行；窗口只显示附近内容，已完成文本块保持稳定，新增内容继续进入尾部。\n`;
+    if (index % 5 === 0) source += '\n';
+  }
+  const answer: string = '思考已完成。\n\n原文完整保留，流式窗口只负责限制当前展示与布局工作。';
+  const frames: UIMessage[] = [];
+  for (let index: number = 1; index <= FRAME_COUNT; index++) {
+    const reasoning: UIMessagePartReasoning = {
+      type: 'reasoning', reasoning: source.substring(0, Math.ceil(source.length * Math.min(index, 18) / 18)),
+      createdAt, finishedAt: index > 18 ? thoughtFinishedAt : null, metadata: { reasoningLevel: 'xhigh' },
+    };
+    const parts: UIMessagePart[] = [reasoning];
+    if (index > 18) parts.push({ type: 'text', text: answer.substring(0, Math.ceil(answer.length * (index - 18) / 6)), metadata: null });
+    frames.push(makeUIMessage('assistant', parts, { id: answerId, createdAt, finishedAt: null }));
+  }
+  const finalReasoning: UIMessagePartReasoning = {
+    type: 'reasoning', reasoning: source, createdAt, finishedAt: thoughtFinishedAt, metadata: { reasoningLevel: 'xhigh' },
+  };
+  const finalMessage: UIMessage = makeUIMessage('assistant', [
+    finalReasoning, { type: 'text', text: answer, metadata: null },
+  ], { id: answerId, createdAt, finishedAt: messageFinishedAt });
+  return { initial, frames, finalConversation: patchConversation(initial, {
+    messageNodes: initial.messageNodes.concat([toMessageNode(finalMessage)]), updateAt: messageFinishedAt,
+  }) };
+};
+
+const performanceHistoryFixture = (runId: string): VisualFixtureData => {
+  const nodes: MessageNode[] = [];
+  const finishedAt: string = nowIso();
+  for (let index: number = 1; index <= 120; index++) {
+    const label: string = String(index).padStart(3, '0');
+    const text: string = `历史消息 ${label}：用于检查按需创建、上下滑动和阅读锚点。`;
+    const message: UIMessage = makeUIMessage(index % 2 === 0 ? 'user' : 'assistant', [
+      { type: 'text', text, metadata: null },
+    ], { id: `debug-history-${runId}-${label}`, finishedAt });
+    nodes.push(makeMessageNode([message], 0, `debug-history-node-${runId}-${label}`));
+  }
+  const initial: Conversation = makeConversation(conversationIdFor(runId), nodes, { title: '长历史性能回放' });
+  const answerId: string = answerIdFor(runId);
+  const content: string = '正在继续生成。可以上滑阅读历史，再返回底部检查位置是否稳定。\n\n'.repeat(35);
+  const finalMessage: UIMessage = makeUIMessage('assistant', [{ type: 'text', text: content, metadata: null }],
+    { id: answerId, finishedAt: nowIso() });
+  return { initial, frames: streamFrames(answerId, content), finalConversation: patchConversation(initial, {
+    messageNodes: initial.messageNodes.concat([toMessageNode(finalMessage)]), updateAt: nowIso(),
+  }) };
+};
+
 const buildVisualFixture = async (runId: string, kind: VisualFixtureCase): Promise<VisualFixtureData> => {
+  if (kind === 'perf-reasoning') return performanceReasoningFixture(runId);
+  if (kind === 'perf-history') return performanceHistoryFixture(runId);
   const conversationId: string = conversationIdFor(runId);
   const answerId: string = answerIdFor(runId);
   const prompt: string = kind === 'miniapp'
@@ -274,7 +347,8 @@ const buildVisualFixture = async (runId: string, kind: VisualFixtureCase): Promi
       }),
     };
   }
-  const content: string = kind === 'widget-error' ? svgPayload().slice(0, -12) :
+  const content: string = kind === 'perf-rich' ? performanceRichContent() :
+    kind === 'widget-error' ? svgPayload().slice(0, -12) :
     kind === 'raw-svg' ? rawSvgPayload() : kind === 'raw-three' ? rawThreePayload() :
     kind === 'raw-three-error' ? rawThreePayload(true) :
     kind === 'smart-ui' ? smartUiCertificatePayload() + '\n\n' + rawSvgPayload() :

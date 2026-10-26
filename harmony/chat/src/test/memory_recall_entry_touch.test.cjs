@@ -24,12 +24,6 @@ const loadRecall = (domain, initialRecords, { profile = null, probabilities = nu
   const imports = {
     '@amber/chat-domain': domain,
     '@kit.PerformanceAnalysisKit': { hilog: {} },
-    './MemoryStore.ets': {
-      getMemoryReadRepository: () => repository,
-      getMemoryLibraryOps: () => ({ getAllRecords: async () => records }),
-      getMemoryTopicStoreOps: () => ({ snapshotProfile: async () => profile }),
-    },
-    './JevSupport.ets': { jevNoulBatch: async () => probabilities === null ? null : { shadow: false, probabilities } },
   };
   const source = fs.readFileSync(sourceFile, 'utf8') + '\nexport { memorySystemBlocks };\n';
   const js = ts.transpileModule(source, {
@@ -48,7 +42,11 @@ const loadRecall = (domain, initialRecords, { profile = null, probabilities = nu
     activeConversation: () => conversation,
     recalledMemoryIds: [...recalledMemoryIds],
   };
-  return { run: () => exports.memorySystemBlocks(ctx), ctx, touches,
+  return { run: () => exports.memorySystemBlocks(ctx, {
+    memoryRepository: repository, memoryLibrary: { getAllRecords: async () => records },
+    memoryTopics: { snapshotProfile: async () => profile },
+    rerankContext: async () => probabilities === null ? null : { shadow: false, probabilities },
+  }), ctx, touches,
     records: () => records, reinforcementCalls: () => reinforcementCalls };
 };
 

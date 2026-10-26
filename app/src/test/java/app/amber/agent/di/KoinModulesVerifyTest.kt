@@ -2,8 +2,6 @@ package app.amber.agent.di
 
 import app.amber.core.ai.Generator
 import app.amber.core.agent.runtime.AgentEventStore
-import app.amber.core.agent.runtime.AgentRegistry
-import app.amber.core.agent.runtime.AgentRunner
 import app.amber.core.di.agentInfraModule
 import app.amber.core.di.agentRuntimeModule
 import app.amber.core.di.appModule
@@ -17,7 +15,6 @@ import app.amber.core.di.viewModelModule
 import app.amber.core.di.webMountModule
 import app.amber.core.di.workspaceModule
 import app.amber.core.service.ConversationAccess
-import app.amber.feature.chat.impl.ChatSessionResolver
 import app.amber.feature.modelcouncil.ModelCouncilTextRunner
 import app.amber.feature.subagent.SubAgentRunner
 import org.junit.Test
@@ -34,7 +31,7 @@ import kotlin.test.assertTrue
  * threw `NoDefinitionFoundException`.
  *
  * Phase D cascade lifted several interfaces into api modules
- * (`core/ai/generation/api`, `feature/chat/api`, `feature/subagent`,
+ * (`core/ai/generation/api`, `feature/subagent`,
  * `feature/modelcouncil`, …), so every concrete `single { Impl(...) }`
  * with consumers asking for the interface needs an alias
  * `single<Interface> { get<Impl>() }`. This test asserts the alias
@@ -77,10 +74,7 @@ class KoinModulesVerifyTest {
     private val requiredAliases: List<KClass<*>> = listOf(
         Generator::class,
         ConversationAccess::class,
-        ChatSessionResolver::class,
         AgentEventStore::class,
-        AgentRegistry::class,
-        AgentRunner::class,
         SubAgentRunner::class,
         ModelCouncilTextRunner::class,
     )

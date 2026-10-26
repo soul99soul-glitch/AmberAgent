@@ -276,8 +276,8 @@ struct NovelBranchHistoryPage {
           PageTitleBar({ title: '历史与分支', actionText: this.loading ? '加载中' : '刷新',
             onBack: (): void => { if (!this.busy) router.back(); },
             onAction: (): void => { if (!this.busy && !this.loading) this.reload(); } })
-          if (this.error.length > 0) { Text(this.error).fontSize(13).fontColor(ERROR).width('100%').padding(20) }
-          if (this.notice.length > 0) { Text(this.notice).fontSize(13).fontColor(ACCENT).width('100%').padding(20) }
+          if (this.error.length > 0) { Text(this.error).fontSize(13).fontColor(ERROR).width('100%').padding({ left: 20, right: 20, top: 8, bottom: 4 }) }
+          if (this.notice.length > 0) { Text(this.notice).fontSize(13).fontColor(ACCENT).width('100%').padding({ left: 20, right: 20, top: 8, bottom: 4 }) }
           Scroll() {
             Column({ space: 12 }) {
               Text(this.projectName).fontSize(18).fontWeight(FontWeight.Medium).fontColor(INK).width('100%')

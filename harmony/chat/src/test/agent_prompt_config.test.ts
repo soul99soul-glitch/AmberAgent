@@ -419,3 +419,45 @@ test('tool:未知 action 错误逐字', async () => {
   const t: AgentTool = makeTool(new MemFiles(), new MemSettingsPort());
   await assert.rejects(t.execute({ action: 'boom' } as never), /Unsupported action: boom/);
 });
+
+test('repository: failed atomic write releases the same repository queue for a following write', async () => {
+  class FailFirstWrite extends MemFiles {
+    attempts: string[] = [];
+    atomicWrite(path: string, content: string): void {
+      this.attempts.push(content);
+      if (this.attempts.length === 1) throw new Error('atomic write failed');
+      super.atomicWrite(path, content);
+    }
+  }
+  const files = new FailFirstWrite();
+  const repo = makeRepo(files);
+  const failed = assert.rejects(repo.writeContextCompactionPrompt('first write'), /atomic write failed/);
+  const following = repo.writeContextCompactionPrompt('following write');
+  await failed;
+  await following;
+  assert.equal(files.attempts.length, 2);
+  assert.match(files.attempts[0], /first write/);
+  assert.match(files.attempts[1], /following write/);
+  assert.equal(await repo.readContextCompactionPrompt(), 'following write');
+});
+
+test('tool: settings failure preserves the written Markdown and does not claim a cross-store rollback', async () => {
+  class FailSettingsWrite extends MemSettingsPort {
+    updates: number = 0;
+    updateSubAgentSetting(_next: SubAgentRuntimeSetting): Promise<void> {
+      this.updates++;
+      return Promise.reject(new Error('settings write failed'));
+    }
+  }
+  const files = new MemFiles();
+  const settings = new FailSettingsWrite();
+  const tool = makeTool(files, settings);
+  await assert.rejects(execText(tool, {
+    action: 'update_subagent_prompt', subagent_id: 'explorer', prompt: 'saved Markdown before KV',
+  }), /settings write failed/);
+  assert.equal(settings.updates, 1);
+  assert.equal(settings.subAgent.overrides.size, 0);
+  assert.match(files.readText('/files/agent_prompts/subagents.md'), /saved Markdown before KV/);
+  const restored = await makeRepo(files).applySubAgentMarkdownToSetting(settings.subAgent);
+  assert.equal(restored.overrides.get('explorer')?.systemPrompt, 'saved Markdown before KV');
+});

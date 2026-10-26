@@ -41,13 +41,13 @@ export struct PluginJSONEditor {
             .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         }
       }.width('100%').clip(true)
-      TextArea({ text: this.text, placeholder: '{}' }).height(180).fontSize(13).fontFamily(FONT_MONO)
-        .fontColor(this.foreground).placeholderColor(this.muted).backgroundColor(this.inset).enabled(this.editable)
+      TextArea({ text: this.text, placeholder: '{}' }).width('100%').height(180).fontSize(13).fontFamily(FONT_MONO)
+        .fontColor(this.foreground).placeholderColor(this.muted).backgroundColor(this.inset).borderRadius(10).enabled(this.editable)
         .onChange((value: string): void => { this.onTextChange(value); })
       if (this.issue.length > 0) {
         Text(this.issue).fontSize(12).fontColor(this.errorColor).width('100%').wordBreak(WordBreak.BREAK_ALL)
       }
     }
-      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%')
+      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%').alignItems(HorizontalAlign.Start)
   }
 }

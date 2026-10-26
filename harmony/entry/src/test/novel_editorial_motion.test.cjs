@@ -4,57 +4,65 @@ const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('../../../chat/node_modules/typescript');
 
-// Execute the page's production collection method against a controlled commit boundary.
+const { loadSession } = require('./novel_workspace_sessions_fixture.cjs');
+
+// Execute the manuscript owner and the page's impression callback against a controlled commit boundary.
 function fixture({ archive = false } = {}) {
   const source = fs.readFileSync(path.join(__dirname, '../main/ets/pages/NovelWorkspacePage.ets'), 'utf8');
-  const helpers = source.slice(source.indexOf('  private clearStudioFeedback()'),
+  const helpers = source.slice(source.indexOf('  private studioBackgroundChanged()'),
     source.indexOf('  private enableKeyboardAvoidance()')).replace(/private /g, '');
-  const collect = source.slice(source.indexOf('  private async submitCollect()'),
-    source.indexOf('  private async refreshCollectedAnalysis')).replace(/private /g, '');
-  const control = source.slice(source.indexOf('  private retainControlPlanDraft('),
-    source.indexOf('  private selectWritingTarget(')).replace(/private /g, '');
-  const js = ts.transpileModule('class Page {' + helpers + control + collect + '} return Page;',
+  const callbackMatch = /^  private onManuscriptCollected\(/m.exec(source);
+  assert.ok(callbackMatch, 'page owns the collection impression callback');
+  let depth = 1, end = source.indexOf('{', callbackMatch.index) + 1;
+  for (; depth && end < source.length; end++) {
+    if (source[end] === '{') depth++;
+    if (source[end] === '}') depth--;
+  }
+  const callback = source.slice(callbackMatch.index, end).replace('private ', '');
+  const js = ts.transpileModule('class Page {' + helpers + callback + '} return Page;',
     { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  let resolveCommit, rejectCommit, dialog;
+  let resolveCommit, rejectCommit;
   const animations = [];
   const committed = new Promise((resolve, reject) => { resolveCommit = resolve; rejectCommit = reject; });
-  const Page = new Function('getNovelCreation', 'getProductKind', 'AlertDialog', 'setTimeout', 'animateTo', 'Curve', js)(
-    () => ({ collectMessage: () => committed }), () => 'novel', { show: value => { dialog = value; } },
-    callback => { callback(); return 1; }, (options, update) => { animations.push(options); update(); }, { EaseOut: 'ease' });
+  const Page = new Function('getProductKind', 'animateTo', 'Curve', js)(
+    () => 'novel', (options, update) => { animations.push(options); update(); }, { EaseOut: 'ease' });
   const page = new Page();
   Object.assign(page, {
-    collectMessageId: 'message', collectDraft: 'committed prose', collectMode: archive ? 0 : 1,
-    collectChapterId: 'chapter', collectTitle: 'chapter title', busy: false,
-    pageAlive: true, pageHiddenOnce: false, studioPageVisible: true, studioBackgrounded: false,
-    controlPlanOwner: '', controlPlanReady: false,
+    busy: false, errorMsg: '', pageAlive: true, pageHiddenOnce: false,
+    writing: { background() {} },
+    studioPageVisible: true, studioBackgrounded: false,
     studioVisibleCycle: 0, collectionStamp: 0, projectId: 'project', tab: 0, reduceMotion: false,
-    workspaceStatus: { activeBranchId: 'branch' }, collectionFeedbackToken: 0,
+    workspaceStatus: { activeBranchId: 'branch' },
     project: { messages: [{ id: 'message', granularity: 'whole_chapter' }] },
-    collectDraftController: { stopEditing() {} }, collectTitleController: { stopEditing() {} },
-    collectDisabled: () => false, reload: async () => {}, refreshCollectedAnalysis: async () => {},
-    archiveDiscussion() {},
+    hasBlockingNovelRun: () => false, reload: async () => {},
+    onCollected: (...args) => page.onManuscriptCollected(...args),
   });
-  return { page, animations, resolveCommit, rejectCommit, dialog: () => dialog,
+  const dialogs = [];
+  const session = loadSession('NovelManuscriptSession', page, { collectMessage: () => committed }, dialogs);
+  Object.assign(session, { collectMessageId: 'message', collectDraft: 'committed prose',
+    collectSelected: [true], collectMode: archive ? 0 : 1,
+    collectChapterId: 'chapter', collectTitle: 'chapter title' });
+  return { page, session, animations, resolveCommit, rejectCommit, dialog: () => dialogs[0],
     success: () => resolveCommit({ analysisFinished: Promise.resolve({ count: 0 }) }) };
 }
 
-const nextTurn = () => new Promise(resolve => setImmediate(resolve));
+const nextTurn = () => new Promise(resolve => setTimeout(resolve, 0));
 
 test('collection impression follows persisted success, never merely starting or failed collection', async () => {
   const f = fixture();
-  const collecting = f.page.submitCollect();
+  const collecting = f.session.submitCollect();
   await nextTurn();
   assert.equal(f.page.collectionStamp, 0);
   f.success(); await collecting;
   assert.equal(f.page.collectionStamp, 1);
   assert.equal(f.page.tab, 1);
-  assert.equal(f.page.collectMessageId, '');
+  assert.equal(f.session.collectMessageId, '');
 
   const failed = fixture();
-  const attempting = failed.page.submitCollect(); await nextTurn();
+  const attempting = failed.session.submitCollect(); await nextTurn();
   failed.rejectCommit(new Error('commit rejected')); await attempting;
   assert.equal(failed.page.collectionStamp, 0);
-  assert.equal(failed.page.collectMessageId, 'message');
+  assert.equal(failed.session.collectMessageId, 'message');
 });
 
 test('leaving and returning, backgrounding, and changing theme suppress old async success', async () => {
@@ -63,20 +71,20 @@ test('leaving and returning, backgrounding, and changing theme suppress old asyn
     p => { p.studioBackgrounded = true; p.studioBackgroundChanged(); p.studioBackgrounded = false; },
     p => p.clearStudioFeedback(),
   ]) {
-    const f = fixture(); const collecting = f.page.submitCollect(); await nextTurn();
+    const f = fixture(); const collecting = f.session.submitCollect(); await nextTurn();
     invalidate(f.page); f.success(); await collecting;
     assert.equal(f.page.collectionStamp, 0);
-    assert.equal(f.page.collectMessageId, ''); // Persisted data still follows the existing flow.
+    assert.equal(f.session.collectMessageId, ''); // Persisted data still follows the existing flow.
   }
 });
 
 test('whole chapter collection completes directly without an automatic archive dialog', async () => {
-  const f = fixture({ archive: true }); const collecting = f.page.submitCollect(); await nextTurn();
+  const f = fixture({ archive: true }); const collecting = f.session.submitCollect(); await nextTurn();
   f.success(); await collecting;
   assert.equal(f.dialog(), undefined, 'discussion archive must remain a manual action');
   assert.equal(f.page.collectionStamp, 1);
   assert.equal(f.page.tab, 1);
-  assert.equal(f.page.collectMessageId, '');
+  assert.equal(f.session.collectMessageId, '');
 });
 
 test('the impression stays in the originating project and branch; leaving正文 clears it', () => {

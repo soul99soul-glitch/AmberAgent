@@ -11,6 +11,7 @@ import { toolOutputJson, toolInputAsJson } from '@amber/chat-domain';
 import type { JsonObject } from '@amber/chat-domain';
 import { MOTION_OVERLAY, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, META, LABEL, BODY } from '../design/tokens.ets';
 import { AgentToolCallCapsule, ToolStatus } from './AgentToolCapsule.ets';
+import type { MessageRowViewState } from './MessageRowViewState.ets';
 
 const COUNCIL_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
   'model_council_start', 'model_council_wait', 'model_council_read',
@@ -101,9 +102,33 @@ export struct ChatMessageCouncilStep {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @Prop tools: UIMessagePartTool[];
   @Prop runId: string = '';
+  viewState: MessageRowViewState | null = null;
   @Prop canOpenRun: boolean = true;
   onOpenRun: (runId: string) => void = (_id: string): void => {};
   @State objectiveExpanded: boolean = false;
+
+  aboutToAppear(): void {
+    if (this.viewState !== null && this.runId.length > 0) {
+      this.objectiveExpanded = this.viewState.councilObjectiveExpanded.get(this.runId) ?? false;
+    }
+  }
+
+  aboutToDisappear(): void {
+    this.saveObjectiveState();
+  }
+
+  private saveObjectiveState(): void {
+    if (this.viewState !== null && this.runId.length > 0) {
+      this.viewState.councilObjectiveExpanded.set(this.runId, this.objectiveExpanded);
+    }
+  }
+
+  private toggleObjective(): void {
+    this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.objectiveExpanded = !this.objectiveExpanded;
+      this.saveObjectiveState();
+    });
+  }
 
   // F12:真实阶段(结构化 output 字段);无则空,不按墙钟轮播
   private currentPhase(): string {
@@ -149,11 +174,7 @@ export struct ChatMessageCouncilStep {
             Text(this.objectiveExpanded ? '收起' : '展开')
               .fontSize(LABEL).fontColor(ACCENT)
               .margin({ left: 8 })
-              .onClick((): void => {
-                this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
-                  this.objectiveExpanded = !this.objectiveExpanded;
-                });
-              })
+              .onClick((): void => { this.toggleObjective(); })
           }
           .width('100%')
 

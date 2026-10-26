@@ -282,3 +282,24 @@ test('workspace import with an existing project id allocates an independent proj
   assert.notEqual(imported.id, 'same');
   assert.equal((await repo.loadProject('same')).name, '本地');
 });
+
+test('inventory reports a failed project lock without reacquiring it to read the display name', async () => {
+  const files = createMemoryFileStore();
+  const original = createFileNovelRepository(files);
+  await original.createProject(makeNovelProject({ id: 'lock-failed', name: '保留项目名', now: 1000 }));
+  let lockAttempts = 0;
+  const failing = new Proxy(files, {
+    get(target, property) {
+      if (property === 'withExclusiveLock') return async (): Promise<never> => {
+        lockAttempts += 1;
+        throw new Error('lock unavailable');
+      };
+      const value = Reflect.get(target, property);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const inventory = await createFileNovelRepository(failing).listProjectInventory();
+  assert.deepEqual(inventory.projects, []);
+  assert.deepEqual(inventory.failures, [{ id: 'lock-failed', name: '保留项目名', error: 'lock unavailable' }]);
+  assert.equal(lockAttempts, 1);
+});

@@ -67,10 +67,13 @@ test('settings polish save writes only the actual four context defaults and repo
 });
 
 test('novel picker availability matches the exact fixed-model execution path with provider overrides', async () => {
-  const source = fs.readFileSync(path.join(root, 'di/AppContainer.ets'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'di/ProviderModelRuntime.ets'), 'utf8');
   const ast = ts.createSourceFile('AppContainer.ts', source, ts.ScriptTarget.ES2022, true);
   const wanted = new Set(['effectiveProvider', 'makeProviderChoice', 'resolveConfiguredProviderChatModel', 'loadNovelModelOptions']);
-  const snippets = ast.statements.filter(node => ts.isVariableStatement(node)
+  const declarations = [];
+  const visit = node => { declarations.push(node); ts.forEachChild(node, visit); };
+  visit(ast);
+  const snippets = declarations.filter(node => ts.isVariableStatement(node)
     && node.declarationList.declarations.some(d => wanted.has(d.name.getText(ast))))
     .map(node => node.getText(ast).replace(/^export /, ''));
   assert.equal(snippets.length, wanted.size);
@@ -84,7 +87,7 @@ test('novel picker availability matches the exact fixed-model execution path wit
       const env = { loadProviders: async () => providers, getChatKvStore: () => ({}),
         hasUsableAuth: p => p.enabled && p.apiKey.length > 0,
         copyProviderSettingWithModels: (p, models) => ({ ...p, models }) };
-      const api = new Function(...Object.keys(env), code)(...Object.values(env));
+      const api = new Function(...Object.keys(env), 'ports', code)(...Object.values(env), env);
       const options = await api.loadNovelModelOptions();
       const choice = await api.resolveConfiguredProviderChatModel('provider-uuid', 'model-uuid');
       assert.equal(options[0].available, choice !== null, 'picker and execution must agree');

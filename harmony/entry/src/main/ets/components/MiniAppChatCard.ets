@@ -20,6 +20,7 @@ import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import { InlineMiniAppRuntime } from './InlineMiniAppRuntime.ets';
 import { VisualArtifactPreview } from './VisualArtifactPreview.ets';
 import { Icon } from './ui/Icon.ets';
+import type { MessageRowViewState } from './MessageRowViewState.ets';
 
 const HILOG_DOMAIN: number = 0x0001;
 const HILOG_TAG: string = 'MiniApp.ChatCard';
@@ -37,6 +38,8 @@ export struct MiniAppChatCard {
   @Prop canRun: boolean = true;
   @Prop canModify: boolean = true;
   @Prop canOpenList: boolean = true;
+  viewState: MessageRowViewState | null = null;
+  viewStateKey: string = '';
   onRun: (appId: string) => void = (_appId: string): void => {};
   onOpenList: () => void = (): void => {};
   onContentGrow: () => void = (): void => {};
@@ -66,7 +69,32 @@ export struct MiniAppChatCard {
 
   aboutToAppear(): void {
     this.alive = true;
+    if (this.viewState !== null && this.viewStateKey.length > 0) {
+      this.modifyRequest = this.viewState.miniAppModifyRequest.get(this.viewStateKey) ?? '';
+      // Saved apps must recheck the current source setting before restoring code.
+      this.showCode = this.part === null && this.savedShowCode();
+    }
     this.loadPreview();
+  }
+
+  private savedShowCode(): boolean {
+    return this.viewState !== null && this.viewStateKey.length > 0
+      && this.viewState.miniAppShowCode.get(this.viewStateKey) === true;
+  }
+
+  private saveViewState(): void {
+    if (this.viewState === null || this.viewStateKey.length === 0) return;
+    if (this.part === null || this.sourceAllowed) {
+      this.viewState.miniAppShowCode.set(this.viewStateKey, this.showCode);
+    }
+    this.viewState.miniAppModifyRequest.set(this.viewStateKey, this.modifyRequest);
+  }
+
+  private updateModifyRequest(value: string): void {
+    this.modifyRequest = value;
+    if (this.viewState !== null && this.viewStateKey.length > 0) {
+      this.viewState.miniAppModifyRequest.set(this.viewStateKey, value);
+    }
   }
 
   private onPartChanged(): void {
@@ -116,6 +144,7 @@ export struct MiniAppChatCard {
       this.platform = platform;
       this.sourceAllowed = platform.settingSnapshot().showSourceButton;
       if (!this.sourceAllowed) this.showCode = false;
+      else if (this.viewState !== null && this.viewStateKey.length > 0) this.showCode = this.savedShowCode();
       platform.repository.getById(appId).then((app: MiniAppRecord | null): void => {
         if (!this.alive || revision !== this.previewRevision || this.part?.appId !== appId) return;
         this.previewApp = app;
@@ -136,6 +165,7 @@ export struct MiniAppChatCard {
   }
 
   aboutToDisappear(): void {
+    this.saveViewState();
     this.alive = false;
     this.previewRevision++;
   }
@@ -169,7 +199,8 @@ export struct MiniAppChatCard {
   private beginModify(): void {
     this.withCurrentApp((app: MiniAppRecord): void => {
       this.modifyApp = app;
-      this.modifyRequest = '';
+      this.modifyRequest = this.viewState !== null && this.viewStateKey.length > 0
+        ? this.viewState.miniAppModifyRequest.get(this.viewStateKey) ?? '' : '';
       this.modifyDialogOpen = true;
     });
   }
@@ -191,6 +222,7 @@ export struct MiniAppChatCard {
       '请基于这个已保存小应用生成新版，并保留适合的能力声明。',
     ].join('\n');
     if (this.onModify(prompt)) {
+      this.updateModifyRequest('');
       this.modifyDialogOpen = false;
     }
   }
@@ -299,7 +331,11 @@ export struct MiniAppChatCard {
   }
 
   private toggleCode(): void {
+    if (this.part !== null && !this.sourceAllowed) return;
     this.showCode = !this.showCode;
+    if (this.viewState !== null && this.viewStateKey.length > 0) {
+      this.viewState.miniAppShowCode.set(this.viewStateKey, this.showCode);
+    }
   }
 
   @Builder
@@ -329,6 +365,7 @@ export struct MiniAppChatCard {
               .onClick((): void => { this.sourceDialogOpen = false; })
           }
           .width('100%')
+          .alignItems(VerticalAlign.Center)
           Scroll() {
             Text(this.sourceTarget)
               .fontSize(11)
@@ -368,6 +405,7 @@ export struct MiniAppChatCard {
             .onClick((): void => { this.versionTarget = null; })
         }
         .width('100%')
+        .alignItems(VerticalAlign.Center)
         .margin({ bottom: 4 })
         Scroll() {
           Column() {
@@ -399,6 +437,7 @@ export struct MiniAppChatCard {
                   })
               }
               .width('100%')
+              .alignItems(VerticalAlign.Center)
               .padding({ left: 4, right: 4, top: 10, bottom: 10 })
               .border({ width: { bottom: 0.5 }, color: LINE })
             }, (v: MiniAppVersionRecord): string => `${v.appId}-${v.versionNumber}`)
@@ -449,7 +488,7 @@ export struct MiniAppChatCard {
             .width('100%')
             .height(88)
             .margin({ top: 12 })
-            .onChange((v: string): void => { this.modifyRequest = v; })
+            .onChange((v: string): void => { this.updateModifyRequest(v); })
 
           Row() {
             Text('取消')
@@ -518,6 +557,7 @@ export struct MiniAppChatCard {
           .onClick((): void => { this.toggleCode(); })
         }
         .width('100%')
+        .alignItems(VerticalAlign.Center)
 
         Text(this.cardDescription())
           .fontSize(BODY2)
@@ -592,6 +632,7 @@ export struct MiniAppChatCard {
             }
           }
           .width('100%')
+          .alignItems(VerticalAlign.Center)
           .margin({ top: 8 })
         }
       }

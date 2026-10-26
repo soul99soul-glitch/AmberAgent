@@ -265,9 +265,6 @@ async function serviceFixture(initialIds = ['A', 'B'], options = {}) {
     BuildProfile: { default: { DEBUG: true }, DEBUG: true },
     '@amber/chat-domain': domain,
     '@kit.ArkTS': { util: { TextEncoder: { create: () => ({ encodeInto: text => new TextEncoder().encode(text) }) } } },
-    '../di/AppContainer.ets': { getChatRepository: () => repository, getChatKvStore: () => kv,
-      getChatAssistants: async () => [assistantFor('default')],
-      getCompactStore: () => ({ getCompacts: async () => [], deleteByConversation: async () => {} }) },
     './BackgroundGenerationKeepAlive.ets': { reportGenerationProgress: (context, progress) => {
       if (progress.generationActive) liveRuns.add(progress.runId);
       else { liveRuns.delete(progress.runId); if (liveRuns.size === 0) stoppedKeepAlive.push(context); }
@@ -300,7 +297,20 @@ async function serviceFixture(initialIds = ['A', 'B'], options = {}) {
   const entryCache = new Map();
   const { ConversationRunService } = loadEntry('ConversationRunService.ets', imports, storage, entryCache);
   const guard = loadEntry('ConversationRunGuard.ets', imports, storage, entryCache);
-  const service = new ConversationRunService();
+  const service = new ConversationRunService({
+    repository, kv, compactStore: { getCompacts: async () => [], deleteByConversation: async () => {} },
+    loadAssistants: async () => [assistantFor('default')],
+  }, {
+    prepareSeed: imports['./ConversationRunDependencies.ets'].prepareConversationSeed,
+    buildTurnDeps: imports['./ConversationRunDependencies.ets'].buildConversationTurnDeps,
+    buildToolLoop: imports['./ConversationRunTools.ets'].buildConversationToolLoop,
+    completeAuxiliary: imports['./ConversationRunAuxiliary.ets'].completeConversationAuxiliary,
+    compactConversation: compactPort.compactConversationNow,
+    evaluateCompletion: imports['./JevCompletionSupport.ets'].evaluateJevCompletion,
+    scheduleApprovalTriage: imports['./JevApprovalTriage.ets'].scheduleJevApprovalTriage,
+    cancelApprovalTriage: imports['./JevApprovalTriage.ets'].cancelJevApprovalTriage,
+    ...documentPort,
+  });
   return { domain, memory, kv, service, guard, values, generating, stoppedKeepAlive, providerFor, contexts, textOf, userCount, maximum, writeEvents, toolsByConversation,
     setSaveGate: value => { saveGate = value; }, setSaveFault: value => { saveFault = value; } };
 }

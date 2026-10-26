@@ -24,11 +24,11 @@ export interface ThreeSceneSpec {
 
 export const THREE_SCENE_RENDERER: string = 'threejs';
 export const THREE_SCENE_RENDERER_ALIAS: string = 'three';
-export const THREE_SCENE_MAX_OBJECTS: number = 48;
+export const THREE_SCENE_MAX_OBJECTS: number = 512;
 export const THREE_SCENE_MAX_ID_CHARS: number = 48;
-export const THREE_SCENE_MAX_COORDINATE: number = 100;
-export const THREE_SCENE_MAX_SIZE: number = 40;
-export const THREE_SCENE_MAX_SCALE: number = 10;
+export const THREE_SCENE_MAX_COORDINATE: number = 200;
+export const THREE_SCENE_MAX_SIZE: number = 100;
+export const THREE_SCENE_MAX_SCALE: number = 20;
 
 const object = (value: JsonValue | undefined): JsonObject | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value : null;
@@ -65,21 +65,64 @@ const finiteVector = (
   return out;
 };
 
-const validColor = (value: string): boolean => /^#[0-9a-f]{6}$/i.test(value);
+const normalizeColor = (value: string): string | null => {
+  const trimmed: string = value.trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(trimmed)) return trimmed;
+  if (/^#[0-9a-f]{3}$/.test(trimmed)) {
+    return `#${trimmed[1]}${trimmed[1]}${trimmed[2]}${trimmed[2]}${trimmed[3]}${trimmed[3]}`;
+  }
+  return null;
+};
+
+/** Normalize one compact voxel tuple: [x, y, z, "#color", w?, h?, d?]. */
+export const normalizeThreeVoxelTuple = (value: JsonValue | undefined, index: number): ThreeSceneObject | null => {
+  if (!Array.isArray(value) || (value.length !== 4 && value.length !== 5 && value.length !== 7)) return null;
+  const position: number[] | null = finiteVector(value.slice(0, 3), 3, THREE_SCENE_MAX_COORDINATE, false);
+  const color: string | null = typeof value[3] === 'string' ? normalizeColor(value[3]) : null;
+  if (position === null || color === null) return null;
+  let sizeInput: JsonValue = [1, 1, 1];
+  if (value.length === 5) {
+    sizeInput = [value[4], value[4], value[4]];
+  } else if (value.length === 7) {
+    sizeInput = [value[4], value[5], value[6]];
+  }
+  const size: number[] | null = finiteVector(sizeInput, 3, THREE_SCENE_MAX_SIZE, true);
+  if (size === null) return null;
+  return {
+    id: `vox-${index}`,
+    type: 'box',
+    color,
+    position,
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    size,
+  };
+};
 
 /** Normalize one complete object. Invalid or incomplete objects return null. */
 export const normalizeThreeSceneObject = (value: JsonValue | undefined): ThreeSceneObject | null => {
   const raw = object(value);
   if (raw === null) return null;
   const id: string = string(raw.id).trim();
-  const typeText: string = string(raw.type).trim().toLowerCase();
-  const color: string = string(raw.color).trim().toLowerCase();
+  const typeText: string = raw.type === undefined ? 'box' : string(raw.type).trim().toLowerCase();
+  const color: string | null = normalizeColor(string(raw.color));
   if (id.length === 0 || id.length > THREE_SCENE_MAX_ID_CHARS ||
-    !isThreeSceneObjectType(typeText) || !validColor(color)) return null;
+    !isThreeSceneObjectType(typeText) || color === null) return null;
   const position: number[] | null = finiteVector(raw.position, 3, THREE_SCENE_MAX_COORDINATE, false);
-  const rotation: number[] | null = finiteVector(raw.rotation, 3, THREE_SCENE_MAX_COORDINATE, false);
-  const scale: number[] | null = finiteVector(raw.scale, 3, THREE_SCENE_MAX_SCALE, true);
-  const size: number[] | null = finiteVector(raw.size, SIZE_LENGTHS[typeText], THREE_SCENE_MAX_SIZE, true);
+  const rotationInput: JsonValue | undefined = raw.rotation === undefined ? [0, 0, 0] : raw.rotation;
+  const scaleInput: JsonValue | undefined = raw.scale === undefined
+    ? [1, 1, 1]
+    : typeof raw.scale === 'number' ? [raw.scale, raw.scale, raw.scale] : raw.scale;
+  let sizeInput: JsonValue | undefined = raw.size;
+  if (sizeInput === undefined && typeText === 'box') {
+    sizeInput = [1, 1, 1];
+  } else if (typeof sizeInput === 'number') {
+    if (typeText === 'box') sizeInput = [sizeInput, sizeInput, sizeInput];
+    else if (typeText === 'sphere') sizeInput = [sizeInput];
+  }
+  const rotation: number[] | null = finiteVector(rotationInput, 3, THREE_SCENE_MAX_COORDINATE, false);
+  const scale: number[] | null = finiteVector(scaleInput, 3, THREE_SCENE_MAX_SCALE, true);
+  const size: number[] | null = finiteVector(sizeInput, SIZE_LENGTHS[typeText], THREE_SCENE_MAX_SIZE, true);
   if (position === null || rotation === null || scale === null || size === null) return null;
   return { id, type: typeText, color, position, rotation, scale, size };
 };
@@ -87,11 +130,25 @@ export const normalizeThreeSceneObject = (value: JsonValue | undefined): ThreeSc
 /** Normalize a complete scene. Every supplied object must pass the same bounds. */
 export const normalizeThreeScene = (value: JsonValue | undefined): ThreeSceneSpec | null => {
   const raw = object(value);
-  if (raw === null || !Array.isArray(raw.objects) || raw.objects.length > THREE_SCENE_MAX_OBJECTS) return null;
+  if (raw === null) return null;
+  const hasObjects: boolean = raw.objects !== undefined;
+  const hasVoxels: boolean = raw.voxels !== undefined;
+  if (!hasObjects && !hasVoxels) return null;
+  if (hasObjects && !Array.isArray(raw.objects)) return null;
+  if (hasVoxels && !Array.isArray(raw.voxels)) return null;
+  const rawObjects: JsonValue[] = hasObjects ? (raw.objects as JsonValue[]) : [];
+  const rawVoxels: JsonValue[] = hasVoxels ? (raw.voxels as JsonValue[]) : [];
+  if (rawObjects.length + rawVoxels.length > THREE_SCENE_MAX_OBJECTS) return null;
   const objects: ThreeSceneObject[] = [];
   const ids = new Set<string>();
-  for (const item of raw.objects) {
+  for (const item of rawObjects) {
     const normalized: ThreeSceneObject | null = normalizeThreeSceneObject(item);
+    if (normalized === null || ids.has(normalized.id)) return null;
+    ids.add(normalized.id);
+    objects.push(normalized);
+  }
+  for (let i: number = 0; i < rawVoxels.length; i++) {
+    const normalized: ThreeSceneObject | null = normalizeThreeVoxelTuple(rawVoxels[i], i);
     if (normalized === null || ids.has(normalized.id)) return null;
     ids.add(normalized.id);
     objects.push(normalized);
@@ -109,17 +166,17 @@ interface ProjectedObject {
   depth: number;
 }
 
-const project = (item: ThreeSceneObject): ProjectedObject => {
+const project = (item: ThreeSceneObject, centerY: number): ProjectedObject => {
   const x3: number = item.position[0];
-  const y3: number = item.position[1];
+  const y3: number = item.position[1] - centerY;
   const z3: number = item.position[2];
   const extent: number = Math.max(...item.size) * Math.max(...item.scale);
   return {
     object: item,
     x: 340 + (x3 - z3) * 3.4,
-    y: 202 - y3 * 3.4 + (x3 + z3) * 0.85,
+    y: 192 - y3 * 3.4 + (x3 + z3) * 0.85,
     radius: Math.max(8, Math.min(72, extent * 2.4)),
-    depth: x3 + z3,
+    depth: x3 + z3 + item.position[1] * 0.1,
   };
 };
 
@@ -146,7 +203,19 @@ const shape = (item: ProjectedObject): string => {
 
 /** Static SVG cover for export when the interactive local renderer is unavailable. */
 export const renderThreeSceneCover = (scene: ThreeSceneSpec, dark: boolean = false): string => {
-  const projected: ProjectedObject[] = scene.objects.map(project)
+  let minY: number = 0;
+  let maxY: number = 0;
+  if (scene.objects.length > 0) {
+    minY = scene.objects[0].position[1];
+    maxY = scene.objects[0].position[1];
+    for (const item of scene.objects) {
+      if (item.position[1] < minY) minY = item.position[1];
+      if (item.position[1] > maxY) maxY = item.position[1];
+    }
+  }
+  const centerY: number = (minY + maxY) * 0.5;
+  const projected: ProjectedObject[] = scene.objects
+    .map((item: ThreeSceneObject): ProjectedObject => project(item, centerY))
     .sort((a: ProjectedObject, b: ProjectedObject): number => a.depth - b.depth);
   const background: string = dark ? '#25222D' : '#F4F7FF';
   const grid: string = dark ? '#69708A' : '#AAB8D8';

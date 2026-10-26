@@ -98,21 +98,25 @@ struct DeepReadSearchSettingsPage {
         Column({ space: 12 }) {
           PlainSection({ label: '首选搜索服务' })
           if (this.settings.searchServices.length > 0) {
-            PillSelect({ options: this.serviceLabels(), selectedIndex: this.settings.searchServiceSelected,
-              triggerMinHeight: 44,
-              onSelect: (index: number): void => {
-                const service: SearchServiceOptions | undefined = this.settings.searchServices[index];
-                if (service !== undefined) this.saveChoice(service.id);
-              } }).width('100%').enabled(!this.busy && !this.loading)
+            Column() {
+              PillSelect({ options: this.serviceLabels(), selectedIndex: this.settings.searchServiceSelected,
+                triggerMinHeight: 44,
+                onSelect: (index: number): void => {
+                  const service: SearchServiceOptions | undefined = this.settings.searchServices[index];
+                  if (service !== undefined) this.saveChoice(service.id);
+                } }).width('100%').enabled(!this.busy && !this.loading)
+            }.width('100%').padding({ left: 16, right: 16 })
           }
-          FooterNote({ text: '优先使用选中的可用服务；不可用时选择其他已启用的可用服务。免费来源按各自开关补充。' })
-          CardGroup({ content: (): void => { this.GoogleCard(); } }).enabled(!this.busy && !this.loading)
-          CardGroup({ content: (): void => { this.ManageCard(); } })
-          if (this.error.length > 0) {
-            Text(this.error).fontSize(14).fontColor(INK3).width('100%')
-          }
+          FooterNote({ text: '优先使用选中的可用服务；请求失败时依次尝试其他已启用的可用服务；已启用免费聚合服务时，再按来源开关兜底。' })
+          Column({ space: 12 }) {
+            CardGroup({ content: (): void => { this.GoogleCard(); } }).enabled(!this.busy && !this.loading)
+            CardGroup({ content: (): void => { this.ManageCard(); } })
+            if (this.error.length > 0) {
+              Text(this.error).fontSize(14).fontColor(INK3).width('100%')
+            }
+          }.width('100%').padding({ left: 16, right: 16 }).alignItems(HorizontalAlign.Start)
         }
-        .width('100%').padding({ left: 20, right: 20, top: 18, bottom: 32 })
+        .width('100%').padding({ top: 18, bottom: 32 })
         .alignItems(HorizontalAlign.Start)
       }
       .width('100%').layoutWeight(1).align(Alignment.TopStart)
@@ -158,7 +162,7 @@ struct DeepReadSearchSettingsPage {
           Column() {
             DeepReadSettingsSection({ title: '多来源搜索' })
             DeepReadSettingsGroup({ content: (): void => { this.PreferredService(); } }).enabled(!this.busy && !this.loading)
-            DeepReadSettingsNote({ text: '优先使用选中的搜索服务；不可用时，选择其他已启用的可用服务。' })
+            DeepReadSettingsNote({ text: '优先使用选中的可用服务；请求失败时依次尝试其他已启用的可用服务；已启用免费聚合服务时，再按来源开关兜底。' })
             DeepReadSettingsSection({ title: '免费聚合与正文读取' })
             DeepReadSettingsGroup({ content: (): void => { this.Supplement(); } }).enabled(!this.busy && !this.loading)
             DeepReadSettingsSection({ title: '服务配置' })

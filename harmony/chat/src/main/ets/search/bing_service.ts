@@ -120,12 +120,6 @@ export const bingSearchService: SearchService = {
       throw new Error(`Bing request failed with HTTP ${resp.status}`);
     }
     const doc = parseHtml(resp.body);
-    const pageText: string = elementText(doc);
-    const lower: string = pageText.toLowerCase();
-    if (lower.includes('verify you are human') || lower.includes('unusual traffic')
-      || lower.includes('captcha')) {
-      throw new Error('Bing blocked the request with a verification page');
-    }
     const primary: SearchResultItem[] = [];
     for (const el of select(doc, 'li.b_algo')) {
       const item = parseBingResult(el);
@@ -144,6 +138,11 @@ export const bingSearchService: SearchService = {
       if (results.length >= commonOptions.resultSize) break; // take
     }
     if (results.length === 0) {
+      // Verification terms also occur in ordinary search results about CAPTCHA.
+      const lower: string = elementText(doc).toLowerCase();
+      if (lower.includes('verify you are human') || lower.includes('unusual traffic')) {
+        throw new Error('Bing blocked the request with a verification page');
+      }
       throw new Error('Search failed: no results found');
     }
     return { answer: null, items: results };

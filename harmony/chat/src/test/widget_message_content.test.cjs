@@ -8,13 +8,14 @@ const source = fs.readFileSync(path.resolve(__dirname,
   '../../../entry/src/main/ets/components/WidgetMessageContent.ets'), 'utf8');
 const methods = [...source.matchAll(/  private [A-Za-z][A-Za-z0-9_]*\([^]*?\n  \}/g)]
   .map(match => match[0]).join('\n');
+const fields = (source.match(/^  private [A-Za-z][A-Za-z0-9_]*:[^\n]+/gm) ?? []).join('\n');
 const build = source.slice(source.indexOf('  build(): void'));
 const callback = build.match(/ForEach\(this\.segments,[^]*?=>\s*\{([^]*?)\n\s*\},/)[1];
 function fixture(dependencies = {}) {
   const records = [];
   const exports = {};
   const chain = new Proxy({}, { get: () => () => chain });
-  const script = 'class Probe {' + methods + '} exports.Probe=Probe;' +
+  const script = 'class Probe {' + fields + '\n' + methods + '} exports.Probe=Probe;' +
     'exports.render=function(segment,index){' + callback + '};';
   vm.runInNewContext(ts.transpileModule(script, {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
@@ -28,9 +29,75 @@ function fixture(dependencies = {}) {
   });
   const probe = new exports.Probe();
   Object.assign(probe, { segments: [], smartUiSourcePrefix: 'source', smartUiValuesFor: () => [],
-    onVisibleGrow: () => {}, smartUiProjections: [], smartUiValueSnapshots: [] });
+    onVisibleGrow: () => {}, smartUiProjections: [], smartUiValueSnapshots: [],
+    content: '', streaming: false, streamKey: '', assets: [], declaredContentIds: [], messageStreaming: false,
+    smartUiNodeId: '', onSmartUiDocument: () => {}, onSmartUiSourceReplaced: () => {} });
   return { probe, render: exports.render, records };
 }
+
+test('equivalent V1 prop copies preserve parsed segments and the native 3D scene input', async () => {
+  const domain = await import('../main/ets/chat/response_content.ts');
+  let parseCalls = 0;
+  const f = fixture({ ...domain, parseResponseContent: (...args) => { parseCalls++; return domain.parseResponseContent(...args); } });
+  f.probe.content = '```amber-three v=1 id=scene\n' +
+    '{"objects":[{"id":"cube","type":"box","color":"#f00","position":[0,0,0],"size":[1,1,1]}]}\n```';
+  f.probe.assets = domain.parseResponseContent(f.probe.content, false).map(segment => segment.artifact);
+  f.probe.declaredContentIds = ['scene'];
+  f.probe.prepare();
+  const segments = f.probe.segments;
+  for (let index = 0; index < 4; index++) {
+    f.probe.assets = structuredClone(f.probe.assets);
+    f.probe.prepare();
+    f.probe.declaredContentIds = [...f.probe.declaredContentIds];
+    f.probe.prepare();
+  }
+  assert.equal(parseCalls, 1, 'watchers must skip parsing equivalent array copies');
+  assert.equal(f.probe.segments, segments, 'unchanged child scene props retain cached native covers');
+});
+
+test('XML validation changes still update a retained content projection', async () => {
+  const domain = await import('../main/ets/chat/response_content.ts');
+  const f = fixture(domain);
+  f.probe.content = '```amber-svg v=1 id=diagram\n<svg xmlns="http://www.w3.org/2000/svg"/>\n```';
+  f.probe.declaredContentIds = ['diagram'];
+  f.probe.assets = domain.parseResponseContent(f.probe.content, false).map(segment => segment.artifact);
+  f.probe.prepare();
+  assert.equal(f.probe.segments[0].artifact.status, 'partial');
+  for (const status of ['ready', 'error']) {
+    f.probe.assets = structuredClone(f.probe.assets);
+    f.probe.assets[0].status = status;
+    f.probe.prepare();
+    assert.equal(f.probe.segments[0].artifact.status, status);
+  }
+});
+
+test('stream completion and reused Smart UI source identities still publish their current definitions', async () => {
+  const domain = await import('../main/ets/chat/response_content.ts');
+  const f = fixture(domain);
+  const published = [];
+  const replaced = [];
+  Object.assign(f.probe, {
+    content: '```amber-ui v=1 id=panel\n{"op":"node","id":"root","type":"column"}\n{"op":"end"}\n```',
+    streaming: true, messageStreaming: true, streamKey: 'stream-a', smartUiNodeId: 'node-a',
+    declaredContentIds: ['panel'],
+    onSmartUiDocument: (...args) => published.push({ args, nodeId: f.probe.smartUiNodeId }),
+    onSmartUiSourceReplaced: prefix => replaced.push(prefix),
+  });
+  f.probe.prepare();
+  assert.equal(published.at(-1).args[2], true);
+  f.probe.streaming = false;
+  f.probe.messageStreaming = false;
+  f.probe.prepare();
+  assert.equal(published.at(-1).args[2], false);
+  f.probe.smartUiSourcePrefix = 'replacement-source';
+  f.probe.prepare();
+  assert.deepEqual(replaced, ['source']);
+  assert.match(published.at(-1).args[0], /^replacement-source:/);
+  f.probe.smartUiNodeId = 'node-b';
+  f.probe.prepare();
+  assert.equal(published.at(-1).nodeId, 'node-b');
+});
+
 test('retained callbacks read current UI and SVG through real builders', async () => {
   const { parseResponseContent } = await import('../main/ets/chat/response_content.ts');
   const f = fixture();
@@ -59,8 +126,7 @@ test('a message-level ID change disables an earlier card without replacing its c
     '{"op":"end"}\n```';
   const published = [];
   const changes = [];
-  Object.assign(f.probe, { content, previousContent: '', previousSourcePrefix: '',
-    previousSmartUiDefinitions: new Map(), assets: [], streaming: false, messageStreaming: false,
+  Object.assign(f.probe, { content, assets: [], streaming: false, messageStreaming: false,
     smartUiNodeId: 'node', declaredContentIds: ['panel'],
     onSmartUiDocument: (...args) => published.push(args),
     onSmartUiSourceReplaced: (...args) => changes.push(args) });

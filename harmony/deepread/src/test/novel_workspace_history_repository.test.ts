@@ -415,3 +415,25 @@ test('NovelCreation exposes the durable proposal production service chain', asyn
   assert.equal(accepted.status, 'accepted');
   assert.equal((await creation.open('proposal-service')).chapters[0].content, '服务链正文');
 });
+
+test('two repository instances serialize distinct commands against the same old CAS', async () => {
+  const files = createMemoryFileStore();
+  const first = createFileNovelRepository(files);
+  const second = createFileNovelRepository(files);
+  await first.createProject(makeNovelProject({ id: 'shared-cas', name: '原名', now: NOW }));
+  const before = (await first.workspaceStatus('shared-cas')).cas;
+  const outcomes = await Promise.allSettled([
+    first.commitProject('shared-cas', before, 'command-a', 'rename', project => ({ ...project, name: 'A' })),
+    second.commitProject('shared-cas', before, 'command-b', 'rename', project => ({ ...project, name: 'B' })),
+  ]);
+  assert.equal(outcomes.filter(outcome => outcome.status === 'fulfilled').length, 1);
+  const rejected = outcomes.find(outcome => outcome.status === 'rejected');
+  assert.equal(rejected?.status, 'rejected');
+  if (rejected?.status === 'rejected') assert.match(String(rejected.reason), /工作区已变化/);
+  const history = await first.workspaceHistory('shared-cas');
+  assert.equal(history.filter(commit => commit.receipt === 'command-a' || commit.receipt === 'command-b').length, 1);
+  const cold = createFileNovelRepository(files);
+  const snapshot = await cold.readWorkspaceSnapshot('shared-cas');
+  assert.equal(snapshot.status.cas.head, history[0].commitId);
+  assert.ok(['A', 'B'].includes(snapshot.project.name));
+});

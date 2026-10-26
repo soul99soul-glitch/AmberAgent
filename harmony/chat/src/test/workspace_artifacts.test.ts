@@ -22,6 +22,10 @@ import type { AgentTool } from '../main/ets/chat/tool.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
 import type { XmlPullPort } from '../main/ets/chat/xml_pull.ts';
 
+import { createWorkspaceArchiveTools } from '../main/ets/chat/workspace_archive_ops.ts';
+import { createArtifactToolTracker } from '../main/ets/chat/workspace_artifact_tool.ts';
+import { MAX_ARCHIVE_ENTRY_BYTES, MAX_DOWNLOAD_BYTES } from '../main/ets/chat/workspace_artifacts.ts';
+
 const te = new TextEncoder();
 const td = new TextDecoder();
 
@@ -415,6 +419,7 @@ test('http_request:payload 五键/headers trim/method+url 门/UA 之外头透传
   assert.equal(http.calls[0].headers['X-Num'], '42');
   assert.equal(http.calls[0].body, 'q');
   assert.equal(http.calls[0].timeoutMs, 5000);
+  assert.equal(http.calls[0].maxResponseBytes, MAX_HTTP_BODY_BYTES);
   await assert.rejects(t.execute({ method: 'OPTIONS', url: 'https://a.com' }),
     /Unsupported HTTP method: OPTIONS/);
   await assert.rejects(t.execute({ url: 'file:///etc' }), /Only http and https URLs are allowed/);
@@ -454,6 +459,7 @@ test('download_file:默认落点/mime 截取/2xx 门/审批标记', async () => 
   });
   assert.equal(fs.readText(`${ROOT}/downloads/report.pdf`), 'PDFBYTES');
   assert.equal(http.calls[0].timeoutMs, 30000);
+  assert.equal(http.calls[0].maxResponseBytes, MAX_DOWNLOAD_BYTES);
   // 非 2xx
   http.response = { status: 404, url: 'https://h.com/x', headers: {}, body: te.encode('') };
   await assert.rejects(t.execute({ url: 'https://h.com/x' }), /Download failed with HTTP 404/);
@@ -683,4 +689,93 @@ test('track:inputPreview 1200 截断 + runtime 标签 + complete 事件', async 
   // 工具侧 take(1200) 后 store 再 take(MAX_INPUT_PREVIEW_CHARS=800)
   //   (AgentToolActivityStore.kt:55/:152 忠实)
   assert.equal(activity?.inputPreview?.length, 800);
+});
+
+const archiveFixture = (fs: MemWsFs, inflate: WorkspaceArtifactToolsDeps['inflateRaw']) => {
+  const store = new AgentToolActivityStore();
+  const deps = makeDeps(fs, store, new HttpSpy(), new ImageSpy());
+  const tools = createWorkspaceArchiveTools({ workspaceManager: deps.workspaceManager,
+    inflateRaw: inflate, deflateRaw: identityDeflate }, createArtifactToolTracker(store));
+  return { tools, store };
+};
+
+const zipWithDeclaredSizes = async (sizes: number[]): Promise<Uint8Array> => {
+  const zip = await buildZipBytes(sizes.map((_size, index) => ({ name: `file-${index}.txt`, data: te.encode('abc') })),
+    identityDeflate, 0, 0);
+  const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  let directory = view.getUint32(zip.length - 22 + 16, true);
+  for (const size of sizes) {
+    view.setUint32(directory + 24, size, true);
+    directory += 46 + view.getUint16(directory + 28, true) + view.getUint16(directory + 30, true)
+      + view.getUint16(directory + 32, true);
+  }
+  return zip;
+};
+
+test('archive extraction rejects oversized ZIP declarations before inflate or workspace writes', async () => {
+  for (const sizes of [Array<number>(5).fill(MAX_ARCHIVE_ENTRY_BYTES), [MAX_ARCHIVE_ENTRY_BYTES + 1]]) {
+    const fs = new MemWsFs();
+    seed(fs, 'limit.zip', await zipWithDeclaredSizes(sizes));
+    let inflations = 0;
+    const fixture = archiveFixture(fs, async data => { inflations++; return data; });
+    await assert.rejects(findTool(fixture.tools, 'archive_extract').execute({ path: 'limit.zip' }),
+      sizes.length > 1 ? /Archive total uncompressed size exceeds/ : /Archive entry file-0.txt exceeds/);
+    assert.equal(inflations, 0);
+    assert.deepEqual([...fs.files.keys()], [`${ROOT}/limit.zip`]);
+    assert.equal(fixture.store.sandboxActivity?.status, 'failed');
+  }
+});
+
+test('archive extraction rejects inflate-size mismatch without writing incomplete files', async () => {
+  const fs = new MemWsFs();
+  seed(fs, 'mismatch.zip', await zipWithDeclaredSizes([3]));
+  const fixture = archiveFixture(fs, async (_data, expected) => {
+    assert.equal(expected, 3);
+    return te.encode('ab');
+  });
+  await assert.rejects(findTool(fixture.tools, 'archive_extract').execute({ path: 'mismatch.zip' }),
+    /Archive entry file-0.txt inflate size mismatch/);
+  assert.deepEqual([...fs.files.keys()], [`${ROOT}/mismatch.zip`]);
+});
+
+const gzipWithSize = (size: number): Uint8Array => {
+  const bytes = new Uint8Array(18);
+  bytes.set([0x1f, 0x8b, 8]);
+  new DataView(bytes.buffer).setUint32(bytes.length - 4, size, true);
+  return bytes;
+};
+
+test('gzip list and extract reject declared output cap and actual output mismatch', async () => {
+  for (const toolName of ['archive_list', 'archive_extract']) {
+    const fs = new MemWsFs();
+    seed(fs, 'limit.tgz', gzipWithSize(256 * 1024 * 1024 + 1));
+    let inflations = 0;
+    const fixture = archiveFixture(fs, async (_data, expected) => {
+      inflations++;
+      assert.equal(expected, 3);
+      return new Uint8Array(2);
+    });
+    await assert.rejects(findTool(fixture.tools, toolName).execute({ path: 'limit.tgz' }),
+      /Archive total uncompressed size exceeds the allowed limit/);
+    assert.equal(inflations, 0);
+    seed(fs, 'mismatch.tgz', gzipWithSize(3));
+    await assert.rejects(findTool(fixture.tools, toolName).execute({ path: 'mismatch.tgz' }),
+      /Corrupted gzip archive: inflated size does not match trailer/);
+    assert.equal(inflations, 1);
+    assert.deepEqual([...fs.files.keys()], [`${ROOT}/limit.tgz`, `${ROOT}/mismatch.tgz`]);
+  }
+});
+
+test('archive extraction keeps earlier files when a later unsafe entry fails', async () => {
+  const fs = new MemWsFs();
+  seed(fs, 'partial.zip', await buildZipBytes([
+    { name: 'first.txt', data: te.encode('saved first') },
+    { name: '../escape.txt', data: te.encode('never written') },
+  ], identityDeflate, 0, 0));
+  const fixture = archiveFixture(fs, identityInflate);
+  await assert.rejects(findTool(fixture.tools, 'archive_extract').execute({ path: 'partial.zip' }),
+    /Unsafe archive entry: \.\.\/escape.txt/);
+  assert.equal(fs.readText(`${ROOT}/extracted/partial/first.txt`), 'saved first');
+  assert.equal(fs.exists(`${ROOT}/extracted/escape.txt`), false);
+  assert.equal(fixture.store.sandboxActivity?.status, 'failed');
 });

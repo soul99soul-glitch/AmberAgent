@@ -118,12 +118,15 @@ export struct SectionHeader {
 export struct PaperSeparator {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   build(): void {
-    Row()
-      
-      .opacity(this.themeEpoch >= 0 ? 1 : 1).width('100%')
-      .height(1)
-      .backgroundColor(LINE)
-      .margin({ left: 16, right: 16 })
+    Row() {
+      Row()
+        .width('100%')
+        .height(1)
+        .backgroundColor(LINE)
+    }
+      .opacity(this.themeEpoch >= 0 ? 1 : 1)
+    .width('100%')
+    .padding({ left: 16, right: 16 })
   }
 }
 
@@ -334,6 +337,8 @@ export struct NavRow {
             .fontFamily(FONT_SANS_SEMIBOLD)
             .letterSpacing(-0.2)
             .fontColor(this.danger ? ERROR : INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.desc.length > 0) {
             Text(this.desc)
               .fontSize(TEXT_STYLES.secondary.size)
@@ -359,6 +364,7 @@ export struct NavRow {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .textAlign(TextAlign.End)
+            .constraintSize({ maxWidth: '45%' })
             .margin({ right: this.showChevron ? 8 : 0, left: 8 })
         } else if (this.linkText.length > 0) {
           Text(this.linkText)
@@ -809,6 +815,8 @@ export struct ToggleRow {
             .fontFamily(FONT_SANS_SEMIBOLD)
             .letterSpacing(-0.2)
             .fontColor(INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.desc.length > 0) {
             Text(this.desc)
               .fontSize(TEXT_STYLES.secondary.size)
@@ -878,6 +886,8 @@ export struct SelectRow {
             .fontFamily(FONT_SANS_SEMIBOLD)
             .letterSpacing(-0.2)
             .fontColor(INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.desc.length > 0) {
             Text(this.desc)
               .fontSize(TEXT_STYLES.secondary.size)
@@ -900,6 +910,7 @@ export struct SelectRow {
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .textAlign(TextAlign.End)
+          .constraintSize({ maxWidth: '45%' })
           .margin({ left: 12 })
       }
       .width('100%')
@@ -973,6 +984,9 @@ export struct SessionRowItem {
             .lineHeight(TEXT_STYLES.meta.lineHeight)
             .fontFamily(FONT_MONO)
             .fontColor(INK4)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
             .margin({ top: 6 })
         }
       }

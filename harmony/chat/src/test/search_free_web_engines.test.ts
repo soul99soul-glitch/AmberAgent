@@ -132,6 +132,47 @@ test('熔断:验证页/限流后该引擎 10 分钟内直接跳过,不再发请�
   assert.ok(!freeEngineCoolingDown('so360'));
 });
 
+test('Bing 验证码话题不触发熔断，后续无关查询仍请求网络', async () => {
+  const calls: HttpRequest[] = [];
+  const page = '<ol id="b_results"><li class="b_algo"><h2>'
+    + '<a href="https://example.com/captcha">CAPTCHA documentation</a></h2>'
+    + '<p>Learn how to verify you are human.</p></li></ol>';
+  initSearchSdk(mockHttpSeq([
+    { status: 200, headers: {}, body: page },
+    { status: 200, headers: {}, body: page.replace(/CAPTCHA/g, 'Rust') },
+  ], calls));
+  const first = await runFreeEngine('bing', 'captcha', { resultSize: 5 });
+  assert.equal(first.items[0].title, 'CAPTCHA documentation');
+  assert.equal(freeEngineCoolingDown('bing'), false);
+  const second = await runFreeEngine('bing', 'Rust programming', { resultSize: 5 });
+  assert.equal(second.items[0].title, 'Rust documentation');
+  assert.equal(calls.length, 2);
+});
+
+test('Bing 的真实验证页和 HTTP 429 仍触发熔断', async () => {
+  for (const response of [
+    { status: 200, headers: {}, body: '<html><body>Please verify you are human</body></html>' },
+    { status: 429, headers: {}, body: '<html><body>Too many requests</body></html>' },
+  ]) {
+    resetFreeEngineBreakers();
+    const calls: HttpRequest[] = [];
+    initSearchSdk(mockHttpSeq([response], calls));
+    await assert.rejects(runFreeEngine('bing', 'q', { resultSize: 5 }), /verification page|HTTP 429/);
+    assert.equal(freeEngineCoolingDown('bing'), true);
+    await assert.rejects(runFreeEngine('bing', 'Rust programming', { resultSize: 5 }), /cooling down/);
+    assert.equal(calls.length, 1);
+  }
+});
+
+test('Bing 空结果页中的查询词 captcha 不构成验证提示', async () => {
+  const calls: HttpRequest[] = [];
+  initSearchSdk(mockHttpSeq([{ status: 200, headers: {},
+    body: '<html><head><title>captcha example - Search</title></head><body>No results found.</body></html>' }], calls));
+  await assert.rejects(runFreeEngine('bing', 'captcha example', { resultSize: 5 }), /no results found/);
+  assert.equal(freeEngineCoolingDown('bing'), false);
+  assert.equal(calls.length, 1);
+});
+
 test('looksTechnicalQuery:技术词命中', () => {
   assert.ok(looksTechnicalQuery('Rust 异步运行时'));
   assert.ok(looksTechnicalQuery('GitHub 开源项目'));

@@ -22,7 +22,7 @@ import { FONT_MONO, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router, promptAction } from '@kit.ArkUI';
 import type { ProviderSetting, ProviderModel } from '@amber/chat-domain';
-import { setPendingProvider } from './ChatProviderDetailPage.ets';
+import { setPendingProvider } from '../platform_impl/provider/PendingProviderDraft.ets';
 import {
   loadProviders, saveProviders, providerFromImportJson, makeProviderSettingOpenAIVariant,
   newId, openAIAuthModeFixedBaseUrl,

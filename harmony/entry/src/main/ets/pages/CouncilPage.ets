@@ -112,12 +112,16 @@ struct CouncilPage {
             .fontSize(META).lineHeight(TEXT_STYLES.meta.lineHeight + 2).fontFamily(FONT_SANS).fontColor(INK3)
             .width('100%').padding({ left: 16, right: 16, top: 4, bottom: 8 })
           PlainSection({ label: '启动' })
-          this.StartCard()
+          Column() {
+            this.StartCard()
+          }.width('100%').padding({ left: 16, right: 16 })
           PlainSection({ label: '最近讨论' })
-          this.RecentCard()
+          Column() {
+            this.RecentCard()
+          }.width('100%').padding({ left: 16, right: 16 })
           PageSpacer()
         }
-        .width('100%').padding({ left: 16, right: 16 })
+        .width('100%')
       }
       .align(Alignment.TopStart)
       .layoutWeight(1)

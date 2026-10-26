@@ -171,7 +171,7 @@ struct MemoryRecordPage {
             .fontColor(this.accentColor).constraintSize({ minHeight: 44 })
             .onClick((): void => { router.replaceUrl({ url: 'pages/MemoryTopicDetailPage', params: { topicId: this.memoryId.toString() } }); })
           Blank()
-        }.width('100%')
+        }.width('100%').alignItems(VerticalAlign.Center)
       } else {
         TextArea({ text: this.draft, placeholder: '源记忆内容' }).width('100%').height(240)
           .fontSize(15).fontColor(this.colors.ink).placeholderColor(this.colors.muted)
@@ -198,7 +198,7 @@ struct MemoryRecordPage {
               .enabled(!this.saving && !this.removing && !this.restoring)
               .onClick((): void => { this.restore(); })
             Blank()
-          }.width('100%')
+          }.width('100%').alignItems(VerticalAlign.Center)
         }
         Row() {
           Text(this.saving ? '保存中' : '保存源记忆').fontSize(14).fontWeight(FontWeight.Medium)
@@ -212,7 +212,7 @@ struct MemoryRecordPage {
             .fontColor(this.saving || this.removing || this.restoring ? this.colors.muted : this.colors.error)
             .constraintSize({ minHeight: 44 })
             .enabled(!this.saving && !this.removing && !this.restoring).onClick((): void => { this.remove(); })
-        }.width('100%')
+        }.width('100%').alignItems(VerticalAlign.Center)
       }
     }.width('100%').padding({ left: 14, right: 14, top: 12, bottom: 10 })
   }
@@ -252,7 +252,7 @@ struct MemoryRecordPage {
             .fontColor(this.accentColor).constraintSize({ minHeight: 44 })
             .onClick((): void => { this.openSource(); })
           Blank()
-        }.width('100%')
+        }.width('100%').alignItems(VerticalAlign.Center)
       }
       if (this.record?.sourceMessageIds.length === 0) {
         Text('没有来源消息 ID。').fontSize(12).fontColor(this.colors.secondary).width('100%')
@@ -290,8 +290,8 @@ struct MemoryRecordPage {
       CenteredTitleBar({ title: '记忆详情' })
       Scroll() {
         Column() {
-          if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').wordBreak(WordBreak.BREAK_ALL)
-          if (this.notice.length > 0) Text(this.notice).fontSize(13).fontColor(this.colors.secondary).width('100%')
+          if (this.error.length > 0) Text(this.error).fontSize(13).fontColor(this.colors.error).width('100%').padding({ left: 16, right: 16 }).wordBreak(WordBreak.BREAK_ALL)
+          if (this.notice.length > 0) Text(this.notice).fontSize(13).fontColor(this.colors.secondary).width('100%').padding({ left: 16, right: 16 })
           if (!this.loaded) {
             Text('正在读取源记忆…').fontSize(13).fontColor(this.colors.secondary).width('100%')
               .textAlign(TextAlign.Center).padding({ top: 44 })
@@ -300,16 +300,16 @@ struct MemoryRecordPage {
               .textAlign(TextAlign.Center).padding({ top: 44 })
           } else {
             PlainSection({ label: '源记忆' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.EditorCard(); } })
+            Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.EditorCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
             if ((this.record.evidence ?? '').trim().length > 0) {
               PlainSection({ label: '用户原话' })
-              CardGroup({ radius: 18, stroke: true, content: (): void => { this.EvidenceCard(); } })
+              Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.EvidenceCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
             }
             PlainSection({ label: '真实来源' })
-            CardGroup({ radius: 18, stroke: true, content: (): void => { this.SourceCard(); } })
+            Column() { CardGroup({ radius: 18, stroke: true, content: (): void => { this.SourceCard(); } }) }.width('100%').padding({ left: 16, right: 16 })
           }
           PageSpacer()
-        }.width('100%').padding({ left: 16, right: 16, top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
+        }.width('100%').padding({ top: 2, bottom: 16 + this.navBarHeight }).justifyContent(FlexAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.TopStart)
     
       }, (e: number): string => `theme-${e}`)
