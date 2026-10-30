@@ -281,6 +281,75 @@ class ChatInteractionDeviceRegressionTest {
         return Triple(koin.get(), koin.get(), koin.get())
     }
 
+    /** Native-time exit frames on the production chat page, with isolated conversation storage. */
+    @Test(timeout = 120_000)
+    fun messageMenuDismissalKeepsComposerStationary(): Unit = runBlocking {
+        requireFixture()
+        val (repository, service, _) = isolatedFixture()
+        val id = Uuid.random()
+        val marker = "MENU_DISMISS_REPLY"
+        repository.insertConversation(Conversation.ofId(id, messages = listOf(
+            MessageNode.of(UIMessage.user("Check the message menu dismissal")),
+            MessageNode.of(UIMessage.assistant(marker)),
+        )).copy(title = "Message menu animation fixture"))
+        try {
+            open(id).use { scenario ->
+                compose.waitUntil(30_000) { runCatching { markerDisplayed(marker) }.getOrDefault(false) }
+                awaitImeHidden(scenario)
+                val composer = compose.onAllNodes(hasSetTextAction(), useUnmergedTree = true).onFirst()
+                val initialComposer = composer.fetchSemanticsNode().boundsInWindow
+                val sheetMatcher = SemanticsMatcher.keyIsDefined(SemanticsProperties.PaneTitle)
+                var safeTop = 0
+                scenario.onActivity { activity ->
+                    safeTop = activity.window.decorView.rootWindowInsets.getInsets(
+                        WindowInsets.Type.statusBars() or WindowInsets.Type.displayCutout(),
+                    ).top
+                }
+                for (mode in listOf("back", "outside", "copy", "swipe")) {
+                    openMenu(marker)
+                    val sheet = compose.onNode(sheetMatcher)
+                    val initialSheet = sheet.fetchSemanticsNode().boundsInWindow
+                    val copyPoint = compose.onNodeWithText(context.getString(R.string.copy))
+                        .fetchSemanticsNode().boundsInWindow.center
+                    var sawExitFrame = false
+                    compose.mainClock.autoAdvance = false
+                    Log.i("AmberMenuDismiss", "begin mode=$mode uptime=${SystemClock.uptimeMillis()} sheet=$initialSheet composer=$initialComposer")
+                    when (mode) {
+                        "copy" -> tap(copyPoint.x, copyPoint.y)
+                        "outside" -> {
+                            check(initialSheet.top > safeTop + 2) { "Fixture needs tappable scrim above the menu" }
+                            tap(initialSheet.center.x, (initialSheet.top + safeTop) / 2f)
+                        }
+                        "swipe" -> sheet.performTouchInput { swipeDown() }
+                        else -> ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation
+                            .executeShellCommand("input keyevent KEYCODE_BACK")).bufferedReader().use { it.readText() }
+                    }
+                    repeat(45) { frame ->
+                        pump(16)
+                        val bounds = composer.fetchSemanticsNode().boundsInWindow
+                        check(kotlin.math.abs(bounds.top - initialComposer.top) < 1f &&
+                            kotlin.math.abs(bounds.bottom - initialComposer.bottom) < 1f) {
+                            "Composer moved during $mode dismissal: $initialComposer -> $bounds"
+                        }
+                        val menuBounds = compose.onAllNodes(sheetMatcher).fetchSemanticsNodes()
+                            .singleOrNull()?.boundsInWindow
+                        if (menuBounds != null && menuBounds.height > 0 && menuBounds.top > initialSheet.top + 1f) {
+                            sawExitFrame = true
+                        }
+                        Log.i("AmberMenuDismiss", "mode=$mode frame=$frame uptime=${SystemClock.uptimeMillis()} sheet=$menuBounds composer=$bounds ime=${imeBottom(scenario)}")
+                    }
+                    compose.mainClock.autoAdvance = true
+                    compose.onNode(sheetMatcher).assertDoesNotExist()
+                    if (mode != "swipe") check(sawExitFrame) { "$mode removed the menu without a slide-out animation" }
+                    Log.i("AmberMenuDismiss", "end mode=$mode uptime=${SystemClock.uptimeMillis()}")
+                }
+            }
+        } finally {
+            compose.mainClock.autoAdvance = true
+            repository.getConversationById(id)?.let { service.deleteConversation(it) }
+        }
+    }
+
     /** Real-time frames for the uptime-based pacer while the test clock is manual. */
     private suspend fun pump(milliseconds: Long) {
         val end = SystemClock.uptimeMillis() + milliseconds
