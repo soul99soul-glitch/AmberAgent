@@ -65,7 +65,14 @@ val agentInfraModule = module {
     single { NotificationApprovalTokenRegistry() }
 
     single { app.amber.feature.live.LiveUsageStore(get()) }
-    single { app.amber.feature.bubble.AgentTaskBubbleController(get(), get(), get(), get(), get()) }
+    single {
+        app.amber.core.automation.PhoneAutomationTakeoverController(
+            persistence = app.amber.core.automation.FilePhoneTakeoverPersistence(
+                java.io.File(get<android.content.Context>().filesDir, "automation/phone_takeover_state.properties"),
+            ),
+        )
+    }
+    single { app.amber.feature.bubble.AgentTaskBubbleController(get(), get(), get(), get(), get(), getOrNull()) }
     single { app.amber.feature.live.LiveCardStore(get()) }
     single { LiveModeManager(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
@@ -79,7 +86,11 @@ val agentInfraModule = module {
 
     single { ScreenCaptureManager(get()) }
 
-    single { ScreenAutomationTools(get(), get(), get(), get()) }
+    single<app.amber.core.automation.ScreenOcrEngine> {
+        app.amber.core.automation.DefaultScreenOcrEngine(get(), get())
+    }
+
+    single { ScreenAutomationTools(get(), get(), get(), get(), get(), getOrNull()) }
 
     single { AgentPermissionBroker(get(), BuildConfig.DEBUG) }
 

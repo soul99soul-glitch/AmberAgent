@@ -83,7 +83,28 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
      * obtained here is recycled before this method returns.
      */
     override fun captureScreenSnapshot(): ScreenSnapshot? = withActiveRoot { root, windowId, packageName ->
-        buildScreenSnapshot(root, windowId, packageName)
+        buildScreenSnapshot(root, windowId, packageName)?.also { snapshot ->
+            ScreenSnapshotInvalidationRegistry.markFreshCapture(snapshot.id)
+        }
+    }
+
+    override fun returnToHostApp(hostPackageName: String): Boolean {
+        val targetPkg = hostPackageName.ifBlank { packageName }
+        if (targetPkg.isBlank()) return false
+        return runCatching {
+            val intent = if (targetPkg == packageName) {
+                android.content.Intent(this, app.amber.agent.RouteActivity::class.java)
+            } else {
+                packageManager.getLaunchIntentForPackage(targetPkg)
+            } ?: return@runCatching false
+            intent.addFlags(
+                android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                    android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+            )
+            startActivity(intent)
+            true
+        }.getOrDefault(false)
     }
 
     /**
@@ -95,6 +116,11 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
         snapshot: ScreenSnapshot,
         action: ScreenAction,
     ): ScreenActionReceipt {
+        if (isSnapshotInvalidated(snapshot.id)) {
+            return staleScreenReceipt(
+                snapshotInvalidationReason(snapshot.id) ?: "returned_to_host_snapshot_invalidated"
+            )
+        }
         val expected = snapshot.nodes.firstOrNull { it.ref == action.ref }
             ?: return rejectedScreenReceipt("unknown_ref")
         if (snapshot.packageName.isBlank() || action.ref.isBlank()) {

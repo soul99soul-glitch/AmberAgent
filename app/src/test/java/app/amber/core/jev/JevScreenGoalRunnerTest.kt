@@ -3,9 +3,11 @@ package app.amber.core.jev
 import app.amber.core.automation.AccessibilityController
 import app.amber.core.automation.AccessibilityTextMatch
 import app.amber.core.automation.ScreenAction
+import app.amber.core.automation.ScreenActionKind
 import app.amber.core.automation.ScreenActionReceipt
 import app.amber.core.automation.ScreenNode
 import app.amber.core.automation.ScreenSnapshot
+import app.amber.core.automation.ScreenSnapshotInvalidationRegistry
 import app.amber.core.settings.Settings
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
@@ -16,6 +18,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -23,6 +26,11 @@ import org.junit.Test
 
 /** 无障碍 Jev 链路的边界回归：授权、快照、派发、fresh 核验和硬限。 */
 class JevScreenGoalRunnerTest {
+
+    @After
+    fun tearDown() {
+        ScreenSnapshotInvalidationRegistry.clearForTest()
+    }
 
     private class ScriptedTransport(
         private val responses: MutableList<String>,
@@ -62,6 +70,7 @@ class JevScreenGoalRunnerTest {
         var captures = 0
             private set
         val actions = mutableListOf<ScreenAction>()
+        val hostReturns = mutableListOf<String>()
 
         override fun captureScreenSnapshot(): ScreenSnapshot {
             captures++
@@ -69,9 +78,21 @@ class JevScreenGoalRunnerTest {
         }
 
         override fun performScreenAction(snapshot: ScreenSnapshot, action: ScreenAction): ScreenActionReceipt {
+            if (isSnapshotInvalidated(snapshot.id)) {
+                return ScreenActionReceipt(
+                    status = "stale_snapshot",
+                    dispatched = false,
+                    reason = snapshotInvalidationReason(snapshot.id) ?: "returned_to_host_snapshot_invalidated",
+                )
+            }
             actions += action
             onAction(action)
             return receipt
+        }
+
+        override fun returnToHostApp(hostPackageName: String): Boolean {
+            hostReturns += hostPackageName
+            return true
         }
 
         override suspend fun tap(x: Float, y: Float, durationMillis: Long): Boolean = true
@@ -439,5 +460,158 @@ class JevScreenGoalRunnerTest {
         assertTrue(candidates.none { it.action.ref in setOf("send", "delete", "password", "disabled", "disabled-scroll") })
         assertTrue(candidates.any { it.action.ref == "safe" && it.action.kind.name == "CLICK" })
         assertTrue(candidates.any { it.action.ref == "search" && it.action.kind.name == "TYPE" && it.action.text == "query" })
+    }
+
+    @Test
+    fun completedGoalReturnsToHostAndInvalidatesPreReturnSnapshot() = runTest {
+        val finalSnapshot = snapshot("final-target-snap")
+        val transport = ScriptedTransport(mutableListOf(answer("done", done = 0.96)))
+        val controller = FakeAccessibilityController(finalSnapshot)
+        val result = runner(runtime(transport) { settings(JevMode.ACTIVE) }, testScheduler).run(
+            controller = controller,
+            packageName = "com.example.target",
+            goal = "confirm target content",
+            texts = emptyList(),
+            runKey = "screen-return-host",
+            hostPackageName = "app.amber.agent",
+        )
+
+        assertEquals("completed", status(result))
+        assertEquals("true", result["returned_to_host"]!!.jsonPrimitive.content)
+        assertEquals("completed_auto_return", result["host_return_reason"]!!.jsonPrimitive.content)
+        assertEquals("true", result["snapshot_invalidated"]!!.jsonPrimitive.content)
+        assertEquals("final-target-snap", result["invalidated_snapshot_id"]!!.jsonPrimitive.content)
+        assertEquals(listOf("app.amber.agent"), controller.hostReturns)
+
+        // Reusing the pre-return snapshot must fail closed so subsequent actions never mis-click the host UI.
+        val staleReceipt = controller.performScreenAction(
+            finalSnapshot,
+            ScreenAction(ScreenActionKind.CLICK, "open"),
+        )
+        assertEquals("stale_snapshot", staleReceipt.status)
+        assertEquals(false, staleReceipt.dispatched)
+        assertEquals("returned_to_host_snapshot_invalidated", staleReceipt.reason)
+    }
+
+    @Test
+    fun completedGoalOnHostPackageDoesNotTriggerHostReturn() = runTest {
+        val hostSnapshot = snapshot("host-snap", packageName = "app.amber.agent")
+        val transport = ScriptedTransport(mutableListOf(answer("done", done = 0.96)))
+        val controller = FakeAccessibilityController(hostSnapshot)
+        val result = runner(runtime(transport) { settings(JevMode.ACTIVE) }, testScheduler).run(
+            controller = controller,
+            packageName = "app.amber.agent",
+            goal = "inspect own screen",
+            texts = emptyList(),
+            runKey = "screen-own-host",
+            hostPackageName = "app.amber.agent",
+        )
+
+        assertEquals("completed", status(result))
+        assertEquals("false", result["returned_to_host"]!!.jsonPrimitive.content)
+        assertEquals("target_is_host", result["host_return_reason"]!!.jsonPrimitive.content)
+        assertEquals("false", result["snapshot_invalidated"]!!.jsonPrimitive.content)
+        assertTrue(controller.hostReturns.isEmpty())
+    }
+
+    @Test
+    fun completedGoalRespectsDisabledAutoReturnSetting() = runTest {
+        val targetSnapshot = snapshot("target-keep-fg")
+        val transport = ScriptedTransport(mutableListOf(answer("done", done = 0.96)))
+        val controller = FakeAccessibilityController(targetSnapshot)
+        val disabledReturnSettings = settings(JevMode.ACTIVE).let { base ->
+            base.copy(agentRuntime = base.agentRuntime.copy(autoReturnToHostOnScreenGoalComplete = false))
+        }
+        val result = runner(runtime(transport) { disabledReturnSettings }, testScheduler).run(
+            controller = controller,
+            packageName = "com.example.target",
+            goal = "stay in target app",
+            texts = emptyList(),
+            runKey = "screen-disabled-return",
+            hostPackageName = "app.amber.agent",
+        )
+
+        assertEquals("completed", status(result))
+        assertEquals("false", result["returned_to_host"]!!.jsonPrimitive.content)
+        assertEquals("disabled_by_setting", result["host_return_reason"]!!.jsonPrimitive.content)
+        assertTrue(controller.hostReturns.isEmpty())
+
+        // Per-call override (autoReturnToHost = false) also suppresses host return even when setting is enabled.
+        val overrideController = FakeAccessibilityController(snapshot("target-override-off"))
+        val overrideResult = runner(
+            runtime(ScriptedTransport(mutableListOf(answer("done", done = 0.96)))) { settings(JevMode.ACTIVE) },
+            testScheduler,
+        ).run(
+            controller = overrideController,
+            packageName = "com.example.target",
+            goal = "stay via override",
+            texts = emptyList(),
+            runKey = "screen-override-return",
+            hostPackageName = "app.amber.agent",
+            autoReturnToHost = false,
+        )
+        assertEquals("completed", status(overrideResult))
+        assertEquals("false", overrideResult["returned_to_host"]!!.jsonPrimitive.content)
+        assertEquals("disabled_by_setting", overrideResult["host_return_reason"]!!.jsonPrimitive.content)
+        assertTrue(overrideController.hostReturns.isEmpty())
+
+        // Launch failure still invalidates pre-return snapshot so stale refs cannot be reused.
+        val failedLaunchSnapshot = snapshot("target-launch-fail")
+        val failedLaunchController = FakeAccessibilityController(failedLaunchSnapshot)
+        val failedLaunchResult = runner(
+            runtime(ScriptedTransport(mutableListOf(answer("done", done = 0.96)))) { settings(JevMode.ACTIVE) },
+            testScheduler,
+        ).run(
+            controller = failedLaunchController,
+            packageName = "com.example.target",
+            goal = "return fails gracefully",
+            texts = emptyList(),
+            runKey = "screen-launch-fail",
+            hostPackageName = "app.amber.agent",
+            returnToHostLauncher = { false },
+        )
+        assertEquals("completed", status(failedLaunchResult))
+        assertEquals("false", failedLaunchResult["returned_to_host"]!!.jsonPrimitive.content)
+        assertEquals("return_launch_failed", failedLaunchResult["host_return_reason"]!!.jsonPrimitive.content)
+        assertEquals("true", failedLaunchResult["snapshot_invalidated"]!!.jsonPrimitive.content)
+        assertTrue(failedLaunchController.isSnapshotInvalidated(failedLaunchSnapshot.id))
+    }
+
+    @Test
+    fun nonCompletedOutcomesNeverStealForegroundBackToHost() = runTest {
+        // 1. handback
+        val handbackController = FakeAccessibilityController(snapshot("s-handback"))
+        val handbackResult = runner(
+            runtime(ScriptedTransport(mutableListOf(answer("handback")))) { settings(JevMode.ACTIVE) },
+            testScheduler,
+        ).run(handbackController, "com.example.target", "goal", emptyList(), "screen-hb")
+        assertEquals("handback", status(handbackResult))
+        assertEquals("false", handbackResult["returned_to_host"]!!.jsonPrimitive.content)
+        assertEquals("not_completed_keep_foreground", handbackResult["host_return_reason"]!!.jsonPrimitive.content)
+        assertTrue(handbackController.hostReturns.isEmpty())
+
+        // 2. outcome_unknown
+        val unknownController = FakeAccessibilityController(
+            snapshot("s-unknown"),
+            receipt = ScreenActionReceipt("unknown", dispatched = true, reason = "set_text_readback_unavailable"),
+        )
+        val unknownResult = runner(
+            runtime(ScriptedTransport(mutableListOf(answer("a0")))) { settings(JevMode.ACTIVE) },
+            testScheduler,
+        ).run(unknownController, "com.example.target", "goal", emptyList(), "screen-unk")
+        assertEquals("outcome_unknown", status(unknownResult))
+        assertEquals("false", unknownResult["returned_to_host"]!!.jsonPrimitive.content)
+        assertEquals("not_completed_keep_foreground", unknownResult["host_return_reason"]!!.jsonPrimitive.content)
+        assertTrue(unknownController.hostReturns.isEmpty())
+
+        // 3. needs_user_action
+        val userActionController = FakeAccessibilityController(snapshot("s-user-action"))
+        val userActionResult = runner(
+            runtime(ScriptedTransport(mutableListOf(answer("a0", safe = 0.50)))) { settings(JevMode.ACTIVE) },
+            testScheduler,
+        ).run(userActionController, "com.example.target", "goal", emptyList(), "screen-ua")
+        assertEquals("needs_user_action", status(userActionResult))
+        assertEquals("false", userActionResult["returned_to_host"]!!.jsonPrimitive.content)
+        assertTrue(userActionController.hostReturns.isEmpty())
     }
 }

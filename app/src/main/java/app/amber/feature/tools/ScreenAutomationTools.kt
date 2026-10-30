@@ -18,8 +18,16 @@ import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.core.automation.AccessibilityController
+import app.amber.core.automation.DefaultScreenOcrEngine
 import app.amber.core.automation.getActiveAccessibilityController
+import app.amber.core.automation.PhoneAutomationTakeoverController
+import app.amber.core.automation.PhoneTakeoverPhase
 import app.amber.core.automation.ScreenCaptureManager
+import app.amber.core.automation.ScreenOcrBlock
+import app.amber.core.automation.ScreenOcrEngine
+import app.amber.core.automation.ScreenOcrMode
+import app.amber.core.automation.ScreenOcrObservation
+import app.amber.core.automation.SensitiveScreenTextClassifier
 import app.amber.core.jev.JevScreenGoalRunner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -30,6 +38,8 @@ class ScreenAutomationTools(
     private val screenCaptureManager: ScreenCaptureManager,
     private val activityStore: AgentToolActivityStore,
     private val jevScreenGoalRunner: JevScreenGoalRunner? = null,
+    private val ocrEngine: ScreenOcrEngine = DefaultScreenOcrEngine(context, screenCaptureManager),
+    private val takeoverController: PhoneAutomationTakeoverController? = null,
 ) {
     private val screenOwner = Mutex()
 
@@ -67,6 +77,9 @@ class ScreenAutomationTools(
                 put("max_steps", integerProp("Jev decision limit, default 6, hard maximum 8."))
                 put("max_duration_ms", integerProp("Deadline, default 15000ms, hard maximum 30000ms."))
                 put("dry_run", buildJsonObject { put("type", "boolean"); put("description", "Only inspect the currently open target app and judge; do not launch or execute actions.") })
+                put("return_to_host", buildJsonObject { put("type", "boolean"); put("description", "Optional override for automatically returning to Amber when the goal completes.") })
+                put("ocr_mode", stringProp("On-device OCR mode: 'auto' (default, zero-overhead tree-first with low-coverage fallback), 'on' (force OCR), or 'off' (disable OCR)."))
+                put("include_ocr", buildJsonObject { put("type", "boolean"); put("description", "Optional boolean alias to explicitly enable or disable on-device OCR.") })
             }, required = listOf("package_name", "goal"))
         },
         needsApproval = true,
@@ -82,6 +95,8 @@ class ScreenAutomationTools(
                     ?.map { it.jsonPrimitive.content } ?: emptyList()
                 require(goal.isNotBlank() && goal.length <= 1000 && texts.size <= 8 && texts.all { it.length <= 300 })
                 val dryRun = input.string("dry_run") == "true"
+                val returnToHostOverride = input.booleanOrNull("return_to_host")
+                val ocrMode = input.resolveOcrMode()
                 val service = requireService()
                 // The approval UI can have brought Amber to the front. Restore only the explicitly named app.
                 val alreadyOpen = if (!dryRun && runner.canExecute()) withContext(Dispatchers.Main.immediate) {
@@ -96,9 +111,18 @@ class ScreenAutomationTools(
                     delay(600)
                 }
                 val outcome = runner.run(
-                    controller = service, packageName = packageName, goal = goal, texts = texts,
-                    runKey = ownerRun, maxSteps = input.int("max_steps") ?: 6,
-                    maxDurationMs = input.long("max_duration_ms") ?: 15_000, dryRun = dryRun,
+                    controller = service,
+                    packageName = packageName,
+                    goal = goal,
+                    texts = texts,
+                    runKey = ownerRun,
+                    maxSteps = input.int("max_steps") ?: 6,
+                    maxDurationMs = input.long("max_duration_ms") ?: 15_000,
+                    dryRun = dryRun,
+                    hostPackageName = context.packageName,
+                    autoReturnToHost = returnToHostOverride,
+                    returnToHostLauncher = { hostPkg -> launchHostApp(service, hostPkg) },
+                    ocrMode = ocrMode,
                 )
                 listOf(UIMessagePart.Text(outcome.toString()))
             }
@@ -108,8 +132,8 @@ class ScreenAutomationTools(
     private val screenClickTool = Tool(
         name = "screen_click",
         description = "Tap screen coordinates using AmberAgent Accessibility after user approval. " +
-            "Optional verify_text polls the UI tree post-action so the tap effect is confirmed, " +
-            "not just injected.",
+            "Optional verify_text polls the UI tree post-action (with automatic on-device OCR fallback) " +
+            "so the tap effect is confirmed, not just injected.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -117,6 +141,8 @@ class ScreenAutomationTools(
                     put("y", numberProp("Y coordinate."))
                     put("verify_text", stringProp("Optional text expected to appear after the tap; result reports verify_text_found."))
                     put("verify_timeout_ms", integerProp("Post-action verify poll timeout. Defaults to 2000."))
+                    put("ocr_mode", stringProp("Optional OCR mode for verify_text fallback: 'auto' (default), 'on', or 'off'."))
+                    put("include_ocr", buildJsonObject { put("type", "boolean"); put("description", "Optional boolean alias to explicitly enable or disable on-device OCR.") })
                 },
                 required = listOf("x", "y")
             )
@@ -183,6 +209,8 @@ class ScreenAutomationTools(
                     put("duration_ms", integerProp("Swipe duration in milliseconds. Defaults to 350."))
                     put("verify_text", stringProp("Optional text expected to appear after the swipe; result reports verify_text_found."))
                     put("verify_timeout_ms", integerProp("Post-action verify poll timeout. Defaults to 2000."))
+                    put("ocr_mode", stringProp("Optional OCR mode for verify_text fallback: 'auto' (default), 'on', or 'off'."))
+                    put("include_ocr", buildJsonObject { put("type", "boolean"); put("description", "Optional boolean alias to explicitly enable or disable on-device OCR.") })
                 },
                 required = listOf("from_x", "from_y", "to_x", "to_y")
             )
@@ -311,19 +339,41 @@ class ScreenAutomationTools(
 
     private val screenReadUiTool = Tool(
         name = "screen_read_ui",
-        description = "Read the current Accessibility UI tree for screen reasoning. For a multi-step phone goal, first discover screen_run_goal: when enabled it uses Jev inside Accessibility to select and execute validated actions, reducing model round trips. Use this raw tree tool for inspection or when that tool hands back.",
+        description = "Read the current Accessibility UI tree for screen reasoning. Defaults to pure Accessibility tree first (zero screenshot/OCR overhead), and automatically triggers on-device OCR with normalized [0,1] coordinates when visible text coverage is low (WebView, Canvas, custom-drawn views). Supports explicit ocr_mode ('auto'|'on'|'off') or include_ocr.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("max_nodes", integerProp("Maximum nodes to include. Defaults to 120."))
+                    put("ocr_mode", stringProp("On-device OCR mode: 'auto' (default, triggers only on low tree coverage), 'on' (always run OCR), or 'off' (disable OCR)."))
+                    put("include_ocr", buildJsonObject { put("type", "boolean"); put("description", "Optional boolean alias to explicitly enable or disable on-device OCR.") })
                 }
             )
         },
         execute = { input ->
             trackScreenTool("screen_read_ui", "读取 UI 树", input) {
                 val service = requireService()
+                val maxNodes = input.int("max_nodes") ?: 120
+                val uiTree = service.dumpUiTree(maxNodes)
+                val snapshot = withContext(Dispatchers.Main.immediate) { service.captureScreenSnapshot() }
+                if (snapshot != null && takeoverController != null) {
+                    if (takeoverController.state.value.phase == PhoneTakeoverPhase.RESUMING) {
+                        takeoverController.confirmResumedWithFreshSnapshot(snapshot)
+                    } else if (takeoverController.state.value.isActive) {
+                        takeoverController.recordObservedSnapshot(
+                            snapshotId = snapshot.id,
+                            stepIndex = takeoverController.state.value.currentStep + 1,
+                        )
+                    }
+                }
+                val ocrMode = input.resolveOcrMode()
+                val ocrObservation = ocrEngine.observe(
+                    snapshot = snapshot,
+                    uiTreeDump = uiTree,
+                    mode = ocrMode,
+                )
                 textJson {
-                    put("ui_tree", service.dumpUiTree(input.int("max_nodes") ?: 120))
+                    put("ui_tree", uiTree)
+                    appendOcrObservationJson(ocrObservation)
                 }
             }
         }
@@ -331,28 +381,50 @@ class ScreenAutomationTools(
 
     private val screenFindTextTool = Tool(
         name = "screen_find_text",
-        description = "Find text in the current Accessibility UI tree and return matching node bounds.",
+        description = "Find text in the current Accessibility UI tree (with automatic on-device OCR fallback when tree text coverage is low or text is inside a WebView/Canvas) and return matching bounds.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("text", stringProp("Text to find."))
                     put("max_nodes", integerProp("Maximum nodes to scan. Defaults to 160."))
+                    put("ocr_mode", stringProp("On-device OCR mode: 'auto' (default), 'on', or 'off'."))
+                    put("include_ocr", buildJsonObject { put("type", "boolean"); put("description", "Optional boolean alias to explicitly enable or disable on-device OCR.") })
                 },
                 required = listOf("text")
             )
         },
         execute = { input ->
             trackScreenTool("screen_find_text", "查找屏幕文字", input) {
-                val matches = requireService().findTextNodes(
-                    query = input.requiredString("text"),
-                    maxNodes = input.int("max_nodes") ?: 160,
+                val service = requireService()
+                val query = input.requiredString("text")
+                val maxNodes = input.int("max_nodes") ?: 160
+                val ocrMode = input.resolveOcrMode()
+                val matches = service.findTextNodes(
+                    query = query,
+                    maxNodes = maxNodes,
                 )
+                val ocrObservation = if (ocrMode != ScreenOcrMode.OFF && (matches.isEmpty() || ocrMode == ScreenOcrMode.ON)) {
+                    val snapshot = withContext(Dispatchers.Main.immediate) { service.captureScreenSnapshot() }
+                    val uiTree = if (snapshot == null) service.dumpUiTree(maxNodes) else ""
+                    ocrEngine.observe(
+                        snapshot = snapshot,
+                        uiTreeDump = uiTree,
+                        mode = ocrMode,
+                        forceReason = if (matches.isEmpty()) "find_text_fallback" else null,
+                    )
+                } else null
+                val ocrMatches = ocrObservation?.matchesQuery(query).orEmpty()
                 textJson {
                     put("matches", buildJsonArray {
                         matches.forEachIndexed { index, match ->
                             add(match.toJson(index))
                         }
+                        val offset = matches.size
+                        ocrMatches.forEachIndexed { index, block ->
+                            add(block.toMatchJson(offset + index))
+                        }
                     })
+                    ocrObservation?.let { appendOcrObservationJson(it) }
                 }
             }
         }
@@ -360,12 +432,14 @@ class ScreenAutomationTools(
 
     private val screenTapTextTool = Tool(
         name = "screen_tap_text",
-        description = "Tap the first Accessibility node containing the requested text.",
+        description = "Tap the first Accessibility node (or on-device OCR fallback region) containing the requested text.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("text", stringProp("Text to tap."))
                     put("max_nodes", integerProp("Maximum nodes to scan. Defaults to 160."))
+                    put("ocr_mode", stringProp("On-device OCR fallback mode: 'auto' (default), 'on', or 'off'."))
+                    put("include_ocr", buildJsonObject { put("type", "boolean"); put("description", "Optional boolean alias to explicitly enable or disable on-device OCR.") })
                 },
                 required = listOf("text")
             )
@@ -375,14 +449,40 @@ class ScreenAutomationTools(
         execute = { input ->
             trackScreenTool("screen_tap_text", "点击文字", input) {
                 val service = requireService()
+                val query = input.requiredString("text")
+                val maxNodes = input.int("max_nodes") ?: 160
+                val ocrMode = input.resolveOcrMode()
                 val match = service.findTextNodes(
-                    query = input.requiredString("text"),
-                    maxNodes = input.int("max_nodes") ?: 160,
-                ).firstOrNull() ?: error("Text not found on screen: ${input.requiredString("text")}")
-                val ok = service.tap(match.bounds.exactCenterX(), match.bounds.exactCenterY())
-                textJson {
-                    put("success", ok)
-                    put("match", match.toJson(0))
+                    query = query,
+                    maxNodes = maxNodes,
+                ).firstOrNull()
+                if (match != null) {
+                    val ok = service.tap(match.bounds.exactCenterX(), match.bounds.exactCenterY())
+                    textJson {
+                        put("success", ok)
+                        put("source", "accessibility_tree")
+                        put("match", match.toJson(0))
+                    }
+                } else {
+                    val ocrObservation = if (ocrMode != ScreenOcrMode.OFF) {
+                        val snapshot = withContext(Dispatchers.Main.immediate) { service.captureScreenSnapshot() }
+                        val uiTree = if (snapshot == null) service.dumpUiTree(maxNodes) else ""
+                        ocrEngine.observe(
+                            snapshot = snapshot,
+                            uiTreeDump = uiTree,
+                            mode = ocrMode,
+                            forceReason = "tap_text_fallback",
+                        )
+                    } else null
+                    val ocrMatch = ocrObservation?.matchesQuery(query)?.firstOrNull()
+                        ?: error("Text not found on screen: $query")
+                    val ok = service.tap(ocrMatch.centerX, ocrMatch.centerY)
+                    textJson {
+                        put("success", ok)
+                        put("source", "ocr")
+                        put("ocr_triggered", true)
+                        put("match", ocrMatch.toMatchJson(0))
+                    }
                 }
             }
         }
@@ -390,31 +490,61 @@ class ScreenAutomationTools(
 
     private val screenWaitForTextTool = Tool(
         name = "screen_wait_for_text",
-        description = "Wait until text appears in the Accessibility UI tree.",
+        description = "Wait until text appears in the Accessibility UI tree (with automatic on-device OCR fallback when tree text coverage is low).",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("text", stringProp("Text to wait for."))
                     put("timeout_ms", integerProp("Timeout in milliseconds. Defaults to 10000."))
                     put("interval_ms", integerProp("Polling interval in milliseconds. Defaults to 500."))
+                    put("ocr_mode", stringProp("On-device OCR fallback mode: 'auto' (default), 'on', or 'off'."))
+                    put("include_ocr", buildJsonObject { put("type", "boolean"); put("description", "Optional boolean alias to explicitly enable or disable on-device OCR.") })
                 },
                 required = listOf("text")
             )
         },
         execute = { input ->
             trackScreenTool("screen_wait_for_text", "等待屏幕文字", input) {
+                val query = input.requiredString("text")
                 val deadline = System.currentTimeMillis() + (input.long("timeout_ms") ?: 10_000L).coerceIn(500L, 60_000L)
                 val interval = (input.long("interval_ms") ?: 500L).coerceIn(100L, 3_000L)
+                val ocrMode = input.resolveOcrMode()
                 val service = requireService()
                 var matches = emptyList<app.amber.core.automation.AccessibilityTextMatch>()
+                var ocrMatches = emptyList<ScreenOcrBlock>()
+                var lastOcrObservation: ScreenOcrObservation? = null
                 while (System.currentTimeMillis() < deadline) {
-                    matches = service.findTextNodes(input.requiredString("text"), maxNodes = 200)
+                    matches = service.findTextNodes(query, maxNodes = 200)
                     if (matches.isNotEmpty()) break
+                    if (ocrMode != ScreenOcrMode.OFF) {
+                        val snapshot = withContext(Dispatchers.Main.immediate) { service.captureScreenSnapshot() }
+                        val obs = ocrEngine.observe(snapshot = snapshot, mode = ocrMode)
+                        if (obs.triggered) {
+                            lastOcrObservation = obs
+                            ocrMatches = obs.matchesQuery(query)
+                            if (ocrMatches.isNotEmpty()) break
+                        }
+                    }
                     delay(interval)
                 }
+                if (matches.isEmpty() && ocrMatches.isEmpty() && ocrMode != ScreenOcrMode.OFF) {
+                    val snapshot = withContext(Dispatchers.Main.immediate) { service.captureScreenSnapshot() }
+                    val obs = ocrEngine.observe(
+                        snapshot = snapshot,
+                        mode = ocrMode,
+                        forceReason = "wait_for_text_fallback",
+                    )
+                    lastOcrObservation = obs
+                    ocrMatches = obs.matchesQuery(query)
+                }
                 textJson {
-                    put("found", matches.isNotEmpty())
-                    put("matches", buildJsonArray { matches.take(5).forEachIndexed { index, match -> add(match.toJson(index)) } })
+                    put("found", matches.isNotEmpty() || ocrMatches.isNotEmpty())
+                    put("matches", buildJsonArray {
+                        matches.take(5).forEachIndexed { index, match -> add(match.toJson(index)) }
+                        val offset = matches.size.coerceAtMost(5)
+                        ocrMatches.take(5 - offset).forEachIndexed { index, block -> add(block.toMatchJson(offset + index)) }
+                    })
+                    lastOcrObservation?.let { appendOcrObservationJson(it) }
                 }
             }
         }
@@ -422,13 +552,15 @@ class ScreenAutomationTools(
 
     private val screenScrollUntilTool = Tool(
         name = "screen_scroll_until",
-        description = "Swipe repeatedly until target text appears in the Accessibility UI tree.",
+        description = "Swipe repeatedly until target text appears in the Accessibility UI tree (or on-device OCR fallback).",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("text", stringProp("Text to find."))
                     put("direction", stringProp("Swipe direction: down, up, left, or right. Defaults to down."))
                     put("max_swipes", integerProp("Maximum swipes. Defaults to 8."))
+                    put("ocr_mode", stringProp("On-device OCR fallback mode: 'auto' (default), 'on', or 'off'."))
+                    put("include_ocr", buildJsonObject { put("type", "boolean"); put("description", "Optional boolean alias to explicitly enable or disable on-device OCR.") })
                 },
                 required = listOf("text")
             )
@@ -441,28 +573,71 @@ class ScreenAutomationTools(
                 val maxSwipes = (input.int("max_swipes") ?: 8).coerceIn(1, 20)
                 val direction = input.string("direction") ?: "down"
                 val query = input.requiredString("text")
+                val ocrMode = input.resolveOcrMode()
                 var matches = service.findTextNodes(query, maxNodes = 200)
+                var ocrMatches = emptyList<ScreenOcrBlock>()
+                var lastOcrObservation: ScreenOcrObservation? = null
                 var swipes = 0
                 var stalled = false
                 var lastTree = service.dumpUiTree(maxNodes = 200)
-                while (matches.isEmpty() && swipes < maxSwipes) {
+                if (matches.isEmpty() && ocrMode != ScreenOcrMode.OFF) {
+                    val initialSnapshot = withContext(Dispatchers.Main.immediate) { service.captureScreenSnapshot() }
+                    val initialObs = ocrEngine.observe(snapshot = initialSnapshot, uiTreeDump = lastTree, mode = ocrMode)
+                    if (initialObs.triggered) {
+                        lastOcrObservation = initialObs
+                        ocrMatches = initialObs.matchesQuery(query)
+                    }
+                }
+                var lastOcrText = lastOcrObservation?.combinedVisibleText().orEmpty()
+                while (matches.isEmpty() && ocrMatches.isEmpty() && swipes < maxSwipes) {
+                    val controller = takeoverController
+                    if (controller != null &&
+                        (controller.state.value.isPausedOrPausing ||
+                            controller.state.value.phase == app.amber.core.automation.PhoneTakeoverPhase.RESUMING)
+                    ) {
+                        val resumed = controller.awaitResumeIfPaused(
+                            currentSnapshotId = controller.state.value.lastSnapshotId,
+                            controller = service,
+                        )
+                        check(resumed) { "Screen automation is paused for user takeover; resume before scrolling further." }
+                        val fresh = withContext(Dispatchers.Main.immediate) { service.captureScreenSnapshot() }
+                        if (fresh != null) {
+                            controller.confirmResumedWithFreshSnapshot(fresh)
+                        }
+                    }
                     swipeByDirection(service, direction)
                     swipes++
                     delay(450)
                     val tree = service.dumpUiTree(maxNodes = 200)
                     matches = service.findTextNodes(query, maxNodes = 200)
-                    if (tree == lastTree && matches.isEmpty()) {
-                        // 滑到底/无位移：树完全没变，不再空滑到上限。
+                    var currentOcrText = ""
+                    if (matches.isEmpty() && ocrMode != ScreenOcrMode.OFF) {
+                        val snapshot = withContext(Dispatchers.Main.immediate) { service.captureScreenSnapshot() }
+                        val obs = ocrEngine.observe(snapshot = snapshot, uiTreeDump = tree, mode = ocrMode)
+                        if (obs.triggered) {
+                            lastOcrObservation = obs
+                            ocrMatches = obs.matchesQuery(query)
+                            currentOcrText = obs.combinedVisibleText()
+                        }
+                    }
+                    if (tree == lastTree && currentOcrText == lastOcrText && matches.isEmpty() && ocrMatches.isEmpty()) {
+                        // 滑到底/无位移：无障碍树与端侧 OCR 文本均无变化，不再空滑到上限。
                         stalled = true
                         break
                     }
                     lastTree = tree
+                    lastOcrText = currentOcrText
                 }
                 textJson {
-                    put("found", matches.isNotEmpty())
+                    put("found", matches.isNotEmpty() || ocrMatches.isNotEmpty())
                     put("swipes", swipes)
                     if (stalled) put("stalled", true)
-                    put("matches", buildJsonArray { matches.take(5).forEachIndexed { index, match -> add(match.toJson(index)) } })
+                    put("matches", buildJsonArray {
+                        matches.take(5).forEachIndexed { index, match -> add(match.toJson(index)) }
+                        val offset = matches.size.coerceAtMost(5)
+                        ocrMatches.take(5 - offset).forEachIndexed { index, block -> add(block.toMatchJson(offset + index)) }
+                    })
+                    lastOcrObservation?.let { appendOcrObservationJson(it) }
                 }
             }
         }
@@ -528,6 +703,28 @@ class ScreenAutomationTools(
                 runtime = runtime,
             )
             return try {
+                val controller = takeoverController
+                val isMutatingLowLevelTool = toolName != "screen_run_goal" &&
+                    toolName != "screen_read_ui" &&
+                    toolName != "screen_find_text" &&
+                    toolName != "vlm_task"
+                if (controller != null && isMutatingLowLevelTool) {
+                    val activeService = getActiveAccessibilityController()
+                    if (activeService != null &&
+                        (controller.state.value.isPausedOrPausing ||
+                            controller.state.value.phase == app.amber.core.automation.PhoneTakeoverPhase.RESUMING)
+                    ) {
+                        val resumed = controller.awaitResumeIfPaused(
+                            currentSnapshotId = controller.state.value.lastSnapshotId,
+                            controller = activeService,
+                        )
+                        check(resumed) { "Screen automation is paused for user takeover; resume before dispatching $toolName." }
+                        val fresh = withContext(Dispatchers.Main.immediate) { activeService.captureScreenSnapshot() }
+                        if (fresh != null) {
+                            controller.confirmResumedWithFreshSnapshot(fresh)
+                        }
+                    }
+                }
                 val result = block()
                 activityStore.complete(toolCallId, result.previewText())
                 result
@@ -568,7 +765,8 @@ class ScreenAutomationTools(
     }
 
     /**
-     * 动作后验证：verify_text 提供时轮询 UI 树确认效果（手势注入 ≠ 目标生效）。
+     * 动作后验证：verify_text 提供时轮询 UI 树确认效果（手势注入 ≠ 目标生效）；
+     * 当无障碍树未命中且未禁用 OCR 时，自动触发端侧 OCR 回退核验。
      * 未提供则退化为仅上报注入结果。
      */
     private suspend fun verifiedResult(
@@ -578,9 +776,12 @@ class ScreenAutomationTools(
     ): List<UIMessagePart> {
         val verifyText = input.string("verify_text")
         if (verifyText == null || !success) return result(success)
+        val ocrMode = input.resolveOcrMode()
         val deadline = System.currentTimeMillis() +
             (input.long("verify_timeout_ms") ?: 2_000L).coerceIn(200L, 15_000L)
         var found = false
+        var verifiedByOcr = false
+        var ocrObservation: ScreenOcrObservation? = null
         while (System.currentTimeMillis() < deadline) {
             if (service.findTextNodes(verifyText, maxNodes = 200).isNotEmpty()) {
                 found = true
@@ -588,11 +789,129 @@ class ScreenAutomationTools(
             }
             delay(250)
         }
+        if (!found && ocrMode != ScreenOcrMode.OFF) {
+            val snapshot = withContext(Dispatchers.Main.immediate) { service.captureScreenSnapshot() }
+            val obs = ocrEngine.observe(
+                snapshot = snapshot,
+                mode = ocrMode,
+                forceReason = "verify_text_fallback",
+            )
+            ocrObservation = obs
+            if (obs.matchesQuery(verifyText).isNotEmpty()) {
+                found = true
+                verifiedByOcr = true
+            }
+        }
         return textJson {
             put("success", success)
             put("verify_text_found", found)
+            put("verified_by_ocr", verifiedByOcr)
+            ocrObservation?.let { appendOcrObservationJson(it) }
         }
     }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.appendOcrObservationJson(
+        observation: ScreenOcrObservation,
+    ) {
+        put("ocr_mode", observation.mode.wireName())
+        put("ocr_triggered", observation.triggered)
+        put("ocr_reason", observation.triggerReason)
+        put("ocr_block_count", observation.blocks.size)
+        put("tree_coverage", buildJsonObject {
+            put("total_nodes", observation.coverage.totalNodes)
+            put("labeled_nodes", observation.coverage.labeledNodes)
+            put("interactive_nodes", observation.coverage.interactiveNodes)
+            put("unlabeled_interactive_nodes", observation.coverage.unlabeledInteractiveNodes)
+            put("custom_canvas_or_webview_nodes", observation.coverage.customCanvasOrWebViewNodes)
+            put("coverage_ratio", observation.coverage.coverageRatio.toDouble())
+            put("is_low_coverage", observation.coverage.isLowCoverage)
+            put("reason", observation.coverage.reason)
+        })
+        if (observation.triggered) {
+            put("ocr_blocks", buildJsonArray {
+                observation.blocks.forEach { block ->
+                    add(block.toJson())
+                }
+            })
+            if (observation.blocks.isNotEmpty()) {
+                put(
+                    "ocr_text",
+                    observation.blocks
+                        .map { SensitiveScreenTextClassifier.redactIfSensitive(it.text) }
+                        .filter { it.isNotBlank() }
+                        .distinct()
+                        .joinToString("\n")
+                        .take(4_000),
+                )
+            }
+        }
+    }
+
+    private fun ScreenOcrBlock.toJson() = buildJsonObject {
+        put("id", id)
+        put("text", SensitiveScreenTextClassifier.redactIfSensitive(text))
+        put("confidence", confidence.toDouble())
+        put("sensitive", isSensitive)
+        put("bounds", buildJsonObject {
+            put("left", left)
+            put("top", top)
+            put("right", right)
+            put("bottom", bottom)
+            put("center_x", centerX.toDouble())
+            put("center_y", centerY.toDouble())
+        })
+        put("normalized_bounds", buildJsonObject {
+            put("left", normalizedBounds.left.toDouble())
+            put("top", normalizedBounds.top.toDouble())
+            put("right", normalizedBounds.right.toDouble())
+            put("bottom", normalizedBounds.bottom.toDouble())
+            put("center_x", normalizedBounds.centerX.toDouble())
+            put("center_y", normalizedBounds.centerY.toDouble())
+        })
+    }
+
+    private fun ScreenOcrBlock.toMatchJson(index: Int) = buildJsonObject {
+        put("index", index)
+        put("source", "ocr")
+        put("text", SensitiveScreenTextClassifier.redactIfSensitive(text))
+        put("content_description", "")
+        put("class_name", "ocr.TextBlock")
+        put("view_id", id)
+        put("clickable", true)
+        put("enabled", true)
+        put("confidence", confidence.toDouble())
+        put("bounds", buildJsonObject {
+            put("left", left)
+            put("top", top)
+            put("right", right)
+            put("bottom", bottom)
+            put("center_x", centerX.toDouble())
+            put("center_y", centerY.toDouble())
+        })
+        put("normalized_bounds", buildJsonObject {
+            put("left", normalizedBounds.left.toDouble())
+            put("top", normalizedBounds.top.toDouble())
+            put("right", normalizedBounds.right.toDouble())
+            put("bottom", normalizedBounds.bottom.toDouble())
+            put("center_x", normalizedBounds.centerX.toDouble())
+            put("center_y", normalizedBounds.centerY.toDouble())
+        })
+    }
+
+    private fun JsonElement.booleanOrNull(name: String): Boolean? =
+        string(name)?.let { raw ->
+            when (raw.trim().lowercase()) {
+                "true" -> true
+                "false" -> false
+                else -> null
+            }
+        }
+
+    private fun JsonElement.resolveOcrMode(): ScreenOcrMode =
+        ScreenOcrMode.parse(
+            ocrModeRaw = string("ocr_mode"),
+            includeOcrRaw = booleanOrNull("include_ocr"),
+        )
 
     private suspend fun swipeByDirection(service: AccessibilityController, direction: String): Boolean {
         val width = context.resources.displayMetrics.widthPixels.toFloat()
@@ -645,6 +964,31 @@ class ScreenAutomationTools(
                 else -> part.toString()
             }
         }.takeLast(1_600)
+
+    private fun launchHostApp(service: AccessibilityController, hostPackageName: String): Boolean {
+        if (service.returnToHostApp(hostPackageName)) return true
+        return runCatching {
+            val intent = Intent(context, app.amber.agent.RouteActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP
+                )
+            }
+            context.startActivity(intent)
+            true
+        }.recoverCatching {
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(hostPackageName)
+                ?: return@recoverCatching false
+            launchIntent.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
+            )
+            context.startActivity(launchIntent)
+            true
+        }.getOrDefault(false)
+    }
 
     private fun JsonElement.activityInputPreview(toolName: String): String =
         when (toolName) {

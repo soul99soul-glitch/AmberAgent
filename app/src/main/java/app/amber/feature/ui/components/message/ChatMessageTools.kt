@@ -301,12 +301,19 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
         "screen_back",
         "screen_home",
         "screen_open_app",
+        "screen_open_url",
         "screen_read_ui",
+        "screen_find_text",
+        "screen_tap_text",
+        "screen_wait_for_text",
+        "screen_scroll_until",
         "screen_screenshot",
+        "screen_run_goal",
         "vlm_task"
     ) -> Lucide.Maximize
 
     else -> when {
+        toolName.startsWith("screen_") -> Lucide.Maximize
         toolName.startsWith("mcp__") -> Lucide.Package
         // Phase 2 WebMount: primitives + adapter tools use the web/search
         // icon so they're visually grouped with webview_* tools.
@@ -347,18 +354,7 @@ private fun getToolKind(toolName: String) = when {
         "terminal_session_stop"
     ) -> AgentToolKind.TERMINAL
 
-    toolName in setOf(
-        "screen_click",
-        "screen_long_click",
-        "screen_swipe",
-        "screen_input_text",
-        "screen_back",
-        "screen_home",
-        "screen_open_app",
-        "screen_read_ui",
-        "screen_screenshot",
-        "vlm_task"
-    ) -> AgentToolKind.SCREEN
+    toolName.startsWith("screen_") || toolName == "vlm_task" -> AgentToolKind.SCREEN
 
     toolName == ToolNames.SEARCH_WEB ||
         toolName == ToolNames.SCRAPE_WEB ||
@@ -407,11 +403,13 @@ private fun toolHasFailure(content: JsonElement?, output: List<UIMessagePart>): 
     val exitCode = jsonObject?.get("exit_code")?.jsonPrimitiveOrNull?.intOrNull
     val status = jsonObject?.get("status")?.jsonPrimitiveOrNull?.contentOrNull?.lowercase()
     val failed = jsonObject?.get("failed")?.jsonPrimitiveOrNull?.contentOrNull?.toBooleanStrictOrNull() == true
+    val successFalse = jsonObject?.get("success")?.jsonPrimitiveOrNull?.contentOrNull?.toBooleanStrictOrNull() == false
     if (jsonObject != null) {
         return !error.isNullOrBlank() ||
             (exitCode != null && exitCode != 0) ||
             failed ||
-            status in setOf("failed", "error", "denied", "timed_out", "interrupted", "policy_denied")
+            successFalse ||
+            status in setOf("failed", "error", "denied", "timed_out", "interrupted", "policy_denied", "disabled", "busy", "stale_snapshot")
     }
     return output.filterIsInstance<UIMessagePart.Text>().any { part ->
         part.text.contains("\"error\"", ignoreCase = true) ||
@@ -424,11 +422,21 @@ internal fun toolStatusFromMessagePart(
     loading: Boolean,
     content: JsonElement?,
 ): AgentToolStatus {
-    val reportedStatus = content?.jsonObjectOrNull
+    val jsonObject = content?.jsonObjectOrNull
+    val reportedStatus = jsonObject
         ?.get("status")
         ?.jsonPrimitiveOrNull
         ?.contentOrNull
         ?.lowercase()
+    val isScreenTool = tool.toolName.startsWith("screen_") || tool.toolName == "vlm_task"
+    val screenUnverified = isScreenTool && (
+        jsonObject?.get("verify_text_found")?.jsonPrimitiveOrNull?.contentOrNull?.toBooleanStrictOrNull() == false ||
+            (tool.toolName in setOf("screen_tap_text", "screen_click", "screen_input_text") &&
+                jsonObject?.get("verified")?.jsonPrimitiveOrNull?.contentOrNull?.toBooleanStrictOrNull() == false) ||
+            (tool.toolName in setOf("screen_wait_for_text", "screen_scroll_until") &&
+                (jsonObject?.get("matched")?.jsonPrimitiveOrNull?.contentOrNull?.toBooleanStrictOrNull() == false ||
+                    jsonObject?.get("found")?.jsonPrimitiveOrNull?.contentOrNull?.toBooleanStrictOrNull() == false))
+    )
     return when {
         tool.approvalState is ToolApprovalState.Pending -> AgentToolStatus.WAITING_FOR_PERMISSION
         tool.approvalState is ToolApprovalState.Denied -> AgentToolStatus.CANCELLED
@@ -437,12 +445,14 @@ internal fun toolStatusFromMessagePart(
         reportedStatus in setOf("queued", "running") -> AgentToolStatus.RUNNING
         reportedStatus == "cancelled" -> AgentToolStatus.CANCELLED
         reportedStatus == "timed_out" -> AgentToolStatus.TIMED_OUT
-        reportedStatus == "interrupted" -> AgentToolStatus.INTERRUPTED
-        // A WebMount action may have been dispatched even when its receipt or
+        reportedStatus in setOf("interrupted", "needs_user_action", "handback", "steps_exhausted", "budget_exhausted", "shadow_trace") ->
+            AgentToolStatus.INTERRUPTED
+        // A WebMount or Screen action may have been dispatched even when its receipt or
         // postcondition is unavailable. Keep that outcome distinct from both
         // a verified success and a confirmed failure.
-        reportedStatus == "unknown" -> AgentToolStatus.UNKNOWN
+        reportedStatus in setOf("unknown", "outcome_unknown") -> AgentToolStatus.UNKNOWN
         toolHasFailure(content = content, output = tool.output) -> AgentToolStatus.FAILED
+        screenUnverified -> AgentToolStatus.INTERRUPTED
         else -> AgentToolStatus.SUCCEEDED
     }
 }
@@ -684,6 +694,16 @@ private fun V3ToolStatusBadge(
 
 
 @Composable
+private fun toolActivityTitleWithDetail(
+    resourceId: Int,
+    detail: String?,
+): String {
+    val base = stringResource(resourceId)
+    val safeDetail = detail?.trim()?.takeIf { it.isNotEmpty() } ?: return base
+    return stringResource(R.string.tool_activity_with_detail, base, safeDetail)
+}
+
+@Composable
 private fun toolDisplayTitle(
     toolName: String,
     arguments: JsonElement,
@@ -835,9 +855,34 @@ private fun toolDisplayTitle(
     "screen_home" -> stringResource(R.string.chat_message_tool_screen_home)
     "screen_open_app" -> stringResource(
         R.string.chat_message_tool_screen_open_app,
-        arguments.getStringContent("package")?.compactToolPreview(18).orEmpty(),
+        (arguments.getStringContent("package_name") ?: arguments.getStringContent("package"))?.compactToolPreview(18).orEmpty(),
+    )
+    "screen_open_url" -> toolActivityTitleWithDetail(
+        R.string.tool_activity_screen_open_url,
+        arguments.getStringContent("url")?.compactToolPreview(22),
     )
     "screen_read_ui" -> stringResource(R.string.chat_message_tool_screen_read_ui)
+    "screen_find_text" -> toolActivityTitleWithDetail(
+        R.string.tool_activity_screen_find_text,
+        arguments.getStringContent("text")?.compactToolPreview(18),
+    )
+    "screen_tap_text" -> toolActivityTitleWithDetail(
+        R.string.tool_activity_screen_tap_text,
+        arguments.getStringContent("text")?.compactToolPreview(18),
+    )
+    "screen_wait_for_text" -> toolActivityTitleWithDetail(
+        R.string.tool_activity_screen_wait_for_text,
+        arguments.getStringContent("text")?.compactToolPreview(18),
+    )
+    "screen_scroll_until" -> toolActivityTitleWithDetail(
+        R.string.tool_activity_screen_scroll_until,
+        arguments.getStringContent("text")?.compactToolPreview(18),
+    )
+    "screen_run_goal" -> toolActivityTitleWithDetail(
+        R.string.tool_activity_screen_run_goal,
+        (arguments.getStringContent("goal")?.let(app.amber.core.automation.SensitiveScreenTextClassifier::redactIfSensitive)
+            ?: arguments.getStringContent("package_name"))?.compactToolPreview(22),
+    )
     "screen_screenshot" -> stringResource(R.string.chat_message_tool_screen_screenshot)
     "vlm_task" -> stringResource(R.string.chat_message_tool_vlm_task)
     else -> if (toolName.startsWith("mcp__")) {
@@ -901,6 +946,17 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val isGenerateImage = tool.toolName == "generate_image"
     val hasExtraContent = isDenied || (images.isNotEmpty() && !isGenerateImage)
     val toolKind = getToolKind(tool.toolName)
+    val screenReceipt = remember(tool.toolName, tool.isExecuted, arguments, content) {
+        if (tool.isExecuted && content != null) {
+            ScreenToolReceiptParser.parse(
+                toolName = tool.toolName,
+                arguments = arguments,
+                content = content,
+            )
+        } else {
+            null
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -935,6 +991,13 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 loading = loading,
                 onClick = { showResult = true },
                 approvalActions = null,
+            )
+        }
+
+        if (screenReceipt != null && !isDenied && !isPending) {
+            ScreenToolReceiptInlineSummary(
+                receipt = screenReceipt,
+                onClick = { showResult = true },
             )
         }
 

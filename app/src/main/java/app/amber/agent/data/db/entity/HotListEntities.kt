@@ -52,6 +52,8 @@ data class HotTopicCacheEntity(
     val latestFetchedAt: Long,
     @ColumnInfo("updated_at")
     val updatedAt: Long,
+    @ColumnInfo(name = "template_id")
+    val templateId: String? = null,
 )
 
 @Entity(
@@ -80,6 +82,10 @@ data class DeepReadCacheEntity(
     /** URL used to create this result; retained so history/Continue can reopen it. */
     @ColumnInfo(name = "source_url")
     val sourceUrl: String? = null,
+    @ColumnInfo(name = "template_id")
+    val templateId: String? = null,
+    @ColumnInfo(name = "structured_json")
+    val structuredJson: String? = null,
 )
 
 @Entity(

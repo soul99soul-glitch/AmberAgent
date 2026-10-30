@@ -551,6 +551,8 @@
   <string name="setting_page_agent_live_status_desc">工作執行時顯示系統即時狀態。</string>
   <string name="setting_page_agent_task_bubble">任務氣泡</string>
   <string name="setting_page_agent_task_bubble_desc">任務執行時在懸浮氣泡裡展示步驟、回覆與審批，無需切回應用。</string>
+  <string name="setting_page_agent_auto_return_to_host">手機任務完成後自動切回 Amber</string>
+  <string name="setting_page_agent_auto_return_to_host_desc">目標確認完成後自動返回 Amber；遇到接管或未完成時保持在目標應用。</string>
   <string name="setting_page_agent_live_status_privacy">隱藏敏感的即時狀態</string>
   <string name="setting_page_agent_live_status_privacy_desc">僅顯示工具類型與狀態；隱藏私人文字。</string>
   <string name="setting_page_agent_operation_preview">操作預覽</string>
@@ -3640,4 +3642,19 @@
   <string name="chat_tool_jev_risk_exfiltration">外傳資料</string>
   <string name="chat_tool_jev_risk_off_task">超出任務範圍</string>
   <string name="chat_tool_jev_risk_separator">"、"</string>
+  <string name="tool_activity_screen_run_goal">執行螢幕目標</string>
+  <string name="phone_takeover_status_automated">自動操作螢幕中</string>
+  <string name="phone_takeover_status_pausing">正在暫停自動操作…</string>
+  <string name="phone_takeover_status_paused">已交由你操作</string>
+  <string name="phone_takeover_status_resuming">正在重讀畫面繼續…</string>
+  <string name="phone_takeover_action_take_over">我來操作</string>
+  <string name="phone_takeover_action_resume">繼續自動操作</string>
+  <string name="phone_takeover_paused_hint">完成手動操作後點擊右側繼續，將自動重讀最新畫面</string>
+  <string name="phone_takeover_intercepted_format">已攔截敏感操作：%1$s</string>
+  <string name="screen_receipt_section_executed_steps">已確認執行步驟</string>
+  <string name="screen_receipt_section_held_actions">已攔截/待你確認的敏感動作</string>
+  <string name="screen_receipt_section_unmet_criteria">驗收結論與後續建議</string>
+  <string name="screen_receipt_section_ocr">端側 OCR 辨識摘要</string>
+  <string name="screen_receipt_section_host_return">宿主返回狀態</string>
+  <string name="screen_receipt_section_raw_details">原始工具詳情</string>
 </resources>

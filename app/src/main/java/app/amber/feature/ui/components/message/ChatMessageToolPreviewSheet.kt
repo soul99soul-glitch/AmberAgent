@@ -23,6 +23,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,6 +77,13 @@ internal fun ToolCallPreviewSheet(
     val isMemoryOperation = toolName == ToolNames.MEMORY &&
         memoryAction in listOf(MemoryActions.CREATE, MemoryActions.EDIT)
     val memoryId = (content as? JsonObject)?.get("id")?.jsonPrimitiveOrNull?.intOrNull
+    val screenReceipt = remember(toolName, arguments, content) {
+        ScreenToolReceiptParser.parse(
+            toolName = toolName,
+            arguments = arguments,
+            content = content,
+        )
+    }
 
     ModalBottomSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -91,6 +99,14 @@ internal fun ToolCallPreviewSheet(
                     memoryRepo = memoryRepo,
                     scope = scope,
                     onDismissRequest = onDismissRequest
+                )
+
+                screenReceipt != null -> ScreenToolReceiptDetailSheetContent(
+                    toolName = toolName,
+                    arguments = arguments,
+                    content = content,
+                    output = output,
+                    receipt = screenReceipt,
                 )
 
                 toolName == ToolNames.SEARCH_WEB -> SearchWebPreview(

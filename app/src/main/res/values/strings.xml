@@ -551,6 +551,8 @@
   <string name="setting_page_agent_live_status_desc">Show live status while tasks run.</string>
   <string name="setting_page_agent_task_bubble">Task bubble</string>
   <string name="setting_page_agent_task_bubble_desc">Show a floating bubble with steps, replies and approvals while a task runs.</string>
+  <string name="setting_page_agent_auto_return_to_host">Auto return to Amber after phone task</string>
+  <string name="setting_page_agent_auto_return_to_host_desc">Return to Amber when a phone goal completes; stay in the target app on handback or pause.</string>
   <string name="setting_page_agent_live_status_privacy">Hide sensitive live status</string>
   <string name="setting_page_agent_live_status_privacy_desc">Only show tool type and state; hide private text.</string>
   <string name="setting_page_agent_operation_preview">Operation Preview</string>
@@ -3662,4 +3664,19 @@ My task:</string>
   <string name="chat_tool_jev_risk_exfiltration">sends data out</string>
   <string name="chat_tool_jev_risk_off_task">outside the task</string>
   <string name="chat_tool_jev_risk_separator">", "</string>
+  <string name="tool_activity_screen_run_goal">Execute screen goal</string>
+  <string name="phone_takeover_status_automated">Automating screen</string>
+  <string name="phone_takeover_status_pausing">Pausing automation…</string>
+  <string name="phone_takeover_status_paused">Handed over to you</string>
+  <string name="phone_takeover_status_resuming">Re-reading screen…</string>
+  <string name="phone_takeover_action_take_over">I\'ll take over</string>
+  <string name="phone_takeover_action_resume">Resume automation</string>
+  <string name="phone_takeover_paused_hint">Operate the screen manually, then tap Resume to re-read the latest screen</string>
+  <string name="phone_takeover_intercepted_format">Held sensitive action: %1$s</string>
+  <string name="screen_receipt_section_executed_steps">Confirmed executed steps</string>
+  <string name="screen_receipt_section_held_actions">Held sensitive actions (awaiting your confirmation)</string>
+  <string name="screen_receipt_section_unmet_criteria">Acceptance status &amp; next step</string>
+  <string name="screen_receipt_section_ocr">On-device OCR recognition</string>
+  <string name="screen_receipt_section_host_return">Host app return</string>
+  <string name="screen_receipt_section_raw_details">Raw tool details</string>
 </resources>

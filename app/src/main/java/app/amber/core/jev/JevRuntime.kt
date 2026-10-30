@@ -26,6 +26,8 @@ class JevRuntime(
         backgroundScope.launch { runCatching { block() } }
     }
 
+    fun currentSettings(): Settings = settingsProvider()
+
     fun configFor(purpose: JevPurpose): JevRuntimeConfig? {
         val setting = settingsProvider().jev
         val mode = setting.modeFor(purpose)

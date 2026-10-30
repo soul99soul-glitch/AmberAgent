@@ -189,6 +189,36 @@ class AppDatabaseMigrationTest {
         db.close()
     }
 
+    @Test
+    fun migration_20_21_adds_template_and_structured_columns() {
+        val version20 = helper.createDatabase(TEST_DB, 20)
+        version20.execSQL(
+            "INSERT INTO hot_topic_cache " +
+                "(topic_id, title, sources_json, source_count, best_rank, latest_fetched_at, updated_at) " +
+                "VALUES ('t-1', 'Topic 1', '[]', 2, 1, 1000, 1000)"
+        )
+        version20.execSQL(
+            "INSERT INTO deep_read_cache " +
+                "(topic_id, title, output_json, created_at, expires_at, updated_at, pinned, source_url) " +
+                "VALUES ('t-1', 'Topic 1', '{}', 1000, 2000, 1000, 0, 'https://example.com')"
+        )
+        version20.close()
+
+        val db = helper.runMigrationsAndValidate(
+            TEST_DB,
+            21,
+            true,
+            AppDatabase.MIGRATION_20_21,
+        )
+
+        assertEquals(1, db.countRows("hot_topic_cache", "topic_id = 't-1'"))
+        assertTrue(db.isNullValue("hot_topic_cache", "template_id", "topic_id = 't-1'"))
+        assertEquals(1, db.countRows("deep_read_cache", "topic_id = 't-1'"))
+        assertTrue(db.isNullValue("deep_read_cache", "template_id", "topic_id = 't-1'"))
+        assertTrue(db.isNullValue("deep_read_cache", "structured_json", "topic_id = 't-1'"))
+        db.close()
+    }
+
     private fun SupportSQLiteDatabase.countRows(table: String, where: String): Int {
         query("SELECT COUNT(*) FROM $table WHERE $where").use { cursor ->
             assertTrue(cursor.moveToFirst())

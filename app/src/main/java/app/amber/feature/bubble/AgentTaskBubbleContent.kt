@@ -48,13 +48,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.amber.agent.R
+import app.amber.core.automation.PhoneTakeoverPhase
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 
 /**
  * 任务气泡内容（与 LiveBubbleContent 同一交互骨架）：
  * 收起 = 44dp 状态点（运行呼吸 / 等待批准快闪 / 完成 / 失败）；
- * 点开 = 280dp 卡片（状态 + 当前步骤 + 回复预览 + 批准/拒绝 + 停止/打开会话）；
+ * 点开 = 280dp 卡片（状态 + 当前步骤 + 手机接管控制 + 回复预览 + 批准/拒绝 + 停止/打开会话）；
  * 长按点 = 停止任务。
  */
 @Composable
@@ -67,16 +68,20 @@ fun AgentTaskBubbleContent(
     onDrag: (Float, Float) -> Unit,
     onDragEnd: () -> Unit,
     onSizeChanged: () -> Unit,
+    onRequestTakeover: () -> Unit = {},
+    onRequestResume: () -> Unit = {},
 ) {
     val tokens = LocalAmberTokens.current
     val errorColor = MaterialTheme.colorScheme.error
+    val warningColor = MaterialTheme.colorScheme.tertiary
     val dotDescription = stringResource(R.string.task_bubble_a11y_label)
     var expanded by remember { mutableStateOf(false) }
-    LaunchedEffect(state.stepRunning) { onSizeChanged() }
+    LaunchedEffect(state.stepRunning, state.takeoverPhase) { onSizeChanged() }
 
     if (!expanded || state.stepRunning) {
         // ── 收起态：状态点 ──
-        val waiting = state.phase == AgentBubblePhase.RUNNING && state.waitingApproval
+        val waiting = state.phase == AgentBubblePhase.RUNNING &&
+            (state.waitingApproval || state.takeoverPhase == PhoneTakeoverPhase.PAUSED || state.takeoverPhase == PhoneTakeoverPhase.PAUSING)
         val pulse = rememberInfiniteTransition(label = "taskBubblePulse")
         val pulseAlpha by pulse.animateFloat(
             initialValue = 0.35f,
@@ -90,6 +95,7 @@ fun AgentTaskBubbleContent(
         val dotColor = when {
             state.phase == AgentBubblePhase.FINISHED && state.failed -> errorColor
             state.phase == AgentBubblePhase.FINISHED -> tokens.accent
+            state.takeoverPhase == PhoneTakeoverPhase.PAUSED || state.takeoverPhase == PhoneTakeoverPhase.PAUSING -> warningColor
             state.waitingApproval -> tokens.accent
             state.phase == AgentBubblePhase.RUNNING -> tokens.accent
             else -> tokens.ink3
@@ -146,6 +152,7 @@ fun AgentTaskBubbleContent(
             animationSpec = tween(durationMillis = 130),
             label = "taskBubbleFade",
         )
+        val maxCardWidth = (LocalConfiguration.current.screenWidthDp - 16).coerceIn(200, 280).dp
         Column(
             modifier = Modifier
                 .graphicsLayer {
@@ -154,7 +161,7 @@ fun AgentTaskBubbleContent(
                     alpha = fade
                     transformOrigin = TransformOrigin(1f, 0f)
                 }
-                .width(280.dp)
+                .width(maxCardWidth)
                 .heightIn(max = (LocalConfiguration.current.screenHeightDp - 48).dp)
                 .verticalScroll(rememberScrollState())
                 .clip(RoundedCornerShape(16.dp))
@@ -164,6 +171,12 @@ fun AgentTaskBubbleContent(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             val statusText = when {
+                state.phase == AgentBubblePhase.RUNNING && state.takeoverPhase == PhoneTakeoverPhase.PAUSING ->
+                    stringResource(R.string.phone_takeover_status_pausing)
+                state.phase == AgentBubblePhase.RUNNING && state.takeoverPhase == PhoneTakeoverPhase.PAUSED ->
+                    stringResource(R.string.phone_takeover_status_paused)
+                state.phase == AgentBubblePhase.RUNNING && state.takeoverPhase == PhoneTakeoverPhase.RESUMING ->
+                    stringResource(R.string.phone_takeover_status_resuming)
                 state.phase == AgentBubblePhase.RUNNING && state.waitingApproval && state.waitingAskUser ->
                     stringResource(R.string.task_bubble_status_waiting_reply)
                 state.phase == AgentBubblePhase.RUNNING && state.waitingApproval ->
@@ -195,6 +208,7 @@ fun AgentTaskBubbleContent(
                         .background(
                             when {
                                 state.phase == AgentBubblePhase.FINISHED && state.failed -> errorColor
+                                state.takeoverPhase == PhoneTakeoverPhase.PAUSED || state.takeoverPhase == PhoneTakeoverPhase.PAUSING -> warningColor
                                 running -> tokens.accent
                                 else -> tokens.ink3
                             }
@@ -212,6 +226,8 @@ fun AgentTaskBubbleContent(
                     text = stringResource(R.string.task_bubble_collapse),
                     style = LocalAmberType.current.meta,
                     color = tokens.ink4,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
 
@@ -225,6 +241,83 @@ fun AgentTaskBubbleContent(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+            }
+
+            if (running && state.takeoverPhase != PhoneTakeoverPhase.IDLE) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(tokens.surface2)
+                        .border(1.dp, tokens.line2, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (!state.interceptedSensitiveAction.isNullOrBlank()) {
+                        Text(
+                            text = stringResource(R.string.phone_takeover_intercepted_format, state.interceptedSensitiveAction),
+                            fontSize = 12.sp,
+                            color = warningColor,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else if (state.takeoverPhase == PhoneTakeoverPhase.PAUSED || state.takeoverPhase == PhoneTakeoverPhase.PAUSING) {
+                        Text(
+                            text = stringResource(R.string.phone_takeover_paused_hint),
+                            fontSize = 12.sp,
+                            color = tokens.ink3,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    when {
+                        state.canRequestTakeover -> {
+                            TextButton(
+                                onClick = onRequestTakeover,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(tokens.surface),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.phone_takeover_action_take_over),
+                                    fontSize = 13.sp,
+                                    color = tokens.accent,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        state.canRequestResume -> {
+                            TextButton(
+                                onClick = onRequestResume,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(tokens.surface),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.phone_takeover_action_resume),
+                                    fontSize = 13.sp,
+                                    color = tokens.accent,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        state.takeoverPhase == PhoneTakeoverPhase.RESUMING -> {
+                            Text(
+                                text = stringResource(R.string.phone_takeover_status_resuming),
+                                fontSize = 12.sp,
+                                color = tokens.ink3,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
 
@@ -248,6 +341,8 @@ fun AgentTaskBubbleContent(
                             stringResource(R.string.task_bubble_approve),
                             fontSize = 13.sp,
                             color = tokens.accent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     TextButton(
@@ -258,6 +353,8 @@ fun AgentTaskBubbleContent(
                             stringResource(R.string.task_bubble_deny),
                             fontSize = 13.sp,
                             color = tokens.ink3,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -298,6 +395,8 @@ fun AgentTaskBubbleContent(
                         stringResource(R.string.task_bubble_open_conversation),
                         fontSize = 13.sp,
                         color = tokens.accent,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 Spacer(modifier = Modifier.weight(1f))
@@ -306,6 +405,8 @@ fun AgentTaskBubbleContent(
                         stringResource(R.string.task_bubble_stop),
                         fontSize = 13.sp,
                         color = if (running) tokens.ink3 else tokens.ink4,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }

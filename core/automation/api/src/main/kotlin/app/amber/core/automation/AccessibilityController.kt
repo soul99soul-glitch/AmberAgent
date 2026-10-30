@@ -58,6 +58,67 @@ interface AccessibilityController {
         dispatched = false,
         reason = "unsupported",
     )
+
+    /**
+     * Marks a snapshot ID as explicitly invalidated (for example, right before
+     * returning to the Amber host app or when human takeover begins) so it
+     * cannot be reused to dispatch actions against the host or post-takeover UI.
+     */
+    fun invalidateSnapshot(
+        snapshotId: String?,
+        reason: String = "returned_to_host_snapshot_invalidated",
+    ) {
+        if (!snapshotId.isNullOrBlank()) {
+            ScreenSnapshotInvalidationRegistry.invalidate(snapshotId, reason)
+        }
+    }
+
+    fun isSnapshotInvalidated(snapshotId: String?): Boolean =
+        !snapshotId.isNullOrBlank() && ScreenSnapshotInvalidationRegistry.isInvalidated(snapshotId)
+
+    fun snapshotInvalidationReason(snapshotId: String?): String? =
+        snapshotId?.takeIf { it.isNotBlank() }?.let(ScreenSnapshotInvalidationRegistry::reasonFor)
+
+    /**
+     * Brings the Amber host application ([hostPackageName]) back to the
+     * foreground after a confirmed goal completion.
+     */
+    fun returnToHostApp(hostPackageName: String): Boolean = hostPackageName.isNotBlank()
+}
+
+/**
+ * Thread-safe bounded registry tracking explicitly invalidated screen snapshot IDs
+ * across host returns and human takeover transitions.
+ */
+object ScreenSnapshotInvalidationRegistry {
+    private const val MAX_ENTRIES = 256
+    private val entries = object : LinkedHashMap<String, String>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean =
+            size > MAX_ENTRIES
+    }
+
+    @Synchronized
+    fun invalidate(snapshotId: String, reason: String = "returned_to_host_snapshot_invalidated") {
+        if (snapshotId.isBlank()) return
+        entries[snapshotId] = reason.ifBlank { "returned_to_host_snapshot_invalidated" }
+    }
+
+    @Synchronized
+    fun markFreshCapture(snapshotId: String) {
+        if (snapshotId.isBlank()) return
+        entries.remove(snapshotId)
+    }
+
+    @Synchronized
+    fun isInvalidated(snapshotId: String): Boolean = entries.containsKey(snapshotId)
+
+    @Synchronized
+    fun reasonFor(snapshotId: String): String? = entries[snapshotId]
+
+    @Synchronized
+    fun clearForTest() {
+        entries.clear()
+    }
 }
 
 data class ScreenNode(

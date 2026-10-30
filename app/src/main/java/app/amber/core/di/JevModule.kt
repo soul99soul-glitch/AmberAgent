@@ -71,5 +71,11 @@ val jevModule = module {
     single { JevCouncilPoolRanker(get()) }
     single<CouncilPoolRanker> { get<JevCouncilPoolRanker>() }
     single { JevWebGoalRunner(get()) }
-    single { app.amber.core.jev.JevScreenGoalRunner(get()) }
+    single {
+        app.amber.core.jev.JevScreenGoalRunner(
+            runtime = get(),
+            ocrEngine = getOrNull(),
+            takeoverController = getOrNull(),
+        )
+    }
 }

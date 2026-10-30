@@ -88,6 +88,7 @@ class ToolActivityTitleLocalizer(
             "screen_tap_text" -> title(R.string.tool_activity_screen_tap_text, input.value("text"))
             "screen_wait_for_text" -> title(R.string.tool_activity_screen_wait_for_text, input.value("text"))
             "screen_scroll_until" -> title(R.string.tool_activity_screen_scroll_until, input.value("text"))
+            "screen_run_goal" -> title(R.string.tool_activity_screen_run_goal, input.value("goal", "package_name"))
             "screen_screenshot" -> title(R.string.tool_activity_screen_screenshot)
             "vlm_task" -> title(R.string.tool_activity_vlm_task)
 

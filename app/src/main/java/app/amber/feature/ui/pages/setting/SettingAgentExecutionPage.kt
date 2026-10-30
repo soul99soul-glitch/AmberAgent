@@ -247,6 +247,25 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                     )
+                    item(
+                        leadingContent = { SettingTileIcon(Lucide.RefreshCw) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_auto_return_to_host_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_auto_return_to_host)) },
+                        trailingContent = {
+                            Switch(
+                                checked = settings.agentRuntime.autoReturnToHostOnScreenGoalComplete,
+                                onCheckedChange = { checked ->
+                                    vm.updateSettings { current ->
+                                        current.copy(
+                                            agentRuntime = current.agentRuntime.copy(
+                                                autoReturnToHostOnScreenGoalComplete = checked
+                                            )
+                                        )
+                                    }
+                                }
+                            )
+                        },
+                    )
                 }
             }
 

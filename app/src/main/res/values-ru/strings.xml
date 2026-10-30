@@ -551,6 +551,8 @@
   <string name="setting_page_agent_live_status_desc">Показывать состояние системы в реальном времени во время выполнения задач.</string>
   <string name="setting_page_agent_task_bubble">Пузырь задач</string>
   <string name="setting_page_agent_task_bubble_desc">Показывает шаги, ответы и одобрения в плавающем пузыре во время выполнения задачи.</string>
+  <string name="setting_page_agent_auto_return_to_host">Автовозврат в Amber после задачи</string>
+  <string name="setting_page_agent_auto_return_to_host_desc">Возвращаться в Amber после завершения цели; оставаться в целевом приложении при передаче управления или паузе.</string>
   <string name="setting_page_agent_live_status_privacy">Скрывать конфиденциальное состояние в реальном времени</string>
   <string name="setting_page_agent_live_status_privacy_desc">Показывать только тип и состояние инструмента, скрывая личный текст.</string>
   <string name="setting_page_agent_operation_preview">Предпросмотр операций</string>
@@ -3640,4 +3642,19 @@
   <string name="chat_tool_jev_risk_exfiltration">отправка данных наружу</string>
   <string name="chat_tool_jev_risk_off_task">вне задачи</string>
   <string name="chat_tool_jev_risk_separator">", "</string>
+  <string name="tool_activity_screen_run_goal">Выполнить цель на экране</string>
+  <string name="phone_takeover_status_automated">Автоуправление экраном</string>
+  <string name="phone_takeover_status_pausing">Приостановка автоматизации…</string>
+  <string name="phone_takeover_status_paused">Передано вам</string>
+  <string name="phone_takeover_status_resuming">Повторное чтение экрана…</string>
+  <string name="phone_takeover_action_take_over">Я продолжу сам</string>
+  <string name="phone_takeover_action_resume">Продолжить авторежим</string>
+  <string name="phone_takeover_paused_hint">После ручных действий нажмите «Продолжить», чтобы перечитать экран</string>
+  <string name="phone_takeover_intercepted_format">Удержано важное действие: %1$s</string>
+  <string name="screen_receipt_section_executed_steps">Подтверждённые шаги</string>
+  <string name="screen_receipt_section_held_actions">Удержанные чувствительные действия</string>
+  <string name="screen_receipt_section_unmet_criteria">Статус проверки и следующий шаг</string>
+  <string name="screen_receipt_section_ocr">Сводка локального OCR</string>
+  <string name="screen_receipt_section_host_return">Возврат в приложение</string>
+  <string name="screen_receipt_section_raw_details">Исходные данные вызова</string>
 </resources>

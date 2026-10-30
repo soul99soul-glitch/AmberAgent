@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import app.amber.agent.AppScope
 import app.amber.agent.RouteActivity
 import app.amber.core.automation.AmberAccessibilityService
+import app.amber.core.automation.PhoneAutomationTakeoverController
 import app.amber.core.service.ChatService
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.runtime.AgentToolActivityStore
@@ -18,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -34,9 +36,11 @@ class AgentTaskBubbleController(
     private val activityStore: AgentToolActivityStore,
     private val settingsStore: SettingsAggregator,
     private val appScope: AppScope,
+    private val takeoverController: PhoneAutomationTakeoverController? = null,
 ) {
     private val window = BubbleWindow()
     private var loopJob: Job? = null
+    private var takeoverObserverJob: Job? = null
 
     private val _visible = MutableStateFlow(false)
 
@@ -54,11 +58,23 @@ class AgentTaskBubbleController(
                 waitForNextTick()
             }
         }
+        takeoverObserverJob?.cancel()
+        takeoverObserverJob = takeoverController?.let { controller ->
+            appScope.launch(Dispatchers.Main.immediate) {
+                controller.state.collectLatest {
+                    if (_visible.value || _uiState.value.isActive) {
+                        tick()
+                    }
+                }
+            }
+        }
     }
 
     fun stop() {
         loopJob?.cancel()
         loopJob = null
+        takeoverObserverJob?.cancel()
+        takeoverObserverJob = null
         window.hide()
         _visible.value = false
     }
@@ -97,6 +113,7 @@ class AgentTaskBubbleController(
         }
 
         val finalText = if (picked == null && prev.phase == AgentBubblePhase.RUNNING) {
+            takeoverController?.finishSession()
             messages?.let { AgentBubbleReducer.lastAssistantText(it) }
         } else {
             null
@@ -110,6 +127,7 @@ class AgentTaskBubbleController(
             failed = failed,
             cancelled = cancelled,
             nowMillis = now,
+            takeoverSession = takeoverController?.state?.value,
         )
         _uiState.value = next
         syncWindow(next, enabled, service, foregroundIsAmber)
@@ -155,11 +173,33 @@ class AgentTaskBubbleController(
                     onDrag = window::moveBy,
                     onDragEnd = window::snapToEdge,
                     onSizeChanged = window::requestReclamp,
+                    onRequestTakeover = ::requestTakeover,
+                    onRequestResume = ::requestResume,
                 )
             }
         }
         window.setTouchPassthrough(AgentBubbleReducer.isTouchPassthrough(state))
         _visible.value = true
+    }
+
+    private fun requestTakeover() {
+        val controller = takeoverController ?: return
+        if (!controller.state.value.isActive) {
+            val activity = activityStore.sandboxActivity.value
+            controller.startSession(
+                runId = activity?.toolCallId?.ifBlank { "manual_takeover" } ?: "manual_takeover",
+                packageName = AmberAccessibilityService.getActiveService()?.activePackageName().orEmpty(),
+                goal = activity?.title.orEmpty(),
+                maxSteps = 1,
+            )
+        }
+        controller.requestUserTakeover(reason = "user_requested")
+        tick()
+    }
+
+    private fun requestResume() {
+        takeoverController?.requestResume()
+        tick()
     }
 
     private fun decideApproval(approved: Boolean) {

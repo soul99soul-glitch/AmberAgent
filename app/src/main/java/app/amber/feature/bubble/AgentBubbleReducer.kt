@@ -4,6 +4,8 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.automation.PhoneAutomationSessionState
+import app.amber.core.automation.PhoneTakeoverPhase
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
 
@@ -21,10 +23,16 @@ data class AgentBubbleUiState(
     val approvalToolTitle: String = "",
     /** 当前正在执行的步骤标题（仅运行中的工具），空串 = 无步骤信息。 */
     val stepTitle: String = "",
-    /** screen_* 工具正在执行：气泡窗口需触摸穿透，避免吞掉注入手势。
-     *  展示会话与执行手势的会话可能不同，穿透必须全局判定（任一活跃会话的 screen_* 在执行即穿透）。
+    /** screen_* 工具正在执行注入手势：气泡窗口需触摸穿透，避免吞掉注入手势。
+     *  展示会话与执行手势的会话可能不同，穿透必须全局判定（任一活跃会话的直接手势注入工具在执行且未处于接管暂停态即穿透）。
      */
     val stepRunning: Boolean = false,
+    /** 手机自动化人机接管阶段。 */
+    val takeoverPhase: PhoneTakeoverPhase = PhoneTakeoverPhase.IDLE,
+    val takeoverReason: String? = null,
+    val interceptedSensitiveAction: String? = null,
+    val canRequestTakeover: Boolean = false,
+    val canRequestResume: Boolean = false,
     /** agent 最新文本回复的尾部预览。 */
     val replyPreview: String = "",
     val failed: Boolean = false,
@@ -41,6 +49,7 @@ object AgentBubbleReducer {
 
     private const val PREVIEW_TAIL_CHARS = 400
     private const val SCREEN_TOOL_PREFIX = "screen_"
+    private const val SCREEN_GOAL_TOOL = "screen_run_goal"
     private const val ASK_USER_TOOL = "ask_user"
 
     /**
@@ -72,6 +81,7 @@ object AgentBubbleReducer {
         failed: Boolean = false,
         cancelled: Boolean = false,
         nowMillis: Long,
+        takeoverSession: PhoneAutomationSessionState? = null,
     ): AgentBubbleUiState {
         if (pickedConversationId == null) {
             when {
@@ -85,6 +95,11 @@ object AgentBubbleReducer {
                     waitingAskUser = false,
                     approvalToolCallId = null,
                     stepRunning = false,
+                    takeoverPhase = PhoneTakeoverPhase.IDLE,
+                    takeoverReason = null,
+                    interceptedSensitiveAction = null,
+                    canRequestTakeover = false,
+                    canRequestResume = false,
                     replyPreview = finalText?.takeLast(PREVIEW_TAIL_CHARS)
                         ?: previous.replyPreview,
                 )
@@ -115,6 +130,22 @@ object AgentBubbleReducer {
             .lastOrNull { it.text.isNotBlank() }
             ?.text
 
+        val isScreenToolRunning = activity?.status == ToolActivityStatus.RUNNING &&
+            activity.toolName.startsWith(SCREEN_TOOL_PREFIX)
+        val effectiveTakeoverPhase = when {
+            takeoverSession?.isActive == true -> takeoverSession.phase
+            isScreenToolRunning -> PhoneTakeoverPhase.AUTOMATED
+            else -> PhoneTakeoverPhase.IDLE
+        }
+        val isPausedOrResuming = effectiveTakeoverPhase == PhoneTakeoverPhase.PAUSING ||
+            effectiveTakeoverPhase == PhoneTakeoverPhase.PAUSED ||
+            effectiveTakeoverPhase == PhoneTakeoverPhase.RESUMING
+        // screen_run_goal 使用无障碍节点语义而非全屏手势坐标注入，且支持用户展开气泡随时点击“我来操作”；
+        // 处于接管暂停态时更不能穿透，以便用户点击“继续自动操作”。
+        val shouldPassthroughTouch = isScreenToolRunning &&
+            activity?.toolName != SCREEN_GOAL_TOOL &&
+            !isPausedOrResuming
+
         return AgentBubbleUiState(
             phase = AgentBubblePhase.RUNNING,
             conversationId = pickedConversationId,
@@ -123,8 +154,13 @@ object AgentBubbleReducer {
             approvalToolCallId = pendingTool?.toolCallId,
             approvalToolTitle = pendingTool?.toolName.orEmpty(),
             stepTitle = runningStepTitle(activity?.takeIf { it.conversationId == pickedConversationId }),
-            stepRunning = activity?.status == ToolActivityStatus.RUNNING &&
-                activity.toolName.startsWith(SCREEN_TOOL_PREFIX),
+            stepRunning = shouldPassthroughTouch,
+            takeoverPhase = effectiveTakeoverPhase,
+            takeoverReason = takeoverSession?.pauseReason,
+            interceptedSensitiveAction = takeoverSession?.interceptedSensitiveAction,
+            canRequestTakeover = effectiveTakeoverPhase == PhoneTakeoverPhase.AUTOMATED && isScreenToolRunning,
+            canRequestResume = effectiveTakeoverPhase == PhoneTakeoverPhase.PAUSED ||
+                effectiveTakeoverPhase == PhoneTakeoverPhase.PAUSING,
             replyPreview = lastText?.takeLast(PREVIEW_TAIL_CHARS).orEmpty(),
         )
     }

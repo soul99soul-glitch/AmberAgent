@@ -551,6 +551,8 @@
   <string name="setting_page_agent_live_status_desc">タスク実行中にシステムのライブステータスを表示します。</string>
   <string name="setting_page_agent_task_bubble">タスクバブル</string>
   <string name="setting_page_agent_task_bubble_desc">タスク実行中、ステップ・返信・承認をフローティングバブルに表示します。</string>
+  <string name="setting_page_agent_auto_return_to_host">操作完了後に Amber へ自動で戻る</string>
+  <string name="setting_page_agent_auto_return_to_host_desc">電話操作の目標完了後に Amber へ戻ります。引き継ぎや未完了時は対象アプリに留まります。</string>
   <string name="setting_page_agent_live_status_privacy">機密なライブステータスを非表示</string>
   <string name="setting_page_agent_live_status_privacy_desc">ツールの種類と状態だけを表示し、プライベートなテキストを隠します。</string>
   <string name="setting_page_agent_operation_preview">操作プレビュー</string>
@@ -3640,4 +3642,19 @@
   <string name="chat_tool_jev_risk_exfiltration">データ外部送信</string>
   <string name="chat_tool_jev_risk_off_task">タスク範囲外</string>
   <string name="chat_tool_jev_risk_separator">"、"</string>
+  <string name="tool_activity_screen_run_goal">画面目標を実行</string>
+  <string name="phone_takeover_status_automated">画面を自動操作中</string>
+  <string name="phone_takeover_status_pausing">自動操作を一時停止中…</string>
+  <string name="phone_takeover_status_paused">手動操作に切り替えました</string>
+  <string name="phone_takeover_status_resuming">画面を再読み取り中…</string>
+  <string name="phone_takeover_action_take_over">自分で操作する</string>
+  <string name="phone_takeover_action_resume">自動操作を再開</string>
+  <string name="phone_takeover_paused_hint">手動操作後に再開をタップすると最新画面を再読み取りします</string>
+  <string name="phone_takeover_intercepted_format">保留された重要操作：%1$s</string>
+  <string name="screen_receipt_section_executed_steps">実行確認済みステップ</string>
+  <string name="screen_receipt_section_held_actions">保留された重要操作（要確認）</string>
+  <string name="screen_receipt_section_unmet_criteria">検証結果と次のステップ</string>
+  <string name="screen_receipt_section_ocr">端末内 OCR 認識概要</string>
+  <string name="screen_receipt_section_host_return">ホストアプリ復帰状態</string>
+  <string name="screen_receipt_section_raw_details">詳細データ</string>
 </resources>
