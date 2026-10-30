@@ -24,6 +24,13 @@
   <uses-permission
     android:name="android.permission.READ_EXTERNAL_STORAGE"
     android:maxSdkVersion="32" />
+  <!-- 全文件访问：AgentPermissionBroker 用 Environment.isExternalStorageManager()
+       判断 ManageAllFiles 是否已授权，并跳转 ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION。
+       缺少此声明时系统设置里的开关恒为禁用态，external_file_* 工具永远报
+       "Android all files access is not granted"。 -->
+  <uses-permission
+    android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+    tools:ignore="ScopedStorage" />
   <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
   <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
   <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
