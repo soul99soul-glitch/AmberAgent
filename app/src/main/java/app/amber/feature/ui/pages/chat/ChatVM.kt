@@ -71,9 +71,8 @@ import app.amber.feature.runtime.OutcomeUnknownPrompt
 import app.amber.feature.miniapp.ConversationDraftStore
 import app.amber.feature.ui.hooks.writeStringPreference
 import app.amber.feature.ui.hooks.ChatInputState
-import app.amber.feature.ui.components.message.chatMessageTimelinePrewarmTexts
 import app.amber.feature.ui.components.message.prewarmChatMessageToolJson
-import app.amber.feature.ui.components.richtext.prewarmMarkdownContent
+import kotlinx.coroutines.yield
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatVM"
@@ -109,6 +108,20 @@ class ChatVM(
         chatService.getTimelineLoadStateFlow(_conversationId)
     private val _timelineMarkdownReady = MutableStateFlow(false)
     val timelineMarkdownReady: StateFlow<Boolean> = _timelineMarkdownReady.asStateFlow()
+
+    /**
+     * Completed by the UI after the first timeline frame has actually been
+     * composed and laid out. Background prewarm waits for this instead of a
+     * timer, so it cannot race the entry frame just because the route
+     * animation happens to be shorter/longer than a fixed delay.
+     */
+    private val timelineFrameSignal = TimelineFrameSignal()
+
+    fun onTimelineFirstFrameRendered() {
+        // Main-thread draw callback. A generation (instead of a one-shot
+        // Deferred) lets restore/re-entry wait for a NEW first draw.
+        timelineFrameSignal.signal()
+    }
     val contextCompacts: StateFlow<List<ConversationCompact>> =
         contextRepository.getCompactsFlow(_conversationId)
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -203,8 +216,18 @@ class ChatVM(
                     return@collectLatest
                 }
                 hasInitialized = true
+                val nodes = conversation.value.messageNodes
+                val loadingLastMessage = conversationJob.value != null
+                // Baseline taken before ChatList can mount for this initialized
+                // cycle; the background pass waits for a NEW draw generation.
+                val firstFrameBaseline = timelineFrameSignal.snapshot()
+                // Only the bounded tail gates the first composition. Preparing the whole
+                // loaded history here used to delay the first frame on long conversations
+                // and still missed user/short bodies (which then parsed synchronously on
+                // the main thread). Never let a prewarm failure trap the spinner either.
+                var firstScreen: TimelinePrewarmSelection? = null
                 try {
-                    prewarmTimelineNodes(conversation.value.messageNodes, conversationJob.value != null)
+                    firstScreen = prewarmFirstScreenTimelineNodes(nodes, loadingLastMessage)
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
@@ -212,6 +235,21 @@ class ChatVM(
                 }
                 currentCoroutineContext().ensureActive()
                 if (timelineLoadState.value.initialized) _timelineMarkdownReady.value = true
+                // Everything above the initial viewport is warmed after the list has
+                // mounted. This is background work only: it must not keep timelineReady
+                // false, and collectLatest still cancels it on a new page/restore.
+                try {
+                    prewarmBackgroundTimelineNodes(
+                        nodes = nodes,
+                        loadingLastMessage = loadingLastMessage,
+                        firstScreen = firstScreen,
+                        firstFrameBaseline = firstFrameBaseline,
+                    )
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Log.w(TAG, "Timeline Markdown background prewarm stopped; rendering will parse on demand", error)
+                }
             }
         }
 
@@ -551,7 +589,13 @@ class ChatVM(
     suspend fun loadOlderTimelinePage() {
         try {
             val nodes = chatService.readOlderTimelinePageForPrewarm(_conversationId)
-            if (nodes.isNotEmpty()) prewarmTimelineNodes(nodes, loadingLastMessage = false)
+            if (nodes.isNotEmpty()) {
+                prewarmTimelineNodes(
+                    nodes = nodes,
+                    loadingLastMessage = false,
+                    budget = TimelineBackgroundPrewarmBudget,
+                )
+            }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -560,22 +604,113 @@ class ChatVM(
         chatService.loadOlderTimelinePage(_conversationId)
     }
 
-    private suspend fun prewarmTimelineNodes(nodes: List<MessageNode>, loadingLastMessage: Boolean) {
+    /**
+     * Warms the bounded newest-first tail that the reverse-layout list mounts
+     * first. Runs entirely on Default; the caller flips
+     * [timelineMarkdownReady] only after it returns.
+     */
+    private suspend fun prewarmFirstScreenTimelineNodes(
+        nodes: List<MessageNode>,
+        loadingLastMessage: Boolean,
+    ): TimelinePrewarmSelection {
+        val settings = settingsStore.settingsFlow.filterNot { it.init }.first()
+        return withContext(Dispatchers.Default) {
+            val selection = selectFirstScreenPrewarmTexts(
+                messageNodes = nodes,
+                regexes = settings.regexes,
+                loadingLastMessage = loadingLastMessage,
+                budget = TimelineFirstScreenPrewarmBudget,
+            )
+            prewarmMarkdownTexts(selection.texts)
+            // Tool cards parse their JSON lazily in composition; warm the same
+            // bounded tail on Default so they do not join the main-thread burst.
+            prewarmToolJsonForNodes(
+                nodes = nodes,
+                startIndex = nodes.lastIndex,
+                maxNodes = TimelineFirstScreenPrewarmBudget.maxNodes,
+                loadingLastMessage = loadingLastMessage,
+            )
+            selection
+        }
+    }
+
+    /** Bounded warmup for a page that is about to be appended above the viewport. */
+    private suspend fun prewarmTimelineNodes(
+        nodes: List<MessageNode>,
+        loadingLastMessage: Boolean,
+        budget: TimelinePrewarmBudget,
+    ) {
         val settings = settingsStore.settingsFlow.filterNot { it.init }.first()
         withContext(Dispatchers.Default) {
-            nodes.asReversed().forEachIndexed { index, node ->
-                currentCoroutineContext().ensureActive()
-                val lastMessage = index == 0
-                node.chatMessageTimelinePrewarmTexts(
-                    regexes = settings.regexes,
-                    loading = loadingLastMessage,
-                    lastMessage = lastMessage,
-                ).forEach { content ->
-                    currentCoroutineContext().ensureActive()
-                    prewarmMarkdownContent(content)
-                }
-                if (!(loadingLastMessage && lastMessage)) node.prewarmChatMessageToolJson()
+            val selection = selectFirstScreenPrewarmTexts(
+                messageNodes = nodes,
+                regexes = settings.regexes,
+                loadingLastMessage = loadingLastMessage,
+                budget = budget,
+            )
+            prewarmMarkdownTexts(selection.texts)
+            prewarmToolJsonForNodes(
+                nodes = nodes,
+                startIndex = nodes.lastIndex,
+                maxNodes = budget.maxNodes,
+            )
+        }
+    }
+
+    /** Prewarm tool-card JSON on Default, newest-first and bounded. */
+    private suspend fun prewarmToolJsonForNodes(
+        nodes: List<MessageNode>,
+        startIndex: Int,
+        maxNodes: Int,
+        loadingLastMessage: Boolean = false,
+    ) {
+        var index = startIndex.coerceAtMost(nodes.lastIndex)
+        var count = 0
+        while (index >= 0 && count < maxNodes) {
+            currentCoroutineContext().ensureActive()
+            if (!(loadingLastMessage && index == nodes.lastIndex)) {
+                nodes[index].prewarmChatMessageToolJson()
             }
+            index--
+            count++
+            yield()
+        }
+    }
+
+    /**
+     * Continues upward through already-loaded history without gating the first
+     * frame. It waits for a real draw callback from the mounted list.
+     */
+    private suspend fun prewarmBackgroundTimelineNodes(
+        nodes: List<MessageNode>,
+        loadingLastMessage: Boolean,
+        firstScreen: TimelinePrewarmSelection?,
+        firstFrameBaseline: Long,
+    ) {
+        if (nodes.isEmpty()) return
+        val startIndex = firstScreen?.nextOlderNodeIndex ?: nodes.lastIndex
+        if (startIndex < 0) return
+        val settings = settingsStore.settingsFlow.filterNot { it.init }.first()
+        val warmed = firstScreen?.texts?.toHashSet().orEmpty()
+        withContext(Dispatchers.Default) {
+            // Wait for a draw generation newer than this initialized cycle.
+            // drawWithContent is a real draw-phase signal (not withFrameNanos),
+            // and the baseline makes restore/re-entry wait for the NEW list.
+            timelineFrameSignal.awaitAfter(firstFrameBaseline)
+            val remaining = selectBackgroundPrewarmTexts(
+                messageNodes = nodes,
+                regexes = settings.regexes,
+                loadingLastMessage = loadingLastMessage,
+                alreadyWarmed = warmed,
+                startIndex = startIndex,
+                budget = TimelineBackgroundPrewarmBudget,
+            )
+            prewarmMarkdownTexts(remaining)
+            prewarmToolJsonForNodes(
+                nodes = nodes,
+                startIndex = startIndex,
+                maxNodes = TimelineBackgroundPrewarmBudget.maxNodes,
+            )
         }
     }
 

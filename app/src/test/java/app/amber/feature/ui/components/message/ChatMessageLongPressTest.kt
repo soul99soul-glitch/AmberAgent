@@ -60,7 +60,9 @@ class ChatMessageLongPressTest {
     @Test
     fun virtualizedParagraphOpensTheFullMessageActions() {
         val heading = "Long answer"
-        val node = MessageNode.of(UIMessage.assistant("# $heading\n\n" + "A longer paragraph. ".repeat(45)))
+        // Keep this above ChatMessageSingleItemTextMaxChars so the virtualized
+        // path is exercised (short plain replies intentionally stay one item).
+        val node = MessageNode.of(UIMessage.assistant("# $heading\n\n" + "A longer paragraph. ".repeat(200)))
         val item = buildChatMessageVirtualItems(
             node = node, assistant = emptyList(), showAssistantBubble = false,
             loading = false, lastMessage = false,

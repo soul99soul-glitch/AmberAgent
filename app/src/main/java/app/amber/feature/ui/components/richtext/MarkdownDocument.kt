@@ -70,6 +70,29 @@ internal fun MarkdownBlockLegacy(
             }
         }
     }
+    // Settled history (the overwhelmingly common path when opening a saved
+    // conversation) needs none of the streaming display buffer, presentation
+    // gate, frame loop, or mutation collector below. A cache hit renders the
+    // parsed tree directly; a cache miss still falls through to the existing
+    // placeholder/background parser path so nothing is shown as raw markup.
+    val sawStreaming = remember { booleanArrayOf(streaming) }
+    if (streaming) sawStreaming[0] = true
+    val settledParse = remember(content) { cachedMarkdownParseResult(content) }
+    if (!streaming && !deferStreamingParse && !sawStreaming[0] && settledParse != null) {
+        MarkdownBlockRender(
+            data = settledParse,
+            renderContent = content,
+            modifier = modifier,
+            style = style,
+            fillWidth = fillWidth,
+            onClickCitation = onClickCitation,
+            streamingLiveSuffix = EMPTY_STREAMING_LIVE_SUFFIX,
+            streamingTailActive = null,
+            streamingMotionScope = null,
+        )
+        return
+    }
+
     val bufferStreaming = streaming && !content.shouldBypassStreamingDisplayBuffer()
     val renderContent = rememberStreamingDisplayText(
         content = content,
@@ -248,6 +271,31 @@ internal fun MarkdownBlockLegacy(
             }
     }
 
+    MarkdownBlockRender(
+        data = data,
+        renderContent = renderContent,
+        modifier = modifier,
+        style = style,
+        fillWidth = fillWidth,
+        onClickCitation = onClickCitation,
+        streamingLiveSuffix = streamingLiveSuffix,
+        streamingTailActive = streamingTailActive,
+        streamingMotionScope = streamingMotionScope,
+    )
+}
+
+@Composable
+private fun MarkdownBlockRender(
+    data: MarkdownParseResult,
+    renderContent: String,
+    modifier: Modifier,
+    style: TextStyle,
+    fillWidth: Boolean,
+    onClickCitation: (String) -> Unit,
+    streamingLiveSuffix: StreamingLiveSuffix,
+    streamingTailActive: StreamingTailActive?,
+    streamingMotionScope: StreamingMarkdownMotionScope?,
+) {
     TraceMarkdownComposable("Amber MarkdownBlock render") {
       CompositionLocalProvider(
           LocalMarkdownFillWidth provides fillWidth,

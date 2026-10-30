@@ -12,6 +12,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import android.os.Trace
+import app.amber.agent.BuildConfig
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -36,6 +38,65 @@ import app.amber.core.utils.copyMessageToClipboard
 
 internal const val ChatMessageVirtualMarkdownMinChars = 600
 private const val ChatMessageVirtualMarkdownMinTableLines = 3
+
+/**
+ * Plain-text assistant replies up to this size stay in ONE lazy item. Splitting
+ * a short/medium reply into header + per-block + footer items saves offscreen
+ * composition but multiplies the fixed per-item cost (subcomposition,
+ * selection/bubble wrappers, applyChanges) on the very first viewport. Longer
+ * or structurally mixed messages still virtualize.
+ */
+internal const val ChatMessageSingleItemTextMaxChars = 2_400
+
+/**
+ * Settled Markdown is still virtualized for long replies, but several adjacent
+ * top-level blocks share one lazy item. Four keeps an offscreen over-compose
+ * bounded while removing most of the per-slice subcomposition/applyChanges
+ * overhead on the first viewport. Search-image anchoring stays one block per
+ * item so images keep their exact placement.
+ */
+internal const val ChatMessageVirtualMarkdownBlocksPerItem = 4
+
+/**
+ * Large paragraphs (or large-font rendering) can make one block taller than
+ * the viewport. Never group past this source-text budget, and never merge a
+ * single oversized block with a neighbour: a group of four huge blocks would
+ * compose several offscreen screens on the first frame.
+ */
+internal const val ChatMessageVirtualMarkdownGroupMaxChars = 1_600
+internal const val ChatMessageVirtualMarkdownBlockMaxChars = 800
+
+/** Pure grouping policy; lengths are source-text lengths per top-level block. */
+internal fun markdownBlockGroups(
+    blockLengths: List<Int>,
+    maxBlocks: Int = ChatMessageVirtualMarkdownBlocksPerItem,
+    maxChars: Int = ChatMessageVirtualMarkdownGroupMaxChars,
+    maxBlockChars: Int = ChatMessageVirtualMarkdownBlockMaxChars,
+): List<IntRange> {
+    if (blockLengths.isEmpty()) return emptyList()
+    val groups = ArrayList<IntRange>()
+    var start = 0
+    while (start < blockLengths.size) {
+        if (blockLengths[start] > maxBlockChars) {
+            groups += start..start
+            start++
+            continue
+        }
+        var end = start
+        var chars = 0
+        while (end < blockLengths.size && end - start < maxBlocks) {
+            val length = blockLengths[end].coerceAtLeast(0)
+            if (end > start && (length > maxBlockChars || chars + length > maxChars)) break
+            chars += length
+            end++
+        }
+        if (end == start) end = start + 1
+        groups += start until end
+        start = end
+    }
+    return groups
+}
+
 private val MarkdownTableLineRegex = Regex("""(?m)^\s*\|.+\|\s*$""")
 
 internal sealed interface ChatMessageVirtualItem {
@@ -94,9 +155,12 @@ internal sealed interface ChatMessageVirtualItem {
         val block: MessagePartBlock.ContentBlock,
         val content: String,
         val parseResult: MarkdownParseResult,
+        /** First top-level block in this slice. */
         val blockIndex: Int,
         val keyBase: String,
         val attachments: List<BlockAttachment> = emptyList(),
+        /** Number of adjacent top-level blocks rendered by this lazy item. */
+        val blockCount: Int = 1,
     ) : ChatMessageVirtualItem {
         override val keySuffix: String =
             "$keyBase-markdown-$blockIndex-${parseResult.topLevelBlockKey(blockIndex)}"
@@ -126,7 +190,9 @@ internal fun MessageNode.chatMessageTimelinePrewarmTexts(
 ): List<String> {
     val message = currentMessage
     if (message.role != MessageRole.ASSISTANT && message.role != MessageRole.USER) return emptyList()
-    if (loading && lastMessage) return emptyList()
+    // Only the generating assistant tail is still being rewritten per token.
+    // A user tail is settled even while we wait for the assistant to start.
+    if (loading && lastMessage && message.role == MessageRole.ASSISTANT) return emptyList()
     return message.parts
         .filterIsInstance<UIMessagePart.Text>()
         .mapNotNull { part ->
@@ -167,9 +233,21 @@ internal fun buildChatMessageVirtualItems(
         return null
     }
 
+    // A plain small reply fits in one item and does not benefit from per-block
+    // virtualization; the extra lazy items cost more than the offscreen blocks
+    // they avoid. Mixed parts (tools/thinking/media) and long replies still use
+    // the slice plan below.
+    val onlyTextParts = message.parts.isNotEmpty() &&
+        message.parts.all { it is UIMessagePart.Text }
+    if (onlyTextParts &&
+        message.parts.sumOf { (it as UIMessagePart.Text).text.length } <= ChatMessageSingleItemTextMaxChars
+    ) {
+        return null
+    }
+
     val groupedParts = message.parts.groupMessageParts()
     val shouldSplitComplexMessage = groupedParts.size > 2 || message.parts.size > 4
-    val searchPresentation = deriveSearchPresentation(message.parts)
+    val searchPresentation = searchPresentationFor(message.parts)
     val imageAnchorResolver = if (searchPresentation.images.isNotEmpty()) {
         SearchBlockImageAnchorResolver(searchPresentation)
     } else {
@@ -222,15 +300,32 @@ internal fun buildChatMessageVirtualItems(
                             parseResult.canRenderByTopLevelBlocks()
                         ) {
                             hasVirtualMarkdown = true
-                            repeat(parseResult.topLevelBlockCount()) { blockIndex ->
-                                val attachments = imageAnchorResolver
-                                    ?.resolveBlock(
-                                        blockNode = parseResult.tree.children[blockIndex],
-                                        content = parseResult.preprocessed,
-                                    )
-                                    ?.takeIf { it.isNotEmpty() }
-                                    ?.let { listOf(BlockAttachment.SearchImages(it)) }
-                                    .orEmpty()
+                            // Search-image groups must stay per-block so every
+                            // attachment is rendered directly below its block.
+                            val groups = if (imageAnchorResolver == null) {
+                                markdownBlockGroups(
+                                    parseResult.tree.children.map { child ->
+                                        (child.endOffset - child.startOffset).coerceAtLeast(0)
+                                    },
+                                )
+                            } else {
+                                parseResult.tree.children.indices.map { it..it }
+                            }
+                            groups.forEach { group ->
+                                val blockIndex = group.first
+                                val blockCount = group.last - group.first + 1
+                                val attachments = if (blockCount == 1) {
+                                    imageAnchorResolver
+                                        ?.resolveBlock(
+                                            blockNode = parseResult.tree.children[blockIndex],
+                                            content = parseResult.preprocessed,
+                                        )
+                                        ?.takeIf { it.isNotEmpty() }
+                                        ?.let { listOf(BlockAttachment.SearchImages(it)) }
+                                        .orEmpty()
+                                } else {
+                                    emptyList()
+                                }
                                 add(
                                     ChatMessageVirtualItem.MarkdownChild(
                                         block = block,
@@ -239,6 +334,7 @@ internal fun buildChatMessageVirtualItems(
                                         blockIndex = blockIndex,
                                         keyBase = keyBase,
                                         attachments = attachments,
+                                        blockCount = blockCount,
                                     )
                                 )
                             }
@@ -263,10 +359,14 @@ internal fun buildChatMessageVirtualItems(
 
     if (!hasVirtualMarkdown && !shouldSplitComplexMessage) return null
     val galleryImages = imageAnchorResolver?.orphans() ?: searchPresentation.images
+    // The footer only renders annotations or the multi-variant branch selector.
+    // Emitting an item that draws nothing still costs a lazy subcomposition on
+    // the first viewport, so skip it when both are absent.
+    val needsFooter = message.annotations.isNotEmpty() || node.messages.size > 1
     return buildList {
         add(ChatMessageVirtualItem.Header(galleryImages = galleryImages))
         addAll(bodyItems)
-        add(ChatMessageVirtualItem.Footer)
+        if (needsFooter) add(ChatMessageVirtualItem.Footer)
     }
 }
 
@@ -324,6 +424,12 @@ internal fun ChatMessageVirtualItemContent(
             ),
     ) {
         CompositionLocalProvider(LocalChatFontScale provides chatFontScale) {
+        val itemTraceName = if (BuildConfig.DEBUG) {
+            "Amber item ${item::class.simpleName}-${message.role.name.lowercase()}"
+        } else {
+            null
+        }
+        if (itemTraceName != null) Trace.beginSection(itemTraceName)
         when (item) {
             is ChatMessageVirtualItem.Header -> {
                 Column(
@@ -496,6 +602,7 @@ internal fun ChatMessageVirtualItemContent(
                 }
             }
         }
+        if (itemTraceName != null) Trace.endSection()
         }
     }
 

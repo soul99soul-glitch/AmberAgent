@@ -2,7 +2,6 @@ package app.amber.feature.ui.pages.chat
 
 import app.amber.feature.ui.utils.amberTraceMeasure
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -64,6 +63,8 @@ import app.amber.core.service.PendingUserMessage
 import app.amber.feature.ui.components.message.resolveThemeTryOnCardTarget
 import app.amber.feature.ui.components.ui.ErrorCardsDisplay
 import app.amber.feature.ui.theme.ThemePackageManager
+import android.os.Trace
+import app.amber.agent.BuildConfig
 import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 import org.koin.compose.koinInject
@@ -95,7 +96,6 @@ internal fun ChatListNormal(
     onUpdateMessage: (MessageNode) -> Unit,
     onClickSuggestion: (String) -> Unit,
     onLongClickSuggestion: (String) -> Unit,
-    animatedVisibilityScope: AnimatedVisibilityScope,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
@@ -110,6 +110,7 @@ internal fun ChatListNormal(
     onEnsureTimelineLoaded: suspend () -> Conversation = { conversation },
     chatTimelinePlan: ChatTimelinePlan,
 ) {
+    if (BuildConfig.DEBUG) Trace.beginSection("Amber ChatListNormal scaffold")
     val themePackageManager = koinInject<ThemePackageManager>()
     val activeThemeTryOn by themePackageManager.tryOn.collectAsState(initial = null)
     val themeTryOnCardTarget = remember(
@@ -132,6 +133,7 @@ internal fun ChatListNormal(
     // has scrolled away from the tail and auto-follow must not yank them back.
     val bottomPinBufferPx = with(density) { 24.dp.toPx().roundToInt() }
     val sendTransitionSlidePx = with(density) { SendTransitionSlideDistance.roundToPx() }
+    if (BuildConfig.DEBUG) Trace.beginSection("Amber chatlist suggestions")
     val actionSuggestions = if (activeGeneration) {
         // Suggestions are hidden for the whole generation. Avoid joining and
         // rescanning the growing assistant tail on every stream snapshot; the
@@ -151,6 +153,7 @@ internal fun ChatListNormal(
     } else {
         emptyList()
     }
+    if (BuildConfig.DEBUG) Trace.endSection()
     val showBottomFollowAnimation = settings.displaySetting.showBottomFollowAnimation
     val latestMessage = conversation.messageNodes.lastOrNull()?.currentMessage
     val postSendState = chatTimelinePlan.postSendState
@@ -174,6 +177,7 @@ internal fun ChatListNormal(
         onRecentScrollChanged = { isRecentScroll = it },
     )
 
+    if (BuildConfig.DEBUG) Trace.beginSection("Amber chatlist compaction+selection")
     val selection = rememberTimelineSelectionState(conversation.id)
     val compaction = rememberTimelineCompactionPresentation(
         conversation, contextCompacts, compactLifecycleState, isCompacting, streamingSummary, state,
@@ -181,6 +185,7 @@ internal fun ChatListNormal(
 
     // 对话大小警告对话框
     val sizeInfo = rememberConversationSizeInfo(conversation)
+    if (BuildConfig.DEBUG) Trace.endSection()
     var showSizeWarningDialog by rememberSaveable(conversation.id) { mutableStateOf(true) }
     if (sizeInfo.showWarning && showSizeWarningDialog) {
         ConversationSizeWarningDialog(
@@ -246,6 +251,7 @@ internal fun ChatListNormal(
                         regexes = settings.regexes,
                         sessionId = conversation.id,
                     )
+                    if (BuildConfig.DEBUG) Trace.beginSection("Amber chatlist lazy column")
                     LazyColumn(
                         state = state,
                         // 底部锚定列表：index 0 是视觉底部（最新内容），流式增长从锚定的
@@ -301,7 +307,9 @@ internal fun ChatListNormal(
                             onOpenQueue = onOpenQueue,
                         )
                     }
+                    if (BuildConfig.DEBUG) Trace.endSection()
 
+                    if (BuildConfig.DEBUG) Trace.beginSection("Amber chatlist overlays")
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -400,10 +408,12 @@ internal fun ChatListNormal(
                             )
                         }
                     }
+                    if (BuildConfig.DEBUG) Trace.endSection()
                 }
             }
         }
     }
+    if (BuildConfig.DEBUG) Trace.endSection()
 }
 
 @Composable

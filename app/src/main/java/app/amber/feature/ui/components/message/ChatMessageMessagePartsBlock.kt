@@ -7,12 +7,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
@@ -83,6 +81,7 @@ import app.amber.feature.ui.components.richtext.MarkPresented
 import app.amber.feature.ui.components.richtext.rememberStreamingPresentationLifetime
 import app.amber.feature.ui.components.richtext.ZoomableAsyncImage
 import app.amber.feature.ui.components.ui.ChainOfThought
+import app.amber.feature.ui.utils.AmberTraceSection
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.modifier.shimmer
 import app.amber.feature.ui.context.LocalNavController
@@ -178,6 +177,7 @@ internal fun MessagePartsBlock(
                     // (less aggressive, single layer), so the user-visible "新思维步骤滑入"
                     // motion is preserved. Removing the outer Card-level spring is the
                     // free win — it stacked on top of the inner one with no added value.
+                    AmberTraceSection("Amber chain of thought") {
                     ChainOfThought(
                         steps = block.steps,
                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
@@ -189,6 +189,7 @@ internal fun MessagePartsBlock(
                     ) { step ->
                         when (step) {
                             is ThinkingStep.ReasoningStep -> {
+                                AmberTraceSection("Amber reasoning step") {
                                 key(step.reasoning.createdAt) {
                                     ChatMessageReasoningStep(
                                         reasoning = step.reasoning,
@@ -199,9 +200,11 @@ internal fun MessagePartsBlock(
                                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
                                     )
                                 }
+                                }
                             }
 
                             is ThinkingStep.ToolStep -> {
+                                AmberTraceSection("Amber tool step ${step.tool.toolName}") {
                                 key(step.tool.stableStepKey()) {
                                     ChatMessageToolStep(
                                         tool = step.tool,
@@ -211,6 +214,7 @@ internal fun MessagePartsBlock(
                                         onOpenWorkspaceFile = onOpenWorkspaceFile,
                                         themeTryOnCardTarget = themeTryOnCardTarget,
                                     )
+                                }
                                 }
                             }
 
@@ -236,6 +240,7 @@ internal fun MessagePartsBlock(
                                 }
                             }
                         }
+                    }
                     }
                     themeTryOnTool?.let { tool ->
                         ThemeTryOnToolCard(
@@ -284,22 +289,12 @@ internal fun MessagePartsBlock(
                                         bottomEnd = 14.dp,
                                         bottomStart = 23.dp,
                                     )
-                                    // §6.2 max-width = 92% of available width. BoxWithConstraints
-                                    // is the in-repo idiom for a fraction-of-parent cap (see
-                                    // GeneratedImageCarousel / GenerativeWidgetCard); it only adds
-                                    // a measuring frame — the Surface + every branch below is
-                                    // untouched. contentAlignment=TopEnd 把 wrap 到内容宽度的气泡靠右放
-                                    // ——光靠 Surface 上的 wrapContentWidth(End) 不够：它只收窄不定位，
-                                    // box 默认 TopStart 会把气泡按到左边，表现为"左对齐"。
-                                    BoxWithConstraints(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        contentAlignment = Alignment.TopEnd,
-                                    ) {
-                                    val userBubbleMaxWidth = maxWidth * 0.92f
+                                    // §6.2 max-width = 92% of available width, right-aligned.
+                                    // A plain layout modifier caps/places the bubble without a
+                                    // nested subcomposition; see Modifier.chatBubbleWidth.
                                     Surface(
                                         modifier = Modifier
-                                            .wrapContentWidth(Alignment.End)
-                                            .widthIn(max = userBubbleMaxWidth)
+                                            .chatBubbleWidth(0.92f, alignEnd = true)
                                             .clip(userBubbleShape)
                                             .combinedClickable(
                                                 onClick = { onUserMessageClick?.invoke() },
@@ -329,7 +324,6 @@ internal fun MessagePartsBlock(
                                             )
                                         }
                                     }
-                                    } // end BoxWithConstraints
                                     } // end DisableSelection
                                 } else {
                                     // True only when this Text block is the very last block
@@ -373,56 +367,51 @@ internal fun MessagePartsBlock(
                                         // Streaming text height animation is intentionally disabled:
                                         // assistant markdown should grow by natural layout only, without
                                         // a restarted spring/tween on every accumulator flush.
-                                        BoxWithConstraints(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            contentAlignment = Alignment.TopStart,
+                                        val amberTokens = LocalAmberTokens.current
+                                        val themeRadius = themeBubbleRadius()
+                                        val themeBorderWidth = themeBubbleBorderWidth()
+                                        val assistantBubbleShape = themeRadius?.let { RoundedCornerShape(it) }
+                                            ?: RoundedCornerShape(
+                                            topStart = 14.dp,
+                                            topEnd = 14.dp,
+                                            bottomStart = 5.dp,
+                                            bottomEnd = 14.dp,
+                                        )
+                                        Surface(
+                                            modifier = Modifier.chatBubbleWidth(0.86f),
+                                            shape = assistantBubbleShape,
+                                            color = amberTokens.surface,
+                                            contentColor = amberTokens.ink,
+                                            tonalElevation = 0.dp,
+                                            shadowElevation = 0.dp,
+                                            border = if (themeBorderWidth == null) {
+                                                BorderStroke(1.dp, amberTokens.line)
+                                            } else {
+                                                themeBorderWidth.takeIf { it > 0.dp }
+                                                    ?.let { BorderStroke(it, amberTokens.line) }
+                                            },
                                         ) {
-                                            val amberTokens = LocalAmberTokens.current
-                                            val themeRadius = themeBubbleRadius()
-                                            val themeBorderWidth = themeBubbleBorderWidth()
-                                            val assistantBubbleShape = themeRadius?.let { RoundedCornerShape(it) }
-                                                ?: RoundedCornerShape(
-                                                topStart = 14.dp,
-                                                topEnd = 14.dp,
-                                                bottomStart = 5.dp,
-                                                bottomEnd = 14.dp,
-                                            )
-                                            Surface(
-                                                modifier = Modifier.widthIn(max = maxWidth * 0.86f),
-                                                shape = assistantBubbleShape,
-                                                color = amberTokens.surface,
-                                                contentColor = amberTokens.ink,
-                                                tonalElevation = 0.dp,
-                                                shadowElevation = 0.dp,
-                                                border = if (themeBorderWidth == null) {
-                                                    BorderStroke(1.dp, amberTokens.line)
-                                                } else {
-                                                    themeBorderWidth.takeIf { it > 0.dp }
-                                                        ?.let { BorderStroke(it, amberTokens.line) }
-                                                },
-                                            ) {
-                                                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                                                    AssistantMarkdownBlockOrWidgets(
-                                                        content = assistantDisplayText,
-                                                        streaming = isStreamingText,
-                                                        deferStreamingParse = deferStreamingParse && isStreamingText,
-                                                        streamingMarkdownContent = streamingMarkdownContent,
-                                                        onClickCitation = handleClickCitation,
-                                                        onGenerativeWidgetAction = onGenerativeWidgetAction,
-                                                        onStreamingVisibleFrame = if (isStreamingText) {
-                                                            onStreamingVisibleFrame
-                                                        } else {
-                                                            null
-                                                        },
-                                                        onStreamingVisualActiveChange = if (
-                                                            isStreamingText || onStreamingVisibleFrame != null
-                                                        ) {
-                                                            onStreamingVisualActiveChange
-                                                        } else {
-                                                            null
-                                                        },
-                                                    )
-                                                }
+                                            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                                                AssistantMarkdownBlockOrWidgets(
+                                                    content = assistantDisplayText,
+                                                    streaming = isStreamingText,
+                                                    deferStreamingParse = deferStreamingParse && isStreamingText,
+                                                    streamingMarkdownContent = streamingMarkdownContent,
+                                                    onClickCitation = handleClickCitation,
+                                                    onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                                    onStreamingVisibleFrame = if (isStreamingText) {
+                                                        onStreamingVisibleFrame
+                                                    } else {
+                                                        null
+                                                    },
+                                                    onStreamingVisualActiveChange = if (
+                                                        isStreamingText || onStreamingVisibleFrame != null
+                                                    ) {
+                                                        onStreamingVisualActiveChange
+                                                    } else {
+                                                        null
+                                                    },
+                                                )
                                             }
                                         }
                                     } else {

@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.chat
 
+import app.amber.feature.ui.utils.AmberTraceSection
 import app.amber.feature.ui.utils.amberTraceMeasure
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -214,6 +215,7 @@ internal fun ChatPageScaffold(
             Scaffold(
                 modifier = Modifier.amberTraceMeasure("Amber ChatPage measure"),
                 topBar = {
+                    AmberTraceSection("Amber ChatTopBar compose") {
                     ChatPageTopBar(
                         conversationFlow = vm.conversation,
                         bigScreen = bigScreen,
@@ -271,8 +273,10 @@ internal fun ChatPageScaffold(
                             }
                         },
                     )
+                    }
                 },
                 bottomBar = {
+                    AmberTraceSection("Amber ChatComposer compose") {
                     ChatPageComposerHost(
                         inputState = inputState,
                         inputSubmissionOwner = inputSubmissionOwner,
@@ -327,6 +331,7 @@ internal fun ChatPageScaffold(
                             )
                         },
                     )
+                    }
                 },
                 containerColor = Color.Transparent,
             ) { innerPadding ->

@@ -107,7 +107,17 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp)
-            .animateContentSize(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()),
+            // Settled history tool steps never change size; the spring only
+            // pays off while input/output are still arriving.
+            .then(
+                if (loading) {
+                    Modifier.animateContentSize(
+                        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+                    )
+                } else {
+                    Modifier
+                },
+            ),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         if (isPending && !dedicatedThemeApproval) {

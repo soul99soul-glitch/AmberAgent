@@ -272,7 +272,6 @@ internal fun ChatInput(
     }
 
     var showUsageSheet by remember { mutableStateOf(false) }
-    val usage = rememberComposerUsageLoader()
     fun dismissExpand() {
         expand = ExpandState.Collapsed
     }
@@ -328,6 +327,10 @@ internal fun ChatInput(
     }
 
     if (showUsageSheet) {
+        // Constructing the OAuth/usage clients eagerly loaded and instantiated
+        // network helper classes on every chat entry even when the sheet was
+        // never opened.
+        val usage = rememberComposerUsageLoader()
         LaunchedEffect(showUsageSheet, chatProvider.providerRoutingKey()) {
             usage.refresh(chatProvider, chatModel)
         }

@@ -22,6 +22,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -229,6 +230,21 @@ internal fun ChatPageTimelineHost(
                 )
             }
         } else {
+            // A draw callback, not withFrameNanos: the background prewarm is only
+            // released after this layer has actually been drawn for the first
+            // time. reset per mount so restore/re-entry waits for its own draw.
+            val firstDraw = remember(conversationId) { booleanArrayOf(false) }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawWithContent {
+                        drawContent()
+                        if (!firstDraw[0]) {
+                            firstDraw[0] = true
+                            vm.onTimelineFirstFrameRendered()
+                        }
+                    }
+            ) {
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = timelineFade.value }) {
                 ChatList(
                     innerPadding = innerPadding,
@@ -369,6 +385,7 @@ internal fun ChatPageTimelineHost(
                     )
                 }
             }  // end timeline fade Box
+            }  // end first-draw Box
         }  // end if (!initialized) else branch (ChatList + hero)
     }
 }
