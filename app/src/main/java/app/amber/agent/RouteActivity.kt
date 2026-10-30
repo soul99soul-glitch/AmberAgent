@@ -78,6 +78,9 @@ import app.amber.feature.ui.context.Navigator
 import app.amber.feature.ui.hooks.containsPreference
 import app.amber.feature.ui.hooks.readBooleanPreference
 import app.amber.feature.ui.hooks.readStringPreference
+import app.amber.feature.ui.overlay.AppModalOverlayHost
+import app.amber.feature.ui.overlay.LocalAppModalOverlayHost
+import app.amber.feature.ui.overlay.rememberAppModalOverlayHostState
 import app.amber.feature.ui.pages.live.LiveCompanionDeepLink
 import app.amber.core.utils.openUrl
 import app.amber.feature.ui.pages.novel.NovelLaunchCurtain
@@ -372,6 +375,10 @@ class RouteActivity : ComponentActivity() {
         val toastState = rememberToasterState()
         val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
         val eventBus = koinInject<AppEventBus>()
+        // One app-level modal layer above every route (and above the two-pane list) so a route's
+        // modal scrim covers the whole interactive window. The owning route publishes the content;
+        // the shell keeps no modal-specific state.
+        val appModalOverlay = rememberAppModalOverlayHostState()
 
         val notificationLink = remember { notificationDeepLinkFrom(intent) }
         val startScreen = remember {
@@ -487,6 +494,7 @@ class RouteActivity : ComponentActivity() {
                 LocalSettings provides settings,
                 LocalHighlighter provides highlighter,
                 LocalToaster provides toastState,
+                LocalAppModalOverlayHost provides appModalOverlay,
             ) {
                 Toaster(
                     state = toastState,
@@ -530,6 +538,7 @@ class RouteActivity : ComponentActivity() {
                         )
                     }
                 }
+                AppModalOverlayHost(appModalOverlay)
                 }
             }
         }

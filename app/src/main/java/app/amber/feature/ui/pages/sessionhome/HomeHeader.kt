@@ -276,6 +276,7 @@ internal fun HomeHeader(
             Box(
                 modifier = Modifier
                     .size(44.dp)
+                    .testTag("home-header-settings")
                     .clickable(
                         interactionSource = settingsInteraction,
                         indication = null,
