@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # Android is now the repository root; the surviving uv project lives here.
+  - package-ecosystem: "uv"
+    directory: "/locale-tui"
+    schedule:
+      interval: "weekly"
+    # Preserve security-only updates without introducing version-update PRs.
+    open-pull-requests-limit: 0
