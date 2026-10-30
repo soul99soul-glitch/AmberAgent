@@ -37,6 +37,8 @@ import app.amber.core.service.PendingUserMessage
 import app.amber.feature.ui.components.message.ChatMessage
 import app.amber.feature.ui.components.message.ChatMessageVirtualItemContent
 import app.amber.feature.ui.components.ui.ListSelectableItem
+import app.amber.feature.ui.utils.AmberTraceSection
+import app.amber.feature.ui.utils.ChatPerfNodeProbes
 import app.amber.core.utils.ChatSendTransitionTracker
 import kotlin.uuid.Uuid
 import androidx.compose.foundation.lazy.LazyListScope
@@ -247,6 +249,8 @@ internal fun LazyListScope.chatTimelineItems(
                             LocalStreamingPresentationHandover provides
                                 (streamingHandover ?: ImmediateStreamingPresentationHandover),
                         ) {
+                        AmberTraceSection("Amber item message-${node.currentMessage.role.name.lowercase()}") {
+                        ChatPerfNodeProbes(node.id.toString()) {
                         ChatMessage(
                             node = node,
                             model = messageModel,
@@ -283,6 +287,8 @@ internal fun LazyListScope.chatTimelineItems(
                             onMiniAppModify = onMiniAppModify,
                             lastMessage = isLastMessage,
                         )
+                        }
+                        }
                         }
                     }
                 }

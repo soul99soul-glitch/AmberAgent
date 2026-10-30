@@ -48,11 +48,11 @@ import app.amber.core.utils.urlDecode
 
 @Composable
 private fun TraceChatComposable(section: String, content: @Composable () -> Unit) {
-    if (BuildConfig.DEBUG) {
+    if (BuildConfig.DEBUG || BuildConfig.CHAT_PERF_TRACE) {
         Trace.beginSection(section)
     }
     content()
-    if (BuildConfig.DEBUG) {
+    if (BuildConfig.DEBUG || BuildConfig.CHAT_PERF_TRACE) {
         Trace.endSection()
     }
 }

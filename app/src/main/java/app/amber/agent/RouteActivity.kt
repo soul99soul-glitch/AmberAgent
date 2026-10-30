@@ -78,6 +78,11 @@ import app.amber.feature.ui.context.Navigator
 import app.amber.feature.ui.hooks.containsPreference
 import app.amber.feature.ui.hooks.readBooleanPreference
 import app.amber.feature.ui.hooks.readStringPreference
+import app.amber.feature.ui.utils.ChatPerfTrace
+import app.amber.feature.ui.utils.ChatPerfHomeEntry
+import app.amber.feature.ui.utils.HOME_FIRST_PATH
+import app.amber.feature.ui.utils.NATIVE_STRESS_PATH
+import org.json.JSONObject
 import app.amber.feature.ui.pages.live.LiveCompanionDeepLink
 import app.amber.core.utils.openUrl
 import app.amber.feature.ui.pages.novel.NovelLaunchCurtain
@@ -160,6 +165,15 @@ class RouteActivity : ComponentActivity() {
         )
         disableNavigationBarContrast()
         super.onCreate(savedInstanceState)
+        val perfHome = ChatPerfHomeEntry.enabled && intent?.getStringExtra("perfPathId") == HOME_FIRST_PATH
+        ChatPerfHomeEntry.attach(this, if (perfHome) HOME_FIRST_PATH else NATIVE_STRESS_PATH)
+        if (BuildConfig.CHAT_PERF_TRACE && !perfHome) {
+            ChatPerfTrace.initializeIfNeeded(
+                this,
+                intent?.getStringExtra("perfScenario") ?: "chat",
+            )
+            Log.i("AmberPerfFixture", "route-created savedState=${savedInstanceState != null}")
+        }
         enableAmberHdrWindow()
         shareIntentConsumed = savedInstanceState?.getBoolean(STATE_SHARE_INTENT_CONSUMED) ?: false
         if (CrashHandler.hasCrashed(this)) {
@@ -375,6 +389,9 @@ class RouteActivity : ComponentActivity() {
 
         val notificationLink = remember { notificationDeepLinkFrom(intent) }
         val startScreen = remember {
+            if (ChatPerfHomeEntry.enabled && intent?.getStringExtra("perfPathId") == HOME_FIRST_PATH) {
+                return@remember Screen.SessionHome
+            }
             // Standalone products (app.amber.novel / app.amber.deepread) resolve
             // only their own surface deep-links; everything else lands on the
             // product home.
@@ -441,7 +458,29 @@ class RouteActivity : ComponentActivity() {
         val navigator = remember(backStack) { Navigator(backStack) }
         val navigationEntries = remember { appNavigationEntries() }
         var currentIntent by remember { mutableStateOf(intent) }
+        val perfDarkMode = if (ChatPerfHomeEntry.enabled) LocalDarkMode.current else false
+        // Read the snapshot-backed stack IN composition: an effect-only read
+        // does not subscribe this parent when NavDisplay changes its top entry.
+        val perfTop = if (ChatPerfHomeEntry.enabled) backStack.lastOrNull() else null
+        val perfTopRoute = when (perfTop) {
+            is Screen.SessionHome -> "Home"
+            is Screen.Chat -> "Chat"
+            null -> "unknown"
+            else -> "Other"
+        }
         SideEffect {
+            if (ChatPerfHomeEntry.enabled) {
+                val c = resources.configuration
+                val d = settings.displaySetting
+                ChatPerfHomeEntry.route(perfTop is Screen.SessionHome, JSONObject().apply {
+                    put("darkMode", perfDarkMode); put("themeFamily", d.amberBaseFamily)
+                    put("accentColor", d.accentColor)
+                    put("themePackApplied", d.themePack != null); put("fontSizeRatio", d.fontSizeRatio)
+                    put("assistantBubble", d.showAssistantBubble); put("chatFontFamily", d.chatFontFamily.name)
+                    put("fontScale", c.fontScale); put("locale", c.locales.toLanguageTags())
+                    put("orientation", c.orientation); put("uiMode", c.uiMode)
+                }, perfTopRoute, (perfTop as? Screen.Chat)?.id)
+            }
             this@RouteActivity.navStack = backStack
             this@RouteActivity.newIntentHandler = { currentIntent = it }
         }

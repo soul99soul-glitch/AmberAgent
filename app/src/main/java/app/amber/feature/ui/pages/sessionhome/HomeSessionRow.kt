@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.sessionhome
 
+import app.amber.feature.ui.utils.chatPerfHomeRow
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.MutableTransitionState
@@ -289,6 +290,7 @@ internal fun HomeSessionRow(
             ) {
                 Row(
                     modifier = Modifier
+                        .chatPerfHomeRow(conversation.id.toString())
                         .fillMaxWidth()
                         .amberPressHighlight(rowInteraction, rowShape, scaleOnPress = false)
                         .background(rowSurface)

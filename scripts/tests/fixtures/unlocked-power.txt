@@ -1,0 +1,3 @@
+# Redacted parser excerpt: only original environment fields; no app inventory or wake-lock history.
+  mWakefulness=Awake
+mWakefulness=1

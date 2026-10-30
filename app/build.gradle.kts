@@ -39,6 +39,13 @@ val baseApplicationId = "app.amber.agent"
 val graphiteDebugApplicationIdSuffix = ".graphite"
 val chatDeviceFixtureEnabled =
     project.findProperty("chatDeviceFixture")?.toString()?.toBoolean() == true
+// Phase-2 diagnostics: independent of BuildConfig.DEBUG. Default OFF; both
+// sides of a comparison must pass the same value.
+val chatPerfTraceEnabled =
+    project.findProperty("chatPerfTrace")?.toString()?.toBoolean() == true
+// Opt-in independent fixture host package; never selected by default builds.
+val chatPerfFixtureEnabled =
+    project.findProperty("chatPerfFixture")?.toString()?.toBoolean() == true
 // -PprofileableDebug=true builds the debug variant non-debuggable and profileable. It installs over
 // the existing `.graphite` debug build (same package, same signature, data kept), so frame timing
 // and Baseline Profile collection run on real conversations without debuggable-ART overhead.
@@ -49,7 +56,8 @@ val profileableDebugEnabled =
 // `applyAmberUiBuildConfig(...)` in the `buildTypes {}` block below to set
 // optional applicationIdSuffix + VERSION/XMS/Firebase/OAuth BuildConfig fields consistently.
 // See the afterEvaluate parity check at file end for why.
-val amberUiBuildTypes = setOf("graphite")
+val amberUiBuildTypes = mutableSetOf("graphite")
+if (chatPerfFixtureEnabled) amberUiBuildTypes += "perffixture"
 
 // Populated by `applyAmberUiBuildConfig(...)` invocations; compared against
 // `amberUiBuildTypes` after configuration.
@@ -68,6 +76,7 @@ val surfaceFlavorApplicationIds = linkedMapOf(
 val buildTypeApplicationIdSuffixes = mapOf(
     "debug" to graphiteDebugApplicationIdSuffix,
     "baseline" to ".debug",
+    "perffixture" to ".perffixture",
 )
 
 fun googleServicesPackageFor(flavorName: String?, buildTypeName: String?): String =
@@ -142,8 +151,7 @@ android {
     namespace = "app.amber.agent"
     compileSdk = 37
     // Opt-in device verification against the same package/signature as the installed build.
-    testBuildType = providers.gradleProperty("deviceTestBuildType").getOrElse("debug")
-
+    testBuildType = if (chatPerfFixtureEnabled) "perffixture" else providers.gradleProperty("deviceTestBuildType").getOrElse("debug")
     defaultConfig {
         applicationId = baseApplicationId
         minSdk = 26
@@ -151,7 +159,12 @@ android {
         versionCode = 396
         versionName = "2.6.8"
 
-        testInstrumentationRunner = if (chatDeviceFixtureEnabled) {
+        buildConfigField("boolean", "CHAT_PERF_TRACE", chatPerfTraceEnabled.toString())
+        manifestPlaceholders["chatPerfTrace"] = chatPerfTraceEnabled.toString()
+        testInstrumentationRunner = if (chatPerfFixtureEnabled) {
+            // Fixture-only runner; never changes the default suites' runner.
+            "app.amber.agent.perffixture.PerfFixtureAndroidTestRunner"
+        } else if (chatDeviceFixtureEnabled) {
             "app.amber.agent.ChatDeviceFixtureRunner"
         } else if (project.findProperty("uiSmokeTest")?.toString()?.toBoolean() == true) {
             "app.amber.agent.AmberAgentUiSmokeTestRunner"
@@ -290,6 +303,16 @@ android {
             matchingFallbacks.add("debug")
             applyAmberUiBuildConfig("")
         }
+        if (chatPerfFixtureEnabled) {
+            create("perffixture") {
+                initWith(getByName("debug"))
+                matchingFallbacks.add("debug")
+                isDebuggable = false
+                isProfileable = true
+                // Full flavor applicationId + this suffix = app.amber.agent.perffixture.
+                applyAmberUiBuildConfig(".perffixture")
+            }
+        }
         create("baseline") {
             initWith(getByName("release"))
             matchingFallbacks.add("release")
@@ -374,6 +397,17 @@ android {
         getByName("debug") {
             java.srcDir("src/chatDeviceFixture/java")
             kotlin.srcDir("src/chatDeviceFixture/java")
+        }
+        if (chatPerfFixtureEnabled) {
+            getByName("perffixture") {
+                java.srcDir("src/chatDeviceFixture/java")
+                kotlin.srcDir("src/chatDeviceFixture/java")
+            }
+            getByName("androidTest") {
+                java.srcDir("src/androidTestPerffixture/java")
+                kotlin.srcDir("src/androidTestPerffixture/java")
+                assets.srcDir("src/androidTestPerffixture/assets")
+            }
         }
         if (chatDeviceFixtureEnabled) {
             getByName("baseline") {

@@ -17,6 +17,7 @@ import app.amber.agent.BuildConfig
 import app.amber.core.model.AssistantRegex
 import app.amber.core.utils.ChatSendTransitionTracker
 import app.amber.feature.ui.components.message.ChatMessageVirtualItem
+import app.amber.feature.ui.utils.ChatPerfTrace
 import java.util.Locale
 import kotlin.uuid.Uuid
 
@@ -393,10 +394,12 @@ private inline fun measureChatTimelinePlan(
     cache: ChatVirtualItemCache,
     block: () -> ChatTimelinePlan,
 ): ChatTimelinePlan {
-    val startedAt = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+    val startedAt = System.nanoTime()
     val plan = block()
+    val elapsedNanos = System.nanoTime() - startedAt
+    ChatPerfTrace.recordPlanBuild(elapsedNanos / 1_000_000.0)
     if (BuildConfig.DEBUG) {
-        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000.0
+        val elapsedMs = elapsedNanos / 1_000_000.0
         if (elapsedMs >= 1.0 || messageCount >= 200) {
             Log.d(
                 CHAT_PERF_TAG,

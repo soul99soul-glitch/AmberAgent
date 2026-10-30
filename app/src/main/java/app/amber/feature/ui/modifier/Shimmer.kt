@@ -11,7 +11,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -40,12 +39,12 @@ fun Modifier.shimmer(
     durationMillis: Int = 1200,
     angle: Float = 20f, // 稍微倾斜的角度
     gradientWidthRatio: Float = 0.5f // 闪光宽度为组件宽度的一半
-): Modifier = composed { // 使用 composed 以便在 Modifier 内部使用 remember 和 LaunchedEffect 等
-    if (!isLoading) {
-        // 如果不处于加载状态，则不应用任何效果
-        this
-    } else {
-        // 创建无限循环动画
+): Modifier {
+    // This is called from composition sites; returning early avoids the old
+    // `composed {}` wrapper (an extra modifier node + composition scope) for
+    // every settled history label.
+    if (!isLoading) return this
+    // 创建无限循环动画
         val transition = rememberInfiniteTransition(label = "ShimmerTransition")
         val translateAnimation = transition.animateFloat(
             initialValue = 0f,
@@ -67,7 +66,7 @@ fun Modifier.shimmer(
             )
         }
         // 应用绘制效果
-        this
+        return this
             .graphicsLayer { alpha = 0.99f } // 开启混合
             .drawWithCache {
                 if (size == Size.Zero) {
@@ -106,5 +105,4 @@ fun Modifier.shimmer(
                     }
                 }
             }
-    }
 }

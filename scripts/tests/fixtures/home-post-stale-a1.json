@@ -1,0 +1,31 @@
+{
+  "provenance": {
+    "runId": "primary-home-a1-20261028-131837-11982-S1-cold-on",
+    "source": "actual A1 failed capture.environmentPost.appState",
+    "sampleStatus": "invalid; not a baseline/performance result"
+  },
+  "before": {
+    "pathId": "home-first-first-history",
+    "pid": 27739,
+    "activityId": "27739-1",
+    "home": true,
+    "rowVisible": true,
+    "chatVisited": false,
+    "targetVisited": false,
+    "lastEntryActivity": null,
+    "lastEntryConversation": null
+  },
+  "after": {
+    "pathId": "home-first-first-history",
+    "pid": 27739,
+    "activityId": "27739-1",
+    "home": true,
+    "rowVisible": false,
+    "chatVisited": true,
+    "targetVisited": true,
+    "lastEntryActivity": "27739-1",
+    "lastEntryConversation": "10000000-0000-4000-8000-000000000001"
+  },
+  "measuredPid": "27739",
+  "conversation": "10000000-0000-4000-8000-000000000001"
+}

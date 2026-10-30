@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:name="app.amber.agent.perffixture.PerfFixtureApplication"
+        android:label="Amber perf fixture"
+        tools:replace="android:name,android:label">
+        <activity
+            android:name="app.amber.agent.perffixture.PerfFixtureLauncherActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="app.amber.agent.perffixture.PerfFixturePrepActivity"
+            android:exported="true"
+            android:theme="@style/Theme.amberagent" />
+        <receiver
+            android:name="app.amber.agent.perffixture.PerfFixtureInteractionReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="app.amber.agent.perffixture.PERF_SET_RUN" />
+                <action android:name="app.amber.agent.perffixture.PERF_HOME_STATE" />
+                <action android:name="app.amber.agent.perffixture.PERF_HOME_ARM" />
+                <action android:name="app.amber.agent.perffixture.PERF_BLUR" />
+                <action android:name="app.amber.agent.perffixture.PERF_INTERACTION" />
+                <action android:name="app.amber.agent.perffixture.PERF_S7_SEND" />
+                <action android:name="app.amber.agent.perffixture.PERF_STOP" />
+                <action android:name="app.amber.agent.perffixture.PERF_SNAPSHOT" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

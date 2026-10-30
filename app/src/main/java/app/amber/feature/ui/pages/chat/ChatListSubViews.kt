@@ -1,7 +1,6 @@
 package app.amber.feature.ui.pages.chat
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.BorderStroke
@@ -65,7 +64,6 @@ internal fun ChatListPreview(
     conversation: Conversation,
     contextCompacts: List<ConversationCompact> = emptyList(),
     settings: Settings,
-    animatedVisibilityScope: AnimatedVisibilityScope,
     onJumpToMessage: (Int) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }

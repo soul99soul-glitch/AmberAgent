@@ -1,5 +1,8 @@
 package app.amber.feature.ui.pages.chat
 
+import app.amber.feature.ui.utils.AmberTraceSection
+import app.amber.feature.ui.utils.ChatPerfCommandBridge
+import app.amber.feature.ui.utils.ChatPerfTrace
 import app.amber.feature.ui.utils.amberTraceMeasure
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -42,6 +46,7 @@ import app.amber.core.context.ConversationCompact
 import app.amber.core.model.Conversation
 import app.amber.core.service.ChatError
 import app.amber.core.service.PendingUserMessage
+import app.amber.core.service.PendingUserMessageMode
 import app.amber.feature.ui.components.ai.ChatInputSubmissionOwner
 import app.amber.feature.ui.components.ai.SandboxActivitySheet
 import app.amber.feature.ui.components.ai.TopModelMenu
@@ -147,6 +152,34 @@ internal fun ChatPageScaffold(
         editMessage = vm::handleMessageEdit,
     )
 
+    if (ChatPerfTrace.enabled || app.amber.agent.BuildConfig.BUILD_TYPE == "perffixture") {
+        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+        DisposableEffect(inputActions, conversation.id, focusManager) {
+            ChatPerfCommandBridge.sendText = { text ->
+                val parts = listOf(app.amber.ai.ui.UIMessagePart.Text(text))
+                inputActions.send(PendingUserMessageMode.FOLLOWUP, parts, null)
+            }
+            ChatPerfCommandBridge.stopGeneration = {
+                vm.stopGeneration()
+                true
+            }
+            ChatPerfCommandBridge.snapshot = {
+                "conversation=${conversation.id} nodes=${conversation.messageNodes.size}" +
+                    " loading=${loadingJob != null}"
+            }
+            ChatPerfCommandBridge.clearFocus = {
+                focusManager.clearFocus(force = true)
+                true
+            }
+            onDispose {
+                ChatPerfCommandBridge.sendText = null
+                ChatPerfCommandBridge.stopGeneration = null
+                ChatPerfCommandBridge.snapshot = null
+                ChatPerfCommandBridge.clearFocus = null
+            }
+        }
+    }
+
     LaunchedEffect(sandboxTimeline.size, sandboxTimeline.lastOrNull()?.toolCallId) {
         if (sandboxActivity == null) {
             sandboxOverlayOpen = false
@@ -214,6 +247,7 @@ internal fun ChatPageScaffold(
             Scaffold(
                 modifier = Modifier.amberTraceMeasure("Amber ChatPage measure"),
                 topBar = {
+                    AmberTraceSection("Amber ChatTopBar compose") {
                     ChatPageTopBar(
                         conversationFlow = vm.conversation,
                         bigScreen = bigScreen,
@@ -271,8 +305,10 @@ internal fun ChatPageScaffold(
                             }
                         },
                     )
+                    }
                 },
                 bottomBar = {
+                    AmberTraceSection("Amber ChatComposer compose") {
                     ChatPageComposerHost(
                         inputState = inputState,
                         inputSubmissionOwner = inputSubmissionOwner,
@@ -327,6 +363,7 @@ internal fun ChatPageScaffold(
                             )
                         },
                     )
+                    }
                 },
                 containerColor = Color.Transparent,
             ) { innerPadding ->

@@ -9,6 +9,7 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -31,6 +32,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.withContext
 import app.amber.agent.BuildConfig
+import app.amber.feature.ui.utils.ChatPerfProbeToken
+import app.amber.feature.ui.utils.LocalMarkdownReadinessDispose
+import app.amber.feature.ui.utils.LocalMarkdownReadinessProbe
 import app.amber.feature.ui.utils.amberTraceMeasure
 import app.amber.core.utils.toDp
 
@@ -70,6 +74,44 @@ internal fun MarkdownBlockLegacy(
             }
         }
     }
+    // Settled history (the overwhelmingly common path when opening a saved
+    // conversation) needs none of the streaming display buffer, presentation
+    // gate, frame loop, or mutation collector below. A cache hit renders the
+    // parsed tree directly; a cache miss still falls through to the existing
+    // placeholder/background parser path so nothing is shown as raw markup.
+    val sawStreaming = remember { booleanArrayOf(streaming) }
+    if (streaming) sawStreaming[0] = true
+    val settledParse = remember(content) { cachedMarkdownParseResult(content) }
+    // Readiness must cover every real render path, including the settled
+    // cache-hit fast path that returns before the slow placeholder logic.
+    val readinessProbe = LocalMarkdownReadinessProbe.current
+    val readinessDispose = LocalMarkdownReadinessDispose.current
+    val readinessToken = remember(readinessProbe) {
+        if (readinessProbe != null) ChatPerfProbeToken.next() else 0
+    }
+    DisposableEffect(readinessToken) {
+        onDispose {
+            if (readinessToken != 0) readinessDispose?.invoke(readinessToken)
+        }
+    }
+    if (!streaming && !deferStreamingParse && !sawStreaming[0] && settledParse != null) {
+        SideEffect {
+            if (readinessToken != 0) readinessProbe?.invoke(readinessToken, false)
+        }
+        MarkdownBlockRender(
+            data = settledParse,
+            renderContent = content,
+            modifier = modifier,
+            style = style,
+            fillWidth = fillWidth,
+            onClickCitation = onClickCitation,
+            streamingLiveSuffix = EMPTY_STREAMING_LIVE_SUFFIX,
+            streamingTailActive = null,
+            streamingMotionScope = null,
+        )
+        return
+    }
+
     val bufferStreaming = streaming && !content.shouldBypassStreamingDisplayBuffer()
     val renderContent = rememberStreamingDisplayText(
         content = content,
@@ -161,6 +203,9 @@ internal fun MarkdownBlockLegacy(
             StreamingRenderProbe.resetStreamingDiagnostics()
         }
         pendingProbe?.invoke(data.isPendingPlaceholder)
+        if (readinessToken != 0) {
+            readinessProbe?.invoke(readinessToken, data.isPendingPlaceholder)
+        }
     }
     LaunchedEffect(Unit) {
         var lastParsedContent: String? = when {
@@ -248,6 +293,31 @@ internal fun MarkdownBlockLegacy(
             }
     }
 
+    MarkdownBlockRender(
+        data = data,
+        renderContent = renderContent,
+        modifier = modifier,
+        style = style,
+        fillWidth = fillWidth,
+        onClickCitation = onClickCitation,
+        streamingLiveSuffix = streamingLiveSuffix,
+        streamingTailActive = streamingTailActive,
+        streamingMotionScope = streamingMotionScope,
+    )
+}
+
+@Composable
+private fun MarkdownBlockRender(
+    data: MarkdownParseResult,
+    renderContent: String,
+    modifier: Modifier,
+    style: TextStyle,
+    fillWidth: Boolean,
+    onClickCitation: (String) -> Unit,
+    streamingLiveSuffix: StreamingLiveSuffix,
+    streamingTailActive: StreamingTailActive?,
+    streamingMotionScope: StreamingMarkdownMotionScope?,
+) {
     TraceMarkdownComposable("Amber MarkdownBlock render") {
       CompositionLocalProvider(
           LocalMarkdownFillWidth provides fillWidth,

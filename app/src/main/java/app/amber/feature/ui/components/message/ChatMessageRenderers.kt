@@ -5,12 +5,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
@@ -62,20 +60,24 @@ internal fun VirtualizedAssistantText(
     val handleClickCitation = rememberClickCitationHandler(fullMessageParts)
     MessageSelectionContainer(enabled = false) {
         if (markdownChild != null) {
+            val blockCount = markdownChild.blockCount.coerceAtLeast(1)
+            val lastBlockIndex = markdownChild.blockIndex + blockCount - 1
             val blockContent: @Composable () -> Unit = {
                 Column {
-                    MarkdownTopLevelBlock(
-                        data = markdownChild.parseResult,
-                        blockIndex = markdownChild.blockIndex,
-                        onClickCitation = handleClickCitation,
-                    )
+                    repeat(blockCount) { offset ->
+                        MarkdownTopLevelBlock(
+                            data = markdownChild.parseResult,
+                            blockIndex = markdownChild.blockIndex + offset,
+                            onClickCitation = handleClickCitation,
+                        )
+                    }
                     BlockAttachments(attachments)
                 }
             }
             if (showAssistantBubble) {
                 AssistantBubbleSegment(
                     first = markdownChild.blockIndex == 0,
-                    last = markdownChild.blockIndex == markdownChild.parseResult.topLevelBlockCount() - 1,
+                    last = lastBlockIndex == markdownChild.parseResult.topLevelBlockCount() - 1,
                     content = blockContent,
                 )
             } else {
@@ -83,45 +85,40 @@ internal fun VirtualizedAssistantText(
             }
         } else {
             if (showAssistantBubble) {
-                BoxWithConstraints(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = androidx.compose.ui.Alignment.TopStart,
+                val amberTokens = LocalAmberTokens.current
+                val themeRadius = themeBubbleRadius()
+                val themeBorderWidth = themeBubbleBorderWidth()
+                val assistantBubbleShape = themeRadius?.let { RoundedCornerShape(it) }
+                    ?: RoundedCornerShape(
+                    topStart = 14.dp,
+                    topEnd = 14.dp,
+                    bottomStart = 5.dp,
+                    bottomEnd = 14.dp,
+                )
+                Surface(
+                    modifier = Modifier.chatBubbleWidth(0.86f),
+                    shape = assistantBubbleShape,
+                    color = amberTokens.surface,
+                    contentColor = amberTokens.ink,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
+                    border = if (themeBorderWidth == null) {
+                        BorderStroke(1.dp, amberTokens.line)
+                    } else {
+                        themeBorderWidth.takeIf { it > 0.dp }?.let { BorderStroke(it, amberTokens.line) }
+                    },
                 ) {
-                    val amberTokens = LocalAmberTokens.current
-                    val themeRadius = themeBubbleRadius()
-                    val themeBorderWidth = themeBubbleBorderWidth()
-                    val assistantBubbleShape = themeRadius?.let { RoundedCornerShape(it) }
-                        ?: RoundedCornerShape(
-                        topStart = 14.dp,
-                        topEnd = 14.dp,
-                        bottomStart = 5.dp,
-                        bottomEnd = 14.dp,
-                    )
-                    Surface(
-                        modifier = Modifier.widthIn(max = maxWidth * 0.86f),
-                        shape = assistantBubbleShape,
-                        color = amberTokens.surface,
-                        contentColor = amberTokens.ink,
-                        tonalElevation = 0.dp,
-                        shadowElevation = 0.dp,
-                        border = if (themeBorderWidth == null) {
-                            BorderStroke(1.dp, amberTokens.line)
-                        } else {
-                            themeBorderWidth.takeIf { it > 0.dp }?.let { BorderStroke(it, amberTokens.line) }
-                        },
-                    ) {
-                        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                            AssistantMarkdownBlockOrWidgets(
-                                content = MessageRenderCache.visualRegexText(
-                                    text = part.text,
-                                    regexes = regexes,
-                                    scope = AssistantAffectScope.ASSISTANT,
-                                ),
-                                streaming = false,
-                                onClickCitation = handleClickCitation,
-                                onGenerativeWidgetAction = onGenerativeWidgetAction,
-                            )
-                        }
+                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        AssistantMarkdownBlockOrWidgets(
+                            content = MessageRenderCache.visualRegexText(
+                                text = part.text,
+                                regexes = regexes,
+                                scope = AssistantAffectScope.ASSISTANT,
+                            ),
+                            streaming = false,
+                            onClickCitation = handleClickCitation,
+                            onGenerativeWidgetAction = onGenerativeWidgetAction,
+                        )
                     }
                 }
             } else {
@@ -389,13 +386,9 @@ private fun AssistantBubbleSegment(
         bottomStart = if (last) tailRadiusDp else 0.dp,
         bottomEnd = if (last) radiusDp else 0.dp,
     )
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = androidx.compose.ui.Alignment.TopStart,
-    ) {
+    Box(modifier = Modifier.chatBubbleWidth(0.86f)) {
         Box(
             modifier = Modifier
-                .widthIn(max = maxWidth * 0.86f)
                 .clip(shape)
                 .background(amberTokens.surface)
                 .drawWithContent {

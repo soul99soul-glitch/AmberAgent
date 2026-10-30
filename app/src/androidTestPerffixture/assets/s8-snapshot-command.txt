@@ -1,0 +1,1 @@
+am broadcast -a app.amber.agent.perffixture.PERF_SNAPSHOT -n app.amber.agent.perffixture/app.amber.agent.perffixture.PerfFixtureInteractionReceiver --es nonce 0123456789abcdef

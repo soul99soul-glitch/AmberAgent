@@ -38,6 +38,7 @@ import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.utils.ChatPerfTrace
 import app.amber.agent.Screen
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.core.utils.base64Decode
@@ -64,6 +65,8 @@ fun ChatPage(
         }
     )
     LaunchedEffect(vm) {
+        app.amber.feature.ui.utils.ChatPerfHomeEntry.chatObserved(id.toString())
+        ChatPerfTrace.entryRequested()
         vm.onChatVisible()
     }
     val toaster = LocalToaster.current
