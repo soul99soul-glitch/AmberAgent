@@ -41,6 +41,16 @@ class SshCredentials(
 }
 
 /**
+ * Which credential fields are currently stored for a profile. Presence only:
+ * values are never read or decrypted to compute this.
+ */
+data class SshCredentialPresence(
+    val hasPassword: Boolean,
+    val hasPrivateKey: Boolean,
+    val hasPassphrase: Boolean,
+)
+
+/**
  * Durable storage for SSH profiles. Profile metadata is kept in the dedicated
  * `ssh_profiles` DataStore entry; credential values only live in SecretStore.
  */
@@ -253,6 +263,17 @@ class SshProfileStore(
         return current.profiles.firstOrNull { it.id == profileId }
             ?: error("SSH profile not found: $profileId")
     }
+
+    /**
+     * Report which credentials exist for [profile] without decrypting them.
+     * Safe for status surfaces (agent tools, list UI) that must never expose
+     * a secret value.
+     */
+    fun credentialPresence(profile: SshProfile): SshCredentialPresence = SshCredentialPresence(
+        hasPassword = secretStore.has(credentialDescriptor(profile, PASSWORD_FIELD)),
+        hasPrivateKey = secretStore.has(credentialDescriptor(profile, PRIVATE_KEY_FIELD)),
+        hasPassphrase = secretStore.has(credentialDescriptor(profile, PASSPHRASE_FIELD)),
+    )
 
     /** Load runtime-only credentials; callers must not persist or log this object. */
     fun readCredentials(profile: SshProfile): SshCredentials = SshCredentials(

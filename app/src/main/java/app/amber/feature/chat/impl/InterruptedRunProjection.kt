@@ -8,6 +8,7 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.canResumeToolExecution
 import app.amber.ai.ui.finishReasoning
 import app.amber.core.model.Conversation
+import app.amber.core.utils.withSettledCredentialArgumentsRedacted
 import app.amber.feature.chat.api.ChatEventPayload
 import app.amber.feature.chat.api.StreamToolState
 import kotlinx.datetime.TimeZone
@@ -122,5 +123,5 @@ object InterruptedRunProjection {
                 UIMessagePart.Text("""{"status":"interrupted","error":"$note"}""")
             ),
             approvalState = ToolApprovalState.Denied(note),
-        )
+        ).withSettledCredentialArgumentsRedacted()
 }

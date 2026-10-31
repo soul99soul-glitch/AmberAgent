@@ -48,6 +48,7 @@ import app.amber.feature.tools.AgentTaskTools
 import app.amber.feature.tools.ConversationContextTools
 import app.amber.feature.tools.ConversationHistoryTools
 import app.amber.feature.tools.ModelCouncilTools
+import app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES
 import app.amber.feature.tools.SubAgentTools
 import app.amber.feature.tools.ToolProfileFilter
 import app.amber.feature.tools.ToolRegistry
@@ -318,13 +319,21 @@ class RunToolCatalogFactory(
         val baseRegistry = ToolRegistry.from(profiledRawTools)
         val baseTools = baseRegistry.tools() +
             localTools.registryIntrospectionTools(baseRegistry)
+        // SSH profile writers change the credentials behind every remote shell,
+        // so they stay main-conversation-only. A subagent inherits the parent
+        // catalog through parentToolsForRun, which is why the writers have to
+        // leave the subagent's own catalog too — otherwise a child run could
+        // still reach them through its parent list. The read-only listing stays
+        // available to subagents.
+        val subAgentCatalogTools = profiledRawTools.filterNot { it.name in SSH_PROFILE_WRITE_TOOL_NAMES }
+        val subAgentParentTools = baseTools.filterNot { it.name in SSH_PROFILE_WRITE_TOOL_NAMES }
         val subAgentRawTools = if (conversationId != null && settings.agentRuntime.subAgent.enabled) {
-            profiledRawTools + SubAgentTools(
+            subAgentCatalogTools + SubAgentTools(
                 subAgentManager = subAgentManager,
                 parentConversationId = conversationId,
                 parentRunId = runId,
                 parentPolicy = executionPolicy,
-                parentToolsProvider = { baseTools },
+                parentToolsProvider = { subAgentParentTools },
                 // A subagent receives the same logical catalog, but WebMount tools must bind
                 // their lease to the internally assigned child generation scope. Rebuild only
                 // the local-tool entries through the existing scoped factory; all other parent
@@ -335,7 +344,7 @@ class RunToolCatalogFactory(
                         conversationId = conversationId,
                         runId = childScopeId,
                     ).associateBy { it.name }
-                    baseTools.map { childScopedLocalTools[it.name] ?: it }
+                    subAgentParentTools.map { childScopedLocalTools[it.name] ?: it }
                 },
                 onRunFinished = { childScopeId, reason, preservePendingHandoff ->
                     localTools.endWebMountRun(

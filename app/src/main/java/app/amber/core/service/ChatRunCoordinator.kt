@@ -40,6 +40,7 @@ import app.amber.feature.runtime.StoredResponseGateway
 import app.amber.feature.runtime.StoredResponseStopCancel
 import app.amber.feature.runtime.ToolEffectLedger
 import app.amber.feature.runtime.argsDigest
+import app.amber.core.utils.withSettledCredentialArgumentsRedacted
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.coroutineContext
@@ -1076,7 +1077,7 @@ class ChatRunCoordinator(
         return tool.copy(
             output = listOf(cancellation),
             approvalState = ToolApprovalState.Denied("Generation cancelled by user"),
-        )
+        ).withSettledCredentialArgumentsRedacted()
     }
 
     internal suspend fun stopRunForDeletion(conversationId: Uuid) {

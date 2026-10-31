@@ -109,7 +109,11 @@ internal fun getToolIcon(toolName: String, action: String?) = when (toolName) {
         "terminal_session_start",
         "terminal_session_exec",
         "terminal_session_read",
-        "terminal_session_stop"
+        "terminal_session_stop",
+        "ssh_profile_list",
+        "ssh_profile_create",
+        "ssh_profile_update",
+        "ssh_profile_delete"
     ) -> Lucide.CodeXml
 
     in setOf(
@@ -174,6 +178,10 @@ internal fun getToolKind(toolName: String) = when {
     ) -> AgentToolKind.TERMINAL
 
     toolName.startsWith("screen_") || toolName == "vlm_task" -> AgentToolKind.SCREEN
+
+    // SSH profile management belongs to the terminal surface: it configures
+    // the runtime that terminal_* executes commands over.
+    toolName.startsWith("ssh_profile_") -> AgentToolKind.TERMINAL
 
     toolName == ToolNames.SEARCH_WEB ||
         toolName == ToolNames.SCRAPE_WEB ||
@@ -459,6 +467,16 @@ internal fun toolDisplayTitle(
     )
     "terminal_session_read" -> stringResource(R.string.chat_message_tool_terminal_session_read)
     "terminal_session_stop" -> stringResource(R.string.chat_message_tool_terminal_session_stop)
+    // SSH profile receipts name the target profile and, for writers, the fields
+    // being changed. Credential arguments are never rendered: the receipt says
+    // which credential is being set instead of echoing it.
+    "ssh_profile_list" -> stringResource(R.string.chat_message_tool_ssh_profile_list)
+    "ssh_profile_create" -> sshProfileCreateTitle(arguments)
+    "ssh_profile_update" -> sshProfileUpdateTitle(arguments)
+    "ssh_profile_delete" -> stringResource(
+        R.string.chat_message_tool_ssh_profile_delete,
+        arguments.getStringContent("id")?.compactToolPreview(22).orEmpty(),
+    )
     "screen_click" -> stringResource(R.string.chat_message_tool_screen_click)
     "screen_long_click" -> stringResource(R.string.chat_message_tool_screen_long_click)
     "screen_swipe" -> stringResource(R.string.chat_message_tool_screen_swipe)
@@ -506,4 +524,123 @@ internal fun toolDisplayTitle(
         stringResource(R.string.chat_message_tool_call_generic, toolName)
     }
     }
+}
+
+/**
+ * Approval/capsule title for `ssh_profile_create`: names the profile, its
+ * `user@host:port` endpoint, the authentication method, and which credential is
+ * about to be stored. Credential arguments only ever contribute the noun of the
+ * credential being set — never the value.
+ */
+@Composable
+private fun sshProfileCreateTitle(arguments: JsonElement): String {
+    val name = arguments.getStringContent("name")?.compactToolPreview(18).orEmpty()
+    val endpoint = sshEndpoint(arguments)
+    val authMethod = sshAuthMethodLabel(arguments.getStringContent("auth_method"))
+    val credential = when {
+        arguments.suppliesSecret("password") -> stringResource(R.string.chat_message_tool_ssh_cred_set_password)
+        arguments.suppliesSecret("private_key") -> stringResource(R.string.chat_message_tool_ssh_cred_set_private_key)
+        arguments.suppliesSecret("passphrase") -> stringResource(R.string.chat_message_tool_ssh_cred_set_passphrase)
+        else -> null
+    }
+    // The approval card clips the title at two lines, so the endpoint and the
+    // credential action lead; make-as-default trails and is the first thing the
+    // ellipsis swallows on a narrow screen.
+    return buildList {
+        add(
+            stringResource(
+                R.string.chat_message_tool_ssh_profile_create_detail,
+                name,
+                endpoint,
+                authMethod,
+            ),
+        )
+        credential?.let(::add)
+        if (arguments.booleanArgument("make_default")) add(
+            stringResource(R.string.chat_message_tool_ssh_field_make_default),
+        )
+    }.joinToString(stringResource(R.string.chat_message_tool_ssh_field_separator))
+}
+
+/**
+ * Approval/capsule title for `ssh_profile_update`: names the target profile and
+ * every field the call changes, including make-as-default and clearing the
+ * passphrase. Credential arguments only ever contribute the noun of the
+ * credential being replaced — never the value.
+ */
+@Composable
+private fun sshProfileUpdateTitle(arguments: JsonElement): String {
+    val target = arguments.getStringContent("id")?.compactToolPreview(18).orEmpty()
+    val fields = buildList {
+        if (arguments.getStringContent("name") != null) add(stringResource(R.string.chat_message_tool_ssh_field_name))
+        if (arguments.getStringContent("host") != null) add(stringResource(R.string.chat_message_tool_ssh_field_host))
+        if (arguments.getStringContent("port") != null) add(stringResource(R.string.chat_message_tool_ssh_field_port))
+        if (arguments.getStringContent("username") != null) add(stringResource(R.string.chat_message_tool_ssh_field_username))
+        if (arguments.getStringContent("auth_method") != null) add(stringResource(R.string.chat_message_tool_ssh_field_auth_method))
+        if (arguments.suppliesSecret("password")) add(
+            stringResource(R.string.chat_message_tool_ssh_cred_set_password),
+        )
+        if (arguments.suppliesSecret("private_key")) add(
+            stringResource(R.string.chat_message_tool_ssh_cred_set_private_key),
+        )
+        when {
+            // An explicit empty passphrase clears the stored one; a present
+            // value replaces it. Both are distinct from "passphrase untouched".
+            arguments.hasArgument("passphrase") && arguments.getStringContent("passphrase").isNullOrEmpty() ->
+                add(stringResource(R.string.chat_message_tool_ssh_cred_clear_passphrase))
+            arguments.suppliesSecret("passphrase") ->
+                add(stringResource(R.string.chat_message_tool_ssh_cred_set_passphrase))
+        }
+        if (arguments.booleanArgument("make_default")) add(
+            stringResource(R.string.chat_message_tool_ssh_field_make_default),
+        )
+    }
+    return if (fields.isEmpty()) {
+        stringResource(R.string.chat_message_tool_ssh_profile_update, target)
+    } else {
+        stringResource(
+            R.string.chat_message_tool_ssh_profile_update_detail,
+            target,
+            fields.joinToString(stringResource(R.string.chat_message_tool_ssh_field_separator)),
+        )
+    }
+}
+
+/**
+ * Whether the call supplies a credential value. The mask placeholder written by
+ * the storage-boundary redaction counts as "supplied" so an already-settled
+ * call still explains that a credential was set.
+ */
+private fun JsonElement.suppliesSecret(key: String): Boolean {
+    val raw = getStringContent(key) ?: return false
+    return raw.isNotEmpty()
+}
+
+/** Whether the argument key is present at all, empty value included. */
+private fun JsonElement.hasArgument(key: String): Boolean =
+    (this as? kotlinx.serialization.json.JsonObject)?.containsKey(key) == true
+
+private fun JsonElement.booleanArgument(key: String): Boolean =
+    getStringContent(key)?.toBooleanStrictOrNull() == true
+
+/**
+ * `user@host:port` for the receipt. Port is omitted when the call relies on the
+ * default, exactly like the Settings summary hides it.
+ */
+@Composable
+private fun sshEndpoint(arguments: JsonElement): String {
+    val user = arguments.getStringContent("username")?.compactToolPreview(14).orEmpty()
+    val host = arguments.getStringContent("host")?.compactToolPreview(20).orEmpty()
+    val port = arguments.getStringContent("port")?.takeIf { it.isNotBlank() }
+    val base = if (user.isBlank()) host else "$user@$host"
+    return if (port == null) base else "$base:$port"
+}
+
+/** Localized authentication-method label; the raw wire name when unrecognized. */
+@Composable
+private fun sshAuthMethodLabel(raw: String?): String = when (raw?.lowercase()) {
+    null, "" -> stringResource(R.string.chat_message_tool_ssh_auth_password)
+    "password" -> stringResource(R.string.chat_message_tool_ssh_auth_password)
+    "private_key" -> stringResource(R.string.chat_message_tool_ssh_auth_private_key)
+    else -> raw
 }

@@ -485,6 +485,44 @@ class SubAgentValidatorTest {
         })
     }
 
+    @Test
+    fun sshProfileWritersAreRejectedFromAnySubagentAllowlist() {
+        listOf(
+            "ssh_profile_create",
+            "ssh_profile_update",
+            "ssh_profile_delete",
+        ).forEach { writer ->
+            val input = inputWithCustomSubagent(toolAllowlist = listOf(writer))
+            val error = runCatching {
+                SubAgentValidator.resolveDefinition(
+                    input,
+                    setting.copy(allowDynamicSubAgents = true),
+                    setOf(writer, "file_read"),
+                )
+            }.exceptionOrNull()
+            assertTrue("$writer must be rejected, got $error", error != null)
+            assertTrue(
+                "$writer rejection must explain the boundary: ${error?.message}",
+                error!!.message.orEmpty().contains("SSH profile credentials"),
+            )
+        }
+    }
+
+    @Test
+    fun sshProfileListIsNotTreatedAsACredentialWriter() {
+        // The listing carries no credential, so the new guard must not touch it:
+        // it is rejected only by the existing tool-profile intersection (the
+        // READ_ONLY profile does not include terminal tools), which is unrelated
+        // to the SSH credential boundary.
+        val error = runCatching {
+            SubAgentValidator.validateToolAllowlist(
+                toolAllowlist = setOf("ssh_profile_list"),
+                availableToolNames = setOf("ssh_profile_list"),
+            )
+        }.exceptionOrNull()
+        org.junit.Assert.assertNull("ssh_profile_list must pass the credential guard, got $error", error)
+    }
+
     private fun inputWithSubagentId(id: String) = buildJsonObject {
         put("subagent_id", id)
         put("task", buildJsonObject {
