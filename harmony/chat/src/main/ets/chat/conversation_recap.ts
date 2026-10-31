@@ -2,6 +2,7 @@ import type { Conversation } from './conversation.ts';
 import { currentMessages, nodeCurrentMessage } from './conversation.ts';
 import type { UIMessage, UIMessagePart } from './message.ts';
 import type { JsonObject } from './json.ts';
+import { redactStoredToolInput } from './tool_input_redaction.ts';
 
 export type RecapNodeKind = 'decision' | 'milestone' | 'failure' | 'artifact';
 export interface ConversationRecapNode {
@@ -32,7 +33,7 @@ export interface RecapInput {
 const partText = (part: UIMessagePart): string => {
   switch (part.type) {
     case 'text': return part.text.trim();
-    case 'tool': return `Tool: ${part.toolName}\nInput: ${part.input.slice(0, 300)}\nOutput: ${part.output.map(partText).join('\n').slice(0, 300)}`;
+    case 'tool': return `Tool: ${part.toolName}\nInput: ${redactStoredToolInput(part.toolName, part.input).slice(0, 300)}\nOutput: ${part.output.map(partText).join('\n').slice(0, 300)}`;
     case 'image': return '[图片]';
     case 'document': return `[文件: ${part.fileName}]`;
     case 'mini_app': return `[交互成果: ${part.title}]`;

@@ -24,6 +24,8 @@ import {
 import type { GenerationRetrySetting, GenerationRetryDecision } from './generation_retry.ts';
 import { decideGenerationRetry, makeGenerationRetrySetting } from './generation_retry.ts';
 import type { AbortSignalLike } from '@amber/deepread-domain';
+import type { SecretToolInputRestore } from './tool_input_vault.ts';
+import { clearSecretToolInput, restoreSecretToolInput } from './tool_input_vault.ts';
 
 const textPart = (text: string): UIMessagePartText => ({ type: 'text', text, metadata: null });
 
@@ -398,6 +400,8 @@ export class AgentToolDispatcher {
     const tracedTool: UIMessagePartTool = withPermissionTrace(
       tool, permissionDecisionTraceToJson(decision.trace));
     if (tool.approvalState.type === 'denied') {
+      // 用户拒绝:该调用的暂存凭据不再需要,立刻擦除。
+      clearSecretToolInput(tool.toolCallId);
       const reason: string = tool.approvalState.reason;
       return {
         ...tracedTool,
@@ -449,7 +453,23 @@ export class AgentToolDispatcher {
     try {
       const parsed: JsonValue = JSON.parse(
         tool.input.trim().length === 0 ? '{}' : tool.input) as JsonValue;
-      const args: JsonValue = withoutToolDisplayMetadata(parsed);
+      const rawArgs: JsonValue = withoutToolDisplayMetadata(parsed);
+      // 持久化的 input 只有 `***`:真实凭据从进程内暂存按 toolCallId 取回(取出即删)。
+      // 暂存丢失(冷启动 / 已消费)时 fail-closed,绝不把占位符交给工具。
+      const restored: SecretToolInputRestore =
+        restoreSecretToolInput(tool.toolName, tool.toolCallId, rawArgs);
+      if (!restored.ok) {
+        return {
+          ...tool,
+          output: [textPart(JSON.stringify({
+            status: 'failed', error_code: restored.code, recoverable: true,
+            message: 'The credential for this call is no longer available in this process. '
+              + 'Ask the user for the password or private key again and issue a new call.',
+            permission_trace: permissionDecisionTraceToJson(decision.trace),
+          }))],
+        };
+      }
+      const args: JsonValue = restored.args;
       request = { ...request, parsedArgs: args };
       const beforeResult: ToolInvocationResult | null = await this.runBeforeHooks(request);
       if (beforeResult !== null) {

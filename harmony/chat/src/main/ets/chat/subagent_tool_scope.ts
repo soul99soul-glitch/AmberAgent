@@ -9,6 +9,7 @@ import type { UIMessagePart, UIMessagePartText } from './message.ts';
 import type { AgentTool } from './tool.ts';
 import { makeAgentTool, makeInputSchemaObj } from './tool.ts';
 import type { ToolRegistry } from './tool_registry.ts';
+import { isSSHProfileMainSessionOnly } from './terminal/profile_tools.ts';
 import { createToolRegistry } from './tool_registry.ts';
 import {
   createToolPolicyExplainTool,
@@ -143,8 +144,9 @@ const createScopedToolPolicyExplainTool = (registry: ToolRegistry): AgentTool =>
 export const scopedSubAgentTools = (allowedTools: AgentTool[]): AgentTool[] => {
   if (allowedTools.length === 0) return [];
 
+  // SSH 配置写工具只留给主会话:子代理拿不到 create/update/delete。
   const availableTools: AgentTool[] = allowedTools.filter(
-    (tool: AgentTool): boolean => !tool.name.startsWith('subagent_'));
+    (tool: AgentTool): boolean => !tool.name.startsWith('subagent_') && !isSSHProfileMainSessionOnly(tool.name));
   if (availableTools.length === 0) return [];
 
   const requestedTools: Set<string> = new Set<string>();

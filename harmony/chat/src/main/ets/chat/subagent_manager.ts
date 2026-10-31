@@ -25,6 +25,7 @@ import {
 } from './subagent_models.ts';
 import type { SubAgentRunner } from './subagent_runner.ts';
 import { scopedSubAgentTools } from './subagent_tool_scope.ts';
+import { isSSHProfileMainSessionOnly } from './terminal/profile_tools.ts';
 import type { SubAgentTranscriptPort } from './subagent_transcript.ts';
 import { appendSubAgentTranscriptEvent } from './subagent_transcript.ts';
 import {
@@ -321,6 +322,8 @@ export class SubAgentManager {
     const allowedTools: AgentTool[] = [];
     parentTools.forEach((tool: AgentTool): void => {
       if (tool.name.startsWith('subagent_')) return;
+      // SSH 配置写工具只留给主会话,即使白名单里写着也不下发给子代理。
+      if (isSSHProfileMainSessionOnly(tool.name)) return;
       if (!effectiveDefinition.toolAllowlist.includes(tool.name)) return;
       if (HISTORY_FULL_READ_TOOLS.has(tool.name) && historyGrant !== null) {
         allowedTools.push(copyToolForHistoryGrant(tool));

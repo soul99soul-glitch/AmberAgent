@@ -47,6 +47,7 @@ import type { PermissionDecision } from './tool_permission.ts';
 import type { AgentToolDispatcher, ToolBatchResultPair } from './tool_dispatcher.ts';
 import { AgentToolDispatcher as DefaultDispatcher, defaultToolInvocationHooks } from './tool_dispatcher.ts';
 import { buildAgentLoopBudgetPrompt, agentLoopShouldHideTools } from './agent_loop_budget.ts';
+import { captureSecretToolInput, clearSecretToolInput } from './tool_input_vault.ts';
 
 // ===== 环路守护(Android DefaultRunKernel duplicate_tool_call 对齐) =====
 // 签名 = toolName+args JSON;出现次数:1 执行,2 跳过(structured reminder,
@@ -466,6 +467,14 @@ const runToolLoopCore = async (
       for (const tool of tools) {
         if (recipeBatch) { updatedTools.push(tool); continue; }
         let invocation: UIMessagePartTool = tool;
+        // 凭据只写不读:真实参数进进程内暂存表,内存/RDB/屏障都只看到占位符。
+        // 必须在审批决策前完成,否则 pending 落盘仍带明文。
+        const captured: { input: string; captured: boolean } =
+          captureSecretToolInput(tool.toolName, tool.toolCallId, tool.input);
+        if (captured.captured) {
+          invocation = { ...invocation, input: captured.input };
+          changed = true;
+        }
         if (loop.captureInvocationMetadata !== undefined && tool.approvalState.type === 'auto') {
           const captured: JsonObject | null = loop.captureInvocationMetadata(tool);
           if (captured !== null) {
@@ -569,6 +578,11 @@ const runToolLoopCore = async (
       conv = rewriteLastMessageTools(conv, executedPairs);
       await deps.store.save(conv);
       emitSnapshot(conv, deps, ctx);
+    }
+    // 被拒绝 / 取消的调用不再需要凭据:立刻擦除,避免暂存长期驻留。
+    for (const pair of executedPairs) {
+      const state: string = pair.result.approvalState.type;
+      if (state === 'denied' || state === 'cancelled') clearSecretToolInput(pair.input.toolCallId);
     }
     if (loop.manualToolCallId !== undefined) break;
 

@@ -11,7 +11,7 @@ import {
   makeChatModel, makeProviderSettingOpenAI, makeTextGenerationParams, createOpenAIChatApi, asChatStreamProvider,
   patchAssistant, patchConversation, currentMessages, updateCurrentMessages, toMessageNode, makeUserMessage, makeUIMessage,
   runAgenticToolLoop, runToolLoopContinuation, applyToolApprovalToConversation, listJevPendingApprovals,
-  buildJevApprovalSubject, toText,
+  buildJevApprovalSubject, toText, redactCouncilStartedInput,
 } from '@amber/chat-domain';
 import type { CouncilSeatStore } from './CouncilSeatStore.ets';
 import { councilSourcesFromMessages } from './CouncilToolSources.ets';
@@ -129,7 +129,9 @@ class CouncilToolRunner implements ModelCouncilTextRunner {
           throw new Error('Council tool changed before effect');
         }
         const metadata: JsonObject = match.metadata === null ? {} : JSON.parse(JSON.stringify(match.metadata)) as JsonObject;
-        metadata['council_started_v1'] = { toolCallId: match.toolCallId, toolName: match.toolName, input: match.input };
+        // 这份 input 副本同样落盘:凭据字段必须与席位快照走同一套脱敏。
+        metadata['council_started_v1'] = { toolCallId: match.toolCallId, toolName: match.toolName,
+          input: redactCouncilStartedInput(match.toolName, match.input) };
         const started: UIMessagePartTool = { type: 'tool', toolCallId: match.toolCallId,
           toolName: match.toolName, input: match.input, output: match.output,
           approvalState: match.approvalState, metadata: metadata };

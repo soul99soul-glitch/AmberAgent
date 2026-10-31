@@ -14,6 +14,7 @@ import type { Conversation, MessageNode } from './conversation.ts';
 import { currentMessages } from './conversation.ts';
 import type { UIMessage, UIMessagePart, UIMessagePartText } from './message.ts';
 import type { JsonObject, JsonValue } from './json.ts';
+import { redactStoredToolInput } from './tool_input_redaction.ts';
 
 export interface ConversationExportOptions {
   /** 空 = 全量;否则仅导出这些 node id(保持树序) */
@@ -31,8 +32,10 @@ const ROLE_LABEL: Record<string, string> = {
   tool: '工具',
 };
 
+// SSH 配置工具把凭据放在按工具约定的字段名里(private_key / private_key_passphrase),
+// 这些名字不在通用密钥词表中,但详情卡与「复制」必须同样遮罩。
 const SENSITIVE_KEY_RE: RegExp =
-  /^(api[_-]?key|x-api-key|x-goog-api-key|authorization|(?:access|refresh|auth|api|session)[_-]?token|token|(?:client[_-]?)?secret|secret[_-]?key|password|passwd|(?:set[_-]?)?cookie|session)$/i;
+  /^(api[_-]?key|x-api-key|x-goog-api-key|authorization|(?:access|refresh|auth|api|session)[_-]?token|token|(?:client[_-]?)?secret|secret[_-]?key|password|passwd|(?:set[_-]?)?cookie|session|private[_-]?key(?:[_-]?passphrase)?|passphrase|key[_-]?passphrase)$/i;
 
 const maskSensitiveJsonValue = (value: JsonValue): JsonValue => {
   if (Array.isArray(value)) return value.map(maskSensitiveJsonValue);
@@ -76,7 +79,7 @@ const messagePlainText = (message: UIMessage, includeReasoning: boolean): string
     } else if (part.type === 'reasoning' && includeReasoning) {
       chunks.push(`<!-- thinking\n${part.reasoning}\n-->`);
     } else if (part.type === 'tool') {
-      chunks.push(`[tool ${part.toolName}] ${maskSensitiveJsonText(part.input)}`);
+      chunks.push(`[tool ${part.toolName}] ${maskSensitiveJsonText(redactStoredToolInput(part.toolName, part.input))}`);
       for (const outPart of part.output) {
         if (outPart.type === 'text') chunks.push(maskSensitiveJsonText(outPart.text));
       }
@@ -172,7 +175,7 @@ export const exportConversationJson = (
       ...message,
       parts: message.parts.map((part: UIMessagePart): UIMessagePart => part.type === 'tool' ? {
         ...part,
-        input: maskSensitiveJsonText(part.input),
+        input: maskSensitiveJsonText(redactStoredToolInput(part.toolName, part.input)),
         output: part.output.map((output: UIMessagePart): UIMessagePart => output.type === 'text'
           ? { ...output, text: maskSensitiveJsonText(output.text) } : output),
       } : part),

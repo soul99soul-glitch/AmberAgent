@@ -17,6 +17,7 @@ import type { JsonObject, JsonValue } from './json.ts';
 import type { UIMessage, UIMessagePart } from './message.ts';
 import type { UIMessagePartText, UIMessagePartTool, UIMessagePartDocument, UIMessagePartReasoning } from './message.ts';
 import { isToolExecuted } from './message.ts';
+import { redactStoredToolInput } from './tool_input_redaction.ts';
 import type { Conversation, MessageNode } from './conversation.ts';
 import { nodeCurrentMessage } from './conversation.ts';
 import type { ConversationRepository, ConversationSummary } from './persistence.ts';
@@ -115,7 +116,9 @@ const formatMessage = (message: UIMessage, includeTools: boolean): string => {
           .filter((p: UIMessagePart): boolean => p.type === 'text')
           .map((p: UIMessagePart): string => (p as UIMessagePartText).text)
           .join('\n');
-        parts.push(`[tool:${t.toolName} input=${t.input.slice(0, 800)} output_tail=${outputText.slice(-1200)}]`);
+        // 会话转录出口:凭据字段一律先脱敏再进文本(压缩后可能发给模型)。
+        const safeInput: string = redactStoredToolInput(t.toolName, t.input);
+        parts.push(`[tool:${t.toolName} input=${safeInput.slice(0, 800)} output_tail=${outputText.slice(-1200)}]`);
       } else {
         parts.push(`[tool:${t.toolName} executed=${isToolExecuted(t)}]`);
       }

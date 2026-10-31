@@ -1,6 +1,8 @@
 // Composition root and caller-compatible exports. Resource state belongs to the runtime factories.
+import type { SSHProfileStore, SSHProfile, ApprovalTargetProfile } from '@amber/chat-domain';
 import type { SkillMetadata, TaskModelReference, MiniAppRecord, ChatStreamProvider, ChatTurnDeps, ToolLoopOptions, KeyValueStore, Assistant, AgentTool, SubAgentGenerationRequest, Conversation, JevSettings, JevQuestion, JevEvaluateResult, JsonObject, PluginStore, InstalledPlugin, PluginLoopAdapter, TerminalApprovalGuard } from '@amber/chat-domain';
-import { patchAssistant, loadJevSettings, AgentToolDispatcher, createTerminalApprovalGuard } from '@amber/chat-domain';
+import { patchAssistant, loadJevSettings, AgentToolDispatcher, createTerminalApprovalGuard,
+  setApprovalTargetProfiles } from '@amber/chat-domain';
 import { createConversationToolComposition } from './ConversationToolComposition.ets';
 import type { ChatExecutionResources, ConversationPreparationPorts, ConversationTurnPorts } from '../platform_impl/ConversationRunDependencies.ets';
 import { prepareChatRuntime, prepareConversationSeed, buildConversationTurnDeps, buildConversationCompressProvider } from '../platform_impl/ConversationRunDependencies.ets';
@@ -213,7 +215,16 @@ export const getChatAssistants = resources.getChatAssistants;
 export const getAgentTaskStore = tasks.getAgentTaskStore;
 export const getAgentTaskScheduler = tasks.getAgentTaskScheduler;
 export const getAgentTaskTools = tasks.getAgentTaskTools;
-export const getSSHProfileStore = localExecution.getSSHProfileStore;
+const getSSHProfileStoreWithApprovalCache = (): Promise<SSHProfileStore> =>
+    localExecution.getSSHProfileStore().then(async (store: SSHProfileStore): Promise<SSHProfileStore> => {
+        // 审批卡同步渲染,靠这份缓存说出「改哪一条」;每次读取都刷新一次快照。
+        const publish = (): void => setApprovalTargetProfiles(store.snapshot().profiles
+            .map((p: SSHProfile): ApprovalTargetProfile => ({ id: p.id, name: p.name, host: p.host, port: p.port })));
+        publish();
+        store.subscribe((): void => publish());
+        return store;
+    });
+export const getSSHProfileStore = getSSHProfileStoreWithApprovalCache;
 export const getTerminalRuntime = localExecution.getTerminalRuntime;
 export const getPythonRuntime = localExecution.getPythonRuntime;
 export const getMoshRuntime = localExecution.getMoshRuntime;

@@ -19,6 +19,7 @@ import type { JsonObject, JsonValue } from './json.ts';
 import type { UIMessagePart, UIMessagePartText } from './message.ts';
 import type { AgentTool, InputSchemaObj } from './tool.ts';
 import { DEVICE_SCHEDULE_TOOL_NAMES } from './device_schedule_tools.ts';
+import { SSH_PROFILE_TOOL_NAMES } from './terminal/profile_tools.ts';
 import { webMountActApprovalClass } from './webmount/parity.ts';
 import type { WebMountActApprovalClass } from './webmount/parity.ts';
 
@@ -190,6 +191,8 @@ export const toolCategory = (name: string): string => {
   if (name.startsWith('icloud_')) return 'cloud';
   if (name.startsWith('officepro_')) return 'office';
   if (name.startsWith('terminal_')) return 'terminal';
+  // SSH 配置管理属于终端配置面:与 terminal_* 同 category,共用终端授权门
+  if (SSH_PROFILE_TOOL_NAMES.includes(name)) return 'terminal';
   if (name === 'python_execute') return 'python';
   if (['search_web', 'scrape_web', 'search_sources_status', 'search_strategy_explain',
     'http_request'].includes(name)) return 'web';
@@ -255,6 +258,8 @@ export const toolMutatesState = (name: string): boolean => {
   if (name === 'memory_tool') return true;
   if (name === 'deep_read_open') return true;
   if (name === 'run_plan_update') return false;
+  // 改写已保存的 SSH 配置与凭据是真实状态变更
+  if (SSH_PROFILE_TOOL_NAMES.includes(name)) return name !== 'ssh_profile_list';
   return hasMutatingNameHint(name)
     || name.includes('_install')
     || name.includes('_stop')
@@ -312,6 +317,10 @@ export const toolRiskProfile = (name: string): RiskProfile => {
   }
   if (name.startsWith('screen_') || name === 'vlm_task') return { risk: 'sensitive', explicit: true };
   if (name.startsWith('terminal_')) return { risk: 'sensitive', explicit: true };
+  // 增/改/删 SSH 配置会写保存的凭据并改变连接目标:按高风险处理(用户已确认)
+  if (SSH_PROFILE_TOOL_NAMES.includes(name)) {
+    return { risk: name === 'ssh_profile_list' ? 'normal' : 'high', explicit: true };
+  }
   if (name === 'python_execute') return { risk: 'sensitive', explicit: true };
   if (DEVICE_SCHEDULE_TOOL_NAMES.includes(name)) return { risk: 'sensitive', explicit: true };
   if (name === 'wm_clear_session') return { risk: 'sensitive', explicit: true };
@@ -343,7 +352,7 @@ export const toolConcurrencySafe = (name: string): boolean => {
   //   same-turn parallel calls would fail with "browser busy" instead of queueing.
   if (['wm_get', 'wm_visual_snapshot'].includes(name)) return false;
   if (['terminal_install_packages', 'terminal_job_stop', 'terminal_execute',
-    'terminal_job_start'].includes(name)) return false;
+    'terminal_job_start'].includes(name) || SSH_PROFILE_TOOL_NAMES.includes(name)) return false;
   if (name.startsWith('cron_task_') && name !== 'cron_task_list') return false;
   if (name.startsWith('agent_task_')
     || ['agent_runtime_status', 'tool_policy_explain', 'tool_search', 'tools_list'].includes(name)) {

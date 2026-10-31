@@ -12,8 +12,9 @@ import type {
   Conversation, MessageNode,
 } from './conversation.ts';
 import type {
-  UIMessage, UIMessagePart, UIMessagePartImage, UIMessagePartTool,
+  UIMessage, UIMessagePart, UIMessagePartImage,
 } from './message.ts';
+import { redactStoredToolInput } from './tool_input_redaction.ts';
 
 export const CHAT_BLOB_PREFIX: string = 'blob://';
 export const CHAT_BLOB_MISSING_URL: string = 'blob://missing';
@@ -119,7 +120,8 @@ const externalizePart = async (
         externalizePart(child, port, hashes)));
     return {
       type: 'tool', toolCallId: part.toolCallId, toolName: part.toolName,
-      input: part.input, output, approvalState: part.approvalState, metadata: part.metadata,
+      input: redactStoredToolInput(part.toolName, part.input), output, approvalState: part.approvalState,
+      metadata: part.metadata,
     };
   }
   return part;

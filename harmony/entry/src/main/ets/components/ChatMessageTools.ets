@@ -5,10 +5,11 @@
 //   + 失败检测 + 拒绝原因 + 点击胶囊查看输出详情 + 工具类型分类
 // 降级(跳过): shimmer / FaviconRow / ZoomableAsyncImage / TTS replay / workspace-file 卡片
 
-import type { UIMessagePartTool, UIMessagePartText, UIMessagePartImage, ToolApprovalSummary } from '@amber/chat-domain';
+import type { UIMessagePartTool, UIMessagePartText, UIMessagePartImage, ToolApprovalSummary,
+  JsonObject, JsonValue } from '@amber/chat-domain';
 import {
   toolActivityStatus, toolOutputJson, jevAutoApprovalReason, toolDisplayTitle, toolStaticDisplayTitle,
-  buildToolApprovalSummary, toolInputAsJson,
+  buildToolApprovalSummary, toolInputAsJson, approvalTargetProfile,
 } from '@amber/chat-domain';
 import { MOTION_OVERLAY, INK2, INK3, SURFACE, LINE, ERROR, META, LABEL, RADIUS } from '../design/tokens.ets';
 import { GeneratedImageCarousel } from './GeneratedImageCarousel.ets';
@@ -117,7 +118,11 @@ export struct ChatMessageTools {
     if (!this.isPending()) return null;
     if (this.packageApprovalView() !== null || isSSHApprovalTool(this.part.toolName)) return null;
     if (parseNovelChapterPlanProposal(this.part) !== null) return null;
-    return buildToolApprovalSummary(this.part.toolName, toolInputAsJson(this.part));
+    // 改/删 SSH 配置时补上保存的 profile,卡片才能写清「改哪一条」。
+    const input: JsonObject = toolInputAsJson(this.part);
+    const profileId: JsonValue | undefined = input['id'];
+    return buildToolApprovalSummary(this.part.toolName, input,
+      { sshProfile: approvalTargetProfile(typeof profileId === 'string' ? profileId : null) });
   }
 
   // output 首条文本(预览)
