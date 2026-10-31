@@ -1023,6 +1023,10 @@ dependencies {
     // quickie (qrcode scanner)
     implementation(libs.quickie.bundled)
     implementation(libs.barcode.scanning)
+    // Bundled on-device text recognition (Chinese model also covers Latin) used by the
+    // ScreenOcrService fallback for WebView/Canvas screens. Keep it bundled: the OCR
+    // fallback must not depend on Play Services or on a runtime model download.
+    implementation(libs.text.recognition.chinese)
     implementation(libs.androidx.camera.core)
 
     // Room

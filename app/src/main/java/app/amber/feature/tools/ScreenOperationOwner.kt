@@ -17,7 +17,7 @@ import kotlinx.coroutines.withContext
 /** Owns one screen operation, run stop markers and the matching activity settlement. */
 internal class ScreenOperationOwner(
     private val activityStore: AgentToolActivityStore,
-    private val takeoverController: PhoneAutomationTakeoverController? = null,
+    internal val takeoverController: PhoneAutomationTakeoverController? = null,
 ) {
     private val screenOwner = Mutex()
 
@@ -26,6 +26,13 @@ internal class ScreenOperationOwner(
      * 进程级布尔会把一次 stop 变成"App 级永久关闭屏幕自控"。
      */
     private val stoppedRuns: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    @Volatile
+    private var boundRunId: String? = null
+
+    fun bindRun(runId: String?) {
+        boundRunId = runKey(runId)
+    }
 
     fun runKey(runId: String?): String? = runId?.takeIf { it.isNotBlank() }
 
@@ -58,6 +65,17 @@ internal class ScreenOperationOwner(
             return try {
                 val result = if (toolName != "screen_run_goal" && takeoverController != null) {
                     val controller = getActiveAccessibilityController()
+                    val currentRunKey = runKey(runId) ?: boundRunId
+                    val initialSession = takeoverController.state.value
+                    if (initialSession.isActive &&
+                        (initialSession.pauseReason == "process_restart" ||
+                            initialSession.runId.isNullOrBlank() ||
+                            (currentRunKey != null && initialSession.runId != currentRunKey))
+                    ) {
+                        // A stale or orphaned takeover session from an ended/restarted run must
+                        // never block a new run's screen operations.
+                        takeoverController.finishSession(initialSession.runId)
+                    }
                     val phase = takeoverController.state.value.phase
                     if (phase == PhoneTakeoverPhase.PAUSING ||
                         phase == PhoneTakeoverPhase.PAUSED ||
@@ -74,12 +92,29 @@ internal class ScreenOperationOwner(
                                 put("reason", "user_takeover_paused")
                             }
                         }
-                        if (takeoverController.state.value.phase == PhoneTakeoverPhase.RESUMING && controller != null) {
-                            val fresh = withContext(Dispatchers.Main.immediate) {
-                                controller.captureScreenSnapshot()
+                    }
+                    // Re-read the phase: the awaited transition above ends in RESUMING, so the
+                    // pre-await value cannot be used to decide whether a fresh snapshot is due.
+                    if (takeoverController.state.value.phase == PhoneTakeoverPhase.RESUMING) {
+                        val fresh = controller?.let {
+                            withContext(Dispatchers.Main.immediate) { it.captureScreenSnapshot() }
+                        }
+                        if (fresh != null && takeoverController.confirmResumedWithFreshSnapshot(fresh)) {
+                            // RESUMING -> AUTOMATED only after a post-takeover snapshot exists.
+                        } else {
+                            // Fail closed instead of dispatching against a pre-takeover view; a new
+                            // PAUSED state keeps a usable "resume" action in the UI. Only regress an
+                            // actual RESUMING phase so a session that already advanced is untouched.
+                            if (takeoverController.state.value.phase == PhoneTakeoverPhase.RESUMING) {
+                                takeoverController.confirmPaused(
+                                    reason = "fresh_snapshot_unavailable",
+                                    controller = controller,
+                                )
                             }
-                            if (fresh != null) {
-                                takeoverController.confirmResumedWithFreshSnapshot(fresh)
+                            return textJson {
+                                put("success", false)
+                                put("status", "needs_user_action")
+                                put("reason", "fresh_snapshot_unavailable")
                             }
                         }
                     }

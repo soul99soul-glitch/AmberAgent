@@ -74,6 +74,7 @@ data class NotificationActionConfig(
     val intent: PendingIntent,
     val remoteInput: RemoteInput? = null,
     val allowGeneratedReplies: Boolean = true,
+    val authenticationRequired: Boolean = true,
 )
 
 data class XiaomiSuperIslandConfig(
@@ -190,16 +191,14 @@ object NotificationUtil {
                 ContextCompat.getDrawable(context, iconRes)?.toNotificationBitmap()?.let { setLargeIcon(it) }
             }
             config.actions.forEach { action ->
-                if (action.remoteInput == null) {
-                    addAction(action.icon, action.title, action.intent)
-                } else {
-                    addAction(
-                        NotificationCompat.Action.Builder(action.icon, action.title, action.intent)
-                            .addRemoteInput(action.remoteInput)
-                            .setAllowGeneratedReplies(action.allowGeneratedReplies)
-                            .build()
-                    )
+                val actionBuilder = NotificationCompat.Action.Builder(action.icon, action.title, action.intent)
+                    .setAuthenticationRequired(action.authenticationRequired)
+                if (action.remoteInput != null) {
+                    actionBuilder
+                        .addRemoteInput(action.remoteInput)
+                        .setAllowGeneratedReplies(action.allowGeneratedReplies)
                 }
+                addAction(actionBuilder.build())
             }
             config.progressMax?.let { max ->
                 setProgress(max, config.progress.coerceIn(0, max), config.progressIndeterminate)

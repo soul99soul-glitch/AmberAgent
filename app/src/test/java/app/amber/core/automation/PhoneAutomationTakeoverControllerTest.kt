@@ -113,26 +113,19 @@ class PhoneAutomationTakeoverControllerTest {
             assertTrue(controller.requestResume())
             assertEquals(PhoneTakeoverPhase.RESUMING, controller.state.value.phase)
 
-            // Rejects resuming with an already-invalidated pre-takeover snapshot
-            val staleSnapshot = ScreenSnapshot(
+            // Snapshot ids are content hashes: resuming an untouched screen re-captures the very
+            // id invalidated at takeover, and that fresh capture must not wedge RESUMING.
+            val resumedUnchangedSnapshot = ScreenSnapshot(
                 id = "snap-before",
                 packageName = "tv.danmaku.bili",
                 windowId = 1,
                 nodes = listOf(sampleNode("n1", label = "旧快照", clickable = true)),
             )
-            assertFalse(controller.confirmResumedWithFreshSnapshot(staleSnapshot))
-            assertEquals(PhoneTakeoverPhase.RESUMING, controller.state.value.phase)
-
-            val freshSnapshot = ScreenSnapshot(
-                id = "snap-after-user",
-                packageName = "tv.danmaku.bili",
-                windowId = 1,
-                nodes = listOf(sampleNode("n1", label = "搜索结果", clickable = true)),
-            )
-            assertTrue(controller.confirmResumedWithFreshSnapshot(freshSnapshot))
+            assertTrue(controller.confirmResumedWithFreshSnapshot(resumedUnchangedSnapshot))
             assertEquals(PhoneTakeoverPhase.AUTOMATED, controller.state.value.phase)
-            assertEquals("snap-after-user", controller.state.value.lastSnapshotId)
-            assertFalse(ScreenSnapshotInvalidationRegistry.isInvalidated("snap-after-user"))
+            assertEquals("snap-before", controller.state.value.lastSnapshotId)
+            assertFalse("snap-before" in controller.state.value.invalidatedSnapshotIds)
+            assertFalse(ScreenSnapshotInvalidationRegistry.isInvalidated("snap-before"))
 
             controller.finishSession("run-101")
             assertEquals(PhoneTakeoverPhase.IDLE, controller.state.value.phase)
@@ -396,5 +389,127 @@ class PhoneAutomationTakeoverControllerTest {
         // Session stays paused with interceptedSensitiveAction visible until turn ends or user resumes
         assertEquals(PhoneTakeoverPhase.PAUSED, takeoverController.state.value.phase)
         assertEquals("Click 完成草稿编辑", takeoverController.state.value.interceptedSensitiveAction)
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // P4 (A4.x): FilePhoneTakeoverPersistence was written on every transition but `load()` had no
+    // production caller, so a process kill during a takeover restored nothing.
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    fun `paused session across process restart invalidates snapshots and clears dead run unless run is alive`() {
+        val dir = Files.createTempDirectory("takeover_restore").toFile()
+        try {
+            val file = File(dir, "phone_takeover_state.properties")
+            val before = PhoneAutomationTakeoverController(
+                persistence = FilePhoneTakeoverPersistence(file),
+            )
+            before.startSession(runId = "run-restart", packageName = "com.example", goal = "填表", maxSteps = 8)
+            before.recordObservedSnapshot(snapshotId = "snap-live", stepIndex = 3)
+            before.confirmPaused(snapshotId = "snap-live", reason = "user_requested")
+            ScreenSnapshotInvalidationRegistry.clearForTest()
+
+            // Default restart (dead run): resets to IDLE so it never blocks a new run,
+            // while still re-registering invalidated snapshots into ScreenSnapshotInvalidationRegistry.
+            val deadRunAfter = PhoneAutomationTakeoverController(
+                persistence = FilePhoneTakeoverPersistence(file),
+                restoreOnCreate = true,
+            )
+            assertEquals(PhoneTakeoverPhase.IDLE, deadRunAfter.state.value.phase)
+            assertTrue(ScreenSnapshotInvalidationRegistry.isInvalidated("snap-live"))
+
+            // Rewrite paused state to test live-run recovery when isRunAlive returns true:
+            before.startSession(runId = "run-restart", packageName = "com.example", goal = "填表", maxSteps = 8)
+            before.recordObservedSnapshot(snapshotId = "snap-live-2", stepIndex = 3)
+            before.confirmPaused(snapshotId = "snap-live-2", reason = "user_requested")
+            ScreenSnapshotInvalidationRegistry.clearForTest()
+
+            val after = PhoneAutomationTakeoverController(
+                persistence = FilePhoneTakeoverPersistence(file),
+                restoreOnCreate = true,
+                isRunAlive = { it == "run-restart" },
+            )
+            val restored = after.state.value
+            assertEquals(PhoneTakeoverPhase.PAUSED, restored.phase)
+            assertEquals("run-restart", restored.runId)
+            assertEquals("com.example", restored.packageName)
+            assertEquals("填表", restored.goal)
+            assertEquals(3, restored.currentStep)
+            assertEquals(8, restored.maxSteps)
+            assertEquals("process_restart", restored.pauseReason)
+            assertTrue(after.state.value.canRequestResume)
+            assertTrue(ScreenSnapshotInvalidationRegistry.isInvalidated("snap-live-2"))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `markFreshCapture does not clear invalidated snapshot while takeover pause is active`() {
+        val controller = PhoneAutomationTakeoverController()
+        controller.startSession(runId = "run-pause", packageName = "com.example", goal = "goal", maxSteps = 4)
+        controller.recordObservedSnapshot("snap-paused", 1)
+        controller.confirmPaused(snapshotId = "snap-paused", reason = "user_requested")
+        assertTrue(ScreenSnapshotInvalidationRegistry.isTakeoverPauseActive())
+        assertTrue(ScreenSnapshotInvalidationRegistry.isInvalidated("snap-paused"))
+
+        // Attempting to mark fresh capture during pause must not resurrect the invalidated snapshot.
+        ScreenSnapshotInvalidationRegistry.markFreshCapture("snap-paused")
+        assertTrue(ScreenSnapshotInvalidationRegistry.isInvalidated("snap-paused"))
+    }
+
+    @Test
+    fun `an automated session is not resurrected after a restart`() {
+        val dir = Files.createTempDirectory("takeover_restore").toFile()
+        try {
+            val file = File(dir, "phone_takeover_state.properties")
+            val before = PhoneAutomationTakeoverController(
+                persistence = FilePhoneTakeoverPersistence(file),
+            )
+            before.startSession(runId = "run-live", packageName = "com.example", goal = "跑完", maxSteps = 4)
+            before.recordObservedSnapshot(snapshotId = "snap-live", stepIndex = 1)
+            assertEquals(PhoneTakeoverPhase.AUTOMATED, before.state.value.phase)
+
+            // The executor and its coroutines died with the process; claiming AUTOMATED would show
+            // a live run that no longer exists and let the user believe taps will be dispatched.
+            val after = PhoneAutomationTakeoverController(
+                persistence = FilePhoneTakeoverPersistence(file),
+                restoreOnCreate = true,
+            )
+            assertEquals(PhoneTakeoverPhase.IDLE, after.state.value.phase)
+            assertFalse(after.state.value.isActive)
+            assertFalse(after.state.value.canRequestResume)
+            assertFalse(after.state.value.canRequestTakeover)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `restore is off by default and a missing file restores nothing`() {
+        val dir = Files.createTempDirectory("takeover_restore").toFile()
+        try {
+            val file = File(dir, "phone_takeover_state.properties")
+            val writer = PhoneAutomationTakeoverController(persistence = FilePhoneTakeoverPersistence(file))
+            writer.startSession(runId = "run-x", packageName = "pkg", goal = "g", maxSteps = 2)
+            writer.confirmPaused(reason = "user_requested")
+
+            val inMemoryDefault = PhoneAutomationTakeoverController(
+                persistence = FilePhoneTakeoverPersistence(file),
+            )
+            assertEquals(
+                "a controller that does not opt in must start IDLE",
+                PhoneTakeoverPhase.IDLE,
+                inMemoryDefault.state.value.phase,
+            )
+
+            val missing = PhoneAutomationTakeoverController(
+                persistence = FilePhoneTakeoverPersistence(File(dir, "absent.properties")),
+                restoreOnCreate = true,
+            )
+            assertEquals(PhoneTakeoverPhase.IDLE, missing.state.value.phase)
+        } finally {
+            dir.deleteRecursively()
+        }
     }
 }

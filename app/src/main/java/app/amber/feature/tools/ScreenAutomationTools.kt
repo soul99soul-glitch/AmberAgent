@@ -42,29 +42,32 @@ class ScreenAutomationTools(
     private val flow = ScreenFlowTools(settingsStore, operations)
     private val collection = ScreenListCollection(operations)
 
-    fun getTools(runId: String? = null): List<Tool> = listOf(
-        scope.screenStatusTool(runId),
-        scope.screenAppsTool,
-        scope.screenAddAppTool(runId),
-        scope.screenRemoveAppTool,
-        scope.screenStopTool(runId),
-        scope.screenGoalTool(runId),
-        primitives.screenClickTool,
-        primitives.screenLongClickTool,
-        primitives.screenSwipeTool,
-        primitives.screenInputTextTool,
-        primitives.screenBackTool,
-        primitives.screenHomeTool,
-        primitives.screenOpenAppTool,
-        primitives.screenOpenUrlTool,
-        primitives.screenReadUiTool,
-        primitives.screenFindTextTool,
-        primitives.screenTapTextTool,
-        primitives.screenWaitForTextTool,
-        primitives.screenScrollUntilTool,
-        flow.screenRunFlowTool(runId),
-        collection.screenCollectListTool,
-        primitives.screenScreenshotTool,
-        primitives.vlmTaskTool,
-    )
+    fun getTools(runId: String? = null): List<Tool> {
+        operations.bindRun(runId)
+        return listOf(
+            scope.screenStatusTool(runId),
+            scope.screenAppsTool,
+            scope.screenAddAppTool(runId),
+            scope.screenRemoveAppTool,
+            scope.screenStopTool(runId),
+            scope.screenGoalTool(runId),
+            primitives.screenClickTool,
+            primitives.screenLongClickTool,
+            primitives.screenSwipeTool,
+            primitives.screenInputTextTool,
+            primitives.screenBackTool,
+            primitives.screenHomeTool,
+            primitives.screenOpenAppTool,
+            primitives.screenOpenUrlTool,
+            primitives.screenReadUiTool,
+            primitives.screenFindTextTool,
+            primitives.screenTapTextTool,
+            primitives.screenWaitForTextTool,
+            primitives.screenScrollUntilTool,
+            flow.screenRunFlowTool(runId),
+            collection.screenCollectListTool,
+            primitives.screenScreenshotTool,
+            primitives.vlmTaskTool,
+        )
+    }
 }

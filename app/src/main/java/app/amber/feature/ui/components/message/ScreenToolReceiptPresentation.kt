@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -143,6 +144,7 @@ object ScreenToolReceiptParser {
         toolName: String,
         arguments: JsonElement,
         content: JsonElement?,
+        context: android.content.Context? = null,
     ): ScreenToolReceiptModel? {
         if (!isScreenTool(toolName)) return null
         val obj = content?.jsonObjectOrNull ?: return null
@@ -163,8 +165,8 @@ object ScreenToolReceiptParser {
             ?: argsObj?.string("package_name")
             ?: argsObj?.string("package")
 
-        val executedSteps = parseExecutedSteps(toolName, argsObj, obj)
-        val heldSensitiveActions = parseHeldSensitiveActions(obj)
+        val executedSteps = parseExecutedSteps(toolName, argsObj, obj, context)
+        val heldSensitiveActions = parseHeldSensitiveActions(obj, context)
         val tier = determineTier(
             toolName = toolName,
             rawStatus = rawStatus.lowercase(),
@@ -179,6 +181,7 @@ object ScreenToolReceiptParser {
             rawReason = rawReason,
             obj = obj,
             heldSensitiveActions = heldSensitiveActions,
+            context = context,
         )
         val recommendedNextStep = obj.string("next")
             ?: obj.string("message")?.takeIf { toolName == "vlm_task" }
@@ -210,28 +213,58 @@ object ScreenToolReceiptParser {
         obj: JsonObject,
         heldSensitiveActions: List<ScreenReceiptHeldActionItem>,
     ): ScreenReceiptTier {
+        // Takeover / held outcomes return success=false, so they must be classified before the
+        // failure short-circuit or a paused hand-back would render as a red "failed" receipt.
+        val needsUserConfirmation = rawStatus == "needs_user_action" ||
+            rawReason in setOf(
+                "action_not_read_only",
+                "user_takeover_paused",
+                "fresh_snapshot_unavailable",
+                "takeover_snapshot_not_refreshed",
+            ) ||
+            (heldSensitiveActions.any { it.isSelectedChoice } && rawStatus != "completed")
         if (!obj.string("error").isNullOrBlank() ||
-            obj.bool("success") == false ||
-            rawStatus in setOf("failed", "error", "disabled", "busy", "denied", "timed_out", "policy_denied")
+            rawStatus in setOf(
+                "failed",
+                "error",
+                "disabled",
+                "busy",
+                "denied",
+                "timed_out",
+                "policy_denied",
+                // The allow-list refused the tool and nothing was dispatched.
+                "no_scope",
+                // The flow rejected its input before the first step.
+                "rejected",
+            ) ||
+            (obj.bool("success") == false && !needsUserConfirmation)
         ) {
             return ScreenReceiptTier.FAILED_OR_BLOCKED
         }
         if (rawStatus in setOf("outcome_unknown", "unknown")) {
             return ScreenReceiptTier.OUTCOME_UNKNOWN
         }
-        if (rawStatus == "needs_user_action" ||
-            rawReason == "action_not_read_only" ||
-            rawReason == "user_takeover_paused" ||
-            (heldSensitiveActions.any { it.isSelectedChoice } && rawStatus != "completed")
-        ) {
+        if (needsUserConfirmation) {
             return ScreenReceiptTier.HELD_FOR_USER
         }
         val verifyTextFound = obj.bool("verify_text_found")
         val verified = obj.bool("verified")
         val matched = obj.bool("matched")
         val found = obj.bool("found")
-        if (rawStatus in setOf("handback", "steps_exhausted", "budget_exhausted", "shadow_trace", "stale_snapshot", "unverified") ||
+        // screen_click/swipe/long_click with `expectation` report the acceptance result here.
+        val expectationMet = (obj["verification"] as? JsonObject)?.bool("met")
+        if (rawStatus in setOf(
+                "handback",
+                "steps_exhausted",
+                "budget_exhausted",
+                "shadow_trace",
+                "stale_snapshot",
+                "unverified",
+                // vlm_task only records intent; it never dispatches an action.
+                "planned",
+            ) ||
             verifyTextFound == false ||
+            expectationMet == false ||
             (verified == false && toolName in setOf("screen_tap_text", "screen_click", "screen_input_text")) ||
             ((matched == false || found == false) && toolName == "screen_wait_for_text") ||
             (found == false && toolName in setOf("screen_find_text", "screen_scroll_until"))
@@ -252,6 +285,7 @@ object ScreenToolReceiptParser {
         toolName: String,
         argsObj: JsonObject?,
         obj: JsonObject,
+        context: android.content.Context? = null,
     ): List<ScreenReceiptStepItem> {
         val stepsArray = obj["steps"] as? JsonArray
         if (stepsArray != null) {
@@ -260,8 +294,9 @@ object ScreenToolReceiptParser {
                 val stepObj = element.jsonObjectOrNull ?: return@forEachIndexed
                 val dispatched = stepObj.bool("dispatched") ?: (stepObj.string("status") == "ok")
                 val reason = stepObj.string("reason")
-                if (!dispatched && reason == "action_not_read_only") {
-                    // Belongs in heldSensitiveActions, not executed steps
+                if (!dispatched) {
+                    // Shadow/stale/held steps were never sent to the device; held ones are listed
+                    // separately and the rest must not inflate "confirmed executed steps".
                     return@forEachIndexed
                 }
                 val actionKind = stepObj.string("action")
@@ -284,30 +319,71 @@ object ScreenToolReceiptParser {
             return result
         }
 
-        // Single low-level screen_* tool call
+        // Single low-level screen_* tool call. vlm_task only plans, so it has no executed step.
+        if (toolName == "vlm_task") return emptyList()
         val isFailed = !obj.string("error").isNullOrBlank() ||
             obj.string("status") in setOf("failed", "error", "disabled", "busy", "stale_snapshot")
         if (isFailed) return emptyList()
 
         val label = when (toolName) {
-            "screen_open_app" -> "打开应用 ${obj.string("package_name") ?: argsObj?.string("package_name").orEmpty()}".trim()
-            "screen_open_url" -> "打开链接 ${obj.string("url") ?: argsObj?.string("url").orEmpty()}".trim()
-            "screen_tap_text" -> "点击文本 \"${obj.string("text") ?: argsObj?.string("text").orEmpty()}\""
-            "screen_find_text" -> "查找文本 \"${argsObj?.string("text").orEmpty()}\" (${obj.int("count") ?: 0} 处匹配)"
-            "screen_wait_for_text" -> "等待文本 \"${obj.string("text") ?: argsObj?.string("text").orEmpty()}\""
-            "screen_scroll_until" -> "滚动查找 \"${argsObj?.string("text").orEmpty()}\" (滑动 ${obj.int("swipes") ?: 0} 次)"
-            "screen_input_text" -> {
-                val rawText = argsObj?.string("text").orEmpty()
-                "输入文本 \"${SensitiveScreenTextClassifier.redactIfSensitive(rawText)}\""
+            "screen_open_app" -> {
+                val pkg = obj.string("package_name") ?: argsObj?.string("package_name").orEmpty()
+                (context?.getString(R.string.screen_receipt_step_open_app, pkg) ?: "打开应用 $pkg").trim()
             }
-            "screen_click" -> "点击坐标/节点 ${argsObj?.string("node_ref") ?: "(${argsObj?.int("x") ?: 0}, ${argsObj?.int("y") ?: 0})"}"
-            "screen_long_click" -> "长按坐标 (${argsObj?.int("x") ?: 0}, ${argsObj?.int("y") ?: 0})"
-            "screen_swipe" -> "滑动屏幕"
-            "screen_back" -> "返回上一级"
-            "screen_home" -> "回到主屏幕"
-            "screen_read_ui" -> "读取当前界面结构"
-            "screen_screenshot" -> "截取当前屏幕 (${obj.int("width") ?: 0}x${obj.int("height") ?: 0})"
-            "vlm_task" -> "规划屏幕目标 ${obj.string("goal") ?: argsObj?.string("goal").orEmpty()}".trim()
+            "screen_open_url" -> {
+                val url = obj.string("url") ?: argsObj?.string("url").orEmpty()
+                (context?.getString(R.string.screen_receipt_step_open_url, url) ?: "打开链接 $url").trim()
+            }
+            "screen_tap_text" -> {
+                val text = obj.string("text") ?: argsObj?.string("text").orEmpty()
+                context?.getString(R.string.screen_receipt_step_tap_text, text) ?: "点击文本 \"$text\""
+            }
+            "screen_find_text" -> {
+                val text = argsObj?.string("text").orEmpty()
+                val count = obj.int("count") ?: 0
+                context?.getString(R.string.screen_receipt_step_find_text, text, count)
+                    ?: "查找文本 \"$text\" ($count 处匹配)"
+            }
+            "screen_wait_for_text" -> {
+                val text = obj.string("text") ?: argsObj?.string("text").orEmpty()
+                context?.getString(R.string.screen_receipt_step_wait_for_text, text) ?: "等待文本 \"$text\""
+            }
+            "screen_scroll_until" -> {
+                val text = argsObj?.string("text").orEmpty()
+                val swipes = obj.int("swipes") ?: 0
+                context?.getString(R.string.screen_receipt_step_scroll_until, text, swipes)
+                    ?: "滚动查找 \"$text\" (滑动 $swipes 次)"
+            }
+            "screen_input_text" -> {
+                val rawText = SensitiveScreenTextClassifier.redactIfSensitive(argsObj?.string("text").orEmpty())
+                context?.getString(R.string.screen_receipt_step_input_text, rawText)
+                    ?: "输入文本 \"$rawText\""
+            }
+            "screen_click" -> {
+                val target = argsObj?.string("node_ref") ?: "(${argsObj?.int("x") ?: 0}, ${argsObj?.int("y") ?: 0})"
+                context?.getString(R.string.screen_receipt_step_click, target)
+                    ?: "点击坐标/节点 $target"
+            }
+            "screen_long_click" -> {
+                val x = argsObj?.int("x") ?: 0
+                val y = argsObj?.int("y") ?: 0
+                context?.getString(R.string.screen_receipt_step_long_click, x, y)
+                    ?: "长按坐标 ($x, $y)"
+            }
+            "screen_swipe" -> context?.getString(R.string.screen_receipt_step_swipe) ?: "滑动屏幕"
+            "screen_back" -> context?.getString(R.string.screen_receipt_step_back) ?: "返回上一级"
+            "screen_home" -> context?.getString(R.string.screen_receipt_step_home) ?: "回到主屏幕"
+            "screen_read_ui" -> context?.getString(R.string.screen_receipt_step_read_ui) ?: "读取当前界面结构"
+            "screen_screenshot" -> {
+                val w = obj.int("width") ?: 0
+                val h = obj.int("height") ?: 0
+                context?.getString(R.string.screen_receipt_step_screenshot, w, h)
+                    ?: "截取当前屏幕 (${w}x${h})"
+            }
+            "vlm_task" -> {
+                val g = obj.string("goal") ?: argsObj?.string("goal").orEmpty()
+                (context?.getString(R.string.screen_receipt_step_plan_goal, g) ?: "规划屏幕目标 $g").trim()
+            }
             else -> toolName
         }
         val dispatched = obj.bool("dispatched") ?: true
@@ -323,7 +399,10 @@ object ScreenToolReceiptParser {
         )
     }
 
-    private fun parseHeldSensitiveActions(obj: JsonObject): List<ScreenReceiptHeldActionItem> {
+    private fun parseHeldSensitiveActions(
+        obj: JsonObject,
+        context: android.content.Context? = null,
+    ): List<ScreenReceiptHeldActionItem> {
         val items = mutableListOf<ScreenReceiptHeldActionItem>()
         val seenLabels = mutableSetOf<String>()
 
@@ -348,7 +427,9 @@ object ScreenToolReceiptParser {
         stepsArray?.forEach { element ->
             val stepObj = element.jsonObjectOrNull ?: return@forEach
             if (stepObj.bool("dispatched") == false && stepObj.string("reason") == "action_not_read_only") {
-                val rawLabel = stepObj.string("label") ?: stepObj.string("choice") ?: "敏感操作"
+                val rawLabel = stepObj.string("label")
+                    ?: stepObj.string("choice")
+                    ?: (context?.getString(R.string.screen_receipt_sensitive_action_default) ?: "敏感操作")
                 val cleanLabel = SensitiveScreenTextClassifier.redactIfSensitive(rawLabel)
                 if (seenLabels.add(cleanLabel)) {
                     items += ScreenReceiptHeldActionItem(
@@ -402,70 +483,117 @@ object ScreenToolReceiptParser {
         rawReason: String?,
         obj: JsonObject,
         heldSensitiveActions: List<ScreenReceiptHeldActionItem>,
+        context: android.content.Context? = null,
     ): List<String> {
         if (tier == ScreenReceiptTier.VERIFIED_COMPLETED) return emptyList()
         val reasons = mutableListOf<String>()
 
         when (rawReason) {
             "action_not_read_only" ->
-                reasons += "已为您完成前置步骤，最后一步属于具有外部副作用的敏感操作，已暂停并等待您手动点击确认。"
+                reasons += context?.getString(R.string.screen_receipt_reason_action_not_read_only)
+                    ?: "已为您完成前置步骤，最后一步属于具有外部副作用的敏感操作，已暂停并等待您手动点击确认。"
             "user_takeover_paused" ->
-                reasons += "您已主动接管当前手机操作，自动执行已安全暂停。"
+                reasons += context?.getString(R.string.screen_receipt_reason_user_takeover_paused)
+                    ?: "您已主动接管当前手机操作，自动执行已安全暂停。"
+            "fresh_snapshot_unavailable", "takeover_snapshot_not_refreshed" ->
+                reasons += context?.getString(R.string.screen_receipt_reason_fresh_snapshot_unavailable)
+                    ?: "接管后未能重新读取到最新画面，已保持暂停；请回到目标应用后再次点击「继续自动操作」。"
             "foreground_package_changed" ->
-                reasons += "当前前台应用已切换（如弹出系统权限框或跳转到其他应用），为保护隐私已暂停跨应用操作。"
+                reasons += context?.getString(R.string.screen_receipt_reason_foreground_package_changed)
+                    ?: "当前前台应用已切换（如弹出系统权限框或跳转到其他应用），为保护隐私已暂停跨应用操作。"
             "done_not_verified" ->
-                reasons += "当前屏幕尚未出现足以证明目标完全达成的视觉证据。"
+                reasons += context?.getString(R.string.screen_receipt_reason_done_not_verified)
+                    ?: "当前屏幕尚未出现足以证明目标完全达成的视觉证据。"
             "completion_snapshot_changed" ->
-                reasons += "完成验收瞬间界面状态仍在变化，未能锁定最终验收快照。"
+                reasons += context?.getString(R.string.screen_receipt_reason_completion_snapshot_changed)
+                    ?: "完成验收瞬间界面状态仍在变化，未能锁定最终验收快照。"
             "no_progress" ->
-                reasons += "连续两步操作后界面无变化（可能已滑到底部或按钮未响应）。"
+                reasons += context?.getString(R.string.screen_receipt_reason_no_progress)
+                    ?: "连续两步操作后界面无变化（可能已滑到底部或按钮未响应）。"
             "screen_unavailable", "post_action_screen_unavailable" ->
-                reasons += "无法读取当前屏幕无障碍节点树（可能处于安全隐私界面或无障碍服务未就绪）。"
+                reasons += context?.getString(R.string.screen_receipt_reason_screen_unavailable)
+                    ?: "无法读取当前屏幕无障碍节点树（可能处于安全隐私界面或无障碍服务未就绪）。"
             "stale_snapshot", "takeover_snapshot_invalidated", "returned_to_host_snapshot_invalidated" ->
-                reasons += "操作前界面快照已过期失效，已拦截基于旧界面的重复动作。"
+                reasons += context?.getString(R.string.screen_receipt_reason_stale_snapshot)
+                    ?: "操作前界面快照已过期失效，已拦截基于旧界面的重复动作。"
             "jev_requested_handback" ->
-                reasons += "当前界面存在歧义或需要额外信息，已交回主模型或由您确认。"
+                reasons += context?.getString(R.string.screen_receipt_reason_jev_handback)
+                    ?: "当前界面存在歧义或需要额外信息，已交回主模型或由您确认。"
             "duration" ->
-                reasons += "单次屏幕目标执行达到安全时长上限。"
+                reasons += context?.getString(R.string.screen_receipt_reason_duration)
+                    ?: "单次屏幕目标执行达到安全时长上限。"
             "enable_jev_screen_automation" ->
-                reasons += "尚未在设置中开启 Jev 屏幕自动化策略。"
+                reasons += context?.getString(R.string.screen_receipt_reason_jev_disabled)
+                    ?: "尚未在设置中开启 Jev 屏幕自动化策略。"
             "screen_content_or_task_text_not_authorized" ->
-                reasons += "尚未授权屏幕内容或任务文本数据范围。"
+                reasons += context?.getString(R.string.screen_receipt_reason_scope_not_authorized)
+                    ?: "尚未授权屏幕内容或任务文本数据范围。"
+            "no_app_scope" ->
+                reasons += context?.getString(R.string.screen_receipt_reason_no_app_scope)
+                    ?: "尚未授权任何应用，自动操作未开始；请先让我确认要操作的应用。"
+            "package_not_allowed" ->
+                reasons += context?.getString(R.string.screen_receipt_reason_package_not_allowed)
+                    ?: "目标应用不在已授权列表，自动操作未开始；请先授权该应用。"
+            "no_run_scope" ->
+                reasons += context?.getString(R.string.screen_receipt_reason_no_run_scope)
+                    ?: "本次运行没有宿主绑定的任务范围，未执行任何自动操作。"
             else -> if (!rawReason.isNullOrBlank()) {
                 reasons += rawReason
             }
         }
 
+        if (rawReason?.startsWith("steps_must_be") == true) {
+            reasons += context?.getString(R.string.screen_receipt_reason_invalid_steps_count)
+                ?: "固定流程的步骤数量不合法，未执行任何步骤。"
+        }
+
         if (rawStatus == "steps_exhausted" && reasons.isEmpty()) {
-            reasons += "已达到单次自动操作的最大步数上限，尚未观察到最终完成标志。"
+            reasons += context?.getString(R.string.screen_receipt_reason_steps_exhausted)
+                ?: "已达到单次自动操作的最大步数上限，尚未观察到最终完成标志。"
         }
         if (rawStatus == "budget_exhausted" && reasons.isEmpty()) {
-            reasons += "已达到单次自动操作的时间预算上限。"
+            reasons += context?.getString(R.string.screen_receipt_reason_budget_exhausted)
+                ?: "已达到单次自动操作的时间预算上限。"
+        }
+        if (rawStatus == "planned" && reasons.isEmpty()) {
+            reasons += context?.getString(R.string.screen_receipt_reason_planned_only)
+                ?: "该工具只生成屏幕操作计划，未执行任何点击或输入。"
+        }
+        if ((obj["verification"] as? JsonObject)?.bool("met") == false) {
+            reasons += context?.getString(R.string.screen_receipt_reason_expectation_unmet)
+                ?: "点击后未满足你设定的验收条件。"
         }
         if (rawStatus == "outcome_unknown" && reasons.isEmpty()) {
-            reasons += "动作已发出，但界面回执尚未确认，请先核对当前屏幕状态避免重复点击。"
+            reasons += context?.getString(R.string.screen_receipt_reason_outcome_unknown)
+                ?: "动作已发出，但界面回执尚未确认，请先核对当前屏幕状态避免重复点击。"
         }
         if (obj.bool("verify_text_found") == false) {
             val expected = obj.string("verify_text").orEmpty()
             reasons += if (expected.isNotBlank()) {
-                "点击后未在界面上检测到预期验收文字「$expected」。"
+                context?.getString(R.string.screen_receipt_reason_verify_text_missing, expected)
+                    ?: "点击后未在界面上检测到预期验收文字「$expected」。"
             } else {
-                "点击后界面未出现预期变化。"
+                context?.getString(R.string.screen_receipt_reason_verify_change_missing)
+                    ?: "点击后界面未出现预期变化。"
             }
         }
         if (toolName == "screen_wait_for_text" && (obj.bool("matched") == false || obj.bool("found") == false)) {
-            reasons += "等待超时，目标文字尚未出现在当前屏幕上。"
+            reasons += context?.getString(R.string.screen_receipt_reason_wait_timeout)
+                ?: "等待超时，目标文字尚未出现在当前屏幕上。"
         }
         if (toolName == "screen_scroll_until" && obj.bool("found") == false) {
             reasons += if (obj.bool("stalled") == true) {
-                "已滑动到底部且画面不再变化，未找到目标文字。"
+                context?.getString(R.string.screen_receipt_reason_scroll_stalled)
+                    ?: "已滑动到底部且画面不再变化，未找到目标文字。"
             } else {
-                "达到最大滑动次数后仍未找到目标文字。"
+                context?.getString(R.string.screen_receipt_reason_scroll_exhausted)
+                    ?: "达到最大滑动次数后仍未找到目标文字。"
             }
         }
         if (heldSensitiveActions.isNotEmpty() && reasons.isEmpty()) {
             val labels = heldSensitiveActions.take(2).joinToString("、") { "「${it.label}」" }
-            reasons += "检测到敏感提交按钮 $labels，已自动留给您亲自确认。"
+            reasons += context?.getString(R.string.screen_receipt_reason_held_buttons_detected, labels)
+                ?: "检测到敏感提交按钮 $labels，已自动留给您亲自确认。"
         }
 
         return reasons.distinct()
@@ -537,11 +665,11 @@ internal fun ScreenToolReceiptInlineSummary(
         ScreenReceiptTier.FAILED_OR_BLOCKED -> Color(0xFFD94848)
     }
     val tierBadgeText = when (receipt.tier) {
-        ScreenReceiptTier.VERIFIED_COMPLETED -> "已完成验证"
-        ScreenReceiptTier.HELD_FOR_USER -> "待您确认最后一步"
-        ScreenReceiptTier.PARTIAL_OR_HANDBACK -> "阶段交回 · 待继续"
-        ScreenReceiptTier.OUTCOME_UNKNOWN -> "结果待核对"
-        ScreenReceiptTier.FAILED_OR_BLOCKED -> "未完成"
+        ScreenReceiptTier.VERIFIED_COMPLETED -> stringResource(R.string.screen_receipt_tier_badge_verified)
+        ScreenReceiptTier.HELD_FOR_USER -> stringResource(R.string.screen_receipt_tier_badge_held)
+        ScreenReceiptTier.PARTIAL_OR_HANDBACK -> stringResource(R.string.screen_receipt_tier_badge_handback)
+        ScreenReceiptTier.OUTCOME_UNKNOWN -> stringResource(R.string.screen_receipt_tier_badge_unknown)
+        ScreenReceiptTier.FAILED_OR_BLOCKED -> stringResource(R.string.screen_receipt_tier_badge_failed)
     }
     val tierIcon = when (receipt.tier) {
         ScreenReceiptTier.VERIFIED_COMPLETED -> Lucide.Check
@@ -612,7 +740,7 @@ internal fun ScreenToolReceiptInlineSummary(
                 if (receipt.heldSensitiveActions.isNotEmpty()) {
                     val firstHeld = receipt.heldSensitiveActions.first().label
                     ReceiptMetricChip(
-                        text = "${stringResource(R.string.screen_receipt_section_held_actions)}: $firstHeld",
+                        text = stringResource(R.string.screen_receipt_chip_held_action, firstHeld),
                         color = Color(0xFFD9822B),
                         background = Color(0xFFD9822B).copy(alpha = 0.12f),
                     )
@@ -620,7 +748,7 @@ internal fun ScreenToolReceiptInlineSummary(
 
                 if (receipt.ocrSummary?.triggered == true) {
                     ReceiptMetricChip(
-                        text = "端侧 OCR ${receipt.ocrSummary.blockCount} 处",
+                        text = stringResource(R.string.screen_receipt_chip_ocr_count, receipt.ocrSummary.blockCount),
                         color = tokens.ink3,
                         background = tokens.surface2,
                     )
@@ -628,9 +756,9 @@ internal fun ScreenToolReceiptInlineSummary(
 
                 if (receipt.hostReturnSummary != null) {
                     val returnLabel = if (receipt.hostReturnSummary.returnedToHost) {
-                        "已返回 Amber"
+                        stringResource(R.string.screen_receipt_chip_returned_to_host)
                     } else if (receipt.tier == ScreenReceiptTier.HELD_FOR_USER) {
-                        "停留在目标应用待您确认"
+                        stringResource(R.string.screen_receipt_chip_staying_for_confirm)
                     } else {
                         null
                     }
@@ -648,13 +776,13 @@ internal fun ScreenToolReceiptInlineSummary(
                 receipt.heldSensitiveActions.isNotEmpty() -> {
                     val heldNames = receipt.heldSensitiveActions.take(2).joinToString("、") { "「${it.label}」" }
                     val reasonText = receipt.unmetReasons.firstOrNull()
-                        ?: "敏感提交/发送操作已保留给您亲自点击确认。"
-                    "待确认动作：$heldNames — $reasonText"
+                        ?: stringResource(R.string.screen_receipt_held_default_reason)
+                    stringResource(R.string.screen_receipt_inline_held_detail, heldNames, reasonText)
                 }
                 receipt.unmetReasons.isNotEmpty() -> receipt.unmetReasons.first()
                 receipt.executedSteps.isNotEmpty() -> {
                     val lastStep = receipt.executedSteps.last()
-                    "最后执行：${lastStep.summaryLabel}"
+                    stringResource(R.string.screen_receipt_inline_last_step, lastStep.summaryLabel)
                 }
                 else -> null
             }
@@ -717,11 +845,11 @@ internal fun ScreenToolReceiptDetailSheetContent(
         ScreenReceiptTier.FAILED_OR_BLOCKED -> Color(0xFFD94848)
     }
     val tierTitle = when (receipt.tier) {
-        ScreenReceiptTier.VERIFIED_COMPLETED -> "目标已完成并验证"
-        ScreenReceiptTier.HELD_FOR_USER -> "已完成前置步骤 · 待您确认敏感动作"
-        ScreenReceiptTier.PARTIAL_OR_HANDBACK -> "阶段交回 · 存在未满足的验收条件"
-        ScreenReceiptTier.OUTCOME_UNKNOWN -> "动作已发出 · 结果待核对"
-        ScreenReceiptTier.FAILED_OR_BLOCKED -> "自动操作未能完成"
+        ScreenReceiptTier.VERIFIED_COMPLETED -> stringResource(R.string.screen_receipt_tier_title_verified)
+        ScreenReceiptTier.HELD_FOR_USER -> stringResource(R.string.screen_receipt_tier_title_held)
+        ScreenReceiptTier.PARTIAL_OR_HANDBACK -> stringResource(R.string.screen_receipt_tier_title_handback)
+        ScreenReceiptTier.OUTCOME_UNKNOWN -> stringResource(R.string.screen_receipt_tier_title_unknown)
+        ScreenReceiptTier.FAILED_OR_BLOCKED -> stringResource(R.string.screen_receipt_tier_title_failed)
     }
 
     BoxWithConstraints(
@@ -768,7 +896,7 @@ internal fun ScreenToolReceiptDetailSheetContent(
                     }
                     if (!receipt.goal.isNullOrBlank()) {
                         Text(
-                            text = "任务目标：${receipt.goal}",
+                            text = stringResource(R.string.screen_receipt_goal_prefix, receipt.goal),
                             style = MaterialTheme.typography.bodySmall,
                             color = tokens.ink2,
                             maxLines = 3,
@@ -781,14 +909,14 @@ internal fun ScreenToolReceiptDetailSheetContent(
                     ) {
                         if (!receipt.packageName.isNullOrBlank()) {
                             ReceiptMetricChip(
-                                text = "应用: ${receipt.packageName}",
+                                text = stringResource(R.string.screen_receipt_app_chip, receipt.packageName),
                                 color = tokens.ink3,
                                 background = tokens.surface,
                             )
                         }
                         if (receipt.takeoverCount > 0) {
                             ReceiptMetricChip(
-                                text = "人工接管 ${receipt.takeoverCount} 次",
+                                text = stringResource(R.string.screen_receipt_takeover_chip, receipt.takeoverCount),
                                 color = tierColor,
                                 background = tokens.surface,
                             )
@@ -796,9 +924,9 @@ internal fun ScreenToolReceiptDetailSheetContent(
                         if (receipt.hostReturnSummary != null) {
                             ReceiptMetricChip(
                                 text = if (receipt.hostReturnSummary.returnedToHost) {
-                                    "完成后已自动切回 Amber"
+                                    stringResource(R.string.screen_receipt_host_returned_detail)
                                 } else {
-                                    "保留在目标应用前台"
+                                    stringResource(R.string.screen_receipt_host_kept_foreground)
                                 },
                                 color = tokens.ink3,
                                 background = tokens.surface,
@@ -843,9 +971,9 @@ internal fun ScreenToolReceiptDetailSheetContent(
                                 )
                                 Text(
                                     text = if (item.isSelectedChoice) {
-                                        "该动作为最终提交/发送类敏感操作，已暂停自动点击，请核对内容后手动确认。"
+                                        stringResource(R.string.screen_receipt_held_selected_desc)
                                     } else {
-                                        "界面上的敏感提交按钮已被安全门禁自动屏蔽，防止误触提交。"
+                                        stringResource(R.string.screen_receipt_held_blocked_desc)
                                     },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = tokens.ink3,
@@ -888,7 +1016,7 @@ internal fun ScreenToolReceiptDetailSheetContent(
                             color = tokens.surface2,
                         ) {
                             Text(
-                                text = "建议下一步：${receipt.recommendedNextStep}",
+                                text = stringResource(R.string.screen_receipt_recommended_next_step, receipt.recommendedNextStep),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = tokens.ink3,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
@@ -911,20 +1039,22 @@ internal fun ScreenToolReceiptDetailSheetContent(
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(tokens.surface2)
                                 .padding(horizontal = 10.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            verticalAlignment = Alignment.Top,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(20.dp)
-                                    .clip(CircleShape)
-                                    .background(tokens.surface),
+                                    .sizeIn(minWidth = 20.dp, minHeight = 20.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(tokens.surface)
+                                    .padding(horizontal = 4.dp, vertical = 2.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
                                     text = step.stepNumber.toString(),
                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                                     color = tokens.ink3,
+                                    maxLines = 1,
                                 )
                             }
                             Column(
@@ -970,21 +1100,25 @@ internal fun ScreenToolReceiptDetailSheetContent(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         ReceiptMetricChip(
-                            text = if (ocr.triggered) "已触发端侧 OCR (${ocr.blockCount} 块)" else "无障碍树覆盖充足 (未触发 OCR)",
+                            text = if (ocr.triggered) {
+                                stringResource(R.string.screen_receipt_ocr_triggered_chip, ocr.blockCount)
+                            } else {
+                                stringResource(R.string.screen_receipt_ocr_not_needed_chip)
+                            },
                             color = tokens.ink2,
                             background = tokens.surface2,
                         )
                         if (ocr.coverageRatio != null) {
                             val pct = (ocr.coverageRatio * 100).toInt().coerceIn(0, 100)
                             ReceiptMetricChip(
-                                text = "节点文本覆盖率 $pct%",
+                                text = stringResource(R.string.screen_receipt_ocr_coverage_chip, pct),
                                 color = tokens.ink3,
                                 background = tokens.surface2,
                             )
                         }
                         if (!ocr.reason.isNullOrBlank()) {
                             ReceiptMetricChip(
-                                text = "原因: ${ocr.reason}",
+                                text = stringResource(R.string.screen_receipt_ocr_reason_chip, ocr.reason),
                                 color = tokens.ink3,
                                 background = tokens.surface2,
                             )
@@ -992,7 +1126,7 @@ internal fun ScreenToolReceiptDetailSheetContent(
                     }
                     if (ocr.sampleTexts.isNotEmpty()) {
                         Text(
-                            text = "识别文本摘要：${ocr.sampleTexts.joinToString(" · ")}",
+                            text = stringResource(R.string.screen_receipt_ocr_sample_summary, ocr.sampleTexts.joinToString(" · ")),
                             style = MaterialTheme.typography.labelSmall,
                             color = tokens.ink3,
                             maxLines = 3,
@@ -1024,7 +1158,11 @@ internal fun ScreenToolReceiptDetailSheetContent(
                     .heightIn(min = 48.dp),
             ) {
                 Text(
-                    text = if (showRawJson) "收起原始技术回执 (JSON)" else "查看原始技术回执 (JSON · $toolName)",
+                    text = if (showRawJson) {
+                        stringResource(R.string.screen_receipt_raw_json_hide)
+                    } else {
+                        stringResource(R.string.screen_receipt_raw_json_show, toolName)
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = tokens.ink3,
                     maxLines = 1,
@@ -1086,11 +1224,12 @@ private fun ReceiptSectionCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Top,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Box(
                     modifier = Modifier
+                        .padding(top = 6.dp)
                         .size(6.dp)
                         .clip(CircleShape)
                         .background(accentColor),
@@ -1099,7 +1238,9 @@ private fun ReceiptSectionCard(
                     text = title,
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = tokens.ink2,
-                    maxLines = 1,
+                    // Localized section titles (e.g. the English held-actions label) exceed one line
+                    // on a narrow screen or at large font scale; wrap instead of truncating.
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }

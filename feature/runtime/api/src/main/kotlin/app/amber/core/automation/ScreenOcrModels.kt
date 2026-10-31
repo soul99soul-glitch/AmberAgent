@@ -263,6 +263,8 @@ data class ScreenOcrObservation(
     val displayWidth: Int,
     val displayHeight: Int,
     val screenshotSource: String? = null,
+    /** True only when a screenshot frame was actually available for pixel recognition. */
+    val pixelFrame: Boolean = false,
 ) {
     fun matchesQuery(query: String): List<ScreenOcrBlock> {
         val needle = query.trim()

@@ -18,7 +18,9 @@ internal class AccessibilityNativeScreen(private val service: AccessibilityServi
      */
     fun captureScreenSnapshot(): ScreenSnapshot? = withActiveRoot { root, windowId, packageName ->
         buildScreenSnapshot(root, windowId, packageName)?.also { snapshot ->
-            ScreenSnapshotInvalidationRegistry.markFreshCapture(snapshot.id)
+            if (!ScreenSnapshotInvalidationRegistry.isTakeoverPauseActive()) {
+                ScreenSnapshotInvalidationRegistry.markFreshCapture(snapshot.id)
+            }
         }
     }
 

@@ -2,6 +2,8 @@ package app.amber.core.jev
 
 import app.amber.core.automation.AccessibilityController
 import app.amber.core.automation.AccessibilityTextMatch
+import app.amber.core.automation.PhoneAutomationTakeoverController
+import app.amber.core.automation.PhoneTakeoverPhase
 import app.amber.core.automation.ScreenAction
 import app.amber.core.automation.ScreenActionKind
 import app.amber.core.automation.ScreenActionReceipt
@@ -64,6 +66,10 @@ class JevScreenGoalRunnerTest {
     private class FakeAccessibilityController(
         initial: ScreenSnapshot,
         private val receipt: ScreenActionReceipt = ScreenActionReceipt("ok", dispatched = true),
+        // Keep onAction last: existing tests pass it as a trailing lambda.
+        private val onCapture: (Int) -> Unit = {},
+        private val captureOverride: ((Int) -> ScreenSnapshot?)? = null,
+        private val actionError: Throwable? = null,
         private val onAction: (ScreenAction) -> Unit = {},
     ) : AccessibilityController {
         var current = initial
@@ -72,8 +78,10 @@ class JevScreenGoalRunnerTest {
         val actions = mutableListOf<ScreenAction>()
         val hostReturns = mutableListOf<String>()
 
-        override fun captureScreenSnapshot(): ScreenSnapshot {
+        override fun captureScreenSnapshot(): ScreenSnapshot? {
             captures++
+            onCapture(captures)
+            captureOverride?.let { return it(captures) }
             return current
         }
 
@@ -85,6 +93,7 @@ class JevScreenGoalRunnerTest {
                     reason = snapshotInvalidationReason(snapshot.id) ?: "returned_to_host_snapshot_invalidated",
                 )
             }
+            actionError?.let { throw it }
             actions += action
             onAction(action)
             return receipt
@@ -148,10 +157,12 @@ class JevScreenGoalRunnerTest {
     private fun runner(
         runtime: JevRuntime,
         scheduler: TestCoroutineScheduler,
+        takeover: PhoneAutomationTakeoverController? = null,
     ) = JevScreenGoalRunner(
         runtime = runtime,
         mainDispatcher = StandardTestDispatcher(scheduler),
         settle = {},
+        takeoverController = takeover,
     )
 
     private fun snapshot(
@@ -575,6 +586,145 @@ class JevScreenGoalRunnerTest {
         assertEquals("stale_snapshot", staleReceipt.status)
         assertEquals(false, staleReceipt.dispatched)
         assertEquals("returned_to_host_snapshot_invalidated", staleReceipt.reason)
+    }
+
+    @Test
+    fun completedGoalKeepsForegroundWhenTakeoverStartsDuringFinalVerification() = runTest {
+        val finalSnapshot = snapshot("final-target-snap")
+        val transport = ScriptedTransport(mutableListOf(answer("done", done = 0.96)))
+        val takeover = PhoneAutomationTakeoverController(clock = { testScheduler.currentTime })
+        val controller = FakeAccessibilityController(
+            initial = finalSnapshot,
+            onCapture = { captures ->
+                // Capture #2 is the fresh completion snapshot; the user grabs control right then.
+                if (captures == 2) takeover.requestUserTakeover(reason = "user_requested", controller = null)
+            },
+        )
+        val result = runner(runtime(transport) { settings(JevMode.ACTIVE) }, testScheduler, takeover).run(
+            controller = controller,
+            packageName = "com.example.target",
+            goal = "confirm target content",
+            texts = emptyList(),
+            runKey = "screen-pause-final",
+            hostPackageName = "app.amber.agent",
+        )
+
+        assertEquals("completed", status(result))
+        assertEquals("false", result["returned_to_host"]!!.jsonPrimitive.content)
+        assertEquals("takeover_paused_keep_foreground", result["host_return_reason"]!!.jsonPrimitive.content)
+        assertTrue(controller.hostReturns.isEmpty())
+    }
+
+    @Test
+    fun endingTheTakeoverSessionAbortsBeforeDispatchingTheChosenAction() = runTest {
+        val takeover = PhoneAutomationTakeoverController(clock = { testScheduler.currentTime })
+        // The user taps "停止" while the Jev decision is still in flight.
+        val transport = ScriptedTransport(
+            mutableListOf(answer("a0")),
+            onCall = { calls -> if (calls == 1) takeover.finishSession() },
+        )
+        val controller = FakeAccessibilityController(snapshot("s1"))
+        val result = runner(runtime(transport) { settings(JevMode.ACTIVE) }, testScheduler, takeover).run(
+            controller = controller,
+            packageName = "com.example.target",
+            goal = "open draft",
+            texts = emptyList(),
+            runKey = "screen-stop-session",
+            hostPackageName = "app.amber.agent",
+        )
+
+        assertEquals("handback", status(result))
+        assertEquals("takeover_session_ended", result["reason"]!!.jsonPrimitive.content)
+        assertEquals("0", result["actions_dispatched"]!!.jsonPrimitive.content)
+        assertTrue(controller.actions.isEmpty())
+        assertEquals(PhoneTakeoverPhase.IDLE, takeover.state.value.phase)
+    }
+
+    @Test
+    fun captureUnavailableBeforeAnyActionHandsBackWithoutDispatch() = runTest {
+        val controller = FakeAccessibilityController(snapshot("s1"), captureOverride = { null })
+        // No scripted response: reaching Jev at all would throw and fail the test.
+        val transport = ScriptedTransport(mutableListOf())
+        val result = runner(runtime(transport) { settings(JevMode.ACTIVE) }, testScheduler).run(
+            controller = controller,
+            packageName = "com.example.target",
+            goal = "open draft",
+            texts = emptyList(),
+            runKey = "screen-no-capture",
+            hostPackageName = "app.amber.agent",
+        )
+
+        assertEquals("handback", status(result))
+        assertEquals("screen_unavailable", result["reason"]!!.jsonPrimitive.content)
+        assertEquals(0, transport.calls)
+        assertTrue(controller.actions.isEmpty())
+    }
+
+    @Test
+    fun accessibilityServiceFailureHandsBackInsteadOfClaimingProgress() = runTest {
+        val controller = FakeAccessibilityController(
+            snapshot("s1"),
+            captureOverride = { throw IllegalStateException("accessibility service unbound") },
+        )
+        val transport = ScriptedTransport(mutableListOf())
+        val result = runner(runtime(transport) { settings(JevMode.ACTIVE) }, testScheduler).run(
+            controller = controller,
+            packageName = "com.example.target",
+            goal = "open draft",
+            texts = emptyList(),
+            runKey = "screen-driver-down",
+            hostPackageName = "app.amber.agent",
+        )
+
+        assertEquals("handback", status(result))
+        assertEquals("screen_driver_failed", result["reason"]!!.jsonPrimitive.content)
+        assertEquals(0, transport.calls)
+        assertTrue(controller.actions.isEmpty())
+    }
+
+    @Test
+    fun actionDispatchFailureIsReportedAsOutcomeUnknownNotVerified() = runTest {
+        val transport = ScriptedTransport(mutableListOf(answer("a0")))
+        val controller = FakeAccessibilityController(
+            snapshot("s1"),
+            actionError = IllegalStateException("binder died"),
+        )
+        val result = runner(runtime(transport) { settings(JevMode.ACTIVE) }, testScheduler).run(
+            controller = controller,
+            packageName = "com.example.target",
+            goal = "open draft",
+            texts = emptyList(),
+            runKey = "screen-dispatch-crash",
+            hostPackageName = "app.amber.agent",
+        )
+
+        assertEquals("outcome_unknown", status(result))
+        assertEquals("screen_driver_failed", result["reason"]!!.jsonPrimitive.content)
+        assertEquals("0", result["actions_dispatched"]!!.jsonPrimitive.content)
+        assertTrue(controller.actions.isEmpty())
+    }
+
+    @Test
+    fun targetAppDisappearingAfterTheTapReportsOutcomeUnknown() = runTest {
+        val transport = ScriptedTransport(mutableListOf(answer("a0")))
+        val first = snapshot("s1")
+        val controller = FakeAccessibilityController(
+            first,
+            captureOverride = { count -> if (count == 1) first else null },
+        )
+        val result = runner(runtime(transport) { settings(JevMode.ACTIVE) }, testScheduler).run(
+            controller = controller,
+            packageName = "com.example.target",
+            goal = "open draft",
+            texts = emptyList(),
+            runKey = "screen-target-crash",
+            hostPackageName = "app.amber.agent",
+        )
+
+        assertEquals("outcome_unknown", status(result))
+        assertEquals("post_action_screen_unavailable", result["reason"]!!.jsonPrimitive.content)
+        assertEquals("1", result["actions_dispatched"]!!.jsonPrimitive.content)
+        assertEquals(1, controller.actions.size)
     }
 
     @Test

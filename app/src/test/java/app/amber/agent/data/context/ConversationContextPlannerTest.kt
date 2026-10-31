@@ -273,6 +273,40 @@ class ConversationContextPlannerTest {
     }
 
     @Test
+    fun compactionBoundaryNeverCutsPendingToolCallsOrSplitsExecutedToolTurns() {
+        fun messageWithTool(callId: String, executed: Boolean) = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Tool(
+                    toolCallId = callId,
+                    toolName = "read_file",
+                    input = "{}",
+                    output = if (executed) listOf(UIMessagePart.Text("ok")) else emptyList(),
+                ),
+            ),
+        )
+        val nodes = buildList {
+            add(MessageNode.of(messageWithTool("tc-executed", executed = true)))
+            repeat(14) { add(MessageNode.of(UIMessage.user("history $it " + "x".repeat(2_000)))) }
+            add(MessageNode.of(messageWithTool("tc-pending", executed = false)))
+            repeat(4) { add(MessageNode.of(UIMessage.user("recent $it " + "x".repeat(2_000)))) }
+        }
+
+        // keepRecentTurns=2 -> keepCount=4 -> the raw sourceEnd lands exactly on the pending tool.
+        val plan = ConversationContextPlanner.planCompaction(
+            nodes = nodes,
+            activeCompacts = emptyList(),
+            policy = CompactPolicy(precompactRatio = 0.40f, forceRatio = 0.60f, keepRecentTurns = 2),
+            modelContextWindowTokens = 2_000,
+        )
+
+        assertTrue(plan.shouldCompact)
+        // Start advances past the completed tool turn; end retreats before the pending one.
+        assertEquals(1, plan.sourceStartIndex)
+        assertEquals(14, plan.sourceEndIndex)
+    }
+
+    @Test
     fun extraTokenEstimateContributesToCompactionPressure() {
         val nodes = List(4) { MessageNode.of(UIMessage.user("short $it")) }
 

@@ -9,9 +9,18 @@ import app.amber.core.automation.AccessibilityActive
 import app.amber.core.automation.AccessibilityController
 import app.amber.core.automation.AccessibilityTextMatch
 import app.amber.core.automation.AmberAccessibilityService
+import app.amber.core.automation.PhoneAutomationTakeoverController
+import app.amber.core.automation.PhoneTakeoverPhase
 import app.amber.core.automation.ScreenCaptureManager
 import app.amber.core.automation.ScreenNode
+import app.amber.core.automation.ScreenOcrBlock
+import app.amber.core.automation.ScreenOcrEngine
+import app.amber.core.automation.ScreenOcrMode
+import app.amber.core.automation.ScreenOcrObservation
 import app.amber.core.automation.ScreenSnapshot
+import app.amber.core.automation.ScreenTreeCoverageAnalyzer
+import app.amber.core.automation.ScreenTreeCoverageReport
+import app.amber.core.automation.NormalizedScreenBounds
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.runtime.ToolActivityStatus
 import kotlinx.coroutines.CompletableDeferred
@@ -21,7 +30,9 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.Json
@@ -193,6 +204,146 @@ class ScreenAutomationAcceptanceTest {
         assertEquals(1, controller.tapCalls)
     }
 
+    @Test
+    fun resumedTakeoverReacquiresFreshSnapshotBeforeDispatchingTool() = runTest {
+        val takeover = PhoneAutomationTakeoverController(clock = { testScheduler.currentTime })
+        takeover.startSession(runId = "run", packageName = "test.target", goal = "goal", maxSteps = 1)
+        takeover.requestUserTakeover(reason = "user_requested", controller = null)
+        val controller = FakeController(snapshot(listOf(node("root/0", "Next"))))
+        AccessibilityActive.activeController = controller
+        val tools = ScreenAutomationTools(
+            context = context,
+            screenCaptureManager = ScreenCaptureManager(context),
+            activityStore = AgentToolActivityStore(),
+            takeoverController = takeover,
+        )
+
+        val pending = launch { executeTool("screen_click", """{"x":1,"y":1}""", tools) }
+        runCurrent()
+        assertEquals(PhoneTakeoverPhase.PAUSED, takeover.state.value.phase)
+
+        assertTrue(takeover.requestResume())
+        advanceUntilIdle()
+        pending.join()
+
+        // RESUMING must be closed with a post-takeover capture before the tap is dispatched,
+        // otherwise the banner would stay on "re-reading screen" forever.
+        assertEquals(PhoneTakeoverPhase.AUTOMATED, takeover.state.value.phase)
+        assertEquals(1, controller.captureCalls)
+        assertEquals(1, controller.tapCalls)
+    }
+
+    @Test
+    fun resumeWithoutReadableScreenStaysPausedAndDispatchesNothing() = runTest {
+        val takeover = PhoneAutomationTakeoverController(clock = { testScheduler.currentTime })
+        takeover.startSession(runId = "run", packageName = "test.target", goal = "goal", maxSteps = 1)
+        takeover.requestUserTakeover(reason = "user_requested", controller = null)
+        val controller = FakeController(snapshot(listOf(node("root/0", "Next")))).apply {
+            snapshotAvailable = false
+        }
+        AccessibilityActive.activeController = controller
+        val tools = ScreenAutomationTools(
+            context = context,
+            screenCaptureManager = ScreenCaptureManager(context),
+            activityStore = AgentToolActivityStore(),
+            takeoverController = takeover,
+        )
+
+        val pending = launch { executeTool("screen_click", """{"x":1,"y":1}""", tools) }
+        runCurrent()
+        assertTrue(takeover.requestResume())
+        advanceUntilIdle()
+        pending.join()
+
+        assertEquals(PhoneTakeoverPhase.PAUSED, takeover.state.value.phase)
+        assertEquals("fresh_snapshot_unavailable", takeover.state.value.pauseReason)
+        assertEquals(0, controller.tapCalls)
+    }
+
+    @Test
+    fun screenReadUiOcrTextIsRedactedLikeItsBlocks() = runTest {
+        val observation = ScreenOcrObservation(
+            mode = ScreenOcrMode.AUTO,
+            triggered = true,
+            triggerReason = "webview_or_canvas_low_text",
+            coverage = ScreenTreeCoverageReport(0, 0, 0, 0, 1, 0f, true, "webview_or_canvas_low_text"),
+            blocks = listOf(
+                ScreenOcrBlock(
+                    id = "ocr_0",
+                    text = "验证码 839201 请勿泄露",
+                    left = 0,
+                    top = 0,
+                    right = 100,
+                    bottom = 40,
+                    normalizedBounds = NormalizedScreenBounds.fromPixelBounds(0, 0, 100, 40, 100, 100),
+                    isSensitive = true,
+                ),
+            ),
+            displayWidth = 100,
+            displayHeight = 100,
+            pixelFrame = true,
+        )
+        val controller = FakeController(snapshot(listOf(node("root/0", "Next"))))
+        AccessibilityActive.activeController = controller
+        val tools = ScreenAutomationTools(
+            context = context,
+            screenCaptureManager = ScreenCaptureManager(context),
+            activityStore = AgentToolActivityStore(),
+            ocrEngine = StaticOcrEngine(observation),
+        )
+
+        val result = executeTool("screen_read_ui", "{}", tools)
+        val ocrText = result.getValue("ocr_text").jsonPrimitive.content
+        assertFalse(ocrText.contains("839201"))
+        assertTrue(ocrText.contains("******"))
+        assertTrue(result.getValue("ocr_pixel_frame").jsonPrimitive.boolean)
+    }
+
+    @Test
+    fun staleTakeoverFromDifferentRunDoesNotBlockNewRunAndNotificationBlocksHighRiskApprove() = runTest {
+        val takeover = PhoneAutomationTakeoverController(clock = { testScheduler.currentTime })
+        takeover.startSession(runId = "old-run", packageName = "test.target", goal = "old", maxSteps = 2)
+        takeover.confirmPaused(snapshotId = "old-snap", reason = "user_requested")
+        val controller = FakeController(snapshot(listOf(node("root/0", "Next"))))
+        AccessibilityActive.activeController = controller
+        val tools = ScreenAutomationTools(
+            context = context,
+            screenCaptureManager = ScreenCaptureManager(context),
+            activityStore = AgentToolActivityStore(),
+            takeoverController = takeover,
+        )
+
+        // New run ("new-run") must clear orphaned "old-run" takeover session and succeed.
+        val result = executeTool("screen_click", """{"x":1,"y":1}""", tools, runId = "new-run")
+        assertTrue(result.getValue("success").jsonPrimitive.boolean)
+        assertEquals(PhoneTakeoverPhase.IDLE, takeover.state.value.phase)
+
+        // AgentBubbleReducer ignores takeover session from another runId.
+        val bubble = app.amber.feature.bubble.AgentBubbleReducer.reduce(
+            previous = app.amber.feature.bubble.AgentBubbleUiState(),
+            pickedConversationId = "conv-1",
+            activity = null,
+            messages = emptyList(),
+            nowMillis = 1_000L,
+            takeoverSession = app.amber.core.automation.PhoneAutomationSessionState(
+                runId = "old-run",
+                phase = PhoneTakeoverPhase.PAUSED,
+                pauseReason = "user_requested",
+            ),
+            activeRunId = "new-run",
+        )
+        assertEquals(PhoneTakeoverPhase.IDLE, bubble.takeoverPhase)
+
+        // High-risk / mandatoryApproval tools require in-app approval only (no notification approve).
+        val highRiskTool = UIMessagePart.Tool(
+            toolCallId = "tc-1",
+            toolName = "screen_run_flow",
+            input = """{"package_name":"test.target","steps":[]}""",
+            output = emptyList(),
+        )
+        assertTrue(app.amber.feature.runtime.AgentLiveStatusNotifier.requiresInAppApprovalOnly(highRiskTool))
+    }
+
     private suspend fun clickWithExpectation(controller: FakeController, expectation: String): JsonObject {
         AccessibilityActive.activeController = controller
         return executeTool("screen_click", """{"x":1,"y":1,"expectation":$expectation}""")
@@ -249,11 +400,25 @@ class ScreenAutomationAcceptanceTest {
         }
     }
 
+    private class StaticOcrEngine(private val observation: ScreenOcrObservation) : ScreenOcrEngine {
+        override suspend fun observe(
+            snapshot: ScreenSnapshot?,
+            uiTreeDump: String,
+            mode: ScreenOcrMode,
+            forceReason: String?,
+        ): ScreenOcrObservation = observation
+    }
+
     private class FakeController(private val observation: ScreenSnapshot) : AccessibilityController {
         var searchMatches: List<AccessibilityTextMatch> = emptyList()
         var onTap: suspend () -> Boolean = { true }
+        var snapshotAvailable = true
+        var captureCalls = 0
         var tapCalls = 0
-        override fun captureScreenSnapshot(): ScreenSnapshot = observation
+        override fun captureScreenSnapshot(): ScreenSnapshot? {
+            captureCalls++
+            return observation.takeIf { snapshotAvailable }
+        }
         override fun findTextNodes(query: String, maxNodes: Int): List<AccessibilityTextMatch> =
             searchMatches.filter { it.text.contains(query, ignoreCase = true) }
         override suspend fun tap(x: Float, y: Float, durationMillis: Long): Boolean {

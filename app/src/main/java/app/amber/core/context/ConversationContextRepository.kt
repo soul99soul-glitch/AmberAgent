@@ -108,21 +108,46 @@ class ConversationContextRepository(
         )
     }
 
-    suspend fun search(conversationId: Uuid, query: String, limit: Int): List<ContextSearchResult> {
-        val compactResults = compactDAO.search(
+    suspend fun search(
+        conversationId: Uuid,
+        query: String,
+        limit: Int,
+        role: String? = null,
+    ): List<ContextSearchResult> = searchPage(conversationId, query, limit, role).results
+
+    suspend fun searchPage(
+        conversationId: Uuid,
+        query: String,
+        limit: Int,
+        role: String? = null,
+    ): ContextSearchPage {
+        val conversation = conversationRepository.getConversationById(conversationId)
+        val existingMessageIds = conversation?.messageNodes?.map { it.currentMessage.id.toString() }?.toSet()
+        val rawCompacts = compactDAO.search(
             conversationId = conversationId.toString(),
             query = query,
-            limit = limit.coerceIn(1, 20),
-        ).map { entity ->
-            val searchable = CompactSummaryPayloads.searchableText(entity.summary)
-            ContextSearchResult(
-                source = "compact_summary",
-                id = entity.id,
-                preview = searchable.previewAround(query),
-            )
-        }
-        val conversation = conversationRepository.getConversationById(conversationId) ?: return compactResults
-        val messageResults = conversation.messageNodes.mapIndexedNotNull { index, node ->
+            limit = Int.MAX_VALUE,
+        )
+        val coveredCompactIds = rawCompacts
+            .flatMap { CompactSummaryPayloads.parse(it.summary)?.coveredCompactIds.orEmpty() }
+            .toSet()
+        val compactResults = rawCompacts
+            .filter { it.id !in coveredCompactIds }
+            .distinctBy { it.id }
+            .map { entity ->
+                val searchable = CompactSummaryPayloads.searchableText(entity.summary)
+                ContextSearchResult(
+                    source = "compact_summary",
+                    id = entity.id,
+                    preview = searchable.previewAround(query),
+                    stale = ContextSearchStaleness.isStale(
+                        sourceMessageIds = JsonInstant.decodeFromString(entity.sourceMessageIdsJson),
+                        existingMessageIds = existingMessageIds,
+                    ),
+                    role = "compact_summary",
+                )
+            }
+        val messageResults = conversation?.messageNodes?.mapIndexedNotNull { index, node ->
             val text = node.currentMessage.toText()
             if (!text.contains(query, ignoreCase = true)) return@mapIndexedNotNull null
             ContextSearchResult(
@@ -130,9 +155,14 @@ class ConversationContextRepository(
                 id = node.currentMessage.id.toString(),
                 preview = text.previewAround(query),
                 nodeIndex = index,
+                role = node.currentMessage.role.name.lowercase(),
             )
-        }.take((limit - compactResults.size).coerceAtLeast(0))
-        return (compactResults + messageResults).take(limit)
+        }.orEmpty()
+        return ContextSearchBudget.deduplicateAndFilter(
+            results = compactResults + messageResults,
+            role = role,
+            limit = limit,
+        )
     }
 
     suspend fun expand(conversationId: Uuid, sourceId: String, radius: Int): List<UIMessage> {
@@ -147,6 +177,39 @@ class ConversationContextRepository(
         val start = (index - radius.coerceIn(0, 8)).coerceAtLeast(0)
         val end = (index + radius.coerceIn(0, 8)).coerceAtMost(conversation.currentMessages.lastIndex)
         return conversation.currentMessages.subList(start, end + 1)
+    }
+
+    /**
+     * Expand with the stale marker the model needs to distrust a compact whose sources are gone.
+     * A compact hit reports `stale` when none of its source messages survive in the transcript.
+     */
+    suspend fun expandResult(conversationId: Uuid, sourceId: String, radius: Int): ContextExpandResult {
+        val conversation = conversationRepository.getConversationById(conversationId)
+            ?: return ContextExpandResult(messages = emptyList(), stale = false)
+        val compact = compactDAO.getCompactById(sourceId)?.toDomain()
+        if (compact == null) {
+            return ContextExpandResult(
+                messages = expandWithin(conversation.currentMessages, sourceId, radius),
+                stale = false,
+            )
+        }
+        val ids = compact.sourceMessageIds.toSet()
+        val existingIds = conversation.currentMessages.map { it.id.toString() }.toSet()
+        return ContextExpandResult(
+            messages = conversation.currentMessages.filter { it.id.toString() in ids },
+            stale = ContextSearchStaleness.isStale(
+                sourceMessageIds = compact.sourceMessageIds,
+                existingMessageIds = existingIds,
+            ),
+        )
+    }
+
+    private fun expandWithin(messages: List<UIMessage>, sourceId: String, radius: Int): List<UIMessage> {
+        val index = messages.indexOfFirst { it.id.toString() == sourceId }
+        if (index < 0) return emptyList()
+        val start = (index - radius.coerceIn(0, 8)).coerceAtLeast(0)
+        val end = (index + radius.coerceIn(0, 8)).coerceAtMost(messages.lastIndex)
+        return messages.subList(start, end + 1)
     }
 
     private fun ConversationCompactEntity.toDomain() = ConversationCompact(

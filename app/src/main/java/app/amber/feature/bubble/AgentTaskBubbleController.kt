@@ -112,8 +112,10 @@ class AgentTaskBubbleController(
             }
         }
 
+        if (picked == null && takeoverController?.state?.value?.isActive == true) {
+            takeoverController.finishSession()
+        }
         val finalText = if (picked == null && prev.phase == AgentBubblePhase.RUNNING) {
-            takeoverController?.finishSession()
             messages?.let { AgentBubbleReducer.lastAssistantText(it) }
         } else {
             null
@@ -175,6 +177,7 @@ class AgentTaskBubbleController(
                     onSizeChanged = window::requestReclamp,
                     onRequestTakeover = ::requestTakeover,
                     onRequestResume = ::requestResume,
+                    onRequestEndTakeover = { takeoverController?.finishSession() },
                 )
             }
         }

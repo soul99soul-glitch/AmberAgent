@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -95,8 +96,8 @@ internal fun SandboxPeekBar(
 internal fun SandboxPhoneTakeoverBanner(
     activity: SandboxActivityUiState,
     modifier: Modifier = Modifier,
+    takeoverController: PhoneAutomationTakeoverController = koinInject(),
 ) {
-    val takeoverController: PhoneAutomationTakeoverController = koinInject()
     val takeoverState by takeoverController.state.collectAsStateWithLifecycle()
     val isRunningScreenTool = activity.status == ToolActivityStatus.RUNNING && activity.toolName.startsWith("screen_")
     if (!isRunningScreenTool && !takeoverState.isActive) return
@@ -104,6 +105,9 @@ internal fun SandboxPhoneTakeoverBanner(
     val effectivePhase = if (takeoverState.isActive) takeoverState.phase else PhoneTakeoverPhase.AUTOMATED
     val canRequestTakeover = effectivePhase == PhoneTakeoverPhase.AUTOMATED && isRunningScreenTool
     val canRequestResume = effectivePhase == PhoneTakeoverPhase.PAUSED || effectivePhase == PhoneTakeoverPhase.PAUSING
+    // RESUMING has no resume action; without an escape the banner would sit on "re-reading screen"
+    // until another screen tool happens to arrive.
+    val canEndTakeover = effectivePhase == PhoneTakeoverPhase.RESUMING
     val workspace = workspaceColors()
     val statusText = when (effectivePhase) {
         PhoneTakeoverPhase.PAUSING -> stringResource(R.string.phone_takeover_status_pausing)
@@ -140,11 +144,15 @@ internal fun SandboxPhoneTakeoverBanner(
         canRequestResume -> {
             { takeoverController.requestResume() }
         }
+        canEndTakeover -> {
+            { takeoverController.finishSession() }
+        }
         else -> null
     }
     val actionLabel = when {
         canRequestTakeover -> stringResource(R.string.phone_takeover_action_take_over)
         canRequestResume -> stringResource(R.string.phone_takeover_action_resume)
+        canEndTakeover -> stringResource(R.string.task_bubble_stop)
         else -> null
     }
 
@@ -161,7 +169,7 @@ internal fun SandboxPhoneTakeoverBanner(
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            val fontScale = LocalConfiguration.current.fontScale
+            val fontScale = maxOf(LocalConfiguration.current.fontScale, LocalDensity.current.fontScale)
             val useStackedLayout = maxWidth < 280.dp || fontScale >= 1.3f
             if (useStackedLayout) {
                 Column(

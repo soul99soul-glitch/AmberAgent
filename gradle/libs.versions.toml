@@ -2,6 +2,7 @@
 agp = "9.2.0"
 barcodeScanning = "17.3.0"
 cameraCore = "1.6.0"
+textRecognitionChinese = "16.0.1"
 dom4j = "2.2.0"
 jlatexmath = "0.2.0"
 kotlin = "2.3.21"
@@ -70,6 +71,7 @@ androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 barcode-scanning = { module = "com.google.mlkit:barcode-scanning", version.ref = "barcodeScanning" }
 dom4j = { module = "org.dom4j:dom4j", version.ref = "dom4j" }
+text-recognition-chinese = { module = "com.google.mlkit:text-recognition-chinese", version.ref = "textRecognitionChinese" }
 jlatexmath = { module = "ru.noties:jlatexmath-android", version.ref = "jlatexmath" }
 jlatexmath-font-greek = { module = "ru.noties:jlatexmath-android-font-greek", version.ref = "jlatexmath" }
 jlatexmath-font-cyrillic = { module = "ru.noties:jlatexmath-android-font-cyrillic", version.ref = "jlatexmath" }

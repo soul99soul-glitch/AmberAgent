@@ -483,6 +483,7 @@ fun ContextUsageSummary(
 
         // meta strip — 改 Column 排版 (label 在上, value 在下), 横向 SpaceBetween,
         // 避免之前 Row 一行 3 个 label+value 挤换行造成 "速度" 被切到下一行.
+        // 窄屏 + 超大字号 (>=1.5x) 下切换为 FlowRow 自动折行，避免三列文字贴死重叠。
         Box(
             modifier = Modifier
                 .padding(top = 14.dp)
@@ -490,42 +491,72 @@ fun ContextUsageSummary(
                 .height(1.dp)
                 .background(theme.hair),
         )
-        Row(
+        val turnVal = lastTurnTotalTokens?.let { formatTokens(it) + " tok" } ?: "—"
+        val promptTokens = lastTurnPromptTokens ?: 0
+        val cachedTokens = lastTurnCachedTokens ?: 0
+        val cacheVal = if (promptTokens > 0 && cachedTokens > 0) {
+            val pct = (cachedTokens * 100.0 / promptTokens).coerceIn(0.0, 100.0)
+            "${pct.toInt()}%"
+        } else "—"
+        val completionTokens = lastTurnCompletionTokens ?: 0
+        val speedVal = if (lastTurnElapsedMs != null && lastTurnElapsedMs > 0L && completionTokens > 0) {
+            val tps = completionTokens.toDouble() / (lastTurnElapsedMs / 1000.0)
+            "${tps.toInt()} tok/s"
+        } else "—"
+        val fontScale = maxOf(
+            androidx.compose.ui.platform.LocalConfiguration.current.fontScale,
+            LocalDensity.current.fontScale,
+        )
+        androidx.compose.foundation.layout.BoxWithConstraints(
             modifier = Modifier
                 .padding(top = 12.dp)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            // V3: 本次 = lastAssistantMessage.usage.totalTokens
-            val turnVal = lastTurnTotalTokens?.let { formatTokens(it) + " tok" } ?: "—"
-            MetaStat(
-                label = stringResource(R.string.context_ring_this_turn),
-                value = turnVal,
-                theme = theme,
-            )
-            // 缓存命中率: cached / prompt * 100%, 跳过 prompt==0 (避免除零 / N/A 时显示 —)
-            val promptTokens = lastTurnPromptTokens ?: 0
-            val cachedTokens = lastTurnCachedTokens ?: 0
-            val cacheVal = if (promptTokens > 0 && cachedTokens > 0) {
-                val pct = (cachedTokens * 100.0 / promptTokens).coerceIn(0.0, 100.0)
-                "${pct.toInt()}%"
-            } else "—"
-            MetaStat(
-                label = stringResource(R.string.context_ring_cache_hit),
-                value = cacheVal,
-                theme = theme,
-            )
-            // 速度: completion_tokens / elapsed_seconds → tok/s. elapsed=null 时 —
-            val completionTokens = lastTurnCompletionTokens ?: 0
-            val speedVal = if (lastTurnElapsedMs != null && lastTurnElapsedMs > 0L && completionTokens > 0) {
-                val tps = completionTokens.toDouble() / (lastTurnElapsedMs / 1000.0)
-                "${tps.toInt()} tok/s"
-            } else "—"
-            MetaStat(
-                label = stringResource(R.string.context_ring_speed),
-                value = speedVal,
-                theme = theme,
-            )
+            if (maxWidth < 360.dp && fontScale >= 1.5f) {
+                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                androidx.compose.foundation.layout.FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    MetaStat(
+                        label = stringResource(R.string.context_ring_this_turn),
+                        value = turnVal,
+                        theme = theme,
+                    )
+                    MetaStat(
+                        label = stringResource(R.string.context_ring_cache_hit),
+                        value = cacheVal,
+                        theme = theme,
+                    )
+                    MetaStat(
+                        label = stringResource(R.string.context_ring_speed),
+                        value = speedVal,
+                        theme = theme,
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    MetaStat(
+                        label = stringResource(R.string.context_ring_this_turn),
+                        value = turnVal,
+                        theme = theme,
+                    )
+                    MetaStat(
+                        label = stringResource(R.string.context_ring_cache_hit),
+                        value = cacheVal,
+                        theme = theme,
+                    )
+                    MetaStat(
+                        label = stringResource(R.string.context_ring_speed),
+                        value = speedVal,
+                        theme = theme,
+                    )
+                }
+            }
         }
     }
 }

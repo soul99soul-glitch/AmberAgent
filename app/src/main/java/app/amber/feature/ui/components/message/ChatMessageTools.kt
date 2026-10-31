@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -102,12 +103,14 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val isGenerateImage = tool.toolName == "generate_image"
     val hasExtraContent = isDenied || (images.isNotEmpty() && !isGenerateImage)
     val toolKind = getToolKind(tool.toolName)
-    val screenReceipt = remember(tool.toolName, tool.isExecuted, arguments, content) {
+    val context = LocalContext.current
+    val screenReceipt = remember(tool.toolName, tool.isExecuted, arguments, content, context) {
         if (tool.isExecuted && content != null) {
             ScreenToolReceiptParser.parse(
                 toolName = tool.toolName,
                 arguments = arguments,
                 content = content,
+                context = context,
             )
         } else {
             null

@@ -20,6 +20,8 @@ internal data class CompactSummaryPayload(
     val coveredCompactIds: List<String>,
     val sourceMessageIds: List<String>,
     val createdAt: Long,
+    /** Verbatim facts the next model must still see; checked against the handoff on normalize. */
+    val mustNotLose: List<String> = emptyList(),
 )
 
 internal object CompactSummaryPayloads {
@@ -27,6 +29,8 @@ internal object CompactSummaryPayloads {
 
     private const val MAX_TIMELINE_SUMMARY_CHARS = 1_200
     private const val MAX_HANDOFF_CHARS = 24_000
+    private const val MAX_MUST_NOT_LOSE_ITEMS = 12
+    private const val MAX_MUST_NOT_LOSE_ITEM_CHARS = 300
     private val json = Json { ignoreUnknownKeys = true }
     private val whitespace = Regex("\\s+")
     private val sentenceEnd = Regex("""[。！？.!?]+""")
@@ -45,6 +49,7 @@ internal object CompactSummaryPayloads {
         "schema_version",
         "timeline_summary",
         "handoff_markdown",
+        "must_not_lose",
         "covered_compact_ids",
         "source_message_ids",
         "created_at",
@@ -101,30 +106,97 @@ internal object CompactSummaryPayloads {
             ?.cleanHumanText()
             .orEmpty()
 
-        val timelineSummary = when {
+        val rawTimelineSummary = when {
             parsed != null -> timelineFromParsed(parsed, preamble)
             cleaned.looksLikeJsonFragment() -> "Conversation history was compacted, but the model returned malformed JSON."
             else -> cleaned.cleanHumanText().ifBlank {
                 "Conversation history was compacted, but the model returned no readable summary."
             }
-        }.coerceTimelineSummary()
-        val handoffMarkdown = when {
+        }
+        val timelineSummary = ContextFactRedaction.redact(rawTimelineSummary).coerceTimelineSummary()
+        val rawHandoffMarkdown = when {
             parsed != null -> parsed.stringValue("handoff_markdown")
                 ?.cleanMarkdown()
                 ?.takeIf { it.isNotBlank() }
                 ?: handoffFromLegacy(parsed, timelineSummary, sourceMessageIds)
             else -> plainTextHandoff(timelineSummary, sourceMessageIds)
-        }.take(MAX_HANDOFF_CHARS)
+        }
+        val handoffMarkdown = ContextFactRedaction.redact(rawHandoffMarkdown)
+        val mustNotLose = parsed
+            ?.stringList("must_not_lose")
+            .orEmpty()
+            .map { ContextFactRedaction.redact(it.trim()).take(MAX_MUST_NOT_LOSE_ITEM_CHARS) }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+            .take(MAX_MUST_NOT_LOSE_ITEMS)
 
         return buildJsonObject {
             put("schema_version", SCHEMA_VERSION)
             put("timeline_summary", timelineSummary)
-            put("handoff_markdown", handoffMarkdown)
+            put("handoff_markdown", fitHandoff(handoffMarkdown, mustNotLose))
+            putStringArray("must_not_lose", mustNotLose)
             putStringArray("covered_compact_ids", coveredCompactIds.distinct())
             putStringArray("source_message_ids", sourceMessageIds.distinct())
             put("created_at", createdAt)
             parsed?.let { putLegacyFields(it, sourceMessageIds) }
         }.toString()
+    }
+
+    /**
+     * Quality gate: every fact the model itself marked as must-not-lose must be present in the
+     * handoff. Missing ones are appended verbatim instead of trusting the model to have kept them.
+     *
+     * The result must also fit [MAX_HANDOFF_CHARS]. Capping *after* appending used to truncate the
+     * appended block down to its `## Must Not Lose` heading, silently dropping every fact — so the
+     * cap is reserved up front: the handoff body is trimmed to leave room for the appended facts,
+     * and only a body that cannot give up enough room falls through to per-item trimming.
+     */
+    private fun fitHandoff(handoff: String, items: List<String>): String {
+        val body = handoff.trim()
+        if (items.isEmpty()) return body.take(MAX_HANDOFF_CHARS)
+        val missing = items.filterNot { body.contains(it, ignoreCase = true) }
+        if (missing.isEmpty()) return body.take(MAX_HANDOFF_CHARS)
+
+        val section = mustNotLoseSection(missing)
+        val reserved = section.length + 2 // one blank line before the heading
+        val keptBody = if (body.length + reserved <= MAX_HANDOFF_CHARS) {
+            body
+        } else {
+            body.take((MAX_HANDOFF_CHARS - reserved).coerceAtLeast(0)).trimEnd()
+        }
+        val combined = if (keptBody.isBlank()) section.trim() else "$keptBody\n\n${section.trim()}"
+        if (combined.length <= MAX_HANDOFF_CHARS) return combined
+
+        // Pathological input (a tiny cap versus many long facts): keep every fact, trim items.
+        val kept = mutableListOf<String>()
+        val overhead = mustNotLoseSection(listOf("")).length
+        var used = overhead
+        for (item in missing) {
+            val cost = item.length + 3 // "- " + newline
+            if (used + cost > MAX_HANDOFF_CHARS) break
+            kept += item
+            used += cost
+        }
+        val fallback = if (kept.isEmpty()) "" else mustNotLoseSection(kept).trim()
+        return fallback.take(MAX_HANDOFF_CHARS)
+    }
+
+    private fun mustNotLoseSection(items: List<String>): String = buildString {
+        appendLine("## Must Not Lose")
+        items.forEach { appendLine("- $it") }
+    }.trimEnd()
+
+    /** Legacy single-pass helper kept for callers that only need the append, not the cap. */
+    private fun ensureMustNotLose(handoff: String, items: List<String>): String {
+        if (items.isEmpty()) return handoff
+        val missing = items.filterNot { handoff.contains(it, ignoreCase = true) }
+        if (missing.isEmpty()) return handoff
+        return buildString {
+            append(handoff.trim())
+            appendLine()
+            appendLine()
+            append(mustNotLoseSection(missing))
+        }.trim()
     }
 
     fun fallbackPayload(
@@ -151,6 +223,7 @@ internal object CompactSummaryPayloads {
                 "handoff_markdown",
                 plainTextHandoff(timelineSummary, sourceMessageIds, carriedHandoffMarkdown).take(MAX_HANDOFF_CHARS)
             )
+            putStringArray("must_not_lose", emptyList())
             putStringArray("covered_compact_ids", safeCoveredCompactIds.distinct())
             putStringArray("source_message_ids", sourceMessageIds.distinct())
             put("created_at", createdAt)
@@ -178,6 +251,10 @@ internal object CompactSummaryPayloads {
             coveredCompactIds = obj.stringList("covered_compact_ids"),
             sourceMessageIds = obj.stringList("source_message_ids"),
             createdAt = obj.longValue("created_at") ?: 0L,
+            mustNotLose = obj.stringList("must_not_lose")
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinct(),
         )
     }
 
@@ -203,6 +280,9 @@ internal object CompactSummaryPayloads {
             return buildString {
                 appendLine(payload.timelineSummary)
                 appendLine(payload.handoffMarkdown)
+                payload.mustNotLose.takeIf { it.isNotEmpty() }?.let { items ->
+                    appendLine(items.joinToString("\n"))
+                }
             }.trim()
         }
         return timelineSummary(summary) ?: summary
@@ -221,6 +301,7 @@ internal object CompactSummaryPayloads {
             ?: timelineSummary(summary)
             ?: summary.cleanHumanText()
         val covered = payload?.coveredCompactIds.orEmpty()
+        val mustNotLose = payload?.mustNotLose.orEmpty()
         return buildString {
             appendLine("[Conversation compact handoff: $id]")
             appendLine("Source message ids: ${sourceMessageIds.joinToString(", ")}")
@@ -229,6 +310,17 @@ internal object CompactSummaryPayloads {
             }
             appendLine()
             append(handoff.trim())
+            // Per-item check: a truncated handoff that happens to keep the heading must not
+            // suppress the facts, which is what the previous heading-only test did.
+            val missing = mustNotLose.filterNot { item -> handoff.contains(item, ignoreCase = true) }
+            if (missing.isNotEmpty()) {
+                appendLine()
+                appendLine()
+                if (!handoff.contains("Must Not Lose", ignoreCase = true)) {
+                    appendLine("Must not lose:")
+                }
+                missing.forEach { appendLine("- $it") }
+            }
         }.trim()
     }
 

@@ -160,17 +160,68 @@ class FilePhoneTakeoverPersistence(
  * 2. **Snapshot invalidation on takeover**: Entering `PAUSING` or `PAUSED` immediately marks
  *    the pre-takeover snapshot ID as invalidated in [ScreenSnapshotInvalidationRegistry] so
  *    stale node refs can never be reused.
- * 3. **Fresh snapshot requirement on resume**: Transitioning `RESUMING -> AUTOMATED` requires a
- *    newly captured post-takeover [ScreenSnapshot].
+ * 3. **Fresh snapshot requirement on resume**: `RESUMING -> AUTOMATED` is only confirmed with a
+ *    snapshot the executor captured after observing `RESUMING` ([confirmResumedWithFreshSnapshot];
+ *    callers pass a live capture, and content-hash ids mean an unchanged re-capture is valid).
  * 4. **No side-effect replay**: [tryRecordSideEffectDispatch] tracks `(snapshotId, actionKind, ref, text)`
  *    keys so already-dispatched side-effect steps are never replayed after resume.
  */
 class PhoneAutomationTakeoverController(
     private val persistence: PhoneTakeoverPersistence = PhoneTakeoverPersistence.InMemory,
     private val clock: () -> Long = System::currentTimeMillis,
+    /**
+     * Restore a session persisted before process death. Off by default so pure in-memory
+     * controllers (and tests) keep a clean IDLE; the DI graph enables it so pre-restart
+     * snapshot invalidations are re-applied and any dead run state is cleaned up.
+     */
+    restoreOnCreate: Boolean = false,
+    private val isRunAlive: (String) -> Boolean = { false },
 ) {
-    private val _state = MutableStateFlow(PhoneAutomationSessionState())
+    private val _state = MutableStateFlow(if (restoreOnCreate) restoredState() else PhoneAutomationSessionState())
     val state: StateFlow<PhoneAutomationSessionState> = _state.asStateFlow()
+
+    /**
+     * Re-applies persisted snapshot invalidations into [ScreenSnapshotInvalidationRegistry] after a
+     * process restart so pre-takeover snapshot IDs can never be reused. If the persisted run is no
+     * longer alive (the normal case across process death), resets the persisted session to [PhoneTakeoverPhase.IDLE]
+     * instead of leaving a dead run permanently in `PAUSED` and blocking subsequent runs.
+     */
+    private fun restoredState(): PhoneAutomationSessionState {
+        val saved = runCatching { persistence.load() }.getOrNull() ?: return PhoneAutomationSessionState()
+        val invalidatedIds = buildSet {
+            addAll(saved.invalidatedSnapshotIds.filter { it.isNotBlank() })
+            saved.lastSnapshotId?.takeIf { it.isNotBlank() }?.let(::add)
+        }
+        invalidatedIds.forEach { snapshotId ->
+            ScreenSnapshotInvalidationRegistry.invalidate(snapshotId, "takeover_snapshot_invalidated")
+        }
+        if (!saved.isActive) return PhoneAutomationSessionState()
+        val recoverable = (saved.phase == PhoneTakeoverPhase.PAUSED ||
+            saved.phase == PhoneTakeoverPhase.PAUSING) &&
+            !saved.runId.isNullOrBlank() &&
+            runCatching { isRunAlive(saved.runId) }.getOrDefault(false)
+        if (!recoverable) {
+            ScreenSnapshotInvalidationRegistry.setTakeoverPauseActive(false)
+            val cleared = PhoneAutomationSessionState(
+                invalidatedSnapshotIds = invalidatedIds,
+                transitionVersion = saved.transitionVersion + 1L,
+                updatedAtMillis = clock(),
+            )
+            runCatching { persistence.save(cleared) }
+            return cleared
+        }
+        ScreenSnapshotInvalidationRegistry.setTakeoverPauseActive(true)
+        return saved.copy(
+            phase = PhoneTakeoverPhase.PAUSED,
+            pauseReason = "process_restart",
+            lastSnapshotId = null,
+            invalidatedSnapshotIds = invalidatedIds,
+            transitionVersion = saved.transitionVersion + 1L,
+            updatedAtMillis = clock(),
+        ).also { restored ->
+            runCatching { persistence.save(restored) }
+        }
+    }
 
     fun startSession(
         runId: String,
@@ -178,6 +229,7 @@ class PhoneAutomationTakeoverController(
         goal: String,
         maxSteps: Int,
     ): PhoneAutomationSessionState {
+        ScreenSnapshotInvalidationRegistry.setTakeoverPauseActive(false)
         var updated = PhoneAutomationSessionState()
         _state.update { prev ->
             PhoneAutomationSessionState(
@@ -254,6 +306,7 @@ class PhoneAutomationTakeoverController(
             ).also { updatedState = it }
         }
         if (transitioned) {
+            ScreenSnapshotInvalidationRegistry.setTakeoverPauseActive(true)
             snapshotToInvalidate?.let { id ->
                 ScreenSnapshotInvalidationRegistry.invalidate(id, "takeover_snapshot_invalidated")
                 controller?.invalidateSnapshot(id, "takeover_snapshot_invalidated")
@@ -290,6 +343,9 @@ class PhoneAutomationTakeoverController(
                 updatedAtMillis = clock(),
             ).also { updated = it }
         }
+        if (updated.isPausedOrPausing) {
+            ScreenSnapshotInvalidationRegistry.setTakeoverPauseActive(true)
+        }
         idsToInvalidate.forEach { id ->
             ScreenSnapshotInvalidationRegistry.invalidate(id, "takeover_snapshot_invalidated")
             controller?.invalidateSnapshot(id, "takeover_snapshot_invalidated")
@@ -313,6 +369,9 @@ class PhoneAutomationTakeoverController(
             current.copy(
                 phase = PhoneTakeoverPhase.RESUMING,
                 pauseReason = null,
+                // The held action was already surfaced in the receipt; keeping it here would show a
+                // stale "blocked" banner while automation is running again.
+                interceptedSensitiveAction = null,
                 transitionVersion = current.transitionVersion + 1L,
                 updatedAtMillis = clock(),
             ).also { updatedState = it }
@@ -324,6 +383,12 @@ class PhoneAutomationTakeoverController(
     /**
      * Completes the `RESUMING -> AUTOMATED` transition after the executor has discarded its
      * pre-takeover snapshot and captured a brand-new live [freshSnapshot].
+     *
+     * Snapshot ids are content hashes, so resuming an unchanged screen re-captures the very id
+     * that was invalidated on takeover. [freshSnapshot] is new evidence by contract (the caller
+     * captured it after observing `RESUMING`), so it is accepted and released from
+     * [PhoneAutomationSessionState.invalidatedSnapshotIds]; otherwise an untouched screen could
+     * never leave `RESUMING`.
      */
     fun confirmResumedWithFreshSnapshot(freshSnapshot: ScreenSnapshot): Boolean {
         val snapshotId = freshSnapshot.id.trim()
@@ -332,17 +397,18 @@ class PhoneAutomationTakeoverController(
         var updatedState: PhoneAutomationSessionState? = null
         _state.update { current ->
             if (current.phase != PhoneTakeoverPhase.RESUMING) return@update current
-            if (snapshotId in current.invalidatedSnapshotIds) return@update current
             transitioned = true
             current.copy(
                 phase = PhoneTakeoverPhase.AUTOMATED,
                 pauseReason = null,
                 lastSnapshotId = snapshotId,
+                invalidatedSnapshotIds = current.invalidatedSnapshotIds - snapshotId,
                 transitionVersion = current.transitionVersion + 1L,
                 updatedAtMillis = clock(),
             ).also { updatedState = it }
         }
         if (transitioned) {
+            ScreenSnapshotInvalidationRegistry.setTakeoverPauseActive(false)
             ScreenSnapshotInvalidationRegistry.markFreshCapture(snapshotId)
             updatedState?.let(persistence::save)
         }
@@ -394,12 +460,16 @@ class PhoneAutomationTakeoverController(
         if (!initial.isPausedOrPausing && initial.phase != PhoneTakeoverPhase.RESUMING) {
             return true
         }
+        val sessionId = initial.sessionId
         if (initial.isPausedOrPausing) {
             confirmPaused(snapshotId = currentSnapshotId, controller = controller)
         }
         val start = clock()
         while (clock() - start < maxPauseWaitMs) {
-            val phase = _state.value.phase
+            val current = _state.value
+            // A different session means this waiter's session ended and another one started.
+            if (current.sessionId != sessionId) return false
+            val phase = current.phase
             if (phase == PhoneTakeoverPhase.RESUMING || phase == PhoneTakeoverPhase.AUTOMATED) {
                 return true
             }
@@ -408,8 +478,9 @@ class PhoneAutomationTakeoverController(
             }
             delay(pollIntervalMs.coerceAtLeast(10L))
         }
-        return _state.value.phase == PhoneTakeoverPhase.RESUMING ||
-            _state.value.phase == PhoneTakeoverPhase.AUTOMATED
+        val finalState = _state.value
+        return finalState.sessionId == sessionId &&
+            (finalState.phase == PhoneTakeoverPhase.RESUMING || finalState.phase == PhoneTakeoverPhase.AUTOMATED)
     }
 
     fun finishSession(runId: String? = null) {
@@ -423,7 +494,10 @@ class PhoneAutomationTakeoverController(
                 updatedAtMillis = clock(),
             ).also { updatedState = it }
         }
-        updatedState?.let(persistence::save)
+        if (updatedState != null) {
+            ScreenSnapshotInvalidationRegistry.setTakeoverPauseActive(false)
+            persistence.save(updatedState!!)
+        }
     }
 
     companion object {

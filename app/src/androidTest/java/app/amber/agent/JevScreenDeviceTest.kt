@@ -23,6 +23,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -65,36 +66,81 @@ class JevScreenDeviceTest {
     private suspend fun connectAccessibility() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
-        // Instrumentation force-stops its target; some OEMs do not rebind enabled services automatically.
-        if (getActiveAccessibilityController() == null) {
-            val resolver = instrumentation.targetContext.contentResolver
-            val key = android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-            val component = "${instrumentation.targetContext.packageName}/app.amber.core.automation.AmberAccessibilityService"
-            val original = android.provider.Settings.Secure.getString(resolver, key).orEmpty()
-            require(component in original.split(':')) { "Enable Amber Accessibility before testing" }
-            automation.adoptShellPermissionIdentity(android.Manifest.permission.WRITE_SECURE_SETTINGS)
-            try {
-                android.provider.Settings.Secure.putString(resolver, key, original.split(':').filterNot { it == component }.joinToString(":"))
-                delay(250)
-            } finally {
-                try { android.provider.Settings.Secure.putString(resolver, key, original) }
-                finally { automation.dropShellPermissionIdentity() }
-            }
+        val resolver = instrumentation.targetContext.contentResolver
+        val key = android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        val component = "${instrumentation.targetContext.packageName}/app.amber.core.automation.AmberAccessibilityService"
+        val original = android.provider.Settings.Secure.getString(resolver, key).orEmpty()
+        require(component in original.split(':')) { "Enable Amber Accessibility before testing" }
+        if (getActiveAccessibilityController() != null) return
+        // The instrumentation process is the target app process, so an enabled service normally
+        // binds to it. Prefer waiting: on API 34 an unbind/rebind through Settings can leave the
+        // service stuck in "crashed services" until reboot, which breaks every later capture.
+        val boundByWaiting = kotlinx.coroutines.withTimeoutOrNull(10_000) {
+            while (getActiveAccessibilityController() == null) delay(250)
+            true
+        } ?: false
+        if (boundByWaiting) return
+        // OEM fallback: force the accessibility manager to re-read the service list.
+        automation.adoptShellPermissionIdentity(android.Manifest.permission.WRITE_SECURE_SETTINGS)
+        try {
+            android.provider.Settings.Secure.putString(resolver, key, original.split(':').filterNot { it == component }.joinToString(":"))
+            delay(250)
+        } finally {
+            try { android.provider.Settings.Secure.putString(resolver, key, original) }
+            finally { automation.dropShellPermissionIdentity() }
         }
         withTimeout(20_000) { while (getActiveAccessibilityController() == null) delay(250) }
     }
 
-    private suspend fun openFixture() {
+    private suspend fun launchFixture(activityName: String) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val testPackage = instrumentation.context.packageName
         val fd = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
-            .executeShellCommand("am start -W -n $testPackage/app.amber.agent.JevScreenFixtureActivity --activity-clear-task --activity-new-task")
+            // FLAG_ACTIVITY_NEW_TASK|CLEAR_TASK; `am start --activity-new-task` is not a valid
+            // option on API 34, which made this helper fail before it ever launched the fixture.
+            .executeShellCommand("am start -W -n $testPackage/$activityName -f 0x10008000")
         android.os.ParcelFileDescriptor.AutoCloseInputStream(fd).bufferedReader().use { it.readText() }
+    }
+
+    private suspend fun openFixture(activityName: String = "app.amber.agent.JevScreenFixtureActivity") {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val testPackage = instrumentation.context.packageName
+        launchFixture(activityName)
         withTimeout(10_000) {
             while (kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 getActiveAccessibilityController()?.captureScreenSnapshot()?.packageName
             } != testPackage) delay(250)
         }
+    }
+
+    @Test
+    fun canvasScreenIsLowCoverageAndOcrReadsItsPixels() = runBlocking {
+        connectAccessibility()
+        // A canvas-only window has no accessibility text, so the snapshot package settles as soon
+        // as the activity is resumed; the 10s package wait in openFixture is unnecessary here.
+        launchFixture("app.amber.agent.OcrCanvasFixtureActivity")
+        delay(800)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val controller = getActiveAccessibilityController()!!
+        val snapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+            controller.captureScreenSnapshot()
+        } ?: error("accessibility snapshot missing for the canvas fixture")
+        val observation = app.amber.core.automation.DefaultScreenOcrEngine(
+            context = context,
+            screenCaptureManager = app.amber.core.automation.ScreenCaptureManager(context),
+        ).observe(snapshot = snapshot, mode = app.amber.core.automation.ScreenOcrMode.AUTO)
+        val text = observation.blocks.joinToString(" ") { it.text }
+        val diagnostics = "pkg=${snapshot.packageName} nodes=${observation.coverage.totalNodes} " +
+            "labeled=${observation.coverage.labeledNodes} ratio=${observation.coverage.coverageRatio} " +
+            "reason=${observation.coverage.reason} ocr='$text'"
+
+        assertTrue(
+            "canvas screen should be low coverage: $diagnostics",
+            observation.coverage.isLowCoverage,
+        )
+        assertTrue("AUTO should trigger OCR on the canvas screen: $diagnostics", observation.triggered)
+        assertTrue("pixel frame expected: $diagnostics", observation.pixelFrame)
+        assertTrue("OCR did not read the canvas text: $diagnostics", text.contains("AMBER", ignoreCase = true))
     }
 
     @Test

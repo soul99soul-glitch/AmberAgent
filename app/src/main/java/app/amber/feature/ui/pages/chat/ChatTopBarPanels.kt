@@ -49,6 +49,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -391,15 +392,20 @@ fun ChatActivityButton(
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .size(14.dp)
+                    .sizeIn(minWidth = 14.dp, minHeight = 14.dp)
                     .clip(CircleShape)
-                    .background(theme.accent),
+                    .background(theme.accent)
+                    .padding(horizontal = 3.dp, vertical = 1.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = count.coerceAtMost(9).toString(),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 9.sp,
+                        lineHeight = 10.sp,
+                    ),
                     color = theme.onAccent,
+                    maxLines = 1,
                 )
             }
         }

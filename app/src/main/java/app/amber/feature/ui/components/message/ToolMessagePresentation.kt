@@ -257,7 +257,16 @@ internal fun toolStatusFromMessagePart(
     val screenFoundFalse = tool.toolName in setOf("screen_wait_for_text", "screen_scroll_until") &&
         (jsonObject?.get("matched")?.jsonPrimitiveOrNull?.contentOrNull?.toBooleanStrictOrNull() == false ||
             jsonObject?.get("found")?.jsonPrimitiveOrNull?.contentOrNull?.toBooleanStrictOrNull() == false)
-    val screenUnverified = screenGoalUnverified || screenVerifyTextFailed || screenActionUnverified || screenFoundFalse
+    // screen_click/swipe/long_click with `expectation` report acceptance under `verification`.
+    val screenExpectationUnmet = isScreenTool &&
+        jsonObject?.get("verification")
+            ?.jsonObject
+            ?.get("met")
+            ?.jsonPrimitiveOrNull
+            ?.contentOrNull
+            ?.toBooleanStrictOrNull() == false
+    val screenUnverified = screenGoalUnverified || screenVerifyTextFailed || screenActionUnverified ||
+        screenFoundFalse || screenExpectationUnmet
     return when {
         tool.approvalState is ToolApprovalState.Pending -> AgentToolStatus.WAITING_FOR_PERMISSION
         tool.approvalState is ToolApprovalState.Denied -> AgentToolStatus.CANCELLED
@@ -266,8 +275,17 @@ internal fun toolStatusFromMessagePart(
         reportedStatus in setOf("queued", "running") -> AgentToolStatus.RUNNING
         reportedStatus == "cancelled" -> AgentToolStatus.CANCELLED
         reportedStatus == "timed_out" -> AgentToolStatus.TIMED_OUT
-        reportedStatus in setOf("interrupted", "needs_user_action", "handback", "steps_exhausted", "budget_exhausted", "shadow_trace") ->
-            AgentToolStatus.INTERRUPTED
+        reportedStatus in setOf(
+            "interrupted",
+            "needs_user_action",
+            "handback",
+            "steps_exhausted",
+            "budget_exhausted",
+            "shadow_trace",
+            // Allow-list refusal and pre-flight rejection dispatch nothing.
+            "no_scope",
+            "rejected",
+        ) -> AgentToolStatus.INTERRUPTED
         // A WebMount or Screen action may have been dispatched even when its receipt or
         // postcondition is unavailable. Keep that outcome distinct from both
         // a verified success and a confirmed failure.

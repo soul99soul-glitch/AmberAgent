@@ -111,6 +111,28 @@ data class ContextSearchResult(
     val id: String,
     val preview: String,
     val nodeIndex: Int? = null,
+    /** A compact hit whose original messages are all gone from the transcript. */
+    val stale: Boolean = false,
+    val role: String? = null,
+)
+
+data class ContextSearchPage(
+    val results: List<ContextSearchResult>,
+    val hasMore: Boolean,
+    val totalMatches: Int = results.size,
+) {
+    val truncated: Boolean
+        get() = hasMore
+}
+
+/**
+ * Result of expanding a compact summary or message id. [stale] mirrors the search marker: a compact
+ * whose source messages are all gone still expands to nothing useful, and the model must know that
+ * instead of reading an empty list as "no history".
+ */
+data class ContextExpandResult(
+    val messages: List<UIMessage>,
+    val stale: Boolean,
 )
 
 data class CompactPlan(

@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import androidx.core.graphics.drawable.IconCompat
 import app.amber.ai.core.MessageRole
+import app.amber.ai.core.Tool
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
@@ -18,13 +19,18 @@ import app.amber.agent.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID
 import app.amber.agent.CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID
 import app.amber.agent.R
 import app.amber.core.ai.mcp.McpToolNamespace
+import app.amber.core.jev.JevAutoApprovalGate
 import app.amber.core.utils.NotificationActionConfig
 import app.amber.core.utils.NotificationConfig
 import app.amber.core.utils.XiaomiSuperIslandConfig
 import app.amber.core.utils.cancelNotification
 import app.amber.core.utils.sendNotification
+import app.amber.feature.tools.ToolRisk
+import app.amber.feature.tools.invocationPolicy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -597,7 +603,7 @@ class AgentLiveStatusNotifier(
         lastAssistantParts(messages).filterIsInstance<UIMessagePart.Tool>()
             .lastOrNull { it.approvalState is ToolApprovalState.Pending }
 
-    private fun approvalActions(
+    internal fun approvalActions(
         conversationId: Uuid,
         runId: String?,
         tool: UIMessagePart.Tool,
@@ -608,16 +614,20 @@ class AgentLiveStatusNotifier(
             toolCallId = tool.toolCallId,
             argsDigest = argsDigest(tool.input),
         )
+        val deny = decisionAction(
+            action = AgentNotificationActionReceiver.ACTION_DENY_TOOL,
+            requestOffset = DENY_ACTION_REQUEST_OFFSET,
+            title = context.getString(R.string.notification_live_status_action_deny),
+            conversationId = conversationId,
+            runId = runId,
+            toolCallId = tool.toolCallId,
+            token = token,
+        )
+        if (requiresInAppApprovalOnly(tool)) {
+            return listOf(deny)
+        }
         return listOf(
-            decisionAction(
-                action = AgentNotificationActionReceiver.ACTION_DENY_TOOL,
-                requestOffset = DENY_ACTION_REQUEST_OFFSET,
-                title = context.getString(R.string.notification_live_status_action_deny),
-                conversationId = conversationId,
-                runId = runId,
-                toolCallId = tool.toolCallId,
-                token = token,
-            ),
+            deny,
             decisionAction(
                 action = AgentNotificationActionReceiver.ACTION_APPROVE_TOOL,
                 requestOffset = APPROVE_ACTION_REQUEST_OFFSET,
@@ -649,7 +659,11 @@ class AgentLiveStatusNotifier(
                 putExtra(AgentNotificationActionReceiver.EXTRA_RUN_ID, runId)
             }
         }
-        return NotificationActionConfig(title = title, intent = broadcast(intent, conversationId, requestOffset))
+        return NotificationActionConfig(
+            title = title,
+            intent = broadcast(intent, conversationId, requestOffset),
+            authenticationRequired = true,
+        )
     }
 
     private fun replyAction(
@@ -835,6 +849,57 @@ class AgentLiveStatusNotifier(
         private val INSTALL_COMMAND_REGEX = Regex(
             "\\b(?:apk\\s+add|pip3?\\s+install|uv\\s+pip\\s+install|npm\\s+install|pnpm\\s+add|yarn\\s+add)\\b\\s+([^;&|]+)"
         )
+        private val MANDATORY_IN_APP_APPROVAL_TOOLS = setOf(
+            "screen_run_goal",
+            "screen_run_flow",
+            "screen_add_app",
+            "mcp_server_manage",
+            "recipe_import",
+            "recipe_rollback",
+            "recipe_delete",
+            "wm_zcode_ask",
+            "wm_run_goal",
+            "wm_fetch_replay",
+            "wm_site_add",
+            "wm_site_remove",
+            "wm_eval",
+            "wm_upload_file",
+        )
+
+        /**
+         * High-risk (`ToolRisk.High`) and `mandatoryApproval` / `alwaysAsk` tools must only be
+         * approved inside the app where the full parameters and risk notice are visible; the
+         * notification shade / lock screen may only deny them.
+         */
+        fun requiresInAppApprovalOnly(tool: UIMessagePart.Tool): Boolean {
+            if (tool.metadata?.containsKey(JevAutoApprovalGate.METADATA_KEY) == true) {
+                return true
+            }
+            val tracePolicy = runCatching {
+                tool.metadata
+                    ?.get("permission_trace")
+                    ?.jsonObject
+                    ?.get("policy")
+                    ?.jsonObject
+            }.getOrNull()
+            if (tracePolicy != null) {
+                val traceRisk = tracePolicy["risk"]?.jsonPrimitive?.contentOrNull
+                val traceMandatory = tracePolicy["mandatory_approval"]?.jsonPrimitive?.booleanOrNull == true
+                val traceAlwaysAsk = tracePolicy["always_ask"]?.jsonPrimitive?.booleanOrNull == true
+                if (traceRisk.equals("high", ignoreCase = true) || traceMandatory || traceAlwaysAsk) {
+                    return true
+                }
+            }
+            val syntheticTool = Tool(
+                name = tool.toolName,
+                description = "",
+                mandatoryApproval = tool.toolName in MANDATORY_IN_APP_APPROVAL_TOOLS ||
+                    tool.toolName == "theme_pack_import",
+                execute = { emptyList() },
+            )
+            val policy = syntheticTool.invocationPolicy(tool.input)
+            return policy.risk == ToolRisk.High || policy.mandatoryApproval || policy.alwaysAsk
+        }
     }
 }
 

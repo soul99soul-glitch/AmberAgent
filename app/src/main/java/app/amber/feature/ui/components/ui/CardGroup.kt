@@ -137,7 +137,7 @@ private fun CardGroupListItem(
                         )
                     } else Modifier
                 )
-                .padding(horizontal = 12.dp, vertical = if (hasSecondaryText) 6.dp else 0.dp),
+                .padding(horizontal = 12.dp, vertical = if (hasSecondaryText) 6.dp else 8.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
+import app.amber.core.automation.PhoneTakeoverPhase
 import app.amber.core.jev.JevScreenGoalRunner
 import app.amber.core.settings.prefs.SettingsAggregator
 import kotlinx.coroutines.Dispatchers
@@ -96,8 +97,27 @@ internal class ScreenFlowTools(
                 val executed = mutableListOf<kotlinx.serialization.json.JsonObject>()
 
                 var handback: String? = null
+                val takeoverController = operations.takeoverController
+                val currentRunKey = operations.runKey(runId)
                 for ((index, step) in steps.withIndex()) {
                     currentCoroutineContext().ensureActive()
+                    if (operations.isStopped(runId)) { handback = "stopped_by_user"; break }
+                    if (takeoverController != null) {
+                        val preStepSession = takeoverController.state.value
+                        if (preStepSession.isActive &&
+                            currentRunKey != null &&
+                            preStepSession.runId == currentRunKey &&
+                            (preStepSession.phase == PhoneTakeoverPhase.PAUSING ||
+                                preStepSession.phase == PhoneTakeoverPhase.PAUSED ||
+                                preStepSession.phase == PhoneTakeoverPhase.RESUMING)
+                        ) {
+                            val resumed = takeoverController.awaitResumeIfPaused(
+                                currentSnapshotId = preStepSession.pausedAtSnapshotId,
+                                controller = service,
+                            )
+                            if (!resumed) { handback = "user_takeover_paused"; break }
+                        }
+                    }
                     if (System.currentTimeMillis() >= deadline) { handback = "budget_exhausted"; break }
                     val target = step.string("target").orEmpty().trim()
                     val operation = step.string("operation").orEmpty()
@@ -112,6 +132,35 @@ internal class ScreenFlowTools(
                         ?: return@trackScreenTool textJson {
                             put("status", "handback"); put("reason", "screen_unavailable")
                         }
+                    if (operations.isStopped(runId)) { handback = "stopped_by_user"; break }
+                    if (takeoverController != null) {
+                        val sessionAfterCapture = takeoverController.state.value
+                        val belongsToRun = sessionAfterCapture.isActive &&
+                            (currentRunKey == null || sessionAfterCapture.runId == currentRunKey)
+                        if (belongsToRun && sessionAfterCapture.phase == PhoneTakeoverPhase.RESUMING) {
+                            if (!takeoverController.confirmResumedWithFreshSnapshot(snapshot)) {
+                                if (takeoverController.state.value.phase == PhoneTakeoverPhase.RESUMING) {
+                                    takeoverController.confirmPaused(
+                                        snapshotId = snapshot.id,
+                                        reason = "fresh_snapshot_unavailable",
+                                        controller = service,
+                                    )
+                                }
+                                handback = "fresh_snapshot_unavailable"
+                                break
+                            }
+                        }
+                        if ((belongsToRun && takeoverController.state.value.isPausedOrPausing) ||
+                            service.isSnapshotInvalidated(snapshot.id)
+                        ) {
+                            service.invalidateSnapshot(snapshot.id, "takeover_snapshot_invalidated")
+                            handback = "user_takeover_paused"
+                            break
+                        }
+                        if (belongsToRun) {
+                            takeoverController.recordObservedSnapshot(snapshot.id, index + 1)
+                        }
+                    }
                     if (snapshot.packageName != packageName) { handback = "foreground_package_changed"; break }
                     val candidates = snapshot.nodes.filter { it.label == target }
                     if (candidates.isEmpty()) { handback = "target_not_found"; break }
@@ -139,6 +188,23 @@ internal class ScreenFlowTools(
                         ref = node.ref,
                         text = text,
                     )
+                    if (operations.isStopped(runId)) { handback = "stopped_by_user"; break }
+                    if (takeoverController != null) {
+                        val sessionBeforeDispatch = takeoverController.state.value
+                        val belongsToRun = sessionBeforeDispatch.isActive &&
+                            (currentRunKey == null || sessionBeforeDispatch.runId == currentRunKey)
+                        if ((belongsToRun && sessionBeforeDispatch.isPausedOrPausing) ||
+                            service.isSnapshotInvalidated(snapshot.id)
+                        ) {
+                            service.invalidateSnapshot(snapshot.id, "takeover_snapshot_invalidated")
+                            handback = "user_takeover_paused"
+                            break
+                        }
+                        if (!takeoverController.tryRecordSideEffectDispatch(snapshot.id, action)) {
+                            handback = "side_effect_already_dispatched"
+                            break
+                        }
+                    }
                     val receipt = withContext(Dispatchers.Main.immediate) {
                         service.performScreenAction(snapshot, action)
                     }

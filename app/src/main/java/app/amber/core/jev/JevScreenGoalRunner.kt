@@ -106,6 +106,8 @@ class JevScreenGoalRunner(
                 status != "completed" -> {
                     if (dryRun || status == "shadow_trace") "dry_run" else "not_completed_keep_foreground"
                 }
+                // A takeover that lands during final verification must keep the target app in front.
+                sessionState?.isPausedOrPausing == true -> "takeover_paused_keep_foreground"
                 dryRun -> "dry_run"
                 isTargetHost -> "target_is_host"
                 !shouldAutoReturn -> "disabled_by_setting"
@@ -166,6 +168,11 @@ class JevScreenGoalRunner(
                     }
                     if (!dryRun && takeoverController != null) {
                         val preStepPhase = takeoverController.state.value.phase
+                        if (!takeoverController.state.value.isActive) {
+                            // The user ended the takeover session ("停止") while this run was in flight;
+                            // stop before the next decision/dispatch instead of continuing silently.
+                            return@withTimeoutOrNull finish("handback", "takeover_session_ended")
+                        }
                         if (preStepPhase == PhoneTakeoverPhase.PAUSING ||
                             preStepPhase == PhoneTakeoverPhase.PAUSED ||
                             preStepPhase == PhoneTakeoverPhase.RESUMING
@@ -181,6 +188,7 @@ class JevScreenGoalRunner(
                             }
                         }
                     }
+                    val usedPending = pending != null
                     val snapshot = pending
                         ?: withContext(mainDispatcher) {
                             controller.captureScreenSnapshot()?.also { captured ->
@@ -191,7 +199,19 @@ class JevScreenGoalRunner(
                     pending = null
                     if (!dryRun && takeoverController != null) {
                         if (takeoverController.state.value.phase == PhoneTakeoverPhase.RESUMING) {
-                            takeoverController.confirmResumedWithFreshSnapshot(snapshot)
+                            if (usedPending) {
+                                // A post-action observation from before the takeover is not evidence that
+                                // the user's screen was re-read; drop it and capture again.
+                                controller.invalidateSnapshot(snapshot.id, "takeover_snapshot_invalidated")
+                                continue
+                            }
+                            val confirmed = takeoverController.confirmResumedWithFreshSnapshot(snapshot)
+                            if (!confirmed && takeoverController.state.value.phase == PhoneTakeoverPhase.RESUMING) {
+                                // The state machine refused this capture; hand back instead of looping
+                                // in RESUMING with no usable resume action in the UI.
+                                controller.invalidateSnapshot(snapshot.id, "takeover_snapshot_not_refreshed")
+                                return@withTimeoutOrNull finish("needs_user_action", "takeover_snapshot_not_refreshed")
+                            }
                             noProgress = 0
                         }
                         takeoverController.recordObservedSnapshot(snapshot.id, stepIndex + 1)
@@ -341,7 +361,7 @@ class JevScreenGoalRunner(
                         takeoverController?.confirmPaused(
                             snapshotId = snapshot.id,
                             reason = "action_not_read_only",
-                            interceptedSensitiveAction = candidate.label.take(120),
+                            interceptedSensitiveAction = candidate.label.take(200),
                             controller = controller,
                         )
                         return@withTimeoutOrNull finish("needs_user_action", "action_not_read_only")
@@ -349,6 +369,14 @@ class JevScreenGoalRunner(
                     val receipt = withContext(mainDispatcher) {
                         currentCoroutineContext().ensureActive()
                         if (runtime.configFor(JevPurpose.SCREEN_AUTOMATION) != config) return@withContext null
+                        if (takeoverController != null && !takeoverController.state.value.isActive) {
+                            // Session ended between the last check and dispatch; fail closed.
+                            return@withContext ScreenActionReceipt(
+                                status = "rejected",
+                                dispatched = false,
+                                reason = "takeover_session_ended",
+                            )
+                        }
                         if (takeoverController?.state?.value?.isPausedOrPausing == true) {
                             controller.invalidateSnapshot(snapshot.id, "takeover_snapshot_invalidated")
                             return@withContext ScreenActionReceipt(
@@ -449,7 +477,13 @@ class JevScreenGoalRunner(
         ocrMode: ScreenOcrMode,
     ): ScreenOcrObservation? {
         val engine = ocrEngine ?: return null
-        return runCatching { engine.observe(snapshot = snapshot, mode = ocrMode) }.getOrNull()
+        return try {
+            engine.observe(snapshot = snapshot, mode = ocrMode)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
     }
 
     internal data class Candidate(val label: String, val action: ScreenAction)
@@ -503,7 +537,7 @@ class JevScreenGoalRunner(
                 .distinct()
             val ocrLines = if (ocrObservation?.triggered == true) {
                 ocrObservation.blocks
-                    .map { it.text.trim() }
+                    .map { SensitiveScreenTextClassifier.redactIfSensitive(it.text.trim()) }
                     .filter { it.isNotBlank() && it !in treeLines }
                     .distinct()
             } else {
@@ -555,6 +589,7 @@ class JevScreenGoalRunner(
             val coverage = ocrObservation?.coverage ?: snapshot?.let(ScreenTreeCoverageAnalyzer::analyze)
             put("ocr_mode", ocrMode.wireName())
             put("ocr_triggered", ocrObservation?.triggered == true || ocrTriggerCount > 0)
+            put("ocr_pixel_frame", ocrObservation?.pixelFrame == true)
             put("ocr_trigger_count", ocrTriggerCount)
             ocrObservation?.let { obs ->
                 put("ocr_reason", obs.triggerReason)

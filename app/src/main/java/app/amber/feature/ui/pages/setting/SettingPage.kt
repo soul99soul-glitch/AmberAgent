@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -49,6 +50,7 @@ import com.composables.icons.lucide.DatabaseZap
 import com.composables.icons.lucide.Globe
 import com.composables.icons.lucide.Grid2x2
 import com.composables.icons.lucide.ImageUp
+import com.composables.icons.lucide.Laptop
 import com.composables.icons.lucide.MessageCircle
 import com.composables.icons.lucide.Pen
 import com.composables.icons.lucide.ScanSearch
@@ -301,6 +303,13 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         headlineContent = { Text(stringResource(R.string.setting_page_zcode)) },
                         trailingContent = { SettingChevron() },
                     )
+                    item(
+                        modifier = Modifier.settingSingleLine(),
+                        onClick = { navController.navigate(Screen.SettingExperimentalMacGateway) },
+                        leadingContent = { SettingLeadingIcon(Lucide.Laptop) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_mac_gateway)) },
+                        trailingContent = { SettingChevron() },
+                    )
                 }
             }
 
@@ -421,8 +430,15 @@ private fun ProviderConfigWarningCard(navController: Navigator) {
                 modifier = Modifier.weight(1f),
                 color = workspace.ink,
             )
-            TextButton(onClick = { navController.navigate(Screen.SettingProvider) }) {
-                Text(stringResource(R.string.setting_page_config))
+            TextButton(
+                onClick = { navController.navigate(Screen.SettingProvider) },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.setting_page_config),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }

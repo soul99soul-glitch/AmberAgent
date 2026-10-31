@@ -227,4 +227,149 @@ class ScreenToolReceiptPresentationTest {
             )
         )
     }
+
+    @Test
+    fun `unmet expectation is not reported as a verified completion`() {
+        val (part, content) = makeToolPart(
+            toolName = "screen_click",
+            inputJson = """{"x":100,"y":200,"expectation":{"kind":"visible","target":"Saved"}}""",
+            outputJson = """{"success":true,"verification":{"kind":"visible","target":"Saved","met":false}}""",
+        )
+        assertEquals(
+            AgentToolStatus.INTERRUPTED,
+            toolStatusFromMessagePart(part, loading = false, content = content),
+        )
+        val receipt = ScreenToolReceiptParser.parse(
+            toolName = "screen_click",
+            arguments = parseJson(part.input),
+            content = content,
+        )
+        assertEquals(ScreenReceiptTier.PARTIAL_OR_HANDBACK, receipt?.tier)
+        assertTrue(receipt?.unmetReasons?.any { it.contains("验收") } == true)
+    }
+
+    @Test
+    fun `planning-only tool is not counted as executed steps or verified completion`() {
+        val (part, content) = makeToolPart(
+            toolName = "vlm_task",
+            inputJson = """{"goal":"打开设置"}""",
+            outputJson = """{"status":"planned","goal":"打开设置"}""",
+        )
+        val receipt = ScreenToolReceiptParser.parse(
+            toolName = "vlm_task",
+            arguments = parseJson(part.input),
+            content = content,
+        )
+        assertEquals(ScreenReceiptTier.PARTIAL_OR_HANDBACK, receipt?.tier)
+        assertTrue(receipt?.executedSteps?.isEmpty() == true)
+        assertTrue(receipt?.unmetReasons?.isNotEmpty() == true)
+    }
+
+    @Test
+    fun `takeover handback is held for the user instead of a failed receipt`() {
+        val (part, content) = makeToolPart(
+            toolName = "screen_click",
+            inputJson = """{"x":100,"y":200}""",
+            outputJson = """{"success":false,"status":"needs_user_action","reason":"fresh_snapshot_unavailable"}""",
+        )
+        assertEquals(
+            AgentToolStatus.INTERRUPTED,
+            toolStatusFromMessagePart(part, loading = false, content = content),
+        )
+        val receipt = ScreenToolReceiptParser.parse(
+            toolName = "screen_click",
+            arguments = parseJson(part.input),
+            content = content,
+        )
+        assertEquals(ScreenReceiptTier.HELD_FOR_USER, receipt?.tier)
+        assertTrue(receipt?.unmetReasons?.any { it.contains("接管") } == true)
+    }
+
+    @Test
+    fun `allow-list refusal and rejected flow are blocked instead of verified`() {
+        val noScopeContent = parseJson(
+            """{"status":"no_scope","package_name":"com.example.target","reason":"package_not_allowed"}""",
+        )
+        val (noScopePart, _) = makeToolPart(
+            toolName = "screen_run_goal",
+            inputJson = """{"package_name":"com.example.target","goal":"open"}""",
+            outputJson = noScopeContent.toString(),
+        )
+        assertEquals(
+            AgentToolStatus.INTERRUPTED,
+            toolStatusFromMessagePart(noScopePart, loading = false, content = noScopeContent),
+        )
+        val noScopeReceipt = ScreenToolReceiptParser.parse(
+            toolName = "screen_run_goal",
+            arguments = parseJson(noScopePart.input),
+            content = noScopeContent,
+        )
+        assertEquals(ScreenReceiptTier.FAILED_OR_BLOCKED, noScopeReceipt?.tier)
+        assertTrue(noScopeReceipt?.unmetReasons?.any { it.contains("已授权列表") } == true)
+
+        val rejectedContent = parseJson(
+            """{"status":"rejected","reason":"steps_must_be_1_to_12"}""",
+        )
+        val (rejectedPart, _) = makeToolPart(
+            toolName = "screen_run_flow",
+            inputJson = """{"package_name":"com.example.target","steps":[]}""",
+            outputJson = rejectedContent.toString(),
+        )
+        assertEquals(
+            AgentToolStatus.INTERRUPTED,
+            toolStatusFromMessagePart(rejectedPart, loading = false, content = rejectedContent),
+        )
+        val rejectedReceipt = ScreenToolReceiptParser.parse(
+            toolName = "screen_run_flow",
+            arguments = parseJson(rejectedPart.input),
+            content = rejectedContent,
+        )
+        assertEquals(ScreenReceiptTier.FAILED_OR_BLOCKED, rejectedReceipt?.tier)
+        assertTrue(rejectedReceipt?.unmetReasons?.any { it.contains("步骤数量") } == true)
+    }
+
+    @Test
+    fun `completed goal stays verified when blocked candidates are only informational`() {
+        val content = parseJson(
+            """
+            {
+              "status":"completed",
+              "package_name":"com.example.target",
+              "blocked_sensitive_candidates":[
+                {"action":"click","label":"确认转账","reason":"sensitive_commit_button_filtered"}
+              ]
+            }
+            """.trimIndent(),
+        )
+        val receipt = ScreenToolReceiptParser.parse(
+            toolName = "screen_run_goal",
+            arguments = parseJson("""{"package_name":"com.example.target","goal":"查看余额"}"""),
+            content = content,
+        )
+        assertEquals(ScreenReceiptTier.VERIFIED_COMPLETED, receipt?.tier)
+        assertEquals(1, receipt?.heldSensitiveActions?.size)
+        assertFalse(receipt?.heldSensitiveActions?.first()?.isSelectedChoice == true)
+    }
+
+    @Test
+    fun `typed sensitive value inside a step label is masked`() {
+        val content = parseJson(
+            """
+            {
+              "status":"handback",
+              "steps":[
+                {"action":"type","target":"n0","label":"Type 'hunter2' into Password field","status":"ok","dispatched":true}
+              ]
+            }
+            """.trimIndent(),
+        )
+        val receipt = ScreenToolReceiptParser.parse(
+            toolName = "screen_run_goal",
+            arguments = parseJson("""{"package_name":"com.example.target","goal":"sign in"}"""),
+            content = content,
+        )
+        val summary = receipt?.executedSteps?.single()?.summaryLabel.orEmpty()
+        assertFalse(summary.contains("hunter2"))
+        assertTrue(summary.contains("******"))
+    }
 }

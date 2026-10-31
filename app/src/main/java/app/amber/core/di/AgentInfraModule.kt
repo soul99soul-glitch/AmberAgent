@@ -79,6 +79,8 @@ val agentInfraModule = module {
             persistence = app.amber.core.automation.FilePhoneTakeoverPersistence(
                 java.io.File(get<android.content.Context>().filesDir, "automation/phone_takeover_state.properties"),
             ),
+            // A process kill during a takeover must not look like "nothing ever happened".
+            restoreOnCreate = true,
         )
     }
     single { app.amber.feature.bubble.AgentTaskBubbleController(get(), get(), get(), get(), get(), getOrNull()) }

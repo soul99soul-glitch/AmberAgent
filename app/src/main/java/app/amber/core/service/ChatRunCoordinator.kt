@@ -985,6 +985,14 @@ class ChatRunCoordinator(
             )
             return@restore false
         }
+        if (approved && toolPart != null && app.amber.feature.runtime.AgentLiveStatusNotifier.requiresInAppApprovalOnly(toolPart)) {
+            Log.w(
+                TAG,
+                "handleNotificationApproval: rejected high-risk/mandatory approval from notification " +
+                    "conversation=$conversationId run=$runId tool=${toolPart.toolName} toolCall=$toolCallId"
+            )
+            return@restore false
+        }
         val session = getOrCreateSession(conversationId)
         session.dispatchToolApproval(
             scope = appScope,

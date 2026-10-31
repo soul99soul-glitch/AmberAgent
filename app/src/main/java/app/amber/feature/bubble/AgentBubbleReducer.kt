@@ -8,6 +8,8 @@ import app.amber.core.automation.PhoneAutomationSessionState
 import app.amber.core.automation.PhoneTakeoverPhase
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 /** 任务气泡的展示阶段：无 run / 运行中 / 结束后短暂停留。 */
 enum class AgentBubblePhase { IDLE, RUNNING, FINISHED }
@@ -82,6 +84,7 @@ object AgentBubbleReducer {
         cancelled: Boolean = false,
         nowMillis: Long,
         takeoverSession: PhoneAutomationSessionState? = null,
+        activeRunId: String? = null,
     ): AgentBubbleUiState {
         if (pickedConversationId == null) {
             when {
@@ -132,8 +135,22 @@ object AgentBubbleReducer {
 
         val isScreenToolRunning = activity?.status == ToolActivityStatus.RUNNING &&
             activity.toolName.startsWith(SCREEN_TOOL_PREFIX)
+        val expectedRunId = activeRunId?.takeIf { it.isNotBlank() }
+            ?: parts.filterIsInstance<UIMessagePart.Tool>()
+                .lastOrNull()
+                ?.metadata
+                ?.get("run_id")
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?.takeIf { it.isNotBlank() }
+        val matchingTakeoverSession = takeoverSession?.takeIf { session ->
+            session.isActive &&
+                session.pauseReason != "process_restart" &&
+                !session.runId.isNullOrBlank() &&
+                (expectedRunId == null || session.runId == expectedRunId)
+        }
         val effectiveTakeoverPhase = when {
-            takeoverSession?.isActive == true -> takeoverSession.phase
+            matchingTakeoverSession != null -> matchingTakeoverSession.phase
             isScreenToolRunning -> PhoneTakeoverPhase.AUTOMATED
             else -> PhoneTakeoverPhase.IDLE
         }
@@ -156,8 +173,8 @@ object AgentBubbleReducer {
             stepTitle = runningStepTitle(activity?.takeIf { it.conversationId == pickedConversationId }),
             stepRunning = shouldPassthroughTouch,
             takeoverPhase = effectiveTakeoverPhase,
-            takeoverReason = takeoverSession?.pauseReason,
-            interceptedSensitiveAction = takeoverSession?.interceptedSensitiveAction,
+            takeoverReason = matchingTakeoverSession?.pauseReason,
+            interceptedSensitiveAction = matchingTakeoverSession?.interceptedSensitiveAction,
             canRequestTakeover = effectiveTakeoverPhase == PhoneTakeoverPhase.AUTOMATED && isScreenToolRunning,
             canRequestResume = effectiveTakeoverPhase == PhoneTakeoverPhase.PAUSED ||
                 effectiveTakeoverPhase == PhoneTakeoverPhase.PAUSING,

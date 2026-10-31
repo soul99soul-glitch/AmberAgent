@@ -110,6 +110,42 @@ class MacGatewayRepository(
         }
     }
 
+    suspend fun decide(
+        sessionKey: String,
+        toolCallId: String,
+        allow: Boolean,
+        highRisk: Boolean = false,
+    ) {
+        val sessionApproval = _state.value.status?.sessions
+            ?.firstOrNull { it.key == sessionKey && it.pendingApproval?.toolCallId == toolCallId }
+            ?.pendingApproval
+        val effectiveHighRisk = highRisk || sessionApproval?.highRisk == true
+        if (effectiveHighRisk && allow) {
+            throw MacGatewayException.Server("high-risk actions must be approved on Mac")
+        }
+        val client = activeClient() ?: return
+        client.decide(
+            sessionKey = sessionKey,
+            toolCallId = toolCallId,
+            allow = allow,
+            highRisk = effectiveHighRisk,
+        )
+        _state.update { current ->
+            current.copy(
+                status = current.status?.copy(
+                    sessions = current.status.sessions.map { session ->
+                        if (session.key == sessionKey && session.pendingApproval?.toolCallId == toolCallId) {
+                            session.copy(pendingApproval = null)
+                        } else {
+                            session
+                        }
+                    },
+                ),
+            )
+        }
+        refresh()
+    }
+
     suspend fun uploadPushToken() {
         val client = activeClient() ?: return
         client.registerPushToken(fetchFcmToken())

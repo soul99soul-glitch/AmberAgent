@@ -2,5 +2,7 @@
     <application>
         <activity android:name="app.amber.agent.JevScreenFixtureActivity"
             android:exported="true" android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity android:name="app.amber.agent.OcrCanvasFixtureActivity"
+            android:exported="true" android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     </application>
 </manifest>

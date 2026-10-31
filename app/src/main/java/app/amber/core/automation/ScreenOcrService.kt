@@ -6,10 +6,12 @@ import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.os.Build
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
+import java.time.Instant
 import kotlin.coroutines.resume
 
 /**
@@ -41,6 +43,12 @@ object SensitiveScreenTextClassifier {
         RegexOption.IGNORE_CASE,
     )
     private val OTP_OR_CARD_DIGITS = Regex("\\b\\d{6,19}\\b")
+    // Jev step labels render supplied input as `Type 'hunter2' into ...`; hide the value itself
+    // rather than only the keyword that follows it.
+    private val TYPED_VALUE = Regex(
+        "((?:Type|Input)\\s+['\"])([^'\"]+)(['\"])",
+        RegexOption.IGNORE_CASE,
+    )
     private val KEY_VALUE_SECRET = Regex(
         "((?:密码|验证码|校验码|动态码|安全码|支付密码|银行卡|身份证|cvv|pin|password|passcode|otp|verification\\s*code|security\\s*code|secret|token)\\s*(?:[:=：]|\\s+)\\s*)([^\\s\"',;，；]+)",
         RegexOption.IGNORE_CASE,
@@ -57,7 +65,10 @@ object SensitiveScreenTextClassifier {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return ""
         if (!isSensitive(trimmed)) return trimmed
-        var redacted = OTP_OR_CARD_DIGITS.replace(trimmed) { match ->
+        var redacted = TYPED_VALUE.replace(trimmed) { match ->
+            "${match.groupValues[1]}******${match.groupValues[3]}"
+        }
+        redacted = OTP_OR_CARD_DIGITS.replace(redacted) { match ->
             val len = match.value.length
             if (len <= 6) "******" else "${match.value.take(2)}****${match.value.takeLast(2)}"
         }
@@ -217,11 +228,15 @@ class DefaultScreenOcrEngine(
             displayWidth = effectiveWidth,
             displayHeight = effectiveHeight,
             screenshotSource = captured?.source ?: "accessibility_fallback",
+            // Distinguishes a real screenshot pass from a metadata-only fallback so callers and
+            // receipts never claim pixel OCR ran when no frame existed.
+            pixelFrame = captured?.bitmap != null,
         )
     }
 
     companion object {
         private const val MAX_OCR_BLOCKS = 64
+        private const val FRESH_FRAME_WINDOW_SECONDS = 5L
 
         private fun resolveDisplaySize(context: Context): Pair<Int, Int> {
             val metrics = DisplayMetrics()
@@ -257,14 +272,19 @@ class DefaultScreenOcrEngine(
                 }
             }
             val lastCapture = screenCaptureManager.lastResult
-            if (lastCapture != null && lastCapture.file.exists()) {
-                val decoded = runCatching { BitmapFactory.decodeFile(lastCapture.file.absolutePath) }.getOrNull()
+            // A frame left over from an earlier screenshot is not evidence about the current screen.
+            val freshCapture = lastCapture?.takeIf { capture ->
+                capture.file.exists() &&
+                    capture.createdAt.isAfter(Instant.now().minusSeconds(FRESH_FRAME_WINDOW_SECONDS))
+            }
+            if (freshCapture != null) {
+                val decoded = runCatching { BitmapFactory.decodeFile(freshCapture.file.absolutePath) }.getOrNull()
                 if (decoded != null) {
                     return CapturedScreenBitmap(
                         bitmap = decoded,
                         source = "media_projection",
-                        width = decoded.width.takeIf { it > 0 } ?: lastCapture.width.takeIf { it > 0 } ?: fallbackWidth,
-                        height = decoded.height.takeIf { it > 0 } ?: lastCapture.height.takeIf { it > 0 } ?: fallbackHeight,
+                        width = decoded.width.takeIf { it > 0 } ?: freshCapture.width.takeIf { it > 0 } ?: fallbackWidth,
+                        height = decoded.height.takeIf { it > 0 } ?: freshCapture.height.takeIf { it > 0 } ?: fallbackHeight,
                     )
                 }
             }
@@ -304,28 +324,51 @@ object AndroidOnDeviceOcrRecognizer {
         return results
     }
 
+    @Volatile
+    private var cachedTextRecognizer: Any? = null
+
+    /**
+     * Creates the ML Kit recognizer once and reuses it. Building a recognizer per observation reloads
+     * the bundled model on every poll of `screen_wait_for_text` / `screen_scroll_until`.
+     */
+    private fun textRecognizerOrNull(): Any? {
+        cachedTextRecognizer?.let { return it }
+        return runCatching {
+            val textRecognitionClass = Class.forName("com.google.mlkit.vision.text.TextRecognition")
+            val recognizerOptionsInterface =
+                Class.forName("com.google.mlkit.vision.text.TextRecognizerOptionsInterface")
+            val optionsObj = runCatching {
+                val chineseOptionsClass =
+                    Class.forName("com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions\$Builder")
+                val builder = chineseOptionsClass.getDeclaredConstructor().newInstance()
+                chineseOptionsClass.getMethod("build").invoke(builder)
+            }.getOrElse {
+                val defaultOptionsClass = Class.forName("com.google.mlkit.vision.text.latin.TextRecognizerOptions")
+                defaultOptionsClass.getField("DEFAULT_OPTIONS").get(null)
+            } ?: return@runCatching null
+            textRecognitionClass.getMethod("getClient", recognizerOptionsInterface)
+                .invoke(null, optionsObj)
+                ?.also { cachedTextRecognizer = it }
+        }.getOrElse { error ->
+            Log.w(TAG, "ML Kit TextRecognizer unavailable; pixel OCR stays disabled", error)
+            null
+        }
+    }
+
     private suspend fun recognizeWithMlKitReflection(bitmap: Bitmap): List<RawOcrRegion> = runCatching {
+        val client = textRecognizerOrNull() ?: return@runCatching emptyList()
         val inputImageClass = Class.forName("com.google.mlkit.vision.common.InputImage")
         val fromBitmap = inputImageClass.getMethod("fromBitmap", Bitmap::class.java, Int::class.javaPrimitiveType)
         val inputImage = fromBitmap.invoke(null, bitmap, 0) ?: return@runCatching emptyList()
 
-        val textRecognitionClass = Class.forName("com.google.mlkit.vision.text.TextRecognition")
-        val recognizerOptionsInterface = Class.forName("com.google.mlkit.vision.text.TextRecognizerOptionsInterface")
-        val optionsObj = runCatching {
-            val chineseOptionsClass = Class.forName("com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions\$Builder")
-            val builder = chineseOptionsClass.getDeclaredConstructor().newInstance()
-            chineseOptionsClass.getMethod("build").invoke(builder)
-        }.getOrElse {
-            val defaultOptionsClass = Class.forName("com.google.mlkit.vision.text.latin.TextRecognizerOptions")
-            defaultOptionsClass.getField("DEFAULT_OPTIONS").get(null)
-        } ?: return@runCatching emptyList()
-
-        val getClient = textRecognitionClass.getMethod("getClient", recognizerOptionsInterface)
-        val client = getClient.invoke(null, optionsObj) ?: return@runCatching emptyList()
         val processMethod = client.javaClass.getMethod("process", inputImageClass)
         val task = processMethod.invoke(client, inputImage) ?: return@runCatching emptyList()
 
-        val visionText = awaitGmsTask(task) ?: return@runCatching emptyList()
+        val visionText = withTimeoutOrNull(OCR_TASK_TIMEOUT_MS) { awaitGmsTask(task) }
+        if (visionText == null) {
+            Log.w(TAG, "ML Kit OCR task did not complete within ${OCR_TASK_TIMEOUT_MS}ms")
+            return@runCatching emptyList()
+        }
         val getTextBlocks = visionText.javaClass.getMethod("getTextBlocks")
         val blocks = getTextBlocks.invoke(visionText) as? List<*> ?: return@runCatching emptyList()
         buildList {
@@ -349,7 +392,10 @@ object AndroidOnDeviceOcrRecognizer {
                 }
             }
         }
-    }.getOrDefault(emptyList())
+    }.getOrElse { error ->
+        Log.w(TAG, "ML Kit OCR failed", error)
+        emptyList()
+    }
 
     private fun recognizeWithGmsVisionReflection(context: Context, bitmap: Bitmap): List<RawOcrRegion> = runCatching {
         val builderClass = Class.forName("com.google.android.gms.vision.text.TextRecognizer\$Builder")
@@ -393,7 +439,10 @@ object AndroidOnDeviceOcrRecognizer {
         } finally {
             runCatching { recognizer.javaClass.getMethod("release").invoke(recognizer) }
         }
-    }.getOrDefault(emptyList())
+    }.getOrElse { error ->
+        Log.w(TAG, "GMS Vision OCR failed", error)
+        emptyList()
+    }
 
     private suspend fun awaitGmsTask(task: Any): Any? = suspendCancellableCoroutine { cont ->
         runCatching {
@@ -413,6 +462,7 @@ object AndroidOnDeviceOcrRecognizer {
                 arrayOf(onFailureListenerClass),
             ) { _, method, _ ->
                 if (method.name == "onFailure" && cont.isActive) {
+                    Log.w(TAG, "ML Kit OCR task failed")
                     cont.resume(null)
                 }
                 null
@@ -502,4 +552,7 @@ object AndroidOnDeviceOcrRecognizer {
             .trim()
         return cleaned.takeIf { it.length in 2..40 }.orEmpty()
     }
+
+    private const val TAG = "AmberScreenOcr"
+    private const val OCR_TASK_TIMEOUT_MS = 3_000L
 }

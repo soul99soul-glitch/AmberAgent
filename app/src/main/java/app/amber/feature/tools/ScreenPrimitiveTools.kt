@@ -263,6 +263,7 @@ internal class ScreenPrimitiveTools(
                 val snapshot = runCatching { service.captureScreenSnapshot() }.getOrNull()
                 val ocrObservation = ocrEngine.observe(
                     snapshot = snapshot,
+                    uiTreeDump = uiTree,
                     mode = ocrMode,
                     forceReason = if (ocrMode == ScreenOcrMode.AUTO && uiTree.isBlank()) "empty_ui_tree_dump" else null,
                 )
@@ -293,11 +294,7 @@ internal class ScreenPrimitiveTools(
                 val service = requireScreenAccessibility()
                 val query = input.requiredString("text")
                 val ocrMode = input.resolveOcrMode()
-                val treeMatches = if (ocrMode == ScreenOcrMode.ON) {
-                    service.findTextNodes(query = query, maxNodes = input.int("max_nodes") ?: 160)
-                } else {
-                    service.findTextNodes(query = query, maxNodes = input.int("max_nodes") ?: 160)
-                }
+                val treeMatches = service.findTextNodes(query = query, maxNodes = input.int("max_nodes") ?: 160)
                 val ocrObservation = if (ocrMode == ScreenOcrMode.ON || (ocrMode == ScreenOcrMode.AUTO && treeMatches.isEmpty())) {
                     val snapshot = runCatching { service.captureScreenSnapshot() }.getOrNull()
                     ocrEngine.observe(
@@ -390,10 +387,18 @@ internal class ScreenPrimitiveTools(
                             }
                         }
                         ocrMatch != null -> {
+                            // The OCR frame is the whole display, which can be larger than this app's
+                            // window metrics in split-screen; validate against the frame it came from.
+                            val ocrWidth = ocrObservation?.displayWidth
+                                ?: context.resources.displayMetrics.widthPixels
+                            val ocrHeight = ocrObservation?.displayHeight
+                                ?: context.resources.displayMetrics.heightPixels
                             val point = requireDisplayPoint(
                                 x = ocrMatch.centerX,
                                 y = ocrMatch.centerY,
                                 label = "screen_tap_text.ocr",
+                                width = ocrWidth,
+                                height = ocrHeight,
                             )
                             val ok = service.tap(point.x, point.y)
                             textJson {
@@ -604,13 +609,18 @@ internal class ScreenPrimitiveTools(
             }
         }
     )
-    private fun requireDisplayPoint(x: Float, y: Float, label: String): ScreenPoint {
-        val metrics = context.resources.displayMetrics
+    private fun requireDisplayPoint(
+        x: Float,
+        y: Float,
+        label: String,
+        width: Int = context.resources.displayMetrics.widthPixels,
+        height: Int = context.resources.displayMetrics.heightPixels,
+    ): ScreenPoint {
         return requirePointInDisplayBounds(
             x = x,
             y = y,
-            width = metrics.widthPixels,
-            height = metrics.heightPixels,
+            width = width,
+            height = height,
             label = label
         )
     }
@@ -688,8 +698,19 @@ internal class ScreenPrimitiveTools(
         put("ocr_triggered", observation.triggered)
         put("ocr_reason", observation.triggerReason)
         put("ocr_block_count", observation.blocks.size)
+        put("ocr_pixel_frame", observation.pixelFrame)
         if (observation.triggered) {
-            put("ocr_text", observation.mergedText(maxChars = 4_000))
+            // Keep the flat text export consistent with the per-block export below: both are
+            // user-visible and must not leak OTP/password text from OCR.
+            put(
+                "ocr_text",
+                observation.blocks
+                    .map { SensitiveScreenTextClassifier.redactIfSensitive(it.text) }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .joinToString("\n")
+                    .take(4_000),
+            )
             put("ocr_blocks", buildJsonArray {
                 observation.blocks.forEachIndexed { index, block ->
                     add(block.toMatchJson(index))

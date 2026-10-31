@@ -95,6 +95,14 @@ data class MacGatewayStatus(
     )
 
     @Serializable
+    data class PendingApproval(
+        val toolCallId: String,
+        val tool: String,
+        val detail: String? = null,
+        val highRisk: Boolean = false,
+    )
+
+    @Serializable
     data class Session(
         val key: String,
         val agent: String,
@@ -104,10 +112,46 @@ data class MacGatewayStatus(
         val host: String? = null,
         val state: String,
         val waitReason: String? = null,
-        val abnormal: Boolean,
-        val monitored: Boolean,
-        val updatedAt: Double,
+        val abnormal: Boolean = false,
+        val monitored: Boolean = false,
+        val updatedAt: Double = 0.0,
+        val summary: String? = null,
+        val pendingApproval: PendingApproval? = null,
     )
+}
+
+/**
+ * Board ordering for the Mac Gateway task list.
+ *
+ * The Mac decides which sessions exist; the phone only decides what to show first, so this is
+ * presentation only. It exists because `/v1/status` gives no guarantee about list order: without a
+ * stable sort the 10 s refresh reshuffles rows under the user's finger and `take(limit)` can drop a
+ * session that is actually waiting for a decision.
+ *
+ * Order: waiting-on-a-human first, then running, then stalled/abnormal, then finished; each bucket
+ * most-recently-updated first, keyed by session key so identical timestamps cannot flip.
+ */
+object MacGatewaySessionOrdering {
+    fun sort(sessions: List<MacGatewayStatus.Session>): List<MacGatewayStatus.Session> =
+        sessions.sortedWith(
+            compareBy<MacGatewayStatus.Session> { priority(it) }
+                .thenByDescending { it.updatedAt }
+                .thenBy { it.key },
+        )
+
+    /** Sorts, then trims to [limit]; a waiting session is never dropped in favour of a finished one. */
+    fun visible(
+        sessions: List<MacGatewayStatus.Session>,
+        limit: Int,
+    ): List<MacGatewayStatus.Session> = sort(sessions).take(limit.coerceAtLeast(0))
+
+    internal fun priority(session: MacGatewayStatus.Session): Int = when {
+        session.state == "waiting" -> 0
+        session.state == "running" -> 1
+        session.state == "stalled" || session.abnormal -> 2
+        session.state == "completed" -> 4
+        else -> 3
+    }
 }
 
 sealed class MacGatewayException(message: String) : Exception(message) {
@@ -171,6 +215,22 @@ class MacGatewayClient(
 
     suspend fun setMonitored(taskKey: String, monitored: Boolean) {
         send("POST", listOf("v1", "tasks", taskKey, "monitor"), mapOf("monitored" to monitored))
+    }
+
+    suspend fun decide(
+        sessionKey: String,
+        toolCallId: String,
+        allow: Boolean,
+        highRisk: Boolean = false,
+    ) {
+        if (highRisk && allow) {
+            throw MacGatewayException.Server("high-risk actions must be approved on Mac")
+        }
+        send(
+            "POST",
+            listOf("v1", "amber", "decision"),
+            mapOf("sessionKey" to sessionKey, "toolCallId" to toolCallId, "allow" to allow),
+        )
     }
 
     suspend fun registerPushToken(pushToken: String) {

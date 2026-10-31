@@ -43,6 +43,7 @@ import app.amber.core.utils.plus
 import app.amber.feature.macgateway.MacGatewayException
 import app.amber.feature.macgateway.MacGatewayPairingPayload
 import app.amber.feature.macgateway.MacGatewayRepository
+import app.amber.feature.macgateway.MacGatewaySessionOrdering
 import app.amber.feature.macgateway.MacGatewayStatus
 import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.components.ui.permission.PermissionManager
@@ -228,12 +229,27 @@ fun SettingExperimentalMacGatewayPage(
                     }
                     status?.health?.let { health -> item { HealthSection(health) } }
                     item {
-                        TasksSection(status?.sessions.orEmpty().take(VISIBLE_TASK_LIMIT), status?.synaraURL) { session, monitored ->
-                            scope.launch {
-                                runCatching { repository.setMonitored(session.key, monitored) }
-                                    .onFailure { notice = Notice(it.describe(context), error = true) }
-                            }
-                        }
+                        TasksSection(
+                            sessions = MacGatewaySessionOrdering.visible(status?.sessions.orEmpty(), VISIBLE_TASK_LIMIT),
+                            synaraURL = status?.synaraURL,
+                            busy = busy,
+                            onMonitoredChange = { session, monitored ->
+                                scope.launch {
+                                    runCatching { repository.setMonitored(session.key, monitored) }
+                                        .onFailure { notice = Notice(it.describe(context), error = true) }
+                                }
+                            },
+                            onDecision = { session, approval, allow ->
+                                perform {
+                                    repository.decide(
+                                        sessionKey = session.key,
+                                        toolCallId = approval.toolCallId,
+                                        allow = allow,
+                                        highRisk = approval.highRisk,
+                                    )
+                                }
+                            },
+                        )
                     }
                 }
             }
@@ -283,10 +299,12 @@ private fun HealthSection(health: MacGatewayStatus.Health) {
 }
 
 @Composable
-private fun TasksSection(
+internal fun TasksSection(
     sessions: List<MacGatewayStatus.Session>,
     synaraURL: String?,
+    busy: Boolean = false,
     onMonitoredChange: (MacGatewayStatus.Session, Boolean) -> Unit,
+    onDecision: (MacGatewayStatus.Session, MacGatewayStatus.PendingApproval, Boolean) -> Unit = { _, _, _ -> },
 ) {
     val workspace = workspaceColors()
     val context = LocalContext.current
@@ -304,34 +322,100 @@ private fun TasksSection(
             return@ExperimentSectionCard
         }
         sessions.forEach { session ->
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = session.subject,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = workspace.ink,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = taskDetail(session),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = workspace.muted,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(
+                            text = session.subject,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = workspace.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = taskDetail(session),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = workspace.muted,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        session.summary?.takeIf { it.isNotBlank() }?.let { summary ->
+                            Text(
+                                text = summary,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = workspace.faint,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    Switch(checked = session.monitored, onCheckedChange = { onMonitoredChange(session, it) })
+                }
+                session.pendingApproval?.let { approval ->
+                    PendingApprovalCard(
+                        session = session,
+                        approval = approval,
+                        busy = busy,
+                        onDecision = onDecision,
                     )
                 }
-                Switch(checked = session.monitored, onCheckedChange = { onMonitoredChange(session, it) })
             }
         }
         ExperimentNote(stringResource(R.string.mac_gateway_tasks_hint))
+    }
+}
+
+@Composable
+private fun PendingApprovalCard(
+    session: MacGatewayStatus.Session,
+    approval: MacGatewayStatus.PendingApproval,
+    busy: Boolean,
+    onDecision: (MacGatewayStatus.Session, MacGatewayStatus.PendingApproval, Boolean) -> Unit,
+) {
+    val workspace = workspaceColors()
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = listOfNotNull(approval.tool.takeIf { it.isNotBlank() }, approval.detail?.takeIf { it.isNotBlank() })
+                .joinToString(" · "),
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            color = workspace.ink,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (approval.highRisk) {
+            ExperimentNote(stringResource(R.string.mac_gateway_approval_high_risk_hint))
+        }
+        ExperimentActionRow {
+            if (!approval.highRisk) {
+                ExperimentActionButton(
+                    text = stringResource(R.string.mac_gateway_approval_approve),
+                    enabled = !busy,
+                    primary = true,
+                ) {
+                    onDecision(session, approval, true)
+                }
+            }
+            ExperimentActionButton(
+                text = stringResource(R.string.mac_gateway_approval_deny),
+                enabled = !busy,
+                primary = false,
+            ) {
+                onDecision(session, approval, false)
+            }
+        }
     }
 }
 

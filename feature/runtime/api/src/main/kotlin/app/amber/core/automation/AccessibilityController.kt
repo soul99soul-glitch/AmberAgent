@@ -92,10 +92,20 @@ interface AccessibilityController {
  */
 object ScreenSnapshotInvalidationRegistry {
     private const val MAX_ENTRIES = 256
+    @Volatile
+    private var takeoverPauseActive: Boolean = false
     private val entries = object : LinkedHashMap<String, String>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean =
             size > MAX_ENTRIES
     }
+
+    @Synchronized
+    fun setTakeoverPauseActive(paused: Boolean) {
+        takeoverPauseActive = paused
+    }
+
+    @Synchronized
+    fun isTakeoverPauseActive(): Boolean = takeoverPauseActive
 
     @Synchronized
     fun invalidate(snapshotId: String, reason: String = "returned_to_host_snapshot_invalidated") {
@@ -106,6 +116,7 @@ object ScreenSnapshotInvalidationRegistry {
     @Synchronized
     fun markFreshCapture(snapshotId: String) {
         if (snapshotId.isBlank()) return
+        if (takeoverPauseActive) return
         entries.remove(snapshotId)
     }
 
@@ -120,6 +131,7 @@ object ScreenSnapshotInvalidationRegistry {
 
     @Synchronized
     fun clearForTest() {
+        takeoverPauseActive = false
         entries.clear()
     }
 }

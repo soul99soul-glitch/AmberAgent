@@ -77,11 +77,13 @@ internal fun ToolCallPreviewSheet(
     val isMemoryOperation = toolName == ToolNames.MEMORY &&
         memoryAction in listOf(MemoryActions.CREATE, MemoryActions.EDIT)
     val memoryId = (content as? JsonObject)?.get("id")?.jsonPrimitiveOrNull?.intOrNull
-    val screenReceipt = remember(toolName, arguments, content) {
+    val context = LocalContext.current
+    val screenReceipt = remember(toolName, arguments, content, context) {
         ScreenToolReceiptParser.parse(
             toolName = toolName,
             arguments = arguments,
             content = content,
+            context = context,
         )
     }
 

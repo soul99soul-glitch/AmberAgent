@@ -70,6 +70,7 @@ fun AgentTaskBubbleContent(
     onSizeChanged: () -> Unit,
     onRequestTakeover: () -> Unit = {},
     onRequestResume: () -> Unit = {},
+    onRequestEndTakeover: () -> Unit = {},
 ) {
     val tokens = LocalAmberTokens.current
     val errorColor = MaterialTheme.colorScheme.error
@@ -309,13 +310,33 @@ fun AgentTaskBubbleContent(
                             }
                         }
                         state.takeoverPhase == PhoneTakeoverPhase.RESUMING -> {
-                            Text(
-                                text = stringResource(R.string.phone_takeover_status_resuming),
-                                fontSize = 12.sp,
-                                color = tokens.ink3,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = stringResource(R.string.phone_takeover_status_resuming),
+                                    fontSize = 12.sp,
+                                    color = tokens.ink3,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                // RESUMING has no resume action; without an escape the bubble would
+                                // sit on "re-reading screen" until the next screen tool arrives.
+                                TextButton(
+                                    onClick = onRequestEndTakeover,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(tokens.surface),
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.task_bubble_stop),
+                                        fontSize = 13.sp,
+                                        color = tokens.ink2,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                         }
                     }
                 }

@@ -421,7 +421,7 @@ internal fun ChatInput(
                     //    capsule (animated width via animateContentSize; + rotates to ×).
                     Row(
                         modifier = Modifier
-                            .height(44.dp)
+                            .heightIn(min = 44.dp)
                             .clip(CircleShape)
                             .background(tokens.surface2)
                             .border(BorderStroke(1.dp, tokens.line), CircleShape)
@@ -430,9 +430,10 @@ internal fun ChatInput(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
                                 .clip(CircleShape)
-                                .clickable { expandToggle(ExpandState.Files) },
+                                .clickable { expandToggle(ExpandState.Files) }
+                                .minimumInteractiveComponentSize()
+                                .size(44.dp),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
@@ -547,8 +548,6 @@ internal fun ChatInput(
                     )
                     Box(
                         modifier = Modifier
-                            .size(ComposerButtonSize)
-                            .minimumInteractiveComponentSize()
                             .combinedClickable(
                                 interactionSource = sendInteraction,
                                 indication = null,
@@ -561,7 +560,9 @@ internal fun ChatInput(
                                     dismissExpand()
                                     sendMessageWithoutAnswer()
                                 },
-                            ),
+                            )
+                            .minimumInteractiveComponentSize()
+                            .size(ComposerButtonSize),
                         contentAlignment = Alignment.Center,
                     ) {
                         Box(
@@ -660,9 +661,10 @@ private fun InlineAttachmentIcon(
     val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     Box(
         modifier = Modifier
-            .size(ComposerButtonSize)
             .clip(CircleShape)
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .minimumInteractiveComponentSize()
+            .size(ComposerButtonSize),
         contentAlignment = Alignment.Center,
     ) {
         Icon(

@@ -10,7 +10,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.context.ContextExpandBudget
+import app.amber.core.context.ContextSearchBudget
 import app.amber.core.context.ConversationContextEngine
 import app.amber.core.settings.Settings
 import app.amber.core.settings.getCurrentChatModel
@@ -56,6 +59,10 @@ class ConversationContextTools(
                         put("type", "integer")
                         put("description", "Maximum results, default 8")
                     })
+                    put("role", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Optional role filter: user, assistant, system, tool, or compact_summary")
+                    })
                 },
                 required = listOf("query")
             )
@@ -63,18 +70,28 @@ class ConversationContextTools(
         execute = { input ->
             val query = input.jsonObject["query"]?.jsonPrimitive?.contentOrNull.orEmpty()
             val limit = input.jsonObject["limit"]?.jsonPrimitive?.intOrNull ?: 8
+            val role = input.jsonObject["role"]?.jsonPrimitive?.contentOrNull
             val conversation = conversationProvider()
-            val results = contextEngine.search(conversation.id, query, limit.coerceIn(1, 20))
+            val page = contextEngine.searchPage(conversation.id, query, limit.coerceIn(1, 20), role)
+            val budgeted = ContextSearchBudget.apply(page.results, limitTruncated = page.hasMore)
             val payload = buildJsonObject {
                 put("status", "ok")
                 put("query", query)
+                role?.takeIf { it.isNotBlank() }?.let { put("role", it) }
+                put("returned", budgeted.results.size)
+                put("total_matches", page.totalMatches)
+                put("has_more", budgeted.hasMore)
+                put("truncated", budgeted.truncated)
+                put("budget_chars", budgeted.usedChars)
                 put("results", buildJsonArray {
-                    results.forEach { result ->
+                    budgeted.results.forEach { result ->
                         add(
                             buildJsonObject {
                                 put("source", result.source)
                                 put("id", result.id)
+                                result.role?.let { put("role", it) }
                                 result.nodeIndex?.let { put("node_index", it) }
+                                put("stale", result.stale)
                                 put("preview", result.preview)
                             }
                         )
@@ -99,6 +116,10 @@ class ConversationContextTools(
                         put("type", "integer")
                         put("description", "When expanding a message id, include this many neighboring messages, default 2")
                     })
+                    put("max_chars", buildJsonObject {
+                        put("type", "integer")
+                        put("description", "Total character budget for returned message text, default 12000")
+                    })
                 },
                 required = listOf("source_id")
             )
@@ -106,18 +127,30 @@ class ConversationContextTools(
         execute = { input ->
             val sourceId = input.jsonObject["source_id"]?.jsonPrimitive?.contentOrNull.orEmpty()
             val radius = input.jsonObject["radius"]?.jsonPrimitive?.intOrNull ?: 2
+            val maxChars = input.jsonObject["max_chars"]?.jsonPrimitive?.intOrNull
+                ?: ContextExpandBudget.DEFAULT_MAX_CHARS
             val conversation = conversationProvider()
-            val messages = contextEngine.expand(conversation.id, sourceId, radius)
+            val expanded = contextEngine.expandResult(conversation.id, sourceId, radius)
+            val textOf = { message: UIMessage -> message.toText() }
+            val budgeted = ContextExpandBudget.apply(
+                messages = expanded.messages,
+                textOf = textOf,
+                maxChars = maxChars,
+            )
             val payload = buildJsonObject {
                 put("status", "ok")
                 put("source_id", sourceId)
+                put("stale", expanded.stale)
+                put("returned", budgeted.messages.size)
+                put("truncated", budgeted.truncated)
+                put("budget_chars", budgeted.usedChars)
                 put("messages", buildJsonArray {
-                    messages.forEach { message ->
+                    budgeted.messages.forEach { message ->
                         add(
                             buildJsonObject {
                                 put("id", message.id.toString())
                                 put("role", message.role.name.lowercase())
-                                put("text", message.toText().take(12_000))
+                                put("text", textOf(message))
                             }
                         )
                     }

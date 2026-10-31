@@ -21,6 +21,7 @@ import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextModelGateway
 import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.limitContext
@@ -644,12 +645,30 @@ class ConversationContextEngine(
         )
     }
 
-    suspend fun search(conversationId: Uuid, query: String, limit: Int): List<ContextSearchResult> {
-        return contextRepository.search(conversationId, query, limit)
+    suspend fun search(
+        conversationId: Uuid,
+        query: String,
+        limit: Int,
+        role: String? = null,
+    ): List<ContextSearchResult> {
+        return contextRepository.search(conversationId, query, limit, role)
+    }
+
+    suspend fun searchPage(
+        conversationId: Uuid,
+        query: String,
+        limit: Int,
+        role: String? = null,
+    ): ContextSearchPage {
+        return contextRepository.searchPage(conversationId, query, limit, role)
     }
 
     suspend fun expand(conversationId: Uuid, sourceId: String, radius: Int): List<UIMessage> {
         return contextRepository.expand(conversationId, sourceId, radius)
+    }
+
+    suspend fun expandResult(conversationId: Uuid, sourceId: String, radius: Int): ContextExpandResult {
+        return contextRepository.expandResult(conversationId, sourceId, radius)
     }
 
     suspend fun status(conversation: Conversation, settings: Settings, model: Model?): JsonObject {
@@ -678,6 +697,15 @@ class ConversationContextEngine(
         val lifecycle = _compactLifecycleStates.value[conversation.id.toString()]
         val rawPressureRatio = plan.estimatedTokens.toFloat() / plan.contextWindowTokens.toFloat()
         val effectivePressureRatio = effectiveTokens.toFloat() / plan.contextWindowTokens.toFloat()
+        val tools = conversation.currentMessages.flatMap { it.getTools() }
+        // No surface records phase acceptance yet, so routing stays "continue" in production;
+        // the router still encodes the guard contract and is unit-tested branch by branch.
+        val phaseRouting = ContextPhaseRouter.decide(
+            pendingTools = tools.any { !it.isExecuted },
+            awaitingApproval = tools.any { it.approvalState is ToolApprovalState.Pending },
+            acceptanceSatisfied = false,
+        )
+        val lastUsage = conversation.currentMessages.lastOrNull { it.usage != null }?.usage
         return buildJsonObject {
             put("enabled", policy.enabled)
             put("notify_only", policy.notifyOnly)
@@ -686,6 +714,21 @@ class ConversationContextEngine(
             put("context_window_tokens", plan.contextWindowTokens)
             put("pressure_ratio", effectivePressureRatio)
             put("raw_pressure_ratio", rawPressureRatio)
+            put("input_fingerprint", ContextFootprintEstimator.inputFingerprint(conversation.currentMessages))
+            if (lastUsage != null) {
+                put("last_turn_prompt_tokens", lastUsage.promptTokens)
+                put("last_turn_cached_tokens", lastUsage.cachedTokens)
+                if (lastUsage.promptTokens > 0) {
+                    put(
+                        "cache_hit_ratio",
+                        (lastUsage.cachedTokens.toDouble() / lastUsage.promptTokens).coerceIn(0.0, 1.0),
+                    )
+                }
+            }
+            put("phase_routing", buildJsonObject {
+                put("action", phaseRouting.action)
+                put("reason", phaseRouting.reason)
+            })
             put("summary_count", compacts.count { it.status == "completed" })
             put("latest_status", compacts.lastOrNull()?.status ?: "none")
             put("compact_lifecycle_status", lifecycle?.status?.name?.lowercase() ?: "idle")
@@ -777,11 +820,13 @@ class ConversationContextEngine(
               "schema_version": 2,
               "timeline_summary": "4-5 complete human-readable sentences in the user's language for the chat timeline.",
               "handoff_markdown": "Dense Markdown continuation handoff with sections: Goal, Constraints, Progress, Decisions, Current State, Next Steps, Critical Context, Relevant Files.",
+              "must_not_lose": ["verbatim facts that must survive the compaction"],
               "covered_compact_ids": [${coveredCompactIds.joinToString(", ") { "\"$it\"" }}],
               "source_message_ids": [${sourceMessageIds.joinToString(", ") { "\"$it\"" }}],
               "created_at": $payloadCreatedAt
             }
             `covered_compact_ids`, `source_message_ids`, and `created_at` must exactly match the values above.
+            `must_not_lose` must contain at most 12 verbatim, checkable facts copied from the transcript, never paraphrases: exact errors and exit codes, commands, file paths with commit/hash, approval wording, key numbers, URLs/endpoints, model or API names, dates/deadlines, user constraints, accepted decisions, unresolved tasks, and security or privacy boundaries. Use [] when none exist.
             Preserve concrete names, files, commands, errors, user preferences, rejected approaches, tool outcomes, and unresolved decisions.
             The timeline summary is for the human timeline; the handoff Markdown is what the next model will receive.
 
