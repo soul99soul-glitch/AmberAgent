@@ -407,3 +407,62 @@ describe('withEffectiveMessages + effectiveContextNextAction(engine:775-806)', (
     assert.equal(effectiveContextNextAction(makeCompactPolicy({ enabled: false }), 999, 1000), 'disabled');
   });
 });
+
+// ===== H4.3:压缩只作用于请求副本,原始 transcript 不可变 =====
+// 计划 §9.1 C4 的合同是「原始 transcript 不可变、压缩仅请求期投影」。这条测试把
+// 合同钉在 prepareContext 上:压缩落库后,会话本体(持久化的 messageNodes)
+// 必须逐字不动,恢复原文只能靠 compact.sourceMessageIds。
+describe('C4: compaction never rewrites the durable transcript', () => {
+  it('a forced compaction leaves every original node and message intact', async () => {
+    // 28 条 x 400K 字符 → force 档;keepRecentTurns 默认 12 只覆盖前几条
+    const conv = convOfTexts('c4', Array.from({ length: 28 }, (): string => '你'.repeat(400000)));
+    const before = JSON.stringify(conv.messageNodes);
+    const messageIdsBefore: string[] = conv.messageNodes.map(
+      (node: MessageNode): string => node.messages[0].id);
+    const store = createMemoryCompactStore();
+    const msgs: UIMessage[] = conv.messageNodes.map((node: MessageNode): UIMessage => node.messages[0]);
+
+    const out = await prepareContext(conv, makeCompactPolicy(), null, msgs, 0,
+      depsOf(providerOf((): string => GOOD_OUTPUT), store));
+
+    assert.equal(out.compressionApplied, true, 'the fixture must actually compact');
+    assert.equal(JSON.stringify(conv.messageNodes), before,
+      'the caller\'s conversation object must not be mutated by compaction');
+    // 压缩产物只引用原文 id,不携带被覆盖消息的内容
+    const compacts: ConversationCompact[] = await store.getCompacts('c4');
+    assert.ok(compacts.length > 0);
+    const covered: string[] = compacts.flatMap((c: ConversationCompact): string[] => c.sourceMessageIds);
+    assert.ok(covered.length > 0, 'a compact must record which messages it covers');
+    for (const id of covered) {
+      assert.ok(messageIdsBefore.indexOf(id) >= 0, `covered id ${id} must still exist in the transcript`);
+    }
+    // 被压缩的消息仍然可以按 id 从原始 transcript 取回完整原文
+    const byId: Map<string, UIMessage> = new Map(
+      msgs.map((m: UIMessage): [string, UIMessage] => [m.id, m]));
+    const recovered: UIMessage | undefined = byId.get(covered[0]);
+    assert.notEqual(recovered, undefined, 'original text stays recoverable by id');
+    const firstPart = recovered!.parts[0];
+    assert.equal(firstPart.type === 'text' && (firstPart as { text: string }).text.length, 400000,
+      'the original source text is unchanged, not the summary');
+  });
+
+  it('the injected request view is a projection, not a replacement stored anywhere', async () => {
+    const conv = convOfTexts('c4b', Array.from({ length: 28 }, (): string => '你'.repeat(400000)));
+    const store = createMemoryCompactStore();
+    const msgs: UIMessage[] = conv.messageNodes.map((node: MessageNode): UIMessage => node.messages[0]);
+
+    const out = await prepareContext(conv, makeCompactPolicy(), null, msgs, 0,
+      depsOf(providerOf((): string => GOOD_OUTPUT), store));
+
+    // 请求视图以 compact handoff 开头,原文不再出现
+    assert.equal(out.messages[0].role, 'system');
+    const head = out.messages[0].parts[0];
+    assert.equal(head.type === 'text'
+      && (head as { text: string }).text.includes('[Conversation compact handoff:'), true);
+    // 但 compact 本身只存摘要 + 源 id,不存被覆盖的原文
+    const compacts: ConversationCompact[] = await store.getCompacts('c4b');
+    const stored = JSON.stringify(compacts);
+    assert.equal(stored.includes('你'.repeat(1000)), false,
+      'the compact must not duplicate the covered source text');
+  });
+});

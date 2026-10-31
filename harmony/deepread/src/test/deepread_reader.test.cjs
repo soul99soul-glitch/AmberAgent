@@ -232,12 +232,19 @@ test('font preference round trip uses the actual PreferencesStorage numeric adap
   const exports = {};
   vm.runInNewContext(compile(adapterSource), {
     exports, AppStorage: { get: () => ({}) },
-    require: spec => spec === '@kit.ArkData' ? { preferences: { getPreferences: async () => ({
+    require: spec => spec === './AtomicJsonFile.ets'
+      // 只用 KeyedAsyncMutex;单测里用最小串行替身,不复制生产实现
+      ? { KeyedAsyncMutex: class { withLock(_key, op) { return op(); } } }
+      : spec === '@kit.ArkData' ? { preferences: { getPreferences: async () => ({
       get: async (key, fallback) => prefs.has(key) ? prefs.get(key) : fallback,
       put: async (key, value) => prefs.set(key, value), flush: async () => {},
     }) } } : {},
   });
-  const storage = exports.createPreferencesStorage();
+  // 显式注入空凭据库:适配器不再有零参默认值,免得密文键在这里静默拿到 undefined
+  const storage = exports.createPreferencesStorage({
+    read: async () => null, write: async () => {}, remove: async () => {}, listOwnerKeys: async () => [],
+    discardAll: async () => {},
+  });
   const { page } = harness({ storage });
   for (const bound of [70, 180]) {
     page.fontScale = bound / 100;

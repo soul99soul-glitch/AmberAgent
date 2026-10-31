@@ -1,6 +1,6 @@
 // ErrorCard — 错误卡片(对齐 Android ErrorCard.kt)
 // 单条错误: 标题 + 消息 + 复制/关闭按钮
-import { INK3, ERROR, ERROR_BG, LINE, LABEL, META } from '../../design/tokens.ets';
+import { INK3, ERROR, ERROR_BG, LINE, LABEL, META, PAD_ITEM, RADIUS } from '../../design/tokens.ets';
 
 @Component
 export struct ErrorCard {
@@ -38,21 +38,27 @@ export struct ErrorCard {
       Text('复制')
         .fontSize(LABEL)
         .fontColor(INK3)
+        .constraintSize({ minWidth: 44, minHeight: 44 })
+        .textAlign(TextAlign.Center)
         .padding({ left: 8, right: 8, top: 6, bottom: 6 })
         .onClick((): void => { this.onCopy(); })
+        .accessibilityText('复制错误信息')
 
       Text('✕')
         .fontSize(LABEL)
         .fontColor(INK3)
+        .constraintSize({ minWidth: 44, minHeight: 44 })
+        .textAlign(TextAlign.Center)
         .padding({ left: 8, right: 8, top: 6, bottom: 6 })
         .onClick((): void => { this.onDismiss(); })
+        .accessibilityText('关闭错误提示')
     }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .backgroundColor(ERROR_BG)
-    .borderRadius(12)
+    .borderRadius(RADIUS)
     .border({ width: 0.5, color: ERROR })
-    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+    .padding(PAD_ITEM)
     .alignItems(VerticalAlign.Center)
   }
 }

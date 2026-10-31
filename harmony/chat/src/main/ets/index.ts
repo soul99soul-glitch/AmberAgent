@@ -607,6 +607,15 @@ export {
 } from './chat/kv_store.ts';
 export type { KeyValueStore, MemoryKeyValueStore } from './chat/kv_store.ts';
 
+// 静息凭据边界:providers blob 落盘前剥离 apiKey/privateKey,读取后回填
+// (设备端 adapter 调用;D-016/D-017 存储形态由 adapter 决定)
+export {
+  sealSecretFields, migrateSecretFields, openSecretFields, stripSecretFields,
+  blobHasInlineSecrets, pruneNamespace, sealScalarSecret, openScalarSecret,
+  SECRET_RECOVERY_NOTICE_KEY,
+} from './chat/secret_fields_blob.ts';
+export type { SecretField, SecretFieldStore } from './chat/secret_fields_blob.ts';
+
 // D-116:MCP 配置模型/线格式/导入解析器(McpConfig.kt+McpStatus.kt+McpImportParser.kt)
 export {
   makeMcpCommonOptions, makeMcpTool, makeMcpSseServer, makeMcpStreamableHttpServer,

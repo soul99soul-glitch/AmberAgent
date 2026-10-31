@@ -86,6 +86,9 @@ export const createStorageModelRegistry = (
       makeModelConfig({ id: 'default', label: '默认模型', baseUrl: baseUrl, apiKey: apiKey, model: model }),
     ];
     await storage.set<string>(key, JSON.stringify(migrated));
+    // 不删除 LEGACY_API_KEY_KEY:ai_api_key 仍被 DeepRead AI 配置卡与
+    // OpenAiCompatibleAiClient 读取,而它现在由 PreferencesStorage 的标量加密
+    // 保管(见 DECISION_LOG D-133),明文已不在盘上,删除只会让那两条链路读到空值。
     return migrated;
   };
 

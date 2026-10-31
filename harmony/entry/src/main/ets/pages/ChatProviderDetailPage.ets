@@ -17,10 +17,10 @@ import { loadGoogleModelCatalog } from '../platform_impl/GoogleAuthSupport.ets';
 import { cleanupDeletedGoogleProvider } from '../platform_impl/GoogleProviderConfigSupport.ets';
 
 import {
-  requestCodexDeviceCode, pollCodexDeviceCode, fetchCodexModels, loadCodexTokens
+  requestCodexDeviceCode, pollCodexDeviceCode, fetchCodexModels, loadCodexTokens, clearCodexTokens
 } from '../platform_impl/CodexOAuthClient.ets';
 import {
-  buildGrokAuthorization, extractGrokCode, exchangeGrokCode, loadGrokTokens, GROK_FALLBACK_MODELS
+  buildGrokAuthorization, extractGrokCode, exchangeGrokCode, loadGrokTokens, clearGrokTokens, GROK_FALLBACK_MODELS
 } from '../platform_impl/GrokOAuthClient.ets';
 
 import { ERROR } from '../design/tokens.ets';
@@ -49,7 +49,7 @@ struct ChatProviderDetailPage {
   @State advancedOpen: boolean = false;
 
   aboutToAppear(): void {
-    this.edit.start({ kvStore: getChatKvStore(), loadCodexTokens, loadGrokTokens,
+    this.edit.start({ kvStore: getChatKvStore(), loadCodexTokens, loadGrokTokens, clearCodexTokens, clearGrokTokens,
       catalogModel: (id: string): GoogleCatalogModel | undefined => this.catalog.catalogModel(id),
       onProviderApplied: (provider: ProviderSetting): void => this.login.loadAccount(provider),
       cleanupDeletedGoogleProvider,

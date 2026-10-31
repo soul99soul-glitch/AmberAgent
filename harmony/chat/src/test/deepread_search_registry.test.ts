@@ -95,7 +95,7 @@ const actualEntryRegistry = (f: ReturnType<typeof fixture>, searchGoogle?: (quer
     throw new Error('unexpected entry import ' + name);
   }, Date, setTimeout, clearTimeout, Promise, Error }, { filename: source.pathname });
   const storage: Storage = { get: async (_key, fallback) => fallback, set: async () => {}, delete: async () => {},
-    getSecret: async () => null, setSecret: async () => {}, deleteSecret: async () => {}, getAllStringEntries: async () => [] };
+    getAllStringEntries: async () => [] };
   const create = exports.createTavilyAndFallbackRegistry as (http: HttpClient, storage: Storage,
     load: () => Promise<typeof f.settings>, ensure: () => void, options: { searchGoogle?: typeof searchGoogle }) => SearchProviderRegistry;
   return create(f.http, storage, async () => structuredClone(f.settings), () => {}, { searchGoogle });

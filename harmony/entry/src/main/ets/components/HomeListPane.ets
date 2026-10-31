@@ -305,13 +305,24 @@ export struct HomeListPane {
     pending.catch((): void => { this.navCooldownUntil = 0; });
   }
 
+  private cachedFilterInput: ConversationSummary[] = [];
+  private cachedFilterQuery: string = '';
+  private cachedFilterResult: ConversationSummary[] = [];
+
   private previewFilter(list: ConversationSummary[]): ConversationSummary[] {
     const query: string = this.searchQuery.trim().toLowerCase();
     if (query.length === 0) return list;
-    return list.filter((item: ConversationSummary): boolean => {
+    if (this.cachedFilterInput === list && this.cachedFilterQuery === query) {
+      return this.cachedFilterResult;
+    }
+    const filtered: ConversationSummary[] = list.filter((item: ConversationSummary): boolean => {
       const title: string = item.title.length > 0 ? item.title : '新对话';
       return title.toLowerCase().includes(query);
     });
+    this.cachedFilterInput = list;
+    this.cachedFilterQuery = query;
+    this.cachedFilterResult = filtered;
+    return filtered;
   }
 
   private isActive(id: string): boolean {

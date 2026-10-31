@@ -12,6 +12,7 @@ import { createEntryAbortController } from '../platform_impl/EntryAbortControlle
 import type { ConversationRepository, KeyValueStore, Assistant, CompactStore, SearchSettings } from '@amber/chat-domain';
 import { loadAssistants, makeAssistant, saveAssistants, SessionAccessGrantStore, AgentToolActivityStore, loadSearchPrefs } from '@amber/chat-domain';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
+import { createEntrySecretFieldStore } from '../platform_impl/ProviderKeyVault.ets';
 import { initializeEntryGoogleAuth } from '../platform_impl/GoogleAuthSupport.ets';
 import { createEntryCompactStore } from '../platform_impl/EntryCompactStore.ets';
 // 容器单例
@@ -52,7 +53,7 @@ export const createAppResources = (ports: AppResourcesPorts): AppResources => {
         const httpClient: HttpClient = createRcpHttpClient();
         initializeEntryGoogleAuth(httpClient);
         ports.initializeHost(httpClient);
-        const storage: Storage = createPreferencesStorage();
+        const storage: Storage = createPreferencesStorage(createEntrySecretFieldStore());
         const repository: DeepReadRepository = createRdbRepository();
         // 深度阅读复用聊天「搜索服务」设置(已配置 API + 免费源开关);均在搜索时惰性读取
         const searchRegistry: SearchProviderRegistry = createTavilyAndFallbackRegistry(httpClient, storage, (): Promise<SearchSettings> => loadSearchPrefs(getChatKvStore()), ports.ensureSearchSdk);

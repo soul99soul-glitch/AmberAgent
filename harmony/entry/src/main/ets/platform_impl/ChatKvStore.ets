@@ -1,5 +1,7 @@
 // ChatKvStore — chat-domain KeyValueStore Port 的 Preferences 适配
 // 复用 deepread Storage(PreferencesStorage)实现字符串 KV 语义。
+// 凭据剥离在 PreferencesStorage 内完成(providers/model_configs/search_services),
+// 本层保持纯 KV 语义,不做额外转换。
 
 import type { Storage } from '@amber/deepread-domain';
 import type { KeyValueStore } from '@amber/chat-domain';

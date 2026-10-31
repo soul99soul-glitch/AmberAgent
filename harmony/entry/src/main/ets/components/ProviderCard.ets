@@ -6,7 +6,7 @@
 // ArkUI 规则:无 as unknown / 无对象展开 / 无 any/unknown;@Prop 避免保留字;
 //   ForEach/@Builder 内不出现 const/let 声明(UI 树优先)
 import {
-  INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, BODY, META, LABEL,
+  INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, ERROR, BODY, META, LABEL, RADIUS,
 } from '../design/tokens.ets';
 import { AmberSwitch, SwitchSize } from './ui/Switch.ets';
 
@@ -43,7 +43,7 @@ export struct ProviderCard {
       .fontSize(LABEL)
       .fontColor(this.modelCount > 0 ? ACCENT : INK4)
       .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-      .backgroundColor(this.modelCount > 0 ? '#FFF5F0' : SURFACE2)
+      .backgroundColor(this.modelCount > 0 ? ACCENT_LIGHT : SURFACE2)
       .borderRadius(50)
       .maxLines(1)
   }
@@ -99,7 +99,8 @@ export struct ProviderCard {
       // 删除按钮(独立点击)
       Text('删除')
         .fontSize(META)
-        .fontColor('#C0392B')
+        .fontColor(ERROR)
+        .constraintSize({ minHeight: 44 })
         .padding({ left: 8, right: 4, top: 8, bottom: 8 })
         .onClick((): void => { this.onDelete(); })
     }
@@ -107,7 +108,7 @@ export struct ProviderCard {
     .width('100%')
     .padding({ left: 14, right: 10, top: 12, bottom: 12 })
     .backgroundColor(SURFACE)
-    .borderRadius(14)
+    .borderRadius(RADIUS)
     .border({ width: 1, color: LINE })
     .alignItems(VerticalAlign.Center)
     // 整卡点击进入配置(开关与删除在子节点已 stopPropagation 等价:

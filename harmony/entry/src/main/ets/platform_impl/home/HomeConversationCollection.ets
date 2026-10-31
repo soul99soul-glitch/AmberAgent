@@ -21,6 +21,13 @@ class HomeConversationCache {
   pendingDeleteId: string = '';
 }
 const shared: HomeConversationCache = new HomeConversationCache();
+
+export const invalidateHomeConversationCache = (): void => {
+  shared.cachedItems = null;
+  shared.cachedCounts = {};
+  shared.cachedCountStamps = {};
+  bumpHomeListVersion();
+};
 export interface HomeConversationCollectionPorts {
   getRepository: () => ConversationRepository;
   getRunService: () => ConversationRunService;

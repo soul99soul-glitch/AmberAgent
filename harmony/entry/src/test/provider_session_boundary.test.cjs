@@ -63,6 +63,19 @@ test('delete confirmation releases busy on cancel; committed latest-list deletio
   failWrite = true; assert.equal(await edit.deleteProvider('keep'), false);
   assert.match(edit.savedMsg, /disk unavailable/); assert.equal(edit.ioBusy, false);
   assert.equal(events.length, 3); assert.equal(backs, 1);
+
+  failWrite = false;
+  const clearedOAuth = [];
+  const editOAuth = new ProviderEditSession();
+  editOAuth.start({
+    kvStore: {},
+    clearCodexTokens: async id => { clearedOAuth.push(`codex:${id}`); },
+    clearGrokTokens: async id => { clearedOAuth.push(`grok:${id}`); },
+    cleanupDeletedGoogleProvider: async () => {},
+    cleanupWarning: message => events.push(message),
+  });
+  assert.equal(await editOAuth.deleteProvider('keep'), true);
+  assert.deepEqual(clearedOAuth, ['codex:keep', 'grok:keep']);
 });
 
 test('current raw provider export keeps format and non-secret Google metadata with picker fallback', async () => {

@@ -13,7 +13,7 @@ import { DeepReadSettingsHeader, DeepReadSettingsSection, DeepReadSettingsGroup,
 //   搜索胶囊、PlainSection 组标、r18 发丝描边卡组、圆形字母头像 + StatusChip;
 //   逻辑(加载/筛选/跳转/添加)零改动。
 import {
-  ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, TEXT_STYLES, lineHeightForSize,
+  ACCENT, BG, ERROR, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, TEXT_STYLES, lineHeightForSize,
 } from '../design/tokens.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, StatusChip, FooterNote, PageSpacer, CardRow,
@@ -25,7 +25,7 @@ import type { ProviderSetting, ProviderModel } from '@amber/chat-domain';
 import { setPendingProvider } from '../platform_impl/provider/PendingProviderDraft.ets';
 import {
   loadProviders, saveProviders, providerFromImportJson, makeProviderSettingOpenAIVariant,
-  newId, openAIAuthModeFixedBaseUrl,
+  newId, openAIAuthModeFixedBaseUrl, SECRET_RECOVERY_NOTICE_KEY,
 } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { loadGoogleAuthStatus } from '../platform_impl/GoogleAuthSupport.ets';
@@ -63,6 +63,8 @@ struct ChatProviderSettingsPage {
   @State sheetShow: boolean = false;
   @State rows: ProviderRow[] = [];
   @State all: ProviderSetting[] = [];
+  // 主密钥不可恢复时存储层清空了密文字段并留下这个标记;提示一次即清除
+  @State secretRecoveryNotice: boolean = false;
 
   aboutToAppear(): void {
     this.load();
@@ -105,10 +107,24 @@ struct ChatProviderSettingsPage {
   // 加载序号:aboutToAppear + onPageShow 双触发时,迟到的旧加载不得覆盖新数据/选中态
   private loadSeq: number = 0;
 
+  // 读一次即清除:用户已经在这个页面,重复提示没有额外信息量
+  private async loadSecretRecoveryNotice(): Promise<void> {
+    try {
+      const store = getChatKvStore();
+      const marker: string | null = await store.get(SECRET_RECOVERY_NOTICE_KEY);
+      if (marker === null) return;
+      this.secretRecoveryNotice = true;
+      await store.delete(SECRET_RECOVERY_NOTICE_KEY);
+    } catch (_e) {
+      // 提示读取失败不影响本页主流程
+    }
+  }
+
   private load(): void {
     const seq: number = ++this.loadSeq;
     this.loaded = false;
     this.loadError = '';
+    this.loadSecretRecoveryNotice();
     loadProviders(getChatKvStore()).then(async (list: ProviderSetting[] | null): Promise<void> => {
       if (seq !== this.loadSeq) return;
       if (list === null) {
@@ -398,6 +414,9 @@ struct ChatProviderSettingsPage {
                   .onChange((value: string): void => { this.filterQuery = value; })
               }.width('100%').height(48).padding({ left: 16, right: 16 }).backgroundColor(D.card).borderRadius(D.radius)
               DeepReadSettingsNote({ text: '配置服务地址与凭据，再添加需要的模型。' })
+              if (this.secretRecoveryNotice) {
+                DeepReadSettingsNote({ text: '本机安全存储不可用，已清除无法解密的密钥，请重新填写服务商与模型的 API Key。' })
+              }
               DeepReadSettingsSection({ title: '已配置' })
               if (this.readingRows(true).length > 0) {
                 DeepReadSettingsGroup({ content: (): void => { this.DeepReadRows(true); } })
@@ -494,6 +513,16 @@ struct ChatProviderSettingsPage {
                   ? '这里配置本应用的服务商与模型。项目设置可以指定创作模型，代笔和润色任务可单独选择模型。'
                   : '聊天和小说共用这里的服务商与模型。小说默认跟随聊天，也可在项目设置中指定。任务模型可单独选择服务商；深度阅读可跟随聊天或从模型库单独选择。',
             })
+            if (this.secretRecoveryNotice) {
+              Text('本机安全存储不可用，已清除无法解密的密钥。请在下方重新填写服务商与模型的 API Key。')
+                .fontSize(TEXT_STYLES.secondary.size)
+                .fontWeight(TEXT_STYLES.secondary.weight)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight)
+                .fontFamily(TEXT_STYLES.secondary.family)
+                .fontColor(ERROR)
+                .width('100%')
+                .padding({ left: 20, right: 20, top: 4, bottom: 8 })
+            }
             Column() {
               CardGroup({ radius: 18, stroke: true, content: (): void => { this.ConfigurationLinks(); } })
             }

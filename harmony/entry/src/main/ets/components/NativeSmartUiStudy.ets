@@ -128,13 +128,13 @@ export struct NativeSmartUiStudy {
     Row({ space: 8 }) {
       if (this.progress.i > 0) {
         Text('上一题').fontSize(this.textSize(13)).fontColor(this.secondaryInk).layoutWeight(1)
-          .height(44).textAlign(TextAlign.Center).backgroundColor(this.surface).borderRadius(8)
+          .constraintSize({ minHeight: 44 }).textAlign(TextAlign.Center).backgroundColor(this.surface).borderRadius(8)
           .accessibilityText('上一题')
           .onClick((): void => { this.previous(); });
       }
       Text(this.progress.i >= this.items().length - 1 ? '查看结果' : '下一题')
         .fontSize(this.textSize(13)).fontColor(this.accent).layoutWeight(1)
-        .height(44).textAlign(TextAlign.Center)
+        .constraintSize({ minHeight: 44 }).textAlign(TextAlign.Center)
         .backgroundColor(accentSoftBg(this.accent)).borderRadius(8)
         .accessibilityText(this.progress.i >= this.items().length - 1 ? '查看结果' : '下一题')
         .onClick((): void => { this.next(); });
@@ -149,7 +149,7 @@ export struct NativeSmartUiStudy {
       Text(!this.hasQuiz() ? '可以重新练习再看一遍。' : this.displayScore() === this.graded()
         ? '全部答对，可以重新练习巩固。' : '错题会在重新练习时再次出现。')
         .width('100%').fontSize(this.textSize(13)).fontColor(this.secondaryInk).lineHeight(this.textSize(19));
-      Text('重新练习').fontSize(this.textSize(13)).fontColor(this.accent).width('100%').height(44)
+      Text('重新练习').fontSize(this.textSize(13)).fontColor(this.accent).width('100%').constraintSize({ minHeight: 44 })
         .textAlign(TextAlign.Center).backgroundColor(accentSoftBg(this.accent)).borderRadius(8)
         .accessibilityText('重新练习')
         .onClick((): void => { this.restart(); });
@@ -173,7 +173,7 @@ export struct NativeSmartUiStudy {
           if (this.progress.answered) this.Answer();
         } else {
           if (!this.progress.answered) {
-            Text('显示答案').fontSize(this.textSize(13)).fontColor(this.accent).width('100%').height(44)
+            Text('显示答案').fontSize(this.textSize(13)).fontColor(this.accent).width('100%').constraintSize({ minHeight: 44 })
               .textAlign(TextAlign.Center).backgroundColor(accentSoftBg(this.accent)).borderRadius(8)
               .accessibilityText('显示答案')
               .onClick((): void => { this.apply(revealStudyAnswer(this.progress)); });

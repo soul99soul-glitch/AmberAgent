@@ -15,7 +15,9 @@ import {
   getFilesRepository, getDeleteChatFilesDeps, MANAGED_FILE_FOLDERS,
   scanManagedOrphans, deleteManagedOrphans, OrphanScanResult, cleanupDeletedConversation,
 } from '../platform_impl/ManagedFileStore.ets';
-import { getChatRepository, getChatKvStore } from '../di/AppContainer.ets';
+import { getChatRepository, getChatKvStore, getConversationRunService } from '../di/AppContainer.ets';
+import { beginConversationRestore } from '../platform_impl/ConversationRunGuard.ets';
+import { invalidateHomeConversationCache } from '../platform_impl/home/HomeConversationCollection.ets';
 import {
   ACCENT, BG, ERROR, INK, INK3, LINE, accentSoftBg, lineHeightForSize,
 } from '../design/tokens.ets';
@@ -174,9 +176,10 @@ struct SettingFilesPage {
   private previewConversationCleanup(): void {
     if (this.convCleaning) return;
     const cutoff: number = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const runService = getConversationRunService();
     getChatRepository().list().then((list: ConversationSummary[]): void => {
       const targets: ConversationSummary[] = list.filter((s: ConversationSummary): boolean =>
-        !s.isPinned && new Date(s.updateAt).getTime() < cutoff);
+        !s.isPinned && !runService.isBusy(s.id) && new Date(s.updateAt).getTime() < cutoff);
       if (targets.length === 0) {
         promptAction.showToast({ message: '没有可清理的对话', duration: 1800 });
         return;
@@ -199,22 +202,37 @@ struct SettingFilesPage {
   private confirmConversationCleanup(targets: ConversationSummary[]): void {
     this.convCleaning = true;
     const repo = getChatRepository();
+    const runService = getConversationRunService();
     let removed: number = 0;
+    const deleteOne = async (id: string): Promise<boolean> => {
+      if (runService.isBusy(id)) return false;
+      const release: () => void = beginConversationRestore([id]);
+      try {
+        const conv: Conversation | null = await repo.getById(id);
+        if (conv === null) return false;
+        await repo.delete(conv.id);
+        runService.forgetDeletedConversation(conv.id);
+        await cleanupDeletedConversation(conv, repo, getChatKvStore());
+        return true;
+      } finally {
+        release();
+      }
+    };
     const step = (i: number): void => {
       if (i >= targets.length) {
         this.convCleaning = false;
+        if (removed > 0) {
+          invalidateHomeConversationCache();
+          this.reload();
+        }
         const msg: string = removed === targets.length
           ? `已清理 ${removed} 个对话`
-          : `已清理 ${removed}/${targets.length} 个对话,部分删除失败`;
+          : `已清理 ${removed}/${targets.length} 个对话,部分跳过或删除失败`;
         promptAction.showToast({ message: msg, duration: 2200 });
         return;
       }
-      repo.getById(targets[i].id).then((conv: Conversation | null): Promise<void> => {
-        if (conv === null) return Promise.resolve();
-        return repo.delete(conv.id).then((): Promise<void> =>
-          cleanupDeletedConversation(conv, repo, getChatKvStore()));
-      }).then((): void => {
-        removed++;
+      deleteOne(targets[i].id).then((deleted: boolean): void => {
+        if (deleted) removed++;
         step(i + 1);
       }).catch((): void => { step(i + 1); });
     };

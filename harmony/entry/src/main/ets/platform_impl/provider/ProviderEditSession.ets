@@ -11,6 +11,8 @@ export interface ProviderEditPorts {
   kvStore: KeyValueStore;
   loadCodexTokens: (providerId: string) => Promise<CodexTokens | null>;
   loadGrokTokens: (providerId: string) => Promise<GrokTokens | null>;
+  clearCodexTokens?: (providerId: string) => Promise<void>;
+  clearGrokTokens?: (providerId: string) => Promise<void>;
   catalogModel: (modelId: string) => GoogleCatalogModel | undefined;
   onProviderApplied: (provider: ProviderSetting) => void;
   cleanupDeletedGoogleProvider: (provider: ProviderSettingGoogle) => Promise<void>;
@@ -267,7 +269,7 @@ export class ProviderEditSession {
   }
 
   // The page owns confirmation and routing; this owner commits the latest list,
-  // then clears Google credentials. Cleanup failure does not undo deletion.
+  // then clears Google and Codex/Grok OAuth credentials. Cleanup failure does not undo deletion.
   async deleteProvider(providerId: string): Promise<boolean> {
     let deletedGoogle: ProviderSettingGoogle | null = null;
     try {
@@ -280,6 +282,20 @@ export class ProviderEditSession {
         catch (error) {
           this.deps.cleanupWarning(error instanceof Error ? error.message : '服务商已删除，但 Google 凭据清理失败。');
         }
+      }
+      const clearCodex = this.deps.clearCodexTokens
+        ?? (typeof this.deps.kvStore?.delete === 'function'
+          ? (id: string): Promise<void> => this.deps.kvStore.delete(`oauth_tokens/codex/${id}`)
+          : null);
+      const clearGrok = this.deps.clearGrokTokens
+        ?? (typeof this.deps.kvStore?.delete === 'function'
+          ? (id: string): Promise<void> => this.deps.kvStore.delete(`oauth_tokens/grok/${id}`)
+          : null);
+      try {
+        if (clearCodex !== null) await clearCodex(providerId);
+        if (clearGrok !== null) await clearGrok(providerId);
+      } catch (error) {
+        this.deps.cleanupWarning(error instanceof Error ? error.message : '服务商已删除，但 OAuth 凭据清理失败。');
       }
       return true;
     } catch (error) {

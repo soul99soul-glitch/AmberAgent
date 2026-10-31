@@ -98,6 +98,7 @@ function actualDraftHandoff(AppStorage = appStorageHost()) {
     getChatKvStore: () => ({}), getAppContainer: () => ({ httpClient: {} }),
     promptAction: { showToast() {} }, cleanupDeletedGoogleProvider: async () => {},
     loadCodexTokens: async () => null, loadGrokTokens: async () => null,
+    clearCodexTokens: async () => {}, clearGrokTokens: async () => {},
     requestCodexDeviceCode() {}, pollCodexDeviceCode() {}, fetchCodexModels() {},
     buildGrokAuthorization() {}, extractGrokCode() {}, exchangeGrokCode() {}, GROK_FALLBACK_MODELS: [],
     loadGoogleModelCatalog() {},
@@ -181,7 +182,9 @@ test('Provider import merges the latest catalog and refuses to overwrite it afte
 });
 test('Provider load failure and seed write failure keep actions gated until a successful retry', async () => {
   let readFailure = true, seedFailure = false;
-  const page = evaluate('class Page { ' + method(settings, 'load') + ' } return new Page();', {
+  // load() 现在会顺带读一次密钥恢复提示,fixture 只抽取被测方法,需要显式带上这个兄弟方法
+  const page = evaluate('class Page { ' + method(settings, 'load')
+    + method(settings, 'loadSecretRecoveryNotice') + ' } return new Page();', {
     getChatKvStore: () => ({}), DEFAULT_PROVIDERS: [{ id: 'seed' }],
     loadProviders: async () => { if (readFailure) throw Error('read denied'); return null; },
     saveProviders: async () => { if (seedFailure) throw Error('write denied'); },

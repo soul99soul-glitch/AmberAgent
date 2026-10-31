@@ -223,11 +223,71 @@ export const getDeleteChatFilesDeps = (): DeleteChatFilesDeps => ({
     getFilesRepository().deleteByPath(relativePath),
 });
 
+// deleteChatImagesDir(FilesManager.kt:481-486):整目录删除会话私有生成图。
+//   Android 用 deleteRecursively;鸿蒙 fileIo.rmdirSync 只能删空目录,所以先逐文件
+//   unlink 再 rmdir。目标目录不存在时直接返回(懒创建);删除失败只告警,不阻断
+//   会话删除编排(与 deleteChatFiles 的吞错口径一致)。
+const deleteDirectoryBestEffortSync = (dir: string): void => {
+  if (!fileIo.accessSync(dir)) return;
+  for (const name of fileIo.listFileSync(dir)) {
+    const path: string = `${dir}/${name}`;
+    try {
+      if (fileIo.statSync(path).isDirectory()) deleteDirectoryBestEffortSync(path);
+      else fileIo.unlinkSync(path);
+    } catch (e) {
+      hilog.warn(0x0001, 'ManagedFileStore', 'chat image unlink failed %{public}s: %{public}s',
+        path, (e as Error).message);
+    }
+  }
+  try {
+    fileIo.rmdirSync(dir);
+  } catch (e) {
+    hilog.warn(0x0001, 'ManagedFileStore', 'chat image dir rmdir failed %{public}s: %{public}s',
+      dir, (e as Error).message);
+  }
+};
+
+// 会话私有生成图目录:先删目录,再删登记行(磁盘与登记同一串行编排内完成)
+export const deleteConversationChatImages = async (conversationId: string): Promise<void> => {
+  const dir: string = `${filesDirPath()}/${FILE_FOLDERS_CHAT_IMAGES}/${conversationId}`;
+  try {
+    deleteDirectoryBestEffortSync(dir);
+  } catch (e) {
+    hilog.warn(0x0001, 'ManagedFileStore', 'chat image cleanup failed %{public}s: %{public}s',
+      dir, (e as Error).message);
+  }
+  // 目录里的文件已删,登记行也要跟上:残留行会让文件管理页列出不存在的文件,
+  // 也会让 HomeContinueSupport.ets:111-120 在首页生成指向已删除会话的「继续」卡片
+  const repo: FilesRepository = getFilesRepository();
+  let tracked: ManagedFileEntity[] = [];
+  try {
+    tracked = await repo.listByFolder(FILE_FOLDERS_CHAT_IMAGES);
+  } catch (e) {
+    hilog.warn(0x0001, 'ManagedFileStore', 'chat image registry read failed: %{public}s',
+      (e as Error).message);
+    return;
+  }
+  const prefix: string = `${FILE_FOLDERS_CHAT_IMAGES}/${conversationId}/`;
+  for (const row of tracked) {
+    if (!row.relativePath.startsWith(prefix)) continue;
+    try {
+      await repo.deleteByPath(row.relativePath);
+    } catch (e) {
+      hilog.warn(0x0001, 'ManagedFileStore', 'chat image registry delete failed %{public}s: %{public}s',
+        row.relativePath, (e as Error).message);
+    }
+  }
+};
+
 // cleanupDeletedConversation(ConversationRepository.kt:425-432)—
 //   favoriteDAO.deleteByConversation → FavoriteStore 级联(KV 真实存储);
-//   deleteChatImagesDir:依附 generate_image 工具,未移植(P1 登记)
+//   deleteChatImagesDir:chat_images/<convId>/ 整目录删除(Android FilesManager:481-486)。
 // R11:补 compact 摘要(compacts/<id> + .events)清理,并防在途摘要迟到复活
 //   (删除标记 + EntryCompactStore 同键写队列,详见该文件)。
+// H4.3:补 composer 输入草稿(chat_input_draft/<id>)。Android 的 conversation_draft 表
+//   在 SessionCleanupManager:144 随会话一起删;鸿蒙此前只删了智能 UI 草稿,导致已删除
+//   会话的用户草稿无限期留在 Preferences 里,下次建同 id 会话还会被 restoreInputDraft 读回。
+//   已生成图片也一并删:它们是会话私有产物,残留会变成孤儿占用空间。
 export const cleanupDeletedConversation = async (
   conv: Conversation, repository: ConversationRepository, kv: KeyValueStore,
 ): Promise<void> => enqueueConversationFileMutation(async (): Promise<void> => {
@@ -246,6 +306,16 @@ export const cleanupDeletedConversation = async (
   }
   await deleteChatFiles(getDeleteChatFilesDeps(), safeUris);
   await clearPendingQueueStorage(kv, conv.id);
+  // 输入草稿与会话派生标记:与智能 UI 草稿同口径,尽力清理但不阻断删除编排
+  for (const auxKey of [`chat_input_draft/${conv.id}`, `suggestions/${conv.id}`, `compact_done/${conv.id}`]) {
+    try {
+      await kv.delete(auxKey);
+    } catch (e) {
+      hilog.warn(0x0001, 'ManagedFileStore',
+        'conversation kv cleanup skipped (%s): %{public}s', auxKey, (e as Error).message);
+    }
+  }
+  await deleteConversationChatImages(conv.id);
   const uiCleanup = await getChatSmartUiDraftStore(kv).cleanupConversation(conv.id);
   if (!uiCleanup.available || uiCleanup.error !== null) {
     hilog.warn(0x0001, 'ManagedFileStore', 'smart UI draft cleanup: %{public}s',

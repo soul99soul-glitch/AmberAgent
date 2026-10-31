@@ -1,14 +1,19 @@
 // SettingAboutPage — 关于页(真实版本值,卡容器对齐设置体系)
-// Android 基准: SettingAboutPage.kt — 版本/构建/开源说明。
-//   版本号经 bundleManager 取真值(不写死);开源仓库无外链目标 → 纯说明行(无箭头)。
-// 2026-09-27 二级页 iOS 对齐:仅换视觉骨架(CenteredTitleBar/PlainSection/
-//   CardGroup r18+描边/CardRow/FooterNote),版本信息与展示逻辑零改动。
-import { bundleManager } from '@kit.AbilityKit';
+// Android 基准: SettingAboutPage.kt — 版本/构建/开源说明/许可协议。
+//   版本号经 bundleManager 取真值(不写死)。
+// 许可:仓库 LICENSE 为用户分段双重许可(AGPL v3 或商业许可),本页与仓库根 LICENSE
+//   及 oh-package.json5 的 license 字段保持一致;此前只写「开源社区项目」而无任何许可
+//   声明,与双许可条款冲突。
+import { bundleManager, common } from '@kit.AbilityKit';
+import { promptAction } from '@kit.ArkUI';
 import { INK, INK3, BG, BODY, TITLE, TEXT_STYLES } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM, FONT_SANS_BOLD } from '../design/fonts.ets';
 import {
   CenteredTitleBar, PlainSection, CardGroup, CardRow, FooterNote, PageSpacer,
 } from '../components/PageTemplate.ets';
+
+const REPOSITORY_URL = 'https://github.com/soul99soul-glitch/AmberAgent';
+const LICENSE_URL = `${REPOSITORY_URL}/blob/main/LICENSE`;
 
 @Entry
 @Component
@@ -22,6 +27,21 @@ struct SettingAboutPage {
       this.versionLabel = `${info.versionName} (${info.versionCode})`;
     } catch (e) {
       this.versionLabel = '';
+    }
+  }
+
+  private openUrl(url: string): void {
+    try {
+      const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+      ctx.startAbility({
+        action: 'ohos.want.action.viewData',
+        entities: ['entity.system.browsable'],
+        uri: url,
+      }).catch((_e: Error): void => {
+        promptAction.showToast({ message: '无法打开浏览器', duration: 1400 });
+      });
+    } catch (_e) {
+      promptAction.showToast({ message: '无法打开浏览器', duration: 1400 });
     }
   }
 
@@ -49,6 +69,10 @@ struct SettingAboutPage {
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.InfoCard(); } })
             .margin({ left: 16, right: 16 })
 
+          PlainSection({ label: '开源与许可' })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.LegalCard(); } })
+            .margin({ left: 16, right: 16 })
+
           FooterNote({ text: 'Powered by multiple AI providers.' })
 
           PageSpacer()
@@ -70,8 +94,25 @@ struct SettingAboutPage {
   InfoCard(): void {
     Column() {
       CardRow({ label: '版本', valueText: this.versionLabel, showChevron: false })
-      CardRow({ label: '构建', valueText: 'HarmonyOS NEXT / ArkTS', showChevron: false })
-      CardRow({ label: '开源社区项目', desc: '不收集任何用户数据', isLast: true, showChevron: false })
+      CardRow({ label: '构建', valueText: 'HarmonyOS NEXT / ArkTS', isLast: true, showChevron: false })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  LegalCard(): void {
+    Column() {
+      CardRow({
+        label: '许可协议',
+        desc: 'AGPL v3；商业使用需取得商业许可',
+        onRowClick: (): void => { this.openUrl(LICENSE_URL); },
+      })
+      CardRow({
+        label: '项目主页',
+        desc: 'github.com/soul99soul-glitch/AmberAgent',
+        isLast: true,
+        onRowClick: (): void => { this.openUrl(REPOSITORY_URL); },
+      })
     }
     .width('100%')
   }

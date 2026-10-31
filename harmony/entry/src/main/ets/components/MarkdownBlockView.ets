@@ -58,6 +58,9 @@ interface CodeRenderRevision {
   code: string;
   sourceLines: string[];
   highlightLines: HighlightToken[][] | null;
+  collapsedHighlightLines: HighlightToken[][] | null;
+  collapsedPlainLines: string[] | null;
+  highlightLineKeys: string[] | null;
 }
 
 interface MarkdownTableBinding {
@@ -223,7 +226,8 @@ export struct MarkdownBlockView {
     const cached: CodeRenderRevision | null = this.cachedCode;
     if (cached !== null && cached.code === block.code && cached.lang === block.lang) return cached;
     const revision: CodeRenderRevision = {
-      lang: block.lang, code: block.code, sourceLines: block.code.split('\n'), highlightLines: null,
+      lang: block.lang, code: block.code, sourceLines: block.code.split('\n'),
+      highlightLines: null, collapsedHighlightLines: null, collapsedPlainLines: null, highlightLineKeys: null,
     };
     this.cachedCode = revision;
     return revision;
@@ -299,15 +303,43 @@ export struct MarkdownBlockView {
   }
 
   private visibleHighlightLines(block: MarkdownBlock, bi: number): HighlightToken[][] {
+    if (block.kind !== 'code_block') return [];
     const lines: HighlightToken[][] = this.getCodeLines(block);
     const cap: number = this.visibleCodeLineCap(block, bi);
-    return cap >= lines.length ? lines : lines.slice(0, cap);
+    if (cap >= lines.length) return lines;
+    const revision: CodeRenderRevision = this.codeRevision(block);
+    if (revision.collapsedHighlightLines === null || revision.collapsedHighlightLines.length !== cap) {
+      revision.collapsedHighlightLines = lines.slice(0, cap);
+    }
+    return revision.collapsedHighlightLines;
   }
 
   private visiblePlainLines(block: MarkdownBlock, bi: number): string[] {
+    if (block.kind !== 'code_block') return [];
     const lines: string[] = this.codeSourceLines(block);
     const cap: number = this.visibleCodeLineCap(block, bi);
-    return cap >= lines.length ? lines : lines.slice(0, cap);
+    if (cap >= lines.length) return lines;
+    const revision: CodeRenderRevision = this.codeRevision(block);
+    if (revision.collapsedPlainLines === null || revision.collapsedPlainLines.length !== cap) {
+      revision.collapsedPlainLines = lines.slice(0, cap);
+    }
+    return revision.collapsedPlainLines;
+  }
+
+  private codeLineKey(block: MarkdownBlockCode, idx: number, lineTokens: HighlightToken[]): string {
+    const revision: CodeRenderRevision = this.codeRevision(block);
+    if (revision.highlightLineKeys === null) {
+      revision.highlightLineKeys = [];
+    }
+    const existing: string | undefined = revision.highlightLineKeys[idx];
+    if (existing !== undefined) return existing;
+    let key: string = `codeline-${idx}`;
+    for (let ti: number = 0; ti < lineTokens.length; ti++) {
+      const tok: HighlightToken = lineTokens[ti];
+      key += `|${tok.type}:${tok.text}`;
+    }
+    revision.highlightLineKeys[idx] = key;
+    return key;
   }
 
   private splitTokensByLine(tokens: HighlightToken[]): HighlightToken[][] {
@@ -646,7 +678,7 @@ export struct MarkdownBlockView {
                 (lineTokens: HighlightToken[], idx: number): void => {
                   this.CodeLineText(idx, lineTokens, '')
                 },
-                (lineTokens: HighlightToken[], idx: number): string => `codeline-${idx}-${JSON.stringify(lineTokens)}`,
+                (lineTokens: HighlightToken[], idx: number): string => this.codeLineKey(params.block, idx, lineTokens),
               )
             } else {
               if (this.showLineNumbers || this.codeBlockAutoCollapse) {

@@ -252,7 +252,8 @@ export struct NativeSmartUiComponent {
   private Items(numbered: boolean, diagram: boolean): void {
     ForEach(this.itemIndices(), (index: number): void => {
       Row({ space: 8 }) {
-        if (!diagram) Text(numbered ? `${index + 1}.` : '•').width(22).fontSize(this.textSize(15)).fontColor(this.accent()).flexShrink(0);
+        // 序号栏随字号缩放:固定 22vp 在大字号下会把两位数序号裁掉
+        if (!diagram) Text(numbered ? `${index + 1}.` : '•').width(this.textSize(22)).fontSize(this.textSize(15)).fontColor(this.accent()).flexShrink(0);
         Text(this.item(index)).layoutWeight(1).fontSize(this.textSize(15)).fontFamily(this.fontFamily)
           .fontColor(this.ink()).lineHeight(this.textSize(21)).textAlign(diagram ? TextAlign.Center : TextAlign.Start);
       }.width('100%').alignItems(VerticalAlign.Top).padding(diagram ? 10 : 0)
@@ -308,7 +309,8 @@ export struct NativeSmartUiComponent {
         if (this.kind() === 'statusDot') Row().width(8).height(8).borderRadius(4).backgroundColor(this.accent());
         if (this.kind() === 'chip') Icon({ name: this.iconName(), iconSize: 14, color: this.accent() });
         Text((this.kind() === 'tag' ? '# ' : '') + this.displayText()).fontSize(this.textSize(12))
-          .fontColor(this.accent()).lineHeight(this.textSize(18)).flexShrink(1);
+          .fontColor(this.accent()).lineHeight(this.textSize(18)).flexShrink(1)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis });
       }.constraintSize({ maxWidth: '100%' }).padding(this.kind() === 'statusDot' ? 0 : 8)
         .backgroundColor(this.kind() === 'badge' || this.kind() === 'chip' ? accentSoftBg(this.accent()) : Color.Transparent)
         .border({ width: this.kind() === 'tag' ? 1 : 0, color: this.accent() }).borderRadius(this.kind() === 'badge' ? 20 : 6);

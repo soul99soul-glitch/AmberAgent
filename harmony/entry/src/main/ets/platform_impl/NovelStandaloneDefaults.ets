@@ -1,11 +1,13 @@
 import type { Storage, NovelModelDefaults, NovelModelTarget, PolishContextOptions } from '@amber/deepread-domain';
 import { defaultNovelModelDefaults } from '@amber/deepread-domain';
 import { createPreferencesStorage } from './PreferencesStorage.ets';
+import { createEntrySecretFieldStore } from './ProviderKeyVault.ets';
 
 const MODEL_KEY: string = 'novel.standalone.model-defaults';
 const POLISH_KEY: string = 'novel.standalone.polish-context';
 const POLISH_PREFERENCE_KEY: string = 'novel.standalone.polish-preference';
-const storage: Storage = createPreferencesStorage();
+// 默认值键均非密;注入凭据库只为满足 Storage 的构造契约(P-1 静息凭据边界)
+const storage: Storage = createPreferencesStorage(createEntrySecretFieldStore());
 
 const validTarget = (target: NovelModelTarget): boolean => target !== null &&
   (target.kind === 'global' || (target.kind === 'fixed' &&

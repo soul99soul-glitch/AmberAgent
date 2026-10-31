@@ -17,16 +17,6 @@ const createFakeStorage = (): Storage & { dump: () => Map<string, unknown> } => 
     async delete(key: string): Promise<void> {
       map.delete(key);
     },
-    async getSecret(key: string): Promise<string | null> {
-      const v = map.get(key);
-      return typeof v === 'string' && v.length > 0 ? v : null;
-    },
-    async setSecret(key: string, value: string): Promise<void> {
-      map.set(key, value);
-    },
-    async deleteSecret(key: string): Promise<void> {
-      map.delete(key);
-    },
     async getAllStringEntries(): Promise<Array<{ key: string; value: string }>> {
       const out: Array<{ key: string; value: string }> = [];
       for (const [key, value] of map) {
@@ -75,6 +65,8 @@ test('registry: migrates legacy single-model config', async () => {
   // 迁移结果已持久化
   const persisted = storage.dump().get(MODEL_CONFIGS_STORAGE_KEY);
   assert.ok(typeof persisted === 'string' && persisted.length > 0);
+  assert.equal(storage.dump().get('ai_api_key'), 'legacy-key',
+    'the legacy key is left in place: it is sealed by the preferences adapter and still read elsewhere');
 });
 
 test('registry: corrupt JSON → empty list, no throw', async () => {

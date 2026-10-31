@@ -419,7 +419,7 @@ struct SettingBackupPage {
           if (this.statusMsg.length > 0 && this.preview === null) {
             FooterNote({ text: this.statusMsg })
           }
-          FooterNote({ text: '备份包含所选服务商凭证，建议使用密码加密。WebDAV 支持上传与快照下载恢复；跨端加密互通（KDF）待后续。' })
+          FooterNote({ text: '备份不含服务商密钥，恢复后需重新填写。WebDAV 支持上传与快照下载恢复；跨端加密互通（KDF）待后续。' })
           PageSpacer()
         }
         .width('100%')
@@ -443,7 +443,7 @@ struct SettingBackupPage {
       })
         .type((isWebDav ? this.showDavPass : this.showPassphrase) ? InputType.Normal : InputType.Password)
         .showPasswordIcon(false)
-        .height(44).layoutWeight(1)
+        .constraintSize({ minHeight: 44 }).layoutWeight(1)
         .fontSize(BODY).fontColor(INK).placeholderColor(INK4)
         .backgroundColor(Color.Transparent)
         .padding({ left: 14, right: 0 })
@@ -468,7 +468,7 @@ struct SettingBackupPage {
         }
       })
     }
-    .width('100%').height(44)
+    .width('100%').constraintSize({ minHeight: 44 })
     .alignItems(VerticalAlign.Center)
     .backgroundColor(SURFACE2).borderRadius(10)
     .enabled(!this.busy)
@@ -516,7 +516,7 @@ struct SettingBackupPage {
         onToggle: (): void => { if (!this.busy) this.exportAssistants = !this.exportAssistants; },
       })
       CardToggleRow({
-        label: '服务商', desc: '打包服务商配置及凭证',
+        label: '服务商', desc: '打包服务商配置（不含密钥）',
         checked: this.exportProviders,
         onToggle: (): void => { if (!this.busy) this.exportProviders = !this.exportProviders; },
       })
@@ -542,13 +542,16 @@ struct SettingBackupPage {
   RestorePreview(preview: SyncInspectPreview): void {
     Column() {
       Text(this.statusMsg).fontSize(META).fontColor(INK3).lineHeight(18)
+        .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
       Text(`设备：${preview.manifest.deviceLabel.length > 0 ? preview.manifest.deviceLabel : preview.manifest.deviceId}`)
         .fontSize(LABEL).fontColor(INK2).margin({ top: 6 })
+        .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
       Text(`创建：${new Date(preview.manifest.createdAt).toLocaleString()}`)
         .fontSize(LABEL).fontColor(INK3).margin({ top: 4 })
+        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
       Text('恢复').fontSize(BODY).fontWeight(FontWeight.Medium)
         .fontColor(this.accentColorStore)
-        .height(44).padding({ left: 12, right: 12 })
+        .constraintSize({ minHeight: 44 }).padding({ left: 12, right: 12, top: 8, bottom: 8 })
         .margin({ top: 8 })
         .onClick((): void => { this.doRestore(); })
       Row() {
@@ -592,8 +595,7 @@ struct SettingBackupPage {
         checked: this.restoreProviders,
         isLast: true,
         onToggle: (): void => { if (!this.busy) this.restoreProviders = !this.restoreProviders; },
-      })
-    }
+      })    }
     .width('100%')
   }
 
@@ -602,7 +604,7 @@ struct SettingBackupPage {
     Column() {
       Column() {
         TextInput({ text: this.davUrl, placeholder: 'https://dav.example.com/dav' })
-          .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
+          .constraintSize({ minHeight: 44 }).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
           .backgroundColor(SURFACE2).borderRadius(10)
           .padding({ left: 14, right: 14 })
           .onChange((v: string): void => { this.davUrl = v; })
@@ -616,7 +618,7 @@ struct SettingBackupPage {
       .padding({ left: 14, right: 14, top: 12 })
       Column() {
         TextInput({ text: this.davUser, placeholder: '用户名' })
-          .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
+          .constraintSize({ minHeight: 44 }).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
           .backgroundColor(SURFACE2).borderRadius(10)
           .padding({ left: 14, right: 14 })
           .onChange((v: string): void => { this.davUser = v; })
@@ -640,7 +642,7 @@ struct SettingBackupPage {
       .padding({ left: 14, right: 14 })
       Column() {
         TextInput({ text: this.davPath, placeholder: '远程目录' })
-          .height(44).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
+          .constraintSize({ minHeight: 44 }).fontSize(BODY).fontColor(INK).placeholderColor(INK4)
           .backgroundColor(SURFACE2).borderRadius(10)
           .padding({ left: 14, right: 14 })
           .onChange((v: string): void => { this.davPath = v; })

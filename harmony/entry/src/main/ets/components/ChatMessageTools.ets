@@ -10,7 +10,8 @@ import {
   toolActivityStatus, toolOutputJson, jevAutoApprovalReason, toolDisplayTitle, toolStaticDisplayTitle,
   buildToolApprovalSummary, toolInputAsJson,
 } from '@amber/chat-domain';
-import { MOTION_OVERLAY, INK2, INK3, SURFACE, LINE, ERROR, META, LABEL, RADIUS } from '../design/tokens.ets';
+import { MOTION_OVERLAY, INK2, INK3, SURFACE, LINE, ERROR, META, LABEL, PAD_ITEM, RADIUS } from '../design/tokens.ets';
+import { FONT_MONO } from '../design/fonts.ets';
 import { GeneratedImageCarousel } from './GeneratedImageCarousel.ets';
 import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshApprovalProtocolLabel } from './SSHApprovalSummary.ets';
 import { SSHUIColors } from './SSHUIColors.ets';
@@ -149,24 +150,26 @@ export struct ChatMessageTools {
   private RecipeSummary(view: RecipeApprovalView): void {
     Column({ space: 4 }) {
       Text(view.title).fontSize(META).fontColor(this.sshColors.ink).width('100%')
+        .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
       Text(view.stepLabel).fontSize(LABEL).fontColor(this.sshColors.secondary).width('100%')
+        .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
       if (view.kind === 'import') {
         Text(`候选 hash: ${view.hash}\n基线: ${view.baseHash ?? '首次安装'}`)
-          .fontSize(LABEL).fontFamily('JetBrainsMono').fontColor(this.sshColors.secondary)
+          .fontSize(LABEL).fontFamily(FONT_MONO).fontColor(this.sshColors.secondary)
           .width('100%').wordBreak(WordBreak.BREAK_ALL)
       } else if (view.pendingStep !== null) {
         if (isSSHApprovalTool(view.pendingStep.toolName)) {
           Text(`${sshApprovalProtocolLabel(view.pendingStep)} · ${sshApprovalTargetLabel(view.pendingStep)}`)
-            .fontSize(META).fontColor(this.sshColors.ink).fontFamily('JetBrainsMono')
-            .width('100%').maxLines(3).wordBreak(WordBreak.BREAK_ALL)
+            .fontSize(META).fontColor(this.sshColors.ink).fontFamily(FONT_MONO)
+            .width('100%').maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis }).wordBreak(WordBreak.BREAK_ALL)
         }
         Text(view.pendingStep.input).fontSize(LABEL).fontColor(this.sshColors.secondary)
-          .fontFamily('JetBrainsMono').lineHeight(17).width('100%').maxLines(3)
+          .fontFamily(FONT_MONO).lineHeight(17).width('100%').maxLines(3)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
     }
-    .width('100%').padding({ left: 12, right: 12, top: 10, bottom: 10 })
-    .backgroundColor(this.sshColors.inset).borderRadius(8).margin({ bottom: 6 })
+    .width('100%').padding(PAD_ITEM)
+    .backgroundColor(this.sshColors.inset).borderRadius(RADIUS).margin({ bottom: 6 })
     .onClick((): void => { if (this.canOpenPreview) this.onOpenPreview(); })
   }
 
@@ -177,14 +180,14 @@ export struct ChatMessageTools {
       } else if (isSSHApprovalTool(this.part.toolName) && this.part.approvalState.type === 'pending') {
         Column({ space: 4 }) {
           Text(`${sshApprovalProtocolLabel(this.part)} · ${sshApprovalTargetLabel(this.part)}`)
-            .fontSize(META).fontColor(this.sshColors.ink).fontFamily('JetBrainsMono')
-            .width('100%').maxLines(3).wordBreak(WordBreak.BREAK_ALL)
+            .fontSize(META).fontColor(this.sshColors.ink).fontFamily(FONT_MONO)
+            .width('100%').maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis }).wordBreak(WordBreak.BREAK_ALL)
           Text(sshApprovalCommand(this.part))
-            .fontSize(LABEL).fontColor(this.sshColors.secondary).fontFamily('JetBrainsMono').lineHeight(17)
-            .width('100%').maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .fontSize(LABEL).fontColor(this.sshColors.secondary).fontFamily(FONT_MONO).lineHeight(17)
+            .width('100%').maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis }).wordBreak(WordBreak.BREAK_ALL)
         }
-        .width('100%').padding({ left: 12, right: 12, top: 10, bottom: 10 })
-        .backgroundColor(this.sshColors.inset).borderRadius(8).margin({ bottom: 6 })
+        .width('100%').padding(PAD_ITEM)
+        .backgroundColor(this.sshColors.inset).borderRadius(RADIUS).margin({ bottom: 6 })
         .onClick((): void => { if (this.canOpenPreview) this.onOpenPreview(); })
       }
       // E13:本章计划提案专用摘要(批准/拒绝仍走下方原胶囊回调,同一 toolCallId)
@@ -277,7 +280,7 @@ export struct ChatMessageTools {
               Text(this.firstOutputText())
                 .fontSize(LABEL)
                 .fontColor(INK2)
-                .fontFamily('JetBrainsMono')
+                .fontFamily(FONT_MONO)
                 .width('100%')
                 .lineHeight(16)
               .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
@@ -286,7 +289,7 @@ export struct ChatMessageTools {
               Text(this.firstOutputText())
                 .fontSize(LABEL)
                 .fontColor(INK2)
-                .fontFamily('JetBrainsMono')
+                .fontFamily(FONT_MONO)
                 .maxLines(3)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .width('100%')

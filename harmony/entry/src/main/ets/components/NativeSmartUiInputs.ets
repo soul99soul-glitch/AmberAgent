@@ -120,11 +120,14 @@ export struct NativeSmartUiInputs {
   private Choice(index: number): void {
     Row({ space: 10 }) {
       if (this.kind() === 'colorChoice') {
-        Text(this.selected(index) ? '✓' : '').width(26).height(26).fontSize(this.textSize(16))
-          .fontColor(accentInkFor(this.color(index))).textAlign(TextAlign.Center).borderRadius(13).backgroundColor(this.color(index));
+        // 色块尺寸随字号缩放:固定 26vp 在无障碍大字号下会裁掉 ✓
+        Text(this.selected(index) ? '✓' : '').width(this.textSize(26)).height(this.textSize(26))
+          .fontSize(this.textSize(16))
+          .fontColor(accentInkFor(this.color(index))).textAlign(TextAlign.Center)
+          .borderRadius(this.textSize(13)).backgroundColor(this.color(index));
       } else if (!this.compactChoices()) {
         Text(this.selected(index) ? '✓' : this.multiple() ? '□' : '○')
-          .fontSize(this.textSize(18)).fontColor(this.accent).width(24).flexShrink(0);
+          .fontSize(this.textSize(18)).fontColor(this.accent).width(this.textSize(24)).flexShrink(0);
       }
       Column({ space: 4 }) {
         Text((this.compactChoices() && this.multiple() && this.selected(index) ? '✓ ' : '') +

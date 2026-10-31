@@ -12,8 +12,9 @@ import {
 } from '@amber/chat-domain';
 import type { JsonObject } from '@amber/chat-domain';
 import {
-  INK, INK2, INK3, INK4, ACCENT, SURFACE, SURFACE2, LINE, ACCENT_LIGHT, BODY, BODY2, META, LABEL, RADIUS,
+  INK, INK2, INK3, INK4, ACCENT, SURFACE, SURFACE2, LINE, ACCENT_LIGHT, BODY, BODY2, META, LABEL, RADIUS, GUTTER,
 } from '../design/tokens.ets';
+import { FONT_MONO } from '../design/fonts.ets';
 import { JsonTree } from './ui/JsonTree.ets';
 import { MarkdownText } from './MarkdownText.ets';
 import { Icon } from './ui/Icon.ets';
@@ -217,21 +218,22 @@ export struct ChatMessageToolPreviewSheet {
         }.width(44).height(44).justifyContent(FlexAlign.Center)
           .onClick((): void => { this.onDismiss(); }).accessibilityText('关闭工具详情')
       }
-      .width('100%').height(56)
-      .padding({ left: 16, right: 4, top: 12 })
+      .width('100%').constraintSize({ minHeight: 56 })
+      .padding({ left: GUTTER, right: 4, top: 10, bottom: 6 })
+      .alignItems(VerticalAlign.Center)
 
       Scroll() {
         Column() {
           // 显示标题之外保留原始工具名(排障/对照日志)
           if (toolDisplayTitle(this.part) !== this.part.toolName) {
             Text(this.part.toolName)
-              .fontSize(LABEL).fontColor(INK3).fontFamily('JetBrainsMono')
+              .fontSize(LABEL).fontColor(INK3).fontFamily(FONT_MONO)
               .width('100%').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .padding({ left: 16, right: 16, bottom: 4 })
+              .padding({ left: GUTTER, right: GUTTER, bottom: 4 })
               .copyOption(CopyOptions.LocalDevice)
           }
           JevApprovalFacts({ part: this.part, subjectHash: this.jevSubjectHash })
-            .padding({ left: 16, right: 16 })
+            .padding({ left: GUTTER, right: GUTTER })
           if (this.part.toolName === 'photos_pick' && this.getImageUrls().length > 0) {
             this.RenderPhotoThumbs()
           }
@@ -270,13 +272,13 @@ export struct ChatMessageToolPreviewSheet {
   private RenderSSHTarget(part: UIMessagePartTool): void {
     Column({ space: 6 }) {
       Text(sshApprovalProtocolLabel(part) + ' · 批准目标').fontSize(META).fontColor(this.sshColors.muted).width('100%')
-      Text(sshApprovalTargetLabel(part)).fontSize(META).fontFamily('JetBrainsMono')
+      Text(sshApprovalTargetLabel(part)).fontSize(META).fontFamily(FONT_MONO)
         .fontColor(this.sshColors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
       Text(part.toolName.endsWith('_session_start') ? '会话操作' : '执行命令')
         .fontSize(META).fontColor(this.sshColors.muted).width('100%').margin({ top: 8 })
-      Text(sshApprovalCommand(part)).fontSize(META).fontFamily('JetBrainsMono').lineHeight(19)
+      Text(sshApprovalCommand(part)).fontSize(META).fontFamily(FONT_MONO).lineHeight(19)
         .fontColor(this.sshColors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
-    }.width('100%').padding(16)
+    }.width('100%').padding(GUTTER)
   }
 
   @Builder
@@ -284,7 +286,7 @@ export struct ChatMessageToolPreviewSheet {
     Column({ space: 6 }) {
       Text(view.title).fontSize(META).fontColor(this.sshColors.ink).width('100%')
       Text(view.stepLabel).fontSize(META).fontColor(this.sshColors.secondary).width('100%')
-      Text(`内容 hash: ${view.hash}`).fontSize(META).fontFamily('JetBrainsMono')
+      Text(`内容 hash: ${view.hash}`).fontSize(META).fontFamily(FONT_MONO)
         .fontColor(this.sshColors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
       if (view.kind === 'import') {
         Text(`来源: ${view.workspacePath}\n安装基线: ${view.baseHash ?? '首次安装'}`)
@@ -294,7 +296,7 @@ export struct ChatMessageToolPreviewSheet {
         Text('固定审核内容').fontSize(META).fontColor(this.sshColors.muted).width('100%').margin({ top: 8 })
         JsonTree({ json: maskSensitiveJsonText(view.canonicalJSON) }).width('100%')
       }
-    }.width('100%').padding(16)
+    }.width('100%').padding(GUTTER)
     if (view.pendingStep !== null && isSSHApprovalTool(view.pendingStep.toolName)) {
       this.RenderSSHTarget(view.pendingStep)
     }
@@ -411,25 +413,31 @@ export struct ChatMessageToolPreviewSheet {
         Text(this.packageApprovalView()?.pendingStep ? '当前步骤实际参数' : '输入参数')
           .fontSize(META).fontColor(INK3).layoutWeight(1)
         Text('复制').fontSize(LABEL).fontColor(ACCENT)
+          .constraintSize({ minHeight: 36 })
+          .padding({ left: 8, right: 4, top: 6, bottom: 6 })
           .onClick((): void => { this.copyToClipboard(this.getInputJson()); })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 8, bottom: 4 })
+      .alignItems(VerticalAlign.Center)
+      .padding({ left: GUTTER, right: GUTTER, top: 8, bottom: 4 })
 
       Column() {
         JsonTree({ json: this.getInputJson() })
           .width('100%').padding(12).backgroundColor(SURFACE2).borderRadius(8)
       }
-      .width('100%').padding({ left: 16, right: 16 }).margin({ bottom: 8 })
+      .width('100%').padding({ left: GUTTER, right: GUTTER }).margin({ bottom: 8 })
 
       // Output
       Row() {
         Text('输出结果').fontSize(META).fontColor(INK3).layoutWeight(1)
         Text('复制').fontSize(LABEL).fontColor(ACCENT)
+          .constraintSize({ minHeight: 36 })
+          .padding({ left: 8, right: 4, top: 6, bottom: 6 })
           .onClick((): void => { this.copyToClipboard(this.getOutputText()); })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 8, bottom: 4 })
+      .alignItems(VerticalAlign.Center)
+      .padding({ left: GUTTER, right: GUTTER, top: 8, bottom: 4 })
 
       Column() {
         if (Object.keys(this.getOutputJson()).length > 0) {
@@ -439,7 +447,7 @@ export struct ChatMessageToolPreviewSheet {
           this.RenderRawOutputText()
         }
       }
-      .width('100%').padding({ left: 16, right: 16 }).margin({ bottom: 16 })
+      .width('100%').padding({ left: GUTTER, right: GUTTER }).margin({ bottom: 16 })
     }
     .width('100%')
   }
@@ -451,11 +459,11 @@ export struct ChatMessageToolPreviewSheet {
         .fontSize(LABEL)
         .fontColor(INK3)
         .width('100%')
-        .padding({ left: 16, right: 16, top: 8, bottom: 4 })
+        .padding({ left: GUTTER, right: GUTTER, top: 8, bottom: 4 })
       Column() {
         this.RenderRawOutputText()
       }
-      .width('100%').padding({ left: 16, right: 16 }).margin({ bottom: 16 })
+      .width('100%').padding({ left: GUTTER, right: GUTTER }).margin({ bottom: 16 })
     }
     .width('100%')
   }
@@ -465,7 +473,7 @@ export struct ChatMessageToolPreviewSheet {
   RenderRawOutputText(): void {
     Column() {
       Text(this.rawOutputShown())
-        .fontSize(LABEL).fontColor(INK2).fontFamily('JetBrainsMono')
+        .fontSize(LABEL).fontColor(INK2).fontFamily(FONT_MONO)
         .width('100%')
         .maxLines(this.rawOutputExpanded ? RAW_OUTPUT_EXPANDED_LINES : RAW_OUTPUT_COLLAPSED_LINES)
         .textOverflow({ overflow: TextOverflow.Ellipsis })

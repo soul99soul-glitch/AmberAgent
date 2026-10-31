@@ -2038,3 +2038,96 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**:五件公共 SubAgentTools、SubAgentStore fileIo adapter、PromptConfigStore hydrated bridge、AppContainer runner/manager/tools 单例与 ChatPage 动态装配已 source-only 闭环；subagent 运行时可被主对话驱动。
 - **未移植(P1 登记)**:专属 `ChatMessageSubAgentStep` 聚合 UI(live phase rotation/run sheet/transcript fallback)为 runtime 闭环后的独立交互片；subagent_* 入 tool_search 可发现集(若需与 Android 完全对齐，重构 ChatPage 为两阶段 registry)。
 - **验证**:D-132c 聚焦 18/18；chat tsc 干净 + 1560/1560(1542+18)，deepread tsc 干净 + 610/610；`hvigorw assembleHar --no-daemon && hvigorw assembleHap --no-daemon` 均 BUILD SUCCESSFUL；`git diff --check` clean；阶段 plan-drift/规格/质量/反过度设计复核对照 Android 基准收口。
+
+## D-133 — 普通模型 API Key 静息加密：providers/model_configs 剥离 + 标量 *_api_key 整体加密
+
+- **日期**: 2026-10-31
+- **状态**: 已执行（source-only；本机无法产出 HAP，未做设备验收）
+- **背景**: 鸿蒙端把整份 `providers` / `model_configs` blob 与 `ai_api_key` / `<source>_api_key` 明文写进 Preferences（`deep_read_settings`）。同一份数据在 Android 侧是 DataStore at rest，鸿蒙侧没有任何加密层；`Storage` 契约里还留着会把「密钥」直接写进 Preferences 的 `getSecret/setSecret/deleteSecret`（无调用方）。
+- **决策**:
+  1. `chat/secret_fields_blob.ts`（纯 TS，可 node 单测）只负责「blob 内凭据位置 ↔ 外部凭据库」的剥离/回填：`sealSecretFields` / `openSecretFields` 处理对象数组（`apiKey`、`privateKey`），`sealScalarSecret` / `openScalarSecret` 处理整段字符串；`blobHasInlineSecrets` 让已迁移的读路径跳过 vault 往返。
+  2. `entry/platform_impl/ProviderKeyVault.ets` 是唯一真值存储：32B 主密钥进 Asset Store（`DEVICE_UNLOCKED` / `SyncType.NEVER` / THROW_ERROR），AES-GCM 逐条密文原子写 `filesDir/amberagent/provider-keys/provider-keys-v1.json`，与 GoogleSecureStore / WebMountSecureStore 同构。不用 Asset SECRET 直存的原因：单条上限 1024B，而 codex/grok 登录态会把 JWT 写进 `apiKey`。
+  3. `entry/platform_impl/PreferencesStorage.ets` 是唯一接入点（D-016「设备端 adapter 决定最终存储形态」）：`providers`/`model_configs`/`search_services` 走结构型剥离（`apiKey`/`privateKey`/`password`），后缀为 `_api_key` 的键走标量加密（覆盖 `ai_api_key` 与 tavily/exa/bocha/brave 等 deepread 检索服务键，新检索源沿用后缀即自动纳入）。旧明文在首次读取时就地迁移并回写空值。同一 Preferences 键的读写用模块级 `KeyedAsyncMutex` 串行，避免迁移回写与并发 `set` 交错。
+  4. 失败语义 fail-closed：vault 读失败必须上抛，绝不降级成空串——上游若拿到空串再回存就会删掉真实凭据。写路径上「内存值即权威」：空值 = 用户清空 = 删除 vault 条目。
+  5. 迁移回写前重读并比对，只有 Preferences 当前值仍等于读到的原始值才写回，避免把并发 `set` 覆盖掉。
+  6. 密文内绑定 `{id, field, secret}` 并在解密后校验，防挪用密文；IV 固定 12B/16 字符 base64；单条密文与整份文件分别设上限（整份放宽到 4MiB），避免 provider 一多就把整库判成损坏。
+  7. `Storage` 的 `getSecret/setSecret/deleteSecret` 删除（无调用方，语义与静态分析冲突）。
+  8. `ai_api_key` 不删除：它已被标量加密覆盖，而 `DeepReadHostSettings` 的 AI 配置卡与 `OpenAiCompatibleAiClient` 仍在读它，删除会让两条链路读到空值（首轮实现曾误删，复审后撤回）。
+- **理由**: 普通模型 API Key 是上架隐私阻断项；明文 Preferences 等于把密钥交给任何拿到应用沙箱的路径。选字段级而非整 blob 加密，是为把「密钥丢失」与「配置丢失」分开：vault 不可用时用户只需重填密钥，而不是整套 provider 配置重建。
+- **影响**: Preferences 内这两个 blob 的 apiKey/privateKey 恒为空串；`getAllStringEntries` 对它们返回无密版本（配额核算不受影响）；provider 模型、wire format、所有请求侧代码零改动。设置备份（SettingBackupPage）仍经 `loadProviders` 取到明文 key，与 Android 一致——导出载荷本身由用户口令加密，未改变。
+- **可逆性**: 可逆（撤掉 `SEALED_BLOBS`/`isScalarSecret` 即回到明文存储；密文文件与 Asset 记录留在原处）。
+- **验证**: 新增 `chat/src/test/secret_fields_blob.test.ts`（12 项）与 `deepread/src/test/preferences_storage_secrets.test.cjs`（6 项，直接跑真实 `PreferencesStorage.ets`）；`model_config.test.ts` 断言 legacy `ai_api_key` 迁移后仍在(不删除)。chat/deepread tsc 干净，改动文件 ArkTS lint 0 error，全量 harmony 测试见交付报告。
+- **独立 review 后补修（2026-10-31 第二轮）**:
+  1. `models[].customHeaders[].value` 纳入加密：按模型把 values 数组整体存一个槽位（`<ns>/<provider>/<model>/customHeaders`），header 名称与顺序留在明文。此前这些用户可编辑的头可能含鉴权信息却明文落盘。
+  2. `models[].providerOverwrite.apiKey` 纳入加密（同 ownerKey 的 `apiKey` 槽位）；overwrite 的 name/baseUrl 等非密字段保留。
+  3. 新增最小恢复路径：密文不可解（`provider_secret_key_missing` / `provider_secret_corrupt` / `provider_secret_binding_mismatch` / 尺寸越界）时，`ProviderKeyVault.discardAll()` 丢弃整库，`stripSecretFields()` 清空全部密文字段并保留非密配置，另写 `provider_secret_recovery` 标记；provider 设置页读一次即清除并显示「请重新填写 API Key」。未知错误（如 Asset 服务暂时不可用）仍原样上抛，不做清库兜底。
+  4. 同时把读路径的迁移从 `sealSecretFields` 改为 `migrateSecretFields`：读路径只写不删。此前读路径沿用写语义，遇到「部分已加密 + 新增明文」的 blob 会删掉已加密条目的密文。
+- **未覆盖**:
+  - `mcp_servers`（`chat/kv_store.ts`）的 `headers` 是 `[name, value]` 数组而非 id 键控行，现有 codec 形状不适用，需要独立决策（整 blob 加密或按 header 提取），本次未做。
+  - Mac Gateway 配对、插件密钥、SSH/Google/WebMount 凭据各有既有 Asset 封装，不在本次范围。
+  - 设置备份仍经 `loadProviders` 取到明文 key 并放进用户口令加密的导出载荷（与 Android 一致）。
+  - `harmony/build-profile.json5` 仍入库 debug 签名配置（D-005 已知，发布签名须另管）。
+  - 四个 oh-package 的 `license: SEE LICENSE IN LICENSE` 指向仓库根 `LICENSE`；包内没有各自的 LICENSE 副本，属元数据指向（这些包不对外发布）。
+
+## D-134 — 鸿蒙 Phase 2（上下文与记忆连续性）审计结论与两个「不做」决策
+
+- **日期**: 2026-10-31
+- **状态**: 已执行（source-only；HAP 无法在本机编译，记为 CONDITIONAL）
+- **背景**: 计划 §8 P2 列了 H2.1–H2.5（引擎 parity、质量闸与 needle、历史检索、缓存/用量观测、阶段路由）。审计发现 P1 之前的移植已把 H2.1–H2.4 的代码面基本铺完，Phase 2 的真实产出是「证明 parity、锁住行为、补 needle 基线、对未做项留下决策」，而不是重写引擎。
+- **审计结论（逐项）**:
+  - H2.1 引擎 parity：`context_compact.ts` 与 Android `CompactSummaryPayloads` 函数面一一对应（`parse/timelineSummary/searchableText/injectionText/validCompletedCompacts/selectCompactsForInjection/sentenceCount/isHighQualityPayload/normalizeModelOutput/fallbackPayload/remapCoveredCompactIds`），schema v2 常量与 `MAX_TIMELINE_SUMMARY_CHARS=1200`/`MAX_HANDOFF_CHARS=24000` 逐值一致；阈值三档（`below_threshold/precompact_threshold/force_threshold`）与 pending tool 边界（跳过开头已执行工具的 assistant、回退尾部含未执行工具的节点）齐备；revision 并发由 `insertCompact(compact, revision)` 返回 false → `skipped: history_invalidated` 兜住。
+  - H2.2 质量闸与 needle：质量闸已接线（`context_engine.ts:567/575`：normalize → `isHighQualityPayload` → 带 `COMPACT_RETRY_SUFFIX` 重试一次 → `compactFallbackPayload`）；`compactSearchableText` 有真实消费方（`searchConversationContext` ← `conversation_search` 工具），不是死产出。新增 `chat/src/test/context_needle.test.ts` 作为计分基线：5 类实体（路径／稳定 id／状态码+数字／命令+退出码／决定原话），结论是**可恢复性 5/5**（按 compact id 展开必得原文），**文本命中基线 0/5**（摘要按设计可省略细节）。
+  - H2.3 历史检索：已实现（`conversation_search`/`conversation_expand`，limit 上限 20、compact 命中优先占额、`previewAround` 截取），**不新增工具**。
+  - H2.4 观测：`cachedTokens` 四种解析器（openai/claude/google/responses）均解析，`ChatModelContextSession.ets:333-334` 出缓存命中百分比；记忆召回块位置 `chat_turn.ts:214-217`（memory 在动态 system 块最前，与 Android `GenerationHandler:727` 同序）。
+  - H2.5 阶段路由：两端都没有 stage 概念（`stageRoute` 全仓 0 命中），默认即「单阶段 continue」。**不做**，理由：没有阶段切换就没有路由可做，新增会在没有需求方的前提下引入状态机。
+- **决定**:
+  1. H2.2 的「`must_not_lose` 硬校验」**不做**。理由：Android 无对应实现，硬校验会在模型合法改写措辞时误判成丢事实；改为 needle 计分（可恢复性作为硬保证、文本命中作为观测基线），并由 `PARITY_DEBT.md` PD-012 登记 fallback 的文本有损问题，等两端同步修改。
+  2. H2.5 阶段路由**不做**（见上）。
+  3. H2.3 **不新增工具**，复用现有 `conversation_search`/`conversation_expand`。
+- **影响**: 无生产行为变更（仅新增测试、文档与债务登记）。Phase 2 的出口证据是：`context_needle.test.ts` 2 项 + 既有 86 项 context 套件全绿、审计表（上）与两条决策。
+- **可逆性**: 纯增量（测试/文档），删除即回到前态。
+- **验证**: `context_needle.test.ts` 2/2；`context_engine/context_compact/context_compaction_races/context_assembly/manual_compaction` 共 88 项；chat/deepread `tsc` 干净；改动文件 ArkTS lint 0 error。HAP 未编译 → Phase 2 证据等级记为 **CONDITIONAL**（无 E3/E4）。
+
+## D-135 — 鸿蒙 Phase 3（真实工作流与扩展边界）审计结论
+
+- **日期**: 2026-10-31
+- **状态**: 已执行（source-only）；**证据等级 CONDITIONAL**（无 HAP / 无真机 → 计划要求的 E3 未取得）
+- **背景**: 计划 §8 P3 四项（H3.1 日程/日历/提醒闭环、H3.2 智能 UI 卡片真机矩阵、H3.3 深读/创作完整链路、H3.4 后台保活）的验收证据全部标为 E3，而本机编不出 HAP。因此 Phase 3 的产出 = 代码级验证 + 行为锁 + 明确 CONDITIONAL 边界，不伪造设备结论。
+- **审计结论（逐项）**:
+  - H3.1 日程/日历/提醒：14 件工具在位（`calendar_events_list`/`calendar_event_create|update|delete`、`reminders_list`/`reminder_create|update|complete|delete`、`alarms_list`/`alarm_schedule|alarm_cancel`、`notification_schedule`/`notification_cancel`），读取→创建→完成/删除全覆盖；权限拒绝返回结构化 error（`device_schedule_tools.test.ts:264` 断言 `ok:false` + `reason` + `error_code:'permission_denied'`），共 38 项工具测试。设备侧行为未验证。
+  - H3.2 智能 UI：目录实为 **80 种 / 8 家族**（计划里的「26 种」是旧口径）。新增 `entry/src/test/smart_ui_renderer_coverage.test.cjs` 三项不变量：① 目录每个 kind 都被渲染器显式分派（默认 `Actions()` 只留给 button/submitButton/resetButton 三个按钮形态）② 渲染器不引用目录之外的 kind（防止改名后留下死分支）③ 组件画廊 `KIND_LABELS` 条目数 == 目录长度（标签按下标对应）。三项全绿 → 无漏接线。真机渲染/长文本/深色/Font Scale/性能未验证。
+  - H3.3 深读/创作：`prefetch_integration.test.ts` 有两条 end-to-end（含 `LLM failure → fallback plan`），`deepread_structured_pipeline.test.ts` 7 项覆盖「替换失败保留旧文章」「冷启动续写只重跑失败阶段」，全仓 deepread/novel 套件里 15 处 `ok:false` 断言构成失败回执证据。设备侧 UI 回执未验证。
+  - H3.4 后台保活：`BackgroundGenerationKeepAlive.ets` 用 `taskHeld`/`lastError` 记录真实状态并显式「停止失败不谎称已停」，导出 `generationKeepAliveHeld()`/`generationKeepAliveLastError()` 供观测；`EntryAbility` 在前后台切换处驱动。切后台/锁屏/恢复的行为未验证（无设备）。
+- **决定**: 本阶段不改生产代码。H3.2 补的三项不变量是纯增量测试；其余三项以既有测试与源码锚点作为代码级证据，设备项一律记 CONDITIONAL 并写入交付报告的未验证清单。
+- **影响**: 无行为变更。Phase 3 出口 = 代码级四项核对通过 + 1 个新测试文件（3 项）+ 全量 4847 项（4846 通过，唯一失败为既有环境项：缺 CPython 宿主编译插件）。
+- **可逆性**: 纯增量。
+- **未取得**: 计划要求的 26/80 卡片真机截图（浅色/深色/Font Scale）、日程工具真机读写、深读链路真机回执、后台保活真机行为 —— 全部因本机无法编译 HAP（`entry@BuildNativeWithNinja`：mosh/rust 依赖需访问 github.com，`curl: (35) SSL_ERROR_SYSCALL`）。
+
+## D-136 — 鸿蒙 Phase 4（跨端任务、审批与数据保留）：数据保留收敛 + 看板「不做」决策
+
+- **日期**: 2026-10-31
+- **状态**: 已执行（source-only）；**证据等级 CONDITIONAL**（无 HAP / 无真机 → 计划要求的 E3 未取得）
+- **背景**: 计划 §8 P4 列了 H4.1–H4.4。H4.1（Gateway 审批入口）与 H4.4（C3/C5 fixture）都以 macOS M4.1 的 Gateway 合同冻结为前置，而 macOS 尚未进 P4，**本阶段不做**（见末节）。H4.3（数据保留/导出/备份）不依赖任何外部合同，先做。H4.2（跨端看板）按计划「核实需求；做则复用 C5，不做则明确替代与决策」处理。
+- **H4.3 审计结论（逐项）**:
+  - **原始 transcript 不可变**：成立，且此前没有测试锁定。`prepareContext`（`context_engine.ts:690-830`）只改请求副本：`applyToolImageRequestBudget` 产出 `requestMessages`，`withEffectiveMessages` 产出新 Conversation 对象，`compactConversation` 只往 `CompactStore` 写摘要 + `sourceMessageIds`。落库的 `conversation.messageNodes` 全程不被触碰。新增 2 项测试（`context_engine.test.ts`「C4: compaction never rewrites the durable transcript」）把它钉住：压缩后 `JSON.stringify(conv.messageNodes)` 逐字不变；compact 内不重复存被覆盖原文；被覆盖消息仍可按 id 从原 transcript 取回完整 400K 字符原文。
+  - **导出不含密钥明文**：**不成立，已修**。`buildSyncSettingsBlob` 从 `loadProviders` 取到回填后的明文 key 直接塞进 settings blob，而 `createSyncBackup` 的 `passphrase === null` 分支（`sync_snapshot.ts:604-607`，UI 上有「使用密码加密」开关可关）确实只做密文化、不做脱敏。修法：序列化后过一次 `stripSecretFields`（与静息存储同一套字段位置），不再另写脱敏规则。Android `SyncPayloadExporter:52-70` 走 `redactForExport`、iOS `IOSSyncBackup.export:52-56` 走 `IOSCredentialRedactor`，两端都是「加密不能代替脱敏」，鸿蒙此前两条都没有。**行为变化**：恢复服务商配置后密钥为空，需用户重填；UI 文案已同步（「打包服务商配置（不含密钥）」/ 页脚「恢复后需重新填写」）。
+  - **同一条审计的连带发现：`providerOverwrite` 只脱敏了 `apiKey`**，而它是完整的 `ProviderSetting`，可能是带 `privateKey` 的 google 变体。已改为对 overwrite 走同一组 `FLAT_FIELDS`（apiKey / privateKey / password），槽位名不冲突、对旧数据向后兼容。
+  - **删除语义**：`cleanupDeletedConversation` 此前漏了两项会话私有数据。①composer 输入草稿 `chat_input_draft/<id>`：Android 的 `conversation_draft` 表在 `SessionCleanupManager:144` 随会话删除，鸿蒙没有任何清理路径，已删除会话的用户未发送文字会无限期留在 Preferences，且重建同 id 会话时会被 `restoreInputDraft` 读回输入框。②生成图片目录 `chat_images/<id>/`：Android `FilesManager.deleteChatImagesDir`（:481-486）整目录递归删，鸿蒙的 `deleteChatFiles` 只处理 `upload/` 前缀（`isSafeUploadRelativePath`），`chat_images/` 从未被覆盖。两项均已补，并连带清理 `managed_files` 里对应的登记行。登记行残留的不只是「文件管理页列出不存在的行」：`HomeContinueSupport.ets:111-120` 从 `rows[0].relativePath.split('/')[1]` 推导会话 id 生成首页「继续」卡片，残留行会让首页出现一张点进去指向已删除会话的卡。
+  - **静息凭据残余**：`mcp_servers` 的 `commonOptions.headers` 是 `[name, value]` 对，value 常带 `Authorization`，此前明文落 Preferences。已纳入加密边界（`secret_fields_blob` 新增 `headers` 槽位 + `PreferencesStorage` 的 `SEALED_BLOBS` 增加 `mcp_servers`/`mcp`）。名称与顺序留在明文，只有 value 数组进库。
+- **H4.2 决定：跨端看板（C5）鸿蒙侧不做**。
+  - **核实的需求**：Mac Gateway 的看板是 `GET /v1/amber/board`（`DaemonAPI.swift:97-98` forward 到 Mac 上的 Amber），返回 `BoardItem[]`，四列 `needsYou/running/scheduled/done`，卡片带 `kind`、`approval { sessionKey, toolCallId, tool, detail, highRisk }`、`waitingForReply`、`failed`、`conversationId`、`nextRunAt`。iOS 已完整消费（`MacGatewayClient.swift:106-137` + `MacGatewayStore.boardItems`，无 Mac 时降级为 gateway sessions 的只读看板）。
+  - **不做**：鸿蒙不实现四栏看板。理由三条，都是可核实的：①`/v1/amber/board` 的内容由 Mac 上的 Amber 经 Unix socket 应答，Amber 未运行时返回 503；鸿蒙当前已实现的 `GET /v1/status` + `/v1/tasks/<key>/monitor` 是**纯 gateway 数据**、不依赖 Amber 运行，可用性边界清楚。②四栏看板的 `needsYou` 列全部价值在「点进去批准/回复」，而批准入口正是 H4.1，被 macOS M4.1 合同阻塞；只做只读四栏 = 把「等你处理」渲染成一个点不动的列表，属于计划 §9.2 G4 明确禁止的「看板显示假状态」。③鸿蒙 `SettingMacGatewayPage` 已提供等价的信息与操作面：会话状态（运行中/等你确认/等你回复/可能卡住/已完成/意外中断）、逐会话推送开关、`synaraURL` 浏览器跳转「在 Synara 中回复或确认」。缺的只是「按列分组」这个展示层。
+  - **替代方案（已存在的等价面，非新增代码）**：任务区按 `updatedAt` 排的会话列表 + 状态文案 + 推送开关 + `synaraURL` 外链。计划允许「不做则明确替代与决策」，本条即该决策。
+  - **何时重新评估**：macOS M4.1 合同冻结、且鸿蒙能编出 HAP 做设备验收之后。届时若要做，`MacGatewayClient` 增加 `board()` + `BoardItem` 类型即可，不需要改协议。
+- **H4.1 / H4.4 阻塞（本阶段不做，列出待合同冻结后要做的事）**:
+  - 现状：`MacGatewayClient` 有 `status/setMonitored/registerPushToken/testPush/unpair/pair`，**没有** `/v1/amber/decision`。Mac 已实现该路由（`DaemonAPI.swift:91-95`：`sessionKey` 必须带 `amber:` 前缀、`toolCallId`、`allow` 布尔，转发到 Amber 后原样回传），iOS 也已接（`MacGatewayClient.swift:291`）。鸿蒙 `MacGatewayStatus.Session` 也没有 `pendingApproval` 字段。
+  - 合同冻结后要做：①`Session` 增加 `pendingApproval { toolCallId, tool, detail?, highRisk }`（与 iOS `MacGatewayClient.swift:72-78` 同形）；②`allow` 只在 `highRisk === false` 时暴露「批准」，`highRisk === true` 只给「拒绝」——这条是 G4 的硬门槛（计划 §9.2：高风险不能远程批准），必须在实现时就锁死而不是靠文案；③单测覆盖「高风险无批准路径」「旧 run 的 toolCallId 不生效」；④真机 E3。
+  - 另外 §9.1 C3 的 golden fixture 需要 macOS 先冻结配对/status/board/decision 的错误码与版本兼容字段；现在冻结等于单方面猜。
+- **影响**: 生产代码改动 4 处（`secret_fields_blob.ts`、`settings_backup.ts`、`PreferencesStorage.ets`、`ManagedFileStore.ets`）+ 1 处 UI 文案（`SettingBackupPage.ets`）。用户可见行为变化两项：服务商备份不再带密钥（需重填）、删除会话会连带清掉输入草稿与生成图片。
+- **可逆性**: 全部可逆。加密边界是 `SEALED_BLOBS` 增删；导出脱敏是 `buildSyncSettingsBlob` 里一个函数调用；删除清理是新增的 `await` 行。
+- **验证**: 定点测试 —— `secret_fields_blob.test.ts` 27（新增 5）、`settings_backup.test.ts` 8（新增 3、改写 1）、`preferences_storage_secrets.test.cjs` 16（新增 3，直接跑真实 `PreferencesStorage.ets`）、`context_engine.test.ts` 22（新增 2）、新增 `managed_cleanup_retention.test.cjs` 5（直接跑真实 `ManagedFileStore.ets`）。改动文件 ArkTS lint 0 error。全量见交付报告。
+- **未覆盖 / 未验证**:
+  - 无 HAP、无真机：Asset Store 主密钥创建、`mcp_servers` 旧明文升级迁移、备份导出/恢复、会话删除清理的设备侧行为全部未实测。
+  - 备份恢复**不还原**密钥（这是上面刻意的取舍，不是缺陷）；跨端 KDF 互通仍未做（`SHA256-ITERATED` vs Android PBKDF2 vs iOS），恢复出的 `.abin` 目前只能本机读。
+  - `mcp_servers.headers` 里的 **URL 内嵌凭据**（如 `https://user:pw@host/mcp`）未处理：`url` 不是 `headers`，整段留在明文。要不要脱敏需要与 Android 的 `redactMcpUrl`（`SecretRedactor.kt:318-345`）一起决定，避免两端线格式不同。
+  - `assistants[].customHeaders[].value` 仍在明文（架构上 assistant 级请求头也可能带鉴权）；`providers` 才是 P1 定的范围，未扩大。

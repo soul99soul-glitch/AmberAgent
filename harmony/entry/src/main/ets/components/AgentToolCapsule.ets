@@ -168,11 +168,11 @@ export struct AgentToolCallCapsule {
         Icon({ name: icon, iconSize: 12, color: color })
         Text(label).fontSize(LABEL).fontColor(color).fontWeight(FontWeight.Medium).maxLines(1)
       }
-      .height(30).padding({ left: 10, right: 10 })
+      .constraintSize({ minHeight: 30 }).padding({ left: 10, right: 10, top: 5, bottom: 5 })
       .borderRadius(RADIUS_PILL).border({ width: 0.7, color: LINE }).backgroundColor(SURFACE2)
       .alignItems(VerticalAlign.Center)
     }
-    .height(44).padding({ left: 4 }).flexShrink(0)
+    .constraintSize({ minHeight: 44 }).padding({ left: 4 }).flexShrink(0)
     .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
     .onClick(action)
     .accessibilityGroup(true)
@@ -195,8 +195,8 @@ export struct AgentToolCallCapsule {
         }
       }
     }
-    .width('auto').constraintSize({ maxWidth: '100%' }).height(30)
-    .padding({ left: 12, right: 12 })
+    .width('auto').constraintSize({ minHeight: 30, maxWidth: '100%' })
+    .padding({ left: 12, right: 12, top: 5, bottom: 5 })
     .backgroundColor(this.showApproval ? SURFACE2 : accentAlpha(this.accentColorStore, 0.10))
     .borderRadius(15).border({ width: 0.7, color: LINE })
     .alignItems(VerticalAlign.Center)

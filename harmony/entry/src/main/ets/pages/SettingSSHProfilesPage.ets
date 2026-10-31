@@ -9,7 +9,7 @@ import { CenteredTitleBar, CardGroup, PlainSection, FooterNote, PageSpacer, Seg 
 import { SSHUIColors } from '../components/SSHUIColors.ets';
 import { sshPageError } from '../components/SSHPageErrors.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { ACCENT, MOTION_OVERLAY, accentSoftBg } from '../design/tokens.ets';
+import { ACCENT, BODY, BODY2, GUTTER, HEADER, LABEL, META, MOTION_OVERLAY, PAD_CARD, accentSoftBg } from '../design/tokens.ets';
 import { FONT_MONO, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 
 @Entry
@@ -324,19 +324,20 @@ struct SettingSSHProfilesPage {
       Row() {
         Column({ space: 4 }) {
           Text(assistant.name.length > 0 ? assistant.name : '未命名助手')
-            .fontSize(16).fontColor(this.colors.ink).fontFamily(FONT_SANS_MEDIUM)
+            .fontSize(HEADER).fontColor(this.colors.ink).fontFamily(FONT_SANS_MEDIUM)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
           Text(!this.assistantAllowsTerminal(assistant) ? '当前助手的工具范围不包含终端'
             : assistant.localTools.indexOf('terminal') >= 0 ? '已启用 SSH / Mosh 终端工具' : '尚未启用终端工具')
-            .fontSize(12).fontColor(this.colors.secondary)
+            .fontSize(META).fontColor(this.colors.secondary)
         }.alignItems(HorizontalAlign.Start).layoutWeight(1)
         Button(this.assistantSavingId === assistant.id ? '保存中…'
           : assistant.localTools.indexOf('terminal') >= 0 ? '停用' : '启用')
-          .type(ButtonType.Normal).height(44).fontSize(14)
+          .type(ButtonType.Normal).constraintSize({ minHeight: 44 }).fontSize(BODY)
           .fontColor(this.accentColor).backgroundColor(Color.Transparent)
           .enabled(this.assistantSavingId.length === 0 && (this.assistantAllowsTerminal(assistant)
             || assistant.localTools.indexOf('terminal') >= 0))
           .onClick((): void => { this.setAssistantTerminal(assistant.id, assistant.localTools.indexOf('terminal') < 0); })
-      }.width('100%').padding(14).border({ width: { bottom: 0.5 }, color: this.colors.line })
+      }.width('100%').padding(PAD_CARD).border({ width: { bottom: 0.5 }, color: this.colors.line })
     }, (assistant: Assistant): string => `${assistant.id}-${assistant.localTools.indexOf('terminal') >= 0}`)
   }
 
@@ -346,21 +347,22 @@ struct SettingSSHProfilesPage {
       Column() {
         Row() {
           Column() {
-            Text(profile.name).fontSize(16).fontColor(this.colors.ink).fontFamily(FONT_SANS_MEDIUM)
+            Text(profile.name).fontSize(HEADER).fontColor(this.colors.ink).fontFamily(FONT_SANS_MEDIUM)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
             Text(`${profile.username}@${profile.host}:${profile.port}`)
-              .fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary)
+              .fontSize(META).fontFamily(FONT_MONO).fontColor(this.colors.secondary)
               .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 4 })
             Text(profile.id === this.defaultId ? '默认配置' : 'SSH 配置')
-              .fontSize(12).fontColor(profile.id === this.defaultId ? this.accentColor : this.colors.muted).margin({ top: 4 })
+              .fontSize(META).fontColor(profile.id === this.defaultId ? this.accentColor : this.colors.muted).margin({ top: 4 })
           }.alignItems(HorizontalAlign.Start).layoutWeight(1)
-          Button('编辑').type(ButtonType.Normal).height(44).fontSize(14)
+          Button('编辑').type(ButtonType.Normal).constraintSize({ minHeight: 44 }).fontSize(BODY)
             .fontColor(this.accentColor).backgroundColor(Color.Transparent)
             .onClick((): void => { this.edit(profile); })
         }.constraintSize({ minHeight: 52 }).width('100%')
         Row() {
           Button(profile.id === this.defaultId ? '已默认' : '设为默认')
-            .type(ButtonType.Normal).height(44).padding({ left: 16, right: 16 })
-            .fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(this.colors.secondary)
+            .type(ButtonType.Normal).constraintSize({ minHeight: 44 }).padding({ left: GUTTER, right: GUTTER, top: 8, bottom: 8 })
+            .fontSize(BODY).fontFamily(FONT_SANS_MEDIUM).fontColor(this.colors.secondary)
             .border({ width: 0.5, color: this.colors.line })
             .borderRadius(22)
             .backgroundColor(this.colors.inset).enabled(profile.id !== this.defaultId)
@@ -368,34 +370,34 @@ struct SettingSSHProfilesPage {
           Button({ type: ButtonType.Normal }) {
             Row({ space: 6 }) {
               Icon({ name: 'ph_terminalWindow', iconSize: 16, color: this.accentColor })
-              Text('终端').fontSize(14).fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColor)
+              Text('终端').fontSize(BODY).fontFamily(FONT_SANS_MEDIUM).fontColor(this.accentColor)
             }.justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-          }.height(44).borderRadius(22).padding({ left: 16, right: 16 })
+          }.constraintSize({ minHeight: 44 }).borderRadius(22).padding({ left: GUTTER, right: GUTTER, top: 8, bottom: 8 })
             .backgroundColor(accentSoftBg(this.accentColor)).margin({ left: 8 })
             .enabled(profile.knownHostSHA256 !== null && profile.credentialRef !== null)
             .onClick((): void => { router.pushUrl({ url: 'pages/TerminalPage', params: { profileId: profile.id } }); })
           Blank()
-          Button('删除').type(ButtonType.Normal).height(44).fontSize(13)
+          Button('删除').type(ButtonType.Normal).constraintSize({ minHeight: 44 }).fontSize(BODY2)
             .fontColor(this.colors.error).backgroundColor(Color.Transparent)
             .onClick((): void => { this.deleteProfile(profile); })
         }.width('100%').margin({ top: 8 })
-      }.width('100%').padding(14).border({ width: { bottom: 0.5 }, color: this.colors.line })
+      }.width('100%').padding(PAD_CARD).border({ width: { bottom: 0.5 }, color: this.colors.line })
     }, (profile: SSHProfile): string => profile.id)
   }
 
   @Builder
   private ConnectionFields(): void {
     Column({ space: 8 }) {
-      TextInput({ text: this.name, placeholder: '配置名称' }).height(52)
+      TextInput({ text: this.name, placeholder: '配置名称' }).constraintSize({ minHeight: 52 })
         .fontColor(this.colors.ink).placeholderColor(this.colors.muted).backgroundColor(this.colors.inset).enabled(this.busy.length === 0)
         .onChange((value: string): void => { this.name = value; this.draftChanged(); })
-      TextInput({ text: this.host, placeholder: '主机名或 IP' }).height(52)
+      TextInput({ text: this.host, placeholder: '主机名或 IP' }).constraintSize({ minHeight: 52 })
         .fontColor(this.colors.ink).placeholderColor(this.colors.muted).fontFamily(FONT_MONO).backgroundColor(this.colors.inset).enabled(this.busy.length === 0)
         .onChange((value: string): void => { this.host = value; this.draftChanged(); })
-      TextInput({ text: this.portText, placeholder: '端口' }).height(52).type(InputType.Number)
+      TextInput({ text: this.portText, placeholder: '端口' }).constraintSize({ minHeight: 52 }).type(InputType.Number)
         .fontColor(this.colors.ink).placeholderColor(this.colors.muted).fontFamily(FONT_MONO).backgroundColor(this.colors.inset).enabled(this.busy.length === 0)
         .onChange((value: string): void => { this.portText = value; this.draftChanged(); })
-      TextInput({ text: this.username, placeholder: '用户名' }).height(52)
+      TextInput({ text: this.username, placeholder: '用户名' }).constraintSize({ minHeight: 52 })
         .fontColor(this.colors.ink).placeholderColor(this.colors.muted).backgroundColor(this.colors.inset).enabled(this.busy.length === 0)
         .onChange((value: string): void => { this.username = value; this.draftChanged(); })
       Seg({ options: ['密码', '私钥'], selected: this.authIndex, onSelect: (index: number): void => {
@@ -406,7 +408,7 @@ struct SettingSSHProfilesPage {
           this.authIndex = index;
         });
       } })
-    }.width('100%').padding(14)
+    }.width('100%').padding(PAD_CARD)
   }
 
   @Builder
@@ -415,14 +417,14 @@ struct SettingSSHProfilesPage {
       if (this.authIndex === 1) {
         Column({ space: 10 }) {
           TextArea({ text: this.secret, placeholder: '粘贴 OpenSSH / PEM 私钥' })
-            .height(150).fontSize(13).fontFamily(FONT_MONO).fontColor(this.colors.ink)
+            .constraintSize({ minHeight: 150 }).fontSize(BODY2).fontFamily(FONT_MONO).fontColor(this.colors.ink)
             .placeholderColor(this.colors.muted)
             .backgroundColor(this.colors.inset).enabled(this.busy.length === 0)
             .copyOption(CopyOptions.None)
             .onChange((value: string): void => { this.secret = value; })
           Row() {
             TextInput({ text: this.passphrase, placeholder: '私钥口令（可选）' })
-              .type(this.showPassphrase ? InputType.Normal : InputType.Password).showPasswordIcon(false).height(52)
+              .type(this.showPassphrase ? InputType.Normal : InputType.Password).showPasswordIcon(false).constraintSize({ minHeight: 52 })
               .layoutWeight(1).fontColor(this.colors.ink).placeholderColor(this.colors.muted)
               .backgroundColor(Color.Transparent).enabled(this.busy.length === 0)
               .onChange((value: string): void => { this.passphrase = value; })
@@ -430,13 +432,13 @@ struct SettingSSHProfilesPage {
               .width(44).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
               .accessibilityText(this.showPassphrase ? '隐藏私钥口令' : '显示私钥口令')
               .enabled(this.busy.length === 0).onClick((): void => { this.showPassphrase = !this.showPassphrase; })
-          }.width('100%').height(52).padding({ right: 4 }).borderRadius(26).backgroundColor(this.colors.inset)
+          }.width('100%').constraintSize({ minHeight: 52 }).padding({ right: 4 }).borderRadius(26).backgroundColor(this.colors.inset)
         }.width('100%')
         .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       } else {
         Row() {
           TextInput({ text: this.secret, placeholder: '密码' })
-            .type(this.showSecret ? InputType.Normal : InputType.Password).showPasswordIcon(false).height(52)
+            .type(this.showSecret ? InputType.Normal : InputType.Password).showPasswordIcon(false).constraintSize({ minHeight: 52 })
             .layoutWeight(1).fontColor(this.colors.ink).placeholderColor(this.colors.muted)
             .backgroundColor(Color.Transparent).enabled(this.busy.length === 0)
             .onChange((value: string): void => { this.secret = value; })
@@ -444,31 +446,31 @@ struct SettingSSHProfilesPage {
             .width(44).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
             .accessibilityText(this.showSecret ? '隐藏密码' : '显示密码')
             .enabled(this.busy.length === 0).onClick((): void => { this.showSecret = !this.showSecret; })
-        }.width('100%').height(52).padding({ right: 4 }).borderRadius(26).backgroundColor(this.colors.inset)
+        }.width('100%').constraintSize({ minHeight: 52 }).padding({ right: 4 }).borderRadius(26).backgroundColor(this.colors.inset)
         .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
       Text(this.hasSavedCredential ? '已有本设备凭据。连接信息相同时可留空沿用，秘密不会回填。' : '认证成功后才保存凭据。')
-        .fontSize(12).fontColor(this.colors.secondary).width('100%')
-    }.width('100%').padding(14)
+        .fontSize(META).fontColor(this.colors.secondary).width('100%')
+    }.width('100%').padding(PAD_CARD)
   }
 
   @Builder
   private TrustDetails(candidate: SSHTrustProbe): void {
     Text(candidate.trustState === 'trusted' ? '主机指纹匹配' : candidate.trustState === 'mismatch'
       ? '主机指纹已改变。请核对服务器后再信任。' : '首次连接。请通过可信渠道核对完整主机指纹。')
-      .fontSize(14).fontColor(candidate.trustState === 'trusted' ? this.colors.success : this.colors.warning)
+      .fontSize(BODY).fontColor(candidate.trustState === 'trusted' ? this.colors.success : this.colors.warning)
       .width('100%')
     Text(`${this.host.trim()}:${this.portText} · ${candidate.hostKeyType}`)
-      .fontSize(12).fontFamily(FONT_MONO).fontColor(this.colors.secondary).width('100%')
-    Text(candidate.fingerprintSHA256).fontSize(13).fontFamily(FONT_MONO)
+      .fontSize(META).fontFamily(FONT_MONO).fontColor(this.colors.secondary).width('100%')
+    Text(candidate.fingerprintSHA256).fontSize(BODY2).fontFamily(FONT_MONO)
       .fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
     if (candidate.trustState === 'mismatch' && candidate.expectedFingerprintSHA256 !== null) {
-      Text('原主机指纹').fontSize(12).fontColor(this.colors.muted).width('100%')
-      Text(candidate.expectedFingerprintSHA256).fontSize(12).fontFamily(FONT_MONO)
+      Text('原主机指纹').fontSize(META).fontColor(this.colors.muted).width('100%')
+      Text(candidate.expectedFingerprintSHA256).fontSize(META).fontFamily(FONT_MONO)
         .fontColor(this.colors.secondary).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
     }
     Button(candidate.trustState === 'trusted' ? '验证并保存' : '信任并验证')
-      .width('100%').height(52).fontSize(15).backgroundColor(this.accentColor)
+      .width('100%').constraintSize({ minHeight: 52 }).fontSize(BODY).backgroundColor(this.accentColor)
       .fontColor(this.colors.accentInk).enabled(this.busy.length === 0)
       .onClick((): void => { this.verify(); })
   }
@@ -479,21 +481,21 @@ struct SettingSSHProfilesPage {
       if (this.candidate !== null) {
         this.TrustDetails(this.candidate)
       }
-      Button(this.candidate === null ? '探测主机指纹' : '重新探测').width('100%').height(52)
+      Button(this.candidate === null ? '探测主机指纹' : '重新探测').width('100%').constraintSize({ minHeight: 52 })
         .type(ButtonType.Normal).fontColor(this.accentColor).backgroundColor(this.colors.inset)
         .enabled(this.busy.length === 0).onClick((): void => { this.probe(); })
       if (this.renameOnlyAvailable()) {
-        Button('仅保存名称').width('100%').height(52).type(ButtonType.Normal)
+        Button('仅保存名称').width('100%').constraintSize({ minHeight: 52 }).type(ButtonType.Normal)
           .fontColor(this.colors.secondary).backgroundColor(this.colors.inset).enabled(this.busy.length === 0)
           .onClick((): void => { this.renameOnly(); })
       }
       if (this.busy.length > 0) {
-        Text(this.busy).fontSize(13).fontColor(this.colors.secondary)
-        Button('取消').height(52).width('100%').type(ButtonType.Normal)
+        Text(this.busy).fontSize(BODY2).fontColor(this.colors.secondary)
+        Button('取消').constraintSize({ minHeight: 52 }).width('100%').type(ButtonType.Normal)
           .fontColor(this.colors.secondary).backgroundColor(this.colors.inset)
           .onClick((): void => { this.cancelOperation(); this.clearSecrets(); this.notice = '已取消，原配置保持可用'; })
       }
-    }.width('100%').padding(14)
+    }.width('100%').padding(PAD_CARD)
   }
 
   build(): void {

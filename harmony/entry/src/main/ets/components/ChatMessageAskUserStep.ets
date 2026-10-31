@@ -14,7 +14,8 @@ import {
   AskUserQuestion, parseAskUserQuestions, parseAskedAnswers,
   askAnswerDisplayText, isAskUserSubmittable, hasAnyAskAnswer,
 } from '@amber/chat-domain';
-import { INK, INK2, INK3, ACCENT, ACCENT_LIGHT, SURFACE, SURFACE2, LINE } from '../design/tokens.ets';
+import { INK, INK2, INK3, ACCENT, ACCENT_INK, ACCENT_LIGHT, SURFACE, SURFACE2, LINE, META, LABEL, TINY } from '../design/tokens.ets';
+import { FONT_MONO } from '../design/fonts.ets';
 
 // Record<string, string> — ArkTS 允许 Record 类型
 type AnswerMap = Record<string, string>;
@@ -40,7 +41,7 @@ export struct ChatMessageAskUserStep {
   build(): void {
     Column() {
       Text(this.heading())
-        .fontSize(12).fontColor(ACCENT).fontWeight(FontWeight.Medium)
+        .fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Medium)
         .width('100%').margin({ top: 4 })
 
       ForEach(this.getQuestions(), (q: AskUserQuestion, qi: number) => {
@@ -51,7 +52,7 @@ export struct ChatMessageAskUserStep {
           // F17:单问题时 heading 已渲染该问题,正文不再重复同一文本
           if (!this.headingShowsQuestion(qi)) {
             Text(q.question)
-              .fontSize(12).fontColor(INK)
+              .fontSize(META).fontColor(INK)
               .width('100%').margin({ top: qi > 0 ? 0 : 4 })
           }
 
@@ -96,7 +97,7 @@ export struct ChatMessageAskUserStep {
             // text 类型 → 自由文本框
             if (this.interactive && q.selectionType !== 'single' && q.selectionType !== 'multi') {
               TextArea({ placeholder: '在此输入回答…', text: this.answerAt(q.id) })
-                .width('100%').height(64).fontSize(12).fontColor(INK)
+                .width('100%').constraintSize({ minHeight: 64 }).fontSize(META).fontColor(INK)
                 .backgroundColor(SURFACE).borderRadius(10)
                 .margin({ top: 6 })
                 .onChange((v: string): void => {
@@ -107,14 +108,14 @@ export struct ChatMessageAskUserStep {
             // 已应答 → 'A' 标记(等宽 accent) + 答案文本(顶对齐)
             Row() {
               Text('A')
-                .fontSize(10)
+                .fontSize(TINY)
                 .fontColor(ACCENT)
-                .fontFamily('JetBrainsMono')
+                .fontFamily(FONT_MONO)
                 .padding({ left: 6, right: 6, top: 2, bottom: 2 })
                 .backgroundColor(ACCENT_LIGHT)
                 .borderRadius(5)
               Text(this.answeredText(q.id))
-                .fontSize(12)
+                .fontSize(META)
                 .fontColor(INK)
                 .layoutWeight(1)
                 .margin({ left: 8 })
@@ -137,15 +138,15 @@ export struct ChatMessageAskUserStep {
           Blank()
           if (hasAnyAskAnswer(this.answers, this.multiAnswers)) {
             Text('清空')
-              .fontSize(11).fontColor(INK3)
+              .fontSize(LABEL).fontColor(INK3)
               .constraintSize({ minWidth: 44, minHeight: 44 })
               .padding({ left: 8, right: 8, top: 4, bottom: 4 })
               .onClick((): void => { this.onClear(); })
           }
           Text('提交')
-            .fontSize(12).fontWeight(FontWeight.Medium)
+            .fontSize(META).fontWeight(FontWeight.Medium)
             .constraintSize({ minHeight: 44 })
-            .fontColor(this.submittable() ? '#FFFFFF' : INK3)
+            .fontColor(this.submittable() ? ACCENT_INK : INK3)
             .padding({ left: 16, right: 16, top: 6, bottom: 6 })
             .margin({ left: 8 })
             .borderRadius(999)
@@ -166,11 +167,11 @@ export struct ChatMessageAskUserStep {
   @Builder
   private OptionChipContent(q: AskUserQuestion, opt: string): void {
     if (this.isOptionSelected(q, opt)) {
-      Text('✓').fontSize(11).fontColor('#FFFFFF').margin({ right: 4 })
+      Text('✓').fontSize(LABEL).fontColor(ACCENT_INK).margin({ right: 4 })
     }
     Text(opt)
-      .fontSize(11)
-      .fontColor(this.isOptionSelected(q, opt) ? '#FFFFFF' : INK2)
+      .fontSize(LABEL)
+      .fontColor(this.isOptionSelected(q, opt) ? ACCENT_INK : INK2)
       .fontWeight(this.isOptionSelected(q, opt) ? FontWeight.Medium : FontWeight.Normal)
   }
 
