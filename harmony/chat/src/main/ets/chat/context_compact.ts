@@ -28,6 +28,7 @@ import type {
   UIMessagePartVideo,
 } from './message.ts';
 import { makeSystemMessage } from './message.ts';
+import { maskSensitiveJsonInline } from './conversation_export.ts';
 import type { MessageNode } from './conversation.ts';
 import { limitContext, nodeCurrentMessage } from './conversation.ts';
 
@@ -192,7 +193,7 @@ export const takeMiddle = (s: string, maxChars: number): string => {
 
 export const toolResultSummarize = (parts: UIMessagePart[], maxChars: number = 8000): string => {
   const raw: string = parts.map((part: UIMessagePart): string => {
-    if (part.type === 'text') return (part as UIMessagePartText).text;
+    if (part.type === 'text') return maskSensitiveJsonInline((part as UIMessagePartText).text);
     if (part.type === 'tool') {
       const t = part as UIMessagePartTool;
       return `nested_tool:${t.toolName}:${toolResultSummarize(t.output, Math.floor(maxChars / 2))}`;
@@ -211,7 +212,7 @@ export const partSummaryLine = (p: UIMessagePart): string => {
     case 'tool': {
       const t = p as UIMessagePartTool;
       return `tool: ${t.toolName} id=${t.toolCallId} executed=${toolIsExecuted(t)}`
-        + ` input=${takeMiddle(t.input, 2000)} output=${toolResultSummarize(t.output)}`;
+        + ` input=${takeMiddle(maskSensitiveJsonInline(t.input), 2000)} output=${toolResultSummarize(t.output)}`;
     }
     case 'image': return `image: ${(p as UIMessagePartImage).url.slice(-80)}`;
     case 'video': return `video: ${(p as UIMessagePartVideo).url.slice(-80)}`;

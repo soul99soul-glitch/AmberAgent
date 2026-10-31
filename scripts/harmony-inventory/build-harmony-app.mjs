@@ -21,9 +21,13 @@ function normalizeDevEcoSdkHome(value) {
   return value;
 }
 
+const userHome = os.userInfo().homedir || `/Users/${os.userInfo().username}`;
 const commandLineToolsRoot = existing(
   path.join(os.homedir(), 'Library', 'Huawei', 'commandline', 'command-line-tools'),
   path.join(os.homedir(), 'command-line-tools'),
+  path.join(userHome, 'Library', 'Huawei', 'commandline', 'command-line-tools'),
+  path.join(userHome, 'command-line-tools'),
+  '/Users/arquiel/Library/Huawei/commandline/command-line-tools',
 );
 
 const sdkRoot = normalizeDevEcoSdkHome(
@@ -46,10 +50,16 @@ if (!ohosBaseSdkHome || !fs.existsSync(ohosBaseSdkHome)) {
   process.exit(2);
 }
 
+const javaHome = existing(
+  process.env.JAVA_HOME || '',
+  '/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home',
+);
+
 const env = {
   ...process.env,
   DEVECO_SDK_HOME: sdkRoot,
   OHOS_BASE_SDK_HOME: ohosBaseSdkHome,
+  ...(javaHome ? { JAVA_HOME: javaHome, PATH: `${path.join(javaHome, 'bin')}:${process.env.PATH || ''}` } : {}),
 };
 
 const sdkNinja = path.join(ohosBaseSdkHome, 'native/build-tools/cmake/bin/ninja');

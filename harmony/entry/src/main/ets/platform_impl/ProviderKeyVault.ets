@@ -18,6 +18,7 @@ import { util } from '@kit.ArkTS';
 import type { Context } from '@kit.AbilityKit';
 import type { BusinessError } from '@kit.BasicServicesKit';
 import type { SecretField, SecretFieldStore, SyncCryptoPort } from '@amber/chat-domain';
+import { isRedactedSecretPlaceholder } from '@amber/chat-domain';
 import { KeyedAsyncMutex, writeTextFileAtomic } from './AtomicJsonFile.ets';
 import { createEntrySyncCryptoPort } from './SyncCryptoPort.ets';
 
@@ -214,6 +215,9 @@ class EntrySecretFieldStore implements SecretFieldStore {
   }
 
   write(id: string, field: SecretField, value: string): Promise<void> {
+    if (isRedactedSecretPlaceholder(value)) {
+      return Promise.resolve();
+    }
     const plaintext: Uint8Array = util.TextEncoder.create('utf-8').encodeInto(value);
     return mutex.withLock<void>(VAULT_NAMESPACE, async (): Promise<void> => {
       try {

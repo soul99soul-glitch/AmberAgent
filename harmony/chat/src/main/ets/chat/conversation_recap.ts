@@ -2,6 +2,7 @@ import type { Conversation } from './conversation.ts';
 import { currentMessages, nodeCurrentMessage } from './conversation.ts';
 import type { UIMessage, UIMessagePart } from './message.ts';
 import type { JsonObject } from './json.ts';
+import { maskSensitiveJsonInline } from './conversation_export.ts';
 
 export type RecapNodeKind = 'decision' | 'milestone' | 'failure' | 'artifact';
 export interface ConversationRecapNode {
@@ -28,11 +29,11 @@ export interface RecapInput {
   sourceSignature: string;
 }
 
-// Local file URLs and reasoning never leave the device in the recap transcript.
+// Local file URLs, reasoning, and tool credentials never leave the device in the recap transcript.
 const partText = (part: UIMessagePart): string => {
   switch (part.type) {
-    case 'text': return part.text.trim();
-    case 'tool': return `Tool: ${part.toolName}\nInput: ${part.input.slice(0, 300)}\nOutput: ${part.output.map(partText).join('\n').slice(0, 300)}`;
+    case 'text': return maskSensitiveJsonInline(part.text.trim());
+    case 'tool': return `Tool: ${part.toolName}\nInput: ${maskSensitiveJsonInline(part.input).slice(0, 300)}\nOutput: ${part.output.map(partText).join('\n').slice(0, 300)}`;
     case 'image': return '[图片]';
     case 'document': return `[文件: ${part.fileName}]`;
     case 'mini_app': return `[交互成果: ${part.title}]`;

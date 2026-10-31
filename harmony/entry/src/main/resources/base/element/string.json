@@ -1,11 +1,11 @@
 {
   "string": [
-    { "name": "module_desc", "value": "Deep Read 深度阅读" },
-    { "name": "EntryAbility_desc", "value": "Deep Read" },
+    { "name": "module_desc", "value": "Amber 智能体与深度阅读工作台" },
+    { "name": "EntryAbility_desc", "value": "Amber 智能体与深度阅读工作台" },
     { "name": "EntryAbility_label", "value": "Amber" },
-    { "name": "reason_internet", "value": "用于搜索和抓取深度阅读所需的来源" },
-    { "name": "reason_network", "value": "检测网络连接状态以决定是否启动深读" },
-    { "name": "reason_notification", "value": "在深读生成完成或失败时通知用户" },
+    { "name": "reason_internet", "value": "用于连接你配置的 AI 模型、检索服务与深度阅读来源" },
+    { "name": "reason_network", "value": "检测网络连接状态以提示离线状态与管理网络请求" },
+    { "name": "reason_notification", "value": "在后台生成、深度阅读或定时任务完成时通知用户" },
     { "name": "reason_contacts", "value": "Agent 在获得授权后搜索或维护联系人" },
     { "name": "reason_calendar", "value": "Agent 在获得授权后读取或创建日历事件" },
     { "name": "reason_microphone", "value": "Agent 在获得授权后录制短音频作为工具产物" },

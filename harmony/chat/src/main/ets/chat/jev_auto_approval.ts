@@ -4,6 +4,7 @@ import type { UIMessagePartTool } from './message.ts';
 import type { PermissionDecision } from './tool_permission.ts';
 import type { AutoApprovalReview } from './tool_dispatcher.ts';
 import type { JevSettings, JevQuestion, JevEvaluation, JevEvaluateResult } from './jev_models.ts';
+import { maskSensitiveJsonInline } from './conversation_export.ts';
 import { jevPurposeConsentUnchanged, resolveJevPurposeMode } from './jev_approval.ts';
 
 export interface JevAutoApprovalBatch {
@@ -16,9 +17,12 @@ export interface JevAutoApprovalReviewDeps {
     expectedSettings?: JevSettings) => Promise<JevEvaluateResult>;
   recentUserTexts: string[];
 }
-// Commands are data for assessment. Bound the request without dropping the end of a command.
-const boundedInput = (input: string): string => input.length <= 1500 ? input
-  : input.substring(0, 750) + '\n…\n' + input.substring(input.length - 750);
+// Commands are data for assessment. Bound the request without dropping the end of a command, and mask sensitive JSON credentials.
+const boundedInput = (input: string): string => {
+  const sanitized: string = maskSensitiveJsonInline(input);
+  return sanitized.length <= 1500 ? sanitized
+    : sanitized.substring(0, 750) + '\n…\n' + sanitized.substring(sanitized.length - 750);
+};
 export const buildJevAutoApprovalBatch = (
   part: UIMessagePartTool, decision: PermissionDecision, recentUserTexts: string[], allowTaskText: boolean = true,
 ): JevAutoApprovalBatch => {

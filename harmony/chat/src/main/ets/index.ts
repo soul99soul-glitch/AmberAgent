@@ -612,7 +612,7 @@ export type { KeyValueStore, MemoryKeyValueStore } from './chat/kv_store.ts';
 export {
   sealSecretFields, migrateSecretFields, openSecretFields, stripSecretFields,
   blobHasInlineSecrets, pruneNamespace, sealScalarSecret, openScalarSecret,
-  SECRET_RECOVERY_NOTICE_KEY,
+  isRedactedSecretPlaceholder, SECRET_RECOVERY_NOTICE_KEY,
 } from './chat/secret_fields_blob.ts';
 export type { SecretField, SecretFieldStore } from './chat/secret_fields_blob.ts';
 

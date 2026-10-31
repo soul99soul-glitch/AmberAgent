@@ -25,6 +25,7 @@ import { makeAgentTool, makeInputSchemaObj } from './tool.ts';
 import type { SessionAccessGrantStore } from './session_grant_store.ts';
 import type { GrantValidation } from './session_grant_store.ts';
 import { previewAround } from './context_engine.ts';
+import { maskSensitiveJsonInline } from './conversation_export.ts';
 import { toText } from './message.ts';
 
 // ===== 调用面(ConversationHistoryTools 构造参) =====
@@ -113,9 +114,9 @@ const formatMessage = (message: UIMessage, includeTools: boolean): string => {
       if (includeTools) {
         const outputText: string = t.output
           .filter((p: UIMessagePart): boolean => p.type === 'text')
-          .map((p: UIMessagePart): string => (p as UIMessagePartText).text)
+          .map((p: UIMessagePart): string => maskSensitiveJsonInline((p as UIMessagePartText).text))
           .join('\n');
-        parts.push(`[tool:${t.toolName} input=${t.input.slice(0, 800)} output_tail=${outputText.slice(-1200)}]`);
+        parts.push(`[tool:${t.toolName} input=${maskSensitiveJsonInline(t.input).slice(0, 800)} output_tail=${outputText.slice(-1200)}]`);
       } else {
         parts.push(`[tool:${t.toolName} executed=${isToolExecuted(t)}]`);
       }

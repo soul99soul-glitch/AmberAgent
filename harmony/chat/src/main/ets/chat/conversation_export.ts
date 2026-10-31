@@ -32,7 +32,7 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 const SENSITIVE_KEY_RE: RegExp =
-  /^(api[_-]?key|x-api-key|x-goog-api-key|authorization|(?:access|refresh|auth|api|session)[_-]?token|token|(?:client[_-]?)?secret|secret[_-]?key|password|passwd|(?:set[_-]?)?cookie|session)$/i;
+  /^(api[_-]?key|x-api-key|x-goog-api-key|authorization|proxy[_-]?authorization|(?:access|refresh|auth|api|session|id|bearer)[_-]?token|token|(?:client[_-]?)?secret|secret[_-]?key|private[_-]?key|password|passwd|passphrase|(?:set[_-]?)?cookie|session)$/i;
 
 const maskSensitiveJsonValue = (value: JsonValue): JsonValue => {
   if (Array.isArray(value)) return value.map(maskSensitiveJsonValue);
@@ -65,6 +65,22 @@ export const maskSensitiveJsonText = (text: string): string => {
       return JSON.stringify(maskSensitiveJsonValue(value), null, 2);
     }
   } catch { /* 普通文本和未完成 JSON 原样显示。 */ }
+  return text;
+};
+
+/** 单行/内联场景（压缩摘要输入、历史检索、Recap、自动批准复核）：仅在命中敏感键时脱敏，不改变无敏感键 JSON 的原始排版 */
+export const maskSensitiveJsonInline = (text: string): string => {
+  try {
+    const value: JsonValue = JSON.parse(text);
+    if (typeof value === 'object' && value !== null) {
+      const masked: JsonValue = maskSensitiveJsonValue(value);
+      const compactOriginal: string = JSON.stringify(value);
+      const compactMasked: string = JSON.stringify(masked);
+      if (compactMasked !== compactOriginal) {
+        return compactMasked;
+      }
+    }
+  } catch { /* 普通文本和未完成 JSON 原样保留。 */ }
   return text;
 };
 

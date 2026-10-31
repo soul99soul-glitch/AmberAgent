@@ -2,8 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   sealSecretFields, openSecretFields, blobHasInlineSecrets, sealScalarSecret, openScalarSecret,
-  migrateSecretFields, stripSecretFields, type SecretFieldStore, type SecretField,
+  migrateSecretFields, stripSecretFields, isRedactedSecretPlaceholder,
+  type SecretFieldStore, type SecretField,
 } from '../main/ets/chat/secret_fields_blob.ts';
+import { encodeSSHCredential, decodeSSHCredential } from '../main/ets/chat/terminal/credential_codec.ts';
+import { partSummaryLine } from '../main/ets/chat/context_compact.ts';
+import { makeRecapInput } from '../main/ets/chat/conversation_recap.ts';
+import { buildJevAutoApprovalBatch } from '../main/ets/chat/jev_auto_approval.ts';
+import { makeConversation, toMessageNode } from '../main/ets/chat/conversation.ts';
+import { makeUserMessage, makeUIMessage, type UIMessagePartTool } from '../main/ets/chat/message.ts';
 import { serializeProviderSettingList, parseProviderSettingList } from '../main/ets/chat/provider_settings_serialize.ts';
 import {
   makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderModel,
@@ -507,4 +514,105 @@ test('assistant top-level customHeaders values are sealed, migrated, opened and 
   }]), store, 'assistants');
   assert.equal(store.entries.has('assistants/assistant-1/customHeaders'), false);
   assert.equal(JSON.parse(await openSecretFields(cleared, store, 'assistants'))[0]['customHeaders'].length, 0);
+});
+
+test('redacted placeholders (<redacted>, ***, ••••) are rejected and never overwrite real secrets in vault or SSH codec', async () => {
+  for (const p of ['<redacted>', '[REDACTED]', '***', '********', '••••', '●●●●', 'sk-...***']) {
+    assert.equal(isRedactedSecretPlaceholder(p), true, `expected placeholder: ${p}`);
+  }
+  assert.equal(isRedactedSecretPlaceholder('sk-real-secret-key-123'), false);
+
+  const store = memoryStore();
+  await sealSecretFields(serializeProviderSettingList([providerWithModelSecrets('p1')]), store, PROVIDERS);
+  assert.equal(store.entries.get('providers/p1/apiKey'), 'sk-provider');
+  assert.equal(store.entries.get('providers/p1/p1-model/customHeaders'), '["header-secret",""]');
+
+  // Attempt to save redacted placeholders over existing provider and model headers
+  const withPlaceholders = makeProviderSettingOpenAIVariant({
+    id: 'p1',
+    name: 'Provider p1',
+    baseUrl: 'https://api.example.com/v1',
+    apiKey: '***',
+    models: [makeProviderModel({
+      id: 'p1-model',
+      modelId: 'model-a',
+      displayName: 'Model A',
+      customHeaders: [
+        { name: 'X-Auth', value: '<redacted>' },
+        { name: 'X-Trace', value: 'trace-ok' },
+      ],
+    })],
+  });
+  const sealedPlaceholder = await sealSecretFields(serializeProviderSettingList([withPlaceholders]), store, PROVIDERS);
+  assert.equal(sealedPlaceholder.includes('***'), false);
+  assert.equal(sealedPlaceholder.includes('<redacted>'), false);
+  assert.equal(store.entries.get('providers/p1/apiKey'), 'sk-provider', 'real apiKey must not be overwritten by ***');
+  assert.equal(store.entries.get('providers/p1/p1-model/customHeaders'), '["header-secret","trace-ok"]',
+    'real header secret must be preserved when placeholder is passed');
+
+  // Scalar secret placeholder rejection
+  await sealScalarSecret('sk-scalar-real', store, 'scalar/ai_api_key', 'apiKey');
+  await sealScalarSecret('••••', store, 'scalar/ai_api_key', 'apiKey');
+  assert.equal(await openScalarSecret('<redacted>', store, 'scalar/ai_api_key', 'apiKey'), 'sk-scalar-real');
+
+  // SSH credential codec placeholder rejection
+  const binding = { host: '10.0.0.1', port: 22, username: 'root', authMethod: 'password' as const };
+  assert.throws(() => encodeSSHCredential(binding, { secret: '<redacted>', passphrase: null }), /credential_invalid/);
+  assert.throws(() => encodeSSHCredential(binding, { secret: '***', passphrase: null }), /credential_invalid/);
+  assert.throws(() => decodeSSHCredential(JSON.stringify({
+    host: '10.0.0.1', port: 22, username: 'root', authMethod: 'password', secret: '••••', passphrase: null,
+  }), binding), /credential_invalid/);
+});
+
+test('tool credentials are masked before compaction summary input, recap input, and Jev auto-approval batch', () => {
+  const toolPart: UIMessagePartTool = {
+    type: 'tool',
+    toolCallId: 'call-1',
+    toolName: 'http_request',
+    input: JSON.stringify({ url: 'https://api.example.com', headers: { Authorization: 'Bearer sk-live-secret-999' } }),
+    output: [{
+      type: 'text',
+      text: JSON.stringify({ api_key: 'sk-output-secret-888', ok: true }),
+      metadata: null,
+    }],
+    approvalState: { type: 'approved' },
+    metadata: null,
+  };
+
+  const summaryLine = partSummaryLine(toolPart);
+  assert.equal(summaryLine.includes('sk-live-secret-999'), false);
+  assert.equal(summaryLine.includes('sk-output-secret-888'), false);
+  assert.equal(summaryLine.includes('***'), true);
+
+  const conv = makeConversation('c-recap', [
+    toMessageNode(makeUserMessage('u1')),
+    toMessageNode(makeUIMessage('assistant', [toolPart])),
+    toMessageNode(makeUserMessage('u2')),
+    toMessageNode(makeUserMessage('u3')),
+  ]);
+  const recapInput = makeRecapInput(conv, null);
+  assert.ok(recapInput !== null);
+  assert.equal(recapInput.prompt.includes('sk-live-secret-999'), false);
+  assert.equal(recapInput.prompt.includes('sk-output-secret-888'), false);
+
+  const jevBatch = buildJevAutoApprovalBatch(toolPart, {
+    action: 'allow',
+    reason: 'test',
+    source: 'test',
+    trace: {
+      traceId: 'trace-1',
+      toolName: 'http_request',
+      invocationContext: 'normal',
+      policy: null,
+      autoApproveTools: true,
+      autoApproveHighRiskTools: false,
+      autoApprovedByRun: false,
+      approvalState: 'pending',
+      action: 'allow',
+      source: 'test',
+      reason: 'test',
+    },
+  }, ['请调用接口']);
+  assert.equal(String(jevBatch.state['parameters']).includes('sk-live-secret-999'), false);
+  assert.equal(String(jevBatch.state['parameters']).includes('***'), true);
 });

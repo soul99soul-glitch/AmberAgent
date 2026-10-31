@@ -124,6 +124,38 @@ const hasNonEmpty = (values: string[]): boolean => {
   return false;
 };
 
+const REDACTED_SECRET_PLACEHOLDER_RE: RegExp =
+  /^(?:<redacted>|\[redacted\]|\(redacted\)|redacted|\*{3,}|[•●·]{3,}|(?:\S+)?(?:\.{2,}|…)(?:\*{2,}|[•●·]{2,}))$/i;
+
+/** 识别 `<redacted>`、`***`、`••••` 等脱敏占位符，拒绝把占位符写进凭据库覆盖真实密钥 */
+export const isRedactedSecretPlaceholder = (value: string): boolean => {
+  const trimmed: string = value.trim();
+  if (trimmed.length === 0) return false;
+  return REDACTED_SECRET_PLACEHOLDER_RE.test(trimmed)
+    || /<redacted>|\[redacted\]/i.test(trimmed);
+};
+
+const sanitizeHeaderValuesForStore = async (
+  incoming: string[], store: SecretFieldStore, ownerKey: string, slot: SecretField,
+): Promise<string[]> => {
+  let hasPlaceholder: boolean = false;
+  for (const v of incoming) {
+    if (isRedactedSecretPlaceholder(v)) {
+      hasPlaceholder = true;
+      break;
+    }
+  }
+  if (!hasPlaceholder) return incoming;
+  const storedRaw: string | null = await store.read(ownerKey, slot);
+  const existing: string[] = storedRaw === null ? [] : (parseHeaderValues(storedRaw) ?? []);
+  const resolved: string[] = [];
+  for (let i: number = 0; i < incoming.length; i++) {
+    const v: string = incoming[i];
+    resolved.push(isRedactedSecretPlaceholder(v) ? (i < existing.length ? existing[i] : '') : v);
+  }
+  return resolved;
+};
+
 /** 把 header 行的 `value` 清空(名称/顺序保持不动) */
 const blankHeaderValues = (headers: SecretRow[]): void => {
   for (const header of headers) {
@@ -178,8 +210,12 @@ const blankMcpHeaderValues = (headers: SecretRow[]): void => {
 const applyHeaderSecrets = async (
   headers: SecretRow[], store: SecretFieldStore, ownerKey: string, authoritative: boolean,
 ): Promise<boolean> => {
-  if (hasNonEmpty(mcpHeaderValuesOf(headers))) {
-    await store.write(ownerKey, MCP_HEADER_SLOT, JSON.stringify(mcpHeaderValuesOf(headers)));
+  const rawValues: string[] = mcpHeaderValuesOf(headers);
+  if (hasNonEmpty(rawValues)) {
+    const sanitized: string[] = await sanitizeHeaderValuesForStore(rawValues, store, ownerKey, MCP_HEADER_SLOT);
+    if (hasNonEmpty(sanitized)) {
+      await store.write(ownerKey, MCP_HEADER_SLOT, JSON.stringify(sanitized));
+    }
     blankMcpHeaderValues(headers);
     return true;
   }
@@ -207,7 +243,9 @@ const applyRowSecrets = async (
     const value: string | null = stringFieldOf(row, field);
     if (value === null) continue;
     if (value.length > 0) {
-      await store.write(ownerKey, field, value);
+      if (!isRedactedSecretPlaceholder(value)) {
+        await store.write(ownerKey, field, value);
+      }
       row[field] = '';
       changed = true;
     } else if (authoritative && await store.read(ownerKey, field) !== null) {
@@ -218,7 +256,11 @@ const applyRowSecrets = async (
   // 顶层 customHeaders(如 assistants[].customHeaders[].value)
   const rowHeaders: SecretRow[] = headerRowsOf(row);
   if (rowHeaders.length > 0 && hasNonEmpty(headerValuesOf(rowHeaders))) {
-    await store.write(ownerKey, MODEL_HEADER_SLOT, JSON.stringify(headerValuesOf(rowHeaders)));
+    const sanitized: string[] = await sanitizeHeaderValuesForStore(
+      headerValuesOf(rowHeaders), store, ownerKey, MODEL_HEADER_SLOT);
+    if (hasNonEmpty(sanitized)) {
+      await store.write(ownerKey, MODEL_HEADER_SLOT, JSON.stringify(sanitized));
+    }
     blankHeaderValues(rowHeaders);
     changed = true;
   } else if (Array.isArray(row['customHeaders']) && authoritative && await store.read(ownerKey, MODEL_HEADER_SLOT) !== null) {
@@ -237,7 +279,11 @@ const applyRowSecrets = async (
     const modelKey: string = ownerKeyOf(namespace, `${ownerId}/${modelId}`);
     const headers: SecretRow[] = headerRowsOf(model);
     if (headers.length > 0 && hasNonEmpty(headerValuesOf(headers))) {
-      await store.write(modelKey, MODEL_HEADER_SLOT, JSON.stringify(headerValuesOf(headers)));
+      const sanitized: string[] = await sanitizeHeaderValuesForStore(
+        headerValuesOf(headers), store, modelKey, MODEL_HEADER_SLOT);
+      if (hasNonEmpty(sanitized)) {
+        await store.write(modelKey, MODEL_HEADER_SLOT, JSON.stringify(sanitized));
+      }
       blankHeaderValues(headers);
       changed = true;
     } else if (headers.length > 0 && authoritative && await store.read(modelKey, MODEL_HEADER_SLOT) !== null) {
@@ -252,7 +298,9 @@ const applyRowSecrets = async (
       const value: string | null = stringFieldOf(override, field);
       if (value === null) continue;
       if (value.length > 0) {
-        await store.write(modelKey, field, value);
+        if (!isRedactedSecretPlaceholder(value)) {
+          await store.write(modelKey, field, value);
+        }
         override[field] = '';
         changed = true;
       } else if (authoritative && await store.read(modelKey, field) !== null) {
@@ -488,6 +536,9 @@ export const sealScalarSecret = async (
     if (await store.read(ownerKey, field) !== null) await store.remove(ownerKey, field);
     return '';
   }
+  if (isRedactedSecretPlaceholder(raw)) {
+    return '';
+  }
   await store.write(ownerKey, field, raw);
   return '';
 };
@@ -500,7 +551,7 @@ export const sealScalarSecret = async (
 export const openScalarSecret = async (
   stored: string, store: SecretFieldStore, ownerKey: string, field: SecretField,
 ): Promise<string> => {
-  if (stored.length > 0) return stored;
+  if (stored.length > 0 && !isRedactedSecretPlaceholder(stored)) return stored;
   const value: string | null = await store.read(ownerKey, field);
   return value === null ? '' : value;
 };

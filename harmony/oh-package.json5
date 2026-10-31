@@ -1,6 +1,7 @@
 {
   "modelVersion": "5.0.0",
-  "description": "Deep Read HarmonyOS App",
+  "description": "Amber HarmonyOS NEXT App",
+  "license": "SEE LICENSE IN LICENSE",
   "dependencies": {},
   "devDependencies": {}
 }

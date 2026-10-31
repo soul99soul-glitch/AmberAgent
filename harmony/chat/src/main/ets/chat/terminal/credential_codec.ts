@@ -1,4 +1,5 @@
 import type { JsonObject } from '../json.ts';
+import { isRedactedSecretPlaceholder } from '../secret_fields_blob.ts';
 import type { SSHCredential, SSHCredentialBinding } from './models.ts';
 import { TerminalError } from './profile_store.ts';
 import { terminalUTF8Encode } from './utf8.ts';
@@ -11,8 +12,13 @@ export const decodeSSHCredential = (text: string, binding: SSHCredentialBinding)
     typeof raw['secret'] !== 'string' || !raw['secret'] ||
     (raw['passphrase'] !== null && typeof raw['passphrase'] !== 'string')) throw new TerminalError('credential_invalid');
   const secret: string = raw['secret'] as string;
+  const passphrase: string | null = raw['passphrase'] as string | null;
+  if (isRedactedSecretPlaceholder(secret)
+    || (passphrase !== null && isRedactedSecretPlaceholder(passphrase))) {
+    throw new TerminalError('credential_invalid');
+  }
   if (terminalUTF8Encode(secret).length > 65536) throw new TerminalError('credential_too_large');
-  return { secret, passphrase: raw['passphrase'] as string | null };
+  return { secret, passphrase };
 };
 export const encodeSSHCredential = (binding: SSHCredentialBinding, credential: SSHCredential): string => {
   const payload: JsonObject = { host: binding.host, port: binding.port, username: binding.username,

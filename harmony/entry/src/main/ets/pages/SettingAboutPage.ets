@@ -69,6 +69,10 @@ struct SettingAboutPage {
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.InfoCard(); } })
             .margin({ left: 16, right: 16 })
 
+          PlainSection({ label: '数据与隐私' })
+          CardGroup({ radius: 18, stroke: true, content: (): void => { this.PrivacyCard(); } })
+            .margin({ left: 16, right: 16 })
+
           PlainSection({ label: '开源与许可' })
           CardGroup({ radius: 18, stroke: true, content: (): void => { this.LegalCard(); } })
             .margin({ left: 16, right: 16 })
@@ -95,6 +99,24 @@ struct SettingAboutPage {
     Column() {
       CardRow({ label: '版本', valueText: this.versionLabel, showChevron: false })
       CardRow({ label: '构建', valueText: 'HarmonyOS NEXT / ArkTS', isLast: true, showChevron: false })
+    }
+    .width('100%')
+  }
+
+  @Builder
+  PrivacyCard(): void {
+    Column() {
+      CardRow({
+        label: '凭据加密',
+        desc: 'API Key、SSH 凭据与网关令牌通过系统 Asset Store 主密钥 + AES-GCM 加密存储，明文不落偏好键值库',
+        showChevron: false,
+      })
+      CardRow({
+        label: '网络与外发边界',
+        desc: '对话与检索请求仅发往你自行配置的模型、搜索、MCP 或网关端点；设置备份与会话导出默认剥离密钥',
+        isLast: true,
+        showChevron: false,
+      })
     }
     .width('100%')
   }
