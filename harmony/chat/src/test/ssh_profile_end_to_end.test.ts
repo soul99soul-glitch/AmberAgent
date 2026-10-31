@@ -9,6 +9,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createMemoryKeyValueStore } from '../main/ets/chat/kv_store.ts';
+import { SSHKeyStore } from '../main/ets/chat/terminal/key_store.ts';
+import { createSSHKeyTools } from '../main/ets/chat/terminal/key_tools.ts';
 import { SSHProfileStore } from '../main/ets/chat/terminal/profile_store.ts';
 import { createSSHProfileTools } from '../main/ets/chat/terminal/profile_tools.ts';
 import type { SSHCredential, SSHCredentialBinding } from '../main/ets/chat/terminal/models.ts';
@@ -131,7 +133,12 @@ const setup = async () => {
   clearAllSecretToolInputs();
   const credentials = new Credentials();
   const profiles = await SSHProfileStore.create({ kv: createMemoryKeyValueStore(), credentials });
-  const tools: AgentTool[] = createSSHProfileTools({ profiles });
+  const keys = await SSHKeyStore.create({ kv: createMemoryKeyValueStore(), credentials, crypto: {
+    async generateKey() { throw new Error('unused'); },
+    async inspectKey() { return { algorithm: 'ed25519', publicKey: 'ssh-ed25519 test-public',
+      fingerprintSHA256: 'SHA256:test-public', hasPassphrase: true }; },
+  } });
+  const tools: AgentTool[] = [...createSSHProfileTools({ profiles }), ...createSSHKeyTools({ profiles, keys })];
   return { credentials, profiles, tools };
 };
 
@@ -267,11 +274,14 @@ test('E2E: request payload sent to the model never contains the credential', asy
   assert.equal(redactStoredToolInput('ssh_profile_create', callArgs()).includes(PASSWORD), false);
 });
 
-test('E2E: all 6 terminal paths erase staged secret inputs (approve, deny, cancel, new-message interrupt, outcome_unknown, cold-start)', async () => {
+for (const terminalTool of ['ssh_profile_create', 'ssh_key_import']) {
+test('E2E: six terminal paths erase secrets for ' + terminalTool, async () => {
   const s = await setup();
+  const terminalArgs = (): string => terminalTool === 'ssh_key_import'
+    ? JSON.stringify({ name: 'imported', private_key: PASSWORD, passphrase: 'passphrase-e2e-marker' }) : callArgs();
   const makeLoopAndDeps = (callId: string) => {
     const provider = scriptedProvider([
-      [toolDelta(callId, 'ssh_profile_create', callArgs())],
+      [toolDelta(callId, terminalTool, terminalArgs())],
       [textDelta('ok')],
     ]);
     const savedSnapshots: string[] = [];
@@ -295,6 +305,17 @@ test('E2E: all 6 terminal paths erase staged secret inputs (approve, deny, cance
     return { deps, loop, savedSnapshots };
   };
 
+  // Approved execution consumes the vault exactly once.
+  {
+    const { deps, loop } = makeLoopAndDeps('ssh-term-approve');
+    const pending = await runChatTurnWithTools(makeConversation('t-approve', []), 'create', deps, loop);
+    assert.equal(secretToolInputCount(), 1);
+    const executed = await runToolLoopContinuation(applyToolApprovalToConversation(pending, 'ssh-term-approve', { kind: 'approved' }), deps, loop);
+    assert.equal(secretToolInputCount(), 0);
+    assert.equal(JSON.stringify(executed).includes(PASSWORD), false);
+    assert.ok(s.credentials.entries.size > 0);
+  }
+
   // (1) 拒绝 (applyToolApprovalToConversation denied immediately clears vault before continuation)
   {
     const { deps, loop, savedSnapshots } = makeLoopAndDeps('ssh-term-deny');
@@ -312,7 +333,7 @@ test('E2E: all 6 terminal paths erase staged secret inputs (approve, deny, cance
     const { deps, loop } = makeLoopAndDeps('ssh-term-cancel');
     const pending = await runChatTurnWithTools(makeConversation('t-cancel', []), 'create', deps, loop);
     assert.equal(secretToolInputCount(), 1);
-    applyStopGeneration(pending);
+    applyStopGeneration(pending, '2026-11-01T00:00:00Z');
     assert.equal(secretToolInputCount(), 0);
   }
 
@@ -321,14 +342,14 @@ test('E2E: all 6 terminal paths erase staged secret inputs (approve, deny, cance
     const { deps, loop } = makeLoopAndDeps('ssh-term-interrupt');
     const pending = await runChatTurnWithTools(makeConversation('t-int', []), 'create', deps, loop);
     assert.equal(secretToolInputCount(), 1);
-    const blocked = resolveIdleToolBlocker(pending, 'new user message');
+    const blocked = resolveIdleToolBlocker(pending, 'new user message', true);
     assert.equal(blocked.event, 'pending_tool_cancel');
     assert.equal(secretToolInputCount(), 0);
   }
 
   // (4) OutcomeUnknown (recoverInterruptedPlugins clears vault for both parent and nested pendingStep)
   {
-    captureSecretToolInput('ssh_profile_create', 'plugin-exec-1-child', callArgs());
+    captureSecretToolInput(terminalTool, 'plugin-exec-1-child', terminalArgs());
     assert.equal(secretToolInputCount(), 1);
     const interruptedConv: Conversation = makeConversation('t-outcome-unknown', [toMessageNode({
       id: 'm1',
@@ -367,8 +388,8 @@ test('E2E: all 6 terminal paths erase staged secret inputs (approve, deny, cance
             pendingStep: {
               type: 'tool',
               toolCallId: 'plugin-exec-1-child',
-              toolName: 'ssh_profile_create',
-              input: redactStoredToolInput('ssh_profile_create', callArgs()),
+              toolName: terminalTool,
+              input: redactStoredToolInput(terminalTool, terminalArgs()),
               output: [],
               approvalState: { type: 'approved' },
               metadata: null,
@@ -398,6 +419,7 @@ test('E2E: all 6 terminal paths erase staged secret inputs (approve, deny, cance
     assert.equal(secretToolInputCount(), 0);
   }
 });
+}
 
 test('E2E: Model Council seat persistence (redactCouncilConversationInputs) preserves approval execution', async () => {
   const s = await setup();

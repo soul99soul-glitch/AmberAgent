@@ -1,0 +1,11 @@
+[
+  {"name":"direct","target":"a","links":{"a":null},"route":["a"]},
+  {"name":"one jump","target":"a","links":{"a":"b","b":null},"route":["b","a"]},
+  {"name":"two jumps","target":"a","links":{"a":"b","b":"c","c":null},"route":["c","b","a"]},
+  {"name":"three jumps","target":"a","links":{"a":"b","b":"c","c":"d","d":null},"route":["d","c","b","a"]},
+  {"name":"four jumps rejected","target":"a","links":{"a":"b","b":"c","c":"d","d":"e","e":null},"error":"jump_chain_too_long"},
+  {"name":"self cycle","target":"a","links":{"a":"a"},"error":"jump_cycle"},
+  {"name":"two cycle","target":"a","links":{"a":"b","b":"a"},"error":"jump_cycle"},
+  {"name":"tail cycle","target":"a","links":{"a":"b","b":"c","c":"b"},"error":"jump_cycle"},
+  {"name":"missing jump","target":"a","links":{"a":"missing"},"error":"jump_profile_not_found"}
+]

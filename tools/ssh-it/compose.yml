@@ -1,0 +1,27 @@
+name: amber-harmony-ssh-it
+services:
+  jump:
+    build: .
+    hostname: jump
+    ports: ["127.0.0.1:2222:22"]
+    volumes:
+      - ./fixtures/authorized_keys:/etc/ssh/authorized_keys:ro
+      - ./sshd_jump.conf:/etc/ssh/sshd_config:ro
+    networks: [edge, inner]
+  jump2:
+    build: .
+    hostname: jump2
+    volumes:
+      - ./fixtures/authorized_keys:/etc/ssh/authorized_keys:ro
+      - ./sshd_jump2.conf:/etc/ssh/sshd_config:ro
+    networks: [inner]
+  target:
+    build: .
+    hostname: target
+    volumes:
+      - ./fixtures/authorized_keys:/etc/ssh/authorized_keys:ro
+      - ./sshd_target.conf:/etc/ssh/sshd_config:ro
+    networks: [inner]
+networks:
+  edge: {}
+  inner: { internal: true }

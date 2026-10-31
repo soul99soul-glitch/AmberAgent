@@ -39,10 +39,16 @@ const textParts = (j: JsonObject): UIMessagePart[] => [{ type: 'text', text: JSO
 const jobJson = (s: TerminalJobSnapshot): JsonObject => ({ runtime: 'remote_ssh', profile_id: s.profileId,
   job_id: s.jobId, command: s.command, cwd: s.cwd, status: s.status.toLowerCase(), running: agentTaskStatusRunning(s.status),
   exit_code: s.exitCode, output: s.outputTail, stdout: s.stdoutTail, stderr: s.stderrTail,
-  output_log_path: s.outputLogPath, error_code: s.errorCode, error: s.errorMessage });
+  output_log_path: s.outputLogPath, route: (s.route ?? []).map((hop): string => hop.name),
+  hop_index: s.hopIndex ?? null, hop_count: s.hopCount ?? null, failed_profile_id: s.failedProfileId ?? null,
+  expected_fingerprint: s.expectedFingerprintSHA256 ?? null, presented_fingerprint: s.presentedFingerprintSHA256 ?? null,
+  error_code: s.errorCode, error: s.errorMessage });
 const sessionJson = (s: TerminalSessionSnapshot): JsonObject => ({ runtime: 'remote_ssh', profile_id: s.profileId,
   session_id: s.sessionId, status: s.status.toLowerCase(), running: agentTaskStatusRunning(s.status), exit_code: s.exitCode,
   output: s.outputTail, output_log_path: s.outputLogPath, columns: s.columns, rows: s.rows,
+  route: (s.route ?? []).map((hop): string => hop.name),
+  hop_index: s.hopIndex ?? null, hop_count: s.hopCount ?? null, failed_profile_id: s.failedProfileId ?? null,
+  expected_fingerprint: s.expectedFingerprintSHA256 ?? null, presented_fingerprint: s.presentedFingerprintSHA256 ?? null,
   error_code: s.errorCode, error: s.errorMessage });
 
 export const createTerminalTools = (deps: TerminalToolsDeps): AgentTool[] => {
@@ -55,7 +61,7 @@ export const createTerminalTools = (deps: TerminalToolsDeps): AgentTool[] => {
   const defaultProfile = deps.profiles.defaultProfile();
   const defaultTarget: SSHTargetSnapshot | null = defaultProfile === null ? null : deps.runtime.captureTarget(null);
   const targetDescription: string = 'Remote SSH targets: ' + (descriptions.join('; ') || 'none') +
-    '. Default profile: ' + (defaultTarget?.profileId ?? 'none') + '. All commands execute on that remote host.';
+    '. Profiles with jump_profile_id connect through their jump hosts automatically; every hop must be trusted first. Default profile: ' + (defaultTarget?.profileId ?? 'none') + '. All commands execute on that remote host.';
   const targetFor = (j: JsonObject): SSHTargetSnapshot => {
     const id: string | null = stringArg(j, 'profile_id', true);
     const target: SSHTargetSnapshot | null = id === null ? defaultTarget : targets.get(id) ?? null;
@@ -163,7 +169,8 @@ export const createTerminalTools = (deps: TerminalToolsDeps): AgentTool[] => {
           else deps.activityStore.fail(activityId, new TerminalError(failure.code, failure.message));
         }
         return textParts({ runtime: 'remote_ssh', status: 'failed', running: false, exit_code: null,
-          error_code: failure.code, error: failure.message });
+          error_code: failure.code, error: failure.message, hop_index: failure.hopIndex ?? null,
+          hop_count: failure.hopCount ?? null, profile_id: failure.profileId ?? null });
       }
     },
   }));

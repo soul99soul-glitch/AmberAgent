@@ -1,7 +1,8 @@
 // Owns SSH credentials/profiles and the terminal, Python and Mosh runtime initialization promises.
 import type { KeyValueStore, SSHCredentialStorePort, PythonTransportPort } from '@amber/chat-domain';
-import { AgentTaskStore, SSHProfileStore, TerminalRuntime, SSHTargetResolver, PythonRuntime, MoshRuntime } from '@amber/chat-domain';
+import { AgentTaskStore, SSHProfileStore, SSHKeyStore, TerminalRuntime, SSHTargetResolver, PythonRuntime, MoshRuntime } from '@amber/chat-domain';
 import { createEntrySSHCredentialStore } from '../platform_impl/SSHCredentialStore.ets';
+import { createNativeSSHKeyCrypto } from '../platform_impl/NativeSSHKeyCrypto.ets';
 import { createNativeSSHTransport } from '../platform_impl/NativeSSHTransport.ets';
 import { createNativePythonTransport } from '../platform_impl/NativePythonTransport.ets';
 import { createNativeMoshTransport } from '../platform_impl/NativeMoshTransport.ets';
@@ -30,9 +31,12 @@ export const createLocalExecutionResources = (ports: LocalExecutionResourcesPort
     };
     const getSSHProfileStore = (): Promise<SSHProfileStore> => {
         if (sshProfileStorePromise === null) {
-            const init: Promise<SSHProfileStore> = SSHProfileStore.create({
-                kv: ports.getChatKvStore(), credentials: getSSHCredentials(),
-            });
+            const init: Promise<SSHProfileStore> = SSHKeyStore.create({
+                kv: ports.getChatKvStore(), credentials: getSSHCredentials(), crypto: createNativeSSHKeyCrypto(),
+                defaultProtection: 'asset_encrypted',
+            }).then((keys: SSHKeyStore): Promise<SSHProfileStore> => SSHProfileStore.create({
+                kv: ports.getChatKvStore(), credentials: getSSHCredentials(), keys,
+            }));
             init.catch((): void => {
                 if (sshProfileStorePromise === init)
                     sshProfileStorePromise = null;
@@ -44,7 +48,7 @@ export const createLocalExecutionResources = (ports: LocalExecutionResourcesPort
     const getTerminalRuntime = (): Promise<TerminalRuntime> => {
         if (terminalRuntimePromise === null) {
             const init: Promise<TerminalRuntime> = getSSHProfileStore().then(async (profiles: SSHProfileStore): Promise<TerminalRuntime> => new TerminalRuntime({
-                profiles, credentials: getSSHCredentials(), transport: createNativeSSHTransport(),
+                profiles, keys: profiles.keyStore(), credentials: getSSHCredentials(), transport: createNativeSSHTransport(),
                 logs: createEntryTerminalLogPort(), taskStore: await ports.getAgentTaskStore(),
             }));
             init.catch((): void => {
@@ -71,7 +75,7 @@ export const createLocalExecutionResources = (ports: LocalExecutionResourcesPort
     const getMoshRuntime = (): Promise<MoshRuntime> => {
         if (moshRuntimePromise === null) {
             const init: Promise<MoshRuntime> = getSSHProfileStore().then(async (profiles: SSHProfileStore): Promise<MoshRuntime> => new MoshRuntime({
-                targetResolver: new SSHTargetResolver({ profiles, credentials: getSSHCredentials() }),
+                targetResolver: new SSHTargetResolver({ profiles, keys: profiles.keyStore(), credentials: getSSHCredentials() }),
                 sshTransport: createNativeSSHTransport(), transport: createNativeMoshTransport(),
                 taskStore: await ports.getAgentTaskStore(),
             }));

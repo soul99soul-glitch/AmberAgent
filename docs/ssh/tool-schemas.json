@@ -1,0 +1,285 @@
+[
+  {
+    "risk": "normal",
+    "needs_approval": false,
+    "mandatory_approval": false,
+    "name": "ssh_key_list",
+    "description": "List saved local SSH keys: id, name, algorithm, OpenSSH public_key, SHA256 fingerprint, origin (generated or imported), protection, has_passphrase, require_user_presence, and used_by_profile_ids. Read-only; never returns private keys or passphrases.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "risk": "high",
+    "needs_approval": true,
+    "mandatory_approval": true,
+    "name": "ssh_key_generate",
+    "description": "Generate a new SSH key pair locally on the device (Ed25519 by default, or ECDSA P-256). The private key is sealed inside the device encrypted store and never leaves the device or appears in tool output. Returns ONLY the OpenSSH public_key line and SHA256 fingerprint. Workflow when setting up key auth for a server or jump host: (1) call ssh_key_generate, (2) show the returned public_key to the user so they can append it to ~/.ssh/authorized_keys on the server, (3) call ssh_profile_create with auth_method=\"key\" and key_id.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Key name shown in Settings (used in comment amber-<name>)."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ed25519",
+            "ecdsa-p256"
+          ],
+          "description": "Key algorithm. Defaults to ed25519."
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "risk": "high",
+    "needs_approval": true,
+    "mandatory_approval": true,
+    "name": "ssh_key_import",
+    "description": "Import an existing OpenSSH or PEM private key into the device encrypted store. Supports unencrypted and passphrase-protected private keys. The private_key and passphrase parameters are write-only and redacted from transcripts; returns ONLY the derived OpenSSH public_key and SHA256 fingerprint.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Key name shown in Settings."
+        },
+        "private_key": {
+          "type": "string",
+          "description": "OpenSSH or PEM private key text. Write-only."
+        },
+        "passphrase": {
+          "type": "string",
+          "description": "Optional passphrase for encrypted private key. Write-only."
+        }
+      },
+      "required": [
+        "name",
+        "private_key"
+      ]
+    }
+  },
+  {
+    "risk": "high",
+    "needs_approval": true,
+    "mandatory_approval": true,
+    "name": "ssh_key_delete",
+    "description": "Delete a saved local SSH key and its encrypted private key material. Fails with key_in_use if any saved SSH profile still references this key_id.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "key_id": {
+          "type": "string",
+          "description": "Key id from ssh_key_list."
+        }
+      },
+      "required": [
+        "key_id"
+      ]
+    }
+  },
+  {
+    "risk": "normal",
+    "needs_approval": false,
+    "mandatory_approval": false,
+    "name": "ssh_profile_list",
+    "description": "List saved SSH profiles: id, name, host, port, username, auth method, key_id, key_fingerprint, jump_profile_id, resolved multi-hop route, route_ready, whether a credential is stored (booleans only), whether the host key is confirmed, and the revision. Read-only; never returns passwords, private keys or passphrases.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "risk": "high",
+    "needs_approval": true,
+    "mandatory_approval": true,
+    "name": "ssh_profile_create",
+    "description": "Create an SSH profile with password auth, a saved local SSH key (key_id from ssh_key_generate / ssh_key_list), or an inline private key, and optionally chain through a bastion/jump host via jump_profile_id (ProxyJump, up to 3 jump hosts). When the user has no SSH key yet, call ssh_key_generate first, give the returned public_key to the user to add to ~/.ssh/authorized_keys, then call ssh_profile_create with key_id. Credentials are write-only: never repeat them in your reply. High risk: needs explicit approval.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Profile name shown in Settings."
+        },
+        "host": {
+          "type": "string",
+          "description": "Host name or IP address."
+        },
+        "port": {
+          "type": "number",
+          "description": "SSH port, 1-65535. Defaults to 22."
+        },
+        "username": {
+          "type": "string"
+        },
+        "auth_method": {
+          "type": "string",
+          "enum": [
+            "password",
+            "key",
+            "private_key",
+            "privateKey"
+          ],
+          "description": "Defaults to password (or privateKey when key_id is set)."
+        },
+        "key_id": {
+          "type": "string",
+          "description": "ID of a local SSH key from ssh_key_list or ssh_key_generate (preferred for privateKey auth)."
+        },
+        "jump_profile_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Null/empty string clears the route. Optional ID of a jump/bastion SSH profile (ProxyJump). Up to 3 jump hosts supported."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password. Write-only: stored in the encrypted store, never returned or logged."
+        },
+        "private_key": {
+          "type": "string",
+          "description": "OpenSSH/PEM private key. Write-only."
+        },
+        "passphrase": {
+          "type": "string",
+          "description": "Private key passphrase. Write-only."
+        },
+        "private_key_passphrase": {
+          "type": "string",
+          "description": "Passphrase for the private key. Write-only."
+        }
+      },
+      "required": [
+        "name",
+        "host",
+        "username"
+      ]
+    }
+  },
+  {
+    "risk": "high",
+    "needs_approval": true,
+    "mandatory_approval": true,
+    "name": "ssh_profile_update",
+    "description": "Update a saved SSH profile: rename it, change host/port/username/auth method, bind a local SSH key (key_id), set or clear jump_profile_id (ProxyJump), replace its password or private key, or clear the stored credential. Changing host, port, or jump_profile_id clears the confirmed host key. Credentials are write-only. High risk: needs explicit approval.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Profile id from ssh_profile_list."
+        },
+        "name": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "number",
+          "description": "SSH port, 1-65535."
+        },
+        "username": {
+          "type": "string"
+        },
+        "auth_method": {
+          "type": "string",
+          "enum": [
+            "password",
+            "key",
+            "private_key",
+            "privateKey"
+          ]
+        },
+        "key_id": {
+          "type": "string",
+          "description": "ID of a local SSH key from ssh_key_list or ssh_key_generate (preferred for privateKey auth)."
+        },
+        "jump_profile_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Null/empty string clears the route. Optional ID of a jump/bastion SSH profile (ProxyJump). Up to 3 jump hosts supported."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password. Write-only: stored in the encrypted store, never returned or logged."
+        },
+        "private_key": {
+          "type": "string",
+          "description": "OpenSSH/PEM private key. Write-only."
+        },
+        "passphrase": {
+          "type": "string",
+          "description": "Private key passphrase. Write-only."
+        },
+        "private_key_passphrase": {
+          "type": "string",
+          "description": "Passphrase for the private key. Write-only."
+        },
+        "clear_credential": {
+          "type": "boolean",
+          "description": "Delete the stored password/private key without replacing it."
+        }
+      },
+      "required": [
+        "id"
+      ]
+    }
+  },
+  {
+    "risk": "high",
+    "needs_approval": true,
+    "mandatory_approval": true,
+    "name": "ssh_profile_delete",
+    "description": "Delete a saved SSH profile and its stored password/private key. Rejected with in_use_as_jump if other profiles reference this profile as jump_profile_id. Terminal jobs and sessions that already started keep running, but new calls on that profile fail with profile_missing. High risk: needs explicit approval.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Profile id from ssh_profile_list."
+        },
+        "revision": {
+          "type": "number",
+          "description": "Optional revision from ssh_profile_list; the delete is rejected if the profile has changed."
+        }
+      },
+      "required": [
+        "id"
+      ]
+    }
+  },
+  {
+    "risk": "high",
+    "needs_approval": true,
+    "mandatory_approval": true,
+    "name": "ssh_host_trust",
+    "description": "First-use SSH host trust only. Call with profile_id to probe its host key (preceding jumps must be trusted). Show the returned hop number and SHA256 fingerprint to the user for independent verification. Then call again with that fingerprint for foreground approval. Existing host keys can NEVER be replaced by this tool; changes must be reviewed manually in Settings. No target credentials are sent during probing.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "profile_id": {
+          "type": "string",
+          "description": "Saved profile whose host key is being confirmed."
+        },
+        "fingerprint": {
+          "type": "string",
+          "description": "Omit to probe; supply the exact returned SHA256 fingerprint to approve initial trust."
+        }
+      },
+      "required": [
+        "profile_id"
+      ]
+    }
+  }
+]

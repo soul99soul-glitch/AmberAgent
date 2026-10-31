@@ -2,7 +2,7 @@ import type { UIMessagePartTool, JsonValue, JsonObject } from '@amber/chat-domai
 import { toolInputAsJson } from '@amber/chat-domain';
 
 const isMoshApprovalTool = (name: string): boolean => name === 'terminal_mosh_session_start' || name === 'terminal_mosh_session_exec';
-export const isSSHApprovalTool = (name: string): boolean => name === 'terminal_execute' ||
+export const isSSHApprovalTool = (name: string): boolean => name === 'ssh_host_trust' || name === 'terminal_execute' ||
   name === 'terminal_job_start' || name === 'terminal_session_start' || name === 'terminal_session_exec' || isMoshApprovalTool(name);
 
 // Protocol is frozen with the approval. Legacy SSH calls can omit the field;
@@ -22,6 +22,10 @@ export const sshApprovalTargetLabel = (part: UIMessagePartTool): string => {
 export const sshApprovalCommand = (part: UIMessagePartTool): string => {
   if (part.toolName === 'terminal_mosh_session_start') return '启动远程 Mosh 交互 Shell';
   const input: JsonObject = toolInputAsJson(part);
+  if (part.toolName === 'ssh_host_trust') {
+    if (part.metadata?.['ssh_trust_settings_required'] === true) return '已有主机指纹，只能在设置页人工核对后替换';
+    return typeof input['fingerprint'] === 'string' ? '首次信任主机指纹：' + input['fingerprint'] : '探测首次连接的主机指纹';
+  }
   const command: JsonValue | undefined = input['command'];
   if (typeof command === 'string') return command;
   if (part.toolName === 'terminal_session_start') {

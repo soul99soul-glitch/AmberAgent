@@ -25,6 +25,7 @@ import type { ChatRuntime, ChatProviderChoice, TaskPrompts } from '../di/ChatRun
 import type { ConversationRunStorage, ConversationRunExecution } from './ConversationRunPorts.ets';
 import type { AgentRuntimeSnapshot } from './AgentRuntimePrefs.ets';
 import type { OcrSeed } from './OcrSupport.ets';
+import { assertSSHForegroundApproval } from './SSHForegroundApproval.ets';
 import { EntryAbortController } from './EntryAbortController.ets';
 import { beginConversationRun, beginConversationCompaction, isConversationCompacting } from './ConversationRunGuard.ets';
 import { reportGenerationProgress } from './BackgroundGenerationKeepAlive.ets';
@@ -740,6 +741,7 @@ export class ConversationRunService {
       } else if (command.kind === 'regenerate') {
         record.regenerateNodeId = command.nodeId; record.visualNodeId = command.nodeId;
       } else if (command.kind === 'verdict') {
+        await assertSSHForegroundApproval(conversation, command.toolCallId, command.verdict, command.locator);
         const approved: Conversation = applyToolApprovalToConversation(conversation, command.toolCallId, command.verdict, command.locator);
         if (approved === conversation) throw new Error('工具调用已变化或无法唯一定位，请重新打开工具卡片');
         const target = approved.messageNodes.find((node): boolean => {

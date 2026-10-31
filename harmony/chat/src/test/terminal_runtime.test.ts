@@ -20,6 +20,9 @@ class Transport implements SSHTransportPort {
   packets: SSHReadPacket[] = [];
   pending = false;
   authFail = false;
+  async verify(id: string, connection: SSHConnectionOptions, signal?: AbortSignalLike): Promise<void> {
+    await this.startExec(id, connection, {}, signal);
+  }
   async probe() { return { fingerprintSHA256: 'SHA256:key', hostKeyType: 'ed25519' }; }
   async startExec(_id: string, connection: SSHConnectionOptions, _options: unknown, signal?: AbortSignalLike): Promise<SSHHandle> {
     this.starts.push(connection);
@@ -160,7 +163,7 @@ test('session replay starts after subscription, read is cached and approved writ
   await assert.rejects(s.runtime.sendSessionBytes(session.sessionId, bytes), /session_closed/);
 });
 
-test('verify succeeds only after pinned auth command exits; auth-time profile edits reject commit', async () => {
+test('verify authenticates without a shell; auth-time profile edits reject commit', async () => {
   const s = await setup();
   const probe = await s.runtime.probe(draft);
   const old = s.profiles.get('p')!;
@@ -168,13 +171,13 @@ test('verify succeeds only after pinned auth command exits; auth-time profile ed
   const saved = await s.runtime.verifyAndSave(draft, probe, { secret: 'newpw', passphrase: null }, false);
   assert.equal(saved.revision, old.revision + 1);
   const nextProbe = await s.runtime.probe(draft);
-  s.transport.read = async () => {
+  s.transport.verify = async () => {
     await s.profiles.saveMetadata({ ...draft, name: 'concurrent rename' }, saved.revision);
-    return { ...running(), state: 'exited', exitCode: 0 };
   };
   await assert.rejects(s.runtime.verifyAndSave(draft, nextProbe, { secret: 'thirdpw', passphrase: null }, false), /profile_conflict/);
   assert.equal(s.profiles.get('p')?.credentialRef, saved.credentialRef);
-  assert.equal(s.transport.closes.filter(r => r === 'release').length, 2);
+  assert.equal(s.transport.reads, 0);
+  assert.equal(s.transport.closes.length, 0);
 });
 
 test('snapshot is immutable across awaited secret load and retargeting is refused after load', async () => {
@@ -360,6 +363,7 @@ test('background aborts probe before credentials or auth are touched', async () 
   };
   const probe = s.runtime.probe(draft);
   const observed = probe.catch(error => error);
+  while (!entered) await new Promise(r => setTimeout(r, 1));
   assert.equal(entered, true);
   await s.runtime.interruptForBackground();
   assert.match((await observed).message, /cancelled/);

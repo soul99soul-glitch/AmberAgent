@@ -8,21 +8,40 @@ export type SSHReadState =
 export type SSHCloseReason = 'cancelled' | 'disconnected' | 'release';
 export type SSHNativeErrorCode =
   'invalid_arguments' | 'unknown_handle' | 'network_error' |
-  'host_key_mismatch' | 'authentication_failed' | 'unsupported_key' |
+  'host_key_mismatch' | 'host_key_changed' | 'host_key_untrusted' | 'authentication_failed' | 'hop_auth_failed' |
+  'unsupported_key' | 'passphrase_required' | 'invalid_passphrase' |
+  'jump_forward_denied' | 'jump_target_unreachable' | 'jump_chain_too_long' |
   'connection_timeout' | 'cancelled' | 'channel_error';
 
 export interface SSHNativeError extends Error {
   code: SSHNativeErrorCode;
+  hopIndex?: number;
+  hopCount?: number;
+  profileId?: string;
+  expectedFingerprintSHA256?: string;
+  presentedFingerprintSHA256?: string;
 }
 export interface SSHHandle {
   id: string;
   kind: SSHHandleKind;
   peerAddress?: string;
 }
+export interface SSHHopOptions {
+  profileId?: string;
+  host: string;
+  port: number;
+  username: string;
+  expectedFingerprintSHA256: string;
+  authMethod: SSHAuthMethod;
+  secret: string;
+  passphrase: string | null;
+}
 export interface SSHProbeOptions {
   host: string;
   port: number;
   timeoutMs: number;
+  profileId?: string;
+  jumpHops?: SSHHopOptions[];
 }
 export interface SSHProbeResult {
   fingerprintSHA256: string;
@@ -37,6 +56,29 @@ export interface SSHConnectionOptions {
   secret: string;
   passphrase: string | null;
   connectTimeoutMs: number;
+  profileId?: string;
+  jumpHops?: SSHHopOptions[];
+}
+export interface SSHGenerateKeyOptions {
+  name: string;
+  type?: 'ed25519' | 'ecdsa-p256';
+}
+export interface SSHGenerateKeyResult {
+  algorithm: 'ed25519' | 'ecdsa-p256';
+  publicKey: string;
+  fingerprintSHA256: string;
+  privateKey: string;
+}
+export interface SSHInspectKeyOptions {
+  name: string;
+  privateKey: string;
+  passphrase: string | null;
+}
+export interface SSHInspectKeyResult {
+  algorithm: string;
+  publicKey: string;
+  fingerprintSHA256: string;
+  hasPassphrase: boolean;
 }
 export interface SSHExecOptions {
   command: string;
@@ -59,6 +101,7 @@ export interface SSHReadPacket {
   errorMessage: string | null;
 }
 
+export const sshVerify: (requestId: string, connection: SSHConnectionOptions) => Promise<void>;
 export const sshProbe: (
   requestId: string, options: SSHProbeOptions
 ) => Promise<SSHProbeResult>;
@@ -75,6 +118,12 @@ export const sshResize: (handle: SSHHandle, columns: number, rows: number) => Pr
 export const sshClose: (
   handle: SSHHandle, reason: SSHCloseReason
 ) => Promise<SSHReadPacket>;
+export const sshGenerateKey: (
+  options: SSHGenerateKeyOptions
+) => Promise<SSHGenerateKeyResult>;
+export const sshInspectKey: (
+  options: SSHInspectKeyOptions
+) => Promise<SSHInspectKeyResult>;
 
 export interface PythonOptions {
   source: string;

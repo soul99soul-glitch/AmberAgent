@@ -664,6 +664,9 @@ export const toolSandboxInputPreview = (
   if (name === 'provider_configure') return '保存提供商和模型配置';
   if (name === 'provider_models') return '获取提供商模型列表';
   // SSH 配置工具的预览只说改哪台机,绝不落到 JSON 全串(那里会带私钥/密码)
+  if (name.startsWith('ssh_key_') || name === 'ssh_host_trust') {
+    return name === 'ssh_key_list' ? '查看本机 SSH 密钥' : 'SSH 密钥 / 主机信任操作（凭据不回显）';
+  }
   if (SSH_PROFILE_TOOL_NAMES.includes(name)) {
     return compactSandboxText(sshProfilePreview(name, inp), 180);
   }

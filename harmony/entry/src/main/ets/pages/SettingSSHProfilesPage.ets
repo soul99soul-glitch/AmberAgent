@@ -1,11 +1,12 @@
 import { router } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 import { SSHProfileStore, TerminalRuntime, patchAssistant } from '@amber/chat-domain';
-import type { Assistant, LocalToolOption, SSHProfile, SSHProfileDraft, SSHProfileSettings, SSHTrustProbe, SSHCredential } from '@amber/chat-domain';
+import type { Assistant, LocalToolOption, SSHProfile, SSHProfileDraft, SSHProfileSettings, SSHTrustProbe, SSHCredential, SSHKey } from '@amber/chat-domain';
 import { getSSHProfileStore, getTerminalRuntime, getChatAssistants } from '../di/AppContainer.ets';
 import { mutateAssistant } from '../platform_impl/AssistantMutation.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { CenteredTitleBar, CardGroup, PlainSection, FooterNote, PageSpacer, Seg } from '../components/PageTemplate.ets';
+import { SSHKeysSection } from '../components/SSHKeysSection.ets';
 import { SSHUIColors } from '../components/SSHUIColors.ets';
 import { sshPageError } from '../components/SSHPageErrors.ets';
 import { Icon } from '../components/ui/Icon.ets';
@@ -28,6 +29,9 @@ struct SettingSSHProfilesPage {
   @State portText: string = '22';
   @State username: string = '';
   @State authIndex: number = 0;
+  @State keys: SSHKey[] = [];
+  @State keyId: string = '';
+  @State jumpProfileId: string = '';
   @State secret: string = '';
   @State passphrase: string = '';
   @State showSecret: boolean = false;
@@ -45,6 +49,7 @@ struct SettingSSHProfilesPage {
   private store: SSHProfileStore | null = null;
   private runtime: TerminalRuntime | null = null;
   private unsubscribe: (() => void) | null = null;
+  private unsubscribeKeys: (() => void) | null = null;
   private operation: EntryAbortController | null = null;
   private alive: boolean = false;
   private draftId: string = '';
@@ -64,6 +69,7 @@ struct SettingSSHProfilesPage {
     this.clearSecrets();
     if (this.unsubscribe !== null) this.unsubscribe();
     this.unsubscribe = null;
+    this.unsubscribeKeys?.(); this.unsubscribeKeys = null;
   }
 
   onPageHide(): void {
@@ -100,6 +106,10 @@ struct SettingSSHProfilesPage {
       this.applySettings(store.snapshot());
       this.unsubscribe = store.subscribe((settings: SSHProfileSettings): void => {
         if (this.alive) this.applySettings(settings);
+      });
+      const keys = store.keyStore();
+      if (keys !== undefined) this.unsubscribeKeys = keys.subscribe((list: SSHKey[]): void => {
+        if (this.alive) this.keys = list;
       });
       this.loaded = true;
     } catch (error) {
@@ -162,7 +172,9 @@ struct SettingSSHProfilesPage {
     this.portText = profile === null ? '22' : String(profile.port);
     this.username = profile === null ? '' : profile.username;
     this.authIndex = profile !== null && profile.authMethod === 'privateKey' ? 1 : 0;
-    this.hasSavedCredential = profile !== null && profile.credentialRef !== null;
+    this.keyId = profile?.keyId ?? '';
+    this.jumpProfileId = profile?.jumpProfileId ?? '';
+    this.hasSavedCredential = profile !== null && (profile.credentialRef !== null || !!profile.keyId);
     this.candidate = null;
     this.notice = '';
     this.error = '';
@@ -186,6 +198,8 @@ struct SettingSSHProfilesPage {
     return {
       id: this.draftId, name: this.name, host: this.host, port: Number(this.portText),
       username: this.username, authMethod: this.authIndex === 1 ? 'privateKey' : 'password',
+      keyId: this.authIndex === 1 && this.keyId.length > 0 ? this.keyId : null,
+      jumpProfileId: this.jumpProfileId.length > 0 ? this.jumpProfileId : null,
     };
   }
 
@@ -243,7 +257,7 @@ struct SettingSSHProfilesPage {
     const candidate: SSHTrustProbe | null = this.candidate;
     if (runtime === null || candidate === null || this.busy.length > 0 || this.backgrounded) return;
     if (!this.editorRevisionMatches()) return;
-    if (this.secret.length === 0 && !this.hasSavedCredential) {
+    if (this.secret.length === 0 && this.keyId.length === 0 && !this.hasSavedCredential) {
       this.error = this.authIndex === 1 ? '请输入私钥' : '请输入密码';
       return;
     }
@@ -283,6 +297,7 @@ struct SettingSSHProfilesPage {
     const original: SSHProfile | null = this.original;
     return original !== null && this.host.trim() === original.host && Number(this.portText) === original.port &&
       this.username.trim() === original.username && (this.authIndex === 1 ? 'privateKey' : 'password') === original.authMethod &&
+      this.keyId === (original.keyId ?? '') && this.jumpProfileId === (original.jumpProfileId ?? '') &&
       this.secret.length === 0 && this.passphrase.length === 0;
   }
 
@@ -374,7 +389,7 @@ struct SettingSSHProfilesPage {
             }.justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
           }.constraintSize({ minHeight: 44 }).borderRadius(22).padding({ left: GUTTER, right: GUTTER, top: 8, bottom: 8 })
             .backgroundColor(accentSoftBg(this.accentColor)).margin({ left: 8 })
-            .enabled(profile.knownHostSHA256 !== null && profile.credentialRef !== null)
+            .enabled(profile.knownHostSHA256 !== null && (profile.credentialRef !== null || !!profile.keyId))
             .onClick((): void => { router.pushUrl({ url: 'pages/TerminalPage', params: { profileId: profile.id } }); })
           Blank()
           Button('删除').type(ButtonType.Normal).constraintSize({ minHeight: 44 }).fontSize(BODY2)
@@ -400,9 +415,18 @@ struct SettingSSHProfilesPage {
       TextInput({ text: this.username, placeholder: '用户名' }).constraintSize({ minHeight: 52 })
         .fontColor(this.colors.ink).placeholderColor(this.colors.muted).backgroundColor(this.colors.inset).enabled(this.busy.length === 0)
         .onChange((value: string): void => { this.username = value; this.draftChanged(); })
+      Text('跳板主机').fontSize(META).fontColor(this.colors.secondary).width('100%')
+      Select([{ value: '直连' }, ...this.profiles.filter((p: SSHProfile): boolean => p.id !== this.draftId)
+        .map((p: SSHProfile): SelectOption => ({ value: p.name }))])
+        .value(this.profiles.find((p: SSHProfile): boolean => p.id === this.jumpProfileId)?.name ?? '直连')
+        .enabled(this.busy.length === 0)
+        .onSelect((index: number): void => {
+          this.jumpProfileId = index === 0 ? '' : this.profiles.filter((p: SSHProfile): boolean => p.id !== this.draftId)[index - 1].id;
+          this.draftChanged();
+        })
       Seg({ options: ['密码', '私钥'], selected: this.authIndex, onSelect: (index: number): void => {
         if (this.busy.length > 0) return;
-        this.clearSecrets();
+        this.clearSecrets(); this.keyId = '';
         this.draftChanged();
         this.getUIContext().animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
           this.authIndex = index;
@@ -416,6 +440,14 @@ struct SettingSSHProfilesPage {
     Column({ space: 10 }) {
       if (this.authIndex === 1) {
         Column({ space: 10 }) {
+          Select([{ value: '粘贴私钥（兼容）' }, ...this.keys.map((key: SSHKey): SelectOption => ({ value: key.name }))])
+            .value(this.keys.find((key: SSHKey): boolean => key.id === this.keyId)?.name ?? '粘贴私钥（兼容）')
+            .enabled(this.busy.length === 0)
+            .onSelect((index: number): void => {
+              this.keyId = index === 0 ? '' : this.keys[index - 1].id;
+              this.clearSecrets(); this.draftChanged();
+            })
+          if (this.keyId.length === 0) {
           TextArea({ text: this.secret, placeholder: '粘贴 OpenSSH / PEM 私钥' })
             .constraintSize({ minHeight: 150 }).fontSize(BODY2).fontFamily(FONT_MONO).fontColor(this.colors.ink)
             .placeholderColor(this.colors.muted)
@@ -433,6 +465,7 @@ struct SettingSSHProfilesPage {
               .accessibilityText(this.showPassphrase ? '隐藏私钥口令' : '显示私钥口令')
               .enabled(this.busy.length === 0).onClick((): void => { this.showPassphrase = !this.showPassphrase; })
           }.width('100%').constraintSize({ minHeight: 52 }).padding({ right: 4 }).borderRadius(26).backgroundColor(this.colors.inset)
+          }
         }.width('100%')
         .transition(TransitionEffect.OPACITY.animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       } else {
@@ -460,7 +493,7 @@ struct SettingSSHProfilesPage {
       ? '主机指纹已改变。请核对服务器后再信任。' : '首次连接。请通过可信渠道核对完整主机指纹。')
       .fontSize(BODY).fontColor(candidate.trustState === 'trusted' ? this.colors.success : this.colors.warning)
       .width('100%')
-    Text(`${this.host.trim()}:${this.portText} · ${candidate.hostKeyType}`)
+    Text(`第 ${candidate.hopIndex ?? 1} 跳 · ${this.host.trim()}:${this.portText} · ${candidate.hostKeyType}`)
       .fontSize(META).fontFamily(FONT_MONO).fontColor(this.colors.secondary).width('100%')
     Text(candidate.fingerprintSHA256).fontSize(BODY2).fontFamily(FONT_MONO)
       .fontColor(this.colors.ink).width('100%').wordBreak(WordBreak.BREAK_ALL).copyOption(CopyOptions.LocalDevice)
@@ -522,12 +555,13 @@ struct SettingSSHProfilesPage {
                 CardGroup({ radius: 18, stroke: true, content: (): void => { this.CredentialFields(); } }).margin({ left: 16, right: 16 })
                 PlainSection({ label: '主机确认' })
                 CardGroup({ radius: 18, stroke: true, content: (): void => { this.TrustCard(); } }).margin({ left: 16, right: 16 })
-                FooterNote({ text: '探测不会发送密码或私钥；正式认证会再次校验主机指纹。失败或取消不会替换原配置。' })
+                FooterNote({ text: '探测只认证已信任的前置跳板，不向当前主机发送凭据；正式认证会再次校验指纹。失败或取消不会替换原配置。' })
               }.width('100%')
               .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 12 }))
                 .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
             } else {
               Column() {
+                SSHKeysSection({ colors: this.colors, accent: this.accentColor })
                 PlainSection({ label: '远程主机' })
                 if (this.profiles.length > 0) {
                   CardGroup({ radius: 18, stroke: true, content: (): void => { this.ProfileRows(); } }).margin({ left: 16, right: 16 })

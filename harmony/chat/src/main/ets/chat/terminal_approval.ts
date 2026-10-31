@@ -6,6 +6,7 @@ import type { ToolInvocationHook, ToolInvocationRequest, ToolInvocationResult } 
 import type { SSHTargetSnapshot } from './terminal/models.ts';
 import type { TerminalRuntime } from './terminal/runtime.ts';
 import type { MoshRuntime } from './mosh/runtime.ts';
+import { resolveSSHRoute, formatApprovalRouteText, buildRouteHopSummaries } from './terminal/route_resolver.ts';
 import type { SSHProfileStore } from './terminal/profile_store.ts';
 
 export interface TerminalApprovalGuard {
@@ -13,7 +14,7 @@ export interface TerminalApprovalGuard {
   hook: ToolInvocationHook;
 }
 const SSH_TARGET_TOOLS: Set<string> = new Set([
-  'terminal_execute', 'terminal_job_start', 'terminal_session_start', 'terminal_session_exec',
+  'ssh_host_trust', 'terminal_execute', 'terminal_job_start', 'terminal_session_start', 'terminal_session_exec',
 ]);
 const MOSH_TARGET_TOOLS: Set<string> = new Set(['terminal_mosh_session_start', 'terminal_mosh_session_exec']);
 type TerminalProtocol = 'remote_ssh' | 'remote_mosh';
@@ -56,7 +57,9 @@ export const createTerminalApprovalGuard = (
   for (const profile of settings.profiles) {
     targets.set(profile.id, runtime.captureTarget(profile.id));
     if (moshRuntime !== undefined) moshTargets.set(profile.id, moshRuntime.captureTarget(profile.id));
-    labels.set(profile.id, `${profile.username}@${profile.host}:${profile.port}`);
+    const route = resolveSSHRoute(profile.id, settings.profiles);
+    labels.set(profile.id, route.length === 1 ? `${profile.username}@${profile.host}:${profile.port}`
+      : formatApprovalRouteText(buildRouteHopSummaries(route)));
   }
   const defaultTarget: SSHTargetSnapshot | null = settings.defaultProfileId === null
     ? null : runtime.captureTarget(null);
@@ -82,13 +85,16 @@ export const createTerminalApprovalGuard = (
     if (protocol === null) return null;
     const args: JsonObject | null = parseInput(part);
     const target: SSHTargetSnapshot | null = args === null ? null : frozenTarget(part, args, protocol);
-    return { terminal_protocol: protocol, terminal_target_label: target === null ? '' : labels.get(target.profileId) ?? '',
+    const blocked: boolean = part.toolName === 'ssh_host_trust' && target !== null
+      && settings.profiles.find((p): boolean => p.id === target.profileId)?.knownHostSHA256 !== null;
+    return { ssh_trust_settings_required: blocked, terminal_protocol: protocol, terminal_target_label: target === null ? '' : labels.get(target.profileId) ?? '',
       terminal_target: target === null ? null : {
       profileId: target.profileId, digest: target.digest, usesDefault: target.usesDefault,
     } };
   };
   const hook: ToolInvocationHook = {
     before: async (request: ToolInvocationRequest): Promise<ToolInvocationResult | null> => {
+      if (request.tool.metadata?.['ssh_trust_settings_required'] === true) return targetChanged();
       const protocol: TerminalProtocol | null = protocolFor(request.tool.toolName);
       if (protocol === null) return null;
       const savedProtocol: JsonValue | undefined = request.tool.metadata?.['terminal_protocol'];

@@ -17,11 +17,12 @@ import type { JsonObject, JsonValue } from './json.ts';
 import {
   redactSSHProfileToolInput, SSH_PROFILE_SECRET_FIELDS, SSH_PROFILE_TOOL_NAMES,
 } from './terminal/profile_tools.ts';
+import { SSH_KEY_TOOL_NAMES } from './terminal/ssh_tool_contract.ts';
 
 export const STORED_TOOL_INPUT_REDACTED: string = '***';
 
 // 各种脱敏占位符形态(大小写不敏感):*** / <redacted> / [REDACTED] / REDACTED / ••••
-export const SECRET_PLACEHOLDERS: string[] = ['***', '<redacted>', '[redacted]', 'redacted', '\u2022\u2022\u2022\u2022'];
+export const SECRET_PLACEHOLDERS: string[] = ['***', '<redacted>', '[redacted]', 'redacted', '(empty)', '\u2022\u2022\u2022\u2022'];
 
 /** 某个值是否是脱敏占位符(占位符绝不能当凭据使用) */
 export const isRedactedPlaceholder = (value: string | null | undefined): boolean =>
@@ -38,7 +39,7 @@ export const toolInputHasPlaceholder = (toolName: string, input: JsonObject): bo
 
 /** 该工具名的输入是否需要在持久化前脱敏 */
 export const toolInputNeedsStoredRedaction = (toolName: string): boolean =>
-  SSH_PROFILE_TOOL_NAMES.indexOf(toolName) >= 0;
+  SSH_PROFILE_TOOL_NAMES.indexOf(toolName) >= 0 || SSH_KEY_TOOL_NAMES.indexOf(toolName) >= 0;
 
 const redactByName = (toolName: string, input: JsonObject): JsonObject =>
   toolInputNeedsStoredRedaction(toolName) ? redactSSHProfileToolInput(toolName, input) : input;

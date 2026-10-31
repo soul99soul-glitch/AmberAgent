@@ -5,23 +5,46 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <string>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace amber::ssh {
 struct Error {
     std::string code;
     std::string message;
+    std::optional<int> hopIndex {};
+    std::optional<int> hopCount {};
+    std::string profileId {};
+    std::string expectedFingerprint {};
+    std::string presentedFingerprint {};
 };
 struct Exception : std::runtime_error {
     Error error;
-    Exception(const char *code, const char *message) : std::runtime_error(message), error {code, message} {}
+    Exception(const char *code, const char *message)
+        : std::runtime_error(message), error {code, message} {}
+    explicit Exception(Error err)
+        : std::runtime_error(err.message), error(std::move(err)) {}
+};
+struct HopOptions {
+    std::string profileId;
+    std::string host;
+    int port = 22;
+    std::string username;
+    std::string fingerprint;
+    std::string authMethod;
+    std::string secret;
+    std::optional<std::string> passphrase;
+    ~HopOptions() { ClearSecrets(); }
+    void ClearSecrets();
 };
 struct Endpoint {
     std::string host;
     int port = 22;
     int timeoutMs = 10000;
+    std::string profileId {};
+    std::vector<HopOptions> jumpHops {};
+    void ClearJumpSecrets();
 };
 struct ConnectionOptions : Endpoint {
     std::string username;

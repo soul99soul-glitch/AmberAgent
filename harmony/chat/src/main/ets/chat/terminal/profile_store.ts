@@ -1,40 +1,149 @@
+import type { SSHKeyStore } from './key_store.ts';
 import type { KeyValueStore } from '../kv_store.ts';
+import type { JsonObject } from '../json.ts';
 import { newId } from '../ids.ts';
 import type { SSHCredentialStorePort } from './ports.ts';
 import type { SSHCredential, SSHCredentialBinding, SSHProfile, SSHProfileDraft, SSHProfileSettings } from './models.ts';
+import { dependentJumpProfileIds, validateProfileRouteCandidate } from './route_resolver.ts';
 
 export class TerminalError extends Error {
-  constructor(public readonly code: string, message: string = code) { super(message); this.name = 'TerminalError'; }
+  public readonly details: JsonObject | null;
+  constructor(public readonly code: string, message: string = code, details: JsonObject | null = null) {
+    super(message);
+    this.name = 'TerminalError';
+    this.details = details;
+  }
 }
+
+const normalizeOptionalId = (value: string | null | undefined): string | null => {
+  if (value === undefined || value === null) return null;
+  const trimmed: string = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 export const normalizeDraft = (d: SSHProfileDraft): SSHProfileDraft => {
   if (!d.id.trim() || !d.host.trim() || !d.name.trim() || !d.username.trim() ||
     !Number.isInteger(d.port) || d.port < 1 || d.port > 65535 ||
     (d.authMethod !== 'password' && d.authMethod !== 'privateKey')) throw new TerminalError('invalid_arguments');
-  return { id: d.id, name: d.name.trim(), host: d.host.trim(), port: d.port,
-    username: d.username.trim(), authMethod: d.authMethod };
+  const keyId: string | null = normalizeOptionalId(d.keyId);
+  const jumpProfileId: string | null = normalizeOptionalId(d.jumpProfileId);
+  if (keyId !== null && d.authMethod !== 'privateKey') {
+    throw new TerminalError('invalid_arguments');
+  }
+  const normalized: SSHProfileDraft = {
+    id: d.id,
+    name: d.name.trim(),
+    host: d.host.trim(),
+    port: d.port,
+    username: d.username.trim(),
+    authMethod: d.authMethod,
+  };
+  if (keyId !== null) normalized.keyId = keyId;
+  else if (d.keyId !== undefined) normalized.keyId = null;
+  if (jumpProfileId !== null) normalized.jumpProfileId = jumpProfileId;
+  else if (d.jumpProfileId !== undefined) normalized.jumpProfileId = null;
+  return normalized;
 };
-export const sameBinding = (a: SSHCredentialBinding, b: SSHCredentialBinding): boolean =>
-  a.host === b.host && a.port === b.port && a.username === b.username && a.authMethod === b.authMethod;
-export const draftDigest = (d: SSHProfileDraft): string =>
-  JSON.stringify([d.id, d.name, d.host, d.port, d.username, d.authMethod]);
-export const targetDigest = (p: SSHProfile): string => JSON.stringify([
-  p.id, p.host, p.port, p.username, p.authMethod, p.knownHostSHA256,
-  p.knownHostHost, p.knownHostPort, p.credentialRef,
-]);
-const copyProfile = (p: SSHProfile): SSHProfile => ({ id: p.id, name: p.name, host: p.host, port: p.port,
-  username: p.username, authMethod: p.authMethod, revision: p.revision, knownHostSHA256: p.knownHostSHA256,
-  knownHostHost: p.knownHostHost, knownHostPort: p.knownHostPort, credentialRef: p.credentialRef });
+
+export const sameBinding = (a: SSHCredentialBinding & { keyId?: string | null },
+  b: SSHCredentialBinding & { keyId?: string | null }): boolean =>
+  a.host === b.host && a.port === b.port && a.username === b.username &&
+  a.authMethod === b.authMethod && (a.keyId ?? null) === (b.keyId ?? null);
+
+export const sameHostAndRoute = (old: SSHProfile, d: SSHProfileDraft): boolean =>
+  old.host === d.host &&
+  old.port === d.port &&
+  (old.jumpProfileId ?? null) === (d.jumpProfileId ?? null) &&
+  (old.knownHostViaJump ?? null) === (d.jumpProfileId ?? null);
+
+export const draftDigest = (d: SSHProfileDraft): string => {
+  if ((d.jumpProfileId ?? null) === null && (d.keyId ?? null) === null) {
+    return JSON.stringify([d.id, d.name, d.host, d.port, d.username, d.authMethod]);
+  }
+  return JSON.stringify([
+    d.id, d.name, d.host, d.port, d.username, d.authMethod,
+    d.keyId ?? null, d.jumpProfileId ?? null,
+  ]);
+};
+
+export const targetDigest = (p: SSHProfile): string => {
+  if ((p.jumpProfileId ?? null) === null && (p.keyId ?? null) === null) {
+    return JSON.stringify([
+      p.id, p.host, p.port, p.username, p.authMethod, p.knownHostSHA256,
+      p.knownHostHost, p.knownHostPort, p.credentialRef, p.revision, p.name,
+    ]);
+  }
+  return JSON.stringify([
+    p.id, p.host, p.port, p.username, p.authMethod, p.knownHostSHA256,
+    p.knownHostHost, p.knownHostPort, p.knownHostViaJump ?? null,
+    p.credentialRef, p.keyId ?? null, p.jumpProfileId ?? null, p.revision, p.name,
+  ]);
+};
+
+const copyProfile = (p: SSHProfile): SSHProfile => {
+  const out: SSHProfile = {
+    id: p.id,
+    name: p.name,
+    host: p.host,
+    port: p.port,
+    username: p.username,
+    authMethod: p.authMethod,
+    revision: p.revision,
+    knownHostSHA256: p.knownHostSHA256,
+    knownHostHost: p.knownHostHost,
+    knownHostPort: p.knownHostPort,
+    credentialRef: p.credentialRef,
+  };
+  if (p.keyId !== undefined && p.keyId !== null) out.keyId = p.keyId;
+  else if (p.keyId === null) out.keyId = null;
+  if (p.jumpProfileId !== undefined && p.jumpProfileId !== null) out.jumpProfileId = p.jumpProfileId;
+  else if (p.jumpProfileId === null) out.jumpProfileId = null;
+  if (p.knownHostViaJump !== undefined && p.knownHostViaJump !== null) out.knownHostViaJump = p.knownHostViaJump;
+  else if (p.knownHostViaJump === null) out.knownHostViaJump = null;
+  return out;
+};
+
+const buildProfileRecord = (
+  d: SSHProfileDraft,
+  revision: number,
+  knownHostSHA256: string | null,
+  knownHostHost: string | null,
+  knownHostPort: number | null,
+  knownHostViaJump: string | null | undefined,
+  credentialRef: string | null,
+): SSHProfile => {
+  const record: SSHProfile = {
+    id: d.id,
+    name: d.name,
+    host: d.host,
+    port: d.port,
+    username: d.username,
+    authMethod: d.authMethod,
+    revision,
+    knownHostSHA256,
+    knownHostHost,
+    knownHostPort,
+    credentialRef,
+  };
+  if (d.keyId !== undefined) record.keyId = d.keyId;
+  if (d.jumpProfileId !== undefined) record.jumpProfileId = d.jumpProfileId;
+  if (knownHostViaJump !== undefined) record.knownHostViaJump = knownHostViaJump;
+  return record;
+};
+
 const copySettings = (s: SSHProfileSettings): SSHProfileSettings => ({
   profiles: s.profiles.map(copyProfile), defaultProfileId: s.defaultProfileId,
 });
-export interface SSHProfileStoreDeps { kv: KeyValueStore; credentials: SSHCredentialStorePort; }
+export interface SSHProfileStoreDeps { kv: KeyValueStore; credentials: SSHCredentialStorePort; keys?: SSHKeyStore; }
 const KEY: string = 'terminal_ssh_profiles';
 
 export class SSHProfileStore {
   private settings: SSHProfileSettings = { profiles: [], defaultProfileId: null };
   private pending: Promise<void> = Promise.resolve();
   private listeners: Array<(settings: SSHProfileSettings) => void> = [];
-  private constructor(private readonly deps: SSHProfileStoreDeps) {}
+  private constructor(private readonly deps: SSHProfileStoreDeps) {
+    deps.keys?.setProfileUsageResolver((id: string): string[] => this.profilesUsingKey(id));
+  }
   static async create(deps: SSHProfileStoreDeps): Promise<SSHProfileStore> {
     const store: SSHProfileStore = new SSHProfileStore(deps);
     const raw: string | null = await deps.kv.get(KEY);
@@ -46,9 +155,8 @@ export class SSHProfileStore {
     }
     return store;
   }
+  keyStore(): SSHKeyStore | undefined { return this.deps.keys; }
   snapshot(): SSHProfileSettings { return copySettings(this.settings); }
-  // 凭据库只暴露两个幂等查询给上层(list 的布尔值、沿用旧凭据的判断),
-  // 不暴露 load/save/delete,避免工具层绕过本 store 的 revision 与清理约束。
   credentialExists(ref: string | null): Promise<boolean> {
     if (ref === null) return Promise.resolve(false);
     return this.deps.credentials.exists(ref).catch((): boolean => false);
@@ -60,13 +168,19 @@ export class SSHProfileStore {
   defaultProfile(): SSHProfile | null {
     return this.settings.defaultProfileId === null ? null : this.get(this.settings.defaultProfileId);
   }
+  profilesUsingKey(keyId: string): string[] {
+    return this.settings.profiles
+      .filter((p: SSHProfile): boolean => (p.keyId ?? null) === keyId)
+      .map((p: SSHProfile): string => p.id);
+  }
   subscribe(listener: (settings: SSHProfileSettings) => void): () => void {
     this.listeners.push(listener);
     listener(this.snapshot());
     return (): void => { this.listeners = this.listeners.filter((v): boolean => v !== listener); };
   }
   private serial<T>(operation: () => Promise<T>): Promise<T> {
-    const run: Promise<T> = this.pending.then(operation);
+    const run: Promise<T> = this.pending.then((): Promise<T> => this.deps.keys === undefined
+      ? operation() : this.deps.keys.withProfileWrite(operation));
     this.pending = run.then((): void => undefined, (): void => undefined);
     return run;
   }
@@ -107,14 +221,27 @@ export class SSHProfileStore {
     const d: SSHProfileDraft = normalizeDraft(draft);
     return this.serial(async (): Promise<SSHProfile> => {
       const old: SSHProfile | null = this.checkRevision(d.id, expectedRevision);
-      const hostMatches: boolean = old !== null && old.host === d.host && old.port === d.port;
-      const bindingMatches: boolean = old !== null && sameBinding(old, d);
-      const next: SSHProfile = { id: d.id, name: d.name, host: d.host, port: d.port, username: d.username,
-        authMethod: d.authMethod, revision: (old?.revision ?? 0) + 1,
-        knownHostSHA256: hostMatches ? old!.knownHostSHA256 : null,
-        knownHostHost: hostMatches ? old!.knownHostHost : null,
-        knownHostPort: hostMatches ? old!.knownHostPort : null,
-        credentialRef: bindingMatches ? old!.credentialRef : null };
+      const mergedDraft: SSHProfileDraft = {
+        ...d,
+        keyId: d.keyId !== undefined ? d.keyId : old?.keyId,
+        jumpProfileId: d.jumpProfileId !== undefined ? d.jumpProfileId : old?.jumpProfileId,
+      };
+      const hostMatches: boolean = old !== null && sameHostAndRoute(old, mergedDraft);
+      const bindingMatches: boolean = old !== null && sameBinding(old, mergedDraft);
+      const viaJump: string | null | undefined = (mergedDraft.jumpProfileId !== undefined || old?.knownHostViaJump !== undefined)
+        ? (hostMatches ? (old?.knownHostViaJump ?? null) : null)
+        : undefined;
+      const next: SSHProfile = buildProfileRecord(
+        mergedDraft,
+        (old?.revision ?? 0) + 1,
+        hostMatches ? old!.knownHostSHA256 : null,
+        hostMatches ? old!.knownHostHost : null,
+        hostMatches ? old!.knownHostPort : null,
+        viaJump,
+        bindingMatches ? old!.credentialRef : null,
+      );
+      if (next.keyId && (this.deps.keys === undefined || this.deps.keys.get(next.keyId) === null)) throw new TerminalError('key_missing');
+      validateProfileRouteCandidate(next, this.settings.profiles);
       await this.persist(this.nextSettings(next));
       if (old !== null && old.credentialRef !== next.credentialRef) await this.cleanup(old.credentialRef);
       return copyProfile(next);
@@ -127,31 +254,47 @@ export class SSHProfileStore {
     return this.serial(async (): Promise<SSHProfile> => {
       let stagedRef: string | null = null;
       try {
+        const old: SSHProfile | null = this.checkRevision(d.id, expectedRevision);
+        const mergedDraft: SSHProfileDraft = {
+          ...d,
+          keyId: d.keyId !== undefined ? d.keyId : old?.keyId,
+          jumpProfileId: d.jumpProfileId !== undefined ? d.jumpProfileId : old?.jumpProfileId,
+        };
+        const usesKeyId: boolean = mergedDraft.authMethod === 'privateKey' &&
+          mergedDraft.keyId !== undefined && mergedDraft.keyId !== null;
+        if (usesKeyId && credential !== null) throw new TerminalError('invalid_arguments');
         if (credential !== null) {
           if (!credential.secret) throw new TerminalError('credential_missing');
           stagedRef = newId();
-          await this.deps.credentials.save(stagedRef, d, credential);
+          await this.deps.credentials.save(stagedRef, mergedDraft, credential);
         }
-        const old: SSHProfile | null = this.checkRevision(d.id, expectedRevision);
         let ref: string | null = stagedRef;
-        if (ref === null) {
-          if (old === null || !sameBinding(old, d) || old.credentialRef === null ||
+        if (ref === null && !usesKeyId) {
+          if (old === null || !sameBinding(old, mergedDraft) || old.credentialRef === null ||
             !await this.deps.credentials.exists(old.credentialRef)) throw new TerminalError('credential_missing');
           ref = old.credentialRef;
         }
-        const next: SSHProfile = { id: d.id, name: d.name, host: d.host, port: d.port, username: d.username,
-          authMethod: d.authMethod, revision: (old?.revision ?? 0) + 1, knownHostSHA256: fingerprintSHA256,
-          knownHostHost: d.host, knownHostPort: d.port, credentialRef: ref };
+        const viaJump: string | null | undefined = (mergedDraft.jumpProfileId !== undefined || old?.knownHostViaJump !== undefined)
+          ? (mergedDraft.jumpProfileId ?? null)
+          : undefined;
+        const next: SSHProfile = buildProfileRecord(
+          mergedDraft,
+          (old?.revision ?? 0) + 1,
+          fingerprintSHA256,
+          mergedDraft.host,
+          mergedDraft.port,
+          viaJump,
+          usesKeyId ? null : ref,
+        );
+        if (next.keyId && (this.deps.keys === undefined || this.deps.keys.get(next.keyId) === null)) throw new TerminalError('key_missing');
+      validateProfileRouteCandidate(next, this.settings.profiles);
         await this.persist(this.nextSettings(next));
         stagedRef = null;
-        if (old !== null && old.credentialRef !== ref) await this.cleanup(old.credentialRef);
+        if (old !== null && old.credentialRef !== next.credentialRef) await this.cleanup(old.credentialRef);
         return copyProfile(next);
       } catch (error) { await this.cleanup(stagedRef); throw error; }
     });
   }
-  // Agent-facing save. Host-key trust is preserved only when the target stays the same; it is
-  // cleared when the host/port changes. A staged credential never claims a fingerprint it did
-  // not verify, and `clearCredential` drops the stored secret without touching trust.
   async saveWithCredential(draft: SSHProfileDraft, expectedRevision: number | null,
     credential: SSHCredential | null, clearCredential: boolean = false): Promise<SSHProfile> {
     const d: SSHProfileDraft = normalizeDraft(draft);
@@ -160,27 +303,44 @@ export class SSHProfileStore {
     return this.serial(async (): Promise<SSHProfile> => {
       let stagedRef: string | null = null;
       try {
+        const old: SSHProfile | null = this.checkRevision(d.id, expectedRevision);
+        const mergedDraft: SSHProfileDraft = {
+          ...d,
+          keyId: d.keyId !== undefined ? d.keyId : (clearCredential ? null : old?.keyId),
+          jumpProfileId: d.jumpProfileId !== undefined ? d.jumpProfileId : old?.jumpProfileId,
+        };
+        const usesKeyId: boolean = !clearCredential && mergedDraft.authMethod === 'privateKey' &&
+          mergedDraft.keyId !== undefined && mergedDraft.keyId !== null;
+        if (usesKeyId && credential !== null) throw new TerminalError('invalid_arguments');
         if (credential !== null) {
           if (credential.secret.indexOf('\0') >= 0) throw new TerminalError('invalid_arguments');
           stagedRef = newId();
-          await this.deps.credentials.save(stagedRef, d, credential);
+          await this.deps.credentials.save(stagedRef, mergedDraft, credential);
         }
-        const old: SSHProfile | null = this.checkRevision(d.id, expectedRevision);
-        const sameTarget: boolean = old !== null && old.host === d.host && old.port === d.port;
+        const sameTarget: boolean = old !== null && sameHostAndRoute(old, mergedDraft);
         let ref: string | null = stagedRef;
-        if (ref === null && !clearCredential) {
-          if (old === null || !sameBinding(old, d) || old.credentialRef === null ||
+        if (ref === null && !clearCredential && !usesKeyId) {
+          if (old === null || !sameBinding(old, mergedDraft) || old.credentialRef === null ||
             !await this.deps.credentials.exists(old.credentialRef)) throw new TerminalError('credential_missing');
           ref = old.credentialRef;
         }
-        const next: SSHProfile = { id: d.id, name: d.name, host: d.host, port: d.port, username: d.username,
-          authMethod: d.authMethod, revision: (old?.revision ?? 0) + 1,
-          knownHostSHA256: sameTarget ? old!.knownHostSHA256 : null,
-          knownHostHost: sameTarget ? old!.knownHostHost : null,
-          knownHostPort: sameTarget ? old!.knownHostPort : null, credentialRef: ref };
+        const viaJump: string | null | undefined = (mergedDraft.jumpProfileId !== undefined || old?.knownHostViaJump !== undefined)
+          ? (sameTarget ? (old?.knownHostViaJump ?? null) : null)
+          : undefined;
+        const next: SSHProfile = buildProfileRecord(
+          mergedDraft,
+          (old?.revision ?? 0) + 1,
+          sameTarget ? old!.knownHostSHA256 : null,
+          sameTarget ? old!.knownHostHost : null,
+          sameTarget ? old!.knownHostPort : null,
+          viaJump,
+          usesKeyId ? null : ref,
+        );
+        if (next.keyId && (this.deps.keys === undefined || this.deps.keys.get(next.keyId) === null)) throw new TerminalError('key_missing');
+      validateProfileRouteCandidate(next, this.settings.profiles);
         await this.persist(this.nextSettings(next));
         stagedRef = null;
-        if (old !== null && old.credentialRef !== ref) await this.cleanup(old.credentialRef);
+        if (old !== null && old.credentialRef !== next.credentialRef) await this.cleanup(old.credentialRef);
         return copyProfile(next);
       } catch (error) { await this.cleanup(stagedRef); throw error; }
     });
@@ -188,6 +348,14 @@ export class SSHProfileStore {
   deleteProfile(id: string, expectedRevision: number): Promise<void> {
     return this.serial(async (): Promise<void> => {
       const old: SSHProfile | null = this.checkRevision(id, expectedRevision);
+      const dependentIds: string[] = dependentJumpProfileIds(id, this.settings.profiles);
+      if (dependentIds.length > 0) {
+        throw new TerminalError(
+          'in_use_as_jump',
+          `SSH profile '${old!.name}' (${id}) is used as a jump host by other profiles and cannot be deleted.`,
+          { dependent_profile_ids: dependentIds },
+        );
+      }
       const next: SSHProfileSettings = this.snapshot();
       next.profiles = next.profiles.filter((p: SSHProfile): boolean => p.id !== id);
       if (next.defaultProfileId === id) next.defaultProfileId = null;

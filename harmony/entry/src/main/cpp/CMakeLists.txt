@@ -68,7 +68,7 @@ add_library(amber_protobuf STATIC IMPORTED)
 set_target_properties(amber_protobuf PROPERTIES IMPORTED_LOCATION "${AMBER_MOSH_INSTALL}/lib/libprotobuf-lite.a")
 add_dependencies(amber_protobuf amber_mosh_build)
 
-add_library(amber_native SHARED napi_init.cpp ssh_core.cpp ssh_napi.cpp
+add_library(amber_native SHARED napi_init.cpp ssh_core.cpp ssh_jump.cpp ssh_keys.cpp ssh_napi.cpp
     python_core.cpp python_napi.cpp mosh_core.cpp mosh_napi.cpp plugin_js_core.cpp plugin_js_napi.cpp
     google_loopback_core.cpp google_loopback_napi.cpp stream_frame_rate.cpp)
 target_compile_features(amber_native PRIVATE cxx_std_17)

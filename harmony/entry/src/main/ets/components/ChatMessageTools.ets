@@ -217,7 +217,7 @@ export struct ChatMessageTools {
         showApproval: this.part.approvalState.type === 'pending' && (this.canApprove || this.canDeny),
         approvalSubject: this.approvalTitle(),
         canOpen: this.canOpenPreview,
-        canApprove: this.canApprove,
+        canApprove: this.canApprove && this.part.metadata?.['ssh_trust_settings_required'] !== true,
         canDeny: this.canDeny,
         onApprove: (): void => { this.onApprove(this.part.toolCallId); },
         onDeny: (): void => { this.onDeny(this.part.toolCallId); },

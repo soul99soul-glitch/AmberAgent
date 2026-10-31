@@ -61,6 +61,9 @@ const closeDiscardedHandle = async (handle: SSHHandle, reason: SSHCloseReason): 
 };
 
 export const createNativeSSHTransport = (): SSHTransportPort => ({
+  verify: (requestId: string, connection: SSHConnectionOptions, signal?: AbortSignalLike): Promise<void> =>
+    withRequest<void>(requestId, signal, (): Promise<void> => native.sshVerify(requestId, connection),
+      async (): Promise<void> => {}),
   probe: (requestId: string, options: SSHProbeOptions,
     signal?: AbortSignalLike): Promise<SSHProbeResult> =>
     withRequest<SSHProbeResult>(requestId, signal,

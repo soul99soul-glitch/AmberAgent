@@ -235,7 +235,7 @@ export type { ToolApprovalVerdict, ToolApprovalPartLocator, IdleToolBlockerResul
 export {
   TOOL_APPROVAL_CONTINUATION_WORDS, isToolApprovalContinuation,
   findToolNameInConversation, conversationHasPendingOrUnexecutedTools,
-  resolveApprovalState, applyToolApprovalToConversation, conversationHasPendingTools,
+  resolveApprovalState, collectToolApprovalCandidates, applyToolApprovalToConversation, conversationHasPendingTools,
   cancelToolForNewUserMessage, skipStaleToolForContinuation, resolveIdleToolBlocker,
 } from './chat/tool_approval.ts';
 export { createTimeTool } from './chat/builtin_time_tool.ts';
@@ -1301,11 +1301,16 @@ export type {
   SSHNativeErrorCode, SSHNativeError, SSHHandle, SSHProbeOptions,
   SSHProbeResult, SSHConnectionOptions, SSHExecOptions, SSHPtyOptions,
   SSHOutputChunk, SSHReadPacket, SSHCredentialBinding, SSHCredential,
-  SSHProfileDraft, SSHProfile, SSHProfileSettings, SSHTrustProbe,
+  SSHProfileDraft, SSHProfile, SSHProfileSettings, SSHTrustProbe, SSHKey, SSHKeyProtection,
+  SSHGeneratedKeyMaterial, SSHInspectedKeyMaterial, SSHHopConnectionOptions, SSHRouteHopSummary,
   SSHTargetSnapshot, TerminalCommandRequest, TerminalSessionRequest, TerminalJobSnapshot,
   TerminalSessionSnapshot, TerminalSessionEvent,
 } from './chat/terminal/models.ts';
-export type { SSHTransportPort, SSHCredentialStorePort, TerminalLogPort } from './chat/terminal/ports.ts';
+export type { SSHTransportPort, SSHCredentialStorePort, SSHKeyCryptoPort, TerminalLogPort } from './chat/terminal/ports.ts';
+export { SSHKeyStore } from './chat/terminal/key_store.ts';
+export { createSSHHostTrustTool } from './chat/terminal/host_trust_tool.ts';
+export { createSSHKeyTools } from './chat/terminal/key_tools.ts';
+export { resolveSSHRoute, formatApprovalRouteText, buildRouteHopSummaries } from './chat/terminal/route_resolver.ts';
 export { SSHProfileStore } from './chat/terminal/profile_store.ts';
 export type { SSHProfileStoreDeps } from './chat/terminal/profile_store.ts';
 export { encodeSSHCredential, decodeSSHCredential } from './chat/terminal/credential_codec.ts';

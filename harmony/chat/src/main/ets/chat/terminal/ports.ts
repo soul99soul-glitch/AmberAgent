@@ -1,10 +1,12 @@
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import type {
   SSHCloseReason, SSHConnectionOptions, SSHCredential, SSHCredentialBinding, SSHExecOptions,
-  SSHHandle, SSHProbeOptions, SSHProbeResult, SSHPtyOptions, SSHReadPacket,
+  SSHGeneratedKeyMaterial, SSHHandle, SSHInspectedKeyMaterial, SSHProbeOptions, SSHProbeResult,
+  SSHPtyOptions, SSHReadPacket,
 } from './models.ts';
 
 export interface SSHTransportPort {
+  verify?(requestId: string, connection: SSHConnectionOptions, signal?: AbortSignalLike): Promise<void>;
   probe(requestId: string, options: SSHProbeOptions, signal?: AbortSignalLike): Promise<SSHProbeResult>;
   startExec(requestId: string, connection: SSHConnectionOptions,
     options: SSHExecOptions, signal?: AbortSignalLike): Promise<SSHHandle>;
@@ -20,6 +22,10 @@ export interface SSHCredentialStorePort {
   load(reference: string, binding: SSHCredentialBinding): Promise<SSHCredential | null>;
   exists(reference: string): Promise<boolean>;
   delete(reference: string): Promise<void>;
+}
+export interface SSHKeyCryptoPort {
+  generateKey(name: string, type: 'ed25519' | 'ecdsa-p256'): Promise<SSHGeneratedKeyMaterial>;
+  inspectKey(name: string, privateKey: string, passphrase: string | null): Promise<SSHInspectedKeyMaterial>;
 }
 export interface TerminalLogPort {
   create(id: string): Promise<string>;

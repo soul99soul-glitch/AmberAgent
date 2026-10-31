@@ -1,10 +1,11 @@
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import { newId } from '../ids.ts';
-import type { SSHConnectionOptions, SSHTargetSnapshot, TerminalSessionEvent,
+import type { SSHConnectionOptions, SSHRouteHopSummary, SSHTargetSnapshot, TerminalSessionEvent,
   TerminalSessionRequest, TerminalSessionSnapshot } from './models.ts';
 import type { SSHTransportPort, TerminalLogPort } from './ports.ts';
 import { TerminalController, checkAbort, relayAbort, terminalAwait } from './control.ts';
 import { TerminalError } from './profile_store.ts';
+import { connectionSecrets } from './output_redactor.ts';
 import { TerminalStream } from './stream.ts';
 import { posixQuote, terminalUTF8Encode } from './utf8.ts';
 
@@ -16,13 +17,14 @@ interface Session {
   controller: TerminalController;
   starting: Promise<void>;
   interrupted: boolean;
+  route: SSHRouteHopSummary[];
   listeners: Array<(event: TerminalSessionEvent) => void>;
 }
 export class TerminalSessionRuntime {
   private sessions: Map<string, Session> = new Map();
   constructor(private readonly transport: SSHTransportPort, private readonly logs: TerminalLogPort) {}
   async start(request: TerminalSessionRequest, connection: SSHConnectionOptions,
-    validate: () => void, signal?: AbortSignalLike): Promise<TerminalSessionSnapshot> {
+    validate: () => void, signal?: AbortSignalLike, route: SSHRouteHopSummary[] = []): Promise<TerminalSessionSnapshot> {
     checkAbort(signal);
     const id: string = newId();
     const controller: TerminalController = new TerminalController();
@@ -35,9 +37,10 @@ export class TerminalSessionRuntime {
           try { listener(event); } catch { /* independent terminal view observers */ }
         }
       });
+    stream.setSecrets(connectionSecrets(connection));
     const session: Session = { id, request, target: { profileId: request.target.profileId,
       digest: request.target.digest, usesDefault: request.target.usesDefault }, stream, controller,
-      starting, interrupted: false, listeners: [] };
+      starting, interrupted: false, route, listeners: [] };
     this.sessions.set(id, session);
     const detach: () => void = relayAbort(signal, (): void => controller.abort());
     try {
@@ -73,7 +76,9 @@ export class TerminalSessionRuntime {
     const s: TerminalStream = session.stream;
     return { sessionId: session.id, profileId: session.target.profileId, status: s.status, exitCode: s.exitCode,
       outputTail: s.outputTail, outputLogPath: s.logPath, columns: session.request.columns, rows: session.request.rows,
-      errorCode: s.errorCode, errorMessage: s.errorMessage };
+      route: session.route, errorCode: s.errorCode, errorMessage: s.errorMessage, hopIndex: s.failure?.hopIndex, hopCount: s.failure?.hopCount,
+      failedProfileId: s.failure?.profileId, expectedFingerprintSHA256: s.failure?.expectedFingerprintSHA256,
+      presentedFingerprintSHA256: s.failure?.presentedFingerprintSHA256 };
   }
   read(id: string): TerminalSessionSnapshot { return this.snapshot(this.get(id)); }
   subscribe(id: string, listener: (event: TerminalSessionEvent) => void): () => void {
@@ -84,7 +89,7 @@ export class TerminalSessionRuntime {
   }
   write(id: string, bytes: Uint8Array): Promise<void> { return this.get(id).stream.write(bytes.slice()); }
   async exec(id: string, command: string, target: SSHTargetSnapshot,
-    validate: () => void, signal?: AbortSignalLike): Promise<TerminalSessionSnapshot> {
+    validate: () => void, signal?: AbortSignalLike, route: SSHRouteHopSummary[] = []): Promise<TerminalSessionSnapshot> {
     const session: Session = this.get(id);
     await session.stream.write(terminalUTF8Encode(command + '\n'), (): void => {
       checkAbort(signal);

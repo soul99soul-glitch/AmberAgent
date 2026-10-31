@@ -2,10 +2,11 @@ import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { AgentTaskStore } from '../agent_task.ts';
 import { agentTaskStatusRunning, makeAgentTaskOutputRef, makeAgentTaskRetryPolicy, makeAgentTaskSnapshot } from '../agent_task.ts';
 import { newId } from '../ids.ts';
-import type { SSHConnectionOptions, TerminalCommandRequest, TerminalJobSnapshot } from './models.ts';
+import type { SSHConnectionOptions, SSHRouteHopSummary, TerminalCommandRequest, TerminalJobSnapshot } from './models.ts';
 import type { SSHTransportPort, TerminalLogPort } from './ports.ts';
 import { TerminalController, checkAbort, relayAbort, terminalAwait, terminalDelay } from './control.ts';
 import { TerminalError } from './profile_store.ts';
+import { connectionSecrets } from './output_redactor.ts';
 import { TerminalStream } from './stream.ts';
 import { posixQuote } from './utf8.ts';
 
@@ -16,13 +17,14 @@ interface Job {
   controller: TerminalController;
   starting: Promise<void>;
   interrupted: boolean;
+  route: SSHRouteHopSummary[];
 }
 export class TerminalJobRuntime {
   private jobs: Map<string, Job> = new Map();
   constructor(private readonly transport: SSHTransportPort, private readonly logs: TerminalLogPort,
     private readonly taskStore: AgentTaskStore) {}
   async start(request: TerminalCommandRequest, connection: SSHConnectionOptions,
-    validate: () => void, signal?: AbortSignalLike): Promise<TerminalJobSnapshot> {
+    validate: () => void, signal?: AbortSignalLike, route: SSHRouteHopSummary[] = []): Promise<TerminalJobSnapshot> {
     checkAbort(signal);
     const id: string = newId();
     const controller: TerminalController = new TerminalController();
@@ -30,7 +32,8 @@ export class TerminalJobRuntime {
     const starting: Promise<void> = new Promise((resolve): void => { finishStarting = resolve; });
     const stream: TerminalStream = new TerminalStream('', this.transport, this.logs,
       async (): Promise<void> => { await this.publish(job); });
-    const job: Job = { id, request, stream, controller, starting, interrupted: false };
+    stream.setSecrets(connectionSecrets(connection));
+    const job: Job = { id, request, stream, controller, starting, interrupted: false, route };
     this.jobs.set(id, job);
     const detach: () => void = relayAbort(signal, (): void => controller.abort());
     try {
@@ -72,21 +75,25 @@ export class TerminalJobRuntime {
       outputOffset: job.stream.logBytes, outputRef: makeAgentTaskOutputRef({ type: 'terminal_log',
         path: snapshot.outputLogPath, exists: true, tailOffset: job.stream.logBytes }),
       summary: JSON.stringify({ exitCode: snapshot.exitCode, stdoutTail: snapshot.stdoutTail,
-        stderrTail: snapshot.stderrTail, outputTail: snapshot.outputTail }),
+        stderrTail: snapshot.stderrTail, outputTail: snapshot.outputTail, route: snapshot.route,
+        hopIndex: snapshot.hopIndex, hopCount: snapshot.hopCount, failedProfileId: snapshot.failedProfileId, expectedFingerprintSHA256: snapshot.expectedFingerprintSHA256,
+        presentedFingerprintSHA256: snapshot.presentedFingerprintSHA256 }),
       lastHeartbeatMs: Date.now(), error: snapshot.errorMessage, lastErrorCode: snapshot.errorCode });
   }
   private snapshot(job: Job): TerminalJobSnapshot {
     const s: TerminalStream = job.stream;
     return { jobId: job.id, profileId: job.request.target.profileId, command: job.request.command, cwd: job.request.cwd,
       status: s.status, exitCode: s.exitCode, stdoutTail: s.stdoutTail, stderrTail: s.stderrTail, outputTail: s.outputTail,
-      outputLogPath: s.logPath, errorCode: s.errorCode, errorMessage: s.errorMessage };
+      outputLogPath: s.logPath, route: job.route, errorCode: s.errorCode, errorMessage: s.errorMessage, hopIndex: s.failure?.hopIndex, hopCount: s.failure?.hopCount,
+      failedProfileId: s.failure?.profileId, expectedFingerprintSHA256: s.failure?.expectedFingerprintSHA256,
+      presentedFingerprintSHA256: s.failure?.presentedFingerprintSHA256 };
   }
   read(id: string): TerminalJobSnapshot {
     const job: Job | undefined = this.jobs.get(id);
     if (job !== undefined) return this.snapshot(job);
     const task = this.taskStore.read(id);
     if (task === null || task.type !== 'terminal' || task.runtime !== 'remote_ssh') throw new TerminalError('job_missing');
-    interface StoredTail { exitCode: number | null; stdoutTail: string; stderrTail: string; outputTail: string; }
+    interface StoredTail { exitCode: number | null; stdoutTail: string; stderrTail: string; outputTail: string; route?: SSHRouteHopSummary[]; hopIndex?: number; hopCount?: number; failedProfileId?: string; expectedFingerprintSHA256?: string; presentedFingerprintSHA256?: string; }
     let tails: StoredTail = { exitCode: null, stdoutTail: '', stderrTail: '', outputTail: '' };
     if (task.summary !== null) { try { tails = JSON.parse(task.summary) as StoredTail; } catch { /* legacy task summary */ } }
     return { jobId: id, profileId: String(task.spec?.['profileId'] ?? ''), command: String(task.spec?.['command'] ?? ''),
@@ -94,6 +101,8 @@ export class TerminalJobRuntime {
       status: agentTaskStatusRunning(task.status) ? 'INTERRUPTED' : task.status,
       exitCode: task.status === 'COMPLETED' || task.status === 'FAILED' ? tails.exitCode ?? null : null,
       stdoutTail: tails.stdoutTail ?? '', stderrTail: tails.stderrTail ?? '', outputTail: tails.outputTail ?? '',
+      expectedFingerprintSHA256: tails.expectedFingerprintSHA256, presentedFingerprintSHA256: tails.presentedFingerprintSHA256,
+      route: tails.route, hopIndex: tails.hopIndex, hopCount: tails.hopCount, failedProfileId: tails.failedProfileId,
       outputLogPath: task.outputRef?.path ?? task.outputPath ?? '', errorCode: task.lastErrorCode, errorMessage: task.error };
   }
   async wait(id: string, timeoutMs: number, signal?: AbortSignalLike): Promise<TerminalJobSnapshot> {

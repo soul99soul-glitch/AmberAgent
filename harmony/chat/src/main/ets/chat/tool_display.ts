@@ -50,6 +50,11 @@ export const modelSlotActionTitle = (slot: string | null): string => {
 // ===== 静态标签 =====
 
 const TOOL_STATIC_LABELS: Record<string, string> = {
+  'ssh_key_list': '查看本机 SSH 密钥',
+  'ssh_key_generate': '生成 SSH 密钥',
+  'ssh_key_import': '导入 SSH 密钥',
+  'ssh_key_delete': '删除 SSH 密钥',
+  'ssh_host_trust': '首次信任 SSH 主机',
   'ssh_profile_list': '查看 SSH 配置',
   'ssh_profile_create': '新建 SSH 配置',
   'ssh_profile_update': '修改 SSH 配置',
@@ -326,6 +331,8 @@ const sshProfileApprovalSummary = (
   out.add('主机', scalarText(input, 'host') ?? (toolName === 'ssh_profile_delete' ? currentHost : null));
   out.add('端口', scalarText(input, 'port'));
   out.add('用户名', scalarText(input, 'username'));
+  out.add('本机密钥', scalarText(input, 'key_id'));
+  out.add('跳板配置', scalarText(input, 'jump_profile_id'));
   out.add('认证方式', sshAuthLabel(scalarText(input, 'auth_method')));
   const hasPassword: boolean = scalarText(input, 'password') !== null;
   const hasKey: boolean = scalarText(input, 'private_key') !== null;
@@ -344,7 +351,7 @@ const sshProfileApprovalSummary = (
     return summaryOf(title, toolName, out, '将删除已保存的凭据，之后连接需要重新输入。', 'caution');
   }
   // 只有 host 或 port 真的变了才会清空已确认的主机指纹。
-  const turnsTrustOff: boolean = existing !== null && (
+  const turnsTrustOff: boolean = Object.prototype.hasOwnProperty.call(input, 'jump_profile_id') || existing !== null && (
     (scalarText(input, 'host') !== null && scalarText(input, 'host') !== currentHost)
     || (numberOf(input, 'port') !== null && numberOf(input, 'port') !== existing.port));
   if (turnsTrustOff) {

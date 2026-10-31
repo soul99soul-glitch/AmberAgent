@@ -15,7 +15,9 @@ const { createAskUserTool } = require('../../../chat/src/main/ets/chat/builtin_a
 const { AgentToolActivityStore } = require('../../../chat/src/main/ets/chat/tool_activity.ts');
 const { createToolRegistry } = require('../../../chat/src/main/ets/chat/tool_registry.ts');
 const { createToolSearchTool } = require('../../../chat/src/main/ets/chat/builtin_introspection_tools.ts');
-const domain = { ...assistants, ...storage, createTerminalTools, createTimeTool, createAskUserTool };
+const domain = { ...assistants, ...storage, createSSHProfileTools: require('../../../chat/src/main/ets/chat/terminal/profile_tools.ts').createSSHProfileTools,
+  createSSHHostTrustTool: require('../../../chat/src/main/ets/chat/terminal/host_trust_tool.ts').createSSHHostTrustTool,
+  createTerminalTools, createTimeTool, createAskUserTool };
 
 function loadEntry(name, dependencies) {
   const source = fs.readFileSync(path.join(entryRoot, 'platform_impl', name + '.ets'), 'utf8');

@@ -1,58 +1,50 @@
 // profile_tools — SSH 配置的 Agent 工具(列出 / 新建 / 修改 / 删除)
 //
 // 设计边界:
-//   - list 只读:只返回 id/名称/host/port/用户名/认证方式 + 「是否已存凭据」布尔 +
-//     主机指纹是否已确认;绝不返回 credentialRef 或任何凭据明文。
+//   - list 只读:只返回 id/名称/host/port/用户名/认证方式/key_id/jump_profile_id/route +
+//     「是否已存凭据」布尔 + 主机指纹是否已确认;绝不返回 credentialRef 或任何凭据明文。
 //   - create/update/delete 是写操作:risk=high + mandatoryApproval,因此
 //     「自动批准普通变更」放不过去;用户开了「高风险自动批准」时按
 //     PermissionDecisionResolver 既有语义照常放行(本模块不额外拦截)。
-//   - 凭据只写不读:password / private_key / private_key_passphrase 只进内存与
+//   - 凭据只写不读:password / private_key / private_key_passphrase / passphrase 只进内存与
 //     加密凭据库;返回值、日志、卡片都只说「已设置/已清除」。
 //     对话记录里的参数脱敏由 redactSSHProfileToolInput 提供(接在保存与展示链路上)。
-//   - 主机指纹:模型无法探测未知主机,所以换了 host/port/用户名/认证方式的配置会清空
-//     knownHost(沿用 SSHProfileStore 语义),结果里 host_trust=unconfirmed 提示用户
-//     需在设置页完成一次指纹确认后才能连接。
+//   - 主机指纹:换了 host/port/jump_profile_id 的配置会清空 knownHost,结果里
+//     host_trust=unconfirmed 提示用户需确认一次指纹后才能连接。
 
 import type { AgentTool } from '../tool.ts';
 import { makeAgentTool, makeInputSchemaObj } from '../tool.ts';
 import type { InputSchemaObj } from '../tool.ts';
 import type { JsonObject, JsonValue } from '../json.ts';
 import type { UIMessagePart } from '../message.ts';
-import type { SSHAuthMethod, SSHCredential, SSHProfile, SSHProfileDraft } from './models.ts';
+import type { SSHAuthMethod, SSHCredential, SSHKey, SSHProfile, SSHProfileDraft } from './models.ts';
+import type { SSHKeyStore } from './key_store.ts';
+import { SSH_KEY_TOOL_NAMES, SSH_PROFILE_TOOL_NAMES, SSH_PROFILE_SECRET_FIELDS } from './ssh_tool_contract.ts';
+export { SSH_PROFILE_TOOL_NAMES, SSH_PROFILE_SECRET_FIELDS, SSH_PROFILE_MAIN_SESSION_ONLY_TOOLS,
+  isSSHProfileMainSessionOnly } from './ssh_tool_contract.ts';
 import type { SSHProfileStore } from './profile_store.ts';
 import { TerminalError, normalizeDraft, sameBinding } from './profile_store.ts';
+import { buildRouteHopJsonList, isProfileHostTrusted, resolveSSHRoute } from './route_resolver.ts';
 import { newId } from '../ids.ts';
 import { isRedactedPlaceholder } from '../tool_input_redaction.ts';
 
-export const SSH_PROFILE_TOOL_NAMES: string[] = [
-  'ssh_profile_list', 'ssh_profile_create', 'ssh_profile_update', 'ssh_profile_delete',
-];
-
-/**
- * 只留给主会话的 SSH 配置工具:增/改/删会写保存的凭据并改变连接目标。
- * 子代理与 Council 席位只拿 list(只读),写操作一律在主会话里由用户当面批准。
- */
-export const SSH_PROFILE_MAIN_SESSION_ONLY_TOOLS: string[] = [
-  'ssh_profile_create', 'ssh_profile_update', 'ssh_profile_delete',
-];
-
-export const isSSHProfileMainSessionOnly = (toolName: string): boolean =>
-  SSH_PROFILE_MAIN_SESSION_ONLY_TOOLS.indexOf(toolName) >= 0;
-
-/** 工具参数里承载凭据的字段名(供对话记录脱敏复用) */
-export const SSH_PROFILE_SECRET_FIELDS: string[] = ['password', 'private_key', 'private_key_passphrase'];
-
 export interface SSHProfileToolsDeps {
-  // 凭据库不单独注入:store 只对外暴露 credentialExists,工具层无法绕过
-  // revision/清理约束直接读写凭据。
   profiles: SSHProfileStore;
+  keys?: SSHKeyStore;
 }
 
 const textResult = (value: JsonObject): UIMessagePart[] =>
   [{ type: 'text', text: JSON.stringify(value), metadata: null }];
 
-const failure = (code: string, message: string, recoverable: boolean): UIMessagePart[] =>
-  textResult({ status: 'failed', error_code: code, message, recoverable });
+const failure = (code: string, message: string, recoverable: boolean, details: JsonObject | null = null): UIMessagePart[] => {
+  const payload: JsonObject = { ok: false, status: 'failed', error_code: code, message, recoverable };
+  if (details !== null) {
+    for (const k of Object.keys(details)) {
+      payload[k] = details[k];
+    }
+  }
+  return textResult(payload);
+};
 
 const objectArg = (input: JsonValue): JsonObject => {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
@@ -67,6 +59,10 @@ const stringArg = (j: JsonObject, key: string): string | null => {
   if (typeof value !== 'string') throw new TerminalError('invalid_arguments');
   return value;
 };
+
+const hasExplicitNullOrEmpty = (j: JsonObject, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(j, key) &&
+  (j[key] === null || (typeof j[key] === 'string' && (j[key] as string).trim().length === 0));
 
 const requiredString = (j: JsonObject, key: string): string => {
   const value: string | null = stringArg(j, key);
@@ -89,27 +85,17 @@ const booleanArg = (j: JsonObject, key: string): boolean => {
 const authMethodArg = (j: JsonObject): SSHAuthMethod | null => {
   const value: JsonValue | undefined = j['auth_method'];
   if (value === undefined || value === null || value === '') return null;
+  if (value === 'key' || value === 'private_key') return 'privateKey';
   if (value !== 'password' && value !== 'privateKey') throw new TerminalError('invalid_arguments');
   return value;
 };
 
-/** 已保存配置的对外摘要:凭据只有布尔值。 */
-const profileJson = (p: SSHProfile, defaultId: string | null, hasCredential: boolean): JsonObject => ({
-  id: p.id, name: p.name, host: p.host, port: p.port, username: p.username,
-  auth_method: p.authMethod, is_default: p.id === defaultId,
-  has_saved_credential: hasCredential,
-  has_password: p.authMethod === 'password' && hasCredential,
-  has_private_key: p.authMethod === 'privateKey' && hasCredential,
-  host_trust: p.knownHostSHA256 === null ? 'unconfirmed' : 'confirmed',
-  revision: p.revision,
-});
-
 /**
  * 把凭据字段换成占位,供对话记录 / 卡片 / 日志复用。
- * 只处理本工具自己的参数形状;其他工具的输入原样返回(不重构现有脱敏)。
+ * 同时覆盖 ssh_profile_* 与 ssh_key_import。
  */
 export const redactSSHProfileToolInput = (toolName: string, input: JsonObject): JsonObject => {
-  if (SSH_PROFILE_TOOL_NAMES.indexOf(toolName) < 0) return input;
+  if (SSH_PROFILE_TOOL_NAMES.indexOf(toolName) < 0 && SSH_KEY_TOOL_NAMES.indexOf(toolName) < 0) return input;
   const out: JsonObject = {};
   for (const key of Object.keys(input)) {
     const value: JsonValue = input[key];
@@ -119,25 +105,28 @@ export const redactSSHProfileToolInput = (toolName: string, input: JsonObject): 
   return out;
 };
 
-// 占位符识别复用共享清单(*** / <redacted> / [REDACTED] / REDACTED / ••••,大小写不敏感)
 const looksRedacted = (value: string | null): boolean => isRedactedPlaceholder(value);
 
-// 认证方式与凭据字段必须自洽,避免把密码存进私钥槽或反之。
-const credentialFor = (j: JsonObject, authMethod: SSHAuthMethod, clear: boolean): SSHCredential | null => {
+const credentialFor = (
+  j: JsonObject,
+  authMethod: SSHAuthMethod,
+  hasKeyId: boolean,
+  clear: boolean,
+): SSHCredential | null => {
   const password: string | null = stringArg(j, 'password');
   const privateKey: string | null = stringArg(j, 'private_key');
-  const passphrase: string | null = stringArg(j, 'private_key_passphrase');
+  const passphrase: string | null = stringArg(j, 'private_key_passphrase') ?? stringArg(j, 'passphrase');
   const hasPassword: boolean = password !== null && password.length > 0;
   const hasKey: boolean = privateKey !== null && privateKey.length > 0;
   const hasPassphrase: boolean = passphrase !== null && passphrase.length > 0;
-  // 审批后从存储回放时会拿到脱敏占位符:绝不能再把它当凭据写进存储(BLOCK1)。
   if (looksRedacted(password) || looksRedacted(privateKey) || looksRedacted(passphrase)) {
     throw new TerminalError('credential_unavailable');
   }
   if (hasPassword && hasKey) throw new TerminalError('invalid_arguments');
-  if (authMethod === 'password' && (hasKey || hasPassphrase)) throw new TerminalError('invalid_arguments');
+  if (hasKeyId && (hasPassword || hasKey)) throw new TerminalError('invalid_arguments');
+  if (authMethod === 'password' && (hasKey || hasPassphrase || hasKeyId)) throw new TerminalError('invalid_arguments');
   if (authMethod === 'privateKey' && hasPassword) throw new TerminalError('invalid_arguments');
-  if (clear && (hasPassword || hasKey || hasPassphrase)) throw new TerminalError('invalid_arguments');
+  if (clear && (hasPassword || hasKey || hasPassphrase || hasKeyId)) throw new TerminalError('invalid_arguments');
   let secret: string | null = null;
   if (authMethod === 'password' && hasPassword) secret = password;
   else if (authMethod === 'privateKey' && hasKey) secret = privateKey;
@@ -151,36 +140,115 @@ const failureFor = (error: unknown, fallback: string): UIMessagePart[] => {
     const messages: Record<string, string> = {
       profile_conflict: 'Profile changed since it was read. Call ssh_profile_list and retry.',
       profile_missing: 'No saved SSH profile with that id.',
-      invalid_arguments: 'Invalid arguments: check name, host, port (1-65535), username, auth_method and credential fields.',
-      credential_required: 'Changing host, port, username or auth method needs the new credential.',
-      credential_missing: 'No usable credential is stored for this profile; provide a password or private key.',
+      invalid_arguments: 'Invalid arguments: check name, host, port (1-65535), username, auth_method, key_id, jump_profile_id and credential fields.',
+      credential_required: 'Changing host, port, username or auth method needs the new credential or key_id.',
+      credential_missing: 'No usable credential is stored for this profile; provide a password, key_id, or private key.',
       credential_unavailable: 'The stored arguments no longer contain the credential. Ask the user for the password '
         + 'or private key again; the placeholder cannot be saved.',
       profile_name_taken: 'Another SSH profile already uses that name. Pick a different name.',
+      key_missing: 'No saved SSH key with that key_id. Call ssh_key_list or ssh_key_generate first.',
+      jump_profile_not_found: 'The specified jump_profile_id does not exist.',
+      jump_cycle: 'The jump_profile_id configuration forms a cycle.',
+      jump_chain_too_long: 'Maximum 3 jump hosts allowed (4 total hops).',
+      in_use_as_jump: 'This profile is referenced as jump_profile_id by other profiles and cannot be deleted until those references are removed.',
     };
-    const message: string = messages[error.code] ?? `Remote SSH: ${error.code}`;
-    // 可恢复 = 用户重新提供参数后能成功;名称重复与凭据缺失都属此类。
-    const recoverable: boolean = ['profile_conflict', 'profile_missing', 'profile_name_taken',
-      'credential_missing', 'credential_required', 'credential_unavailable'].includes(error.code);
-    return failure(error.code, message, recoverable);
+    const message: string = messages[error.code] ?? error.message ?? `Remote SSH: ${error.code}`;
+    const recoverable: boolean = [
+      'profile_conflict', 'profile_missing', 'profile_name_taken',
+      'credential_missing', 'credential_required', 'credential_unavailable',
+      'key_missing', 'jump_profile_not_found', 'jump_cycle', 'jump_chain_too_long', 'in_use_as_jump',
+    ].includes(error.code);
+    return failure(error.code, message, recoverable, error.details);
   }
   return failure('profile_write_failed', fallback, false);
 };
 
 export const createSSHProfileTools = (deps: SSHProfileToolsDeps): AgentTool[] => {
-  const describe = async (p: SSHProfile): Promise<JsonObject> =>
-    profileJson(p, deps.profiles.snapshot().defaultProfileId, await deps.profiles.credentialExists(p.credentialRef));
+  const describe = async (p: SSHProfile): Promise<JsonObject> => {
+    const settings = deps.profiles.snapshot();
+    const keyId: string | null = p.keyId ?? null;
+    const keyRecord: SSHKey | null = (keyId !== null && deps.keys !== undefined) ? deps.keys.get(keyId) : null;
+    const hasInlineCred: boolean = await deps.profiles.credentialExists(p.credentialRef);
+    const hasKeyCred: boolean = keyId !== null && (deps.keys !== undefined ? await deps.keys.credentialExists(keyId) : false);
+    const hasCredential: boolean = hasInlineCred || hasKeyCred;
+    let routeJson: JsonObject[] = [];
+    let routeReady: boolean = false;
+    try {
+      const resolved: SSHProfile[] = resolveSSHRoute(p.id, settings.profiles);
+      routeJson = buildRouteHopJsonList(resolved);
+      routeReady = true;
+      for (const hop of resolved) {
+        const credentialReady: boolean = hop.keyId ? (deps.keys !== undefined && await deps.keys.credentialExists(hop.keyId))
+          : await deps.profiles.credentialExists(hop.credentialRef);
+        if (!isProfileHostTrusted(hop) || !credentialReady) routeReady = false;
+      }
+    } catch {
+      routeJson = [];
+      routeReady = false;
+    }
+    const hostTrusted: boolean = isProfileHostTrusted(p);
+    return {
+      id: p.id,
+      name: p.name,
+      host: p.host,
+      port: p.port,
+      username: p.username,
+      auth_method: p.authMethod,
+      key_id: keyId,
+      key_fingerprint: keyRecord?.fingerprintSHA256 ?? null,
+      jump_profile_id: p.jumpProfileId ?? null,
+      is_default: p.id === settings.defaultProfileId,
+      has_saved_credential: hasCredential,
+      has_password: p.authMethod === 'password' && hasInlineCred,
+      has_private_key: p.authMethod === 'privateKey' && hasCredential,
+      host_trust: hostTrusted ? 'confirmed' : 'unconfirmed',
+      route: routeJson,
+      route_ready: routeReady && hasCredential,
+      revision: p.revision,
+    };
+  };
 
-  const draftFor = (j: JsonObject, existing: SSHProfile | null): SSHProfileDraft => normalizeDraft({
-    id: existing === null ? newId() : existing.id,
-    name: stringArg(j, 'name') ?? existing?.name ?? '',
-    host: stringArg(j, 'host') ?? existing?.host ?? '',
-    port: numberArg(j, 'port') ?? existing?.port ?? 22,
-    username: stringArg(j, 'username') ?? existing?.username ?? '',
-    authMethod: authMethodArg(j) ?? existing?.authMethod ?? 'password',
-  });
+  const draftFor = (j: JsonObject, existing: SSHProfile | null): SSHProfileDraft => {
+    const explicitKeyId: string | null = stringArg(j, 'key_id');
+    const clearKeyId: boolean = hasExplicitNullOrEmpty(j, 'key_id') || booleanArg(j, 'clear_credential');
+    const explicitJumpId: string | null = stringArg(j, 'jump_profile_id');
+    const clearJumpId: boolean = hasExplicitNullOrEmpty(j, 'jump_profile_id');
 
-  // 名称按大小写不敏感去重(排除自身),与设置页的「名称唯一」一致。
+    let keyId: string | null | undefined = existing?.keyId;
+    if (clearKeyId) keyId = null;
+    else if (explicitKeyId !== null && explicitKeyId.trim().length > 0) keyId = explicitKeyId.trim();
+
+    let jumpProfileId: string | null | undefined = existing?.jumpProfileId;
+    if (clearJumpId) jumpProfileId = null;
+    else if (explicitJumpId !== null && explicitJumpId.trim().length > 0) jumpProfileId = explicitJumpId.trim();
+
+    const explicitAuth: SSHAuthMethod | null = authMethodArg(j);
+    if (explicitKeyId !== null && explicitKeyId.trim().length > 0 && explicitAuth === 'password') {
+      throw new TerminalError('invalid_arguments');
+    }
+    if ((explicitAuth === 'password' || typeof j['private_key'] === 'string') && explicitKeyId === null) {
+      keyId = null;
+    }
+    const resolvedAuth: SSHAuthMethod = explicitAuth ??
+      ((explicitKeyId !== null && explicitKeyId.trim().length > 0) ? 'privateKey' : (existing?.authMethod ?? 'password'));
+
+    if (keyId !== undefined && keyId !== null && (deps.keys === undefined || deps.keys.get(keyId) === null)) {
+      throw new TerminalError('key_missing');
+    }
+
+    const rawDraft: SSHProfileDraft = {
+      id: existing === null ? newId() : existing.id,
+      name: stringArg(j, 'name') ?? existing?.name ?? '',
+      host: stringArg(j, 'host') ?? existing?.host ?? '',
+      port: numberArg(j, 'port') ?? existing?.port ?? 22,
+      username: stringArg(j, 'username') ?? existing?.username ?? '',
+      authMethod: resolvedAuth,
+    };
+    if (keyId !== undefined) rawDraft.keyId = keyId;
+    if (jumpProfileId !== undefined) rawDraft.jumpProfileId = jumpProfileId;
+    return normalizeDraft(rawDraft);
+  };
+
   const assertNameAvailable = (draft: SSHProfileDraft): void => {
     const wanted: string = draft.name.trim().toLowerCase();
     for (const other of deps.profiles.snapshot().profiles) {
@@ -190,40 +258,61 @@ export const createSSHProfileTools = (deps: SSHProfileToolsDeps): AgentTool[] =>
   };
 
   const apply = async (j: JsonObject, existing: SSHProfile | null): Promise<SSHProfile> => {
+    const clear: boolean = booleanArg(j, 'clear_credential');
+    const explicitKeyId: string | null = stringArg(j, 'key_id');
+    const hasNewKeyId: boolean = explicitKeyId !== null && explicitKeyId.trim().length > 0;
     const draft: SSHProfileDraft = draftFor(j, existing);
     assertNameAvailable(draft);
-    const clear: boolean = booleanArg(j, 'clear_credential');
-    const credential: SSHCredential | null = credentialFor(j, draft.authMethod, clear);
+    let credential: SSHCredential | null = credentialFor(j, draft.authMethod, hasNewKeyId, clear);
+    let imported: SSHKey | null = null;
+    if (draft.authMethod === 'privateKey' && credential !== null && deps.keys !== undefined) {
+      imported = await deps.keys.importKey(`${draft.name.slice(0, 40)}-imported-${newId().slice(0, 8)}`, credential.secret, credential.passphrase);
+      draft.keyId = imported.id;
+      credential = null;
+    }
     const expected: number | null = existing === null ? null : existing.revision;
-    if (existing === null) {
-      // 新建必须带凭据:没有凭据的配置连不上,只会在终端里报 credential_missing。
-      if (credential === null) throw new TerminalError('credential_missing');
-      return deps.profiles.saveWithCredential(draft, null, credential, false);
+    const hasEffectiveKeyId: boolean = draft.authMethod === 'privateKey' &&
+      draft.keyId !== undefined && draft.keyId !== null;
+    try {
+      if (existing === null) {
+        if (credential === null && !hasEffectiveKeyId) throw new TerminalError('credential_missing');
+        return await deps.profiles.saveWithCredential(draft, null, credential, false);
+      }
+      if (credential !== null || hasNewKeyId || imported !== null || hasEffectiveKeyId) {
+        return await deps.profiles.saveWithCredential(draft, expected, credential, false);
+      }
+      if (!clear && !sameBinding(existing, draft) && (existing.credentialRef !== null || (existing.keyId ?? null) !== null)) {
+        throw new TerminalError('credential_required', 'Changing host, port, username or auth method needs the new credential');
+      }
+      if (clear) return await deps.profiles.saveWithCredential(draft, expected, null, true);
+      return await deps.profiles.saveMetadata(draft, expected);
+    } catch (error) {
+      if (imported !== null && deps.keys !== undefined) await deps.keys.deleteKey(imported.id);
+      throw error;
     }
-    if (credential !== null) return deps.profiles.saveWithCredential(draft, expected, credential, false);
-    // 无新凭据:
-    //   clear → store 在同一事务里清掉旧 ref(设置页语义:清凭据不动元数据)
-    //   想沿用旧凭据 → 必须 binding 未变且凭据仍在,否则明确报错而不是静默丢凭据
-    //   本来就没有凭据 → 与设置页一致,只改名称/端口等元数据不要求凭据
-    if (!clear && !sameBinding(existing, draft) && existing.credentialRef !== null) {
-      throw new TerminalError('credential_required', 'Changing host, port, username or auth method needs the new credential');
-    }
-    if (clear) return deps.profiles.saveWithCredential(draft, expected, null, true);
-    return deps.profiles.saveMetadata(draft, expected);
   };
 
   const secretProperties: JsonObject = {
+    key_id: {
+      type: 'string',
+      description: 'ID of a local SSH key from ssh_key_list or ssh_key_generate (preferred for privateKey auth).',
+    },
+    jump_profile_id: {
+      type: ['string', 'null'],
+      description: 'Null/empty string clears the route. Optional ID of a jump/bastion SSH profile (ProxyJump). Up to 3 jump hosts supported.',
+    },
     password: { type: 'string', description: 'Password. Write-only: stored in the encrypted store, never returned or logged.' },
     private_key: { type: 'string', description: 'OpenSSH/PEM private key. Write-only.' },
+    passphrase: { type: 'string', description: 'Private key passphrase. Write-only.' },
     private_key_passphrase: { type: 'string', description: 'Passphrase for the private key. Write-only.' },
   };
 
   return [
     makeAgentTool({
       name: 'ssh_profile_list',
-      description: 'List saved SSH profiles: id, name, host, port, username, auth method, whether a credential is '
-        + 'stored (password or private key as booleans only), whether the host key is confirmed, and the revision. '
-        + 'Read-only; never returns passwords, private keys or passphrases.',
+      description: 'List saved SSH profiles: id, name, host, port, username, auth method, key_id, key_fingerprint, '
+        + 'jump_profile_id, resolved multi-hop route, route_ready, whether a credential is stored (booleans only), '
+        + 'whether the host key is confirmed, and the revision. Read-only; never returns passwords, private keys or passphrases.',
       needsApproval: false,
       allowsAutoApproval: true,
       parameters: (): InputSchemaObj => makeInputSchemaObj({}),
@@ -233,7 +322,7 @@ export const createSSHProfileTools = (deps: SSHProfileToolsDeps): AgentTool[] =>
           const settings = deps.profiles.snapshot();
           const profiles: JsonObject[] = [];
           for (const profile of settings.profiles) {
-            profiles.push(profileJson(profile, settings.defaultProfileId, await deps.profiles.credentialExists(profile.credentialRef)));
+            profiles.push(await describe(profile));
           }
           return textResult({ status: 'ok', count: profiles.length,
             default_profile_id: settings.defaultProfileId, profiles });
@@ -244,10 +333,11 @@ export const createSSHProfileTools = (deps: SSHProfileToolsDeps): AgentTool[] =>
     }),
     makeAgentTool({
       name: 'ssh_profile_create',
-      description: 'Create an SSH profile and store its password or private key. The credential is write-only: never '
-        + 'repeat it in your reply. Host-key trust starts unconfirmed, so tell the user the fingerprint must be '
-        + 'confirmed in Settings once before the first connection. High risk: needs explicit approval unless '
-        + 'high-risk auto-approval is enabled.',
+      description: 'Create an SSH profile with password auth, a saved local SSH key (key_id from ssh_key_generate / '
+        + 'ssh_key_list), or an inline private key, and optionally chain through a bastion/jump host via jump_profile_id '
+        + '(ProxyJump, up to 3 jump hosts). When the user has no SSH key yet, call ssh_key_generate first, give the '
+        + 'returned public_key to the user to add to ~/.ssh/authorized_keys, then call ssh_profile_create with key_id. '
+        + 'Credentials are write-only: never repeat them in your reply. High risk: needs explicit approval.',
       needsApproval: true,
       allowsAutoApproval: false,
       mandatoryApproval: true,
@@ -256,7 +346,7 @@ export const createSSHProfileTools = (deps: SSHProfileToolsDeps): AgentTool[] =>
         host: { type: 'string', description: 'Host name or IP address.' },
         port: { type: 'number', description: 'SSH port, 1-65535. Defaults to 22.' },
         username: { type: 'string' },
-        auth_method: { type: 'string', enum: ['password', 'privateKey'], description: 'Defaults to password.' },
+        auth_method: { type: 'string', enum: ['password', 'key', 'private_key', 'privateKey'], description: 'Defaults to password (or privateKey when key_id is set).' },
         ...secretProperties,
       }, ['name', 'host', 'username']),
       execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
@@ -271,10 +361,10 @@ export const createSSHProfileTools = (deps: SSHProfileToolsDeps): AgentTool[] =>
     }),
     makeAgentTool({
       name: 'ssh_profile_update',
-      description: 'Update a saved SSH profile: rename it, change host/port/username/auth method, replace its '
-        + 'password or private key, or clear the stored credential. Changing host, port, username or auth method '
-        + 'requires the new credential and clears the confirmed host key. Credentials are write-only. High risk: '
-        + 'needs explicit approval unless high-risk auto-approval is enabled.',
+      description: 'Update a saved SSH profile: rename it, change host/port/username/auth method, bind a local SSH key '
+        + '(key_id), set or clear jump_profile_id (ProxyJump), replace its password or private key, or clear the stored '
+        + 'credential. Changing host, port, or jump_profile_id clears the confirmed host key. Credentials are write-only. '
+        + 'High risk: needs explicit approval.',
       needsApproval: true,
       allowsAutoApproval: false,
       mandatoryApproval: true,
@@ -284,7 +374,7 @@ export const createSSHProfileTools = (deps: SSHProfileToolsDeps): AgentTool[] =>
         host: { type: 'string' },
         port: { type: 'number', description: 'SSH port, 1-65535.' },
         username: { type: 'string' },
-        auth_method: { type: 'string', enum: ['password', 'privateKey'] },
+        auth_method: { type: 'string', enum: ['password', 'key', 'private_key', 'privateKey'] },
         ...secretProperties,
         clear_credential: { type: 'boolean', description: 'Delete the stored password/private key without replacing it.' },
       }, ['id']),
@@ -295,7 +385,7 @@ export const createSSHProfileTools = (deps: SSHProfileToolsDeps): AgentTool[] =>
           if (existing === null) throw new TerminalError('profile_missing');
           const saved: SSHProfile = await apply(j, existing);
           return textResult({ status: 'ok', action: 'updated', profile: await describe(saved),
-            note: saved.knownHostSHA256 === null
+            note: !isProfileHostTrusted(saved)
               ? 'The host key is no longer confirmed; confirm the fingerprint in Settings before connecting.'
               : 'Profile saved.' });
         } catch (error) {
@@ -305,9 +395,9 @@ export const createSSHProfileTools = (deps: SSHProfileToolsDeps): AgentTool[] =>
     }),
     makeAgentTool({
       name: 'ssh_profile_delete',
-      description: 'Delete a saved SSH profile and its stored password/private key. Terminal jobs and sessions that '
-        + 'already started keep running, but new calls on that profile fail with profile_missing. High risk: needs '
-        + 'explicit approval unless high-risk auto-approval is enabled.',
+      description: 'Delete a saved SSH profile and its stored password/private key. Rejected with in_use_as_jump if '
+        + 'other profiles reference this profile as jump_profile_id. Terminal jobs and sessions that already started '
+        + 'keep running, but new calls on that profile fail with profile_missing. High risk: needs explicit approval.',
       needsApproval: true,
       allowsAutoApproval: false,
       mandatoryApproval: true,

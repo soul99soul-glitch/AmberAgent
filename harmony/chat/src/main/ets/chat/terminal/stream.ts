@@ -4,6 +4,8 @@ import type { SSHCloseReason, SSHHandle, SSHOutputChunk, SSHReadPacket } from '.
 import type { SSHTransportPort, TerminalLogPort } from './ports.ts';
 import { TerminalError } from './profile_store.ts';
 import { terminalFailure } from './control.ts';
+import { SSHOutputRedactor } from './output_redactor.ts';
+import type { TerminalFailure } from './control.ts';
 import { TerminalUTF8Decoder, terminalTail, terminalUTF8Encode } from './utf8.ts';
 
 export const packetStatus = (packet: SSHReadPacket): AgentTaskStatus => {
@@ -27,6 +29,14 @@ export class TerminalStream {
   errorCode: string | null = null;
   errorMessage: string | null = null;
   logBytes: number = 0;
+  failure: TerminalFailure | null = null;
+  private stdoutRedactor: SSHOutputRedactor = new SSHOutputRedactor([]);
+  private stderrRedactor: SSHOutputRedactor = new SSHOutputRedactor([]);
+  setSecrets(values: string[]): void {
+    this.stdoutRedactor = new SSHOutputRedactor(values);
+    this.stderrRedactor = new SSHOutputRedactor(values);
+  }
+  private clearSecrets(): void { this.stdoutRedactor.clear(); this.stderrRedactor.clear(); }
   private handle: SSHHandle | null = null;
   private pending: Promise<void> = Promise.resolve();
   private closeCompletion: Promise<void> | null = null;
@@ -71,12 +81,21 @@ export class TerminalStream {
   }
   private async consume(packet: SSHReadPacket, released: boolean = false): Promise<void> {
     if (!this.active()) return;
+    const safeChunks: SSHOutputChunk[] = [];
     for (const chunk of packet.chunks) {
-      await this.append((chunk.isStderr ? this.stderr : this.stdout).decode(chunk.bytes), chunk.isStderr);
+      const text: string = (chunk.isStderr ? this.stderrRedactor : this.stdoutRedactor)
+        .push((chunk.isStderr ? this.stderr : this.stdout).decode(chunk.bytes));
+      await this.append(text, chunk.isStderr);
+      if (text) safeChunks.push({ bytes: terminalUTF8Encode(text), isStderr: chunk.isStderr });
     }
     if (packet.state !== 'running') {
-      await this.append(this.stdout.decode(new Uint8Array(0), true), false);
-      await this.append(this.stderr.decode(new Uint8Array(0), true), true);
+      for (const isStderr of [false, true]) {
+        const text: string = (isStderr ? this.stderrRedactor : this.stdoutRedactor)
+          .push((isStderr ? this.stderr : this.stdout).decode(new Uint8Array(0), true), true);
+        await this.append(text, isStderr);
+        if (text) safeChunks.push({ bytes: terminalUTF8Encode(text), isStderr });
+      }
+      this.clearSecrets();
       this.status = packetStatus(packet);
       this.exitCode = packet.state === 'exited' ? packet.exitCode : null;
       this.errorCode = packet.errorCode;
@@ -87,7 +106,7 @@ export class TerminalStream {
         await this.transport.close(handle, 'release');
       }
     }
-    await this.changed(packet.chunks);
+    await this.changed(safeChunks);
   }
   async startFailed(error: Error, interrupted: boolean = false): Promise<void> {
     if (this.closeCompletion !== null) { await this.closeCompletion; return; }
@@ -99,6 +118,8 @@ export class TerminalStream {
       catch { /* retain original startup error */ }
     }
     const failure = terminalFailure(error);
+    this.failure = failure;
+    this.clearSecrets();
     this.status = interrupted || failure.code === 'disconnected' ? 'INTERRUPTED' : failure.code === 'cancelled' ? 'CANCELLED' : 'FAILED';
     this.errorCode = interrupted ? 'background_interrupted' : failure.code;
     this.errorMessage = interrupted ? 'Remote SSH interrupted in background.' : failure.message;
@@ -112,6 +133,8 @@ export class TerminalStream {
       try { await this.transport.close(handle, 'cancelled'); } catch { /* report original transport/log failure */ }
     }
     const failure = terminalFailure(error);
+    this.failure = failure;
+    this.clearSecrets();
     this.status = 'FAILED'; this.exitCode = null;
     this.errorCode = failure.code; this.errorMessage = failure.message;
     await this.changed([]);

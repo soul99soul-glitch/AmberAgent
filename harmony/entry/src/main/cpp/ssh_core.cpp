@@ -1,4 +1,5 @@
 #include "ssh_core.h"
+#include "ssh_jump.h"
 #include <libssh2.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -24,6 +25,7 @@ using Clock = std::chrono::steady_clock;
 constexpr size_t MAX_PENDING = 1024 * 1024;
 constexpr size_t MAX_QUEUED_INPUT = 1024 * 1024;
 constexpr int MAX_OWNERS = 32;
+constexpr size_t MAX_JUMP_HOPS = 3;
 std::atomic<uint64_t> nextHandle {1};
 using Failure = Exception;
 Result Failed(const Error &error) { Result result; result.error = error; return result; }
@@ -35,10 +37,22 @@ void Nonblocking(int fd) {
     if (fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) < 0 ||
         fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) throw Failure("network_error", "Cannot configure SSH socket");
 }
+void ValidateHop(const HopOptions &hop) {
+    if (!Text(hop.host, 1024) || hop.port < 1 || hop.port > 65535 ||
+        !Text(hop.username, 256) || !Text(hop.fingerprint, 128) ||
+        hop.secret.empty() || hop.secret.size() > 65536 ||
+        (hop.authMethod != "password" && hop.authMethod != "privateKey") ||
+        (hop.passphrase && (hop.passphrase->size() > 65536 || hop.passphrase->find('\0') != std::string::npos))) {
+        throw Failure("invalid_arguments", "Invalid SSH jump hop options or credentials");
+    }
+}
 void Validate(const Endpoint &options) {
     if (!Text(options.host, 1024) || options.port < 1 || options.port > 65535 ||
         options.timeoutMs < 1 || options.timeoutMs > 300000)
         throw Failure("invalid_arguments", "Invalid SSH endpoint or connection timeout");
+    if (options.jumpHops.size() > MAX_JUMP_HOPS)
+        throw Failure("jump_chain_too_long", "SSH jump chain exceeds maximum of 3 jump hosts");
+    for (const auto &hop : options.jumpHops) ValidateHop(hop);
 }
 std::string Fingerprint(LIBSSH2_SESSION *session) {
     const char *hash = libssh2_hostkey_hash(session, LIBSSH2_HOSTKEY_HASH_SHA256);
@@ -93,6 +107,7 @@ struct Owner : std::enable_shared_from_this<Owner> {
     int wake[2] {-1, -1};
     LIBSSH2_SESSION *session = nullptr;
     LIBSSH2_CHANNEL *channel = nullptr;
+    std::vector<std::unique_ptr<JumpBridge>> jumpBridges;
     std::mutex mutex;
     std::condition_variable ended;
     std::deque<Chunk> output;
@@ -106,7 +121,12 @@ struct Owner : std::enable_shared_from_this<Owner> {
     std::optional<int64_t> exitCode;
     bool done = false;
     Handle handle;
-    ~Owner() { connection.ClearSecrets(); for (int fd : wake) if (fd >= 0) ::close(fd); }
+    ~Owner() {
+        connection.ClearSecrets();
+        endpoint.ClearJumpSecrets();
+        for (int fd : wake) if (fd >= 0) ::close(fd);
+    }
+    int TotalHops() const { return static_cast<int>(endpoint.jumpHops.size()) + 1; }
     void Wake() { const char byte = 0; (void)::write(wake[1], &byte, 1); }
     void Stop(const std::string &reason) {
         { std::lock_guard<std::mutex> lock(mutex); if (!done && stopReason.empty()) stopReason = reason; }
@@ -120,43 +140,50 @@ struct Owner : std::enable_shared_from_this<Owner> {
         if (connecting && Clock::now() >= connectDeadline)
             throw Failure("connection_timeout", "SSH connection timed out");
     }
-    void Wait(short events, bool connecting, bool backpressure = false) {
+    void WaitFd(int fd, short events, bool connecting, bool backpressure = false) {
         Check(connecting);
         auto until = connecting ? std::min(deadline, connectDeadline) : deadline;
         int delay = 100;
         if (until != Clock::time_point::max()) delay = std::max(1, std::min(delay,
             static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(until - Clock::now()).count())));
-        pollfd fds[2] {{wake[0], POLLIN, 0}, {backpressure ? -1 : socket, events, 0}};
+        pollfd fds[2] {{wake[0], POLLIN, 0}, {backpressure ? -1 : fd, events, 0}};
         int result = poll(fds, 2, delay);
         if (result < 0 && errno != EINTR) throw Failure("network_error", "SSH socket polling failed");
         if (fds[0].revents & POLLIN) { char buffer[64]; while (::read(wake[0], buffer, sizeof(buffer)) > 0) {} }
         Check(connecting);
         if (fds[1].revents & (POLLNVAL | POLLERR)) throw Failure("network_error", "SSH socket disconnected");
-        // POLLHUP can coexist with the final SSH channel close packet. Read it before classifying transport loss.
     }
-    void WaitSSH(bool connecting) {
-        int directions = libssh2_session_block_directions(session);
+    void Wait(short events, bool connecting, bool backpressure = false) {
+        WaitFd(socket, events, connecting, backpressure);
+    }
+    void WaitSession(LIBSSH2_SESSION *targetSession, int fd, bool connecting) {
+        int directions = libssh2_session_block_directions(targetSession);
         short events = 0;
         if (directions & LIBSSH2_SESSION_BLOCK_INBOUND) events |= POLLIN;
         if (directions & LIBSSH2_SESSION_BLOCK_OUTBOUND) events |= POLLOUT;
-        Wait(events ? events : POLLIN, connecting);
+        WaitFd(fd, events ? events : POLLIN, connecting);
     }
-    template<class Call> void Retry(Call call, bool connecting, const char *code, const char *message) {
+    void WaitSSH(bool connecting) { WaitSession(session, socket, connecting); }
+    template<class Call> void RetryOn(LIBSSH2_SESSION *targetSession, int fd, Call call,
+        bool connecting, const Error &err) {
         while (true) {
             Check(connecting);
             int result = call();
             if (!result) return;
-            if (result != LIBSSH2_ERROR_EAGAIN) throw Failure(code, message);
-            WaitSSH(connecting);
+            if (result != LIBSSH2_ERROR_EAGAIN) throw Failure(err);
+            WaitSession(targetSession, fd, connecting);
         }
     }
-    void Connect() {
+    template<class Call> void Retry(Call call, bool connecting, const char *code, const char *message) {
+        RetryOn(session, socket, std::move(call), connecting, Error {code, message});
+    }
+    void ConnectTcp(const std::string &targetHost, int targetPort) {
         auto addresses = std::make_shared<Addresses>();
         addrinfo hints {}; hints.ai_socktype = SOCK_STREAM; hints.ai_family = AF_UNSPEC; hints.ai_flags = AI_NUMERICHOST;
-        const std::string service = std::to_string(endpoint.port);
-        addresses->error = getaddrinfo(endpoint.host.c_str(), service.c_str(), &hints, &addresses->head);
+        const std::string service = std::to_string(targetPort);
+        addresses->error = getaddrinfo(targetHost.c_str(), service.c_str(), &hints, &addresses->head);
         if (addresses->error == EAI_NONAME) {
-            const std::string host = endpoint.host;
+            const std::string host = targetHost;
             hints.ai_flags = 0;
             std::thread([addresses, host, service, hints]() {
 #ifdef AMBER_SSH_TESTING
@@ -210,31 +237,123 @@ struct Owner : std::enable_shared_from_this<Owner> {
         }
         throw Failure("network_error", "SSH TCP connection failed");
     }
+    void VerifyAndAuthSession(LIBSSH2_SESSION *targetSession, int fd, int hopIdx, int hopCount,
+        const std::string &profileId, const std::string &expectedFp, const std::string &username,
+        const std::string &authMethod, const std::string &secret,
+        const std::optional<std::string> &passphrase, bool isJumpHop) {
+        const std::string actual = Fingerprint(targetSession);
+        if (actual.size() != expectedFp.size() ||
+            CRYPTO_memcmp(actual.data(), expectedFp.data(), actual.size())) {
+            throw Failure(Error {
+                "host_key_changed",
+                "SSH host key does not match the trusted fingerprint",
+                hopIdx,
+                hopCount,
+                profileId,
+                expectedFp,
+                actual
+            });
+        }
+        const char *authErrCode = (isJumpHop || hopCount > 1) ? "hop_auth_failed" : "authentication_failed";
+        if (authMethod == "password") {
+            RetryOn(targetSession, fd, [&]() {
+                return libssh2_userauth_password_ex(targetSession, username.data(),
+                    static_cast<unsigned>(username.size()), secret.data(),
+                    static_cast<unsigned>(secret.size()), nullptr);
+            }, true, Error {authErrCode, "SSH password authentication failed", hopIdx, hopCount, profileId});
+        } else {
+            const char *passPtr = (passphrase && !passphrase->empty()) ? passphrase->c_str() : "";
+            RetryOn(targetSession, fd, [&]() {
+                return libssh2_userauth_publickey_frommemory(targetSession, username.data(),
+                    username.size(), nullptr, 0, secret.data(), secret.size(), passPtr);
+            }, true, Error {authErrCode, "SSH private key authentication failed", hopIdx, hopCount, profileId});
+        }
+    }
+    void EstablishJumpChain() {
+        const int totalHops = TotalHops();
+        const std::string &firstHost = endpoint.jumpHops.empty() ? endpoint.host : endpoint.jumpHops[0].host;
+        const int firstPort = endpoint.jumpHops.empty() ? endpoint.port : endpoint.jumpHops[0].port;
+        jumpBridges.reserve(endpoint.jumpHops.size());
+        ConnectTcp(firstHost, firstPort);
+
+        for (size_t i = 0; i < endpoint.jumpHops.size(); ++i) {
+            auto &hop = endpoint.jumpHops[i];
+            const int hopIdx = static_cast<int>(i) + 1;
+            int hopSocket = socket;
+            socket = -1;
+            LIBSSH2_SESSION *hopSession = libssh2_session_init();
+            if (!hopSession) {
+                ::close(hopSocket);
+                throw Failure("network_error", "Cannot create SSH jump session");
+            }
+            libssh2_session_set_blocking(hopSession, 0);
+            try {
+                RetryOn(hopSession, hopSocket, [&]() {
+                    return libssh2_session_handshake(hopSession, hopSocket);
+                }, true, Error {
+                    i == 0 ? "network_error" : "jump_target_unreachable",
+                    "SSH jump host handshake failed",
+                    hopIdx,
+                    totalHops,
+                    hop.profileId
+                });
+                VerifyAndAuthSession(hopSession, hopSocket, hopIdx, totalHops, hop.profileId,
+                    hop.fingerprint, hop.username, hop.authMethod, hop.secret, hop.passphrase, true);
+                hop.ClearSecrets();
+
+                const bool nextIsTarget = (i + 1 == endpoint.jumpHops.size());
+                const std::string &nextHost = nextIsTarget ? endpoint.host : endpoint.jumpHops[i + 1].host;
+                const int nextPort = nextIsTarget ? endpoint.port : endpoint.jumpHops[i + 1].port;
+                const std::string &nextProfileId = nextIsTarget ? endpoint.profileId : endpoint.jumpHops[i + 1].profileId;
+
+                LIBSSH2_CHANNEL *directChannel = nullptr;
+                while (!directChannel) {
+                    Check(true);
+                    directChannel = libssh2_channel_direct_tcpip_ex(
+                        hopSession, nextHost.c_str(), nextPort, "127.0.0.1", 0);
+                    if (!directChannel) {
+                        if (libssh2_session_last_errno(hopSession) != LIBSSH2_ERROR_EAGAIN) {
+                            throw Failure(ClassifyDirectTcpipError(
+                                hopSession, hopIdx, totalHops, hop.profileId, nextProfileId, nextHost, nextPort));
+                        }
+                        WaitSession(hopSession, hopSocket, true);
+                    }
+                }
+                int nextSocket = -1;
+                auto bridge = JumpBridge::CreateAndStart(hopSocket, hopSession, directChannel, nextSocket);
+                hopSession = nullptr;
+                hopSocket = -1;
+                jumpBridges.push_back(std::move(bridge));
+                socket = nextSocket;
+            } catch (...) {
+                hop.ClearSecrets();
+                if (hopSession) (void)libssh2_session_free(hopSession);
+                if (hopSocket >= 0) ::close(hopSocket);
+                throw;
+            }
+        }
+    }
     void Handshake() {
-        Connect();
+        EstablishJumpChain();
         session = libssh2_session_init();
         if (!session) throw Failure("network_error", "Cannot create SSH session");
         libssh2_session_set_blocking(session, 0);
-        Retry([&]() { return libssh2_session_handshake(session, socket); }, true,
-            "network_error", "SSH handshake failed");
+        const int totalHops = TotalHops();
+        RetryOn(session, socket, [&]() { return libssh2_session_handshake(session, socket); }, true,
+            Error {
+                totalHops > 1 ? "jump_target_unreachable" : "network_error",
+                "SSH handshake failed",
+                totalHops,
+                totalHops,
+                endpoint.profileId
+            });
     }
     void Authenticate() {
-        // Pin verification is deliberately before any userauth call.
-        const std::string actual = Fingerprint(session);
-        if (actual.size() != connection.fingerprint.size() ||
-            CRYPTO_memcmp(actual.data(), connection.fingerprint.data(), actual.size()))
-            throw Failure("host_key_mismatch", "SSH host key does not match the trusted fingerprint");
-        if (connection.authMethod == "password") {
-            Retry([&]() { return libssh2_userauth_password_ex(session, connection.username.data(),
-                static_cast<unsigned>(connection.username.size()), connection.secret.data(),
-                static_cast<unsigned>(connection.secret.size()), nullptr); }, true,
-                "authentication_failed", "SSH password authentication failed");
-        } else {
-            Retry([&]() { return libssh2_userauth_publickey_frommemory(session, connection.username.data(),
-                connection.username.size(), nullptr, 0, connection.secret.data(), connection.secret.size(),
-                connection.passphrase ? connection.passphrase->c_str() : nullptr); }, true,
-                "authentication_failed", "SSH private key authentication failed");
-        }
+        const int totalHops = TotalHops();
+        VerifyAndAuthSession(session, socket, totalHops, totalHops,
+            connection.profileId.empty() ? endpoint.profileId : connection.profileId,
+            connection.fingerprint, connection.username, connection.authMethod,
+            connection.secret, connection.passphrase, false);
         connection.ClearSecrets();
     }
     void OpenChannel() {
@@ -343,7 +462,7 @@ struct Owner : std::enable_shared_from_this<Owner> {
     }
     void Cleanup() {
         connection.ClearSecrets();
-        // All libssh2 destruction stays on the owner. Closing the fd bounds EAGAIN cleanup.
+        endpoint.ClearJumpSecrets();
         bool stopped;
         { std::lock_guard<std::mutex> lock(mutex); stopped = !stopReason.empty(); }
         if (channel && stopped && start.kind == "exec") (void)libssh2_channel_signal_ex(channel, "TERM", 4);
@@ -351,6 +470,10 @@ struct Owner : std::enable_shared_from_this<Owner> {
         if (channel) { (void)libssh2_channel_free(channel); channel = nullptr; }
         if (session) { (void)libssh2_session_free(session); session = nullptr; }
         if (socket >= 0) { ::close(socket); socket = -1; }
+        while (!jumpBridges.empty()) {
+            jumpBridges.back()->StopAndJoin();
+            jumpBridges.pop_back();
+        }
     }
     void Run() {
         try {
@@ -359,10 +482,15 @@ struct Owner : std::enable_shared_from_this<Owner> {
                 Result result; result.fingerprint = Fingerprint(session); result.hostKeyType = KeyType(session);
                 Cleanup(); started(std::move(result)); started = nullptr;
             } else {
-                Authenticate(); OpenChannel();
+                Authenticate();
+                if (start.kind == "auth") {
+                    Cleanup(); started({}); started = nullptr;
+                } else {
+                OpenChannel();
                 Result result; result.handle = handle;
                 started(std::move(result)); started = nullptr;
                 Pump();
+                }
             }
         } catch (const Failure &failure) {
             { std::lock_guard<std::mutex> lock(mutex);
@@ -390,7 +518,20 @@ struct Owner : std::enable_shared_from_this<Owner> {
     }
 };
 } // namespace
-void ConnectionOptions::ClearSecrets() { Clear(secret); if (passphrase) Clear(*passphrase); passphrase.reset(); }
+void HopOptions::ClearSecrets() {
+    Clear(secret);
+    if (passphrase) Clear(*passphrase);
+    passphrase.reset();
+}
+void Endpoint::ClearJumpSecrets() {
+    for (auto &hop : jumpHops) hop.ClearSecrets();
+}
+void ConnectionOptions::ClearSecrets() {
+    Clear(secret);
+    if (passphrase) Clear(*passphrase);
+    passphrase.reset();
+    ClearJumpSecrets();
+}
 struct Runtime::Impl {
     mutable std::mutex mutex;
     bool stopping = false;
@@ -440,7 +581,7 @@ void Runtime::Probe(const std::string &id, Endpoint options, Complete complete) 
             std::lock_guard<std::mutex> lock(impl->mutex); impl->requests.erase(id); impl->owners.erase(pointer);
         };
         StartThread(owner);
-    } catch (const Failure &failure) { complete(Failed(failure.error)); }
+    } catch (const Failure &failure) { options.ClearJumpSecrets(); complete(Failed(failure.error)); }
 }
 void Runtime::Start(const std::string &id, ConnectionOptions connection, StartOptions start, Complete complete) {
     try {
@@ -448,7 +589,7 @@ void Runtime::Start(const std::string &id, ConnectionOptions connection, StartOp
         if (!Text(connection.username, 256) || !Text(connection.fingerprint, 128) || connection.secret.empty() ||
             connection.secret.size() > 65536 || (connection.authMethod != "password" && connection.authMethod != "privateKey") ||
             (connection.passphrase && (connection.passphrase->size() > 65536 || connection.passphrase->find('\0') != std::string::npos)) ||
-            (start.kind != "exec" && start.kind != "pty") ||
+            (start.kind != "exec" && start.kind != "pty" && start.kind != "auth") ||
             (start.kind == "exec" && (!Text(start.command, 65536) || start.timeoutMs < 1 || start.timeoutMs > 86400000)) ||
             (start.kind == "pty" && (!Text(start.term, 128) || start.columns < 1 || start.columns > 1000 || start.rows < 1 || start.rows > 1000)))
             throw Failure("invalid_arguments", "Invalid SSH credentials, trusted fingerprint, or channel options");
@@ -460,7 +601,7 @@ void Runtime::Start(const std::string &id, ConnectionOptions connection, StartOp
         auto impl = impl_;
         impl_->Launch(id, owner, [impl, id, owner, complete](Result result) {
             { std::lock_guard<std::mutex> lock(impl->mutex);
-              impl->requests.erase(id); if (!result.error) impl->handles.emplace(owner->handle.id, owner); }
+              impl->requests.erase(id); if (!result.error && owner->start.kind != "auth") impl->handles.emplace(owner->handle.id, owner); }
             complete(std::move(result));
         });
         owner->finished = [impl, id, pointer = owner.get()]() {

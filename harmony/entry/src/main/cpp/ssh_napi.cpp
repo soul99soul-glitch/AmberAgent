@@ -1,5 +1,6 @@
 #include "ssh_napi.h"
 #include "ssh_core.h"
+#include "ssh_keys.h"
 #include <cmath>
 #include <cstring>
 #include <atomic>
@@ -11,7 +12,10 @@ using amber::ssh::ConnectionOptions;
 using amber::ssh::Endpoint;
 using amber::ssh::Error;
 using amber::ssh::Exception;
+using amber::ssh::GenerateKey;
 using amber::ssh::Handle;
+using amber::ssh::HopOptions;
+using amber::ssh::InspectKey;
 using amber::ssh::Packet;
 using amber::ssh::Result;
 using amber::ssh::Runtime;
@@ -35,7 +39,6 @@ struct Completion {
             auto payload = std::make_unique<Result>(std::move(result));
             if (napi_call_threadsafe_function(function, payload.get(), napi_tsfn_nonblocking) == napi_ok) payload.release();
         }
-        // The owner holds one reference; the env cleanup or JS callback holds the other.
         napi_release_threadsafe_function(function, napi_tsfn_release);
     }
 };
@@ -46,11 +49,19 @@ napi_value String(napi_env env, const std::string &text) {
     napi_value result = nullptr; Check(napi_create_string_utf8(env, text.data(), text.size(), &result)); return result;
 }
 napi_value Null(napi_env env) { napi_value result = nullptr; Check(napi_get_null(env, &result)); return result; }
+napi_value Bool(napi_env env, bool flag) { napi_value result = nullptr; Check(napi_get_boolean(env, flag, &result)); return result; }
+napi_value Int32(napi_env env, int32_t num) { napi_value result = nullptr; Check(napi_create_int32(env, num, &result)); return result; }
 napi_value Object(napi_env env) { napi_value result = nullptr; Check(napi_create_object(env, &result)); return result; }
 void Set(napi_env env, napi_value object, const char *key, napi_value value) { Check(napi_set_named_property(env, object, key, value)); }
 napi_value NativeError(napi_env env, const Error &error) {
     napi_value result = nullptr; Check(napi_create_error(env, nullptr, String(env, error.message), &result));
-    Set(env, result, "code", String(env, error.code)); return result;
+    Set(env, result, "code", String(env, error.code));
+    if (error.hopIndex) Set(env, result, "hopIndex", Int32(env, *error.hopIndex));
+    if (error.hopCount) Set(env, result, "hopCount", Int32(env, *error.hopCount));
+    if (!error.profileId.empty()) Set(env, result, "profileId", String(env, error.profileId));
+    if (!error.expectedFingerprint.empty()) Set(env, result, "expectedFingerprintSHA256", String(env, error.expectedFingerprint));
+    if (!error.presentedFingerprint.empty()) Set(env, result, "presentedFingerprintSHA256", String(env, error.presentedFingerprint));
+    return result;
 }
 void Reject(napi_env env, napi_deferred deferred, const Error &error) {
     try { napi_reject_deferred(env, deferred, NativeError(env, error)); } catch (const std::exception &) {}
@@ -64,8 +75,8 @@ napi_value PacketValue(napi_env env, const Packet &packet) {
         if (!packet.chunks[i].bytes.empty()) std::memcpy(data, packet.chunks[i].bytes.data(), packet.chunks[i].bytes.size());
         napi_value bytes = nullptr; Check(napi_create_typedarray(env, napi_uint8_array, packet.chunks[i].bytes.size(), buffer, 0, &bytes));
         Set(env, chunk, "bytes", bytes);
-        napi_value stderrValue = nullptr; Check(napi_get_boolean(env, packet.chunks[i].isStderr, &stderrValue));
-        Set(env, chunk, "isStderr", stderrValue); Check(napi_set_element(env, chunks, static_cast<uint32_t>(i), chunk));
+        Set(env, chunk, "isStderr", Bool(env, packet.chunks[i].isStderr));
+        Check(napi_set_element(env, chunks, static_cast<uint32_t>(i), chunk));
     }
     Set(env, result, "chunks", chunks); Set(env, result, "state", String(env, packet.state));
     napi_value exit = Null(env);
@@ -138,6 +149,19 @@ napi_value Property(napi_env env, napi_value object, const char *key) {
 std::string Field(napi_env env, napi_value object, const char *key, size_t max = 65536) {
     return ReadString(env, Property(env, object, key), max);
 }
+std::string OptionalStringField(napi_env env, napi_value object, const char *key, size_t max = 65536) {
+    napi_value val = Property(env, object, key);
+    napi_valuetype type; Check(napi_typeof(env, val, &type));
+    if (type == napi_undefined || type == napi_null) return "";
+    return ReadString(env, val, max);
+}
+std::optional<std::string> ReadOptionalPassphrase(napi_env env, napi_value object) {
+    auto passphrase = Property(env, object, "passphrase");
+    napi_valuetype type; Check(napi_typeof(env, passphrase, &type));
+    if (type == napi_string) return ReadString(env, passphrase);
+    if (type == napi_null || type == napi_undefined) return std::nullopt;
+    throw Exception("invalid_arguments", "SSH passphrase must be string or null");
+}
 int Number(napi_env env, napi_value value, int min, int max) {
     napi_valuetype type; double number = 0;
     if (napi_typeof(env, value, &type) != napi_ok || type != napi_number ||
@@ -149,19 +173,54 @@ int Number(napi_env env, napi_value value, int min, int max) {
 int NumericField(napi_env env, napi_value object, const char *key, int min, int max) {
     return Number(env, Property(env, object, key), min, max);
 }
+HopOptions ReadHopOptions(napi_env env, napi_value object) {
+    HopOptions hop;
+    hop.profileId = OptionalStringField(env, object, "profileId", 256);
+    hop.host = Field(env, object, "host", 1024);
+    hop.port = NumericField(env, object, "port", 1, 65535);
+    hop.username = Field(env, object, "username", 256);
+    hop.fingerprint = Field(env, object, "expectedFingerprintSHA256", 128);
+    hop.authMethod = Field(env, object, "authMethod", 16);
+    hop.secret = Field(env, object, "secret");
+    hop.passphrase = ReadOptionalPassphrase(env, object);
+    return hop;
+}
+std::vector<HopOptions> ReadJumpHops(napi_env env, napi_value object) {
+    napi_value hopsVal = Property(env, object, "jumpHops");
+    napi_valuetype type; Check(napi_typeof(env, hopsVal, &type));
+    if (type == napi_undefined || type == napi_null) return {};
+    bool isArray = false;
+    if (napi_is_array(env, hopsVal, &isArray) != napi_ok || !isArray)
+        throw Exception("invalid_arguments", "SSH jumpHops must be an array");
+    uint32_t length = 0;
+    Check(napi_get_array_length(env, hopsVal, &length));
+    if (length > 3) throw Exception("jump_chain_too_long", "SSH jump chain exceeds maximum of 3 jump hosts");
+    std::vector<HopOptions> hops;
+    hops.reserve(length);
+    for (uint32_t i = 0; i < length; ++i) {
+        napi_value item = nullptr;
+        Check(napi_get_element(env, hopsVal, i, &item));
+        hops.push_back(ReadHopOptions(env, item));
+    }
+    return hops;
+}
 Endpoint ReadEndpoint(napi_env env, napi_value object, const char *timeoutKey) {
-    Endpoint options; options.host = Field(env, object, "host", 1024);
+    Endpoint options;
+    options.host = Field(env, object, "host", 1024);
     options.port = NumericField(env, object, "port", 1, 65535);
-    options.timeoutMs = NumericField(env, object, timeoutKey, 1, 300000); return options;
+    options.timeoutMs = NumericField(env, object, timeoutKey, 1, 300000);
+    options.profileId = OptionalStringField(env, object, "profileId", 256);
+    options.jumpHops = ReadJumpHops(env, object);
+    return options;
 }
 ConnectionOptions ReadConnection(napi_env env, napi_value object) {
-    ConnectionOptions options; static_cast<Endpoint &>(options) = ReadEndpoint(env, object, "connectTimeoutMs");
+    ConnectionOptions options;
+    static_cast<Endpoint &>(options) = ReadEndpoint(env, object, "connectTimeoutMs");
     options.username = Field(env, object, "username", 256);
     options.fingerprint = Field(env, object, "expectedFingerprintSHA256", 128);
-    options.authMethod = Field(env, object, "authMethod", 16); options.secret = Field(env, object, "secret");
-    auto passphrase = Property(env, object, "passphrase"); napi_valuetype type; Check(napi_typeof(env, passphrase, &type));
-    if (type == napi_string) options.passphrase = ReadString(env, passphrase);
-    else if (type != napi_null) throw Exception("invalid_arguments", "SSH passphrase must be string or null");
+    options.authMethod = Field(env, object, "authMethod", 16);
+    options.secret = Field(env, object, "secret");
+    options.passphrase = ReadOptionalPassphrase(env, object);
     return options;
 }
 Handle ReadHandle(napi_env env, napi_value object) {
@@ -185,7 +244,6 @@ template<class Action> napi_value Async(napi_env env, napi_callback_info info, s
     std::shared_ptr<Completion> completion;
     try {
         Call call(env, info, count);
-        // Register TSFN before launching the owner; request is synchronously registered by runtime before return.
         completion = MakeCompletion(env, call.environment, deferred, kind);
         action(call, [completion](Result result) { completion->Post(std::move(result)); });
     } catch (const Exception &error) {
@@ -214,7 +272,15 @@ napi_value Start(napi_env env, napi_callback_info info, const char *kind) {
             options.term = Field(env, call.args[2], "term", 128); options.columns = NumericField(env, call.args[2], "columns", 1, 1000);
             options.rows = NumericField(env, call.args[2], "rows", 1, 1000);
         }
-        call.environment->runtime.Start(id, connection, std::move(options), std::move(done));
+        call.environment->runtime.Start(id, std::move(connection), std::move(options), std::move(done));
+    });
+}
+napi_value Verify(napi_env env, napi_callback_info info) {
+    return Async(env, info, 2, Completion::VOID, [&](Call &call, amber::ssh::Complete done) {
+        auto id = ReadString(env, call.args[0], 256);
+        auto connection = ReadConnection(env, call.args[1]);
+        StartOptions options; options.kind = "auth";
+        call.environment->runtime.Start(id, std::move(connection), std::move(options), std::move(done));
     });
 }
 napi_value StartExec(napi_env env, napi_callback_info info) { return Start(env, info, "exec"); }
@@ -258,11 +324,76 @@ napi_value Close(napi_env env, napi_callback_info info) {
         call.environment->runtime.Close(handle, reason, std::move(done));
     });
 }
+struct KeyWork {
+    napi_async_work work = nullptr;
+    napi_deferred deferred = nullptr;
+    bool generate = false;
+    std::string name;
+    std::string type;
+    ConnectionOptions material;
+    amber::ssh::GeneratedKey generated;
+    amber::ssh::InspectedKey inspected;
+    std::optional<Error> error;
+};
+void ExecuteKey(napi_env, void *data) {
+    auto &job = *static_cast<KeyWork *>(data);
+    try {
+        if (job.generate) job.generated = GenerateKey(job.name, job.type);
+        else job.inspected = InspectKey(job.name, job.material.secret, job.material.passphrase);
+    } catch (const Exception &error) { job.error = error.error; }
+    catch (const std::exception &) { job.error = Error {"unsupported_key", "SSH key operation failed"}; }
+    job.material.ClearSecrets();
+}
+void CompleteKey(napi_env env, napi_status status, void *data) {
+    std::unique_ptr<KeyWork> job(static_cast<KeyWork *>(data));
+    try {
+        if (status != napi_ok) Reject(env, job->deferred, Error {"cancelled", "SSH key operation cancelled"});
+        else if (job->error) Reject(env, job->deferred, *job->error);
+        else {
+            auto value = Object(env);
+            Set(env, value, "algorithm", String(env, job->generate ? job->generated.algorithm : job->inspected.algorithm));
+            Set(env, value, "publicKey", String(env, job->generate ? job->generated.publicKey : job->inspected.publicKey));
+            Set(env, value, "fingerprintSHA256", String(env, job->generate ? job->generated.fingerprint : job->inspected.fingerprint));
+            if (job->generate) Set(env, value, "privateKey", String(env, job->generated.privateKey));
+            else Set(env, value, "hasPassphrase", Bool(env, job->inspected.hasPassphrase));
+            Check(napi_resolve_deferred(env, job->deferred, value));
+        }
+    } catch (const Exception &error) { Reject(env, job->deferred, error.error); }
+    napi_delete_async_work(env, job->work);
+}
+napi_value KeyOperation(napi_env env, napi_callback_info info, bool generate) {
+    napi_value promise = nullptr;
+    auto job = std::make_unique<KeyWork>();
+    if (napi_create_promise(env, &job->deferred, &promise) != napi_ok) return nullptr;
+    try {
+        Call call(env, info, 1);
+        job->generate = generate;
+        job->name = Field(env, call.args[0], "name", 256);
+        if (generate) job->type = OptionalStringField(env, call.args[0], "type", 32);
+        else {
+            job->material.secret = Field(env, call.args[0], "privateKey", 65536);
+            job->material.passphrase = ReadOptionalPassphrase(env, call.args[0]);
+        }
+        Check(napi_create_async_work(env, nullptr, String(env, "AmberSSHKey"), ExecuteKey, CompleteKey, job.get(), &job->work));
+        Check(napi_queue_async_work(env, job->work));
+        job.release();
+    } catch (const Exception &error) {
+        if (job->work) napi_delete_async_work(env, job->work);
+        Reject(env, job->deferred, error.error);
+    } catch (const std::exception &) {
+        if (job->work) napi_delete_async_work(env, job->work);
+        Reject(env, job->deferred, Error {"unsupported_key", "SSH key operation failed"});
+    }
+    return promise;
+}
+napi_value GenerateKeyNapi(napi_env env, napi_callback_info info) { return KeyOperation(env, info, true); }
+napi_value InspectKeyNapi(napi_env env, napi_callback_info info) { return KeyOperation(env, info, false); }
 } // namespace
 napi_value RegisterSSH(napi_env env, napi_value exports) {
     try {
         auto holder = std::make_unique<std::shared_ptr<Environment>>(std::make_shared<Environment>());
         napi_property_descriptor descriptors[] = {
+            {"sshVerify", nullptr, Verify, nullptr, nullptr, nullptr, napi_default, holder.get()},
             {"sshProbe", nullptr, Probe, nullptr, nullptr, nullptr, napi_default, holder.get()},
             {"sshStartExec", nullptr, StartExec, nullptr, nullptr, nullptr, napi_default, holder.get()},
             {"sshStartPty", nullptr, StartPty, nullptr, nullptr, nullptr, napi_default, holder.get()},
@@ -270,7 +401,9 @@ napi_value RegisterSSH(napi_env env, napi_value exports) {
             {"sshRead", nullptr, Read, nullptr, nullptr, nullptr, napi_default, holder.get()},
             {"sshWrite", nullptr, Write, nullptr, nullptr, nullptr, napi_default, holder.get()},
             {"sshResize", nullptr, Resize, nullptr, nullptr, nullptr, napi_default, holder.get()},
-            {"sshClose", nullptr, Close, nullptr, nullptr, nullptr, napi_default, holder.get()}
+            {"sshClose", nullptr, Close, nullptr, nullptr, nullptr, napi_default, holder.get()},
+            {"sshGenerateKey", nullptr, GenerateKeyNapi, nullptr, nullptr, nullptr, napi_default, holder.get()},
+            {"sshInspectKey", nullptr, InspectKeyNapi, nullptr, nullptr, nullptr, napi_default, holder.get()}
         };
         Check(napi_define_properties(env, exports, sizeof(descriptors) / sizeof(descriptors[0]), descriptors));
         Check(napi_add_env_cleanup_hook(env, Cleanup, holder.get())); holder.release();
