@@ -3,6 +3,7 @@ package app.amber.core.di
 import android.content.Context
 import app.amber.core.ai.tools.LocalTools
 import app.amber.core.ai.tools.ImageGenerationLocalTools
+import app.amber.feature.tools.SshProfileTools
 import app.amber.feature.webmount.tools.WebMountLocalTools
 import app.amber.feature.runtime.AgentToolDispatcher
 import app.amber.feature.runtime.PermissionDecisionResolver
@@ -25,6 +26,8 @@ val toolExecutionModule = module {
             conversationRepository = get(),
         )
     }
+    single { SshProfileTools(sshProfileStore = get()) }
+
     single {
         LocalTools(
             context = get(),
@@ -47,6 +50,7 @@ val toolExecutionModule = module {
             healthSummaryReader = get(),
             reminderTools = get(),
             jevDecisionCoordinator = get(),
+            sshProfileTools = get(),
         )
     }
 

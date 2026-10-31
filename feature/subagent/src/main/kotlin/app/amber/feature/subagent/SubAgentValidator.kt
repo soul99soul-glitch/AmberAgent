@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.core.ReasoningLevel
+import app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES
 import kotlin.uuid.Uuid
 
 const val MAX_SUB_AGENT_CONTEXT_CHARS = 6_000
@@ -197,6 +198,15 @@ object SubAgentValidator {
     fun validateToolAllowlist(toolAllowlist: Set<String>, availableToolNames: Set<String>) {
         require(toolAllowlist.none { it.startsWith("subagent_") }) {
             "Subagents cannot call subagent_* tools"
+        }
+        // Belt and braces with RunToolCatalogFactory: the writers are already
+        // removed from the catalog a subagent can see, and this rejects an
+        // allowlist that names them anyway (a saved custom definition, or a
+        // catalog shape that changes later).
+        val credentialWriters = toolAllowlist.intersect(SSH_PROFILE_WRITE_TOOL_NAMES)
+        require(credentialWriters.isEmpty()) {
+            "Subagents cannot change SSH profile credentials; " +
+                "${credentialWriters.sorted().joinToString(", ")} is main-conversation only."
         }
         val missing = toolAllowlist.filterNot { it in availableToolNames }
         require(missing.isEmpty()) {

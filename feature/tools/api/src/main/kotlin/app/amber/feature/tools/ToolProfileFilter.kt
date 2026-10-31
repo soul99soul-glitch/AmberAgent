@@ -3,6 +3,18 @@ package app.amber.feature.tools
 import app.amber.ai.core.Tool
 import app.amber.core.model.MainAgentToolProfile
 
+/**
+ * SSH profile writers change the credentials behind every remote shell, so only
+ * the main conversation may call them. A subagent inherits its parent catalog,
+ * which is why this set is filtered out of both the subagent catalog and the
+ * parent tool list handed to it; the read-only `ssh_profile_list` stays.
+ */
+val SSH_PROFILE_WRITE_TOOL_NAMES: Set<String> = setOf(
+    "ssh_profile_create",
+    "ssh_profile_update",
+    "ssh_profile_delete",
+)
+
 data class ToolProfileFilterResult(
     val profile: MainAgentToolProfile,
     val tools: List<Tool>,

@@ -310,6 +310,28 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             concurrencySafe = readOnly
         }
 
+        // ssh_profile_* manage the credentials that unlock remote shells, so
+        // the three writers are High risk: ordinary auto-approval never
+        // releases them, while the explicit high-risk auto-approval setting
+        // runs them unattended like terminal_execute. The listing is a read.
+        "ssh_profile_list" -> {
+            mutates = false
+            risk = ToolRisk.Normal
+            riskExplicit = true
+            needsApproval = false
+            autoApprovable = true
+            concurrencySafe = true
+        }
+
+        "ssh_profile_create", "ssh_profile_update", "ssh_profile_delete" -> {
+            mutates = true
+            risk = ToolRisk.High
+            riskExplicit = true
+            needsApproval = true
+            autoApprovable = false
+            concurrencySafe = false
+        }
+
         "theme_pack_import" -> {
             val action = input.stringValue("action")?.lowercase(Locale.ROOT) ?: "prepare"
             if (action == "prepare" || action == "discard") {
@@ -586,6 +608,9 @@ internal fun Tool.category(): String = when {
     name.startsWith("file_") || name.startsWith("archive_") ||
         name in setOf("download_file", "pdf_read", "pdf_render_page", "office_read", "image_info", "image_convert", "ocr_image") -> "workspace"
     name.startsWith("icloud_") -> "cloud"
+    // SSH profile management sits with the terminal surface: it configures
+    // the runtime that terminal_* executes commands over.
+    name.startsWith("ssh_profile_") -> "terminal"
     name.startsWith("terminal_") -> "terminal"
     name in setOf("search_web", "scrape_web", "search_sources_status", "search_strategy_explain", "http_request") -> "web"
     name.startsWith("webview_") -> "webview"
@@ -715,6 +740,10 @@ private fun Tool.riskProfile(): RiskProfile = when {
     name.startsWith("sms_") || name.startsWith("call_") || name.startsWith("contacts_write") -> RiskProfile(ToolRisk.High, explicit = true)
     name.startsWith("screen_") || name == "vlm_task" -> RiskProfile(ToolRisk.Sensitive, explicit = true)
     name.startsWith("terminal_") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    // Profile management writes the credentials behind every remote shell.
+    name in setOf("ssh_profile_create", "ssh_profile_update", "ssh_profile_delete") ->
+        RiskProfile(ToolRisk.High, explicit = true)
+    name == "ssh_profile_list" -> RiskProfile(ToolRisk.Normal, explicit = true)
     else -> RiskProfile(ToolRisk.Normal, explicit = false)
 }
 
