@@ -2,6 +2,7 @@
 
 日期：2026-11-01。Work item：`hub-work:9dcaa4c11be848fb18307d657396f9730b2e1405`。
 工作目录：`/Users/arquiel/.synara/worktrees/a631a45c149b`。
+实现提交：`79977a6c7adb0d01e7d24a2c432f72763185019b`。
 分支：`synara/amber-harmonyos-release-baseline`。接手基线：`1062fbb34d71913fdbf0bee08d1bd44f55d46b47`。
 
 ## 实现
@@ -11,11 +12,14 @@
   删除密钥由存储层检查所有 profile 引用，与 profile 写入共享串行边界。
 - 复用既有 `SSHCredentialStore`：AES-GCM 加密完整凭据，AES 密钥由 Asset 安全仓保护，
   `DEVICE_UNLOCKED`、`SyncType.NEVER`。工具与密钥元数据只输出公钥、指纹和非秘密属性。
-  保护类型如实标记为 `asset_encrypted`，没有伪称新增不可导出的 HUKS 签名密钥；后者属设计 P3。
+  Asset 的底层加解密和访问控制由 HUKS 实现（[OpenHarmony ASSET 官方说明](https://github.com/openharmony/security_asset)）。
+  本实现使用 Asset/HUKS 保护包装密钥，加密私钥与口令；保护类型标记为 `asset_encrypted`。
+  不可导出的 HUKS 签名密钥属于设计 P3，不是本轮的包装存储路径；本轮未验证设备上的 TEE 行为。
 - profile 新增 `key_id`、`jump_profile_id`。支持 `key`、`private_key` 与旧 `privateKey` 认证拼写。
   旧 private_key 写法在生产组合根中导入密钥库；已有 inline 凭据继续可用。
 - 最多 3 个跳板，检测自环、尾环、悬空引用和反向依赖超深；被引用的跳板禁止删除。
 - 原生桥接使用 `libssh2_channel_direct_tcpip_ex` + 匿名 socketpair + 各跳独立泵线程；不依赖跳板 shell，未实现 -L。
+  该通道语义已核对 [libssh2 官方文档](https://libssh2.org/libssh2_channel_direct_tcpip_ex.html)。
   认证专用 `sshVerify` 不创建 shell/session channel，设置页因此可验证禁止 shell 的跳板。
 - `terminal_execute`、`terminal_job_*` 和 SSH PTY 透明走路由；审批摘要涵盖全链，摘要变化阻断旧批准。
   每跳在认证前检查 pin，变化时阻断且返回 hop/profile 信息；终端输出和日志在写入前过滤各跳凭据。
