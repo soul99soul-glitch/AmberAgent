@@ -47,6 +47,12 @@ export class SSHProfileStore {
     return store;
   }
   snapshot(): SSHProfileSettings { return copySettings(this.settings); }
+  // 凭据库只暴露两个幂等查询给上层(list 的布尔值、沿用旧凭据的判断),
+  // 不暴露 load/save/delete,避免工具层绕过本 store 的 revision 与清理约束。
+  credentialExists(ref: string | null): Promise<boolean> {
+    if (ref === null) return Promise.resolve(false);
+    return this.deps.credentials.exists(ref).catch((): boolean => false);
+  }
   get(id: string): SSHProfile | null {
     const p: SSHProfile | undefined = this.settings.profiles.find((v: SSHProfile): boolean => v.id === id);
     return p === undefined ? null : copyProfile(p);
@@ -136,6 +142,42 @@ export class SSHProfileStore {
         const next: SSHProfile = { id: d.id, name: d.name, host: d.host, port: d.port, username: d.username,
           authMethod: d.authMethod, revision: (old?.revision ?? 0) + 1, knownHostSHA256: fingerprintSHA256,
           knownHostHost: d.host, knownHostPort: d.port, credentialRef: ref };
+        await this.persist(this.nextSettings(next));
+        stagedRef = null;
+        if (old !== null && old.credentialRef !== ref) await this.cleanup(old.credentialRef);
+        return copyProfile(next);
+      } catch (error) { await this.cleanup(stagedRef); throw error; }
+    });
+  }
+  // Agent-facing save. Host-key trust is preserved only when the target stays the same; it is
+  // cleared when the host/port changes. A staged credential never claims a fingerprint it did
+  // not verify, and `clearCredential` drops the stored secret without touching trust.
+  async saveWithCredential(draft: SSHProfileDraft, expectedRevision: number | null,
+    credential: SSHCredential | null, clearCredential: boolean = false): Promise<SSHProfile> {
+    const d: SSHProfileDraft = normalizeDraft(draft);
+    if (credential !== null && clearCredential) return Promise.reject(new TerminalError('invalid_arguments'));
+    if (credential !== null && !credential.secret) return Promise.reject(new TerminalError('credential_missing'));
+    return this.serial(async (): Promise<SSHProfile> => {
+      let stagedRef: string | null = null;
+      try {
+        if (credential !== null) {
+          if (credential.secret.indexOf('\0') >= 0) throw new TerminalError('invalid_arguments');
+          stagedRef = newId();
+          await this.deps.credentials.save(stagedRef, d, credential);
+        }
+        const old: SSHProfile | null = this.checkRevision(d.id, expectedRevision);
+        const sameTarget: boolean = old !== null && old.host === d.host && old.port === d.port;
+        let ref: string | null = stagedRef;
+        if (ref === null && !clearCredential) {
+          if (old === null || !sameBinding(old, d) || old.credentialRef === null ||
+            !await this.deps.credentials.exists(old.credentialRef)) throw new TerminalError('credential_missing');
+          ref = old.credentialRef;
+        }
+        const next: SSHProfile = { id: d.id, name: d.name, host: d.host, port: d.port, username: d.username,
+          authMethod: d.authMethod, revision: (old?.revision ?? 0) + 1,
+          knownHostSHA256: sameTarget ? old!.knownHostSHA256 : null,
+          knownHostHost: sameTarget ? old!.knownHostHost : null,
+          knownHostPort: sameTarget ? old!.knownHostPort : null, credentialRef: ref };
         await this.persist(this.nextSettings(next));
         stagedRef = null;
         if (old !== null && old.credentialRef !== ref) await this.cleanup(old.credentialRef);

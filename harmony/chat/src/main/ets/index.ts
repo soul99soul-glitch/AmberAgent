@@ -415,6 +415,19 @@ export {
   exportFileNameFor, maskSensitiveJsonObject, maskSensitiveJsonText,
 } from './chat/conversation_export.ts';
 export type { ConversationExportOptions, ConversationExportJson, ChatMessageArchiveSource } from './chat/conversation_export.ts';
+// 工具输入脱敏(持久化 / 导出 / 审批复核 / Council 席位共用同一套规则)
+export {
+  redactStoredToolInput, restoreStoredToolInput, toolInputNeedsStoredRedaction, STORED_TOOL_INPUT_REDACTED,
+} from './chat/tool_input_redaction.ts';
+export type { StoredToolInputRestore } from './chat/tool_input_redaction.ts';
+export { redactCouncilConversationInputs, redactCouncilStartedInput } from './chat/council_seat_redaction.ts';
+export {
+  captureSecretToolInput, restoreSecretToolInput, clearSecretToolInput, clearSecretToolPart,
+  clearAllSecretToolInputs, clearSecretsForConversation, secretToolInputCount, SECRET_TOOL_INPUT_MAX_ENTRIES,
+} from './chat/tool_input_vault.ts';
+export type { SecretToolInputRestore } from './chat/tool_input_vault.ts';
+export { setApprovalTargetProfiles, approvalTargetProfile } from './chat/tool_approval_target_cache.ts';
+export type { ApprovalTargetProfile } from './chat/tool_approval_target_cache.ts';
 export { parseGenerativeWidgets, widgetDocument, widgetActionPrompt, sanitizeWidgetHtml } from './chat/generative_widget.ts';
 export type { GenerativeWidget, GenerativeWidgetAction, GenerativeWidgetSegment } from './chat/generative_widget.ts';
 export type { ThreeSceneSpec, ThreeSceneObject, ThreeSceneObjectType } from './chat/three_scene.ts';
@@ -1299,6 +1312,10 @@ export { encodeSSHCredential, decodeSSHCredential } from './chat/terminal/creden
 export { TerminalRuntime } from './chat/terminal/runtime.ts';
 export type { TerminalRuntimeDeps } from './chat/terminal/runtime.ts';
 export { createTerminalTools } from './chat/terminal/tools.ts';
+export { createSSHProfileTools, redactSSHProfileToolInput, SSH_PROFILE_TOOL_NAMES,
+  SSH_PROFILE_SECRET_FIELDS, SSH_PROFILE_MAIN_SESSION_ONLY_TOOLS,
+  isSSHProfileMainSessionOnly } from './chat/terminal/profile_tools.ts';
+export type { SSHProfileToolsDeps } from './chat/terminal/profile_tools.ts';
 export { createTerminalApprovalGuard } from './chat/terminal_approval.ts';
 export type { TerminalApprovalGuard } from './chat/terminal_approval.ts';
 export type { TerminalToolsDeps } from './chat/terminal/tools.ts';

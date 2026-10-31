@@ -69,6 +69,8 @@ interface ToolSignature {
   executed: boolean;
 }
 
+import { redactStoredToolInput } from './tool_input_redaction.ts';
+
 const toolSignatures = (messages: UIMessage[]): ToolSignature[] => {
   const out: ToolSignature[] = [];
   for (const m of messages) {
@@ -76,7 +78,9 @@ const toolSignatures = (messages: UIMessage[]): ToolSignature[] => {
       if (p.type === 'tool') {
         const t = p as UIMessagePartTool;
         out.push({
-          id: t.toolCallId, name: t.toolName, input: t.input, executed: isToolExecuted(t),
+          id: t.toolCallId, name: t.toolName,
+          // 不变量比对同样不能把明文带出去(签名可能进日志/诊断)。
+          input: redactStoredToolInput(t.toolName, t.input), executed: isToolExecuted(t),
         });
       }
     }

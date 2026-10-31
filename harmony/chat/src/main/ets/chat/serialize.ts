@@ -16,6 +16,7 @@ import type {
   UIMessagePart, UIMessagePartTool,
 } from './message.ts';
 import type { TokenUsage } from './usage.ts';
+import { redactStoredToolInput } from './tool_input_redaction.ts';
 
 // ===== 窄化助手 =====
 
@@ -82,7 +83,9 @@ export const serializePart = (p: UIMessagePart): JsonObject => {
     case 'tool': {
       const t = p as UIMessagePartTool;
       const obj: JsonObject = {
-        type: 'tool', toolCallId: t.toolCallId, toolName: t.toolName, input: t.input,
+        // 序列化是降级内存仓库的落盘点:凭据字段在这里统一脱敏。
+        type: 'tool', toolCallId: t.toolCallId, toolName: t.toolName,
+        input: redactStoredToolInput(t.toolName, t.input),
         output: t.output.map(serializePart),
         approvalState: serializeApprovalState(t.approvalState),
       };

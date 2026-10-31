@@ -15,6 +15,7 @@ import type { JsonObject, JsonValue } from '../json.ts';
 import type { UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartTool } from '../message.ts';
 import type { AgentTool, InputSchemaObj } from '../tool.ts';
 import { makeAgentTool, makeInputSchemaObj } from '../tool.ts';
+import { clearSecretToolPart } from '../tool_input_vault.ts';
 import type { RecipeExecutionPort, RecipeLoopAdapter } from '../recipes/ports.ts';
 import type {
   WebMountDocumentToken, WebMountElement, WebMountGoalCheckpoint,
@@ -268,6 +269,10 @@ const finishGoal = async (
   parent: UIMessagePartTool, checkpoint: WebMountGoalCheckpoint, port: RecipeExecutionPort,
   status: GoalTerminalStatus, message: string, observation: WebMountObservation | null = null,
 ): Promise<UIMessagePartTool> => {
+  clearSecretToolPart(parent);
+  if (checkpoint.pendingStep !== null) {
+    clearSecretToolPart(checkpoint.pendingStep);
+  }
   const finished: WebMountGoalCheckpoint = { ...checkpoint, phase: 'finished' };
   const output: JsonObject = {
     'status': status,
@@ -570,6 +575,8 @@ export const recoverInterruptedWebMountGoals = (conversation: Conversation): Con
         try { checkpoint = checkpointOf(part); } catch (_error) { return part; }
         if (checkpoint.phase !== 'started') return part;
         messageChanged = true;
+        clearSecretToolPart(part);
+        if (checkpoint.pendingStep !== null) clearSecretToolPart(checkpoint.pendingStep);
         const finished: WebMountGoalCheckpoint = { ...checkpoint, phase: 'finished' };
         const output: JsonObject = {
           'status': 'outcome_unknown',

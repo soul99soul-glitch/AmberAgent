@@ -44,6 +44,7 @@ import type { JsonObject } from './json.ts';
 //   复用,不重复实现
 import { toAgentToolFailureJson } from './tool_dispatcher.ts';
 import { modelSlotActionTitle, toolInputDisplayTitle, toolStaticLabel } from './tool_display.ts';
+import { SSH_PROFILE_TOOL_NAMES } from './terminal/profile_tools.ts';
 
 // ===== ToolActivityStatus(AgentRuntimeModels.kt:77-92) =====
 
@@ -662,6 +663,10 @@ export const toolSandboxInputPreview = (
   if (name === 'provider_list') return '查看已配置的提供商';
   if (name === 'provider_configure') return '保存提供商和模型配置';
   if (name === 'provider_models') return '获取提供商模型列表';
+  // SSH 配置工具的预览只说改哪台机,绝不落到 JSON 全串(那里会带私钥/密码)
+  if (SSH_PROFILE_TOOL_NAMES.includes(name)) {
+    return compactSandboxText(sshProfilePreview(name, inp), 180);
+  }
   if (name === 'settings_set_model_slot') {
     return modelSlotActionTitle(getFirstStringContent(inp, ['slot']));
   }
@@ -702,6 +707,16 @@ export const toolSandboxInputPreview = (
   }
   if (picked !== null) return compactSandboxText(picked, 180);
   return compactSandboxText(JSON.stringify(inp), 180);
+};
+
+// SSH 配置工具的预览:只用非敏感字段拼成一句说明
+const sshProfilePreview = (toolName: string, input: JsonObject): string => {
+  if (toolName === 'ssh_profile_list') return '查看已保存的 SSH 配置';
+  const name: string | null = getFirstStringContent(input, ['name', 'id']);
+  const host: string | null = getStringContent(input, 'host');
+  const target: string = [name, host].filter((v: string | null): boolean => v !== null).join(' · ');
+  const verb: string = toolName === 'ssh_profile_create' ? '新建' : toolName === 'ssh_profile_update' ? '修改' : '删除';
+  return target.length > 0 ? `${verb} SSH 配置：${target}` : `${verb} SSH 配置`;
 };
 
 // defaultRuntime(:1385-1401)

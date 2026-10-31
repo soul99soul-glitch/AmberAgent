@@ -31,6 +31,7 @@ import { makeSystemMessage } from './message.ts';
 import { maskSensitiveJsonInline } from './conversation_export.ts';
 import type { MessageNode } from './conversation.ts';
 import { limitContext, nodeCurrentMessage } from './conversation.ts';
+import { redactStoredToolInput } from './tool_input_redaction.ts';
 
 // ===== 模型(ConversationContextModels.kt:7-28/:116-127) =====
 
@@ -211,8 +212,10 @@ export const partSummaryLine = (p: UIMessagePart): string => {
     case 'reasoning': return `reasoning_marker: ${(p as UIMessagePartReasoning).reasoning.length} chars`;
     case 'tool': {
       const t = p as UIMessagePartTool;
+      // 压缩输入会进入模型可见的摘要:凭据参数按持久化同一规则脱敏
       return `tool: ${t.toolName} id=${t.toolCallId} executed=${toolIsExecuted(t)}`
-        + ` input=${takeMiddle(maskSensitiveJsonInline(t.input), 2000)} output=${toolResultSummarize(t.output)}`;
+        + ` input=${takeMiddle(maskSensitiveJsonInline(redactStoredToolInput(t.toolName, t.input)), 2000)}`
+        + ` output=${toolResultSummarize(t.output)}`;
     }
     case 'image': return `image: ${(p as UIMessagePartImage).url.slice(-80)}`;
     case 'video': return `video: ${(p as UIMessagePartVideo).url.slice(-80)}`;

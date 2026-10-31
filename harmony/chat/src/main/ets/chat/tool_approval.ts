@@ -17,6 +17,7 @@ import type { UIMessage, UIMessagePart, UIMessagePartTool, ToolApprovalState } f
 import { isToolExecuted, isToolPending } from './message.ts';
 import { nowIso } from './ids.ts';
 import { ASK_USER_TOOL_NAME } from './tool_permission.ts';
+import { clearSecretToolPart } from './tool_input_vault.ts';
 
 // ===== TOOL_APPROVAL_CONTINUATION_WORDS(:142-157) =====
 
@@ -160,6 +161,9 @@ export const applyToolApprovalToConversation = (
           const targeted: boolean = locator !== null
             ? msg.id === locator.messageId && index === locator.partIndex
             : tp.toolCallId === toolCallId;
+          if (targeted && newState.type === 'denied') {
+            clearSecretToolPart(tp);
+          }
           return targeted ? { ...tp, approvalState: newState } : part;
         }),
       })),
@@ -176,20 +180,26 @@ export const conversationHasPendingTools = (conv: Conversation): boolean =>
 
 // ===== 陈旧工具处理(:955-970) =====
 
-export const cancelToolForNewUserMessage = (tool: UIMessagePartTool): UIMessagePartTool => ({
-  ...tool,
-  output: [{
-    type: 'text',
-    text: '{"status":"cancelled","error":"A new user message arrived before this pending tool was approved, so AmberAgent cancelled the stale tool state and continued the conversation."}',
-    metadata: null,
-  }],
-  approvalState: { type: 'denied', reason: 'Cancelled because a new user message arrived before approval' },
-});
+export const cancelToolForNewUserMessage = (tool: UIMessagePartTool): UIMessagePartTool => {
+  clearSecretToolPart(tool);
+  return {
+    ...tool,
+    output: [{
+      type: 'text',
+      text: '{"status":"cancelled","error":"A new user message arrived before this pending tool was approved, so AmberAgent cancelled the stale tool state and continued the conversation."}',
+      metadata: null,
+    }],
+    approvalState: { type: 'denied', reason: 'Cancelled because a new user message arrived before approval' },
+  };
+};
 
-export const skipStaleToolForContinuation = (tool: UIMessagePartTool): UIMessagePartTool => ({
-  ...tool,
-  approvalState: { type: 'denied', reason: 'Skipped stale tool after user asked to continue' },
-});
+export const skipStaleToolForContinuation = (tool: UIMessagePartTool): UIMessagePartTool => {
+  clearSecretToolPart(tool);
+  return {
+    ...tool,
+    approvalState: { type: 'denied', reason: 'Skipped stale tool after user asked to continue' },
+  };
+};
 
 // ===== resolveIdleToolBlockerBeforeDispatch(:869-943) =====
 

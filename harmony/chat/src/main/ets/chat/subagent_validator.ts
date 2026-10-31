@@ -16,6 +16,7 @@ import type {
 import {
   makeSubAgentTaskSpec, makeSubAgentValidationResult,
 } from './subagent_models.ts';
+import { isSSHProfileMainSessionOnly } from './terminal/profile_tools.ts';
 
 const MAX_SUB_AGENT_CONTEXT_CHARS: number = 6000;
 
@@ -351,6 +352,10 @@ export const subAgentValidateToolAllowlist = (
   for (const toolName of toolAllowlist) {
     if (toolName.startsWith('subagent_')) {
       throw new Error('Subagents cannot call subagent_* tools');
+    }
+    // SSH 配置写工具会写保存的凭据并改变连接目标:只允许主会话调用。
+    if (isSSHProfileMainSessionOnly(toolName)) {
+      throw new Error('Subagents cannot call SSH profile write tools');
     }
   }
   const missing: string[] = [];

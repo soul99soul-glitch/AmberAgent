@@ -1,7 +1,7 @@
 import type { AgentTool, Assistant, LocalToolOption, AgentToolActivityStore, PosixWorkspaceManager,
   TerminalRuntime, MoshRuntime, SSHProfileStore, PythonRuntime } from '@amber/chat-domain';
-import { createTimeTool, createTerminalTools, createMoshTools, createPythonTool, createAskUserTool,
-  createWorkspaceTools, createWorkspaceArtifactTools } from '@amber/chat-domain';
+import { createTimeTool, createTerminalTools, createSSHProfileTools, createMoshTools, createPythonTool,
+  createAskUserTool, createWorkspaceTools, createWorkspaceArtifactTools } from '@amber/chat-domain';
 import { createJavascriptExecuteTool } from './JsSandboxTool.ets';
 import { createArtifactHttpPort, createArtifactImagePort, createDeflateRawPort } from './ArtifactPorts.ets';
 import { inflateRawEntry, createEntryXmlPull } from './EntryDocumentParser.ets';
@@ -30,6 +30,8 @@ export const createAssistantLocalPrimitives = (deps: AssistantLocalPrimitivesDep
       tools.push(...createMoshTools({ runtime: deps.moshRuntime, profiles: deps.sshProfiles,
         activityStore: deps.activityStore, conversationId: deps.conversationId }));
     }
+    // SSH 配置增删改查:写操作 risk=high + mandatoryApproval,由 PermissionDecisionResolver 统一裁决
+    tools.push(...createSSHProfileTools({ profiles: deps.sshProfiles }));
   }
   if (options.indexOf('python') >= 0 && deps.pythonRuntime !== null) {
     tools.push(createPythonTool({ runtime: deps.pythonRuntime,

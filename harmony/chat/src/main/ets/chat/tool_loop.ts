@@ -47,6 +47,7 @@ import type { PermissionDecision } from './tool_permission.ts';
 import type { AgentToolDispatcher, ToolBatchResultPair } from './tool_dispatcher.ts';
 import { AgentToolDispatcher as DefaultDispatcher, defaultToolInvocationHooks } from './tool_dispatcher.ts';
 import { buildAgentLoopBudgetPrompt, agentLoopShouldHideTools } from './agent_loop_budget.ts';
+import { captureSecretToolInput, clearSecretToolInput, clearSecretToolPart } from './tool_input_vault.ts';
 
 // ===== 环路守护(Android DefaultRunKernel duplicate_tool_call 对齐) =====
 // 签名 = toolName+args JSON;出现次数:1 执行,2 跳过(structured reminder,
@@ -435,12 +436,25 @@ const runToolLoopCore = async (
       //   引用不等 → 节点写回;新增消息 → 追加入列
       const lastBase: UIMessage = baseMessages[baseMessages.length - 1];
       const mergedLast: UIMessage = finalMessages[baseMessages.length - 1];
+      const redactGeneratedMessage = (msg: UIMessage): UIMessage => {
+        let redactedChanged: boolean = false;
+        const parts: UIMessagePart[] = msg.parts.map((p: UIMessagePart): UIMessagePart => {
+          if (p.type !== 'tool' || isToolExecuted(p as UIMessagePartTool)) return p;
+          const tp: UIMessagePartTool = p as UIMessagePartTool;
+          const captured: { input: string; captured: boolean } =
+            captureSecretToolInput(tp.toolName, tp.toolCallId, tp.input);
+          if (!captured.captured) return p;
+          redactedChanged = true;
+          return { ...tp, input: captured.input };
+        });
+        return redactedChanged ? { ...msg, parts } : msg;
+      };
       if (mergedLast !== lastBase) {
-        conv = rewriteLastMessage(conv, mergedLast);
+        conv = rewriteLastMessage(conv, redactGeneratedMessage(mergedLast));
       }
       const generated: UIMessage[] = finalMessages.slice(baseMessages.length);
       for (const msg of generated) {
-        conv = appendNode(conv, msg);
+        conv = appendNode(conv, redactGeneratedMessage(msg));
       }
       if (mergedLast !== lastBase || generated.length > 0) {
         await deps.store.save(conv);
@@ -466,10 +480,18 @@ const runToolLoopCore = async (
       for (const tool of tools) {
         if (recipeBatch) { updatedTools.push(tool); continue; }
         let invocation: UIMessagePartTool = tool;
+        // 凭据只写不读:真实参数进进程内暂存表,内存/RDB/屏障都只看到占位符。
+        // 必须在审批决策前完成,否则 pending 落盘仍带明文。
+        const captured: { input: string; captured: boolean } =
+          captureSecretToolInput(tool.toolName, tool.toolCallId, tool.input);
+        if (captured.captured) {
+          invocation = { ...invocation, input: captured.input };
+          changed = true;
+        }
         if (loop.captureInvocationMetadata !== undefined && tool.approvalState.type === 'auto') {
-          const captured: JsonObject | null = loop.captureInvocationMetadata(tool);
+          const captured: JsonObject | null = loop.captureInvocationMetadata(invocation);
           if (captured !== null) {
-            invocation = { ...tool, metadata: { ...(tool.metadata ?? {}), ...captured } };
+            invocation = { ...invocation, metadata: { ...(invocation.metadata ?? {}), ...captured } };
             changed = true;
           }
         }
@@ -511,10 +533,14 @@ const runToolLoopCore = async (
         classifyToolCallDuplicates(toolsToProcess, executedSignatures);
       toolsToProcess = guardOutcome.toExecute;
       if (guardOutcome.skipped.length > 0 || guardOutcome.stopping !== null) {
+        for (const skippedTool of guardOutcome.skipped) {
+          clearSecretToolPart(skippedTool);
+        }
         const guardPairs: ToolBatchResultPair[] = guardOutcome.skipped.map(
           (t: UIMessagePartTool): ToolBatchResultPair => ({ input: t, result: t }));
         if (guardOutcome.stopping !== null) {
           const stopTool: UIMessagePartTool = guardOutcome.stopping;
+          clearSecretToolPart(stopTool);
           guardPairs.push({ input: stopTool, result: stopTool });
         }
         conv = rewriteLastMessageTools(conv, guardPairs);
@@ -569,6 +595,15 @@ const runToolLoopCore = async (
       conv = rewriteLastMessageTools(conv, executedPairs);
       await deps.store.save(conv);
       emitSnapshot(conv, deps, ctx);
+    }
+    // 已执行 / 被拒绝 / 取消的调用不再需要凭据:立刻擦除,避免暂存长期驻留。
+    for (const pair of executedPairs) {
+      const state: string = pair.result.approvalState.type;
+      if (isToolExecuted(pair.result) || state === 'denied' || state === 'cancelled') {
+        clearSecretToolInput(pair.input.toolCallId);
+        clearSecretToolPart(pair.input);
+        clearSecretToolPart(pair.result);
+      }
     }
     if (loop.manualToolCallId !== undefined) break;
 

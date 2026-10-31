@@ -1,5 +1,5 @@
 import type { Conversation, ConversationSummary, MessageSearchHit, ConversationRepository } from '@amber/chat-domain';
-import { patchConversation } from '@amber/chat-domain';
+import { patchConversation, clearSecretsForConversation, currentMessages } from '@amber/chat-domain';
 import type { ConversationRunService } from '../ConversationRunService.ets';
 import { beginConversationRestore } from '../ConversationRunGuard.ets';
 import { ERROR } from '../../design/tokens.ets';
@@ -100,6 +100,8 @@ export class ChatConversationDrawerSession {
             const full: Conversation | null = await deps.repository.getById(item.id);
             if (full === null) return;
             await deps.repository.delete(item.id);
+            // 会话删除:该会话里未执行的凭据暂存一并擦除。
+            clearSecretsForConversation(currentMessages(full));
             deps.runService.forgetDeletedConversation(item.id);
             await deps.cleanupConversation(item.id);
             await deps.cleanupDeletedConversation(full);

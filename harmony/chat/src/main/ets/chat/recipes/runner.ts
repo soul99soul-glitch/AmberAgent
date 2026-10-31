@@ -6,6 +6,7 @@ import type { Conversation, MessageNode } from '../conversation.ts';
 import { newId } from '../ids.ts';
 import type { AgentTool } from '../tool.ts';
 import { sanitizedToolFailureMessage } from '../tool_dispatcher.ts';
+import { clearSecretToolPart } from '../tool_input_vault.ts';
 import { TerminalController, relayAbort } from '../terminal/control.ts';
 import type { InstalledRecipe, RecipeDescriptor, RecipeImportCheckpoint, RecipeRunCheckpoint } from './models.ts';
 import { RECIPE_DEFAULT_TIMEOUT_SECONDS } from './models.ts';
@@ -179,6 +180,10 @@ const failure = (error: Error): RecipeRunError => error instanceof RecipeRunErro
   new RecipeRunError((error as RecipeRunError).code ?? 'recipe_failed', sanitizedToolFailureMessage(error));
 const terminalParent = (parent: UIMessagePartTool, checkpoint: Checkpoint, status: RunStatus,
   error: RecipeRunError | null = null, outputs: JsonObject = {}): UIMessagePartTool => {
+  clearSecretToolPart(parent);
+  if (checkpoint.kind === 'run' && checkpoint.pendingStep !== null) {
+    clearSecretToolPart(checkpoint.pendingStep);
+  }
   const descriptor = checkpoint.kind === 'run' ? checkpoint.descriptor : checkpoint.preview.candidate;
   const value: JsonObject = { status, recipe: descriptor.manifest.name, version: descriptor.manifest.version, hash: descriptor.hash,
     completed_steps: checkpoint.kind === 'run' ? checkpoint.completedSteps : [],

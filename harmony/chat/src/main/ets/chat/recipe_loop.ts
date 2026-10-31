@@ -7,6 +7,7 @@ import type { ToolInvocationContext, PermissionDecision } from './tool_permissio
 import type { GenerationRetrySetting } from './generation_retry.ts';
 import { permissionDecisionTraceToJson } from './tool_permission.ts';
 import { makeGenerationRetrySetting } from './generation_retry.ts';
+import { captureSecretToolInput } from './tool_input_vault.ts';
 import type { RecipeLoopAdapter, RecipeExecutionPort } from './recipes/runner.ts';
 import type { PluginLoopAdapter } from './plugins/ports.ts';
 
@@ -85,6 +86,10 @@ export const executeRecipeBatch = async (
             message: error instanceof Error ? error.message : String(error) }) }] });
       }
     } else {
+      const secretCaptured = captureSecretToolInput(current.toolName, current.toolCallId, current.input);
+      if (secretCaptured.captured) {
+        await save({ ...current, input: secretCaptured.input });
+      }
       if (current.approvalState.type === 'auto' && options.capture !== undefined) {
         const captured = options.capture(current);
         if (captured !== null) await save({ ...current,

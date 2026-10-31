@@ -11,7 +11,7 @@ import {
   makeChatModel, makeProviderSettingOpenAI, makeTextGenerationParams, createOpenAIChatApi, asChatStreamProvider,
   patchAssistant, patchConversation, currentMessages, updateCurrentMessages, toMessageNode, makeUserMessage, makeUIMessage,
   runAgenticToolLoop, runToolLoopContinuation, applyToolApprovalToConversation, listJevPendingApprovals,
-  buildJevApprovalSubject, toText,
+  buildJevApprovalSubject, toText, redactCouncilStartedInput, clearSecretsForConversation,
 } from '@amber/chat-domain';
 import type { CouncilSeatStore } from './CouncilSeatStore.ets';
 import { councilSourcesFromMessages } from './CouncilToolSources.ets';
@@ -129,7 +129,9 @@ class CouncilToolRunner implements ModelCouncilTextRunner {
           throw new Error('Council tool changed before effect');
         }
         const metadata: JsonObject = match.metadata === null ? {} : JSON.parse(JSON.stringify(match.metadata)) as JsonObject;
-        metadata['council_started_v1'] = { toolCallId: match.toolCallId, toolName: match.toolName, input: match.input };
+        // 这份 input 副本同样落盘:凭据字段必须与席位快照走同一套脱敏。
+        metadata['council_started_v1'] = { toolCallId: match.toolCallId, toolName: match.toolName,
+          input: redactCouncilStartedInput(match.toolName, match.input) };
         const started: UIMessagePartTool = { type: 'tool', toolCallId: match.toolCallId,
           toolName: match.toolName, input: match.input, output: match.output,
           approvalState: match.approvalState, metadata: metadata };
@@ -152,56 +154,60 @@ class CouncilToolRunner implements ModelCouncilTextRunner {
         if (last !== undefined && last.role === 'assistant') req.onChunk(toText(last).slice(0, req.outputBudgetChars));
       } };
     checkSignal(signal);
-    conversation = await runAgenticToolLoop(conversation, deps, loop);
-    while (true) {
-      checkSignal(signal);
-      const saved: Conversation | null = await seat.store.load();
-      if (saved === null) throw new Error('Council seat checkpoint missing');
-      conversation = saved;
-      const snapshot: CouncilToolSnapshot = pendingSnapshot(key, saved);
-      checkSignal(signal);
-      req.onTools?.(snapshot);
-      if (snapshot.pending.length === 0) break;
-      if (req.requestApproval === undefined) throw new Error('Council seat approval host unavailable');
-      for (const approval of snapshot.pending) {
-        const verdict: CouncilToolVerdict = await req.requestApproval(approval, signal);
+    try {
+      conversation = await runAgenticToolLoop(conversation, deps, loop);
+      while (true) {
         checkSignal(signal);
-        const latest: Conversation | null = await seat.store.load();
-        if (latest === null) throw new Error('Council seat checkpoint missing');
-        const current: CouncilToolSnapshot = pendingSnapshot(key, latest);
-        const exact: CouncilApprovalRequest | undefined = current.pending.find((candidate: CouncilApprovalRequest): boolean =>
-          candidate.messageId === approval.messageId && candidate.partIndex === approval.partIndex
-          && candidate.toolCallId === approval.toolCallId && candidate.subjectHash === approval.subjectHash);
-        if (exact === undefined) throw new Error('Council approval subject changed');
-        const asks: boolean = answeredTool(latest, exact);
-        if ((asks && verdict.kind === 'approved') || (verdict.kind === 'answered' && (!asks || verdict.answer === null))) {
-          throw new Error('Council question requires its actual answer');
+        const saved: Conversation | null = await seat.store.load();
+        if (saved === null) throw new Error('Council seat checkpoint missing');
+        conversation = saved;
+        const snapshot: CouncilToolSnapshot = pendingSnapshot(key, saved);
+        checkSignal(signal);
+        req.onTools?.(snapshot);
+        if (snapshot.pending.length === 0) break;
+        if (req.requestApproval === undefined) throw new Error('Council seat approval host unavailable');
+        for (const approval of snapshot.pending) {
+          const verdict: CouncilToolVerdict = await req.requestApproval(approval, signal);
+          checkSignal(signal);
+          const latest: Conversation | null = await seat.store.load();
+          if (latest === null) throw new Error('Council seat checkpoint missing');
+          const current: CouncilToolSnapshot = pendingSnapshot(key, latest);
+          const exact: CouncilApprovalRequest | undefined = current.pending.find((candidate: CouncilApprovalRequest): boolean =>
+            candidate.messageId === approval.messageId && candidate.partIndex === approval.partIndex
+            && candidate.toolCallId === approval.toolCallId && candidate.subjectHash === approval.subjectHash);
+          if (exact === undefined) throw new Error('Council approval subject changed');
+          const asks: boolean = answeredTool(latest, exact);
+          if ((asks && verdict.kind === 'approved') || (verdict.kind === 'answered' && (!asks || verdict.answer === null))) {
+            throw new Error('Council question requires its actual answer');
+          }
+          let decision: ToolApprovalVerdict;
+          if (verdict.kind === 'answered') decision = { kind: 'answered', answer: verdict.answer as string };
+          else if (verdict.kind === 'denied') decision = { kind: 'denied', reason: verdict.reason };
+          else decision = { kind: 'approved' };
+          const approved: Conversation = applyToolApprovalToConversation(latest, exact.toolCallId, decision,
+            { messageId: exact.messageId, partIndex: exact.partIndex });
+          if (approved === latest) throw new Error('Council approval locator changed');
+          checkSignal(signal);
+          await seat.store.save(approved);
+          checkSignal(signal);
+          req.onTools?.(pendingSnapshot(key, approved));
+          conversation = approved;
         }
-        let decision: ToolApprovalVerdict;
-        if (verdict.kind === 'answered') decision = { kind: 'answered', answer: verdict.answer as string };
-        else if (verdict.kind === 'denied') decision = { kind: 'denied', reason: verdict.reason };
-        else decision = { kind: 'approved' };
-        const approved: Conversation = applyToolApprovalToConversation(latest, exact.toolCallId, decision,
-          { messageId: exact.messageId, partIndex: exact.partIndex });
-        if (approved === latest) throw new Error('Council approval locator changed');
         checkSignal(signal);
-        await seat.store.save(approved);
-        checkSignal(signal);
-        req.onTools?.(pendingSnapshot(key, approved));
-        conversation = approved;
+        conversation = await runToolLoopContinuation(conversation, deps, loop);
       }
+      const messages: UIMessage[] = currentMessages(conversation);
+      if (messages.some((message: UIMessage): boolean => message.parts.some((part: UIMessagePart): boolean =>
+        part.type === 'tool' && part.output.length === 0))) throw new Error('Council seat has unresolved tools');
+      const text: string = finalText(messages).slice(0, req.outputBudgetChars);
+      if (text.trim().length === 0) throw new Error('Council seat produced no final text');
       checkSignal(signal);
-      conversation = await runToolLoopContinuation(conversation, deps, loop);
+      return { text: text, warnings: [], toolMessages: messages.filter((message: UIMessage): boolean =>
+        message.parts.some((part: UIMessagePart): boolean => part.type === 'tool')),
+        sources: councilSourcesFromMessages(messages) };
+    } finally {
+      clearSecretsForConversation(currentMessages(conversation));
     }
-    const messages: UIMessage[] = currentMessages(conversation);
-    if (messages.some((message: UIMessage): boolean => message.parts.some((part: UIMessagePart): boolean =>
-      part.type === 'tool' && part.output.length === 0))) throw new Error('Council seat has unresolved tools');
-    const text: string = finalText(messages).slice(0, req.outputBudgetChars);
-    if (text.trim().length === 0) throw new Error('Council seat produced no final text');
-    checkSignal(signal);
-    return { text: text, warnings: [], toolMessages: messages.filter((message: UIMessage): boolean =>
-      message.parts.some((part: UIMessagePart): boolean => part.type === 'tool')),
-      sources: councilSourcesFromMessages(messages) };
   }
 }
 

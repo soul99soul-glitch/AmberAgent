@@ -1,6 +1,6 @@
 import type { FileStore, CouncilSeatRunKey } from '@amber/deepread-domain';
 import type { Conversation, ConversationStore } from '@amber/chat-domain';
-import { currentMessages } from '@amber/chat-domain';
+import { currentMessages, redactCouncilConversationInputs } from '@amber/chat-domain';
 import { sha256HexUtf8 } from './EntryLocalToolPorts.ets';
 
 export interface CouncilSeatStore extends ConversationStore {
@@ -49,7 +49,9 @@ class FileCouncilSeatStore implements CouncilSeatStore {
   }
 
   save(conversation: Conversation): Promise<void> {
-    const envelope: CouncilSeatEnvelope = { version: 1, key: this.key, conversation: conversation };
+    // 席位快照落在 model-council/seats/*.json:带凭据的工具输入必须在这里就换成占位符。
+    const envelope: CouncilSeatEnvelope = { version: 1, key: this.key,
+      conversation: redactCouncilConversationInputs(conversation) };
     // Freeze the complete snapshot at invocation time, before entering the write queue.
     const text: string = JSON.stringify(envelope);
     const write: Promise<void> = this.tail.then(async (): Promise<void> => {

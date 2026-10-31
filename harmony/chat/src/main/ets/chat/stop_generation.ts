@@ -18,6 +18,7 @@ import type { Conversation, MessageNode } from './conversation.ts';
 import { finishPendingTools, finishReasoning } from './conversation.ts';
 import type { UIMessage, UIMessagePart, UIMessagePartTool } from './message.ts';
 import { nowIso } from './ids.ts';
+import { clearSecretToolPart } from './tool_input_vault.ts';
 
 // ChatService.cancelToolByUser(:1611-1620) 逐字:取消输出 JSON + denied reason
 export const CANCEL_TOOL_BY_USER_OUTPUT: string =
@@ -25,11 +26,14 @@ export const CANCEL_TOOL_BY_USER_OUTPUT: string =
 
 export const CANCEL_TOOL_BY_USER_REASON: string = 'Generation cancelled by user';
 
-export const cancelToolByUser = (tool: UIMessagePartTool): UIMessagePartTool => ({
-  ...tool,
-  output: [{ type: 'text', text: CANCEL_TOOL_BY_USER_OUTPUT, metadata: null }],
-  approvalState: { type: 'denied', reason: CANCEL_TOOL_BY_USER_REASON },
-});
+export const cancelToolByUser = (tool: UIMessagePartTool): UIMessagePartTool => {
+  clearSecretToolPart(tool);
+  return {
+    ...tool,
+    output: [{ type: 'text', text: CANCEL_TOOL_BY_USER_OUTPUT, metadata: null }],
+    approvalState: { type: 'denied', reason: CANCEL_TOOL_BY_USER_REASON },
+  };
+};
 
 // 结构相等判定(Android `updatedMessage == lastMessage` 是 data class 结构相等,
 //  Harmony 为引用相等;finishReasoning/finishPendingTools 无变化时也会构建新对象,

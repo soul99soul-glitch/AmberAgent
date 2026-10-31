@@ -18,6 +18,7 @@
 
 import type { JsonObject, JsonValue } from './json.ts';
 import { maskSensitiveJsonObject } from './conversation_export.ts';
+import { SSH_PROFILE_TOOL_NAMES } from './terminal/profile_tools.ts';
 
 // ===== 模型槽位 =====
 
@@ -49,6 +50,10 @@ export const modelSlotActionTitle = (slot: string | null): string => {
 // ===== 静态标签 =====
 
 const TOOL_STATIC_LABELS: Record<string, string> = {
+  'ssh_profile_list': '查看 SSH 配置',
+  'ssh_profile_create': '新建 SSH 配置',
+  'ssh_profile_update': '修改 SSH 配置',
+  'ssh_profile_delete': '删除 SSH 配置',
   'calendar_events_list': '查看日历事件',
   'calendar_event_create': '新建日历事件',
   'calendar_event_update': '更新日历事件',
@@ -294,6 +299,60 @@ const wmActHasInput = (input: JsonObject): boolean => {
 const GENERIC_SKIP_TOOLS: string[] = ['ask_user', 'novel_workspace_write'];
 const GENERIC_SKIP_KEYS: string[] = ['display_title'];
 
+const sshAuthLabel = (value: string | null): string | null =>
+  value === 'password' ? '密码' : value === 'privateKey' ? '私钥' : value;
+
+/**
+ * SSH 配置审批摘要:说清改哪一条(名称 + id)、改了哪些字段;凭据只写「将设置/更换密码」,
+ * 绝不出现明文。
+ *
+ * `existing` 由调用方从保存的 profile 解析后传入:改名的调用通常只带 name,
+ * 删除的调用只带 id — 没有它就无法告诉用户到底动了哪一条。
+ */
+const sshProfileApprovalSummary = (
+  title: string, toolName: string, input: JsonObject,
+  existing: { name: string; host: string; port: number } | null,
+): ToolApprovalSummary => {
+  const out: LineCollector = new LineCollector();
+  const inputName: string | null = scalarText(input, 'name');
+  const inputId: string | null = scalarText(input, 'id');
+  const currentName: string | null = existing !== null ? compactValue(existing.name) : null;
+  const currentHost: string | null = existing !== null ? compactValue(existing.host) : null;
+  // 改名:同时给出原名称与新名称;删除:给出名称与主机,让用户确认是哪一台。
+  out.add('配置', currentName !== null && inputName !== null && currentName !== inputName
+    ? `${currentName} → ${inputName}` : (inputName ?? currentName));
+  out.add('配置 ID', inputId);
+  // 删除调用通常只带 id:主机从保存的 profile 补上,否则用户看不出删的是哪一台。
+  out.add('主机', scalarText(input, 'host') ?? (toolName === 'ssh_profile_delete' ? currentHost : null));
+  out.add('端口', scalarText(input, 'port'));
+  out.add('用户名', scalarText(input, 'username'));
+  out.add('认证方式', sshAuthLabel(scalarText(input, 'auth_method')));
+  const hasPassword: boolean = scalarText(input, 'password') !== null;
+  const hasKey: boolean = scalarText(input, 'private_key') !== null;
+  const clearing: boolean = input['clear_credential'] === true || input['clear_credential'] === 'true';
+  if (clearing) {
+    out.add('凭据', '将删除已保存的密码/私钥');
+  } else if (hasPassword) {
+    out.add('凭据', '将设置或更换密码');
+  } else if (hasKey) {
+    out.add('凭据', '将设置或更换私钥');
+  }
+  if (toolName === 'ssh_profile_delete') {
+    return summaryOf(title, toolName, out, '将删除该 SSH 配置及本设备保存的凭据，无法撤销。', 'danger');
+  }
+  if (clearing) {
+    return summaryOf(title, toolName, out, '将删除已保存的凭据，之后连接需要重新输入。', 'caution');
+  }
+  // 只有 host 或 port 真的变了才会清空已确认的主机指纹。
+  const turnsTrustOff: boolean = existing !== null && (
+    (scalarText(input, 'host') !== null && scalarText(input, 'host') !== currentHost)
+    || (numberOf(input, 'port') !== null && numberOf(input, 'port') !== existing.port));
+  if (turnsTrustOff) {
+    return summaryOf(title, toolName, out, '改主机或端口后会清除已确认的主机指纹，需重新确认。', 'caution');
+  }
+  return summaryOf(title, toolName, out);
+};
+
 const genericLines = (toolName: string, input: JsonObject, out: LineCollector): void => {
   if (toolName.startsWith('provider_')) return;
   const masked: JsonObject = maskSensitiveJsonObject(input);
@@ -324,9 +383,15 @@ const summaryOf = (
  * 不适用(ask_user 等已有专用卡片 / 兜底无内容)→ null。
  * recipe/plugin/SSH 由宿主专用摘要处理,调用方应先判定。
  */
+export interface ToolApprovalSummaryContext {
+  /** 改/删 SSH 配置时,保存的 profile 摘要(用于显示原名称与主机)。纯函数不查库。 */
+  sshProfile?: { name: string; host: string; port: number } | null;
+}
+
 export const buildToolApprovalSummary = (
   toolName: string,
   input: JsonObject,
+  context: ToolApprovalSummaryContext = {},
 ): ToolApprovalSummary | null => {
   const out: LineCollector = new LineCollector();
   const staticLabel: string | null = toolStaticLabel(toolName, input);
@@ -460,6 +525,9 @@ export const buildToolApprovalSummary = (
       return summaryOf(title, toolName, out, '将在网页中执行点击或输入操作。', 'caution');
     }
     return summaryOf(title, toolName, out);
+  }
+  if (SSH_PROFILE_TOOL_NAMES.indexOf(toolName) >= 0) {
+    return sshProfileApprovalSummary(title, toolName, input, context.sshProfile ?? null);
   }
 
   // 未知工具:顶层标量参数兜底

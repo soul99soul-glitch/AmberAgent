@@ -7,6 +7,7 @@ import type { Conversation, MessageNode } from '../conversation.ts';
 import type { AgentTool } from '../tool.ts';
 import { newId } from '../ids.ts';
 import { sanitizedToolFailureMessage } from '../tool_dispatcher.ts';
+import { clearSecretToolPart } from '../tool_input_vault.ts';
 import { TerminalController, relayAbort } from '../terminal/control.ts';
 import { terminalUTF8Encode } from '../terminal/utf8.ts';
 import { createRecipeRun, nextRecipeStep, acceptRecipeStep } from '../recipes/runner.ts';
@@ -186,6 +187,8 @@ export const recoverInterruptedPlugins = (conversation: Conversation,
         const vmLost = checkpoint.descriptor.implementation.kind === 'javascript' &&
           ['running', 'awaiting_approval'].includes(checkpoint.phase) && !hasJsSession(checkpoint.executionId);
         if (checkpoint.phase !== 'started' && !vmLost) return part;
+        clearSecretToolPart(part);
+        if (checkpoint.pendingStep !== null) clearSecretToolPart(checkpoint.pendingStep);
         const value: JsonObject = { status: 'outcome_unknown', plugin_id: checkpoint.descriptor.pluginId,
           tool: checkpoint.descriptor.toolId, package_hash: checkpoint.descriptor.packageHash, result: null,
           error_code: 'outcome_unknown', message: 'Interrupted plugin execution will not be replayed.', logs: [], quarantined: false };
@@ -240,6 +243,10 @@ export const createPluginLoopAdapter = (deps: PluginLoopAdapterDeps): PluginLoop
       if (test.expectedProvided) value['expected_match'] = expectedMatch ?? false;
     }
     const finalCheckpoint: PluginCheckpoint = checkpoint.kind === 'run' ? { ...checkpoint, phase: 'finished', pendingStep: null, pendingCallId: null } : checkpoint;
+    clearSecretToolPart(parent);
+    if (checkpoint.kind === 'run' && checkpoint.pendingStep !== null) {
+      clearSecretToolPart(checkpoint.pendingStep);
+    }
     const result = { ...withCheckpoint(parent, finalCheckpoint), approvalState: { type: 'auto' as const },
       output: [{ type: 'text' as const, text: JSON.stringify(value), metadata: null }] };
     await save(result, checkpoint, port); return result;

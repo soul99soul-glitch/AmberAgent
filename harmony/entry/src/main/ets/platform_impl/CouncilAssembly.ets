@@ -11,7 +11,7 @@ import { AgentToolDispatcher, cloneMcpServerConfig, createConversationContextToo
   createConversationHistoryTools, createMcpManagementTools, createMemoryTools, createSearchTools,
   createSkillTools, createTerminalApprovalGuard, defaultToolInvocationHooks, makeAgentTool,
   makeCompactPolicy, makeMcpCommonOptions, patchAssistant, PermissionDecisionResolver,
-  ToolInvocationBarrierError, currentMessages } from '@amber/chat-domain';
+  ToolInvocationBarrierError, currentMessages, isSSHProfileMainSessionOnly } from '@amber/chat-domain';
 import type { AgentRuntimeSnapshot } from './AgentRuntimePrefs.ets';
 import { createAssistantLocalPrimitives } from './AssistantLocalPrimitives.ets';
 import type { CouncilSeatStore } from './CouncilSeatStore.ets';
@@ -75,6 +75,8 @@ const hasTarget = (targets: McpToolIdentity[], target: McpToolIdentity): boolean
   (candidate: McpToolIdentity): boolean => candidate.serverId === target.serverId && candidate.toolName === target.toolName);
 const hasSeatHost = (tool: AgentTool): boolean => !tool.name.startsWith('wm_')
   && !tool.name.startsWith('webview_') && !tool.name.startsWith('subagent_')
+  // SSH 配置写工具只留给主会话:席位不持有 create/update/delete
+  && !isSSHProfileMainSessionOnly(tool.name)
   && tool.name !== 'javascript_execute' && tool.name !== 'conversation_queue_status'
   && tool.name !== 'conversation_queue_cancel' && tool.name !== 'deep_read_open';
 const memoryEnabled = (runtime: AgentRuntimeSnapshot): boolean => runtime.enableCoreMemory
