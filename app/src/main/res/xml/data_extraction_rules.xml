@@ -9,6 +9,40 @@
     <exclude
       domain="sharedpref"
       path="mini_app_storage.xml" />
+    <!-- 凭据与 OAuth 令牌存储绑定本地 Android Keystore，不进系统云备份 -->
+    <exclude
+      domain="sharedpref"
+      path="amberagent_secret_store.xml" />
+    <exclude
+      domain="sharedpref"
+      path="amberagent_oauth_tokens.xml" />
+    <exclude
+      domain="sharedpref"
+      path="amberagent_webmount_oauth_pending.xml" />
+    <exclude
+      domain="sharedpref"
+      path="amberagent_webmount_oauth_tokens.xml" />
+    <exclude
+      domain="sharedpref"
+      path="amberagent_webmount_oauth_creds.xml" />
+    <exclude
+      domain="sharedpref"
+      path="amberagent_webmount_profiles.xml" />
+    <exclude
+      domain="sharedpref"
+      path="antigravity_oauth.xml" />
+    <exclude
+      domain="sharedpref"
+      path="google_gemini_oauth.xml" />
+    <exclude
+      domain="sharedpref"
+      path="grok_web_oauth.xml" />
+    <exclude
+      domain="sharedpref"
+      path="grok_web_oauth_backup.xml" />
+    <exclude
+      domain="sharedpref"
+      path="openai_codex_oauth.xml" />
     <include
       domain="file"
       path="upload/" />
@@ -23,6 +57,42 @@
     <include
       domain="sharedpref"
       path="." />
+    <exclude
+      domain="sharedpref"
+      path="mini_app_storage.xml" />
+    <exclude
+      domain="sharedpref"
+      path="amberagent_secret_store.xml" />
+    <exclude
+      domain="sharedpref"
+      path="amberagent_oauth_tokens.xml" />
+    <exclude
+      domain="sharedpref"
+      path="amberagent_webmount_oauth_pending.xml" />
+    <exclude
+      domain="sharedpref"
+      path="amberagent_webmount_oauth_tokens.xml" />
+    <exclude
+      domain="sharedpref"
+      path="amberagent_webmount_oauth_creds.xml" />
+    <exclude
+      domain="sharedpref"
+      path="amberagent_webmount_profiles.xml" />
+    <exclude
+      domain="sharedpref"
+      path="antigravity_oauth.xml" />
+    <exclude
+      domain="sharedpref"
+      path="google_gemini_oauth.xml" />
+    <exclude
+      domain="sharedpref"
+      path="grok_web_oauth.xml" />
+    <exclude
+      domain="sharedpref"
+      path="grok_web_oauth_backup.xml" />
+    <exclude
+      domain="sharedpref"
+      path="openai_codex_oauth.xml" />
     <include
       domain="file"
       path="upload/" />

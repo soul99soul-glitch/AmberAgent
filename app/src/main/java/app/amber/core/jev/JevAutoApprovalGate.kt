@@ -1,5 +1,6 @@
 package app.amber.core.jev
 
+import app.amber.core.context.ContextFactRedaction
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -67,7 +68,9 @@ class JevAutoApprovalGate(private val runtime: JevRuntime) {
             put("tool", toolName)
             put("arguments", parameterSummary(toolName, input))
             put("recent_user_messages", buildJsonArray {
-                recentUserTexts.takeLast(1).forEach { add(kotlinx.serialization.json.JsonPrimitive(it.take(600))) }
+                recentUserTexts.takeLast(1).forEach {
+                    add(kotlinx.serialization.json.JsonPrimitive(ContextFactRedaction.redact(it.take(600))))
+                }
             })
         }
         val questions = Risk.entries.associate { it.key to JevQuestion.Noul(instructions = it.instructions) } +

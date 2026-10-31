@@ -3,7 +3,10 @@ package app.amber.core.recap
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.context.ContextFactRedaction
 import app.amber.core.model.Conversation
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.maskSensitiveJson
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -228,13 +231,16 @@ object ConversationRecapPrompt {
 
     private fun UIMessage.recapText(): String = parts.mapNotNull { part ->
         when (part) {
-            is UIMessagePart.Text -> part.text.trim().takeIf { it.isNotEmpty() }
+            is UIMessagePart.Text -> part.text.trim().takeIf { it.isNotEmpty() }?.let(ContextFactRedaction::redact)
             is UIMessagePart.Image -> "(image)"
             is UIMessagePart.Document -> "(file: ${part.fileName})"
             is UIMessagePart.MiniApp -> "(mini app: ${part.title})"
             is UIMessagePart.Tool -> {
                 val failed = part.output.any { it is UIMessagePart.Text && it.text.contains("\"error\"") }
-                "(tool ${part.toolName}${if (failed) " failed" else ""}: ${part.input.take(120)})"
+                val sanitizedInput = runCatching {
+                    maskSensitiveJson(JsonInstant.parseToJsonElement(part.input)).toString()
+                }.getOrDefault(part.input).let(ContextFactRedaction::redact)
+                "(tool ${part.toolName}${if (failed) " failed" else ""}: ${sanitizedInput.take(120)})"
             }
             else -> null
         }
@@ -267,13 +273,15 @@ object ConversationRecapParser {
         tailSignature: String = "",
     ): ConversationRecap? {
         val obj = extractObject(raw) ?: return null
-        val overview = obj.string("overview")?.trim().orEmpty()
+        val overview = obj.string("overview")?.trim().orEmpty().let(ContextFactRedaction::redact)
         if (overview.isEmpty()) return null
         val byRef = sources.associateBy { it.ref }
         val previousByTitle = previous?.nodes?.associateBy { it.title.trim() }.orEmpty()
         val nodes = (obj["nodes"] as? JsonArray).orEmpty().mapNotNull { element ->
             val node = element as? JsonObject ?: return@mapNotNull null
-            val title = node.string("title")?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            val title = node.string("title")?.trim()?.takeIf { it.isNotEmpty() }
+                ?.let(ContextFactRedaction::redact)
+                ?: return@mapNotNull null
             val kind = when (node.string("kind")?.trim()?.lowercase()) {
                 "decision" -> RecapNodeKind.DECISION
                 "failure", "error" -> RecapNodeKind.FAILURE
@@ -290,7 +298,7 @@ object ConversationRecapParser {
             )
         }.take(RECAP_MAX_NODES)
         val next = (obj["next"] as? JsonArray ?: obj["nextSteps"] as? JsonArray).orEmpty()
-            .mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotEmpty) }
+            .mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotEmpty)?.let(ContextFactRedaction::redact) }
             .take(3)
         return ConversationRecap(
             conversationId = conversationId,

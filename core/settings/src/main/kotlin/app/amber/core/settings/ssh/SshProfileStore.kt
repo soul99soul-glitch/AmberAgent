@@ -295,6 +295,9 @@ class SshProfileStore(
     private fun validateSecret(value: String?, label: String) {
         if (value == null) return
         require(value.isNotBlank()) { "SSH $label must not be blank" }
+        require(!isMaskedOrRedactedPlaceholder(value)) {
+            "SSH $label looks like a masked or redacted placeholder, not a real credential"
+        }
         require(value.toByteArray(Charsets.UTF_8).size <= MAX_SECRET_BYTES) {
             "SSH $label is too large"
         }
@@ -302,9 +305,21 @@ class SshProfileStore(
 
     private fun validatePassphrase(value: String?) {
         if (value == null || value.isEmpty()) return
+        require(!isMaskedOrRedactedPlaceholder(value)) {
+            "SSH passphrase looks like a masked or redacted placeholder, not a real credential"
+        }
         require(value.toByteArray(Charsets.UTF_8).size <= MAX_SECRET_BYTES) {
             "SSH passphrase is too large"
         }
+    }
+
+    private fun isMaskedOrRedactedPlaceholder(value: String): Boolean {
+        val trimmed = value.trim()
+        if (trimmed.isEmpty()) return false
+        val lower = trimmed.lowercase()
+        if (trimmed.startsWith("••••") || trimmed.all { it == '•' || it == '*' }) return true
+        if (lower == "<redacted>" || lower == "[redacted]" || lower == "__masked_by_amberagent_backup__") return true
+        return false
     }
 
     private fun writeCredential(profileId: String, revision: String, field: String, value: String) {

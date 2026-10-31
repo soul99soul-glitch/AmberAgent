@@ -29,6 +29,9 @@ private val SENSITIVE_JSON_KEYS = setOf(
     "token",
     "authorization",
     "password",
+    "private_key",
+    "privatekey",
+    "passphrase",
     "secret_key",
     "secretkey",
     "access_key",
@@ -39,6 +42,21 @@ private val SENSITIVE_JSON_KEYS = setOf(
 
 private const val SENSITIVE_MASK = "••••"
 
+/**
+ * Keys whose value must never show even a suffix. A credential suffix is still
+ * credential material: it narrows a password search and confirms a guess, so
+ * password / private key / passphrase always render as a complete mask.
+ */
+private val FULLY_MASKED_JSON_KEYS = setOf(
+    "password",
+    "private_key",
+    "privatekey",
+    "passphrase",
+)
+
+/** The storage-boundary placeholder; it is already masked and stays verbatim. */
+private const val CREDENTIAL_REDACTION_PLACEHOLDER = "<redacted>"
+
 /** 敏感键下非字符串原始值（数字 / 布尔等）的统一掩码。 */
 private const val SENSITIVE_NON_STRING_MASK = "***"
 
@@ -47,14 +65,18 @@ private const val SENSITIVE_NON_STRING_MASK = "***"
  * 小写归一自然命中）落在 [SENSITIVE_JSON_KEYS] 时，字符串值替换为 "••••" + 末 4 位
  * （长度 ≤ 4 全掩码），数字 / 布尔等非字符串原始值掩码为 "***"；空串与 null 原样保留
  * （空串 = 清除、null = 无值），其余元素原样保留。
+ *
+ * SSH 凭据键（[FULLY_MASKED_JSON_KEYS]）例外：一律输出完整掩码，不保留末 4 位；
+ * 存储层已经写入的占位符原样保留，避免二次截断成无意义片段。
  */
 internal fun maskSensitiveJson(element: JsonElement): JsonElement = when (element) {
     is JsonObject -> buildJsonObject {
         element.forEach { (key, value) ->
-            val masked = if (key.lowercase() in SENSITIVE_JSON_KEYS) {
-                maskSensitiveValue(value)
-            } else {
-                maskSensitiveJson(value)
+            val normalized = key.lowercase()
+            val masked = when (normalized) {
+                in FULLY_MASKED_JSON_KEYS -> maskFully(value)
+                in SENSITIVE_JSON_KEYS -> maskSensitiveValue(value)
+                else -> maskSensitiveJson(value)
             }
             put(key, masked)
         }
@@ -63,11 +85,25 @@ internal fun maskSensitiveJson(element: JsonElement): JsonElement = when (elemen
     else -> element
 }
 
+/** Complete mask for keys whose value must never reveal any character. */
+private fun maskFully(value: JsonElement): JsonElement = when (value) {
+    is JsonPrimitive -> when {
+        value.isString -> when (value.content) {
+            "" -> value
+            CREDENTIAL_REDACTION_PLACEHOLDER -> value
+            else -> JsonPrimitive(SENSITIVE_MASK)
+        }
+        value is JsonNull -> value
+        else -> JsonPrimitive(SENSITIVE_NON_STRING_MASK)
+    }
+    else -> JsonPrimitive(SENSITIVE_MASK)
+}
+
 private fun maskSensitiveValue(value: JsonElement): JsonElement = when (value) {
     is JsonPrimitive -> when {
         value.isString -> {
             val content = value.content
-            if (content.isEmpty()) {
+            if (content.isEmpty() || content == CREDENTIAL_REDACTION_PLACEHOLDER) {
                 value
             } else if (content.length <= 4) {
                 JsonPrimitive(SENSITIVE_MASK)

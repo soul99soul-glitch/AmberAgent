@@ -19,6 +19,7 @@ import app.amber.feature.runtime.RunTerminalState
 import app.amber.feature.runtime.RunTerminalStore
 import app.amber.feature.runtime.ToolEffectLedger
 import app.amber.feature.runtime.argsDigest
+import app.amber.core.utils.withSettledCredentialArgumentsRedacted
 import app.amber.feature.tools.capabilityForTool
 import java.time.Instant
 import java.util.Locale
@@ -140,6 +141,7 @@ class ChatApprovalActions(
                         }
                         approvedInputs += part.toolCallId to resumeInput
                         part.copy(input = resumeInput, approvalState = newApprovalState)
+                            .withSettledCredentialArgumentsRedacted()
                     }
                 }
                 message.copy(parts = parts)
@@ -341,7 +343,7 @@ class ChatApprovalActions(
                                             "Tool execution outcome was unknown after an interruption; " +
                                                 "the user chose to abandon this call."
                                         ),
-                                    )
+                                    ).withSettledCredentialArgumentsRedacted()
                                 }
                             }
                         )
@@ -468,13 +470,13 @@ class ChatApprovalActions(
                 )
             ),
             approvalState = ToolApprovalState.Denied("Cancelled because a new user message arrived before approval")
-        )
+        ).withSettledCredentialArgumentsRedacted()
     }
 
     private fun skipStaleToolForContinuation(tool: UIMessagePart.Tool): UIMessagePart.Tool {
         return tool.copy(
             approvalState = ToolApprovalState.Denied("Skipped stale tool after user asked to continue")
-        )
+        ).withSettledCredentialArgumentsRedacted()
     }
 
     /** Bind a nested recipe resume to the one checkpoint the user approved. */

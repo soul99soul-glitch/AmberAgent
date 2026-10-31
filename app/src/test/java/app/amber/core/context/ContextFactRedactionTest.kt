@@ -140,4 +140,44 @@ class ContextFactRedactionTest {
         assertFalse("timeline secret leaked: $normalized", normalized.contains("TimelineSecret1234567890"))
         assertFalse("handoff secret leaked: $normalized", normalized.contains("HandoffSecretToken9876543210"))
     }
+
+    @Test
+    fun compactPromptAndRecapRedactionStripToolAndTextSecrets() {
+        val msg = app.amber.ai.ui.UIMessage(
+            role = app.amber.ai.core.MessageRole.USER,
+            parts = listOf(
+                app.amber.ai.ui.UIMessagePart.Text("My key is sk-proj-SecretKey1234567890"),
+                app.amber.ai.ui.UIMessagePart.Tool(
+                    toolCallId = "call_1",
+                    toolName = "provider_config_apply",
+                    input = """{"provider_id":"p1","api_key":"sk-proj-ToolSecret9876543210"}""",
+                    output = listOf(app.amber.ai.ui.UIMessagePart.Text("Authorization: Bearer ToolOutputToken1234567890")),
+                ),
+            ),
+        )
+        val prompt = ConversationContextPlanner.buildCompressionInput(listOf(msg))
+        assertFalse(prompt.contains("SecretKey1234567890"))
+        assertFalse(prompt.contains("ToolSecret9876543210"))
+        assertFalse(prompt.contains("ToolOutputToken1234567890"))
+
+        val parsedRecap = app.amber.core.recap.ConversationRecapParser.parse(
+            raw = """{"overview":"Configured sk-proj-OverviewSecret1234567890","nodes":[{"ref":"m1","kind":"decision","title":"Saved api_key=NodeSecret1234567890"}],"next":["Rotate Authorization: Bearer NextStepToken1234567890"]}""",
+            conversationId = "c1",
+            sources = listOf(
+                app.amber.core.recap.RecapSourceMessage(
+                    ref = "m1",
+                    nodeId = "n1",
+                    messageId = "m1",
+                    role = app.amber.ai.core.MessageRole.USER,
+                    text = "hello",
+                )
+            ),
+            branchMessageIds = listOf("m1"),
+            previous = null,
+            nowMillis = 1_000L,
+        )!!
+        assertFalse(parsedRecap.overview.contains("OverviewSecret1234567890"))
+        assertFalse(parsedRecap.nodes.single().title.contains("NodeSecret1234567890"))
+        assertFalse(parsedRecap.nextSteps.single().contains("NextStepToken1234567890"))
+    }
 }

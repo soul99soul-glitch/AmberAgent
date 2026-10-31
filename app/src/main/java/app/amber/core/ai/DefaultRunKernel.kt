@@ -32,6 +32,7 @@ import app.amber.feature.runtime.ToolLedgerContext
 import app.amber.feature.tools.ToolEffectClass
 import app.amber.feature.tools.ToolExposureState
 import app.amber.feature.tools.effectClass
+import app.amber.core.utils.withSettledCredentialsRedacted
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.core.model.AMBER_AGENT_ID
@@ -658,6 +659,13 @@ class DefaultRunKernel(
                     },
                 )
                 messages = messages.dropLast(1) + mergedAssistant
+                // Write-only credentials must not survive in the transcript:
+                // the call is now settled, so mask its credential arguments
+                // before this turn is projected, checkpointed, exported or
+                // summarised. Pending calls keep their args for approval
+                // resume and are masked by the UI instead.
+                val credentialSettled = messages.withSettledCredentialsRedacted()
+                if (credentialSettled !== messages) messages = credentialSettled
                 val visibleToolResults = messages.transforms(
                     transformers = outputTransformers,
                     context = context,

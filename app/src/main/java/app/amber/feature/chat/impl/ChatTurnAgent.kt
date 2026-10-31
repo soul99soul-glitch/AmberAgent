@@ -15,6 +15,7 @@ import app.amber.core.ai.GenerationRunSession
 import app.amber.core.ai.toGenerationSettings
 import app.amber.core.ai.GenerationTerminal
 import app.amber.core.ai.RunKernel
+import app.amber.core.utils.withUnapprovedCredentialsWithheld
 import app.amber.core.service.ConversationAccess
 import app.amber.core.model.toMessageNode
 import java.time.Instant
@@ -201,6 +202,24 @@ private fun mergeMessages(
     sourceStartIndex: Int? = null,
 ): Conversation {
     if (generatedMessages.isEmpty()) return conversation
+    // Storage boundary: a credential that is still awaiting approval must not
+    // land in the conversation — that persisted copy is what the mid-approval
+    // checkpoint writes and what a restart resumes from. The live in-memory
+    // tail keeps the value so the approval card still works; only the stored
+    // copy is stripped, and a withheld call reports
+    // CREDENTIAL_WITHHELD_ON_RESUME if it is ever resumed from storage.
+    return mergeMessagesIntoConversation(
+        conversation = conversation,
+        generatedMessages = generatedMessages.withUnapprovedCredentialsWithheld(),
+        sourceStartIndex = sourceStartIndex,
+    )
+}
+
+private fun mergeMessagesIntoConversation(
+    conversation: Conversation,
+    generatedMessages: List<UIMessage>,
+    sourceStartIndex: Int? = null,
+): Conversation {
     if (sourceStartIndex != null) {
         val updatedNodes = conversation.messageNodes.toMutableList()
         var changed = false

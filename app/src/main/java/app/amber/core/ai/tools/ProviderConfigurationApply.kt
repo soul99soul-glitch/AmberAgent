@@ -324,11 +324,14 @@ private fun isValidHttpsUrl(value: String): Boolean {
         uri.userInfo == null
 }
 
-/** 拒绝明显 placeholder（sk-xxx / your_key / 过短等）；空串由调用方按「清除」处理。 */
-private fun isPlaceholderApiKey(value: String): Boolean {
+/** 拒绝明显 placeholder（sk-xxx / your_key / 掩码占位符 / 过短等）；空串由调用方按「清除」处理。 */
+internal fun isPlaceholderApiKey(value: String): Boolean {
     val trimmed = value.trim()
     if (trimmed.isEmpty()) return false
     val lower = trimmed.lowercase()
+    if (trimmed.startsWith("••••") || trimmed.all { it == '•' || it == '*' }) return true
+    if (lower == "<redacted>" || lower == "[redacted]" || lower == "***" || lower == "******") return true
+    if (lower.contains("<redacted>") || lower.contains("[redacted]") || lower.contains("__masked_by_amberagent_backup__")) return true
     if (trimmed.length < 8) return true
     if (lower.contains("your_key") || lower.contains("your-key") || lower.contains("your key") ||
         lower.contains("yourapi") || lower.contains("your_api") || lower.contains("your_api_key") ||
@@ -338,7 +341,7 @@ private fun isPlaceholderApiKey(value: String): Boolean {
     }
     if (lower in setOf("xxx", "xxxx", "test", "testing", "dummy", "demo")) return true
     if (Regex("^sk-x{3,}$").matches(lower) || Regex("^sk-[x*\\-]{3,}$").matches(lower)) return true
-    if (lower.contains("sk-xxx") || lower.contains("sk-xxxx")) return true
+    if (lower.contains("sk-xxx") || lower.contains("sk-xxxx") || lower.contains("sk-******")) return true
     return false
 }
 

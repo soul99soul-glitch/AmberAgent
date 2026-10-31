@@ -35,6 +35,8 @@ import app.amber.core.settings.secret.SecretRedactor
 import app.amber.core.settings.secret.SecretStore
 import app.amber.core.settings.secret.SecretStoreBackend
 import app.amber.core.agent.utils.JsonInstant
+import app.amber.core.utils.withSettledCredentialsRedacted
+import app.amber.core.utils.withUnapprovedCredentialsWithheld
 import app.amber.feature.runtime.AgentToolDispatcher
 import app.amber.feature.runtime.PermissionDecisionAction
 import app.amber.feature.runtime.PermissionDecisionResolver
@@ -545,9 +547,24 @@ class ProviderConfigToolsTest {
     }
 
     @Test
-    fun `apply rejects placeholder api keys`() = runBlocking {
+    fun `apply rejects placeholder and masked api keys`() = runBlocking {
         seed(app.amber.core.settings.Settings.dummy().copy(init = false, providers = listOf(openAiProvider)))
-        listOf("sk-xxx", "sk-xxxx", "your_key", "your_api_key", "xxx", "sk-123").forEach { placeholder ->
+        listOf(
+            "sk-xxx",
+            "sk-xxxx",
+            "your_key",
+            "your_api_key",
+            "xxx",
+            "sk-123",
+            "••••1234",
+            "••••",
+            "<redacted>",
+            "***",
+            "******",
+            "[REDACTED]",
+            "__MASKED_BY_AMBERAGENT_BACKUP__",
+            "********",
+        ).forEach { placeholder ->
             val result = runTool(
                 tool(TOOL_PROVIDER_CONFIG_APPLY),
                 """{"provider_id":"${openAiProvider.id}","api_key":"$placeholder"}""",
@@ -555,6 +572,41 @@ class ProviderConfigToolsTest {
             assertEquals("placeholder $placeholder must be rejected", "failed", result["status"]?.jsonPrimitive?.contentOrNull)
             assertFalse(secretStore.has(apiKeyDescriptor(openAiProvider.id)))
         }
+    }
+
+    @Test
+    fun `provider_config_apply credential arguments are withheld while pending and redacted when settled`() {
+        val pendingCall = UIMessagePart.Tool(
+            toolCallId = "call_pending",
+            toolName = TOOL_PROVIDER_CONFIG_APPLY,
+            input = """{"provider_id":"${openAiProvider.id}","api_key":"sk-live-secret-9999"}""",
+            approvalState = ToolApprovalState.Pending,
+        )
+        val pendingMsg = app.amber.ai.ui.UIMessage(
+            role = app.amber.ai.core.MessageRole.ASSISTANT,
+            parts = listOf(pendingCall),
+        )
+        // Pending checkpoint withholds plaintext credential and marks Denied
+        val withheldList = listOf(pendingMsg).withUnapprovedCredentialsWithheld()
+        val withheldTool = withheldList.single().parts.single() as UIMessagePart.Tool
+        assertFalse(withheldTool.input.contains("sk-live-secret-9999"))
+        assertEquals("{}", withheldTool.input)
+        assertTrue(withheldTool.approvalState is ToolApprovalState.Denied)
+
+        // Settled call (executed or denied) redacts api_key to <redacted> while keeping provider_id
+        val executedCall = pendingCall.copy(
+            approvalState = ToolApprovalState.Approved,
+            output = listOf(UIMessagePart.Text("""{"status":"ok"}""")),
+        )
+        val settledMsg = app.amber.ai.ui.UIMessage(
+            role = app.amber.ai.core.MessageRole.ASSISTANT,
+            parts = listOf(executedCall),
+        )
+        val redactedList = listOf(settledMsg).withSettledCredentialsRedacted()
+        val redactedTool = redactedList.single().parts.single() as UIMessagePart.Tool
+        assertFalse(redactedTool.input.contains("sk-live-secret-9999"))
+        assertTrue(redactedTool.input.contains("<redacted>"))
+        assertTrue(redactedTool.input.contains(openAiProvider.id.toString()))
     }
 
     @Test

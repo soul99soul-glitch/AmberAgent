@@ -13,6 +13,7 @@ import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.context.ContextExpandBudget
+import app.amber.core.context.ContextFactRedaction
 import app.amber.core.context.ContextSearchBudget
 import app.amber.core.context.ConversationContextEngine
 import app.amber.core.settings.Settings
@@ -131,7 +132,7 @@ class ConversationContextTools(
                 ?: ContextExpandBudget.DEFAULT_MAX_CHARS
             val conversation = conversationProvider()
             val expanded = contextEngine.expandResult(conversation.id, sourceId, radius)
-            val textOf = { message: UIMessage -> message.toText() }
+            val textOf = { message: UIMessage -> ContextFactRedaction.redact(message.toText()) }
             val budgeted = ContextExpandBudget.apply(
                 messages = expanded.messages,
                 textOf = textOf,

@@ -84,4 +84,18 @@ class SensitiveJsonMaskTest {
         assertTrue(masked.contains("\"password\": null"))
         assertTrue(masked.contains("\"secret\": \"***\""))
     }
+
+    @Test
+    fun `password private_key and passphrase never reveal any suffix while redacted placeholder stays verbatim`() {
+        val masked = mask(
+            """{"password":"my-long-password-1234","private_key":"-----BEGIN KEY-----abcd","passphrase":"pass-9999","api_key":"<redacted>"}"""
+        )
+        assertFalse(masked.contains("1234"))
+        assertFalse(masked.contains("abcd"))
+        assertFalse(masked.contains("9999"))
+        assertTrue(masked.contains("\"password\": \"••••\""))
+        assertTrue(masked.contains("\"private_key\": \"••••\""))
+        assertTrue(masked.contains("\"passphrase\": \"••••\""))
+        assertTrue(masked.contains("\"api_key\": \"<redacted>\""))
+    }
 }

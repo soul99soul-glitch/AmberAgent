@@ -135,11 +135,11 @@ class ConversationContextRepository(
             .filter { it.id !in coveredCompactIds }
             .distinctBy { it.id }
             .map { entity ->
-                val searchable = CompactSummaryPayloads.searchableText(entity.summary)
+                val searchable = ContextFactRedaction.redact(CompactSummaryPayloads.searchableText(entity.summary))
                 ContextSearchResult(
                     source = "compact_summary",
                     id = entity.id,
-                    preview = searchable.previewAround(query),
+                    preview = ContextFactRedaction.redact(searchable.previewAround(query)),
                     stale = ContextSearchStaleness.isStale(
                         sourceMessageIds = JsonInstant.decodeFromString(entity.sourceMessageIdsJson),
                         existingMessageIds = existingMessageIds,
@@ -148,12 +148,12 @@ class ConversationContextRepository(
                 )
             }
         val messageResults = conversation?.messageNodes?.mapIndexedNotNull { index, node ->
-            val text = node.currentMessage.toText()
+            val text = ContextFactRedaction.redact(node.currentMessage.toText())
             if (!text.contains(query, ignoreCase = true)) return@mapIndexedNotNull null
             ContextSearchResult(
                 source = "message",
                 id = node.currentMessage.id.toString(),
-                preview = text.previewAround(query),
+                preview = ContextFactRedaction.redact(text.previewAround(query)),
                 nodeIndex = index,
                 role = node.currentMessage.role.name.lowercase(),
             )

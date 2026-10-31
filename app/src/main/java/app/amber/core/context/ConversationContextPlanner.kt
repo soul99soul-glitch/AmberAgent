@@ -5,6 +5,8 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.limitContext
 import app.amber.core.model.MessageNode
+import app.amber.core.utils.JsonInstant
+import app.amber.core.utils.maskSensitiveJson
 
 object ConversationContextPlanner {
     private const val DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000
@@ -302,11 +304,14 @@ object ConversationContextPlanner {
     }
 
     private fun UIMessagePart.summaryLine(): String = when (this) {
-        is UIMessagePart.Text -> "text: ${text.takeMiddle(8_000)}"
+        is UIMessagePart.Text -> "text: ${ContextFactRedaction.redact(text.takeMiddle(8_000))}"
         is UIMessagePart.Reasoning -> "reasoning_marker: ${reasoning.length} chars"
         is UIMessagePart.Tool -> {
-            val outputText = ToolResultCompactor.summarize(output)
-            "tool: $toolName id=$toolCallId executed=$isExecuted input=${input.takeMiddle(2_000)} output=$outputText"
+            val sanitizedInput = runCatching {
+                maskSensitiveJson(JsonInstant.parseToJsonElement(input)).toString()
+            }.getOrDefault(input).let(ContextFactRedaction::redact)
+            val outputText = ContextFactRedaction.redact(ToolResultCompactor.summarize(output))
+            "tool: $toolName id=$toolCallId executed=$isExecuted input=${sanitizedInput.takeMiddle(2_000)} output=$outputText"
         }
         is UIMessagePart.Image -> "image: ${url.takeLast(80)}"
         is UIMessagePart.Video -> "video: ${url.takeLast(80)}"
