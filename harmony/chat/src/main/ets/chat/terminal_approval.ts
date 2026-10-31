@@ -8,6 +8,7 @@ import type { TerminalRuntime } from './terminal/runtime.ts';
 import type { MoshRuntime } from './mosh/runtime.ts';
 import { resolveSSHRoute, formatApprovalRouteText, buildRouteHopSummaries } from './terminal/route_resolver.ts';
 import type { SSHProfileStore } from './terminal/profile_store.ts';
+import { authorizeSSHHostTrustInput, requiresSSHHostTrustConfirmation } from './terminal/host_trust_approval.ts';
 
 export interface TerminalApprovalGuard {
   captureInvocationMetadata: (part: UIMessagePartTool) => JsonObject | null;
@@ -118,6 +119,10 @@ export const createTerminalApprovalGuard = (
         const current: SSHTargetSnapshot = selectedRuntime.captureTarget(approved.usesDefault ? null : approved.profileId);
         if (current.profileId !== approved.profileId || current.digest !== approved.digest ||
           current.usesDefault !== approved.usesDefault) return targetChanged();
+        if (requiresSSHHostTrustConfirmation(request.tool)
+          && (request.invocationContext !== 'normal' || !authorizeSSHHostTrustInput(request.tool, args, current))) {
+          return targetChanged();
+        }
       } catch { return targetChanged(); }
       return null;
     },

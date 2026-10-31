@@ -443,7 +443,7 @@ const runToolLoopCore = async (
           const tp: UIMessagePartTool = p as UIMessagePartTool;
           const captured: { input: string; captured: boolean } =
             captureSecretToolInput(tp.toolName, tp.toolCallId, tp.input);
-          if (!captured.captured) return p;
+          if (captured.input === tp.input) return p;
           redactedChanged = true;
           return { ...tp, input: captured.input };
         });
@@ -484,7 +484,7 @@ const runToolLoopCore = async (
         // 必须在审批决策前完成,否则 pending 落盘仍带明文。
         const captured: { input: string; captured: boolean } =
           captureSecretToolInput(tool.toolName, tool.toolCallId, tool.input);
-        if (captured.captured) {
+        if (captured.input !== tool.input) {
           invocation = { ...invocation, input: captured.input };
           changed = true;
         }

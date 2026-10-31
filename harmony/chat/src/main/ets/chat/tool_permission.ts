@@ -16,6 +16,7 @@ import type { AgentTool } from './tool.ts';
 import type { ToolInvocationPolicy } from './tool_policy.ts';
 import { toolInvocationPolicyFromText } from './tool_policy.ts';
 import { webMountActHasTapText } from './webmount/parity.ts';
+import { requiresSSHHostTrustConfirmation } from './terminal/host_trust_approval.ts';
 
 // ===== ToolInvocationContext(ToolInvocationContext.kt 全文 9 行) =====
 
@@ -197,6 +198,10 @@ export class PermissionDecisionResolver {
         'webmount_explicit_approval',
         policy,
       );
+    }
+    if (requiresSSHHostTrustConfirmation(tool)) {
+      return decision('ask', 'Initial SSH host trust requires an unlocked foreground confirmation.',
+        'ssh_host_trust_confirmation', policy);
     }
     if (autoApproveTools && autoApproveHighRiskTools) {
       return decision(

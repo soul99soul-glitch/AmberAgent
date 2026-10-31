@@ -1322,6 +1322,7 @@ export { createSSHProfileTools, redactSSHProfileToolInput, SSH_PROFILE_TOOL_NAME
   isSSHProfileMainSessionOnly } from './chat/terminal/profile_tools.ts';
 export type { SSHProfileToolsDeps } from './chat/terminal/profile_tools.ts';
 export { createTerminalApprovalGuard } from './chat/terminal_approval.ts';
+export { recordSSHHostTrustConfirmation, clearSSHHostTrustConfirmation } from './chat/terminal/host_trust_approval.ts';
 export type { TerminalApprovalGuard } from './chat/terminal_approval.ts';
 export type { TerminalToolsDeps } from './chat/terminal/tools.ts';
 

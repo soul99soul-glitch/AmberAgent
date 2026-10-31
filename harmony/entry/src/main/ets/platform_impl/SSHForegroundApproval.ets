@@ -1,11 +1,13 @@
 import screenLock from '@ohos.screenLock';
 import type { Conversation, ToolApprovalVerdict, ToolApprovalPartLocator, UIMessagePartTool } from '@amber/chat-domain';
-import { collectToolApprovalCandidates, isSSHProfileMainSessionOnly } from '@amber/chat-domain';
+import { collectToolApprovalCandidates, isSSHProfileMainSessionOnly,
+  recordSSHHostTrustConfirmation, clearSSHHostTrustConfirmation } from '@amber/chat-domain';
 
 // API 7 public query is deprecated; its replacement is restricted to system apps.
 // Do not request unlock or new permissions. Unknown lock state denies manual approval.
 export const assertSSHForegroundApproval = async (conversation: Conversation, toolCallId: string,
   verdict: ToolApprovalVerdict, locator?: ToolApprovalPartLocator): Promise<void> => {
+  clearSSHHostTrustConfirmation(toolCallId);
   if (verdict.kind === 'denied') return;
   let candidates: UIMessagePartTool[] = collectToolApprovalCandidates(conversation, toolCallId);
   if (locator !== undefined) {
@@ -14,7 +16,7 @@ export const assertSSHForegroundApproval = async (conversation: Conversation, to
       for (const message of node.messages) {
         if (message.id !== locator.messageId) continue;
         const part = message.parts[locator.partIndex];
-        if (part?.type === 'tool') candidates.push(part);
+        if (part?.type === 'tool' && (toolCallId.length === 0 || part.toolCallId === toolCallId)) candidates.push(part);
       }
     }
   }
@@ -28,4 +30,5 @@ export const assertSSHForegroundApproval = async (conversation: Conversation, to
   if (locked || AppStorage.get<boolean>('appBackgrounded') === true) {
     throw new Error('SSH 写操作只能在解锁后的前台卡片批准');
   }
+  if (verdict.kind === 'approved' && candidates.length === 1) recordSSHHostTrustConfirmation(candidates[0]);
 };

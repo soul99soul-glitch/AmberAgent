@@ -6,6 +6,7 @@ import type { UIMessagePart } from '../message.ts';
 import { SSHProfileStore, TerminalError } from './profile_store.ts';
 import type { TerminalRuntime } from './runtime.ts';
 import { terminalFailure } from './control.ts';
+import { consumeSSHHostTrustConfirmation } from './host_trust_approval.ts';
 
 const result = (value: JsonObject): UIMessagePart[] => [{ type: 'text', text: JSON.stringify(value), metadata: null }];
 
@@ -44,7 +45,11 @@ export const createSSHHostTrustTool = (runtime: TerminalRuntime, profiles: SSHPr
         expected_fingerprint: fingerprint, presented_fingerprint: probe.fingerprintSHA256,
         message: `第 ${probe.hopIndex ?? 1} 跳主机指纹变化，已拦截。请在设置页处理。` });
       // commitVerified checks revision, so concurrent settings edits cannot be overwritten.
-      await profiles.commitVerified(profile, probe.profileRevision, probe.fingerprintSHA256, null);
+      const target = runtime.captureTarget(id);
+      if (!consumeSSHHostTrustConfirmation(args, target)) {
+        throw new TerminalError('host_trust_confirmation_required');
+      }
+      await profiles.commitVerified(profile, probe.profileRevision, probe.fingerprintSHA256, null, target.digest);
       return result({ ok: true, status: 'trusted', profile_id: id, fingerprint });
     } catch (error) {
       const failure = terminalFailure(error as Error);

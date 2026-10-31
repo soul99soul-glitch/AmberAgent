@@ -25,7 +25,7 @@ import type { GenerationRetrySetting, GenerationRetryDecision } from './generati
 import { decideGenerationRetry, makeGenerationRetrySetting } from './generation_retry.ts';
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { SecretToolInputRestore } from './tool_input_vault.ts';
-import { clearSecretToolPart, restoreSecretToolInput } from './tool_input_vault.ts';
+import { captureSecretToolInput, clearSecretToolPart, restoreSecretToolInput } from './tool_input_vault.ts';
 
 const textPart = (text: string): UIMessagePartText => ({ type: 'text', text, metadata: null });
 
@@ -443,6 +443,8 @@ export class AgentToolDispatcher {
     retrySetting: GenerationRetrySetting,
     signal: AbortSignalLike | undefined = undefined,
   ): Promise<UIMessagePartTool> {
+    // Direct dispatch/resume must use the same safe input boundary as generation and storage.
+    tool = { ...tool, input: captureSecretToolInput(tool.toolName, tool.toolCallId, tool.input).input };
     let request: ToolInvocationRequest = {
       tool,
       toolDef,

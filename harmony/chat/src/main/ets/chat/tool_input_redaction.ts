@@ -6,10 +6,10 @@
 //   按工具约定命名的字段,私钥与口令只有本层知道。
 //
 // 边界:
-//   - 只在**保存进持久化存储**时调用(conversation_blobs.externalizePart),不改内存中的
-//     会话对象,所以审批之后执行时仍能用真实参数(审批与执行是同一个 part)。
+//   - 生成捕获、持久化和错误回显共用本层。真实凭据只由 tool_input_vault 暂存,
+//     执行时取回;内存会话与持久化快照都只保留安全输入。
 //   - 只做「按工具名 + 字段名」的定点替换;未登记的工具原样返回,不重构既有脱敏。
-//   - 非 JSON / 非对象输入原样返回。
+//   - 敏感工具的非 JSON / 非对象输入只保留不可回放标记。
 //   - restoreStoredToolInput 是反向判定:参数被脱敏过的调用**不可**从存储回放执行
 //     (占位符绝不能当凭据写入),调用方必须 fail-closed。
 
@@ -20,6 +20,8 @@ import {
 import { SSH_KEY_TOOL_NAMES } from './terminal/ssh_tool_contract.ts';
 
 export const STORED_TOOL_INPUT_REDACTED: string = '***';
+const UNAVAILABLE_INPUT_FIELD: string = '_amber_secret_input_unavailable';
+const UNAVAILABLE_INPUT: string = '{"_amber_secret_input_unavailable":true}';
 
 // 各种脱敏占位符形态(大小写不敏感):*** / <redacted> / [REDACTED] / REDACTED / ••••
 export const SECRET_PLACEHOLDERS: string[] = ['***', '<redacted>', '[redacted]', 'redacted', '(empty)', '\u2022\u2022\u2022\u2022'];
@@ -31,6 +33,7 @@ export const isRedactedPlaceholder = (value: string | null | undefined): boolean
 /** 该工具的输入里是否带着占位符凭据(说明真实值只存在于进程内暂存) */
 export const toolInputHasPlaceholder = (toolName: string, input: JsonObject): boolean => {
   if (!toolInputNeedsStoredRedaction(toolName)) return false;
+  if (input[UNAVAILABLE_INPUT_FIELD] === true) return true;
   for (const field of SSH_PROFILE_SECRET_FIELDS) {
     if (isRedactedPlaceholder(typeof input[field] === 'string' ? input[field] as string : null)) return true;
   }
@@ -52,16 +55,17 @@ export const redactStoredToolInput = (toolName: string, inputText: string): stri
   if (!toolInputNeedsStoredRedaction(toolName)) return inputText;
   try {
     const parsed: JsonValue = JSON.parse(inputText.trim().length === 0 ? '{}' : inputText) as JsonValue;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return inputText;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return UNAVAILABLE_INPUT;
     return JSON.stringify(redactByName(toolName, parsed as JsonObject));
   } catch {
-    // 无法解析时宁可不改写:调用方仍会在导出/预览层走 maskSensitiveJsonText。
-    return inputText;
+    // 流式中断也可能已有完整凭据字段,不能把原文交给存储或错误回显。
+    return UNAVAILABLE_INPUT;
   }
 };
 
 const storedInputCarriesSecret = (toolName: string, input: JsonObject): boolean => {
   if (!toolInputNeedsStoredRedaction(toolName)) return false;
+  if (toolInputHasPlaceholder(toolName, input)) return true;
   for (const field of SSH_PROFILE_SECRET_FIELDS) {
     const value: JsonValue | undefined = input[field];
     if (typeof value === 'string' && value.length > 0) return true;

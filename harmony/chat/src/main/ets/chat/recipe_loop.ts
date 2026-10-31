@@ -87,7 +87,7 @@ export const executeRecipeBatch = async (
       }
     } else {
       const secretCaptured = captureSecretToolInput(current.toolName, current.toolCallId, current.input);
-      if (secretCaptured.captured) {
+      if (secretCaptured.input !== current.input) {
         await save({ ...current, input: secretCaptured.input });
       }
       if (current.approvalState.type === 'auto' && options.capture !== undefined) {

@@ -137,14 +137,24 @@ test('streaming output redacts every split of jump and target credentials', () =
 
 test('first-use trust probes and confirms a fingerprint but cannot replace an existing pin', async () => {
   const { createSSHHostTrustTool } = await import('../main/ets/chat/terminal/host_trust_tool.ts');
+  const { recordSSHHostTrustConfirmation, authorizeSSHHostTrustInput } = await import('../main/ets/chat/terminal/host_trust_approval.ts');
   const { draftDigest } = await import('../main/ets/chat/terminal/profile_store.ts');
   const s = await setup();
   const p = await s.profiles.saveWithCredential(profile('untrusted'), null, { secret: 'fixture-pw', passphrase: null });
-  const runtime = { async probe() { return { draftDigest: draftDigest(p), profileRevision: p.revision,
+  const resolver = new SSHTargetResolver({ profiles: s.profiles, credentials: s.credentials });
+  const runtime = { captureTarget: (id: string) => resolver.captureTarget(id),
+    async probe() { return { draftDigest: draftDigest(p), profileRevision: p.revision,
     fingerprintSHA256: 'SHA256:first-key', hostKeyType: 'ssh-ed25519', expectedFingerprintSHA256: null,
     trustState: 'untrusted' as const, hopIndex: 1, hopCount: 1 }; } };
   const tool = createSSHHostTrustTool(runtime as unknown as import('../main/ets/chat/terminal/runtime.ts').TerminalRuntime, s.profiles);
   const call = async (args: JsonObject) => {
+    if (args['fingerprint']) {
+      const target = runtime.captureTarget(p.id);
+      const part = { type: 'tool' as const, toolName: tool.name, toolCallId: 'trust-unit', input: JSON.stringify(args),
+        output: [], approvalState: { type: 'approved' as const }, metadata: { terminal_target: { ...target } } };
+      recordSSHHostTrustConfirmation(part);
+      assert.equal(authorizeSSHHostTrustInput(part, args, target), true);
+    }
     const parts = await tool.execute(args);
     return JSON.parse(parts[0].type === 'text' ? parts[0].text : '{}');
   };

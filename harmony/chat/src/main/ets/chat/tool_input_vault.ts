@@ -88,19 +88,22 @@ const evictOldest = (): void => {
 export const captureSecretToolInput = (
   toolName: string, toolCallId: string, inputText: string,
 ): { input: string; captured: boolean } => {
-  if (!toolInputNeedsStoredRedaction(toolName) || toolCallId.length === 0) {
+  if (!toolInputNeedsStoredRedaction(toolName)) {
     return { input: inputText, captured: false };
   }
   const redacted: string = redactStoredToolInput(toolName, inputText);
+  if (toolCallId.length === 0) return { input: redacted, captured: false };
   if (redacted === inputText) return { input: inputText, captured: false };
   let parsed: JsonValue = null;
   try {
     parsed = JSON.parse(inputText) as JsonValue;
   } catch {
-    return { input: inputText, captured: false };
+    clearSecretToolInput(toolCallId);
+    return { input: redacted, captured: false };
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { input: inputText, captured: false };
+    clearSecretToolInput(toolCallId);
+    return { input: redacted, captured: false };
   }
   if (toolInputHasPlaceholder(toolName, parsed as JsonObject)) {
     return { input: redacted, captured: false };

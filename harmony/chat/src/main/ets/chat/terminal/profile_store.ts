@@ -4,7 +4,7 @@ import type { JsonObject } from '../json.ts';
 import { newId } from '../ids.ts';
 import type { SSHCredentialStorePort } from './ports.ts';
 import type { SSHCredential, SSHCredentialBinding, SSHProfile, SSHProfileDraft, SSHProfileSettings } from './models.ts';
-import { dependentJumpProfileIds, validateProfileRouteCandidate } from './route_resolver.ts';
+import { dependentJumpProfileIds, resolveSSHRoute, validateProfileRouteCandidate } from './route_resolver.ts';
 
 export class TerminalError extends Error {
   public readonly details: JsonObject | null;
@@ -248,13 +248,19 @@ export class SSHProfileStore {
     });
   }
   async commitVerified(draft: SSHProfileDraft, expectedRevision: number | null,
-    fingerprintSHA256: string, credential: SSHCredential | null): Promise<SSHProfile> {
+    fingerprintSHA256: string, credential: SSHCredential | null, expectedRouteDigest?: string): Promise<SSHProfile> {
     const d: SSHProfileDraft = normalizeDraft(draft);
     if (!fingerprintSHA256.startsWith('SHA256:')) return Promise.reject(new TerminalError('invalid_arguments'));
     return this.serial(async (): Promise<SSHProfile> => {
       let stagedRef: string | null = null;
       try {
         const old: SSHProfile | null = this.checkRevision(d.id, expectedRevision);
+        if (expectedRouteDigest !== undefined) {
+          // Recheck inside the serialized write: a jump edit may have queued after the probe.
+          const route: SSHProfile[] = resolveSSHRoute(d.id, this.settings.profiles);
+          const digest: string = route.length === 1 ? targetDigest(route[0]) : JSON.stringify(route.map(targetDigest));
+          if (digest !== expectedRouteDigest) throw new TerminalError('profile_conflict');
+        }
         const mergedDraft: SSHProfileDraft = {
           ...d,
           keyId: d.keyId !== undefined ? d.keyId : old?.keyId,
