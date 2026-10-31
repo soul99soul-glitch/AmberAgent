@@ -13,8 +13,18 @@ data class SshProfile(
     val username: String,
     /** Authentication method; credential values are resolved separately. */
     val authMethod: SshAuthMethod,
+    /** Referenced local SSH key id in SshKeyStore when using key authentication. */
+    val keyId: String? = null,
+    /** Optional single-hop jump profile id; multi-hop chains are formed by chaining profiles. */
+    val jumpProfileId: String? = null,
     /** SHA-256 fingerprint of the accepted host key, hex without colons. */
     val acceptedHostKeyFingerprint: String? = null,
+    /** Host for which [acceptedHostKeyFingerprint] was confirmed. */
+    val acceptedHostKeyHost: String? = if (acceptedHostKeyFingerprint != null) host else null,
+    /** Port for which [acceptedHostKeyFingerprint] was confirmed. */
+    val acceptedHostKeyPort: Int? = if (acceptedHostKeyFingerprint != null) port else null,
+    /** Jump profile id via which [acceptedHostKeyFingerprint] was confirmed. */
+    val acceptedHostKeyViaJump: String? = if (acceptedHostKeyFingerprint != null) jumpProfileId else null,
     val createdAtMs: Long,
     val updatedAtMs: Long,
     /** Opaque SecretStore generation; empty means the legacy credential keys. */
@@ -36,6 +46,8 @@ data class SshProfile(
             "username contains whitespace"
         }
         require(port in 1..65535) { "port out of range" }
+        require(keyId == null || keyId.isNotBlank()) { "keyId must not be blank" }
+        require(jumpProfileId == null || jumpProfileId.isNotBlank()) { "jumpProfileId must not be blank" }
     }
 }
 
@@ -44,7 +56,10 @@ data class SshProfile(
 data class SshProfilesState(
     val profiles: List<SshProfile> = emptyList(),
     val defaultProfileId: String? = null,
-)
+) {
+    val items: List<SshProfile>
+        get() = profiles
+}
 
 @Serializable
 enum class SshAuthMethod(val wireName: String) {
@@ -52,11 +67,20 @@ enum class SshAuthMethod(val wireName: String) {
     PASSWORD("password"),
 
     @SerialName("private_key")
-    PRIVATE_KEY("private_key");
+    PRIVATE_KEY("key");
 
     companion object {
-        fun fromWire(value: String?): SshAuthMethod? =
-            entries.firstOrNull { it.wireName == value || it.name.equals(value, ignoreCase = true) }
+        fun fromWire(value: String?): SshAuthMethod? {
+            val normalized = value?.trim()?.lowercase() ?: return null
+            return when (normalized) {
+                "password" -> PASSWORD
+                "key", "private_key", "privatekey", "publickey", "public_key" -> PRIVATE_KEY
+                else -> entries.firstOrNull {
+                    it.wireName.equals(normalized, ignoreCase = true) ||
+                        it.name.equals(normalized, ignoreCase = true)
+                }
+            }
+        }
     }
 }
 
@@ -84,6 +108,15 @@ object SshTrustPolicy {
      * value (empty/illegal hex) is treated as Untrusted, never Trusted.
      */
     fun evaluate(profile: SshProfile, probedFingerprint: String?): SshHostTrust {
+        if (profile.acceptedHostKeyHost != null && profile.acceptedHostKeyHost != profile.host) {
+            return SshHostTrust.Untrusted
+        }
+        if (profile.acceptedHostKeyPort != null && profile.acceptedHostKeyPort != profile.port) {
+            return SshHostTrust.Untrusted
+        }
+        if (profile.acceptedHostKeyViaJump != profile.jumpProfileId) {
+            return SshHostTrust.Untrusted
+        }
         val accepted = profile.acceptedHostKeyFingerprint
             ?.let { runCatching { normalizeFingerprint(it) }.getOrNull() }
             ?: return SshHostTrust.Untrusted
@@ -97,14 +130,26 @@ object SshTrustPolicy {
         }
     }
 
-    /** Normalizes a fingerprint for storage: lowercase hex, no colons/spaces. */
-    fun normalizeFingerprint(raw: String): String =
-        raw.trim().replace(":", "").lowercase()
+    /** Normalizes a fingerprint for storage: lowercase hex, no colons/spaces (also accepts SHA256:<base64>). */
+    fun normalizeFingerprint(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.startsWith("SHA256:", ignoreCase = true)) {
+            val b64 = trimmed.substringAfter(':').trim().trimEnd('=')
+            val bytes = try {
+                java.util.Base64.getDecoder().decode(b64)
+            } catch (e: IllegalArgumentException) {
+                throw IllegalArgumentException("fingerprint must be 32 SHA-256 bytes", e)
+            }
+            require(bytes.size == 32) { "fingerprint must be 32 SHA-256 bytes" }
+            return bytes.joinToString("") { "%02x".format(it) }
+        }
+        return trimmed.replace(":", "").lowercase()
             .also { normalized ->
                 require(Regex("[0-9a-f]{64}").matches(normalized)) {
                     "fingerprint must be 32 SHA-256 bytes in hex"
                 }
             }
+    }
 
     /** Formats a stored SHA-256 fingerprint the way OpenSSH displays it. */
     fun displayFingerprint(raw: String): String {

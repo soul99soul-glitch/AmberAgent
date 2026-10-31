@@ -24,6 +24,7 @@ internal class ApprovalBatchPlanner(
     private val runId: String?,
     private val autoApprovalGate: JevAutoApprovalGate?,
     private val resolveDecision: (Tool?, UIMessagePart.Tool) -> PermissionDecision,
+    private val captureTarget: suspend (UIMessagePart.Tool) -> UIMessagePart.Tool = { it },
 ) {
     class ResumePlan(
         val canReleaseWaitingToolsWithHighRisk: Boolean,
@@ -108,7 +109,8 @@ internal class ApprovalBatchPlanner(
         recentUserTexts: List<String>,
     ): FreshPlan {
         var hasPendingApproval = false
-        val updatedTools = tools.map { tool ->
+        val updatedTools = tools.map { original ->
+            val tool = captureTarget(original)
             val toolDef = toolDefinitions.find { it.name == tool.toolName }
             val decision = resolveDecision(toolDef, tool)
             val escalation = autoApprovalEscalation(tool, decision, recentUserTexts)

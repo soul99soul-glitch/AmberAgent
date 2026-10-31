@@ -9,6 +9,8 @@ import app.amber.ai.ui.canResumeToolExecution
 import app.amber.ai.ui.finishReasoning
 import app.amber.core.model.Conversation
 import app.amber.core.utils.withSettledCredentialArgumentsRedacted
+import app.amber.core.utils.withUnapprovedCredentialsWithheld
+import app.amber.core.utils.withSettledCredentialsRedacted
 import app.amber.feature.chat.api.ChatEventPayload
 import app.amber.feature.chat.api.StreamToolState
 import kotlinx.datetime.TimeZone
@@ -104,7 +106,9 @@ object InterruptedRunProjection {
             annotations = target.annotations + UIMessageAnnotation.GenerationInterrupted(fullReason),
             finishedAt = target.finishedAt
                 ?: Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
-        ).finishReasoning()
+        ).finishReasoning().let {
+            listOf(it).withSettledCredentialsRedacted().withUnapprovedCredentialsWithheld().single()
+        }
 
         return conversation.copy(
             messageNodes = conversation.messageNodes.mapIndexed { index, n ->

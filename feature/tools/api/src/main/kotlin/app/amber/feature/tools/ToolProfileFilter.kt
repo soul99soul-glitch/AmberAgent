@@ -13,6 +13,9 @@ val SSH_PROFILE_WRITE_TOOL_NAMES: Set<String> = setOf(
     "ssh_profile_create",
     "ssh_profile_update",
     "ssh_profile_delete",
+    "ssh_key_generate",
+    "ssh_key_import",
+    "ssh_key_delete",
 )
 
 data class ToolProfileFilterResult(

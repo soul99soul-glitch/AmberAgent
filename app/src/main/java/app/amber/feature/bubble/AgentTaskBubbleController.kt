@@ -207,6 +207,10 @@ class AgentTaskBubbleController(
 
     private fun decideApproval(approved: Boolean) {
         val state = _uiState.value
+        if (approved && state.approvalToolTitle in app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES) {
+            openConversation()
+            return
+        }
         val uuid = state.conversationId?.let(::parseUuid) ?: return
         val toolCallId = state.approvalToolCallId ?: return
         chatService.handleToolApproval(uuid, toolCallId, approved)

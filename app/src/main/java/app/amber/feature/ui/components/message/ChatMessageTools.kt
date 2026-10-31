@@ -125,6 +125,10 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         if (isPending && !dedicatedThemeApproval) {
+            val (sshCanApprove, sshExtraContent) = rememberSshApprovalRouteState(
+                tool = tool,
+                arguments = arguments,
+            )
             ChatToolApprovalCard(
                 title = title,
                 toolName = tool.toolName,
@@ -138,7 +142,9 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 onDeny = { showDenyDialog = true },
                 onApprove = { onToolApproval?.invoke(tool.toolCallId, true, "") },
                 actionsEnabled = onToolApproval != null,
+                approveEnabled = sshCanApprove,
                 notice = jevAutoApprovalNotice(tool),
+                extraContent = sshExtraContent,
             )
         } else {
             AgentToolCallCapsule(

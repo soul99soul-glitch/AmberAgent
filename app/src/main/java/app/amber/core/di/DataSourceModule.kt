@@ -103,6 +103,10 @@ val dataSourceModule = module {
         )
     }
 
+    single {
+        get<app.amber.core.settings.ssh.SshProfileStore>().keyStore
+    }
+
     // P1-01: 统一 SecretStore（Android Keystore AES/GCM 加密存储）
     single {
         createAndroidSecretStore(get<Context>())

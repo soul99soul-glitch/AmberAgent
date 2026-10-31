@@ -82,7 +82,11 @@ class AgentToolDispatcher(
     private val json: Json,
     private val permissionDecisionResolver: PermissionDecisionResolver,
     private val hooks: List<ToolInvocationHook> = emptyList(),
+    private val sshApprovalTargetGuard: SshApprovalTargetGuard? = null,
 ) {
+    suspend fun captureApprovalTarget(tool: UIMessagePart.Tool): UIMessagePart.Tool =
+        sshApprovalTargetGuard?.capture(tool) ?: tool
+
     fun resolveDecision(
         toolDef: Tool?,
         tool: UIMessagePart.Tool,
@@ -288,6 +292,11 @@ class AgentToolDispatcher(
                         )
                     )
                 )
+            } else if (sshApprovalTargetGuard?.isCurrent(tool) == false) {
+                recordDeniedEffect(ledgerContext, tool, errorCategory = "approvedTargetChanged")
+                tracedTool.copy(output = listOf(UIMessagePart.Text(
+                    """{"status":"failed","code":"approvedTargetChanged","error":"SSH route or runtime changed while awaiting approval. Issue a fresh call.","recoverable":true}""",
+                )))
             } else executionPolicyDenied(
                 tool = tracedTool,
                 executionPolicy = executionPolicy,
@@ -396,7 +405,7 @@ class AgentToolDispatcher(
                     put(RECIPE_INVOCATION_INPUT_KEY, JsonPrimitive(tool.toolCallId))
                 })
             } else {
-                args
+                SshApprovalTargetGuard.executionArgs(tool, args)
             }
             logInfo("execute: ${resolved.name} argKeys=${(args as? JsonObject)?.keys.orEmpty()}")
             val executeNested = suspend {

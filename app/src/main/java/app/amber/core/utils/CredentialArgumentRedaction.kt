@@ -26,6 +26,7 @@ import kotlinx.serialization.json.put
 internal val CREDENTIAL_BEARING_TOOL_CREDENTIAL_KEYS: Map<String, Set<String>> = mapOf(
     "ssh_profile_create" to setOf("password", "private_key", "passphrase"),
     "ssh_profile_update" to setOf("password", "private_key", "passphrase"),
+    "ssh_key_import" to setOf("private_key", "passphrase"),
     "provider_config_apply" to setOf("api_key", "token", "secret", "password"),
 )
 
@@ -46,7 +47,7 @@ internal const val CREDENTIAL_REDACTION = "<redacted>"
 internal fun redactCredentialArguments(toolName: String, input: JsonElement?): JsonElement? {
     if (input == null) return null
     val keys = CREDENTIAL_BEARING_TOOL_CREDENTIAL_KEYS[toolName] ?: return input
-    val root = input as? JsonObject ?: return input
+    val root = input as? JsonObject ?: return JsonObject(emptyMap())
     if (root.keys.none { it in keys }) return input
     return buildJsonObject {
         root.forEach { (key, value) ->
@@ -101,7 +102,7 @@ internal fun UIMessagePart.Tool.withRedactedCredentialArguments(): UIMessagePart
     if (toolName !in CREDENTIAL_BEARING_TOOL_CREDENTIAL_KEYS) return this
     val parsed = runCatching {
         JsonInstant.parseToJsonElement(input.ifBlank { "{}" })
-    }.getOrNull() ?: return this
+    }.getOrNull() ?: return copy(input = "{}")
     val redacted = redactCredentialArguments(toolName, parsed) ?: return this
     if (redacted == parsed) return this
     return copy(input = redacted.toString())
@@ -179,8 +180,8 @@ internal fun UIMessagePart.Tool.withheldCredentialArguments(): UIMessagePart.Too
     if (toolName !in CREDENTIAL_BEARING_TOOL_CREDENTIAL_KEYS) return this
     val parsed = runCatching {
         JsonInstant.parseToJsonElement(input.ifBlank { "{}" })
-    }.getOrNull() ?: return this
-    if (redactCredentialArguments(toolName, parsed) == parsed) return this
+    }.getOrNull()
+    if (parsed is JsonObject && redactCredentialArguments(toolName, parsed) == parsed) return this
     return copy(
         input = JsonObject(emptyMap()).toString(),
         approvalState = ToolApprovalState.Denied(CREDENTIAL_WITHHELD_ON_RESUME),

@@ -113,7 +113,11 @@ internal fun getToolIcon(toolName: String, action: String?) = when (toolName) {
         "ssh_profile_list",
         "ssh_profile_create",
         "ssh_profile_update",
-        "ssh_profile_delete"
+        "ssh_profile_delete",
+        "ssh_key_list",
+        "ssh_key_generate",
+        "ssh_key_import",
+        "ssh_key_delete",
     ) -> Lucide.CodeXml
 
     in setOf(
@@ -179,9 +183,9 @@ internal fun getToolKind(toolName: String) = when {
 
     toolName.startsWith("screen_") || toolName == "vlm_task" -> AgentToolKind.SCREEN
 
-    // SSH profile management belongs to the terminal surface: it configures
+    // SSH profile and key management belong to the terminal surface: they configure
     // the runtime that terminal_* executes commands over.
-    toolName.startsWith("ssh_profile_") -> AgentToolKind.TERMINAL
+    toolName.startsWith("ssh_profile_") || toolName.startsWith("ssh_key_") -> AgentToolKind.TERMINAL
 
     toolName == ToolNames.SEARCH_WEB ||
         toolName == ToolNames.SCRAPE_WEB ||
@@ -495,6 +499,10 @@ internal fun toolDisplayTitle(
         R.string.chat_message_tool_ssh_profile_delete,
         arguments.getStringContent("id")?.compactToolPreview(22).orEmpty(),
     )
+    "ssh_key_list" -> "列出本机 SSH 密钥"
+    "ssh_key_generate" -> "生成本机 SSH 密钥 ${arguments.getStringContent("name")?.compactToolPreview(18).orEmpty()} (${arguments.getStringContent("type") ?: "ed25519"})"
+    "ssh_key_import" -> "导入本机 SSH 密钥 ${arguments.getStringContent("name")?.compactToolPreview(18).orEmpty()}"
+    "ssh_key_delete" -> "删除本机 SSH 密钥 ${(arguments.getStringContent("key_id") ?: arguments.getStringContent("id"))?.compactToolPreview(18).orEmpty()}"
     "screen_click" -> stringResource(R.string.chat_message_tool_screen_click)
     "screen_long_click" -> stringResource(R.string.chat_message_tool_screen_long_click)
     "screen_swipe" -> stringResource(R.string.chat_message_tool_screen_swipe)
@@ -659,6 +667,6 @@ private fun sshEndpoint(arguments: JsonElement): String {
 private fun sshAuthMethodLabel(raw: String?): String = when (raw?.lowercase()) {
     null, "" -> stringResource(R.string.chat_message_tool_ssh_auth_password)
     "password" -> stringResource(R.string.chat_message_tool_ssh_auth_password)
-    "private_key" -> stringResource(R.string.chat_message_tool_ssh_auth_private_key)
+    "key", "private_key" -> stringResource(R.string.chat_message_tool_ssh_auth_private_key)
     else -> raw
 }

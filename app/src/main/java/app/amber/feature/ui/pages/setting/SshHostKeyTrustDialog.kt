@@ -41,6 +41,12 @@ internal fun HostKeyTrustDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (pending.probe.hopCount > 1) {
+                    Text(
+                        text = "链路第 ${pending.probe.hopIndex}/${pending.probe.hopCount} 跳 · ${pending.probe.profile.name} (${pending.probe.route.joinToString(" → ") { it.name }})",
+                        style = LocalAmberType.current.meta,
+                    )
+                }
                 Text(
                     stringResource(
                         R.string.setting_sandbox_ssh_probe_endpoint,

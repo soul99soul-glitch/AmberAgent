@@ -66,6 +66,17 @@ data class TerminalJobSnapshot(
     val updatedAtMs: Long,
     val error: String?,
     val sshProfileId: String? = null,
+    val sshRoute: List<String> = emptyList(),
+    val sshFailure: SshHopFailure? = null,
+)
+
+data class SshHopFailure(
+    val code: String,
+    val hopIndex: Int,
+    val hopCount: Int,
+    val profileId: String,
+    val expectedFingerprint: String? = null,
+    val presentedFingerprint: String? = null,
 )
 
 /** A probe observes the server key without sending authentication credentials. */
@@ -73,6 +84,9 @@ data class SshHostKeyProbe(
     val profile: SshProfile,
     val fingerprint: String,
     val algorithm: String,
+    val hopIndex: Int = 1,
+    val hopCount: Int = 1,
+    val route: List<SshProfile> = listOf(profile),
 )
 
 data class TermuxRuntimeStatus(

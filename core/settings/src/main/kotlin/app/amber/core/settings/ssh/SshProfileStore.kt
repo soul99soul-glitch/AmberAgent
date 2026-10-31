@@ -8,8 +8,12 @@ import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.settings.secret.SecretDescriptor
 import app.amber.core.settings.secret.SecretStore
 import app.amber.feature.terminal.SshAuthMethod
+import app.amber.feature.terminal.SshKey
 import app.amber.feature.terminal.SshProfile
 import app.amber.feature.terminal.SshProfilesState
+import app.amber.feature.terminal.SshRouteError
+import app.amber.feature.terminal.SshRouteException
+import app.amber.feature.terminal.SshRouteResolver
 import app.amber.feature.terminal.SshTrustPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -57,8 +61,18 @@ data class SshCredentialPresence(
 class SshProfileStore(
     private val dataStore: DataStore<Preferences>,
     private val secretStore: SecretStore,
+    val keyStore: SshKeyStore,
 ) {
-    private val mutationMutex = Mutex()
+    constructor(
+        dataStore: DataStore<Preferences>,
+        secretStore: SecretStore,
+    ) : this(
+        dataStore = dataStore,
+        secretStore = secretStore,
+        keyStore = SshKeyStore(dataStore, secretStore),
+    )
+
+    private val mutationMutex get() = keyStore.mutationMutex
 
     /** The DataStore-backed flow. It intentionally has no synthetic ready state. */
     val state: Flow<SshProfilesState> = dataStore.data.map { preferences ->
@@ -83,14 +97,23 @@ class SshProfileStore(
         validateSecret(password, "password")
         validateSecret(privateKey, "private key")
         validatePassphrase(passphrase)
+        require(profile.keyId == null || privateKey == null) { "Specify either key_id or private_key, not both." }
+        require(profile.keyId == null || passphrase == null) { "Stored keys carry their own passphrase; import a new key instead." }
+        require(profile.keyId == null || profile.authMethod == SshAuthMethod.PRIVATE_KEY) { "key_id requires key authentication" }
 
         val before = snapshot()
         val existing = before.profiles.firstOrNull { it.id == profile.id }
-        val endpointChanged = existing != null &&
-            (existing.host != profile.host || existing.port != profile.port)
-        val previousCredentials = existing?.let(::readCredentials)
+        val profileKeyId = profile.keyId
+        if (profileKeyId != null) {
+            keyStore.resolve(profileKeyId)
+        }
+        val endpointOrRouteChanged = existing != null &&
+            (existing.host != profile.host ||
+                existing.port != profile.port ||
+                existing.jumpProfileId != profile.jumpProfileId)
+        val previousCredentials = existing?.let(::readInlineCredentials)
             ?: SshCredentials(password = null, privateKey = null, passphrase = null)
-        if (existing != null) {
+        if (existing != null && profile.keyId == null) {
             val retainedFields = when (profile.authMethod) {
                 SshAuthMethod.PASSWORD -> listOf(Triple(PASSWORD_FIELD, password, previousCredentials.password))
                 SshAuthMethod.PRIVATE_KEY -> listOf(
@@ -119,27 +142,44 @@ class SshProfileStore(
                 privateKey = null,
                 passphrase = null,
             )
-            SshAuthMethod.PRIVATE_KEY -> SshCredentials(
-                password = null,
-                privateKey = suppliedCredentials.privateKey,
-                passphrase = suppliedCredentials.passphrase,
-            )
+            SshAuthMethod.PRIVATE_KEY -> if (profile.keyId != null && privateKey == null) {
+                SshCredentials(password = null, privateKey = null, passphrase = null)
+            } else {
+                SshCredentials(
+                    password = null,
+                    privateKey = suppliedCredentials.privateKey,
+                    passphrase = suppliedCredentials.passphrase,
+                )
+            }
         }
         validateSecret(credentials.password, "password")
         validateSecret(credentials.privateKey, "private key")
         validatePassphrase(credentials.passphrase)
         val now = System.currentTimeMillis()
         val credentialRevision = newCredentialRevision()
+        val retainedFingerprint = when {
+            existing == null -> null
+            endpointOrRouteChanged -> null
+            else -> existing.acceptedHostKeyFingerprint
+        }
         val persistedProfile = profile.copy(
             createdAtMs = existing?.createdAtMs ?: profile.createdAtMs,
-            acceptedHostKeyFingerprint = when {
-                existing == null -> null
-                endpointChanged -> null
-                else -> existing.acceptedHostKeyFingerprint
-            },
+            acceptedHostKeyFingerprint = retainedFingerprint,
+            acceptedHostKeyHost = if (retainedFingerprint != null) profile.host else null,
+            acceptedHostKeyPort = if (retainedFingerprint != null) profile.port else null,
+            acceptedHostKeyViaJump = if (retainedFingerprint != null) profile.jumpProfileId else null,
             updatedAtMs = now,
             credentialRevision = credentialRevision,
         )
+
+        val candidateProfiles = if (existing == null) {
+            before.profiles + persistedProfile
+        } else {
+            before.profiles.map { stored ->
+                if (stored.id == profile.id) persistedProfile else stored
+            }
+        }
+        SshRouteResolver.validateAllRoutes(candidateProfiles)
 
         val newDescriptors = buildList {
             if (credentials.password != null) add(credentialDescriptor(profile.id, credentialRevision, PASSWORD_FIELD))
@@ -183,6 +223,10 @@ class SshProfileStore(
         require(id.isNotBlank()) { "id must not be blank" }
         val before = snapshot()
         if (before.profiles.none { it.id == id }) return@withLock
+        val dependents = SshRouteResolver.dependentProfiles(id, before.profiles)
+        if (dependents.isNotEmpty()) {
+            throw SshRouteException(SshRouteError.InUseAsJump(id, dependents))
+        }
 
         // Remove metadata first. If the process dies before cleanup, only
         // encrypted SSH-owned orphans remain and can never be resolved by id.
@@ -227,12 +271,17 @@ class SshProfileStore(
      * profile snapshot it inspected. This prevents accepting a key for a
      * changed endpoint or authentication configuration.
      */
-    suspend fun acceptHostKey(expectedProfile: SshProfile, fingerprint: String) =
+    suspend fun acceptHostKey(expectedProfile: SshProfile, fingerprint: String, expectedRoute: List<SshProfile>? = null) =
         mutationMutex.withLock {
             validateProfile(expectedProfile)
             val normalized = SshTrustPolicy.normalizeFingerprint(fingerprint)
             dataStore.edit { preferences ->
                 val current = decodeState(preferences[SSH_PROFILES_KEY])
+                if (expectedRoute != null) {
+                    check(SshRouteResolver.resolveRoute(expectedRoute.last().id, current.profiles) == expectedRoute) {
+                        "SSH route changed while accepting host key. Probe again."
+                    }
+                }
                 val stored = current.profiles.firstOrNull { it.id == expectedProfile.id }
                     ?: error("SSH profile not found: ${expectedProfile.id}")
                 check(stored == expectedProfile) {
@@ -244,6 +293,9 @@ class SshProfileStore(
                             if (profile.id == expectedProfile.id) {
                                 profile.copy(
                                     acceptedHostKeyFingerprint = normalized,
+                                    acceptedHostKeyHost = profile.host,
+                                    acceptedHostKeyPort = profile.port,
+                                    acceptedHostKeyViaJump = profile.jumpProfileId,
                                     updatedAtMs = System.currentTimeMillis(),
                                 )
                             } else {
@@ -265,22 +317,67 @@ class SshProfileStore(
     }
 
     /**
+     * Resolve the ordered ProxyJump hop chain from outermost jump host (`first()`)
+     * to final target (`last()`) for [id] (or the persisted default profile).
+     */
+    suspend fun resolveRoute(id: String? = null): List<SshProfile> {
+        val current = snapshot()
+        val profileId = id ?: current.defaultProfileId
+            ?: error("No default SSH profile configured")
+        return SshRouteResolver.resolveRoute(profileId, current.profiles)
+    }
+
+    /**
      * Report which credentials exist for [profile] without decrypting them.
      * Safe for status surfaces (agent tools, list UI) that must never expose
      * a secret value.
      */
-    fun credentialPresence(profile: SshProfile): SshCredentialPresence = SshCredentialPresence(
-        hasPassword = secretStore.has(credentialDescriptor(profile, PASSWORD_FIELD)),
-        hasPrivateKey = secretStore.has(credentialDescriptor(profile, PRIVATE_KEY_FIELD)),
-        hasPassphrase = secretStore.has(credentialDescriptor(profile, PASSPHRASE_FIELD)),
-    )
+    fun credentialPresence(
+        profile: SshProfile,
+        keysById: Map<String, SshKey> = emptyMap(),
+    ): SshCredentialPresence {
+        val keyId = profile.keyId
+        val referencedKey = keyId?.let { keysById[it] }
+        val hasInlineKey = secretStore.has(credentialDescriptor(profile, PRIVATE_KEY_FIELD))
+        val hasInlinePassphrase = secretStore.has(credentialDescriptor(profile, PASSPHRASE_FIELD))
+        val hasStoredKey = when {
+            referencedKey != null -> keyStore.hasPrivateKey(referencedKey)
+            keyId != null -> false
+            else -> false
+        }
+        val hasStoredPassphrase = when {
+            referencedKey != null -> keyStore.hasPassphrase(referencedKey)
+            keyId != null -> false
+            else -> false
+        }
+        return SshCredentialPresence(
+            hasPassword = secretStore.has(credentialDescriptor(profile, PASSWORD_FIELD)),
+            hasPrivateKey = hasInlineKey || hasStoredKey,
+            hasPassphrase = hasInlinePassphrase || hasStoredPassphrase,
+        )
+    }
 
-    /** Load runtime-only credentials; callers must not persist or log this object. */
-    fun readCredentials(profile: SshProfile): SshCredentials = SshCredentials(
+    private fun readInlineCredentials(profile: SshProfile): SshCredentials = SshCredentials(
         password = secretStore.read(credentialDescriptor(profile, PASSWORD_FIELD)),
         privateKey = secretStore.read(credentialDescriptor(profile, PRIVATE_KEY_FIELD)),
         passphrase = secretStore.read(credentialDescriptor(profile, PASSPHRASE_FIELD)),
     )
+
+    /** Load runtime-only credentials; callers must not persist or log this object. */
+    fun readCredentials(
+        profile: SshProfile,
+        keysById: Map<String, SshKey> = emptyMap(),
+    ): SshCredentials {
+        val inline = readInlineCredentials(profile)
+        val keyId = profile.keyId ?: return inline
+        val key = keysById[keyId] ?: throw SshRouteException(SshRouteError.KeyNotFound(keyId))
+        val material = keyStore.readMaterial(key)
+        return SshCredentials(
+            password = inline.password,
+            privateKey = material.privateKey,
+            passphrase = material.passphrase,
+        )
+    }
 
     /**
      * Capture credentials only while the persisted profile is still equal to
@@ -292,7 +389,12 @@ class SshProfileStore(
             check(snapshot().profiles.firstOrNull { it.id == profile.id } == profile) {
                 "SSH profile changed before credentials were read: ${profile.id}"
             }
-            readCredentials(profile)
+            val keysById = if (profile.keyId != null) {
+                keyStore.snapshot().keys.associateBy { it.id }
+            } else {
+                emptyMap()
+            }
+            readCredentials(profile, keysById)
         }
 
     private fun validateProfile(profile: SshProfile) {
@@ -334,14 +436,8 @@ class SshProfileStore(
         }
     }
 
-    private fun isMaskedOrRedactedPlaceholder(value: String): Boolean {
-        val trimmed = value.trim()
-        if (trimmed.isEmpty()) return false
-        val lower = trimmed.lowercase()
-        if (trimmed.startsWith("••••") || trimmed.all { it == '•' || it == '*' }) return true
-        if (lower == "<redacted>" || lower == "[redacted]" || lower == "__masked_by_amberagent_backup__") return true
-        return false
-    }
+    private fun isMaskedOrRedactedPlaceholder(value: String): Boolean =
+        SshKeyStore.isMaskedOrRedactedPlaceholder(value)
 
     private fun writeCredential(profileId: String, revision: String, field: String, value: String) {
         val descriptor = credentialDescriptor(profileId, revision, field)

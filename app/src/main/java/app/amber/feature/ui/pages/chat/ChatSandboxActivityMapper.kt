@@ -314,7 +314,7 @@ private fun UIMessagePart.Tool.inputPreview(input: JsonElement): String {
 
 private fun UIMessagePart.Tool.defaultRuntime(input: JsonElement): String = when {
     toolName in setOf("terminal_execute", "terminal_job_start") &&
-        input.getStringContent("ssh_profile_id") != null -> "remote_ssh"
+        (input.getStringContent("profile_id") != null || input.getStringContent("ssh_profile_id") != null) -> "remote_ssh"
     toolName in setOf("terminal_execute", "terminal_job_start") &&
         input.getStringContent("runtime") != null -> input.getStringContent("runtime").orEmpty()
     toolName == "search_web" -> "web-search"
@@ -336,7 +336,8 @@ private fun UIMessagePart.Tool.defaultRuntime(input: JsonElement): String = when
 }
 
 private fun UIMessagePart.Tool.defaultWorkspace(input: JsonElement): String = when {
-    defaultRuntime(input) == "remote_ssh" -> input.getStringContent("ssh_profile_id").orEmpty()
+    defaultRuntime(input) == "remote_ssh" ->
+        (input.getStringContent("profile_id") ?: input.getStringContent("ssh_profile_id")).orEmpty()
     toolName.startsWith("terminal_job_") -> ""
     toolName.startsWith("terminal_") || toolName.startsWith("file_") -> "/workspace"
     toolName.startsWith("icloud_") -> "/icloud"

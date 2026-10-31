@@ -2,6 +2,8 @@ package app.amber.feature.ui.pages.setting
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -34,13 +36,17 @@ import com.composables.icons.lucide.EyeOff
 import com.composables.icons.lucide.Lucide
 import app.amber.agent.R
 import app.amber.feature.terminal.SshAuthMethod
+import app.amber.feature.terminal.SshKey
 import app.amber.feature.terminal.SshProfile
 import kotlin.uuid.Uuid
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SshProfileEditorDialog(
     request: SshProfileEditorRequest,
     saving: Boolean,
+    availableKeys: List<SshKey> = emptyList(),
+    availableJumpProfiles: List<SshProfile> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (SshProfile, String?, String?, String?) -> Unit,
 ) {
@@ -50,6 +56,10 @@ internal fun SshProfileEditorDialog(
     var port by remember(request.id) { mutableStateOf(existing?.port?.toString() ?: "22") }
     var username by remember(request.id) { mutableStateOf(existing?.username.orEmpty()) }
     var authMethod by remember(request.id) { mutableStateOf(existing?.authMethod ?: SshAuthMethod.PASSWORD) }
+    var selectedKeyId by remember(request.id) {
+        mutableStateOf(existing?.keyId ?: availableKeys.firstOrNull()?.id)
+    }
+    var selectedJumpProfileId by remember(request.id) { mutableStateOf(existing?.jumpProfileId) }
     // Credentials stay in ordinary remember state and are cleared on either button path.
     var password by remember(request.id) { mutableStateOf("") }
     var privateKey by remember(request.id) { mutableStateOf("") }
@@ -69,7 +79,7 @@ internal fun SshProfileEditorDialog(
         parsedPort == null || parsedPort !in 1..65535 -> stringResource(R.string.setting_sandbox_ssh_port_invalid)
         authMethod == SshAuthMethod.PASSWORD && secretRequired && password.isBlank() ->
             stringResource(R.string.setting_sandbox_ssh_password_required)
-        authMethod == SshAuthMethod.PRIVATE_KEY && secretRequired && privateKey.isBlank() ->
+        authMethod == SshAuthMethod.PRIVATE_KEY && selectedKeyId == null && secretRequired && privateKey.isBlank() ->
             stringResource(R.string.setting_sandbox_ssh_private_key_required)
         else -> null
     }
@@ -175,48 +185,89 @@ internal fun SshProfileEditorDialog(
                         },
                     )
                 } else {
-                    OutlinedTextField(
-                        value = privateKey,
-                        onValueChange = { privateKey = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 120.dp),
-                        label = { Text(stringResource(R.string.setting_sandbox_ssh_private_key)) },
-                        supportingText = { Text(stringResource(R.string.setting_sandbox_ssh_private_key_hint)) },
-                        enabled = !saving,
-                        minLines = 4,
-                        maxLines = 8,
-                    )
-                    OutlinedTextField(
-                        value = passphrase,
-                        onValueChange = { passphrase = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text(stringResource(R.string.setting_sandbox_ssh_passphrase)) },
-                        supportingText = { Text(stringResource(R.string.setting_sandbox_ssh_passphrase_hint)) },
-                        singleLine = true,
-                        enabled = !saving && !clearPassphrase,
-                        visualTransformation = if (showPassphrase) VisualTransformation.None else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        trailingIcon = {
-                            IconButton(onClick = { showPassphrase = !showPassphrase }) {
-                                Icon(
-                                    if (showPassphrase) Lucide.EyeOff else Lucide.Eye,
-                                    stringResource(if (showPassphrase) R.string.setting_sandbox_ssh_hide_secret else R.string.setting_sandbox_ssh_show_secret),
+                    if (availableKeys.isNotEmpty()) {
+                        Text("选择已保存的本机密钥", style = MaterialTheme.typography.labelLarge)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            availableKeys.forEach { key ->
+                                FilterChip(
+                                    selected = selectedKeyId == key.id,
+                                    onClick = { selectedKeyId = key.id },
+                                    enabled = !saving,
+                                    label = { Text("${key.name} (${key.algorithm})") },
                                 )
                             }
-                        },
-                    )
-                    if (existing != null) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = clearPassphrase,
-                                onCheckedChange = {
-                                    clearPassphrase = it
-                                    if (it) passphrase = ""
-                                },
+                            FilterChip(
+                                selected = selectedKeyId == null,
+                                onClick = { selectedKeyId = null },
                                 enabled = !saving,
+                                label = { Text("手动粘贴私钥") },
                             )
-                            Text(stringResource(R.string.setting_sandbox_ssh_passphrase_clear))
+                        }
+                    }
+                    if (selectedKeyId == null) {
+                        OutlinedTextField(
+                            value = privateKey,
+                            onValueChange = { privateKey = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 120.dp),
+                            label = { Text(stringResource(R.string.setting_sandbox_ssh_private_key)) },
+                            supportingText = { Text(stringResource(R.string.setting_sandbox_ssh_private_key_hint)) },
+                            enabled = !saving,
+                            minLines = 4,
+                            maxLines = 8,
+                        )
+                        OutlinedTextField(
+                            value = passphrase,
+                            onValueChange = { passphrase = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text(stringResource(R.string.setting_sandbox_ssh_passphrase)) },
+                            supportingText = { Text(stringResource(R.string.setting_sandbox_ssh_passphrase_hint)) },
+                            singleLine = true,
+                            enabled = !saving && !clearPassphrase,
+                            visualTransformation = if (showPassphrase) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            trailingIcon = {
+                                IconButton(onClick = { showPassphrase = !showPassphrase }) {
+                                    Icon(
+                                        if (showPassphrase) Lucide.EyeOff else Lucide.Eye,
+                                        stringResource(if (showPassphrase) R.string.setting_sandbox_ssh_hide_secret else R.string.setting_sandbox_ssh_show_secret),
+                                    )
+                                }
+                            },
+                        )
+                        if (existing != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(
+                                    checked = clearPassphrase,
+                                    onCheckedChange = {
+                                        clearPassphrase = it
+                                        if (it) passphrase = ""
+                                    },
+                                    enabled = !saving,
+                                )
+                                Text(stringResource(R.string.setting_sandbox_ssh_passphrase_clear))
+                            }
+                        }
+                    }
+                }
+                val jumpCandidates = availableJumpProfiles.filter { it.id != request.id }
+                if (jumpCandidates.isNotEmpty() || selectedJumpProfileId != null) {
+                    Text("跳板机 (ProxyJump)", style = MaterialTheme.typography.labelLarge)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = selectedJumpProfileId == null,
+                            onClick = { selectedJumpProfileId = null },
+                            enabled = !saving,
+                            label = { Text("直连 (无跳板)") },
+                        )
+                        jumpCandidates.forEach { candidate ->
+                            FilterChip(
+                                selected = selectedJumpProfileId == candidate.id,
+                                onClick = { selectedJumpProfileId = candidate.id },
+                                enabled = !saving,
+                                label = { Text(candidate.name) },
+                            )
                         }
                     }
                 }
@@ -231,8 +282,11 @@ internal fun SshProfileEditorDialog(
                 onClick = {
                     val portNumber = parsedPort ?: return@SandboxAction
                     val now = System.currentTimeMillis()
-                    val endpointChanged = existing != null &&
-                        (existing.host != host.trim() || existing.port != portNumber)
+                    val endpointOrRouteChanged = existing != null &&
+                        (existing.host != host.trim() ||
+                            existing.port != portNumber ||
+                            existing.jumpProfileId != selectedJumpProfileId)
+                    val resolvedKeyId = if (authMethod == SshAuthMethod.PRIVATE_KEY) selectedKeyId else null
                     val saved = runCatching { (existing ?: SshProfile(
                         id = request.id,
                         name = name.trim(),
@@ -240,6 +294,8 @@ internal fun SshProfileEditorDialog(
                         port = portNumber,
                         username = username.trim(),
                         authMethod = authMethod,
+                        keyId = resolvedKeyId,
+                        jumpProfileId = selectedJumpProfileId,
                         createdAtMs = now,
                         updatedAtMs = now,
                     )).copy(
@@ -248,16 +304,19 @@ internal fun SshProfileEditorDialog(
                         port = portNumber,
                         username = username.trim(),
                         authMethod = authMethod,
-                        acceptedHostKeyFingerprint = if (endpointChanged) null else existing?.acceptedHostKeyFingerprint,
+                        keyId = resolvedKeyId,
+                        jumpProfileId = selectedJumpProfileId,
+                        acceptedHostKeyFingerprint = if (endpointOrRouteChanged) null else existing?.acceptedHostKeyFingerprint,
                         updatedAtMs = now,
                     )
                     }.getOrElse {
                         formError = invalidProfileMessage
                         return@SandboxAction
                     }
-                    val newPassword = password.takeIf { it.isNotEmpty() }
-                    val newPrivateKey = privateKey.takeIf { it.isNotEmpty() }
+                    val newPassword = password.takeIf { authMethod == SshAuthMethod.PASSWORD && it.isNotEmpty() }
+                    val newPrivateKey = privateKey.takeIf { authMethod == SshAuthMethod.PRIVATE_KEY && resolvedKeyId == null && it.isNotEmpty() }
                     val newPassphrase = when {
+                        authMethod != SshAuthMethod.PRIVATE_KEY || resolvedKeyId != null -> null
                         clearPassphrase -> ""
                         passphrase.isNotEmpty() -> passphrase
                         else -> null

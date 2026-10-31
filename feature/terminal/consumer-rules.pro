@@ -2,10 +2,10 @@
 # Class.forName(...).getDeclaredConstructor().newInstance(). Keep the exact
 # implementations used by the Android SSH backend, including their names and
 # members. The backend fixes KEX/host-key/public-key algorithms in SshClient.kt
-# and deliberately does not enable Bouncy Castle, GSSAPI, compression, or agent
-# implementations.
+# and uses Bouncy Castle lightweight primitives only for Ed25519 / Curve25519.
 
 # KEX selected by SshClient.SUPPORTED_KEX.
+-keep class com.jcraft.jsch.DH25519 { *; }
 -keep class com.jcraft.jsch.DHEC256 { *; }
 -keep class com.jcraft.jsch.DHEC384 { *; }
 -keep class com.jcraft.jsch.DHEC521 { *; }
@@ -14,15 +14,28 @@
 -keep class com.jcraft.jsch.DHG18 { *; }
 -keep class com.jcraft.jsch.DHG14256 { *; }
 
-# JCA primitives used by the selected KEX and host-key algorithms.
+# JCA and Bouncy Castle primitives used by the selected KEX, host-key, and key-gen algorithms.
 -keep class com.jcraft.jsch.jce.DH { *; }
 -keep class com.jcraft.jsch.jce.ECDHN { *; }
+-keep class com.jcraft.jsch.jce.KeyPairGenECDSA { *; }
+-keep class com.jcraft.jsch.jce.KeyPairGenRSA { *; }
 -keep class com.jcraft.jsch.jce.Random { *; }
 -keep class com.jcraft.jsch.jce.SHA1 { *; }
 -keep class com.jcraft.jsch.jce.SHA256 { *; }
 -keep class com.jcraft.jsch.jce.SHA384 { *; }
 -keep class com.jcraft.jsch.jce.SHA512 { *; }
 -keep class com.jcraft.jsch.jce.MD5 { *; }
+-keep class com.jcraft.jsch.bc.KeyPairGenEdDSA { *; }
+-keep class com.jcraft.jsch.bc.SignatureEd25519 { *; }
+-keep class com.jcraft.jsch.bc.SignatureEd448 { *; }
+-keep class com.jcraft.jsch.bc.SignatureEdDSA { *; }
+-keep class com.jcraft.jsch.bc.XDH { *; }
+-keep class com.jcraft.jsch.KeyPairEd25519 { *; }
+-keep class com.jcraft.jsch.KeyPairEdDSA { *; }
+-keep class com.jcraft.jsch.KeyPairECDSA { *; }
+-keep class com.jcraft.jsch.KeyPairGenECDSA { *; }
+-keep class com.jcraft.jsch.KeyPairGenEdDSA { *; }
+-dontwarn org.bouncycastle.**
 
 # Session ciphers and legacy/private-key decryption ciphers.
 -keep class com.jcraft.jsch.jce.AES128GCM { *; }

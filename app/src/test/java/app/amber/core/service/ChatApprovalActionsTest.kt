@@ -101,6 +101,30 @@ class ChatApprovalActionsTest : DurableRuntimeTestBase() {
     }
 
     @Test
+    fun `SSH pending credentials never reach Room and locked device can only deny key writes`() = runBlocking {
+        val fixture = fixture()
+        val secret = "pending-private-material"
+        val imported = tool("import", "ssh_key_import").copy(input = """{"name":"k","private_key":"$secret","passphrase":"passphrase-secret"}""")
+        val saved = Conversation.ofId(Uuid.random()).copy(messageNodes = listOf(assistantTools(imported)))
+        fixture.repo.insertConversation(saved)
+        val restored = fixture.repo.getConversationById(saved.id)!!.currentMessages.last().getTools().single()
+        assertFalse(restored.input.contains(secret))
+        assertFalse(restored.input.contains("passphrase-secret"))
+        assertTrue(restored.approvalState is ToolApprovalState.Denied)
+
+        val waiting = tool("key-write", "ssh_key_generate")
+        val conversation = Conversation.ofId(Uuid.random()).copy(messageNodes = listOf(assistantTools(waiting)))
+        fixture.repo.insertConversation(conversation)
+        val keyguard = context.getSystemService(android.app.KeyguardManager::class.java)
+        val shadow = org.robolectric.Shadows.shadowOf(keyguard)
+        shadow.setKeyguardLocked(true)
+        try {
+            assertFalse(fixture.actions.applyToolApprovalDecision(conversation.id, waiting.toolCallId, true, "", null).applied)
+            assertTrue(fixture.actions.applyToolApprovalDecision(conversation.id, waiting.toolCallId, false, "deny", null).applied)
+        } finally { shadow.setKeyguardLocked(false) }
+    }
+
+    @Test
     fun `a decision already applied cannot resume again or be overwritten by a stale approval`() = runBlocking {
         val fixture = fixture()
         val waiting = tool("once", "file_write")

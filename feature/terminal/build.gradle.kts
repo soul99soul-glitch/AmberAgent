@@ -34,10 +34,14 @@ dependencies {
     implementation(platform(libs.koin.bom))
     implementation(libs.koin.android)
     implementation("com.github.mwiede:jsch:2.28.7")
+    implementation(libs.bouncycastle.bcprov)
     testImplementation(libs.junit)
 }
 
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
-    // An explicitly requested loopback run must contact the current temporary server.
-    outputs.upToDateWhen { !providers.environmentVariable("AMBER_SSH_LOOPBACK_FIXTURE").isPresent }
+    // An explicitly requested loopback or Docker IT run must contact the current server.
+    outputs.upToDateWhen {
+        !providers.environmentVariable("AMBER_SSH_LOOPBACK_FIXTURE").isPresent &&
+            !providers.environmentVariable("AMBER_SSH_IT").isPresent
+    }
 }

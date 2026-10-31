@@ -39,6 +39,7 @@ import app.amber.agent.R
 import app.amber.feature.terminal.SshAuthMethod
 import app.amber.feature.terminal.SshHostTrust
 import app.amber.feature.terminal.SshProfile
+import app.amber.feature.terminal.SshRouteResolver
 import app.amber.feature.terminal.SshTrustPolicy
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.LocalAmberType
@@ -46,6 +47,7 @@ import app.amber.feature.ui.theme.LocalAmberType
 @Composable
 internal fun SshProfileCard(
     profile: SshProfile,
+    allProfiles: List<SshProfile> = listOf(profile),
     isDefault: Boolean,
     isSelected: Boolean,
     enabled: Boolean,
@@ -56,10 +58,12 @@ internal fun SshProfileCard(
     onProbe: () -> Unit,
 ) {
     val colors = workspaceColors()
-    val trusted = SshTrustPolicy.evaluate(
-        profile,
-        profile.acceptedHostKeyFingerprint,
-    ) is SshHostTrust.Trusted
+    val route = remember(profile, allProfiles) {
+        runCatching { SshRouteResolver.resolveRoute(profile.id, allProfiles) }.getOrNull() ?: listOf(profile)
+    }
+    val trusted = route.all { hop ->
+        SshTrustPolicy.evaluate(hop, hop.acceptedHostKeyFingerprint) is SshHostTrust.Trusted
+    }
     val trustDescription = stringResource(
         if (trusted) R.string.setting_sandbox_ssh_host_key_trusted
         else R.string.setting_sandbox_ssh_host_key_untrusted,
@@ -73,9 +77,13 @@ internal fun SshProfileCard(
     )
     var actionsExpanded by remember(profile.id) { mutableStateOf(false) }
 
+    val routeSuffix = if (route.size > 1) {
+        " · 跳板: ${route.joinToString(" → ") { it.name }}"
+    } else ""
+
     SandboxSettingsRow(
         title = profile.name,
-        summary = "${profile.username}@${profile.host}:${profile.port}",
+        summary = "${profile.username}@${profile.host}:${profile.port}$routeSuffix",
         modifier = (if (isSelected) {
             Modifier.background(colors.blueContainer.copy(alpha = 0.32f))
         } else {

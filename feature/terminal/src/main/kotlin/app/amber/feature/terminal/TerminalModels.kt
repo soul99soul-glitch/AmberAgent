@@ -11,6 +11,8 @@ data class TerminalResult(
     val running: Boolean = false,
     val outputLogPath: String = "",
     val sshProfileId: String? = null,
+    val sshRoute: List<String> = emptyList(),
+    val sshFailure: SshHopFailure? = null,
 )
 
 data class TerminalSessionInfo(

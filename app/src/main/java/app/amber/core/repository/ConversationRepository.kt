@@ -33,6 +33,7 @@ import app.amber.core.sync.core.SyncRestoreWriteEpoch
 import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.JsonInstant
 import app.amber.core.utils.withSettledCredentialsRedacted
+import app.amber.core.utils.withUnapprovedCredentialsWithheld
 import java.time.Instant
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
@@ -618,7 +619,7 @@ class ConversationRepository(
                 id = node.id.toString(),
                 conversationId = conversationId,
                 nodeIndex = firstNodeIndex + index,
-                messages = JsonInstant.encodeToString(node.messages.withSettledCredentialsRedacted()),
+                messages = JsonInstant.encodeToString(node.messages.withSettledCredentialsRedacted().withUnapprovedCredentialsWithheld()),
                 selectIndex = node.selectIndex
             )
         }

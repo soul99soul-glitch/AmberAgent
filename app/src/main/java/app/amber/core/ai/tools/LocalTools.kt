@@ -10,6 +10,7 @@ import app.amber.feature.tools.ICloudDriveTools
 import app.amber.feature.tools.ExternalFileTools
 import app.amber.feature.webmount.tools.WebMountLocalTools
 import app.amber.feature.tools.ScreenAutomationTools
+import app.amber.feature.tools.SshKeyTools
 import app.amber.feature.tools.SshProfileTools
 import app.amber.feature.tools.SystemAccessTools
 import app.amber.feature.tools.TerminalTools
@@ -46,6 +47,7 @@ class LocalTools(
     private val reminderTools: ReminderTools,
     private val jevDecisionCoordinator: app.amber.core.jev.JevDecisionCoordinator,
     private val sshProfileTools: SshProfileTools,
+    private val sshKeyTools: SshKeyTools,
 ) {
     val javascriptTool by lazy { createJavascriptTool() }
 
@@ -131,6 +133,7 @@ class LocalTools(
         if (options.contains(LocalToolOption.Terminal)) {
             tools.addAll(terminalTools.getTools())
             tools.addAll(sshProfileTools.getTools())
+            tools.addAll(sshKeyTools.getTools())
         }
         if (options.contains(LocalToolOption.ScreenAutomation)) {
             tools.addAll(screenAutomationTools.getTools(runId = runId))

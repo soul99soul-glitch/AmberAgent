@@ -31,6 +31,10 @@ class SshProfileToolApprovalTest {
             sshTool("ssh_profile_create"),
             sshTool("ssh_profile_update"),
             sshTool("ssh_profile_delete"),
+            sshTool("ssh_key_list", needsApproval = false, allowsAutoApproval = true),
+            sshTool("ssh_key_generate"),
+            sshTool("ssh_key_import"),
+            sshTool("ssh_key_delete"),
         ),
     )
 
@@ -38,6 +42,9 @@ class SshProfileToolApprovalTest {
     private val createInput = """{"name":"web","host":"h","username":"u","password":"pw"}"""
     private val updateInput = """{"id":"p1","name":"renamed"}"""
     private val deleteInput = """{"id":"p1"}"""
+    private val keyGenInput = """{"name":"k1","type":"ed25519"}"""
+    private val keyImportInput = """{"name":"k1","private_key":"-----BEGIN-----"}"""
+    private val keyDeleteInput = """{"key_id":"k1"}"""
 
     // ---------------- metadata ----------------
 
@@ -47,6 +54,9 @@ class SshProfileToolApprovalTest {
             "ssh_profile_create",
             "ssh_profile_update",
             "ssh_profile_delete",
+            "ssh_key_generate",
+            "ssh_key_import",
+            "ssh_key_delete",
         ).forEach { name ->
             val metadata = registry.metadataFor(name)!!
             assertEquals(name, ToolRisk.High, metadata.risk)
@@ -54,11 +64,13 @@ class SshProfileToolApprovalTest {
             assertTrue(name, metadata.needsApproval)
             assertFalse(name, metadata.autoApprovable)
         }
-        val list = registry.metadataFor("ssh_profile_list")!!
-        assertEquals(ToolRisk.Normal, list.risk)
-        assertFalse(list.mutates)
-        assertFalse(list.needsApproval)
-        assertTrue(list.autoApprovable)
+        listOf("ssh_profile_list", "ssh_key_list").forEach { readName ->
+            val list = registry.metadataFor(readName)!!
+            assertEquals(ToolRisk.Normal, list.risk)
+            assertFalse(list.mutates)
+            assertFalse(list.needsApproval)
+            assertTrue(list.autoApprovable)
+        }
     }
 
     @Test
@@ -67,6 +79,9 @@ class SshProfileToolApprovalTest {
             "ssh_profile_create",
             "ssh_profile_update",
             "ssh_profile_delete",
+            "ssh_key_generate",
+            "ssh_key_import",
+            "ssh_key_delete",
         ).forEach { name ->
             val effectClass = registry.tools().first { it.name == name }.effectClass()
             assertEquals(name, ToolEffectClass.NON_IDEMPOTENT_WRITE, effectClass)
@@ -81,6 +96,9 @@ class SshProfileToolApprovalTest {
             "ssh_profile_create" to createInput,
             "ssh_profile_update" to updateInput,
             "ssh_profile_delete" to deleteInput,
+            "ssh_key_generate" to keyGenInput,
+            "ssh_key_import" to keyImportInput,
+            "ssh_key_delete" to keyDeleteInput,
         ).forEach { (name, input) ->
             val decision = resolve(name, input, autoApproveTools = true, highRisk = false)
             assertEquals(name, PermissionDecisionAction.ASK, decision.action)

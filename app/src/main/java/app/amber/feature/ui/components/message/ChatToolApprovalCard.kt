@@ -54,8 +54,10 @@ internal fun ChatToolApprovalCard(
     onDeny: () -> Unit,
     onApprove: () -> Unit,
     actionsEnabled: Boolean = true,
+    approveEnabled: Boolean = actionsEnabled,
     /** 状态行下方的补充说明（如 Jev 复核暂停了自动批准的原因）。 */
     notice: String? = null,
+    extraContent: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalAmberTokens.current
@@ -144,6 +146,12 @@ internal fun ChatToolApprovalCard(
                 )
             }
 
+            if (extraContent != null) {
+                Box(modifier = Modifier.padding(top = 8.dp)) {
+                    extraContent()
+                }
+            }
+
             TextButton(
                 onClick = onDetails,
                 modifier = Modifier
@@ -184,9 +192,9 @@ internal fun ChatToolApprovalCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Button(
+                if (approveEnabled) Button(
                     onClick = onApprove,
-                    enabled = actionsEnabled,
+                    enabled = actionsEnabled && approveEnabled,
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 48.dp),

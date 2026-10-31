@@ -167,7 +167,10 @@ object AgentBubbleReducer {
             phase = AgentBubblePhase.RUNNING,
             conversationId = pickedConversationId,
             waitingApproval = pendingTool != null,
-            waitingAskUser = pendingTool?.toolName == ASK_USER_TOOL,
+            waitingAskUser = pendingTool != null && (
+                pendingTool.toolName == ASK_USER_TOOL ||
+                    pendingTool.toolName in app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES
+                ),
             approvalToolCallId = pendingTool?.toolCallId,
             approvalToolTitle = pendingTool?.toolName.orEmpty(),
             stepTitle = runningStepTitle(activity?.takeIf { it.conversationId == pickedConversationId }),

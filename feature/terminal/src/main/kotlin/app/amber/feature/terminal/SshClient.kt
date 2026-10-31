@@ -16,6 +16,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
@@ -24,28 +25,28 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 
-private const val PROBE_CONNECT_TIMEOUT_MS = 15_000L
-private const val PROBE_TIMEOUT_MS = 20_000L
+private const val PROBE_TIMEOUT_MS = 25_000L
 private const val READER_JOIN_TIMEOUT_MS = 2_000L
-private const val UNSUPPORTED_CRYPTO_ERROR =
-    "Only RSA/SHA-2 and ECDSA SSH keys are supported in this build. Use a supported server host key and private key."
+internal const val UNSUPPORTED_CRYPTO_ERROR =
+    "Only Ed25519, ECDSA, and RSA/SHA-2 SSH keys are supported in this build. Use a supported server host key and private key."
 private const val COMMAND_INTERRUPTED_ERROR =
     "SSH command interrupted; remote status is unknown."
 private const val COMMAND_FAILED_UNKNOWN_ERROR =
     "SSH command failed after request; remote status is unknown."
 private const val SUPPORTED_KEX =
-    "ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521," +
+    "curve25519-sha256,curve25519-sha256@libssh.org," +
+        "ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521," +
         "diffie-hellman-group-exchange-sha256,diffie-hellman-group16-sha512," +
         "diffie-hellman-group18-sha512,diffie-hellman-group14-sha256"
 private const val SUPPORTED_HOST_KEY_ALGORITHMS =
     "ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521," +
-        "rsa-sha2-512,rsa-sha2-256"
+        "ssh-ed25519,rsa-sha2-512,rsa-sha2-256"
 private const val SUPPORTED_PUBLIC_KEY_ALGORITHMS =
-    "ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521," +
+    "ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521," +
         "rsa-sha2-512,rsa-sha2-256"
 
 /** A safe, user-facing failure from the managed SSH backend. */
-class SshClientException(message: String) : Exception(message)
+open class SshClientException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /** The result of one remote exec request. A null exit code means the result is unknown. */
 data class SshCommandOutcome(
@@ -57,17 +58,29 @@ data class SshCommandOutcome(
  * Small JSch adapter used by [TerminalRuntime].
  *
  * JSch connects and authenticates synchronously. Operations therefore run on a dedicated daemon
- * worker, and cancellation closes the owned socket as well as the JSch session. Every command gets
- * a new JSch instance so identities and host-key state never cross profile boundaries.
+ * worker, and cancellation closes the owned socket as well as any intermediate ProxyJump channels
+ * and JSch sessions. Every hop gets its own JSch instance so identities and host-key state never
+ * cross profile boundaries.
  */
 class SshClient {
     /** Observe the server host key without sending a password, private key, or keyboard response. */
-    suspend fun probe(profile: SshProfile): SshHostKeyProbe {
+    suspend fun probe(profile: SshProfile): SshHostKeyProbe =
+        probeRoute(listOf(profile)) { SshCredentials() }
+
+    /**
+     * Sequentially probes the first untrusted hop (or the final hop if all hops are trusted)
+     * in [route] over `direct-tcpip`.
+     */
+    suspend fun probeRoute(
+        route: List<SshProfile>,
+        credentialsForHop: (SshProfile) -> SshCredentials,
+    ): SshHostKeyProbe {
         return try {
             withTimeout(PROBE_TIMEOUT_MS) {
                 suspendCancellableCoroutine { continuation ->
                     val cancelled = AtomicBoolean(false)
-                    val sessionRef = AtomicReference<Session?>(null)
+                    val sessions = CopyOnWriteArrayList<Session>()
+                    val proxies = CopyOnWriteArrayList<DirectTcpipProxy>()
                     val socketFactoryRef = AtomicReference<OwnedSocketFactory?>(null)
                     val worker = thread(
                         start = false,
@@ -77,8 +90,16 @@ class SshClient {
                         try {
                             continuation.resumeWith(
                                 Result.success(
-                                    probeBlocking(profile, sessionRef, socketFactoryRef, cancelled)
-                                )
+                                    SshHopChain.probeRouteBlocking(
+                                        route = route,
+                                        credentialsForHop = credentialsForHop,
+                                        socketFactoryRef = socketFactoryRef,
+                                        sessionsSink = sessions,
+                                        proxiesSink = proxies,
+                                        cancelled = cancelled,
+                                        totalTimeoutMs = PROBE_TIMEOUT_MS,
+                                    ),
+                                ),
                             )
                         } catch (error: Throwable) {
                             continuation.resumeWith(Result.failure(error))
@@ -87,7 +108,8 @@ class SshClient {
                     continuation.invokeOnCancellation {
                         cancelled.set(true)
                         socketFactoryRef.getAndSet(null)?.close()
-                        sessionRef.getAndSet(null)?.disconnect()
+                        proxies.reversed().forEach { runCatching { it.close() } }
+                        sessions.reversed().forEach { runCatching { it.disconnect() } }
                         worker.interrupt()
                     }
                     if (continuation.isActive) worker.start()
@@ -100,58 +122,14 @@ class SshClient {
 
     /** Create the one-shot connection handle used by one terminal job. */
     fun command(): SshCommandConnection = SshCommandConnection()
-
-    private fun probeBlocking(
-        profile: SshProfile,
-        sessionRef: AtomicReference<Session?>,
-        socketFactoryRef: AtomicReference<OwnedSocketFactory?>,
-        cancelled: AtomicBoolean,
-    ): SshHostKeyProbe {
-        val jsch = JSch()
-        val observed = ProbeHostKeyRepository()
-        val session = configuredSession(jsch, profile, preferredAuthentications = "")
-        session.setHostKeyRepository(observed)
-        val socketFactory = OwnedSocketFactory(cancelled, PROBE_CONNECT_TIMEOUT_MS)
-        socketFactoryRef.set(socketFactory)
-        session.setSocketFactory(socketFactory)
-
-        try {
-            if (!installSession(sessionRef, session, cancelled)) {
-                throw CancellationException("SSH host-key probe cancelled")
-            }
-
-            var failure: Throwable? = null
-            try {
-                // An empty auth list still performs KEX and host-key verification, but never sends
-                // a password, private key, or keyboard-interactive response.
-                session.connect(jschTimeout(PROBE_CONNECT_TIMEOUT_MS))
-            } catch (error: Exception) {
-                failure = error
-            } catch (error: LinkageError) {
-                failure = error
-            }
-
-            if (cancelled.get()) throw CancellationException("SSH host-key probe cancelled")
-            val key = observed.key ?: throw safeConnectionFailure(failure)
-            return SshHostKeyProbe(
-                profile = profile,
-                fingerprint = sshSha256Fingerprint(key.bytes),
-                algorithm = key.algorithm,
-            )
-        } finally {
-            socketFactoryRef.compareAndSet(socketFactory, null)
-            socketFactory.close()
-            sessionRef.compareAndSet(session, null)
-            session.disconnect()
-        }
-    }
 }
 
-/** One-shot managed SSH exec handle. */
+/** One-shot managed SSH exec handle supporting both direct and multi-hop ProxyJump routes. */
 class SshCommandConnection : AutoCloseable {
     private val closed = AtomicBoolean(false)
     private val started = AtomicBoolean(false)
-    private val sessionRef = AtomicReference<Session?>(null)
+    private val sessions = CopyOnWriteArrayList<Session>()
+    private val proxies = CopyOnWriteArrayList<DirectTcpipProxy>()
     private val channelRef = AtomicReference<ChannelExec?>(null)
     private val socketFactoryRef = AtomicReference<OwnedSocketFactory?>(null)
     private val commandRequested = AtomicBoolean(false)
@@ -159,6 +137,20 @@ class SshCommandConnection : AutoCloseable {
     suspend fun execute(
         profile: SshProfile,
         credentials: () -> SshCredentials,
+        command: String,
+        timeoutMillis: Long,
+        onOutput: (String) -> Unit,
+    ): SshCommandOutcome = executeRoute(
+        route = listOf(profile),
+        credentialsForHop = { credentials() },
+        command = command,
+        timeoutMillis = timeoutMillis,
+        onOutput = onOutput,
+    )
+
+    suspend fun executeRoute(
+        route: List<SshProfile>,
+        credentialsForHop: (SshProfile) -> SshCredentials,
         command: String,
         timeoutMillis: Long,
         onOutput: (String) -> Unit,
@@ -179,8 +171,8 @@ class SshCommandConnection : AutoCloseable {
                         try {
                             continuation.resumeWith(
                                 Result.success(
-                                    executeBlocking(profile, credentials, command, onOutput, timeout)
-                                )
+                                    executeRouteBlocking(route, credentialsForHop, command, onOutput, timeout),
+                                ),
                             )
                         } catch (error: Throwable) {
                             continuation.resumeWith(Result.failure(error))
@@ -205,114 +197,46 @@ class SshCommandConnection : AutoCloseable {
         }
     }
 
-    /** Close the local SSH transport; this cannot prove that a remote process stopped. */
+    /** Close the local SSH transport and any intermediate jump hops in reverse order. */
     override fun close() {
         closed.set(true)
+        channelRef.getAndSet(null)?.let { runCatching { it.disconnect() } }
+        for (i in sessions.indices.reversed()) {
+            runCatching { sessions[i].disconnect() }
+            if (i - 1 in proxies.indices) {
+                runCatching { proxies[i - 1].close() }
+            }
+        }
+        proxies.forEach { runCatching { it.close() } }
+        sessions.clear()
+        proxies.clear()
         socketFactoryRef.getAndSet(null)?.close()
-        channelRef.getAndSet(null)?.disconnect()
-        sessionRef.getAndSet(null)?.disconnect()
     }
 
-    private fun executeBlocking(
-        profile: SshProfile,
-        credentialsProvider: () -> SshCredentials,
+    private fun executeRouteBlocking(
+        route: List<SshProfile>,
+        credentialsForHop: (SshProfile) -> SshCredentials,
         command: String,
         onOutput: (String) -> Unit,
         timeoutMillis: Long,
     ): SshCommandOutcome {
-        val acceptedFingerprint = profile.acceptedHostKeyFingerprint
-            ?.let { runCatching { SshTrustPolicy.normalizeFingerprint(it) }.getOrNull() }
-            ?: throw SshClientException(
-                "SSH host key is not trusted. Probe and confirm this server before running a command.",
-            )
         val deadline = System.nanoTime() +
             timeoutMillis.coerceAtMost(Long.MAX_VALUE / 1_000_000L) * 1_000_000L
 
         try {
-            val jsch = JSch()
-            val session = configuredSession(
-                jsch = jsch,
-                profile = profile,
-                preferredAuthentications = when (profile.authMethod) {
-                    SshAuthMethod.PASSWORD -> "password"
-                    SshAuthMethod.PRIVATE_KEY -> "publickey"
-                },
+            val connected = SshHopChain.connectRouteBlocking(
+                route = route,
+                credentialsForHop = credentialsForHop,
+                deadlineNanos = deadline,
+                closed = closed,
+                socketFactoryRef = socketFactoryRef,
+                sessionsSink = sessions,
+                proxiesSink = proxies,
             )
-            val repository = PinnedHostKeyRepository(acceptedFingerprint)
-            session.setHostKeyRepository(repository)
-            val socketFactory = OwnedSocketFactory(closed, remainingMillis(deadline))
-            socketFactoryRef.set(socketFactory)
-            session.setSocketFactory(socketFactory)
-            if (!installSession(sessionRef, session, closed)) return interruptedOutcome()
-
             if (remainingMillis(deadline) <= 0L || closed.get()) return interruptedOutcome()
-            val credentialSnapshot = try {
-                // JSch needs credentials before Session.connect(), but this happens on a session
-                // whose host-key repository is already pinned. No credential is sent before JSch's
-                // pre-auth host-key check.
-                credentialsProvider()
-            } catch (_: Exception) {
-                throw SshClientException("SSH credentials are unavailable.")
-            }
-            val secrets = listOfNotNull(
-                credentialSnapshot.password,
-                credentialSnapshot.privateKey,
-                credentialSnapshot.passphrase,
-            ).filter { it.isNotEmpty() }
 
-            when (profile.authMethod) {
-                SshAuthMethod.PASSWORD -> {
-                    val password = credentialSnapshot.password?.takeIf { it.isNotEmpty() }
-                        ?: throw SshClientException("SSH password is not configured for this profile.")
-                    val passwordBytes = password.toByteArray(StandardCharsets.UTF_8)
-                    try {
-                        // JSch 2.28.7 copies the byte array into Session and clears its own copy
-                        // after connect; clear this caller-owned copy as soon as it is set.
-                        session.setPassword(passwordBytes)
-                    } finally {
-                        passwordBytes.fill(0)
-                    }
-                }
-
-                SshAuthMethod.PRIVATE_KEY -> {
-                    val privateKey = credentialSnapshot.privateKey?.takeIf { it.isNotEmpty() }
-                        ?: throw SshClientException("SSH private key is not configured for this profile.")
-                    val privateKeyBytes = privateKey.toByteArray(StandardCharsets.UTF_8)
-                    val passphraseBytes = credentialSnapshot.passphrase
-                        ?.toByteArray(StandardCharsets.UTF_8)
-                    try {
-                        // Use the byte-array overload; the String passphrase overload is deprecated.
-                        jsch.addIdentity(profile.id, privateKeyBytes, null, passphraseBytes)
-                    } catch (error: Exception) {
-                        throw safeCredentialFailure(error)
-                    } catch (error: LinkageError) {
-                        throw safeCredentialFailure(error)
-                    } finally {
-                        privateKeyBytes.fill(0)
-                        passphraseBytes?.fill(0)
-                    }
-                }
-            }
-
-            val connectTimeout = remainingMillis(deadline)
-            if (connectTimeout <= 0L || closed.get()) return interruptedOutcome()
-            try {
-                session.connect(jschTimeout(connectTimeout))
-            } catch (error: Exception) {
-                if (closed.get()) return interruptedOutcome()
-                if (repository.result == HostKeyRepository.CHANGED) {
-                    throw SshClientException("SSH host key changed; authentication was blocked.")
-                }
-                throw safeAuthenticationFailure(error)
-            } catch (error: LinkageError) {
-                if (closed.get()) return interruptedOutcome()
-                throw safeCredentialFailure(error)
-            }
-            if (closed.get()) return interruptedOutcome()
-            if (repository.result != HostKeyRepository.OK) {
-                throw SshClientException("SSH host key changed; authentication was blocked.")
-            }
-
+            val session = connected.targetSession
+            val secrets = connected.allSecrets
             val channel = try {
                 session.openChannel("exec") as ChannelExec
             } catch (error: Exception) {
@@ -331,8 +255,6 @@ class SshCommandConnection : AutoCloseable {
             if (channelTimeout <= 0L || closed.get()) return interruptedOutcome()
             commandRequested.set(true)
             try {
-                // Set this flag before the call: the command request may have reached the server
-                // even if the channel acknowledgement is lost locally.
                 channel.connect(jschTimeout(channelTimeout))
             } catch (error: Exception) {
                 if (closed.get()) return interruptedOutcome()
@@ -380,6 +302,7 @@ class SshCommandConnection : AutoCloseable {
         } catch (error: SshClientException) {
             throw error
         } catch (error: CancellationException) {
+            if (closed.get()) return interruptedOutcome()
             throw error
         } catch (error: Exception) {
             if (closed.get()) return interruptedOutcome()
@@ -388,7 +311,7 @@ class SshCommandConnection : AutoCloseable {
         } catch (error: LinkageError) {
             if (closed.get()) return interruptedOutcome()
             if (commandRequested.get()) return commandFailedUnknownOutcome()
-            throw safeCredentialFailure(error)
+            throw SshClientException("SSH private key is invalid or unsupported.", error)
         } finally {
             close()
         }
@@ -447,73 +370,53 @@ class SshCommandConnection : AutoCloseable {
         exitCode = null,
         error = COMMAND_FAILED_UNKNOWN_ERROR,
     )
-
-    private fun safeCredentialFailure(error: Throwable): SshClientException =
-        if (looksLikeUnsupportedCrypto(error)) {
-            SshClientException(UNSUPPORTED_CRYPTO_ERROR)
-        } else {
-            SshClientException("SSH private key is invalid or unsupported.")
-        }
-
-    private fun safeAuthenticationFailure(error: Throwable): SshClientException =
-        if (looksLikeUnsupportedCrypto(error)) {
-            SshClientException(UNSUPPORTED_CRYPTO_ERROR)
-        } else {
-            SshClientException("SSH authentication failed.")
-        }
 }
 
-private fun configuredSession(
+internal fun configuredSession(
     jsch: JSch,
     profile: SshProfile,
     preferredAuthentications: String,
-): Session = jsch.getSession(profile.username, profile.host, profile.port).apply {
-    setConfig("StrictHostKeyChecking", "yes")
-    setConfig("PreferredAuthentications", preferredAuthentications)
-    // The Android build does not bundle Bouncy Castle. Stay on the JSch Java-8-compatible
-    // algorithms and surface a safe error for Ed25519/Ed448-only servers or private keys.
-    setConfig("kex", SUPPORTED_KEX)
-    setConfig("server_host_key", SUPPORTED_HOST_KEY_ALGORITHMS)
-    setConfig("PubkeyAcceptedAlgorithms", SUPPORTED_PUBLIC_KEY_ALGORITHMS)
-    setConfig("CheckSignatures", "ssh-ed25519,ssh-ed448")
+): Session {
+    SshKeyPairs.configureBouncyCastleEdDsa()
+    return jsch.getSession(profile.username, profile.host, profile.port).apply {
+        setConfig("StrictHostKeyChecking", "yes")
+        setConfig("PreferredAuthentications", preferredAuthentications)
+        setConfig("kex", SUPPORTED_KEX)
+        setConfig("server_host_key", SUPPORTED_HOST_KEY_ALGORITHMS)
+        setConfig("PubkeyAcceptedAlgorithms", SUPPORTED_PUBLIC_KEY_ALGORITHMS)
+        setConfig("CheckSignatures", "ssh-ed25519,ssh-ed448")
+        setConfig("keypairgen.eddsa", "com.jcraft.jsch.bc.KeyPairGenEdDSA")
+        setConfig("keypairgen_fromprivate.eddsa", "com.jcraft.jsch.bc.KeyPairGenEdDSA")
+        setConfig("ssh-ed25519", "com.jcraft.jsch.bc.SignatureEd25519")
+        setConfig("ssh-ed448", "com.jcraft.jsch.bc.SignatureEd448")
+        setConfig("xdh", "com.jcraft.jsch.bc.XDH")
+        setConfig("curve25519-sha256", "com.jcraft.jsch.DH25519")
+        setConfig("curve25519-sha256@libssh.org", "com.jcraft.jsch.DH25519")
+    }
 }
 
-private fun jschTimeout(timeoutMillis: Long): Int =
+internal fun jschTimeout(timeoutMillis: Long): Int =
     timeoutMillis.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
 
-private fun remainingMillis(deadlineNanos: Long): Long {
+internal fun remainingMillis(deadlineNanos: Long): Long {
     val remainingNanos = deadlineNanos - System.nanoTime()
     if (remainingNanos <= 0L) return 0L
     return (remainingNanos / 1_000_000L).coerceAtLeast(1L)
 }
 
-private fun installSession(
-    target: AtomicReference<Session?>,
-    session: Session,
-    closedState: AtomicBoolean,
-): Boolean {
-    if (closedState.get()) return false
-    target.set(session)
-    if (closedState.get()) {
-        if (target.compareAndSet(session, null)) session.disconnect()
-        return false
-    }
-    return true
-}
-
-private fun safeConnectionFailure(error: Throwable?): SshClientException {
+internal fun safeConnectionFailure(error: Throwable?): SshClientException {
+    if (error is SshClientException) return error
     if (error != null && looksLikeUnsupportedCrypto(error)) {
-        return SshClientException(UNSUPPORTED_CRYPTO_ERROR)
+        return SshClientException(UNSUPPORTED_CRYPTO_ERROR, error)
     }
-    return SshClientException("SSH connection failed.")
+    return SshClientException("SSH connection failed.", error)
 }
 
-private fun looksLikeUnsupportedCrypto(error: Throwable): Boolean {
+internal fun looksLikeUnsupportedCrypto(error: Throwable): Boolean {
     val text = error.message.orEmpty()
     return error is LinkageError ||
         text.contains("server_host_key", ignoreCase = true) ||
         text.contains("algorithm negotiation", ignoreCase = true) ||
-        text.contains("ed25519", ignoreCase = true) ||
         text.contains("ed448", ignoreCase = true) ||
         text.contains("bouncy castle", ignoreCase = true)
 }
@@ -522,7 +425,7 @@ private fun looksLikeUnsupportedCrypto(error: Throwable): Boolean {
  * Socket ownership is kept outside JSch so close() can interrupt a blocking TCP connect too.
  * JSch's SocketFactory contract requires createSocket() to return a connected socket.
  */
-private class OwnedSocketFactory(
+internal class OwnedSocketFactory(
     private val closed: AtomicBoolean,
     private val connectTimeoutMillis: Long,
 ) : SocketFactory {
@@ -562,12 +465,12 @@ private class OwnedSocketFactory(
     }
 }
 
-private data class ObservedHostKey(
+internal data class ObservedHostKey(
     val bytes: ByteArray,
     val algorithm: String,
 )
 
-private class ProbeHostKeyRepository : HostKeyRepository {
+internal class ProbeHostKeyRepository : HostKeyRepository {
     @Volatile
     var key: ObservedHostKey? = null
         private set
@@ -603,8 +506,13 @@ internal class PinnedHostKeyRepository(
     var result: Int? = null
         private set
 
+    @Volatile
+    var observedFingerprint: String? = null
+        private set
+
     override fun check(host: String, key: ByteArray): Int {
         val observed = sshSha256Fingerprint(key)
+        observedFingerprint = observed
         val matches = constantTimeEquals(acceptedFingerprint, observed)
         result = if (matches) HostKeyRepository.OK else HostKeyRepository.CHANGED
         return result!!

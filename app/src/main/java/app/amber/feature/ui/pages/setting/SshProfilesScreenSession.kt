@@ -6,6 +6,10 @@ import androidx.compose.runtime.setValue
 import app.amber.agent.R
 import app.amber.core.settings.ssh.SshProfileStore
 import app.amber.feature.terminal.SshHostTrust
+import app.amber.feature.terminal.SshKey
+import app.amber.feature.terminal.SshKeyGenType
+import app.amber.feature.terminal.SshKeyPairs
+import app.amber.feature.terminal.SshKeysState
 import app.amber.feature.terminal.SshProfile
 import app.amber.feature.terminal.SshProfilesState
 import app.amber.feature.terminal.SshTrustPolicy
@@ -34,6 +38,7 @@ internal class SshProfilesScreenSession(
                 emit(SshProfilesLoadState.Failed(error))
             }
     }
+    val keysFlow = sshProfileStore.keyStore.state
     private val savedText get() = context.getString(R.string.setting_sandbox_ssh_saved)
     private val deletedText get() = context.getString(R.string.setting_sandbox_ssh_deleted)
     private val defaultSavedText get() = context.getString(R.string.setting_sandbox_ssh_default_saved)
@@ -44,6 +49,8 @@ internal class SshProfilesScreenSession(
 
     var operationBusy by mutableStateOf(false)
     var editorRequest by mutableStateOf<SshProfileEditorRequest?>(null)
+    var showKeyGenerator by mutableStateOf(false)
+    var recentlyGeneratedKey by mutableStateOf<SshKey?>(null)
     var pendingDelete by mutableStateOf<String?>(null)
     var pendingTrust by mutableStateOf<PendingHostKeyTrust?>(null)
     var selectedProfileId by mutableStateOf<String?>(null)
@@ -207,7 +214,9 @@ internal class SshProfilesScreenSession(
             operationBusy = true
             scope.launch {
                 try {
-                    sshProfileStore.acceptHostKey(pending.probe.profile, pending.probe.fingerprint)
+                    val keyguard = context.getSystemService(android.app.KeyguardManager::class.java)
+                    check(keyguard != null && !keyguard.isDeviceLocked && !keyguard.isKeyguardLocked) { "Unlock the device before trusting an SSH host." }
+                    sshProfileStore.acceptHostKey(pending.probe.profile, pending.probe.fingerprint, pending.probe.route)
                     pendingTrust = null
                     notice(hostKeySavedText)
                 } catch (error: Throwable) {
@@ -218,6 +227,52 @@ internal class SshProfilesScreenSession(
                 }
             }
         }
+    }
+
+    fun generateKey(name: String, type: SshKeyGenType) {
+        if (!operationBusy) {
+            operationBusy = true
+            scope.launch {
+                try {
+                    val generated = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        SshKeyPairs.generate(name = name, type = type)
+                    }
+                    val persisted = sshProfileStore.keyStore.save(
+                        key = generated.key,
+                        privateKey = generated.privateKeyOpenSsh,
+                        passphrase = null,
+                    )
+                    recentlyGeneratedKey = persisted
+                    notice("SSH 密钥已生成：${persisted.name}")
+                } catch (error: Throwable) {
+                    if (error is CancellationException) throw error
+                    showError(error)
+                } finally {
+                    operationBusy = false
+                }
+            }
+        }
+    }
+
+    fun deleteKey(key: SshKey) {
+        if (!operationBusy) {
+            operationBusy = true
+            scope.launch {
+                try {
+                    sshProfileStore.keyStore.delete(key.id)
+                    notice("已删除密钥：${key.name}")
+                } catch (error: Throwable) {
+                    if (error is CancellationException) throw error
+                    showError(error)
+                } finally {
+                    operationBusy = false
+                }
+            }
+        }
+    }
+
+    fun notifyPublicKeyCopied(key: SshKey) {
+        notice("已复制公钥 (${key.name}) 到剪贴板")
     }
 }
 

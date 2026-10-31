@@ -3,10 +3,13 @@ package app.amber.core.di
 import android.content.Context
 import app.amber.core.ai.tools.LocalTools
 import app.amber.core.ai.tools.ImageGenerationLocalTools
+import app.amber.feature.tools.SshKeyTools
 import app.amber.feature.tools.SshProfileTools
 import app.amber.feature.webmount.tools.WebMountLocalTools
 import app.amber.feature.runtime.AgentToolDispatcher
 import app.amber.feature.runtime.PermissionDecisionResolver
+import app.amber.feature.runtime.SshApprovalTargetGuard
+import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.runtime.defaultToolInvocationHooks
 import org.koin.dsl.module
 
@@ -27,6 +30,7 @@ val toolExecutionModule = module {
         )
     }
     single { SshProfileTools(sshProfileStore = get()) }
+    single { SshKeyTools(sshProfileStore = get()) }
 
     single {
         LocalTools(
@@ -51,16 +55,24 @@ val toolExecutionModule = module {
             reminderTools = get(),
             jevDecisionCoordinator = get(),
             sshProfileTools = get(),
+            sshKeyTools = get(),
         )
     }
 
     single { PermissionDecisionResolver(appContext = get<Context>()) }
+    single {
+        val settings = get<SettingsAggregator>()
+        SshApprovalTargetGuard(profiles = get(), defaultRuntime = {
+            settings.settingsFlow.value.agentRuntime.terminalDefaultRuntime
+        })
+    }
 
     single {
         AgentToolDispatcher(
             json = get(),
             permissionDecisionResolver = get(),
             hooks = defaultToolInvocationHooks(),
+            sshApprovalTargetGuard = get(),
         )
     }
 

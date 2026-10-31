@@ -197,7 +197,7 @@ class SshProfileToolsTest {
         )
         assertEquals("created", result.str("status"))
         val profile = result.jsonObject["profile"]!!.jsonObject
-        assertEquals("private_key", profile.str("auth_method"))
+        assertEquals("key", profile.str("auth_method"))
         assertTrue(profile.bool("has_private_key")!!)
         assertTrue(profile.bool("has_passphrase")!!)
         assertFalse(profile.bool("has_password")!!)
@@ -295,7 +295,7 @@ class SshProfileToolsTest {
         assertTrue(beta.bool("has_private_key")!!)
         assertFalse(beta.bool("has_password")!!)
         assertEquals("password", alpha.str("auth_method"))
-        assertEquals("private_key", beta.str("auth_method"))
+        assertEquals("key", beta.str("auth_method"))
 
         assertFalse(list.contains("alpha-secret"))
         assertFalse(list.contains("beta-key-body"))

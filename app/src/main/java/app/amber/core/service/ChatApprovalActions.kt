@@ -115,6 +115,9 @@ class ChatApprovalActions(
             }
         ) return ApprovalDecisionResult(shouldResume = false, applied = false)
         val approvedToolName = conversation.findToolName(toolCallId)
+        if (approved && !canApproveSensitiveTool(approvedToolName)) {
+            return ApprovalDecisionResult(shouldResume = false, applied = false)
+        }
         val newApprovalState = when {
             answer != null -> ToolApprovalState.Answered(answer)
             approved -> ToolApprovalState.Approved
@@ -402,6 +405,8 @@ class ChatApprovalActions(
                             part.copy(approvalState = ToolApprovalState.Answered(userAnswer))
                         }
 
+                        explicitApproval && part.isPending && !canApproveSensitiveTool(part.toolName) -> part
+
                         explicitApproval && part.isPending -> {
                             changed = true
                             val resumeInput = recipeResumeInputForApproval(part)
@@ -447,6 +452,12 @@ class ChatApprovalActions(
             shouldResume = shouldResume,
             blockingToolNames = blockingTools.map { it.toolName },
         )
+    }
+
+    private fun canApproveSensitiveTool(toolName: String?): Boolean {
+        if (toolName?.startsWith("ssh_") != true && toolName != "terminal_execute" && toolName != "terminal_job_start") return true
+        val keyguard = context.getSystemService(android.app.KeyguardManager::class.java) ?: return false
+        return !keyguard.isDeviceLocked && !keyguard.isKeyguardLocked
     }
 
     private fun PendingUserMessage.isToolApprovalContinuation(): Boolean {

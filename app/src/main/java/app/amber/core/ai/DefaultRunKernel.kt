@@ -154,6 +154,7 @@ class DefaultRunKernel(
             invocationContext = invocationContext,
             runId = runId,
             autoApprovalGate = autoApprovalGate,
+            captureTarget = toolDispatcher::captureApprovalTarget,
             resolveDecision = { toolDef, tool ->
                 toolDispatcher.resolveDecision(
                     toolDef = toolDef,

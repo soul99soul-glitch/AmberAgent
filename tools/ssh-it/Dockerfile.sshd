@@ -1,0 +1,15 @@
+FROM alpine:3.20
+
+RUN apk add --no-cache openssh-server openssh-keygen bash \
+    && mkdir -p /var/run/sshd /etc/ssh/sshd_config.d \
+    && adduser -D -s /bin/bash testuser \
+    && echo "testuser:amber-it-pass" | chpasswd \
+    && mkdir -p /home/testuser/.ssh \
+    && chmod 700 /home/testuser/.ssh \
+    && touch /home/testuser/.ssh/authorized_keys \
+    && chmod 600 /home/testuser/.ssh/authorized_keys \
+    && chown -R testuser:testuser /home/testuser/.ssh \
+    && printf '\nInclude /etc/ssh/sshd_config.d/*.conf\n' >> /etc/ssh/sshd_config
+
+EXPOSE 22
+CMD ["/bin/sh", "-c", "ssh-keygen -A && exec /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config.d/amber.conf"]

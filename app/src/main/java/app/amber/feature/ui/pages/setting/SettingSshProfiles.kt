@@ -37,6 +37,7 @@ import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Trash2
 import app.amber.agent.R
 import app.amber.core.settings.ssh.SshProfileStore
+import app.amber.feature.terminal.SshKeysState
 import app.amber.feature.terminal.TerminalRuntime
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -61,6 +62,8 @@ fun SettingSshProfilesSection(
         }
     }
     val profileLoad by session.profileLoadFlow.collectAsStateWithLifecycle(initialValue = SshProfilesLoadState.Loading)
+    val keysState by session.keysFlow.collectAsStateWithLifecycle(initialValue = SshKeysState())
+    val keys = keysState.keys
     val state = (profileLoad as? SshProfilesLoadState.Ready)?.state
     val loadError = (profileLoad as? SshProfilesLoadState.Failed)?.error
     val profiles = state?.profiles.orEmpty()
@@ -117,6 +120,7 @@ fun SettingSshProfilesSection(
             profiles.forEachIndexed { index, profile ->
                 SshProfileCard(
                     profile = profile,
+                    allProfiles = profiles,
                     isDefault = profile.id == defaultId,
                     isSelected = profile.id == session.selectedProfileId,
                     enabled = ready && !session.operationBusy,
@@ -134,6 +138,18 @@ fun SettingSshProfilesSection(
                 }
             }
         }
+
+        SshKeysCard(
+            keys = keys,
+            profiles = profiles,
+            busy = session.operationBusy,
+            onGenerateClick = {
+                session.recentlyGeneratedKey = null
+                session.showKeyGenerator = true
+            },
+            onDeleteKey = { key -> session.deleteKey(key) },
+            onCopiedPublicKey = { key -> session.notifyPublicKeyCopied(key) },
+        )
 
         TextButton(
             onClick = { showMoreSettings = true },
@@ -189,8 +205,23 @@ fun SettingSshProfilesSection(
         SshProfileEditorDialog(
             request = request,
             saving = session.operationBusy,
+            availableKeys = keys,
+            availableJumpProfiles = profiles,
             onDismiss = { if (!session.operationBusy) session.editorRequest = null },
             onSave = { profile, password, privateKey, passphrase -> session.save(profile, password, privateKey, passphrase) },
+        )
+    }
+
+    if (session.showKeyGenerator) {
+        SshKeyGenerateDialog(
+            busy = session.operationBusy,
+            generatedKey = session.recentlyGeneratedKey,
+            onDismiss = {
+                session.showKeyGenerator = false
+                session.recentlyGeneratedKey = null
+            },
+            onGenerate = { name, type -> session.generateKey(name, type) },
+            onCopyGeneratedKey = { key -> session.notifyPublicKeyCopied(key) },
         )
     }
 

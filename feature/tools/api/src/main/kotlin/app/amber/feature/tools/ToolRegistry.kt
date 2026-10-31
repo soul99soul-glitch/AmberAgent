@@ -310,11 +310,11 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             concurrencySafe = readOnly
         }
 
-        // ssh_profile_* manage the credentials that unlock remote shells, so
-        // the three writers are High risk: ordinary auto-approval never
+        // ssh_profile_* and ssh_key_* manage the credentials that unlock remote
+        // shells, so all six writers are High risk: ordinary auto-approval never
         // releases them, while the explicit high-risk auto-approval setting
-        // runs them unattended like terminal_execute. The listing is a read.
-        "ssh_profile_list" -> {
+        // runs them unattended like terminal_execute. The listings are reads.
+        "ssh_profile_list", "ssh_key_list" -> {
             mutates = false
             risk = ToolRisk.Normal
             riskExplicit = true
@@ -323,7 +323,8 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             concurrencySafe = true
         }
 
-        "ssh_profile_create", "ssh_profile_update", "ssh_profile_delete" -> {
+        "ssh_profile_create", "ssh_profile_update", "ssh_profile_delete",
+        "ssh_key_generate", "ssh_key_import", "ssh_key_delete", -> {
             mutates = true
             risk = ToolRisk.High
             riskExplicit = true
@@ -608,9 +609,9 @@ internal fun Tool.category(): String = when {
     name.startsWith("file_") || name.startsWith("archive_") ||
         name in setOf("download_file", "pdf_read", "pdf_render_page", "office_read", "image_info", "image_convert", "ocr_image") -> "workspace"
     name.startsWith("icloud_") -> "cloud"
-    // SSH profile management sits with the terminal surface: it configures
+    // SSH profile and key management sit with the terminal surface: they configure
     // the runtime that terminal_* executes commands over.
-    name.startsWith("ssh_profile_") -> "terminal"
+    name.startsWith("ssh_profile_") || name.startsWith("ssh_key_") -> "terminal"
     name.startsWith("terminal_") -> "terminal"
     name in setOf("search_web", "scrape_web", "search_sources_status", "search_strategy_explain", "http_request") -> "web"
     name.startsWith("webview_") -> "webview"
@@ -651,7 +652,7 @@ private val EXTERNAL_ACTION_TOOLS = setOf(
 )
 
 private fun Tool.mutatesState(): Boolean {
-    if (name in EXTERNAL_ACTION_TOOLS) return true
+    if (name in EXTERNAL_ACTION_TOOLS || name in SSH_PROFILE_WRITE_TOOL_NAMES) return true
     if (name.startsWith("mcp__")) return true
     if (name == "memory_tool") return true
     if (name == "deep_read_open") return true
@@ -740,10 +741,9 @@ private fun Tool.riskProfile(): RiskProfile = when {
     name.startsWith("sms_") || name.startsWith("call_") || name.startsWith("contacts_write") -> RiskProfile(ToolRisk.High, explicit = true)
     name.startsWith("screen_") || name == "vlm_task" -> RiskProfile(ToolRisk.Sensitive, explicit = true)
     name.startsWith("terminal_") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
-    // Profile management writes the credentials behind every remote shell.
-    name in setOf("ssh_profile_create", "ssh_profile_update", "ssh_profile_delete") ->
-        RiskProfile(ToolRisk.High, explicit = true)
-    name == "ssh_profile_list" -> RiskProfile(ToolRisk.Normal, explicit = true)
+    // Profile and key management write the credentials behind every remote shell.
+    name in SSH_PROFILE_WRITE_TOOL_NAMES -> RiskProfile(ToolRisk.High, explicit = true)
+    name == "ssh_profile_list" || name == "ssh_key_list" -> RiskProfile(ToolRisk.Normal, explicit = true)
     else -> RiskProfile(ToolRisk.Normal, explicit = false)
 }
 

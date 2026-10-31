@@ -65,6 +65,7 @@ sqlite-vector = "0.9.92"
 jmdns = "3.6.3"
 slf4j = "2.0.17"
 sqlite-android = "0bbaa7a8b4c485c0d4b385425113fe33ead6c3c0"
+bouncycastle = "1.79"
 
 [libraries]
 androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "cameraCore" }
@@ -181,6 +182,7 @@ jmdns = { module = "org.jmdns:jmdns", version.ref = "jmdns" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 slf4j-android = { module = "uk.uuid.slf4j:slf4j-android", version = "2.0.17-0" }
 sqlite-android = { module = "com.github.requery:sqlite-android", version.ref = "sqlite-android" }
+bouncycastle-bcprov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

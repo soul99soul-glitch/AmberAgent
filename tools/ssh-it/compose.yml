@@ -1,0 +1,52 @@
+services:
+  jump1:
+    build:
+      context: .
+      dockerfile: Dockerfile.sshd
+    container_name: amber-ssh-it-jump1
+    hostname: jump1
+    ports:
+      - "127.0.0.1:2221:22"
+    volumes:
+      - ./sshd_jump.conf:/etc/ssh/sshd_config.d/amber.conf:ro
+    networks:
+      - net_edge
+      - net_mid
+
+  jump2:
+    build:
+      context: .
+      dockerfile: Dockerfile.sshd
+    container_name: amber-ssh-it-jump2
+    hostname: jump2
+    expose:
+      - "22"
+    volumes:
+      - ./sshd_jump2.conf:/etc/ssh/sshd_config.d/amber.conf:ro
+    networks:
+      - net_mid
+      - net_inner
+
+  target:
+    build:
+      context: .
+      dockerfile: Dockerfile.sshd
+    container_name: amber-ssh-it-target
+    hostname: target
+    expose:
+      - "22"
+    volumes:
+      - ./sshd_target.conf:/etc/ssh/sshd_config.d/amber.conf:ro
+    networks:
+      - net_mid
+      - net_inner
+
+networks:
+  net_edge:
+    driver: bridge
+  net_mid:
+    driver: bridge
+    internal: true
+  net_inner:
+    driver: bridge
+    internal: true

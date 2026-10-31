@@ -25,6 +25,7 @@ import app.amber.feature.task.toQueueState
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.feature.workspace.WorkspaceMirrorLease
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.ssh.SshCredentials
 import app.amber.core.settings.ssh.SshProfileStore
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -58,6 +59,7 @@ class TerminalRuntime(
         onOutputLine: ((String) -> Unit)? = null,
         runtime: TerminalRuntimeKind? = null,
         sshProfileId: String? = null,
+        expectedSshRouteDigest: String? = null,
     ): TerminalResult {
         val selectedRuntime = runtime ?: if (sshProfileId != null) TerminalRuntimeKind.REMOTE_SSH
             else TerminalRuntimeKind.BUILTIN_ALPINE
@@ -67,6 +69,7 @@ class TerminalRuntime(
             timeoutMillis = timeoutMillis,
             runtime = selectedRuntime,
             sshProfileId = sshProfileId,
+            expectedSshRouteDigest = expectedSshRouteDigest,
             toolName = "terminal_execute",
             title = if (selectedRuntime == TerminalRuntimeKind.REMOTE_SSH) "执行 SSH 命令" else "执行终端命令",
             syncWorkspace = syncWorkspace || (!shouldDetach && selectedRuntime.supportsWorkspaceSync),
@@ -90,6 +93,8 @@ class TerminalRuntime(
                 running = started.running,
                 outputLogPath = started.outputLogPath,
                 sshProfileId = started.sshProfileId,
+                sshRoute = started.sshRoute,
+                sshFailure = started.sshFailure,
             )
         }
 
@@ -113,6 +118,8 @@ class TerminalRuntime(
             running = final.running,
             outputLogPath = final.outputLogPath,
             sshProfileId = final.sshProfileId,
+            sshRoute = final.sshRoute,
+            sshFailure = final.sshFailure,
         )
     }
 
@@ -127,6 +134,7 @@ class TerminalRuntime(
         flushWorkspace: Boolean = false,
         outputCallback: ((String) -> Unit)? = null,
         sshProfileId: String? = null,
+        expectedSshRouteDigest: String? = null,
     ): TerminalJobSnapshot = withContext(Dispatchers.IO) {
         val selectedRuntime = runtime ?: if (sshProfileId != null) TerminalRuntimeKind.REMOTE_SSH
             else settingsStore.settingsFlow.value.agentRuntime.terminalDefaultRuntime
@@ -134,13 +142,14 @@ class TerminalRuntime(
             "ssh_profile_id requires remote_ssh runtime."
         }
         // Resolve once: switching the default or editing a profile cannot retarget an admitted job.
-        val sshProfile = if (selectedRuntime == TerminalRuntimeKind.REMOTE_SSH) {
-            sshProfileStore.resolve(sshProfileId).also {
-                require(it.acceptedHostKeyFingerprint != null) {
-                    "Confirm this SSH server's host key in Settings > Agent Runtime > SSH profiles before running commands."
+        val sshRoute = if (selectedRuntime == TerminalRuntimeKind.REMOTE_SSH) {
+            sshProfileStore.resolveRoute(sshProfileId).also { route ->
+                require(expectedSshRouteDigest == null || expectedSshRouteDigest == SshRouteResolver.routeDigest(route)) {
+                    "approvedTargetChanged: SSH route changed before job admission."
                 }
             }
-        } else null
+        } else emptyList()
+        val sshProfile = sshRoute.lastOrNull()
         val job = admissionMutex.withLock {
             pruneFinishedJobsLocked()
             val maxJobs = settingsStore.settingsFlow.value.agentRuntime.terminalMaxConcurrentJobs
@@ -185,6 +194,7 @@ class TerminalRuntime(
                 flushWorkspace = flushWorkspace,
                 outputCallback = outputCallback,
                 sshProfile = sshProfile,
+                sshRoute = sshRoute,
             ).also { jobs[it.id] = it }
         }
         try {
@@ -223,8 +233,25 @@ class TerminalRuntime(
         job.snapshot()
     }
 
-    suspend fun probeSshHostKey(profileId: String): SshHostKeyProbe =
-        sshClient.probe(sshProfileStore.resolve(profileId))
+    suspend fun probeSshHostKey(profileId: String): SshHostKeyProbe {
+        val route = sshProfileStore.resolveRoute(profileId)
+        if (route.size <= 1) {
+            return sshClient.probe(route.single())
+        }
+        val firstUntrustedIdx = route.indexOfFirst { hop ->
+            SshTrustPolicy.evaluate(hop, hop.acceptedHostKeyFingerprint) !is SshHostTrust.Trusted
+        }
+        val prefixEnd = if (firstUntrustedIdx >= 0) firstUntrustedIdx else route.lastIndex
+        val credentialsByHopId = buildMap {
+            for (idx in 0 until prefixEnd) {
+                val hop = route[idx]
+                put(hop.id, sshProfileStore.credentialsFor(hop))
+            }
+        }
+        return sshClient.probeRoute(route) { hop ->
+            credentialsByHopId[hop.id] ?: SshCredentials()
+        }
+    }
 
     suspend fun installPackages(
         packages: List<String>,
@@ -337,6 +364,7 @@ class TerminalRuntime(
         flushWorkspace: Boolean,
         outputCallback: ((String) -> Unit)?,
         sshProfile: SshProfile? = null,
+        sshRoute: List<SshProfile> = listOfNotNull(sshProfile),
     ): TerminalJob {
         val id = Uuid.random().toString()
         val logDir = context.filesDir.resolve("amberagent/terminal-jobs").apply { mkdirs() }
@@ -366,6 +394,7 @@ class TerminalRuntime(
             flushWorkspace = flushWorkspace,
             outputCallback = outputCallback,
             sshProfile = sshProfile,
+            sshRoute = sshRoute,
             log = TerminalJobLog(
                 file = logDir.resolve("$id.log"),
                 maxBytes = MAX_JOB_LOG_BYTES,
@@ -436,11 +465,13 @@ class TerminalRuntime(
         try {
             if (!job.status.compareAndSet(TerminalJobStatus.QUEUED, TerminalJobStatus.RUNNING)) return
             agentTaskStore.update(job.id, status = AgentTaskStatus.RUNNING)
-            val profile = requireNotNull(job.sshProfile)
-            val credentials = sshProfileStore.credentialsFor(profile)
-            val outcome = connection.execute(
-                profile = profile,
-                credentials = { credentials },
+            val route = job.sshRoute.ifEmpty { listOf(requireNotNull(job.sshProfile)) }
+            val credentialsByHopId = route.associate { hop ->
+                hop.id to sshProfileStore.credentialsFor(hop)
+            }
+            val outcome = connection.executeRoute(
+                route = route,
+                credentialsForHop = { hop -> credentialsByHopId.getValue(hop.id) },
                 command = job.command,
                 timeoutMillis = job.timeoutMillis,
                 onOutput = { appendJobOutput(job, it) },
@@ -459,6 +490,10 @@ class TerminalRuntime(
         } catch (error: Throwable) {
             // Persist only the backend's fixed safe messages; library/store exceptions
             // can quote authentication material.
+            (error as? SshHopException)?.let {
+                job.sshFailure = SshHopFailure(it.status, it.hopIndex, it.hopCount, it.profile.id,
+                    it.expectedFingerprint, it.presentedFingerprint)
+            }
             val message = (error as? SshClientException)?.message
                 ?: "SSH connection or authentication failed. Check the profile, credentials and accepted host key in Settings > Agent Runtime > SSH profiles."
             appendJobOutput(job, "$message\n")
@@ -761,6 +796,8 @@ class TerminalRuntime(
             updatedAtMs = updatedAtMs,
             error = error,
             sshProfileId = sshProfile?.id,
+            sshRoute = sshRoute.map { it.name },
+            sshFailure = sshFailure,
         )
     }
 
@@ -806,6 +843,8 @@ private data class TerminalJob(
     @Volatile var outputCallback: ((String) -> Unit)?,
     val log: TerminalJobLog,
     val sshProfile: SshProfile? = null,
+    val sshRoute: List<SshProfile> = emptyList(),
+    @Volatile var sshFailure: SshHopFailure? = null,
     val status: AtomicReference<TerminalJobStatus> = AtomicReference(TerminalJobStatus.QUEUED),
     val completionNotified: AtomicBoolean = AtomicBoolean(false),
     @Volatile var localProcess: LocalTerminalProcess? = null,

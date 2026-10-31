@@ -11,9 +11,14 @@ import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.runtime.AgentToolActivityStore
+import app.amber.feature.terminal.SshHopFailure
+import app.amber.feature.terminal.SshHostTrust
+import app.amber.feature.terminal.SshRouteResolver
+import app.amber.feature.terminal.SshTrustPolicy
 import app.amber.feature.terminal.TerminalJobSnapshot
 import app.amber.feature.terminal.TerminalRuntime
 import app.amber.feature.terminal.TerminalRuntimeKind
+import kotlinx.serialization.json.JsonPrimitive
 
 class TerminalTools(
     private val terminalRuntime: TerminalRuntime,
@@ -37,13 +42,14 @@ class TerminalTools(
 
     private val terminalExecuteTool = Tool(
         name = "terminal_execute",
-        description = "Run a one-shot command in Alpine or over SSH. For SSH pass runtime=remote_ssh and ssh_profile_id from terminal_ssh_profiles. Configure credentials and accept host keys in Settings > Agent Runtime > SSH profiles first.",
+        description = "Run a one-shot command in Alpine or over SSH. For SSH pass runtime=remote_ssh and ssh_profile_id from terminal_ssh_profiles. Configure credentials and accept host keys in Settings > Agent Runtime > SSH profiles first. Profiles with jump_profile_id connect through their jump hosts automatically; every hop must be trusted.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("command", stringProp("Command to run."))
                     put("timeout_ms", integerProp("Timeout in milliseconds. Defaults to 60000."))
                     put("runtime", stringProp("Runtime: builtin_alpine, android_shell, termux_external, remote_ssh. Defaults to builtin_alpine."))
+                    put("profile_id", stringProp("Saved SSH profile ID (alias: ssh_profile_id); implies remote_ssh when runtime is omitted. Supports ProxyJump chains."))
                     put("ssh_profile_id", stringProp("Saved SSH profile ID; implies remote_ssh when runtime is omitted. Never pass passwords or keys in tool inputs."))
                     put("sync_workspace", booleanProp("For detached long commands, refresh the SAF workspace before start and flush changes back after completion."))
                 },
@@ -53,12 +59,14 @@ class TerminalTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
+            val sshProfileId = input.string("profile_id") ?: input.string("ssh_profile_id")
             val result = terminalRuntime.execute(
                 command = input.requiredString("command"),
                 timeoutMillis = input.long("timeout_ms") ?: 60_000L,
                 syncWorkspace = input.boolean("sync_workspace") ?: false,
                 runtime = input.runtime(),
-                sshProfileId = input.string("ssh_profile_id"),
+                sshProfileId = sshProfileId,
+                expectedSshRouteDigest = input.string("__amber_ssh_route_digest"),
             )
             textJson {
                 put("runtime", result.runtime)
@@ -70,21 +78,39 @@ class TerminalTools(
                 result.status?.let { put("status", it) }
                 put("running", result.running)
                 put("output_log_path", result.outputLogPath)
-                result.sshProfileId?.let { put("ssh_profile_id", it) }
+                result.sshProfileId?.let {
+                    put("ssh_profile_id", it)
+                    put("profile_id", it)
+                }
+                result.sshFailure?.toToolJson()?.forEach { (key, value) -> put(key, value) }
+                if (result.sshRoute.isNotEmpty()) {
+                    put("route", buildJsonArray { result.sshRoute.forEach { hop -> add(JsonPrimitive(hop)) } })
+                }
             }
         }
     )
 
     private val terminalSshProfilesTool = Tool(
         name = "terminal_ssh_profiles",
-        description = "List saved SSH profiles, their IDs, default selection and host-key trust readiness. Returns no credentials. Add/edit profiles and confirm fingerprints in Settings > Agent Runtime > SSH profiles.",
+        description = "List saved SSH profiles, their IDs, ProxyJump routes, default selection and host-key trust readiness. Returns no credentials. Add/edit profiles and confirm fingerprints in Settings > Agent Runtime > SSH profiles.",
         parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
         execute = {
             val state = sshProfileStore.snapshot()
+            val profilesById = state.profiles.associateBy { it.id }
             textJson {
                 state.defaultProfileId?.let { put("default_profile_id", it) }
                 put("profiles", buildJsonArray {
                     state.profiles.forEach { profile ->
+                        val routeResult = runCatching { SshRouteResolver.resolveRoute(profile.id, profilesById) }
+                        val resolvedRoute = routeResult.getOrNull().orEmpty()
+                        val keysById = sshProfileStore.keyStore.snapshot().keys.associateBy { it.id }
+                        val routeReady = routeResult.isSuccess && resolvedRoute.all { hop ->
+                            val presence = sshProfileStore.credentialPresence(hop, keysById)
+                            val hasCredential = if (hop.authMethod == app.amber.feature.terminal.SshAuthMethod.PASSWORD) {
+                                presence.hasPassword
+                            } else presence.hasPrivateKey
+                            hasCredential && SshTrustPolicy.evaluate(hop, hop.acceptedHostKeyFingerprint) is SshHostTrust.Trusted
+                        }
                         add(buildJsonObject {
                             put("id", profile.id)
                             put("name", profile.name)
@@ -92,7 +118,14 @@ class TerminalTools(
                             put("port", profile.port)
                             put("username", profile.username)
                             put("auth_method", profile.authMethod.wireName)
-                            put("host_key_accepted", profile.acceptedHostKeyFingerprint != null)
+                            profile.keyId?.let { put("key_id", it) }
+                            profile.jumpProfileId?.let { put("jump_profile_id", it) }
+                            put("route", buildJsonArray { resolvedRoute.forEach { add(JsonPrimitive(it.name)) } })
+                            put("route_ready", routeReady)
+                            put(
+                                "host_key_accepted",
+                                SshTrustPolicy.evaluate(profile, profile.acceptedHostKeyFingerprint) is SshHostTrust.Trusted,
+                            )
                         })
                     }
                 })
@@ -102,13 +135,14 @@ class TerminalTools(
 
     private val terminalJobStartTool = Tool(
         name = "terminal_job_start",
-        description = "Start a terminal command as a background job, locally or over SSH. For SSH pass runtime=remote_ssh and ssh_profile_id from terminal_ssh_profiles. Use terminal_job_read/wait/stop to follow it. Closing SSH does not prove that the remote process stopped.",
+        description = "Start a terminal command as a background job, locally or over SSH. For SSH pass runtime=remote_ssh and profile_id / ssh_profile_id from terminal_ssh_profiles. Use terminal_job_read/wait/stop to follow it. Closing SSH does not prove that the remote process stopped. Profiles with jump_profile_id connect through their jump hosts automatically; every hop must be trusted.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("command", stringProp("Command to run."))
                     put("timeout_ms", integerProp("Job timeout in milliseconds. Defaults to 900000."))
                     put("runtime", stringProp("Runtime: builtin_alpine, android_shell, termux_external, remote_ssh. Defaults to settings."))
+                    put("profile_id", stringProp("Saved SSH profile ID (alias: ssh_profile_id); implies remote_ssh when runtime is omitted."))
                     put("ssh_profile_id", stringProp("Saved SSH profile ID; implies remote_ssh when runtime is omitted. Omit for the default SSH profile. Credentials must be configured in Settings, never in a command."))
                     put("sync_workspace", booleanProp("Refresh /workspace from SAF before start and flush changes back after completion. Use this when the command reads or writes user workspace files."))
                     put("flush_workspace", booleanProp("Flush /workspace changes back to SAF after completion without refreshing before start."))
@@ -119,11 +153,13 @@ class TerminalTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
+            val sshProfileId = input.string("profile_id") ?: input.string("ssh_profile_id")
             val snapshot = terminalRuntime.startJob(
                 command = input.requiredString("command"),
                 timeoutMillis = input.long("timeout_ms") ?: 15 * 60_000L,
                 runtime = input.runtime(),
-                sshProfileId = input.string("ssh_profile_id"),
+                sshProfileId = sshProfileId,
+                expectedSshRouteDigest = input.string("__amber_ssh_route_digest"),
                 syncWorkspace = input.boolean("sync_workspace") ?: false,
                 flushWorkspace = input.boolean("flush_workspace") ?: false,
             )
@@ -383,7 +419,14 @@ class TerminalTools(
         put("started_at_ms", startedAtMs)
         put("updated_at_ms", updatedAtMs)
         error?.let { put("error", it) }
-        sshProfileId?.let { put("ssh_profile_id", it) }
+        sshProfileId?.let {
+            put("ssh_profile_id", it)
+            put("profile_id", it)
+        }
+        sshFailure?.toToolJson()?.forEach { (key, value) -> put(key, value) }
+        if (sshRoute.isNotEmpty()) {
+            put("route", buildJsonArray { sshRoute.forEach { hop -> add(JsonPrimitive(hop)) } })
+        }
     }
 
     private fun List<UIMessagePart>.previewText(): String =
@@ -393,4 +436,13 @@ class TerminalTools(
                 else -> part.toString()
             }
         }.takeLast(1_600)
+}
+
+private fun SshHopFailure.toToolJson() = buildJsonObject {
+    put("code", code)
+    put("hop_index", hopIndex)
+    put("hop_count", hopCount)
+    put("profile_id", profileId)
+    expectedFingerprint?.let { put("expected_fingerprint", it) }
+    presentedFingerprint?.let { put("presented_fingerprint", it) }
 }
