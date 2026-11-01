@@ -1,7 +1,9 @@
 package app.amber.agent
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.SystemClock
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import android.webkit.WebView
@@ -17,8 +19,6 @@ import app.amber.core.automation.ScreenOcrSource
 import app.amber.core.automation.ScreenSnapshot
 import app.amber.core.automation.ScreenOcrCapabilities
 import java.io.File
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -30,7 +30,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Partial on-device OCR evidence: offscreen WebView/Canvas `view.draw` into owned ML Kit
+ * Partial on-device OCR evidence: fixture WebView/Canvas `view.draw` into owned ML Kit
  * `text-recognition-chinese` 16.0.1. Does **not** go through production
  * `captureFreshBitmap` / Accessibility screenshot.
  *
@@ -108,39 +108,30 @@ class ScreenOcrDeviceTest {
     }
 
     private fun recognizeFixture(mode: String, evidenceName: String) {
-        // Off-screen WebView/Canvas: real ML Kit on pixels. Not the production capture path.
+        // Draw the fixture view into a bitmap. This is not the production capture path.
         val width = 1080
         val height = 1600
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val ready = CountDownLatch(1)
-        val contentReady = CountDownLatch(1)
         var host: View? = null
-        instrumentation.runOnMainSync {
-            val context = instrumentation.targetContext
-            val view = if (mode == ScreenOcrFixtureActivity.MODE_CANVAS) {
-                ScreenOcrFixtureActivity.createCanvasView(context).also { contentReady.countDown() }
-            } else {
-                ScreenOcrFixtureActivity.createWebView(context) { contentReady.countDown() }
-            }
-            val specW = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
-            val specH = View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
-            view.measure(specW, specH)
-            view.layout(0, 0, width, height)
-            host = view
-            ready.countDown()
-        }
-        check(ready.await(8, TimeUnit.SECONDS)) { "fixture $mode did not become ready" }
-        // Measuring the WebView does not mean its asynchronous page load has finished.
-        check(contentReady.await(20, TimeUnit.SECONDS)) { "fixture $mode content did not become ready" }
-        Thread.sleep(if (mode == ScreenOcrFixtureActivity.MODE_WEBVIEW) 1500 else 200)
-        instrumentation.runOnMainSync {
-            val view = requireNotNull(host)
-            view.draw(Canvas(bitmap))
-        }
-        savePng(bitmap, "$evidenceName-source.png")
-        val axDump = dumpAxText(instrumentation.uiAutomation.rootInActiveWindow)
-        writeEvidence("$evidenceName-ax.txt", axDump)
+        val intent = Intent(instrumentation.targetContext, ScreenOcrFixtureActivity::class.java)
+            .putExtra(ScreenOcrFixtureActivity.EXTRA_MODE, mode)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val activity = instrumentation.startActivitySync(intent) as ScreenOcrFixtureActivity
         try {
+            // WebView needs an attached window; measurement alone does not finish its page load.
+            val deadline = SystemClock.elapsedRealtime() + 20_000
+            while (!activity.pageReady && SystemClock.elapsedRealtime() < deadline) Thread.sleep(50)
+            check(activity.pageReady) { "fixture $mode content did not become ready" }
+            Thread.sleep(if (mode == ScreenOcrFixtureActivity.MODE_WEBVIEW) 1500 else 200)
+            instrumentation.runOnMainSync {
+                val view = activity.targetView
+                check(view.width > 0 && view.height > 0) { "fixture $mode has no layout" }
+                host = view
+                view.draw(Canvas(bitmap))
+            }
+            savePng(bitmap, "$evidenceName-source.png")
+            val axDump = dumpAxText(instrumentation.uiAutomation.rootInActiveWindow)
+            writeEvidence("$evidenceName-ax.txt", axDump)
             val screenshotCalls = AtomicInteger(0)
             val engine = DefaultScreenOcrEngine(
                 displaySizeProvider = { bitmap.width to bitmap.height },
@@ -233,6 +224,8 @@ class ScreenOcrDeviceTest {
             )
             assertEquals(1, screenshotCalls.get())
         } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+            instrumentation.waitForIdleSync()
             if (host is WebView) {
                 instrumentation.runOnMainSync { (host as WebView).destroy() }
             }
