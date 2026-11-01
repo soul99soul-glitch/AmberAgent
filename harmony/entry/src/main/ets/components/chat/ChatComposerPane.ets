@@ -2,6 +2,8 @@ import type { PendingUserMessageMode } from '@amber/chat-domain';
 import { ChatComposerSession } from '../../platform_impl/chat/ChatComposerSession.ets';
 import type { PendingChipRow } from '../../platform_impl/chat/ChatComposerSession.ets';
 import { ChatConversationPresentation } from '../../platform_impl/chat/ChatConversationPresentation.ets';
+import { ChatCloudDialogueSession } from '../../platform_impl/chat/ChatCloudDialogueSession.ets';
+import { ChatCloudDialogueStrip } from './ChatCloudDialogueStrip.ets';
 import { ChatInput } from '../ChatInput.ets';
 import { ChatPendingQueueSheet } from '../ChatPendingQueueSheet.ets';
 import { JevCompletionNoticeView } from '../JevCompletionNotice.ets';
@@ -12,6 +14,7 @@ import { ACCENT, BG, INK2, INK3, ERROR, SURFACE2, OVERLAY, LINE, META } from '..
 export struct ChatComposerPane {
   @ObjectLink composer: ChatComposerSession;
   @ObjectLink presentation: ChatConversationPresentation;
+  @ObjectLink cloudDialogue: ChatCloudDialogueSession;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop navBarHeight: number = 0;
   @Prop storageDegraded: boolean = false;
@@ -178,6 +181,7 @@ export struct ChatComposerPane {
         }
         // 子代理跨会话活动条(C5-4;有运行中子代理时显示)
         this.runtimeContent()
+        ChatCloudDialogueStrip({ session: this.cloudDialogue })
         if (this.manualCompacting) {
           Text('正在压缩上下文…').fontSize(META).fontColor(INK3)
             .width('100%').padding({ left: 20, right: 20, top: 6, bottom: 4 })

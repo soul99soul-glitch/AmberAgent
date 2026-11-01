@@ -15,7 +15,11 @@ import { getChatKvStore } from '../di/AppContainer.ets';
 const DOMAIN: number = 0x0001;
 const TAG: string = 'MacGateway';
 const CONNECTION_KEY: string = 'mac_gateway_connection_v1';
+export const CLOUD_DIALOGUE_ENABLED_KEY: string = 'mac_gateway_cloud_dialogue_enabled_v1';
+export const CLOUD_DIALOGUE_STATE_KEY: string = 'mac_gateway_cloud_dialogue_state_v1';
 const MAX_LINK_LENGTH: number = 4096;
+const CLOUD_REQUEST_ID_MAX_LEN: number = 128;
+const CLOUD_TEXT_MAX_LEN: number = 24000;
 // RCP 公钥锁定不匹配(curl CURLE_SSL_PINNEDPUBKEYNOTMATCH=90)
 const PIN_MISMATCH_CODE: number = 1007900090;
 const PUSH_NOT_CONFIGURED_CODE: number = 1000900010;
@@ -84,6 +88,65 @@ export interface MacGatewayStatus {
   sessions: MacGatewaySession[];
 }
 
+export type CloudDialogueInputState = 'received' | 'consumed' | 'cancelled';
+
+export type CloudDialogueEventKind =
+  | 'user_message'
+  | 'followup'
+  | 'stop_requested'
+  | 'assistant_reply'
+  | 'input_consumed'
+  | 'input_cancelled'
+  | 'process_event'
+  | 'task_result';
+
+export type CloudDialogueEventRole = 'user' | 'assistant' | 'system';
+
+export interface CloudDialogueReceipt {
+  eventId: string;
+  requestId: string;
+  topicId?: string | null;
+  workItemIds: string[];
+  state: CloudDialogueInputState;
+  replayed: boolean;
+}
+
+export interface CloudDialogueEvent {
+  seq: number;
+  id: string;
+  kind: CloudDialogueEventKind;
+  role: CloudDialogueEventRole;
+  text: string;
+  topicId?: string | null;
+  workItemId?: string | null;
+  outcome?: string | null;
+}
+
+export interface CloudDialogueEventsPage {
+  items: CloudDialogueEvent[];
+  nextCursor: number;
+}
+
+export interface CloudDialogueClientLike {
+  messages(requestId: string, text: string): Promise<CloudDialogueReceipt>;
+  inputs(workItemId: string, requestId: string, text: string): Promise<CloudDialogueReceipt>;
+  stop(workItemId: string, requestId: string): Promise<CloudDialogueReceipt>;
+  receipts(requestId: string): Promise<CloudDialogueReceipt>;
+  events(after?: number, limit?: number): Promise<CloudDialogueEventsPage>;
+}
+
+export const isValidCloudRequestId = (requestId: string): boolean => {
+  return requestId.length >= 1
+    && requestId.length <= CLOUD_REQUEST_ID_MAX_LEN
+    && /^[A-Za-z0-9._:-]+$/.test(requestId);
+};
+
+export const validateCloudDialogueText = (text: string): string | null => {
+  if (text.trim().length === 0) return '消息内容不能为空';
+  if (text.length > CLOUD_TEXT_MAX_LEN) return '消息长度超过上限（24000 字符）';
+  return null;
+};
+
 interface PairResponse {
   deviceId: string;
   token: string;
@@ -99,10 +162,14 @@ export type MacGatewayErrorKind = 'unreachable' | 'certificate' | 'unauthorized'
 
 export class MacGatewayError extends Error {
   kind: MacGatewayErrorKind;
+  statusCode: number;
+  errorCode: string;
 
-  constructor(kind: MacGatewayErrorKind, message: string) {
+  constructor(kind: MacGatewayErrorKind, message: string, statusCode: number = 0, errorCode: string = '') {
     super(message);
     this.kind = kind;
+    this.statusCode = statusCode;
+    this.errorCode = errorCode;
   }
 }
 
@@ -113,7 +180,15 @@ export const describeMacGatewayError = (e: Error): string => {
     case 'certificate': return 'Mac 的证书与配对时不一致（可能重装过 amber-gateway），请取消配对后重新扫码';
     case 'unauthorized': return '此设备已在 Mac 上被吊销，请重新配对';
     case 'invalid': return 'Mac Gateway 返回了无法识别的数据';
-    default: return e.message;
+    default:
+      if (e.errorCode === 'request_id_conflict') return '请求 ID 冲突，请重新发送';
+      if (e.errorCode === 'task_terminal') return '该云任务已结束，无法继续补充或停止';
+      if (e.errorCode === 'task_not_found') return '未找到对应的云任务';
+      if (e.errorCode === 'receipt_not_found') return '未找到对应的请求回执';
+      if (e.errorCode === 'invalid_cursor') return '事件游标无效';
+      if (e.errorCode === 'invalid_request') return '请求参数无效（请检查内容长度与格式）';
+      if (e.statusCode === 404) return '连接的 Gateway 不支持云主对话（需升级 amber-gateway 至支持 /v2/dialogue 的版本）';
+      return e.message;
   }
 };
 
@@ -140,7 +215,7 @@ export const parsePairingLink = (text: string): MacGatewayPairingPayload | null 
   }
 };
 
-export class MacGatewayClient {
+export class MacGatewayClient implements CloudDialogueClientLike {
   private addrs: string[];
   private port: number;
   private fingerprint: string;
@@ -190,6 +265,65 @@ export class MacGatewayClient {
     await this.send('POST', '/v1/unpair', '{}');
   }
 
+  async messages(requestId: string, text: string): Promise<CloudDialogueReceipt> {
+    if (!isValidCloudRequestId(requestId)) {
+      throw new MacGatewayError('server', 'invalid_request', 400, 'invalid_request');
+    }
+    const textError: string | null = validateCloudDialogueText(text);
+    if (textError !== null) {
+      throw new MacGatewayError('server', textError, 400, 'invalid_request');
+    }
+    const body: Record<string, string> = { 'requestId': requestId, 'text': text };
+    return this.parseJson<CloudDialogueReceipt>(await this.send('POST', '/v2/dialogue/messages', JSON.stringify(body)));
+  }
+
+  async inputs(workItemId: string, requestId: string, text: string): Promise<CloudDialogueReceipt> {
+    const targetId: string = workItemId.trim();
+    if (targetId.length === 0 || !isValidCloudRequestId(requestId)) {
+      throw new MacGatewayError('server', 'invalid_request', 400, 'invalid_request');
+    }
+    const textError: string | null = validateCloudDialogueText(text);
+    if (textError !== null) {
+      throw new MacGatewayError('server', textError, 400, 'invalid_request');
+    }
+    const body: Record<string, string> = { 'requestId': requestId, 'text': text };
+    const path: string = `/v2/work-items/${encodeURIComponent(targetId)}/inputs`;
+    return this.parseJson<CloudDialogueReceipt>(await this.send('POST', path, JSON.stringify(body)));
+  }
+
+  async stop(workItemId: string, requestId: string): Promise<CloudDialogueReceipt> {
+    const targetId: string = workItemId.trim();
+    if (targetId.length === 0 || !isValidCloudRequestId(requestId)) {
+      throw new MacGatewayError('server', 'invalid_request', 400, 'invalid_request');
+    }
+    const body: Record<string, string> = { 'requestId': requestId };
+    const path: string = `/v2/work-items/${encodeURIComponent(targetId)}/stop`;
+    return this.parseJson<CloudDialogueReceipt>(await this.send('POST', path, JSON.stringify(body)));
+  }
+
+  async receipts(requestId: string): Promise<CloudDialogueReceipt> {
+    if (!isValidCloudRequestId(requestId)) {
+      throw new MacGatewayError('server', 'invalid_request', 400, 'invalid_request');
+    }
+    const path: string = `/v2/dialogue/receipts/${encodeURIComponent(requestId)}`;
+    return this.parseJson<CloudDialogueReceipt>(await this.send('GET', path, undefined));
+  }
+
+  async events(after: number = 0, limit: number = 100): Promise<CloudDialogueEventsPage> {
+    const safeAfter: number = Math.max(0, Math.floor(after));
+    const safeLimit: number = Math.max(1, Math.min(200, Math.floor(limit)));
+    const path: string = `/v2/dialogue/events?after=${safeAfter}&limit=${safeLimit}`;
+    return this.parseJson<CloudDialogueEventsPage>(await this.send('GET', path, undefined));
+  }
+
+  private parseJson<T>(raw: string): T {
+    try {
+      return JSON.parse(raw) as T;
+    } catch (_e) {
+      throw new MacGatewayError('invalid', 'invalid response');
+    }
+  }
+
   private ordered(): string[] {
     const preferred: string | null = this.preferred;
     if (preferred === null) return this.addrs;
@@ -225,15 +359,19 @@ export class MacGatewayClient {
       const text: string = response.body === undefined ? ''
         : util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(response.body));
       if (response.statusCode >= 200 && response.statusCode < 300) return text;
-      if (response.statusCode === 401) throw new MacGatewayError('unauthorized', 'unauthorized');
+      if (response.statusCode === 401) throw new MacGatewayError('unauthorized', 'unauthorized', 401, 'unauthorized');
       let message: string = `HTTP ${response.statusCode}`;
+      let errorCode: string = '';
       try {
         const parsed: ErrorBody = JSON.parse(text) as ErrorBody;
-        if (parsed.error !== undefined) message = parsed.error;
+        if (parsed.error !== undefined) {
+          message = parsed.error;
+          errorCode = parsed.error;
+        }
       } catch (_e) {
         // 非 JSON 错误体沿用 HTTP 状态码
       }
-      throw new MacGatewayError('server', message);
+      throw new MacGatewayError('server', message, response.statusCode, errorCode);
     }
     throw sawPinMismatch ? new MacGatewayError('certificate', 'certificate mismatch')
       : new MacGatewayError('unreachable', 'unreachable');
@@ -252,6 +390,17 @@ export const loadMacGatewayConnection = async (): Promise<MacGatewayConnection |
 
 export const forgetMacGatewayConnection = async (): Promise<void> => {
   await getChatKvStore().delete(CONNECTION_KEY);
+  await getChatKvStore().delete(CLOUD_DIALOGUE_ENABLED_KEY);
+  await getChatKvStore().delete(CLOUD_DIALOGUE_STATE_KEY);
+};
+
+export const loadCloudDialogueEnabled = async (): Promise<boolean> => {
+  const raw: string | null = await getChatKvStore().get(CLOUD_DIALOGUE_ENABLED_KEY);
+  return raw === 'true';
+};
+
+export const setCloudDialogueEnabled = async (enabled: boolean): Promise<void> => {
+  await getChatKvStore().put(CLOUD_DIALOGUE_ENABLED_KEY, enabled ? 'true' : 'false');
 };
 
 export const pairMacGateway = async (p: MacGatewayPairingPayload): Promise<MacGatewayConnection> => {

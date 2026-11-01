@@ -14,6 +14,7 @@ import { CenteredTitleBar, PlainSection, CardGroup, FooterNote, NavRow, ToggleRo
 import {
   MacGatewayClient, MacGatewayError, describeMacGatewayError, parsePairingLink, loadMacGatewayConnection,
   forgetMacGatewayConnection, pairMacGateway, uploadMacGatewayPushToken,
+  loadCloudDialogueEnabled, setCloudDialogueEnabled,
   type MacGatewayConnection, type MacGatewayPairingPayload, type MacGatewayStatus, type MacGatewaySession,
   type MacGatewayHealth,
 } from '../platform_impl/MacGatewayClient.ets';
@@ -33,20 +34,26 @@ struct SettingMacGatewayPage {
   @State reachable: number = 0; // 0 连接中 · 1 在线 · -1 无法连接
   @State pending: MacGatewayPairingPayload | null = null;
   @State busy: boolean = false;
+  @State cloudDialogueEnabled: boolean = false;
   @State notice: string = '';
   @State noticeIsError: boolean = false;
   private timer: number = -1;
   private disposed: boolean = false;
 
   aboutToAppear(): void {
-    loadMacGatewayConnection().then((c: MacGatewayConnection | null): void => {
-      this.connection = c;
-      this.loaded = true;
-      this.startPolling();
-    }).catch((): void => { this.loaded = true; });
+    Promise.all([loadMacGatewayConnection(), loadCloudDialogueEnabled()])
+      .then((res: [MacGatewayConnection | null, boolean]): void => {
+        this.connection = res[0];
+        this.cloudDialogueEnabled = res[0] !== null && res[1];
+        this.loaded = true;
+        this.startPolling();
+      }).catch((): void => { this.loaded = true; });
   }
 
   onPageShow(): void {
+    loadCloudDialogueEnabled().then((enabled: boolean): void => {
+      this.cloudDialogueEnabled = this.connection !== null && enabled;
+    }).catch((): void => {});
     this.startPolling();
   }
 
@@ -115,6 +122,7 @@ struct SettingMacGatewayPage {
       // 本地存储删除失败也要退出已配对界面;残留记录下次打开时会因 401 再次被清理
     }
     this.connection = null;
+    this.cloudDialogueEnabled = false;
     this.status = null;
     this.reachable = 0;
   }
@@ -207,6 +215,16 @@ struct SettingMacGatewayPage {
 
   private testPush(): void {
     this.run((c: MacGatewayConnection): Promise<void> => MacGatewayClient.of(c).testPush(), '测试推送已发出，留意通知栏');
+  }
+
+  private toggleCloudDialogue(): void {
+    if (this.connection === null) return;
+    const next: boolean = !this.cloudDialogueEnabled;
+    this.cloudDialogueEnabled = next;
+    setCloudDialogueEnabled(next).catch((e: Error): void => {
+      this.cloudDialogueEnabled = !next;
+      this.showNotice(describeMacGatewayError(e), true);
+    });
   }
 
   private toggleTask(s: MacGatewaySession): void {
@@ -372,6 +390,25 @@ struct SettingMacGatewayPage {
   }
 
   @Builder
+  CloudDialogueCard(): void {
+    ToggleRow({
+      label: '云主对话',
+      desc: '开启后，主聊天发送的消息将通过已配对 Gateway 异步执行，支持长任务后台运行、追问、补充与停止',
+      checked: this.cloudDialogueEnabled,
+      isLast: true,
+      onToggle: (): void => { this.toggleCloudDialogue(); },
+    })
+  }
+
+  @Builder
+  CloudDialogueSection(): void {
+    PlainSection({ label: '云主对话' })
+    CardGroup({ radius: 18, stroke: true, content: (): void => { this.CloudDialogueCard(); } })
+      .margin({ left: 16, right: 16 })
+    FooterNote({ text: '关闭时保持本地模型对话不变，不会自动迁移或隐式切换。' })
+  }
+
+  @Builder
   HealthCard(): void {
     if (this.health()?.diskFreeBytes !== undefined) {
       NavRow({ label: '磁盘剩余', valueText: formatBytes(this.health()?.diskFreeBytes ?? 0), showChevron: false })
@@ -444,6 +481,7 @@ struct SettingMacGatewayPage {
               this.ConfirmSection()
             } else if (this.connection !== null) {
               this.MacSection()
+              this.CloudDialogueSection()
               if (this.health() !== undefined) {
                 this.HealthSection()
               }

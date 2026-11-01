@@ -161,6 +161,7 @@ import { chatCompactionErrorText } from '../platform_impl/chat/ChatCompactionSup
 import { ChatConversationPresentation } from '../platform_impl/chat/ChatConversationPresentation.ets';
 import { ChatComposerSession } from '../platform_impl/chat/ChatComposerSession.ets';
 import type { PendingDoc, PendingChipRow } from '../platform_impl/chat/ChatComposerSession.ets';
+import { ChatCloudDialogueSession } from '../platform_impl/chat/ChatCloudDialogueSession.ets';
 import { ChatModelContextSession } from '../platform_impl/chat/ChatModelContextSession.ets';
 import { ChatModelMenuOverlay, ChatContextMeterOverlay, ChatCompactSummaryHost } from '../components/chat/ChatModelContextView.ets';
 import { ChatRunDetailsSession } from '../platform_impl/chat/ChatRunDetailsSession.ets';
@@ -251,6 +252,7 @@ struct ChatPage {
   // P2: native Smart UI state stays page-owned and keyed by message source identity.
   @State presentation: ChatConversationPresentation = new ChatConversationPresentation();
   @State composer: ChatComposerSession = new ChatComposerSession();
+  @State cloudDialogue: ChatCloudDialogueSession = new ChatCloudDialogueSession();
   @State modelContext: ChatModelContextSession = new ChatModelContextSession();
   @State runDetails: ChatRunDetailsSession = new ChatRunDetailsSession();
   @State messageActions: ChatMessageActionsSession = new ChatMessageActionsSession();
@@ -316,6 +318,7 @@ struct ChatPage {
     this.pageVisible = false;
     this.presentation.dispose();
     this.composer.dispose();
+    this.cloudDialogue.dispose();
     this.modelContext.dispose();
     this.runDetails.dispose();
     this.messageActions.dispose();
@@ -348,6 +351,7 @@ struct ChatPage {
   onPageShow(): void {
     this.presentation.show();
     this.composer.show();
+    this.cloudDialogue.show();
     this.modelContext.show();
     this.runDetails.show();
     this.messageActions.show();
@@ -411,6 +415,7 @@ struct ChatPage {
     this.homePaneVisible = false;
     this.presentation.hide();
     this.composer.hide();
+    this.cloudDialogue.hide();
     this.modelContext.hide();
     this.runDetails.hide();
     this.messageActions.hide();
@@ -518,8 +523,18 @@ struct ChatPage {
       loadMentionRoles: (): Promise<MentionRoleItem[]> => hydrateSubAgentSetting().then((setting): Promise<MentionRoleItem[]> =>
         isModelCouncilEnabled().then((enabled: boolean): MentionRoleItem[] => buildMentionRoleItems(setting.enabled, enabled, setting.mode, setting.customDefinitions))),
       abilityContext: (): common.UIAbilityContext => getContext(this) as common.UIAbilityContext,
+      cloudDialogue: (): ChatCloudDialogueSession => this.cloudDialogue,
     };
     this.composer.start(composerPorts);
+    this.cloudDialogue.start({
+      kvStore: getChatKvStore(),
+      currentConversation: (): Conversation | null => this.presentation.conversation,
+      mutateConversation: (id: string, update: (latest: Conversation) => Conversation | null): Promise<Conversation | null> =>
+        getConversationRunService().mutateStoredConversation(id, update),
+      error: (message: string): void => { this.presentation.errorMsg = message; },
+      autoScrollEnabled: (): boolean => this.timeline.enableAutoScroll,
+      jumpToBottom: (): void => { this.timeline.jumpToBottom(); },
+    });
     this.modelContext.start({
       currentConversation: (): Conversation | null => this.presentation.conversation,
       error: (message: string): void => { this.presentation.errorMsg = message; },
@@ -1097,7 +1112,7 @@ struct ChatPage {
       .width('100%')
 
       ChatComposerPane({
-        composer: this.composer, presentation: this.presentation,
+        composer: this.composer, presentation: this.presentation, cloudDialogue: this.cloudDialogue,
         navBarHeight: this.navBarHeight, storageDegraded: this.storageDegraded,
         manualCompacting: this.modelContext.manualCompacting, retryStatus: this.runDetails.retryStatus,
         onCompact: (): void => { this.modelContext.compactCurrentConversation(); },

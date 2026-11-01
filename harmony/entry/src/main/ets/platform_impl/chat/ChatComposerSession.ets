@@ -10,6 +10,7 @@ import { currentMessages, toText, loadSearchPrefs, SearchSettings, firstImageBlo
 import type { ChatProviderChoice } from '../../di/ChatRuntimeContracts.ets';
 import type { ConversationRunService, ConversationRunCommand, ConversationRunSnapshot, ConversationEditCommand, ConversationSendCommand } from '../ConversationRunService.ets';
 import type { SmartUiContinuationCapture } from './ChatSmartUiSession.ets';
+import type { ChatCloudDialogueSession } from './ChatCloudDialogueSession.ets';
 import type { OcrSeed } from '../OcrSupport.ets';
 import type { QuickMessage } from '../../components/SlashCommandPanel.ets';
 import { compressImageAsDataUrl } from '../ImageCompress.ets';
@@ -73,6 +74,7 @@ export interface ChatComposerPorts {
   continuationCurrent: (capture: SmartUiContinuationCapture | null) => boolean;
   loadMentionRoles: () => Promise<MentionRoleItem[]>;
   abilityContext: () => common.UIAbilityContext;
+  cloudDialogue?: () => ChatCloudDialogueSession | null;
 }
 
 @Observed
@@ -411,6 +413,19 @@ export class ChatComposerSession {
     for (const doc of acceptedDocs) inputParts.push({ type: 'document', url: doc.url,
       fileName: doc.fileName, mime: doc.mime, metadata: null });
     if (editingNodeId.length === 0 && this.tryRouteDeepReadSlash(inputParts)) return;
+    const cloud: ChatCloudDialogueSession | null = this.deps.cloudDialogue !== undefined ? this.deps.cloudDialogue() : null;
+    if (editingNodeId.length === 0 && cloud !== null && cloud.isActiveMode()) {
+      if (acceptedImages.length > 0 || acceptedDocs.length > 0) {
+        this.errorMsg = '云主对话暂不支持图片或文件附件';
+        return;
+      }
+      this.deps.dismissKeyboard();
+      const sent: boolean = await cloud.submitComposerText(sendText);
+      if (sent && this.pageAlive && this.conversation?.id === owner) {
+        this.clearAcceptedComposer(acceptedText, acceptedImages, acceptedDocs);
+      }
+      return;
+    }
     this.sendPrechecking = true;
     const sequence: number = ++this.sendPreflightSeq;
     try {
@@ -570,6 +585,19 @@ export class ChatComposerSession {
     for (const doc of acceptedDocs) inputParts.push({ type: 'document', url: doc.url,
       fileName: doc.fileName, mime: doc.mime, metadata: null });
     if (editingNodeId.length === 0 && this.tryRouteDeepReadSlash(inputParts)) return;
+    const cloud: ChatCloudDialogueSession | null = this.deps.cloudDialogue !== undefined ? this.deps.cloudDialogue() : null;
+    if (editingNodeId.length === 0 && cloud !== null && cloud.isActiveMode()) {
+      if (acceptedImages.length > 0 || acceptedDocs.length > 0) {
+        this.errorMsg = '云主对话暂不支持图片或文件附件';
+        return;
+      }
+      this.deps.dismissKeyboard();
+      const sent: boolean = await cloud.submitComposerText(sendText);
+      if (sent && this.pageAlive && this.conversation?.id === owner) {
+        this.clearAcceptedComposer(acceptedText, acceptedImages, acceptedDocs);
+      }
+      return;
+    }
     this.sendPrechecking = true;
     const sequence: number = ++this.sendPreflightSeq;
     try {
