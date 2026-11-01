@@ -23,8 +23,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -43,6 +46,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.test.core.app.ApplicationProvider
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
@@ -60,6 +64,7 @@ import app.amber.feature.ui.overlay.LocalAppModalOverlayHost
 import app.amber.feature.ui.overlay.rememberAppModalOverlayHostState
 import app.amber.feature.ui.pages.chat.ChatModelMenuOverlay
 import app.amber.feature.ui.pages.chat.ChatPageTopBar
+import app.amber.feature.ui.pages.chat.chatPaneStartInsetPx
 import app.amber.feature.ui.pages.sessionhome.HomeHeader
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
@@ -906,6 +911,8 @@ class ModelMenuInteractionTest {
         var menuOpen by remember { mutableStateOf(true) }
         val density = LocalDensity.current
         var headerHeight by remember { mutableStateOf(0.dp) }
+        var chatPaneStart by remember { mutableStateOf(0.dp) }
+        val layoutDirection = LocalLayoutDirection.current
         val conversationFlow = remember {
             MutableStateFlow(
                 Conversation(
@@ -928,7 +935,18 @@ class ModelMenuInteractionTest {
                             onNewSession = {},
                         )
                     }
-                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                    Box(
+                        Modifier.weight(1f).fillMaxHeight().testTag("fixture-chat-pane")
+                            .onGloballyPositioned { coordinates ->
+                                chatPaneStart = with(density) {
+                                    chatPaneStartInsetPx(
+                                        coordinates.boundsInWindow(),
+                                        coordinates.findRootCoordinates().boundsInWindow(),
+                                        layoutDirection,
+                                    ).toDp()
+                                }
+                            },
+                    ) {
                         Column(Modifier.fillMaxSize()) {
                             Box(
                                 Modifier.onGloballyPositioned {
@@ -971,7 +989,7 @@ class ModelMenuInteractionTest {
                             },
                             onUpdateReasoningLevel = {},
                             panelTopInset = headerHeight,
-                            panelStartInset = TWO_PANE_LIST_WIDTH,
+                            panelStartInset = chatPaneStart,
                         )
                     }
                 }
@@ -1105,6 +1123,25 @@ class ModelMenuInteractionTest {
         compose.onRoot().performTouchInput { click(settings) }
         compose.mainClock.advanceTimeByFrame()
         assertEquals("after dismissal the same settings target navigates", 1, navSettings)
+    }
+
+    @Test
+    @Config(sdk = [34], application = Application::class, qualifiers = "w1280dp-h800dp")
+    fun appShellModalLayer_rtlPanelStaysInsideChatPane() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                TwoPaneAppShellFixture(
+                    provider = regressionProvider("rtl-model"),
+                    onBack = {}, onOpenSettings = {}, onMenuClosed = {},
+                )
+            }
+        }
+        compose.mainClock.advanceTimeBy(1_000)
+        val panel = compose.onNodeWithTag("top-model-menu-panel").fetchSemanticsNode().boundsInRoot
+        val chat = compose.onNodeWithTag("fixture-chat-pane").fetchSemanticsNode().boundsInRoot
+        assertEquals("panel left must match the chat pane", chat.left, panel.left, 1f)
+        assertEquals("panel right must match the chat pane", chat.right, panel.right, 1f)
     }
 
     @Test

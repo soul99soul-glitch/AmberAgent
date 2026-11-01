@@ -12,6 +12,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -156,6 +160,59 @@ class ChatMessageLongPressTest {
         compose.waitForIdle()
         assertEquals(listOf("dismiss", "copy"), events)
         copy.assertDoesNotExist()
+    }
+
+    @Test
+    fun tappingScrimDuringExitDoesNotCancelChosenAction() {
+        val events = mutableListOf<String>()
+        content {
+            var visible by remember { mutableStateOf(true) }
+            if (visible) {
+                ChatMessageActionsSheet(
+                    message = UIMessage.assistant("A completed reply"),
+                    model = null,
+                    onDelete = {}, onEdit = {}, onShare = {}, onFork = {}, onSelectAndCopy = {},
+                    onCopy = { events += "copy" },
+                    onDismissRequest = { events += "dismiss"; visible = false },
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithText(RuntimeEnvironment.getApplication().getString(R.string.copy)).performClick()
+        compose.mainClock.advanceTimeByFrame()
+        clickOutsideActionsSheet()
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+
+        assertEquals(listOf("dismiss", "copy"), events)
+    }
+
+    @Test
+    fun tappingScrimNormallyDismissesWithoutAction() {
+        val events = mutableListOf<String>()
+        content {
+            var visible by remember { mutableStateOf(true) }
+            if (visible) {
+                ChatMessageActionsSheet(
+                    message = UIMessage.assistant("A completed reply"),
+                    model = null,
+                    onDelete = {}, onEdit = {}, onShare = {}, onFork = {}, onSelectAndCopy = {},
+                    onCopy = { events += "copy" },
+                    onDismissRequest = { events += "dismiss"; visible = false },
+                )
+            }
+        }
+        compose.waitForIdle()
+        clickOutsideActionsSheet()
+        compose.waitForIdle()
+        assertEquals(listOf("dismiss"), events)
+    }
+
+    private fun clickOutsideActionsSheet() {
+        val copy = RuntimeEnvironment.getApplication().getString(R.string.copy)
+        compose.onNode(isRoot() and hasAnyDescendant(hasText(copy)), useUnmergedTree = true)
+            .performTouchInput { click(Offset(5f, 5f)) }
     }
 
     private fun openMenuAndRegenerate(text: String) {

@@ -1196,6 +1196,7 @@ def collect(args: argparse.Namespace) -> int:
         raise SystemExit("capture is not successful; keep invalid evidence out of summaries")
     for key, expected in (
         ("runId", args.run_id), ("scenario", args.scenario), ("package", args.package),
+        ("serial", args.serial),
     ):
         if capture.get(key) != expected:
             raise SystemExit(f"capture {key} mismatch: {capture.get(key)!r} != {expected!r}")
@@ -1204,14 +1205,13 @@ def collect(args: argparse.Namespace) -> int:
     if capture.get("phase") != args.phase:
         raise SystemExit("capture phase mismatch")
     trace_path = Path(capture["tracePath"]) if capture.get("tracePath") else None
-    if args.trace_on and trace_path is None:
-        raise SystemExit("trace-on collect requires the capture log's trace path")
-    if trace_path is not None:
-        if not trace_path.is_file():
-            raise SystemExit(f"trace missing: {trace_path}")
-        if sha256(trace_path) != capture.get("traceSha256"):
-            raise SystemExit("trace hash does not match the capture log")
-    if args.trace and trace_path is not None and sha256(Path(args.trace)) != capture.get("traceSha256"):
+    if trace_path is None:
+        raise SystemExit("collect requires the capture log's trace path")
+    if not trace_path.is_file():
+        raise SystemExit(f"trace missing: {trace_path}")
+    if sha256(trace_path) != capture.get("traceSha256"):
+        raise SystemExit("trace hash does not match the capture log")
+    if args.trace and sha256(Path(args.trace)) != capture.get("traceSha256"):
         raise SystemExit("--trace does not match the capture log")
     frames = json.loads(frames_path.read_text())
     if frames.get("pathId") != requested_path or frames.get("parserVersion") != PARSER_VERSION:
@@ -1234,6 +1234,10 @@ def collect(args: argparse.Namespace) -> int:
         raise SystemExit("frames-json windowMs must be 1500")
     if frames.get("runId") != args.run_id:
         raise SystemExit("frames-json belongs to another run")
+    if frames.get("traceSha256") != capture.get("traceSha256"):
+        raise SystemExit("frames-json trace does not match the capture log")
+    if capture.get("entryMonoNs") is None or frames.get("anchorMonotonicNs") != capture["entryMonoNs"]:
+        raise SystemExit("frames-json anchor does not match the capture log")
     if frames.get("pid") is not None and capture.get("pidMeasured") not in (None, str(frames["pid"])):
         raise SystemExit("frames-json pid does not match the measured process")
     if frames.get("parserSourceSha256") != sha256(Path(__file__).with_name("parse-atrace-frames.py")):

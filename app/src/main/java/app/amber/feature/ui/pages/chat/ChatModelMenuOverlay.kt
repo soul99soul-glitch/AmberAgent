@@ -2,7 +2,9 @@ package app.amber.feature.ui.pages.chat
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
@@ -10,6 +12,11 @@ import app.amber.ai.provider.ProviderSetting
 import app.amber.feature.ui.components.ai.TopModelMenu
 import app.amber.feature.ui.overlay.HostInAppModalOverlay
 import kotlin.uuid.Uuid
+
+/** The menu's start padding is relative to the app shell, including in RTL. */
+internal fun chatPaneStartInsetPx(pane: Rect, root: Rect, direction: LayoutDirection): Float =
+    (if (direction == LayoutDirection.Ltr) pane.left - root.left else root.right - pane.right)
+        .coerceAtLeast(0f)
 
 /**
  * Production wiring for the chat model menu: the menu owns its animation/gesture handling, but it

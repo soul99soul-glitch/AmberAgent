@@ -93,6 +93,8 @@ adb_fixture shell am force-stop app.amber.agent.perffixture
 
 The wrapper runs doctor → separate-process prepare/readback → cold → production Back → warm → parse/collect/summary. The primitive CLIs allow explicit `--adb`, `--capture-log`, `--trace-output`, `--source-manifest` and `--output`. The fixed window, r4 lifecycle/window/display/touch checks, final revision and missing-marker failures must remain intact. Preserve invalid samples and unknown fields. Pilot/overhead commands are explicit larger experiments, not part of this six-run smoke or an automatic next step.
 
+Collection binds the device serial, trace hash and parser anchor to the capture log. For manual parsing intended for collection, pass the capture's `entryMonoNs` as `--anchor-monotonic-ns` and retain the captured trace; a marker may also be supplied. Marker-only parsing remains available for standalone inspection but cannot establish the collector's capture identity.
+
 ## UTF-16 metric naming correction
 
 The current diagnostic metrics JSON uses schema 2 and exports only `preparation.toolOutputCharsPrepared`: the sum of `String.length` for Text tool outputs, measured in UTF-16 code units. CJK characters count as one unit and an emoji surrogate pair as two. This is not encoded bytes, serialized JSON volume or a byte budget. The existing Int accumulator limits remain; this change does not increase budgets or encode outputs. The VM and regression use the same diagnostic counting function. A Unicode export regression checks 4 UTF-16 units for “中文😀”, compared with 10 UTF-8 bytes computed only inside the test, and checks the exact exported preparation keys.

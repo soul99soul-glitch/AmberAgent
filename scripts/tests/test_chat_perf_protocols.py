@@ -268,6 +268,7 @@ class DeadlineTest(unittest.TestCase):
             payload = json.loads(output.read_text())
             self.assertEqual('off-1', payload['runId'])
             self.assertEqual('external', payload['runBinding'])
+            self.assertEqual(module.sha256(trace), payload['traceSha256'])
 
 class CollectMainTest(unittest.TestCase):
     def test_unknown_budget_survives_actual_collect_main_and_invalid_capture_is_rejected(self):
@@ -279,11 +280,14 @@ class CollectMainTest(unittest.TestCase):
             source = root / 'source.json'
             source.write_text(json.dumps({'head': '1' * 40, 'trackedDiffSha256': 'a' * 64, 'untrackedFiles': {}, 'hostFiles': {n: module.sha256(Path(module.__file__).with_name(n)) for n in ['chat-history-entry-perf.py', 'parse-atrace-frames.py', 'chat_perf_contract.py']}, 'build': {'apks': {'mock': {'sha256': module.sha256(apk)}}}}))
             frame = root / 'frames.json'
-            frame.write_text(json.dumps({'runId': 'r1', 'pathId': 'native-launcher-stress', 'parserVersion': module.PARSER_VERSION, 'parserSourceSha256': module.sha256(Path(module.__file__).with_name('parse-atrace-frames.py')), 'pid': 100, 'deadlineStatus': 'unknown',
-                                        'deadlineMs': None, 'valuesMs': [100.0], 'windowMs': 1500.0}))
+            frame_data = {'runId': 'r1', 'pathId': 'native-launcher-stress', 'parserVersion': module.PARSER_VERSION, 'parserSourceSha256': module.sha256(Path(module.__file__).with_name('parse-atrace-frames.py')), 'pid': 100, 'deadlineStatus': 'unknown',
+                          'deadlineMs': None, 'valuesMs': [100.0], 'windowMs': 1500.0,
+                          'anchorMonotonicNs': 1000010000000, 'traceSha256': module.sha256(trace)}
+            frame.write_text(json.dumps(frame_data))
             capture = root / 'capture.json'
             capture_data = {'pathId': 'native-launcher-stress', 'hostVersion': module.HOST_VERSION, 'environmentPre': {}, 'environmentPost': {}, 'runId': 'r1', 'scenario': 'S1', 'package': module.PACKAGE, 'phase': 'cold',
-                            'status': 'ok', 'pidMeasured': '100', 'tracePath': str(trace), 'traceSha256': module.sha256(trace)}
+                            'status': 'ok', 'serial': 'mock', 'entryMonoNs': 1000010000000,
+                            'pidMeasured': '100', 'tracePath': str(trace), 'traceSha256': module.sha256(trace)}
             capture.write_text(json.dumps(capture_data))
             def adb(serial, *args, **kwargs):
                 if args[0] == 'pull':
@@ -301,6 +305,26 @@ class CollectMainTest(unittest.TestCase):
                  patch.object(module, 'installed_apk_hash', return_value=module.sha256(apk)), \
                  patch.object(module, 'apk_signer_sha256', return_value='f' * 64), \
                  patch.object(module, 'device_identity', return_value={'serial': 'mock', 'model': 'fixture', 'sdk': '37'}):
+                capture_data['serial'] = 'other-device'
+                capture.write_text(json.dumps(capture_data))
+                with self.assertRaisesRegex(SystemExit, 'capture serial mismatch'):
+                    main(argv)
+                capture_data['serial'] = 'mock'
+                capture.write_text(json.dumps(capture_data))
+
+                frame_data['anchorMonotonicNs'] += 890000000
+                frame.write_text(json.dumps(frame_data))
+                with self.assertRaisesRegex(SystemExit, 'frames.*anchor'):
+                    main(argv)
+                frame_data['anchorMonotonicNs'] = capture_data['entryMonoNs']
+
+                frame_data['traceSha256'] = '0' * 64
+                frame.write_text(json.dumps(frame_data))
+                with self.assertRaisesRegex(SystemExit, 'frames.*trace'):
+                    main(argv)
+                frame_data['traceSha256'] = module.sha256(trace)
+                frame.write_text(json.dumps(frame_data))
+
                 self.assertEqual(0, main(argv))
                 result = json.loads((root / 'result/run-manifest.json').read_text())
                 self.assertIsNone(result['frames']['deadlineMs'])

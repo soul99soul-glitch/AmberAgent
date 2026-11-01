@@ -498,6 +498,27 @@ class ScreenOcrFallbackTest {
     }
 
     @Test
+    fun traditionalPasswordLabelRedactsCombinedAndAdjacentValues() = runTest {
+        val engine = engine(
+            recognizer = {
+                BitmapOcrResult(
+                    listOf(
+                        RawOcrRegion("密碼: example7", 100, 100, 400, 160),
+                        RawOcrRegion("密碼", 100, 250, 220, 310),
+                        RawOcrRegion("other9", 240, 250, 360, 310),
+                    ),
+                )
+            },
+        )
+
+        val observation = engine.observe(snapshot = lowCoverageSnapshot(), mode = ScreenOcrMode.AUTO)
+
+        assertTrue(observation.blocks.single { it.text == "密碼: example7" }.isSensitive)
+        assertFalse(observation.redactedText().contains("example7"))
+        assertFalse(observation.redactedText().contains("other9"))
+    }
+
+    @Test
     fun ocrOverPasswordLabeledNodeIsMaskedWithoutSecretKeywords() = runTest {
         val snapshot = ScreenSnapshot(
             id = "password-label-screen",
@@ -593,6 +614,7 @@ class ScreenOcrFallbackTest {
                         RawOcrRegion("8492", 280, 100, 380, 160),
                         RawOcrRegion("38491", 280, 180, 380, 240),
                         RawOcrRegion("hunter2", 120, 310, 400, 350),
+                        RawOcrRegion("密碼: example7", 120, 400, 440, 460),
                     ),
                 )
             },
@@ -642,6 +664,7 @@ class ScreenOcrFallbackTest {
             nodes = listOf(
                 sampleNode("0/0", label = "", className = "android.webkit.WebView"),
                 sampleNode("pw", label = "[password]", editable = true, left = 100, top = 300, right = 500, bottom = 360),
+                sampleNode("otp-tree", label = "6743", left = 100, top = 500, right = 300, bottom = 550),
             ),
         )
         val controller = object : AccessibilityController {
@@ -669,9 +692,13 @@ class ScreenOcrFallbackTest {
         assertFalse(resultJson.contains("8492"))
         assertFalse(resultJson.contains("38491"))
         assertFalse(resultJson.contains("hunter2"))
+        assertFalse(resultJson.contains("example7"))
+        assertFalse(resultJson.contains("6743"))
         assertFalse(capturedRequestJson.contains("8492"))
         assertFalse(capturedRequestJson.contains("38491"))
         assertFalse(capturedRequestJson.contains("hunter2"))
+        assertFalse(capturedRequestJson.contains("example7"))
+        assertFalse(capturedRequestJson.contains("6743"))
         assertFalse(result["visible_text"]!!.jsonPrimitive.content.contains("8492"))
         assertFalse(result["visible_text"]!!.jsonPrimitive.content.contains("38491"))
         assertFalse(result["visible_text"]!!.jsonPrimitive.content.contains("hunter2"))

@@ -139,8 +139,17 @@ object PerAppSuccessPathSanitizer {
         taskSensitive: Boolean = false,
     ): PerAppSuccessPath? {
         if (!validPackageName(packageName)) return null
+        val knownInputs = inputSecrets.map { clip(it, Int.MAX_VALUE) }.filter { it.isNotEmpty() }
+        fun containsKnownInput(value: String): Boolean =
+            knownInputs.any { input -> labelMirrorsSecret(value, input) }
         val cleaned = steps
-            .mapNotNull { step -> sanitizeStep(step, limits) }
+            .mapNotNull { step ->
+                val sanitized = sanitizeStep(step, limits) ?: return@mapNotNull null
+                val label = sanitized.label.takeUnless(::containsKnownInput).orEmpty()
+                val semanticId = sanitized.semanticId.takeUnless(::containsKnownInput).orEmpty()
+                if (label.isEmpty() && semanticId.isEmpty()) null
+                else sanitized.copy(label = label, semanticId = semanticId)
+            }
             .take(limits.maxStepsPerPath)
         if (cleaned.isEmpty()) return null
         val sensitiveGoal = goalIsSensitive(goal, inputSecrets, taskSensitive)
@@ -199,8 +208,11 @@ object PerAppSuccessPathSanitizer {
     ): Boolean {
         if (taskSensitive) return true
         if (looksSensitive(goal)) return true
+        val normalizedGoal = clip(goal, Int.MAX_VALUE)
         return inputSecrets.any { secret ->
-            secret.isNotBlank() && (looksSensitive(secret) || goal.contains(secret))
+            val normalizedSecret = clip(secret, Int.MAX_VALUE)
+            normalizedSecret.isNotEmpty() &&
+                (looksSensitive(normalizedSecret) || normalizedGoal.contains(normalizedSecret, ignoreCase = true))
         }
     }
 

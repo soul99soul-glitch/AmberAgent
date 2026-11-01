@@ -115,16 +115,17 @@ object ScreenOcrCapabilities {
 object SensitiveScreenTextClassifier {
     const val MASKED_SENSITIVE_TEXT: String = "[已隐藏敏感内容]"
 
-    private val SENSITIVE_KEYWORDS = Regex(
-        "密码|验证码|校验码|动态码|安全码|支付密码|银行卡|身份证|cvv|pin|password|passcode|otp|verification\\s*code|security\\s*code|secret|token",
-        RegexOption.IGNORE_CASE,
-    )
+    private const val SENSITIVE_LABELS =
+        "密码|密碼|验证码|驗證碼|校验码|校驗碼|动态码|動態碼|安全码|安全碼|" +
+            "支付密码|支付密碼|银行卡|銀行卡|身份证|身份證|cvv|pin|password|passcode|otp|" +
+            "verification\\s*code|security\\s*code|secret|token"
+    private val SENSITIVE_KEYWORDS = Regex(SENSITIVE_LABELS, RegexOption.IGNORE_CASE)
     private val OTP_OR_CARD_DIGITS = Regex("\\b\\d{6,19}\\b")
     private val STANDALONE_DIGITS_4_TO_8 = Regex("^\\d{4,8}$")
     private val SECRET_TOKEN = Regex("^[A-Za-z0-9@#$%^&*._-]{4,16}$")
     private val DIGIT_RUN_4_TO_19 = Regex("\\d{4,19}")
     private val KEY_VALUE_SECRET = Regex(
-        "((?:密码|验证码|校验码|动态码|安全码|支付密码|银行卡|身份证|cvv|pin|password|passcode|otp|verification\\s*code|security\\s*code|secret|token)\\s*(?:[:=：]|\\s+)\\s*)([^\\s\"',;，；]+)",
+        "((?:$SENSITIVE_LABELS)\\s*(?:[:=：]|\\s+)\\s*)([^\\s\"',;，；]+)",
         RegexOption.IGNORE_CASE,
     )
 

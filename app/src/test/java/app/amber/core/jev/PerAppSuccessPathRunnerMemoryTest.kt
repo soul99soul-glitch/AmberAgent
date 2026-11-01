@@ -316,6 +316,31 @@ class PerAppSuccessPathRunnerMemoryTest {
     }
 
     @Test
+    fun typedValueEchoedByClickedResultIsNotPersisted() = runTest {
+        val memory = store()
+        val nodes = listOf(node("result", "Example7", clickable = true, viewId = "id/result"))
+        val transport = ScriptedTransport(
+            actionStepAnswers(answer("a0")).apply { add(answer("done", done = 0.96)) },
+        )
+        val result = runner(runtime(transport) { settings(JevMode.ACTIVE) }, testScheduler, memory).run(
+            FakeAccessibilityController(snapshot("echo-s", nodes = nodes)),
+            "com.example.target",
+            "open Example7",
+            listOf("example7"),
+            "run-echo",
+        )
+
+        assertEquals("completed", status(result))
+        assertEquals("true", result["experience_written"]!!.jsonPrimitive.content)
+        val stored = memory.pathsFor("com.example.target").single()
+        assertEquals("", stored.steps.single().label)
+        assertEquals("id/result", stored.steps.single().semanticId)
+        assertEquals("", stored.goalHint)
+        assertEquals("", stored.goalFingerprint)
+        assertFalse(File(tmp.root, "jev/per_app_success_paths.json").readText().contains("Example7"))
+    }
+
+    @Test
     fun ambiguousMemoryDoesNotDispatchPreferredTarget() = runTest {
         val memory = store()
         val seed = PerAppSuccessPathSanitizer.buildPath(

@@ -109,7 +109,10 @@ fun ChatMessageActionsSheet(
         sheetGesturesEnabled = pendingAction == null,
         // Use one slide-out for key/edge back and action taps. M3's predictive
         // back handler scales this dialog first, exposing its bottom/side edges.
-        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false),
+        properties = ModalBottomSheetProperties(
+            shouldDismissOnBackPress = false,
+            shouldDismissOnClickOutside = pendingAction == null,
+        ),
         // Reserve the top safe area outside the sheet's measured content. The
         // default top content inset depends on the sheet offset; a tall menu
         // can grow as that inset changes and moves its expanded anchor again.

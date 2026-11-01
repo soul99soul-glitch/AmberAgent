@@ -124,6 +124,31 @@ class ChatTimelinePrewarmSelectionTest {
     }
 
     @Test
+    fun backgroundResumesTextDeferredByCharacterBudget() {
+        val firstPart = "a".repeat(19)
+        val deferredPart = "bb"
+        val node = MessageNode(
+            id = Uuid.random(),
+            messages = listOf(
+                UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(UIMessagePart.Text(firstPart), UIMessagePart.Text(deferredPart)),
+                ),
+            ),
+        )
+        val nodes = listOf(node)
+        val first = selectFirstScreenPrewarmTexts(nodes, emptyList(), false, TimelinePrewarmBudget(8, 24, 20))
+        assertEquals(listOf(firstPart), first.texts)
+        assertEquals(0, first.nextOlderNodeIndex)
+
+        val background = selectBackgroundPrewarmTexts(
+            nodes, emptyList(), false, first.texts.toSet(), first.nextOlderNodeIndex,
+            TimelinePrewarmBudget(8, 24, 60),
+        )
+        assertEquals(listOf(deferredPart), background)
+    }
+
+    @Test
     fun textAndCharBudgetsAreApplied() {
         val nodes = listOf(
             UIMessage.user("1234567890").toMessageNode(),

@@ -103,7 +103,15 @@ class ChatNativeMenuBackDeviceTest {
                         Thread.sleep(50)
                     }
                     check(find(context.getString(R.string.copy)) == null) { "$mode did not dismiss the menu" }
-                    check(find(marker) != null) { "$mode also left the conversation" }
+                    // The dialog window may disappear before accessibility exposes the
+                    // underlying conversation again; wait for that window transition.
+                    val conversationEnd = SystemClock.uptimeMillis() + 5_000
+                    var visibleMessage = find(marker)
+                    while (visibleMessage == null && SystemClock.uptimeMillis() < conversationEnd) {
+                        Thread.sleep(50)
+                        visibleMessage = find(marker)
+                    }
+                    check(visibleMessage != null) { "$mode also left the conversation" }
                     Log.i(TAG, "END mode=$mode uptime=${SystemClock.uptimeMillis()}")
                 }
             }

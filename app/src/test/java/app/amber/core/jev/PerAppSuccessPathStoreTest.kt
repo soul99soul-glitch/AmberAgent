@@ -330,6 +330,47 @@ class PerAppSuccessPathStoreTest {
     }
 
     @Test
+    fun knownInputIsRemovedFromClickIdentityWithoutDroppingSafeParts() {
+        val path = PerAppSuccessPathSanitizer.buildPath(
+            packageName = "com.example.app",
+            goal = "open the result",
+            steps = listOf(
+                PerAppSuccessPathStep(kind = "click", label = "Open Example7", semanticId = "id/result"),
+                PerAppSuccessPathStep(kind = "click", label = "Open result", semanticId = "id/example7"),
+                PerAppSuccessPathStep(kind = "click", label = "Example7", semanticId = "id/example7"),
+            ),
+            recordedAtMs = 1,
+            inputSecrets = listOf("example7"),
+        )!!
+        assertEquals(
+            listOf(
+                PerAppSuccessPathStep(kind = "click", label = "", semanticId = "id/result"),
+                PerAppSuccessPathStep(kind = "click", label = "Open result", semanticId = ""),
+            ),
+            path.steps,
+        )
+    }
+
+    @Test
+    fun knownInputRemainsProtectedAfterLabelClippingAndWhitespaceNormalization() {
+        val longInput = "a".repeat(90)
+        val path = PerAppSuccessPathSanitizer.buildPath(
+            packageName = "com.example.app",
+            goal = "open alpha beta",
+            steps = listOf(
+                PerAppSuccessPathStep(kind = "click", label = longInput, semanticId = "id/long_result"),
+                PerAppSuccessPathStep(kind = "click", label = "alpha beta", semanticId = "id/short_result"),
+            ),
+            recordedAtMs = 1,
+            inputSecrets = listOf(longInput, "alpha   beta"),
+        )!!
+        assertEquals(listOf("", ""), path.steps.map { it.label })
+        assertEquals(listOf("id/long_result", "id/short_result"), path.steps.map { it.semanticId })
+        assertEquals("", path.goalHint)
+        assertEquals("", path.goalFingerprint)
+    }
+
+    @Test
     fun readDiskScrubsLegacyCardAndOtpLabels() {
         val file = File(tmp.root, "jev/per_app_success_paths.json")
         file.parentFile?.mkdirs()

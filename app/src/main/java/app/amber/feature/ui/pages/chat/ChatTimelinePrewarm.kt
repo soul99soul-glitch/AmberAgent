@@ -163,6 +163,7 @@ private fun collectTimelinePrewarmTexts(
     var chars = 0
     var scanned = 0
     var index = startIndex.coerceAtMost(messageNodes.lastIndex)
+    var deferredNodeIndex: Int? = null
     while (index >= 0 && scanned < budget.maxNodes) {
         if (selected.size >= budget.maxTexts) break
         val nodeTexts = messageNodes[index].chatMessageTimelinePrewarmTexts(
@@ -177,7 +178,10 @@ private fun collectTimelinePrewarmTexts(
                 break
             }
             if (text in excluded || text in selected) continue
-            if (chars + text.length > budget.maxChars) continue
+            if (chars + text.length > budget.maxChars) {
+                if (deferredNodeIndex == null) deferredNodeIndex = index
+                continue
+            }
             selected += text
             chars += text.length
         }
@@ -191,7 +195,7 @@ private fun collectTimelinePrewarmTexts(
     }
     return TimelinePrewarmSelection(
         texts = selected.toList(),
-        nextOlderNodeIndex = if (index < 0) -1 else index,
+        nextOlderNodeIndex = deferredNodeIndex ?: if (index < 0) -1 else index,
     )
 }
 

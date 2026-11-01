@@ -244,9 +244,11 @@ def main() -> int:
         deadline = 1000.0 / args.refresh_hz if args.refresh_hz is not None else args.deadline_ms
     if args.external_run_id and args.anchor_monotonic_ns is None:
         raise SystemExit("external run binding requires --anchor-monotonic-ns from capture")
+    trace_path = Path(args.trace)
+    trace_sha256 = hashlib.sha256(trace_path.read_bytes()).hexdigest()
     try:
         payload = extract(
-            Path(args.trace),
+            trace_path,
             args.pid,
             args.start_ms,
             args.window_ms,
@@ -256,6 +258,9 @@ def main() -> int:
         )
     except TraceError as error:
         raise SystemExit(str(error))
+    if hashlib.sha256(trace_path.read_bytes()).hexdigest() != trace_sha256:
+        raise SystemExit("trace changed while parsing")
+    payload["traceSha256"] = trace_sha256
     payload["parserSourceSha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     payload["pathId"] = args.path_id
     payload["runId"] = args.run_id or args.external_run_id

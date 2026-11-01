@@ -24,9 +24,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -206,10 +208,11 @@ internal fun ChatPageScaffold(
     var modelMenuOpen by remember { mutableStateOf(false) }
     // 菜单挂在 app shell 的模态层上（遮罩必须盖住 header、输入区以及展开屏左侧列表），
     // 但面板仍要从 header 正下方、聊天栏内展开，所以记下 Scaffold 测出的顶栏高度
-    // （content 的 innerPadding.top）与聊天栏在窗口里的左边界（双栏时在左侧列表之后）。
+    // （content 的 innerPadding.top）与聊天栏相对应用窗口的起始边距（适配 LTR/RTL）。
     var headerInset by remember { mutableStateOf(0.dp) }
     var chatPaneStartInset by remember { mutableStateOf(0.dp) }
     val windowDensity = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     // Header island: recap panel, shelf panel, and timeline jumps they trigger.
     var recapOpen by remember(conversation.id) { mutableStateOf(false) }
     var shelfOpen by remember(conversation.id) { mutableStateOf(false) }
@@ -274,7 +277,11 @@ internal fun ChatPageScaffold(
                 .amberCanvas()
                 .onGloballyPositioned { coordinates ->
                     chatPaneStartInset = with(windowDensity) {
-                        coordinates.boundsInWindow().left.toDp()
+                        chatPaneStartInsetPx(
+                            coordinates.boundsInWindow(),
+                            coordinates.findRootCoordinates().boundsInWindow(),
+                            layoutDirection,
+                        ).toDp()
                     }
                 },
         ) {

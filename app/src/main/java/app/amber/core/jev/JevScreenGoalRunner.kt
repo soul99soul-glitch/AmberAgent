@@ -12,6 +12,7 @@ import app.amber.core.automation.ScreenOcrObservation
 import app.amber.core.automation.ScreenSnapshot
 import app.amber.core.automation.ScreenSnapshotInvalidationRegistry
 import app.amber.core.automation.ScreenTreeCoverageAnalyzer
+import app.amber.core.automation.SensitiveScreenTextClassifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -642,7 +643,7 @@ class JevScreenGoalRunner(
             ocrObservation: ScreenOcrObservation? = null,
         ): String {
             val treeLines = snapshot.nodes
-                .map { it.label }
+                .map { SensitiveScreenTextClassifier.redactForDisplay(it.label) }
                 .filter { it.isNotBlank() }
                 .distinct()
             val ocrLines = if (ocrObservation?.triggered == true) {
