@@ -48,7 +48,10 @@ internal fun CloudDialogueStatusDock(
 ) {
     val activeTasks = uiState.activeTasksForConversation(conversationId)
     val recentInputs = uiState.submissionsForConversation(conversationId)
-        .filter { it.kind == CloudSubmissionKind.FOLLOWUP || it.kind == CloudSubmissionKind.MESSAGE }
+        .filter {
+            it.kind == CloudSubmissionKind.FOLLOWUP ||
+                (cloudActive && it.kind == CloudSubmissionKind.MESSAGE)
+        }
         .take(3)
     if (!cloudActive && activeTasks.isEmpty() && recentInputs.isEmpty()) return
 
@@ -75,11 +78,11 @@ internal fun CloudDialogueStatusDock(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = if (targetTask != null) {
-                        stringResource(R.string.mac_gateway_cloud_mode_targeting, targetTask.title)
-                    } else {
-                        stringResource(R.string.mac_gateway_cloud_mode_active) + " · " +
+                    text = when {
+                        targetTask != null -> stringResource(R.string.mac_gateway_cloud_mode_targeting, targetTask.title)
+                        cloudActive -> stringResource(R.string.mac_gateway_cloud_mode_active) + " · " +
                             stringResource(R.string.mac_gateway_cloud_mode_new_message)
+                        else -> stringResource(R.string.mac_gateway_cloud_mode_new_message)
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = if (targetTask != null) MaterialTheme.colorScheme.primary else workspace.muted,

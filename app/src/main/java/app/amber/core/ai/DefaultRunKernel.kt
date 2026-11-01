@@ -457,6 +457,14 @@ class DefaultRunKernel(
                         emit(GenerationChunk.Messages(messages))
                         continue
                     }
+                    if (stepIndex < maxSteps - 1) {
+                        val steerAtTurnEnd = consumeSteerMessages()
+                        if (steerAtTurnEnd.isNotEmpty()) {
+                            messages = messages + steerAtTurnEnd
+                            emit(GenerationChunk.Messages(messages))
+                            continue
+                        }
+                    }
                     brokeEarly = true
                     break
                 }

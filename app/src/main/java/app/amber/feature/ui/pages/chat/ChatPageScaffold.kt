@@ -116,6 +116,7 @@ internal fun ChatPageScaffold(
     var selectedSandboxIndex by rememberSaveable(conversation.id) { mutableStateOf<Int?>(null) }
     val activityStore: AgentToolActivityStore = koinInject()
     val macGatewayRepository: MacGatewayRepository = koinInject()
+    val localAsyncTaskCoordinator: app.amber.core.service.LocalAsyncTaskCoordinator = koinInject()
     val gatewayState by macGatewayRepository.state.collectAsStateWithLifecycle()
     val cloudDialogueState by macGatewayRepository.cloudDialogueState.collectAsStateWithLifecycle()
     val cloudScope = rememberCoroutineScope()
@@ -123,6 +124,8 @@ internal fun ChatPageScaffold(
     LaunchedEffect(conversationIdString, gatewayState.isCloudDialogueActive) {
         if (gatewayState.isCloudDialogueActive) {
             macGatewayRepository.bindActiveConversation(conversationIdString)
+        } else {
+            localAsyncTaskCoordinator.bindActiveConversation(conversation.id)
         }
     }
     val liveSandboxActivity by activityStore.sandboxActivity.collectAsStateWithLifecycle()

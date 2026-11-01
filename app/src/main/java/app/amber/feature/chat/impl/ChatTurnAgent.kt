@@ -100,11 +100,13 @@ class ChatTurnAgent(
                         // Stream the latest message list to chat.db so UI updates
                         // in real time (mirrors the legacy path's behavior).
                         val conversationUuid = Uuid.parse(input.conversationId.value)
+                        val anchorNodeUuid = runCatching { Uuid.parse(input.messageNodeId.value) }.getOrNull()
                         conversationAccess.updateConversationState(conversationUuid) { current ->
                             mergeMessages(
                                 conversation = current,
                                 generatedMessages = chunk.messages,
                                 sourceStartIndex = input.messageRangeStart,
+                                anchorNodeId = anchorNodeUuid,
                             )
                         }
                         hooks?.onStreamingMessages?.invoke(runId, chunk.messages)
@@ -200,6 +202,7 @@ private fun mergeMessages(
     conversation: Conversation,
     generatedMessages: List<UIMessage>,
     sourceStartIndex: Int? = null,
+    anchorNodeId: Uuid? = null,
 ): Conversation {
     if (generatedMessages.isEmpty()) return conversation
     // Storage boundary: a credential that is still awaiting approval must not
@@ -212,6 +215,7 @@ private fun mergeMessages(
         conversation = conversation,
         generatedMessages = generatedMessages.withUnapprovedCredentialsWithheld(),
         sourceStartIndex = sourceStartIndex,
+        anchorNodeId = anchorNodeId,
     )
 }
 
@@ -219,6 +223,7 @@ private fun mergeMessagesIntoConversation(
     conversation: Conversation,
     generatedMessages: List<UIMessage>,
     sourceStartIndex: Int? = null,
+    anchorNodeId: Uuid? = null,
 ): Conversation {
     if (sourceStartIndex != null) {
         val updatedNodes = conversation.messageNodes.toMutableList()
@@ -268,7 +273,26 @@ private fun mergeMessagesIntoConversation(
         }
     }
 
-    val generatedById = generatedMessages.associateBy { it.id }
+    val initialAnchorIndex = anchorNodeId?.let { id ->
+        conversation.messageNodes.indexOfFirst { it.id == id }
+    } ?: -1
+    val anchorMsgId = if (initialAnchorIndex >= 0) {
+        conversation.messageNodes[initialAnchorIndex].currentMessage.id
+    } else {
+        null
+    }
+    val anchorInGenerated = if (anchorMsgId != null) {
+        generatedMessages.indexOfFirst { it.id == anchorMsgId }
+    } else {
+        -1
+    }
+    val ownedGeneratedMessages = if (anchorInGenerated >= 0) {
+        generatedMessages.subList(anchorInGenerated, generatedMessages.size)
+    } else {
+        generatedMessages
+    }
+
+    val generatedById = ownedGeneratedMessages.associateBy { it.id }
     var changed = false
     val updatedNodes = conversation.messageNodes.map { node ->
         val selected = node.currentMessage
@@ -285,15 +309,34 @@ private fun mergeMessagesIntoConversation(
         }
     }
     val existingIds = updatedNodes.mapTo(mutableSetOf()) { it.currentMessage.id }
-    val appendedNodes = generatedMessages
+    val appendedNodes = ownedGeneratedMessages
         .filterNot { it.id in existingIds }
         .map { msg ->
             changed = true
             app.amber.core.model.MessageNode(messages = listOf(msg))
         }
-    return if (!changed) conversation
-    else conversation.copy(
-        messageNodes = updatedNodes + appendedNodes,
+    if (!changed) return conversation
+    val anchorIndex = anchorNodeId?.let { id ->
+        updatedNodes.indexOfFirst { it.id == id }
+    } ?: -1
+    val mergedNodes = if (anchorIndex >= 0 && appendedNodes.isNotEmpty()) {
+        val taskOwnedIds = ownedGeneratedMessages.mapTo(hashSetOf()) { it.id }
+        var insertAfterIndex = anchorIndex
+        for (idx in (anchorIndex + 1) until updatedNodes.size) {
+            if (updatedNodes[idx].currentMessage.id in taskOwnedIds) {
+                insertAfterIndex = idx
+            } else {
+                break
+            }
+        }
+        updatedNodes.toMutableList().apply {
+            addAll(insertAfterIndex + 1, appendedNodes)
+        }
+    } else {
+        updatedNodes + appendedNodes
+    }
+    return conversation.copy(
+        messageNodes = mergedNodes,
         updateAt = Instant.now(),
     )
 }

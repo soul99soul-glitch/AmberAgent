@@ -258,6 +258,7 @@ val agentRuntimeModule = module {
             pendingMessageQueue = get(),
             errorStore = get(),
             toolCatalogFactory = get(),
+            localAsyncTaskCoordinator = get(),
         )
     }
 

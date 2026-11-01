@@ -8,6 +8,7 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.canResumeToolExecution
 import app.amber.ai.ui.finishReasoning
 import app.amber.core.model.Conversation
+import app.amber.core.model.MessageNode
 import app.amber.core.utils.withSettledCredentialArgumentsRedacted
 import app.amber.core.utils.withUnapprovedCredentialsWithheld
 import app.amber.core.utils.withSettledCredentialsRedacted
@@ -117,6 +118,68 @@ object InterruptedRunProjection {
                     messages = n.messages.map { if (it.id == target.id) updatedMessage else it }
                 )
             },
+            updateAt = Instant.now(),
+        )
+    }
+
+    /**
+     * Projects an interrupted local async task onto its anchored position in [conversation].
+     * If an assistant node already exists immediately after [anchorNodeId], it is annotated
+     * as interrupted and any half-streamed tools/reasoning are closed. If the task was still
+     * queued or died before emitting its first assistant chunk, a synthetic interrupted
+     * assistant node is inserted right after [anchorNodeId].
+     */
+    fun projectAtAnchor(
+        conversation: Conversation,
+        anchorNodeId: Uuid,
+        reason: String = DEFAULT_REASON,
+    ): Conversation {
+        val anchorIndex = conversation.messageNodes.indexOfFirst { it.id == anchorNodeId }
+        if (anchorIndex < 0) return conversation
+        val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+        val nextNode = conversation.messageNodes.getOrNull(anchorIndex + 1)
+        val nextMsg = nextNode?.messages?.getOrNull(nextNode.selectIndex)
+        if (nextNode != null && nextMsg != null && nextMsg.role == MessageRole.ASSISTANT) {
+            if (nextMsg.annotations.any { it is UIMessageAnnotation.GenerationInterrupted }) {
+                return conversation
+            }
+            val updatedParts = nextMsg.parts.map { part ->
+                if (part !is UIMessagePart.Tool || part.isExecuted) return@map part
+                if (part.isPending || part.approvalState.canResumeToolExecution()) {
+                    part
+                } else {
+                    markNotExecutable(part, ARGS_INCOMPLETE_NOTE)
+                }
+            }
+            val updatedMessage = nextMsg.copy(
+                parts = updatedParts,
+                annotations = nextMsg.annotations + UIMessageAnnotation.GenerationInterrupted(reason),
+                finishedAt = nextMsg.finishedAt ?: now,
+            ).finishReasoning().let {
+                listOf(it).withSettledCredentialsRedacted().withUnapprovedCredentialsWithheld().single()
+            }
+            return conversation.copy(
+                messageNodes = conversation.messageNodes.mapIndexed { index, n ->
+                    if (index != anchorIndex + 1) n
+                    else n.copy(
+                        messages = n.messages.map { if (it.id == nextMsg.id) updatedMessage else it },
+                    )
+                },
+                updateAt = Instant.now(),
+            )
+        }
+
+        val interruptedMsg = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = emptyList(),
+            annotations = listOf(UIMessageAnnotation.GenerationInterrupted(reason)),
+            finishedAt = now,
+        )
+        val updatedNodes = conversation.messageNodes.toMutableList().apply {
+            add(anchorIndex + 1, MessageNode(messages = listOf(interruptedMsg)))
+        }
+        return conversation.copy(
+            messageNodes = updatedNodes,
             updateAt = Instant.now(),
         )
     }

@@ -77,8 +77,10 @@ internal fun ChatPageComposerHost(
     val filesManager: FilesManager = koinInject()
     val conversationRepository: ConversationRepository = koinInject()
     val macGatewayRepository: MacGatewayRepository = koinInject()
+    val localAsyncTaskCoordinator: app.amber.core.service.LocalAsyncTaskCoordinator = koinInject()
     val gatewayState by macGatewayRepository.state.collectAsStateWithLifecycle()
     val cloudDialogueState by macGatewayRepository.cloudDialogueState.collectAsStateWithLifecycle()
+    val localAsyncState by localAsyncTaskCoordinator.uiState.collectAsStateWithLifecycle()
     val webMountSessionOwner: WebMountSessionOwner = koinInject()
     val webMountSessions by webMountSessionOwner.sessions.collectAsStateWithLifecycle()
     val conversationWebMountSessions = webMountSessions.filter {
@@ -131,19 +133,29 @@ internal fun ChatPageComposerHost(
         ChatInput(
             submissionOwner = inputSubmissionOwner,
             aboveComposerContent = {
+                val isCloudActive = gatewayState.isCloudDialogueActive
                 CloudDialogueStatusDock(
                     conversationId = conversation.id.toString(),
-                    cloudActive = gatewayState.isCloudDialogueActive,
-                    uiState = cloudDialogueState,
+                    cloudActive = isCloudActive,
+                    uiState = if (isCloudActive) cloudDialogueState else localAsyncState,
                     onSelectFollowupTarget = { workItemId ->
-                        macGatewayRepository.selectFollowupTarget(workItemId)
+                        if (isCloudActive) {
+                            macGatewayRepository.selectFollowupTarget(workItemId)
+                        } else {
+                            localAsyncTaskCoordinator.selectFollowupTarget(conversation.id, workItemId)
+                        }
                     },
                     onStopTask = { workItemId ->
                         scope.launch {
-                            runCatching { macGatewayRepository.stopCloudWorkItem(workItemId) }
-                                .onFailure { error ->
-                                    toaster.show(error.message ?: "Stop failed", type = ToastType.Error)
+                            runCatching {
+                                if (isCloudActive) {
+                                    macGatewayRepository.stopCloudWorkItem(workItemId)
+                                } else {
+                                    localAsyncTaskCoordinator.stopTask(conversation.id, workItemId)
                                 }
+                            }.onFailure { error ->
+                                toaster.show(error.message ?: "Stop failed", type = ToastType.Error)
+                            }
                         }
                     },
                 )

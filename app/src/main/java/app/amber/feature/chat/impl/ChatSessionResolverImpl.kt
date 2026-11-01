@@ -20,10 +20,16 @@ import app.amber.core.ai.transformers.TimeReminderTransformer
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.memory.store.MemoryRepository
+import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.canResumeToolExecution
+import app.amber.core.model.Conversation
 import app.amber.core.service.ChatRunCoordinator
 import app.amber.core.service.ChatRunHooksFactory
 import app.amber.core.service.ChatErrorStore
 import app.amber.core.service.ConversationStore
+import app.amber.core.service.LocalAsyncTaskCoordinator
 import app.amber.core.service.PendingMessageQueue
 import app.amber.core.service.PendingUserMessageDisplayCopy
 import app.amber.core.service.tools.RunToolCatalogFactory
@@ -41,6 +47,7 @@ class ChatSessionResolverImpl(
     private val pendingMessageQueue: PendingMessageQueue,
     private val errorStore: ChatErrorStore,
     private val toolCatalogFactory: RunToolCatalogFactory,
+    private val localAsyncTaskCoordinator: LocalAsyncTaskCoordinator? = null,
 ) : ChatSessionResolver {
 
     override suspend fun resolve(
@@ -49,6 +56,12 @@ class ChatSessionResolverImpl(
         events: app.amber.core.agent.runtime.AgentEventWriter?,
     ): ChatSession {
         val conversationId = Uuid.parse(input.conversationId.value)
+        val anchorNodeId = runCatching { Uuid.parse(input.messageNodeId.value) }.getOrNull()
+        val managedTask = localAsyncTaskCoordinator?.bindRunToAnchorNode(anchorNodeId, runId)
+        val hasConcurrentTasks = localAsyncTaskCoordinator?.hasActiveOrQueuedTasks(
+            conversationId = conversationId,
+            excludingRunId = runId,
+        ) == true
         val settings = settingsStore.settingsFlow.value
         val model = settings.getCurrentChatModel()
             ?: throw IllegalStateException("No chat model configured")
@@ -57,7 +70,10 @@ class ChatSessionResolverImpl(
         // so long histories are not truncated to the loaded window.
         val loadStartedAt = if (perfEnabled) System.nanoTime() else 0L
         val conversation = try {
-            conversationStore.conversationForGeneration(conversationId)
+            conversationStore.conversationForGeneration(
+                conversationId = conversationId,
+                preserveActiveTurns = hasConcurrentTasks,
+            )
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -67,7 +83,18 @@ class ChatSessionResolverImpl(
         if (perfEnabled) {
             Log.d("AmberChatPerf", "resolve.conversation nodes=${conversation.messageNodes.size} elapsedMs=${(System.nanoTime() - loadStartedAt) / 1_000_000.0}")
         }
-        val hooks = hooksFactory.create(conversationId, runCoordinator::stopGeneration)
+        val hooks = hooksFactory.create(
+            conversationId = conversationId,
+            cancelGeneration = { convId, cancelRunId ->
+                if (managedTask != null && localAsyncTaskCoordinator != null) {
+                    localAsyncTaskCoordinator.stopTask(convId, cancelRunId ?: runId)
+                } else {
+                    runCoordinator.stopGeneration(convId, cancelRunId)
+                }
+            },
+            runIdHint = runId,
+            anchorNodeId = anchorNodeId,
+        )
 
         val inputTransformers = listOf(
             TimeReminderTransformer,
@@ -127,6 +154,8 @@ class ChatSessionResolverImpl(
             if (start != null && end != null) {
                 val clampedEnd = end.coerceAtMost(all.size)
                 all.subList(start.coerceAtMost(clampedEnd), clampedEnd)
+            } else if (managedTask != null && anchorNodeId != null) {
+                resolveMessagesForAnchoredTask(conversation, anchorNodeId)
             } else {
                 all
             }
@@ -160,5 +189,44 @@ class ChatSessionResolverImpl(
             // parts self-gate on the runtime flags.
             hooks = hooks,
         )
+    }
+
+    private fun resolveMessagesForAnchoredTask(
+        conversation: Conversation,
+        anchorNodeId: Uuid,
+    ): List<UIMessage> {
+        val nodes = conversation.messageNodes
+        val anchorIndex = nodes.indexOfFirst { it.id == anchorNodeId }
+        if (anchorIndex < 0) return conversation.currentMessages
+
+        var endInclusive = anchorIndex
+        for (idx in (anchorIndex + 1) until nodes.size) {
+            if (nodes[idx].currentMessage.role == MessageRole.ASSISTANT) {
+                endInclusive = idx
+            } else {
+                break
+            }
+        }
+
+        val result = ArrayList<UIMessage>(endInclusive + 1)
+        for (idx in 0..endInclusive) {
+            val msg = nodes[idx].currentMessage
+            if (idx < anchorIndex && msg.role == MessageRole.ASSISTANT) {
+                // Sanitize in-flight unexecuted tool parts from earlier concurrent tasks
+                // so this task's prompt remains valid without mutating ConversationStore.
+                val validParts = msg.parts.filter { part ->
+                    part !is UIMessagePart.Tool ||
+                        part.isExecuted ||
+                        part.isPending ||
+                        part.approvalState.canResumeToolExecution()
+                }
+                if (validParts.isNotEmpty()) {
+                    result += if (validParts.size == msg.parts.size) msg else msg.copy(parts = validParts)
+                }
+            } else {
+                result += msg
+            }
+        }
+        return result
     }
 }

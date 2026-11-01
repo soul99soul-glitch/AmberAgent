@@ -16,6 +16,7 @@ import app.amber.core.service.ConversationAccess
 import app.amber.core.service.ConversationStore
 import app.amber.core.service.ConversationEditor
 import app.amber.core.service.ChatErrorStore
+import app.amber.core.service.LocalAsyncTaskCoordinator
 import app.amber.core.service.PendingMessageQueue
 import app.amber.core.infra.AppScope
 import app.amber.core.service.PendingMessageStore
@@ -220,6 +221,23 @@ val chatModule = module {
     }
 
     single {
+        LocalAsyncTaskCoordinator(
+            context = get(),
+            appScope = get<AppScope>(),
+            settingsStore = get(),
+            conversationStore = get(),
+            userInputPreprocessor = get(),
+            runPresenter = get(),
+            agentRunner = get(),
+            agentEventStore = get(),
+            runTerminalStore = get(),
+            runOwnershipRegistry = get(),
+        ).also { coordinator ->
+            get<ChatRunHooksFactory>().bindLocalAsyncTaskCoordinator(coordinator)
+        }
+    }
+
+    single {
         ChatService(
             context = get(),
             runCoordinator = get(),
@@ -236,6 +254,7 @@ val chatModule = module {
             pendingMessageQueue = get(),
             errorStore = get(),
             restoreWriteGate = get(),
+            localAsyncTaskCoordinator = get(),
         )
     }
     single<ConversationAccess> { get<ConversationStore>() }

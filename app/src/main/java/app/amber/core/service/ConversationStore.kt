@@ -631,12 +631,18 @@ class ConversationStore(
         finalConversation
     }
 
-    internal suspend fun conversationForGeneration(conversationId: Uuid): Conversation {
+    internal suspend fun conversationForGeneration(
+        conversationId: Uuid,
+        preserveActiveTurns: Boolean = false,
+    ): Conversation {
         val perfEnabled = BuildConfig.DEBUG && runCatching { Log.isLoggable("AmberChatPerf", Log.DEBUG) }.getOrDefault(false)
         val startedAt = if (perfEnabled) System.nanoTime() else 0L
         val full = loadFullConversationForGeneration(conversationId)
         if (perfEnabled) {
             Log.d("AmberChatPerf", "conversationForGeneration.load nodes=${full.messageNodes.size} elapsedMs=${(System.nanoTime() - startedAt) / 1_000_000.0}")
+        }
+        if (preserveActiveTurns) {
+            return full
         }
         val sanitized = sanitizeInvalidMessagesForGeneration(full)
         if (sanitized != full) {

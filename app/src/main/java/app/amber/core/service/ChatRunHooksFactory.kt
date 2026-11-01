@@ -36,6 +36,7 @@ import app.amber.feature.runtime.ToolEffectLedger
 import app.amber.feature.runtime.terminalForFlowEnd
 import app.amber.feature.subagent.SubAgentManager
 import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.coroutineContext
@@ -77,10 +78,17 @@ class ChatRunHooksFactory(
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
     private val recapGenerator: ConversationRecapGenerator? = null,
     private val recapStore: ConversationRecapStore? = null,
+    private var localAsyncTaskCoordinator: LocalAsyncTaskCoordinator? = null,
 ) {
+    internal fun bindLocalAsyncTaskCoordinator(coordinator: LocalAsyncTaskCoordinator) {
+        localAsyncTaskCoordinator = coordinator
+    }
+
     internal suspend fun create(
         conversationId: Uuid,
         cancelGeneration: suspend (conversationId: Uuid, runId: String?) -> Unit,
+        runIdHint: String? = null,
+        anchorNodeId: Uuid? = null,
     ): app.amber.feature.chat.impl.ChatRunHooks {
         val generationRestoreEpoch = captureRestoreEpoch()
         val durable = chatDurableRuntimeEnabled(capabilityFlags, toolEffectLedger, runTerminalStore, runRecovery)
@@ -96,11 +104,22 @@ class ChatRunHooksFactory(
         var generationTaskId: String? = null
         var reportedTerminal: app.amber.core.ai.GenerationTerminal? = null
         var responseRequest: app.amber.ai.provider.ResponsesResumeRequest? = null
+        val streamedMessageIds = ConcurrentHashMap.newKeySet<Uuid>()
+        val managedTask = localAsyncTaskCoordinator?.findTaskForRun(runIdHint, anchorNodeId)
         return app.amber.feature.chat.impl.ChatRunHooks(
             durable = durable,
-            processingStatus = conversationStore.session(conversationId).processingStatus,
+            processingStatus = managedTask?.processingStatus
+                ?: conversationStore.session(conversationId).processingStatus,
             autoApprovedToolNames = approvalActions.trustedToolNames(conversationId),
-            consumeSteerMessages = { pendingMessageQueue.consumeSteerMessagesForRun(conversationId) },
+            consumeSteerMessages = {
+                val coordinator = localAsyncTaskCoordinator
+                val task = coordinator?.findTaskForRun(runIdHint, anchorNodeId)
+                if (coordinator != null && task != null) {
+                    coordinator.consumeFollowupsForRun(runIdHint ?: task.runId ?: task.taskId, anchorNodeId)
+                } else {
+                    pendingMessageQueue.consumeSteerMessagesForRun(conversationId)
+                }
+            },
             onRunStarted = { runId ->
                 if (durable) {
                     runTerminalStore!!.begin(runId, conversationId.toString(), AMBER_AGENT_ID.toString())
@@ -149,6 +168,8 @@ class ChatRunHooksFactory(
                 reportedTerminal = terminal
             },
             onStreamingMessages = { runId, messages ->
+                messages.forEach { streamedMessageIds.add(it.id) }
+                localAsyncTaskCoordinator?.onStreamingMessages(runId, anchorNodeId, messages)
                 runPresenter.updateLiveStatus(
                     conversationId = conversationId,
                     messages = messages,
@@ -182,7 +203,15 @@ class ChatRunHooksFactory(
                     conversationStore.updateConversationState(conversationId) { current ->
                         current.copy(
                             messageNodes = current.messageNodes.map { node ->
-                                node.copy(messages = node.messages.map { it.finishReasoning() })
+                                node.copy(
+                                    messages = node.messages.map { msg ->
+                                        if (streamedMessageIds.isEmpty() || msg.id in streamedMessageIds) {
+                                            msg.finishReasoning()
+                                        } else {
+                                            msg
+                                        }
+                                    },
+                                )
                             },
                             updateAt = maxOf(current.updateAt, updatedAt),
                         )
@@ -333,13 +362,13 @@ class ChatRunHooksFactory(
                     } else {
                         true
                     }
-                    if (shouldStopKeepAlive && !hasQueuedContinuation(conversationId)) {
+                    if (shouldStopKeepAlive && !hasQueuedContinuation(conversationId, runId)) {
                         runPresenter.stopGenerationKeepAlive(conversationId)
                     }
 
                     conversationStore.clearCheckpoint(conversationId)
                     generationTaskId?.let { runPresenter.finishGenerationTask(it, cause, runId) }
-                    cleanupRunResourcesIfDone(conversationId, updatedConversation)
+                    cleanupRunResourcesIfDone(conversationId, updatedConversation, runId)
 
                     check(terminalOwnerSucceeded) {
                         "Chat terminal state was not durably committed for $conversationId"
@@ -363,7 +392,7 @@ class ChatRunHooksFactory(
                             checkpointConversation = updatedConversation,
                             checkpointLoadState = checkpointLoadState,
                         )
-                        cleanupRunResourcesIfDone(conversationId, finalConversation)
+                        cleanupRunResourcesIfDone(conversationId, finalConversation, runId)
                         launchWithConversationReference(conversationId, generationRestoreEpoch) {
                             aiAuxiliaryGenerator.generateTitle(conversationId, finalConversation)
                         }
@@ -475,10 +504,16 @@ class ChatRunHooksFactory(
         }
     }
 
-    private fun hasQueuedContinuation(conversationId: Uuid): Boolean =
-        conversationStore.sessionOrNull(conversationId)?.pendingUserMessages?.value?.isNotEmpty() == true
+    private fun hasQueuedContinuation(conversationId: Uuid, excludingRunId: String? = null): Boolean =
+        conversationStore.sessionOrNull(conversationId)?.pendingUserMessages?.value?.isNotEmpty() == true ||
+            localAsyncTaskCoordinator?.hasActiveOrQueuedTasks(conversationId, excludingRunId) == true
 
-    private fun cleanupRunResourcesIfDone(conversationId: Uuid, conversation: Conversation) {
+    private fun cleanupRunResourcesIfDone(
+        conversationId: Uuid,
+        conversation: Conversation,
+        excludingRunId: String? = null,
+    ) {
+        if (localAsyncTaskCoordinator?.hasActiveOrQueuedTasks(conversationId, excludingRunId) == true) return
         if (conversation.hasPendingOrUnexecutedTools()) return
         approvalActions.clearTrust(conversationId)
         screenCaptureManager.releaseSession()

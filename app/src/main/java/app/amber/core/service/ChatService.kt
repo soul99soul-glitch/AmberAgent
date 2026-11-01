@@ -98,6 +98,7 @@ class ChatService(
     // Full restore raises an epoch and serializes durable conversation writes;
     // nullable keeps legacy construction sites and isolated tests unchanged.
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
+    val localAsyncTaskCoordinator: LocalAsyncTaskCoordinator? = null,
 ) : ConversationAccess {
     val errors: StateFlow<List<ChatError>> = errorStore.errors
 
@@ -238,7 +239,13 @@ class ChatService(
         content: List<UIMessagePart>,
         answer: Boolean = true,
         queueMode: PendingUserMessageMode = PendingUserMessageMode.FOLLOWUP,
-    ): Boolean = runCoordinator.sendMessage(conversationId, content, answer, queueMode)
+    ): Boolean {
+        val localAsync = localAsyncTaskCoordinator
+        if (localAsync != null) {
+            return localAsync.submitMessage(conversationId, content, answer)
+        }
+        return runCoordinator.sendMessage(conversationId, content, answer, queueMode)
+    }
 
     internal suspend fun startTaskMessage(conversationId: Uuid, content: List<UIMessagePart>): ChatTaskRun =
         runCoordinator.startTaskMessage(conversationId, content)
@@ -520,6 +527,7 @@ class ChatService(
         val expectedRestoreEpoch = captureRestoreEpoch()
         conversationStore.markDeleted(conversationId, expectedRestoreEpoch)
         try {
+            localAsyncTaskCoordinator?.stopAllForConversation(conversationId)
             runCoordinator.stopRunForDeletion(conversationId)
             conversationStore.sessionOrNull(conversationId)?.let { session ->
                 if (session.pendingUserMessages.value.isNotEmpty()) {
@@ -555,6 +563,7 @@ class ChatService(
             conversations.forEach { conversation ->
                 conversationStore.markDeleted(conversation.id, expectedRestoreEpoch)
                 tombstoned.add(conversation.id)
+                localAsyncTaskCoordinator?.stopAllForConversation(conversation.id)
                 runCoordinator.stopRunForDeletion(conversation.id)
                 conversationStore.sessionOrNull(conversation.id)?.let { session ->
                     if (session.pendingUserMessages.value.isNotEmpty()) {
@@ -573,8 +582,13 @@ class ChatService(
         }
     }
 
-    suspend fun stopGeneration(conversationId: Uuid, runId: String? = null) =
+    suspend fun stopGeneration(conversationId: Uuid, runId: String? = null) {
+        val localAsync = localAsyncTaskCoordinator
+        if (localAsync != null && localAsync.stopTask(conversationId, runId)) {
+            return
+        }
         runCoordinator.stopGeneration(conversationId, runId)
+    }
 
     fun resumePendingQueue(conversationId: Uuid) = runCoordinator.resumePendingQueue(conversationId)
 

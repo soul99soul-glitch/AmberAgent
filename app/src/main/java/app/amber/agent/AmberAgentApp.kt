@@ -239,7 +239,10 @@ class AmberAgentApp : Application() {
                         get<app.amber.feature.runtime.RunRecoveryService>().recover()
                     }
                 },
-                replayChatEvents = { get<ChatEventProjector>().replayUnfinished() },
+                replayChatEvents = {
+                    get<ChatEventProjector>().replayUnfinished()
+                    get<app.amber.core.service.LocalAsyncTaskCoordinator>().recoverInterruptedTasks()
+                },
                 recoverJsCells = {
                     val flags = get<app.amber.core.settings.CapabilityFlags>()
                     if (flags.isEnabled(app.amber.core.settings.Capability.JSCellRuntime)) {
