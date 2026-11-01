@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -28,6 +30,7 @@ import app.amber.feature.runtime.OutcomeUnknownPrompt
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.ui.components.ai.ChatInput
 import app.amber.feature.ui.components.ai.ChatInputSubmissionOwner
+import app.amber.feature.ui.components.ai.SubAgentDockState
 import app.amber.feature.ui.components.ai.SubAgentStatusDock
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.hooks.ChatInputState
@@ -86,6 +89,17 @@ internal fun ChatPageComposerHost(
         it.sessionId in dismissedWebMountSessionIds
     }
 
+    // Most history entries have no subagent dock. Keep the (class-heavy) dock
+    // out of the first composition until it has ever had a task; once shown it
+    // stays composed so its own exit animation is unchanged.
+    val subAgentDockState: SubAgentDockState = koinInject()
+    val subAgentDockUi by subAgentDockState.uiState.collectAsStateWithLifecycle()
+    val subAgentDockHasTasks = subAgentDockUi.enabled && subAgentDockUi.tasks.isNotEmpty()
+    var subAgentDockEverShown by remember(conversation.id) { mutableStateOf(false) }
+    LaunchedEffect(subAgentDockHasTasks) {
+        if (subAgentDockHasTasks) subAgentDockEverShown = true
+    }
+
     // Same reading column as the timeline on tablets; phones are narrower than it.
     Column(
         Modifier
@@ -126,20 +140,22 @@ internal fun ChatPageComposerHost(
         ChatInput(
             submissionOwner = inputSubmissionOwner,
             aboveComposerContent = {
-                SubAgentStatusDock(
-                    currentConversationId = conversation.id,
-                    onOpenConversation = { sourceId ->
-                        if (sourceId != conversation.id) {
-                            scope.launch {
-                                if (conversationRepository.existsConversationById(sourceId)) {
-                                    onOpenConversation(sourceId)
-                                } else {
-                                    toaster.show(context.getString(R.string.workspace_source_unavailable), type = ToastType.Error)
+                if (subAgentDockEverShown || subAgentDockHasTasks) {
+                    SubAgentStatusDock(
+                        currentConversationId = conversation.id,
+                        onOpenConversation = { sourceId ->
+                            if (sourceId != conversation.id) {
+                                scope.launch {
+                                    if (conversationRepository.existsConversationById(sourceId)) {
+                                        onOpenConversation(sourceId)
+                                    } else {
+                                        toaster.show(context.getString(R.string.workspace_source_unavailable), type = ToastType.Error)
+                                    }
                                 }
                             }
-                        }
-                    },
-                )
+                        },
+                    )
+                }
             },
             state = inputState,
             loading = loading,

@@ -107,7 +107,18 @@ data class ScreenReceiptOcrSummary(
     val blockCount: Int,
     val coverageRatio: Float?,
     val sampleTexts: List<String>,
-)
+    /** `bitmap_ocr` / `extended_accessibility` / `unavailable`; null for legacy receipts. */
+    val source: String? = null,
+    /** `recognized` / `degraded` / `unavailable` / `not_triggered`; null for legacy receipts. */
+    val outcome: String? = null,
+    val diagnostics: String? = null,
+    val recognizer: String? = null,
+) {
+    /** Bitmap OCR is the only source that may be presented as real end-side OCR. */
+    val isBitmapOcr: Boolean get() = source == "bitmap_ocr" || (source == null && triggered && blockCount > 0)
+
+    val isAccessibilityOnly: Boolean get() = source == "extended_accessibility"
+}
 
 data class ScreenReceiptHostReturnSummary(
     val returnedToHost: Boolean,
@@ -483,7 +494,7 @@ object ScreenToolReceiptParser {
             ?.mapNotNull { it.jsonObjectOrNull?.string("text") }
             ?.filter { it.isNotBlank() }
             ?.take(6)
-            ?.map(SensitiveScreenTextClassifier::redactIfSensitive)
+            ?.map { text -> SensitiveScreenTextClassifier.redactForDisplay(text) }
             .orEmpty()
 
         return ScreenReceiptOcrSummary(
@@ -493,6 +504,10 @@ object ScreenToolReceiptParser {
             blockCount = blockCount,
             coverageRatio = coverageRatio,
             sampleTexts = samples,
+            source = obj.string("ocr_source"),
+            outcome = obj.string("ocr_outcome"),
+            diagnostics = obj.string("ocr_diagnostics"),
+            recognizer = obj.string("ocr_recognizer"),
         )
     }
 
@@ -619,10 +634,15 @@ internal fun ScreenToolReceiptInlineSummary(
                 }
 
                 if (receipt.ocrSummary?.triggered == true) {
+                    val ocr = receipt.ocrSummary
                     ReceiptMetricChip(
-                        text = "端侧 OCR ${receipt.ocrSummary.blockCount} 处",
-                        color = tokens.ink3,
-                        background = tokens.surface2,
+                        text = when {
+                            ocr.isBitmapOcr -> "端侧 OCR ${ocr.blockCount} 处"
+                            ocr.isAccessibilityOnly -> "无障碍扩展元数据 ${ocr.blockCount} 处（非位图 OCR）"
+                            else -> "OCR 无可用结果"
+                        },
+                        color = if (ocr.isBitmapOcr) tokens.ink3 else Color(0xFFD9822B),
+                        background = if (ocr.isBitmapOcr) tokens.surface2 else Color(0xFFD9822B).copy(alpha = 0.12f),
                     )
                 }
 
@@ -970,10 +990,22 @@ internal fun ScreenToolReceiptDetailSheetContent(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         ReceiptMetricChip(
-                            text = if (ocr.triggered) "已触发端侧 OCR (${ocr.blockCount} 块)" else "无障碍树覆盖充足 (未触发 OCR)",
+                            text = when {
+                                !ocr.triggered -> "无障碍树覆盖充足 (未触发 OCR)"
+                                ocr.isBitmapOcr -> "端侧 OCR 识别 ${ocr.blockCount} 块"
+                                ocr.isAccessibilityOnly -> "仅无障碍扩展元数据 ${ocr.blockCount} 块（非位图 OCR）"
+                                else -> "OCR 未产生可用文字"
+                            },
                             color = tokens.ink2,
                             background = tokens.surface2,
                         )
+                        if (ocr.recognizer != null && ocr.isBitmapOcr) {
+                            ReceiptMetricChip(
+                                text = "识别器: ${ocr.recognizer}",
+                                color = tokens.ink3,
+                                background = tokens.surface2,
+                            )
+                        }
                         if (ocr.coverageRatio != null) {
                             val pct = (ocr.coverageRatio * 100).toInt().coerceIn(0, 100)
                             ReceiptMetricChip(
@@ -987,6 +1019,13 @@ internal fun ScreenToolReceiptDetailSheetContent(
                                 text = "原因: ${ocr.reason}",
                                 color = tokens.ink3,
                                 background = tokens.surface2,
+                            )
+                        }
+                        if (!ocr.diagnostics.isNullOrBlank()) {
+                            ReceiptMetricChip(
+                                text = "诊断: ${ocr.diagnostics}",
+                                color = Color(0xFFD9822B),
+                                background = Color(0xFFD9822B).copy(alpha = 0.12f),
                             )
                         }
                     }

@@ -3,6 +3,8 @@ package app.amber.agent
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Bundle
+import android.util.Log
 import androidx.test.runner.AndroidJUnitRunner
 import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
@@ -25,7 +27,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import org.koin.android.ext.koin.androidContext
 import org.koin.androidx.workmanager.koin.workManagerFactory
+import org.koin.core.context.GlobalContext
 import org.koin.core.context.startKoin
+import org.koin.core.context.stopKoin
 import org.koin.dsl.module
 
 /** Separate files/DB/preferences namespace; never opens the owner's saved model or conversation stores. */
@@ -46,6 +50,7 @@ class ChatDeviceFixtureApplication : Application() {
                 .setApiKey("local-firebase-disabled").setProjectId("amberagent-local").build())
         }
         FirebaseApp.getInstance().setDataCollectionDefaultEnabled(false)
+        if (GlobalContext.getOrNull() != null) stopKoin()
         startKoin {
             androidContext(this@ChatDeviceFixtureApplication)
             modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule,
@@ -62,9 +67,28 @@ class ChatDeviceFixtureApplication : Application() {
     }
 }
 
+/**
+ * Second instrumentation in the test APK. [newApplication] always installs
+ * [ChatDeviceFixtureApplication]. Select with
+ * `am instrument …/app.amber.agent.ChatDeviceFixtureRunner`.
+ */
 class ChatDeviceFixtureRunner : AndroidJUnitRunner() {
-    override fun newApplication(cl: ClassLoader?, className: String?, context: Context?): Application =
-        super.newApplication(cl, ChatDeviceFixtureApplication::class.java.name, context)
+    override fun newApplication(cl: ClassLoader?, className: String?, context: Context?): Application {
+        context?.let { appContext ->
+            TestReminderReceiverIsolation.installNoOpReminderKoin(appContext)
+            TestReminderReceiverIsolation.disable(appContext)
+        }
+        Log.i("AmberS9Runner", "newApplication app=${ChatDeviceFixtureApplication::class.java.name}")
+        return super.newApplication(cl, ChatDeviceFixtureApplication::class.java.name, context)
+    }
+
+    override fun finish(resultCode: Int, results: Bundle?) {
+        try {
+            TestReminderReceiverIsolation.restore(targetContext)
+        } finally {
+            super.finish(resultCode, results)
+        }
+    }
 }
 
 /** Only the provider boundary is scripted; production CAS, run ownership and persistence remain real. */

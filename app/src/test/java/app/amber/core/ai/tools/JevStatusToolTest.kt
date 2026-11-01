@@ -74,6 +74,8 @@ class JevStatusToolTest {
         assertEquals(false, out["enabled"]!!.jsonPrimitive.content.toBooleanStrict())
         assertEquals(false, out["api_key_configured"]!!.jsonPrimitive.content.toBooleanStrict())
         val purposes = out["purposes"]!!.jsonObject
+        assertEquals(JevPurpose.VISIBLE_COUNT, purposes.size)
+        assertFalse(purposes.containsKey("SCREEN_AUTOMATION"))
         JevPurpose.entries.forEach { purpose ->
             assertEquals(
                 "off",

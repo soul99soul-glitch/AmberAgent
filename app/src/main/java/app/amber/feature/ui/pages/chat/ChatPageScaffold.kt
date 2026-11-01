@@ -1,5 +1,8 @@
 package app.amber.feature.ui.pages.chat
 
+import app.amber.feature.ui.utils.AmberTraceSection
+import app.amber.feature.ui.utils.ChatPerfCommandBridge
+import app.amber.feature.ui.utils.ChatPerfTrace
 import app.amber.feature.ui.utils.amberTraceMeasure
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,20 +11,31 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.findRootCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import app.amber.core.recap.RECAP_MIN_USER_MESSAGES
@@ -42,9 +56,9 @@ import app.amber.core.context.ConversationCompact
 import app.amber.core.model.Conversation
 import app.amber.core.service.ChatError
 import app.amber.core.service.PendingUserMessage
+import app.amber.core.service.PendingUserMessageMode
 import app.amber.feature.ui.components.ai.ChatInputSubmissionOwner
 import app.amber.feature.ui.components.ai.SandboxActivitySheet
-import app.amber.feature.ui.components.ai.TopModelMenu
 import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ui.ImagePreviewDialog
 import app.amber.agent.Screen
@@ -95,6 +109,10 @@ internal fun ChatPageScaffold(
     val chatProvidersForMenu = setting.providers.filter { provider ->
         provider.enabled && provider.models.any { it.type == ModelType.CHAT }
     }
+    val chatModelIdForMenu = setting.chatModelId
+    val currentProviderIdForMenu = chatProvidersForMenu.firstOrNull { provider ->
+        provider.models.any { it.id == chatModelIdForMenu }
+    }?.id
     val currentReasoningLevelForMenu = currentChatModel?.let { model ->
         setting.rememberedReasoningLevelsByModelId[model.id.toString()]
             ?: if (setting.reasoningLevel == ReasoningLevel.AUTO) {
@@ -147,6 +165,34 @@ internal fun ChatPageScaffold(
         editMessage = vm::handleMessageEdit,
     )
 
+    if (ChatPerfTrace.enabled || app.amber.agent.BuildConfig.BUILD_TYPE == "perffixture") {
+        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+        DisposableEffect(inputActions, conversation.id, focusManager) {
+            ChatPerfCommandBridge.sendText = { text ->
+                val parts = listOf(app.amber.ai.ui.UIMessagePart.Text(text))
+                inputActions.send(PendingUserMessageMode.FOLLOWUP, parts, null)
+            }
+            ChatPerfCommandBridge.stopGeneration = {
+                vm.stopGeneration()
+                true
+            }
+            ChatPerfCommandBridge.snapshot = {
+                "conversation=${conversation.id} nodes=${conversation.messageNodes.size}" +
+                    " loading=${loadingJob != null}"
+            }
+            ChatPerfCommandBridge.clearFocus = {
+                focusManager.clearFocus(force = true)
+                true
+            }
+            onDispose {
+                ChatPerfCommandBridge.sendText = null
+                ChatPerfCommandBridge.stopGeneration = null
+                ChatPerfCommandBridge.snapshot = null
+                ChatPerfCommandBridge.clearFocus = null
+            }
+        }
+    }
+
     LaunchedEffect(sandboxTimeline.size, sandboxTimeline.lastOrNull()?.toolCallId) {
         if (sandboxActivity == null) {
             sandboxOverlayOpen = false
@@ -160,6 +206,13 @@ internal fun ChatPageScaffold(
 
     // Graphite TopModelMenu: header 下方卷帘下拉的开合状态（顶栏触发器 + 内容区 overlay 共享）
     var modelMenuOpen by remember { mutableStateOf(false) }
+    // 菜单挂在 app shell 的模态层上（遮罩必须盖住 header、输入区以及展开屏左侧列表），
+    // 但面板仍要从 header 正下方、聊天栏内展开，所以记下 Scaffold 测出的顶栏高度
+    // （content 的 innerPadding.top）与聊天栏相对应用窗口的起始边距（适配 LTR/RTL）。
+    var headerInset by remember { mutableStateOf(0.dp) }
+    var chatPaneStartInset by remember { mutableStateOf(0.dp) }
+    val windowDensity = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     // Header island: recap panel, shelf panel, and timeline jumps they trigger.
     var recapOpen by remember(conversation.id) { mutableStateOf(false) }
     var shelfOpen by remember(conversation.id) { mutableStateOf(false) }
@@ -191,12 +244,20 @@ internal fun ChatPageScaffold(
     val recapEligible by recapEligibleFlow.collectAsStateWithLifecycle(initialValue = false)
     // 跨对话活动：只读投影，别的对话还在跑时顶栏出现卫星。
     val activityCenter: app.amber.feature.runtime.ConversationActivityCenter = koinInject()
+    val activityScope = rememberCoroutineScope()
     val otherActivityFlow = remember(activityCenter, conversation.id) {
         activityCenter.notices(excluding = conversation.id.toString())
     }
     val otherActivity by otherActivityFlow.collectAsStateWithLifecycle(
         initialValue = emptyList(),
     )
+    val activityLifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(activityCenter, conversation.id, activityLifecycleOwner) {
+        activityCenter.consumeWhileResumed(
+            activityLifecycleOwner.lifecycle,
+            conversation.id.toString(),
+        )
+    }
     LaunchedEffect(jumpToLiveKey) {
         if (jumpToLiveKey > 0) {
             previewMode = false
@@ -210,10 +271,24 @@ internal fun ChatPageScaffold(
         activityOpen = false
     }
     CompositionLocalProvider(LocalTimelineHighlight provides timelineHighlight) {
-        Box(modifier = Modifier.fillMaxSize().amberCanvas()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .amberCanvas()
+                .onGloballyPositioned { coordinates ->
+                    chatPaneStartInset = with(windowDensity) {
+                        chatPaneStartInsetPx(
+                            coordinates.boundsInWindow(),
+                            coordinates.findRootCoordinates().boundsInWindow(),
+                            layoutDirection,
+                        ).toDp()
+                    }
+                },
+        ) {
             Scaffold(
                 modifier = Modifier.amberTraceMeasure("Amber ChatPage measure"),
                 topBar = {
+                    AmberTraceSection("Amber ChatTopBar compose") {
                     ChatPageTopBar(
                         conversationFlow = vm.conversation,
                         bigScreen = bigScreen,
@@ -271,8 +346,10 @@ internal fun ChatPageScaffold(
                             }
                         },
                     )
+                    }
                 },
                 bottomBar = {
+                    AmberTraceSection("Amber ChatComposer compose") {
                     ChatPageComposerHost(
                         inputState = inputState,
                         inputSubmissionOwner = inputSubmissionOwner,
@@ -327,9 +404,14 @@ internal fun ChatPageScaffold(
                             )
                         },
                     )
+                    }
                 },
                 containerColor = Color.Transparent,
             ) { innerPadding ->
+                val topInset = innerPadding.calculateTopPadding()
+                if (headerInset != topInset) {
+                    SideEffect { headerInset = topInset }
+                }
                 Box(modifier = Modifier.fillMaxSize()) {
                     ChatPageTimelineHost(
                         timelineReady = timelineReady,
@@ -372,52 +454,6 @@ internal fun ChatPageScaffold(
                         onOpenQueue = { queuePanelOpen = true },
                     )
 
-                    // Graphite TopModelMenu —— 从 header 正下方 (innerPadding.top) 卷帘展开、覆盖内容区
-                    // 的服务商/模型手风琴下拉（替代旧 ModalBottomSheet）。
-                    val chatModelIdForMenu = setting.chatModelId
-                    val currentProviderIdForMenu = chatProvidersForMenu.firstOrNull { p ->
-                        p.models.any { it.id == chatModelIdForMenu }
-                    }?.id
-                    TopModelMenu(
-                        open = modelMenuOpen,
-                        providers = chatProvidersForMenu,
-                        modelType = ModelType.CHAT,
-                        currentProviderId = currentProviderIdForMenu,
-                        currentModelId = chatModelIdForMenu,
-                        onSelect = { model ->
-                            vm.setChatModel(model = model)
-                            modelMenuOpen = false
-                        },
-                        onClose = { modelMenuOpen = false },
-                        reasoningLevel = currentReasoningLevelForMenu,
-                        onUpdateReasoningLevel = { level ->
-                            currentChatModel?.let { model ->
-                                vm.updateSettings(
-                                    setting.copy(
-                                        reasoningLevel = level,
-                                        rememberedReasoningLevelsByModelId =
-                                            setting.rememberedReasoningLevelsByModelId +
-                                                (model.id.toString() to level),
-                                    )
-                                )
-                            }
-                        },
-                        modifier = Modifier.padding(
-                            top = innerPadding.calculateTopPadding(),
-                            bottom = innerPadding.calculateBottomPadding(),
-                        ),
-                        header = if (conversation.messageNodes.isNotEmpty()) {
-                            {
-                                ChatModelMenuUsageHeader(
-                                    conversationFlow = vm.conversation,
-                                    contextCompacts = contextCompacts,
-                                    currentChatModel = currentChatModel,
-                                )
-                            }
-                        } else {
-                            null
-                        },
-                    )
                     ChatRecapPanelHost(
                         conversationFlow = vm.conversation,
                         recapStateFlow = vm.recapState,
@@ -473,12 +509,15 @@ internal fun ChatPageScaffold(
                             top = innerPadding.calculateTopPadding(),
                             bottom = innerPadding.calculateBottomPadding(),
                         ),
-                        onOpen = { conversationId ->
+                        onOpen = { notice ->
+                            val target = activityNoticeNavigationTarget(
+                                notice.conversationId,
+                                conversation.id,
+                            ) ?: return@ChatActivityPanelHost
                             activityOpen = false
-                            val target = runCatching { Uuid.parse(conversationId) }.getOrNull()
-                            if (target != null && target != conversation.id) {
-                                navigateToChatPage(navController, chatId = target)
-                            }
+                            activityCenter.rememberOpenedNotice(notice)
+                            activityScope.launch { activityCenter.markSeen(notice) }
+                            navigateToChatPage(navController, chatId = target)
                         },
                     )
 
@@ -487,6 +526,47 @@ internal fun ChatPageScaffold(
                     }
                 }  // end outer Box (fillMaxSize)
             }
+
+            // Graphite TopModelMenu —— 发布到 app shell 的模态层：遮罩铺满整个应用窗口
+            // （header、输入区、展开屏左侧会话列表），面板仍从 header 正下方、聊天栏内卷帘展开。
+            // 只挂在 ChatPage 自己身上时，header 返回和左栏设置会在第一次点击时穿透。
+            ChatModelMenuOverlay(
+                open = modelMenuOpen,
+                providers = chatProvidersForMenu,
+                currentProviderId = currentProviderIdForMenu,
+                currentModelId = chatModelIdForMenu,
+                onSelect = { model ->
+                    vm.setChatModel(model = model)
+                    modelMenuOpen = false
+                },
+                onClose = { modelMenuOpen = false },
+                reasoningLevel = currentReasoningLevelForMenu,
+                onUpdateReasoningLevel = { level ->
+                    currentChatModel?.let { model ->
+                        vm.updateSettings(
+                            setting.copy(
+                                reasoningLevel = level,
+                                rememberedReasoningLevelsByModelId =
+                                    setting.rememberedReasoningLevelsByModelId +
+                                        (model.id.toString() to level),
+                            )
+                        )
+                    }
+                },
+                panelTopInset = headerInset,
+                panelStartInset = chatPaneStartInset,
+                header = if (conversation.messageNodes.isNotEmpty()) {
+                    {
+                        ChatModelMenuUsageHeader(
+                            conversationFlow = vm.conversation,
+                            contextCompacts = contextCompacts,
+                            currentChatModel = currentChatModel,
+                        )
+                    }
+                } else {
+                    null
+                },
+            )
 
             if (sandboxOverlayOpen && sandboxActivity != null) {
                 SandboxActivitySheet(

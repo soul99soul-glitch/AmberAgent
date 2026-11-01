@@ -181,6 +181,7 @@ class ChatApprovalActions(
                 tool.toolName == ASK_USER_TOOL_NAME ||
                     // Jev 复核收紧的调用只能由用户逐个决定。
                     tool.metadata?.containsKey(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) == true ||
+                    tool.metadata?.containsKey(app.amber.core.jev.JevApprovalTriage.METADATA_KEY) == true ||
                     tool.metadata?.get("run_id")?.jsonPrimitive?.contentOrNull != waitingRun.runId
             }
         ) return null
@@ -197,7 +198,8 @@ class ChatApprovalActions(
                 val parts = message.parts.map { part ->
                     if (part !is UIMessagePart.Tool || !part.isPending || part.toolName == "ask_user" ||
                         // Jev 复核收紧的调用不随开关批量批准，只能由用户在卡片上决定。
-                        part.metadata?.containsKey(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) == true
+                        part.metadata?.containsKey(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) == true ||
+                        part.metadata?.containsKey(app.amber.core.jev.JevApprovalTriage.METADATA_KEY) == true
                     ) {
                         part
                     } else {

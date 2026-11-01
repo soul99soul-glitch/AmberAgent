@@ -1,0 +1,4 @@
+# Redacted parser excerpt: only original environment fields; no app inventory or wake-lock history.
+      showing=false
+        mScreenOn = true
+        mScreenOn = true

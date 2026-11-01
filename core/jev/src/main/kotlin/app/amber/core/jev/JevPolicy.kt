@@ -23,14 +23,20 @@ data class JevPolicy(
     val webDoneVerifiedThreshold: Double = 0.6,
     /** WEB_AUTOMATION：Choice 自报信心低于此值交还主模型。 */
     val webLowConfidenceThreshold: Double = 0.5,
-    /** SCREEN_AUTOMATION：safe Noul 低于此值不派发。真机导航探针 0.84–0.88；0.9 会误杀已标注的翻页按钮。 */
+    /** PHONE_ACTIONS：safe Noul 低于此值不派发。真机导航探针 0.84–0.88；0.9 会误杀已标注的翻页按钮。 */
     val screenReadOnlyThreshold: Double = 0.8,
-    /** SCREEN_AUTOMATION：DONE 核验低于此值 handback。 */
+    /** PHONE_VERIFICATION：DONE 核验低于此值不得宣称完成。 */
     val screenDoneVerifiedThreshold: Double = 0.85,
     /** TOOL_RESULT_RETENTION：保留概率达到此值才跳过压缩清空。 */
     val toolResultRetentionKeepProbability: Double = 0.7,
     /** Automatic approval may only be tightened to manual approval. */
     val autoApprovalRiskThreshold: Double = 0.8,
+    /** APPROVAL_TRIAGE：风险 Noul 过阈则建议至少 ASK，不能升为 ALLOW。 */
+    val approvalTriageRiskThreshold: Double = 0.8,
+    /** SUBAGENT_INTENT：角色 alignment Noul 低于此值视为偏离角色。 */
+    val subagentIntentMinAlignment: Double = 0.7,
+    /** SCRIPT_JUDGMENT：Choice 自报信心低于此值回落原文。 */
+    val scriptJudgmentMinConfidence: Double = 0.6,
     /** Continue once when an unverified final reply claims completion. */
     val completionClaimThreshold: Double = 0.8,
 ) {
@@ -38,7 +44,8 @@ data class JevPolicy(
         /**
          * 判断语义版本：VERCEL 契约、预算档位或阈值变更时递增（参与缓存键）。
          * v3：VERCEL 从 evaluation-model 改为 decision-model（stateParts，spec 版本头改名）。
+         * v4：可见用途 13 个；SCREEN_AUTOMATION 拆成 PHONE_VERIFICATION / PHONE_ACTIONS。
          */
-        const val CURRENT_POLICY_VERSION = 3
+        const val CURRENT_POLICY_VERSION = 4
     }
 }

@@ -37,12 +37,15 @@ class JevBudget(
 ) {
     companion object {
         /**
-         * Screen automation needs more turns than ordinary Jev purposes.
-         * 一次 goal 每步一次决策、上限 30 步，同一 run 可以连续跑多个 goal：
+         * Phone verification and actions share one bucket so splitting
+         * SCREEN_AUTOMATION cannot double the phone ceiling.
+         * 一次 goal 每步最多两次决策、上限 30 步，同一 run 可以连续跑多个 goal：
          * 24 会让第二个 15 步 goal 必然中途 budget_exhausted。
          */
-        const val SCREEN_AUTOMATION_MAX_REQUESTS = 150
-        const val SCREEN_AUTOMATION_MAX_STATE_BYTES = 512 * 1024
+        const val PHONE_MAX_REQUESTS = 150
+        const val PHONE_MAX_STATE_BYTES = 512 * 1024
+        const val SCREEN_AUTOMATION_MAX_REQUESTS = PHONE_MAX_REQUESTS
+        const val SCREEN_AUTOMATION_MAX_STATE_BYTES = PHONE_MAX_STATE_BYTES
     }
 
     private data class PurposeUsage(var requests: Int = 0, var stateBytes: Long = 0)
@@ -55,18 +58,20 @@ class JevBudget(
     data class RunUsage(var requests: Int = 0, var stateBytes: Long = 0) {
         private val purposeUsages = HashMap<JevPurpose?, PurposeUsage>()
 
-        private fun bucket(purpose: JevPurpose?): JevPurpose? =
-            purpose.takeIf { it == JevPurpose.SCREEN_AUTOMATION }
+        private fun bucket(purpose: JevPurpose?): JevPurpose? = when (purpose) {
+            JevPurpose.PHONE_VERIFICATION, JevPurpose.PHONE_ACTIONS -> JevPurpose.PHONE_ACTIONS
+            else -> null
+        }
 
         fun canConsume(purpose: JevPurpose?, requestCount: Int, bodyBytes: Long): Boolean {
             val usage = purposeUsages[bucket(purpose)] ?: PurposeUsage()
-            val requestLimit = if (bucket(purpose) == JevPurpose.SCREEN_AUTOMATION) {
-                SCREEN_AUTOMATION_MAX_REQUESTS
+            val requestLimit = if (bucket(purpose) == JevPurpose.PHONE_ACTIONS) {
+                PHONE_MAX_REQUESTS
             } else {
                 JevLimits.PER_RUN_MAX_REQUESTS
             }
-            val stateLimit = if (bucket(purpose) == JevPurpose.SCREEN_AUTOMATION) {
-                SCREEN_AUTOMATION_MAX_STATE_BYTES.toLong()
+            val stateLimit = if (bucket(purpose) == JevPurpose.PHONE_ACTIONS) {
+                PHONE_MAX_STATE_BYTES.toLong()
             } else {
                 JevLimits.PER_RUN_MAX_STATE_BYTES.toLong()
             }

@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +38,10 @@ import coil3.request.allowHardware
 import coil3.request.crossfade
 import app.amber.feature.ui.components.ui.ImagePreviewDialog
 import app.amber.feature.ui.components.ui.LocalExportContext
+import app.amber.feature.ui.utils.ChatPerfImageModelOverride
+import app.amber.feature.ui.utils.ChatPerfProbeToken
+import app.amber.feature.ui.utils.LocalImageReadinessDispose
+import app.amber.feature.ui.utils.LocalImageReadinessProbe
 
 /**
  * Renders a grouped search image layout. The message renderer derives these
@@ -154,10 +160,27 @@ private fun SingleImage(
     val context = LocalContext.current
     val export = LocalExportContext.current
     var showViewer by remember(entry.url) { mutableStateOf(false) }
+    val effectiveUrl = remember(entry.url) {
+        ChatPerfImageModelOverride.resolve?.invoke(entry.url) ?: entry.url
+    }
+    val readinessProbe = LocalImageReadinessProbe.current
+    val readinessDispose = LocalImageReadinessDispose.current
+    val readinessToken = remember(entry.url, readinessProbe) {
+        if (readinessProbe != null) ChatPerfProbeToken.next() else 0
+    }
+    DisposableEffect(readinessToken) {
+        onDispose {
+            if (readinessToken != 0) readinessDispose?.invoke(readinessToken)
+        }
+    }
+    var loading by remember(entry.url) { mutableStateOf(true) }
+    SideEffect {
+        if (readinessToken != 0) readinessProbe?.invoke(readinessToken, !loading)
+    }
 
-    val request = remember(entry.url, export) {
+    val request = remember(effectiveUrl, export) {
         ImageRequest.Builder(context)
-            .data(entry.url)
+            .data(effectiveUrl)
             .crossfade(false)
             .allowHardware(!export)
             .build()
@@ -167,6 +190,9 @@ private fun SingleImage(
         AsyncImage(
             model = request,
             contentDescription = entry.caption,
+            onLoading = { loading = true },
+            onSuccess = { loading = false },
+            onError = { loading = false },
             modifier = Modifier
                 .fillMaxWidth()
                 // heightIn(max=800dp) is a safety net for the rare portrait source
@@ -212,10 +238,27 @@ private fun ThumbnailImage(
     val context = LocalContext.current
     val export = LocalExportContext.current
     var showViewer by remember(url) { mutableStateOf(false) }
+    val effectiveUrl = remember(url) {
+        ChatPerfImageModelOverride.resolve?.invoke(url) ?: url
+    }
+    val readinessProbe = LocalImageReadinessProbe.current
+    val readinessDispose = LocalImageReadinessDispose.current
+    val readinessToken = remember(url, readinessProbe) {
+        if (readinessProbe != null) ChatPerfProbeToken.next() else 0
+    }
+    DisposableEffect(readinessToken) {
+        onDispose {
+            if (readinessToken != 0) readinessDispose?.invoke(readinessToken)
+        }
+    }
+    var loading by remember(url) { mutableStateOf(true) }
+    SideEffect {
+        if (readinessToken != 0) readinessProbe?.invoke(readinessToken, !loading)
+    }
 
-    val request = remember(url, export) {
+    val request = remember(effectiveUrl, export) {
         ImageRequest.Builder(context)
-            .data(url)
+            .data(effectiveUrl)
             .crossfade(false)
             .allowHardware(!export)
             .build()
@@ -223,6 +266,9 @@ private fun ThumbnailImage(
     AsyncImage(
         model = request,
         contentDescription = null,
+        onLoading = { loading = true },
+        onSuccess = { loading = false },
+        onError = { loading = false },
         modifier = modifier
             // Height follows width via aspectRatio(4:3). The width itself comes
             // from the caller's modifier (Modifier.weight(1f) inside a Row for

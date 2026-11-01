@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.sessionhome
 
+import app.amber.feature.ui.utils.ChatPerfHomeEntry
 import android.os.Build
 import androidx.activity.compose.LocalActivity
 
@@ -202,12 +203,7 @@ fun SessionHomePage() {
     // 首页是 hub：用 push（保留 SessionHome 在栈底），返回能回到首页；不能用 navigateToChatPage
     // （其内部 clearAndNavigate 会清掉首页）。popUpTo 在手机上是空操作（首页在栈顶才点得到），
     // 两栏时把右栏已开的会话换掉，而不是越叠越深。
-    val openChat: (Screen.Chat) -> Unit = { chat ->
-        navController.navigate(chat) {
-            popUpTo(Screen.SessionHome)
-            launchSingleTop = true
-        }
-    }
+    val openChat = homeChatNavigation(navController)
 
     LaunchedEffect(homeSearchQuery, untitledConversationLabel) {
         vm.setHomeSearchQuery(homeSearchQuery, untitledConversationLabel)
@@ -477,5 +473,14 @@ fun SessionHomePage() {
                 }
             }
         }
+    }
+}
+
+/** The same callback used by real Home rows; diagnostics precede original navigation. */
+internal fun homeChatNavigation(navController: app.amber.feature.ui.context.Navigator): (Screen.Chat) -> Unit = { chat ->
+    ChatPerfHomeEntry.openFromHome(chat.id)
+    navController.navigate(chat) {
+        popUpTo(Screen.SessionHome)
+        launchSingleTop = true
     }
 }

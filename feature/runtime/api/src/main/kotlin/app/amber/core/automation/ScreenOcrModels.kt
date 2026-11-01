@@ -43,6 +43,157 @@ enum class ScreenOcrMode {
 }
 
 /**
+ * Where an OCR observation / block actually came from.
+ *
+ * Callers must not flatten [BITMAP_OCR] and [EXTENDED_ACCESSIBILITY] into one
+ * "OCR succeeded" signal: only the former is real pixel recognition (works on
+ * WebView / Canvas / custom-drawn pages), the latter is extra metadata read
+ * from Accessibility nodes and cannot see unlabelled pixels.
+ */
+enum class ScreenOcrSource {
+    /** Text recognized from a captured screen bitmap by the on-device recognizer. */
+    BITMAP_OCR,
+
+    /** Text recovered from extra Accessibility node attributes (hint/tooltip/stateDescription/semantics). */
+    EXTENDED_ACCESSIBILITY,
+
+    /** Nothing usable was produced. */
+    UNAVAILABLE,
+    ;
+
+    fun wireName(): String = name.lowercase(Locale.ROOT)
+
+    val isBitmapOcr: Boolean get() = this == BITMAP_OCR
+}
+
+/**
+ * Honest outcome of one observation pass.
+ *
+ * - [NOT_TRIGGERED]: tree coverage was sufficient (or OCR was disabled); zero screenshot/OCR.
+ * - [RECOGNIZED]: bitmap OCR produced text.
+ * - [DEGRADED]: bitmap OCR was unavailable/failed/timed out, only Accessibility metadata was found.
+ * - [UNAVAILABLE]: triggered but no text and a diagnosable failure reason.
+ */
+enum class ScreenOcrOutcome {
+    NOT_TRIGGERED,
+    RECOGNIZED,
+    DEGRADED,
+    UNAVAILABLE,
+    ;
+
+    fun wireName(): String = name.lowercase(Locale.ROOT)
+
+    val isBitmapOcr: Boolean get() = this == RECOGNIZED
+}
+
+/**
+ * Scripts the **bundled, compiled-in** recognizer actually supports.
+ *
+ * The ML Kit `text-recognition-chinese` model recognizes Chinese (Simplified and
+ * Traditional) plus Latin script, which covers the app's Chinese/English screen
+ * automation paths. Japanese, Korean, Cyrillic and Devanagari are intentionally
+ * not claimed — they would need their own ML Kit model artifacts.
+ */
+object ScreenOcrCapabilities {
+    /** Stable identifier surfaced in diagnostics/receipts. */
+    const val RECOGNIZER_ID: String = "mlkit_text_recognition_chinese"
+
+    val supportedScripts: List<String> = listOf("zh-Hans", "zh-Hant", "latin")
+
+    val unsupportedScripts: List<String> = listOf("ja", "ko", "ru", "devanagari")
+
+    fun describe(): String = "ML Kit bundled text recognition (Chinese + Latin)"
+}
+
+/**
+ * Classifies and redacts sensitive text (passwords, OTP codes, payment/card numbers)
+ * so OCR summaries, model-facing text and step receipts never leak raw secrets.
+ *
+ * Lives in the shared automation API so every consumer (engine, tools, receipts,
+ * Jev runner) applies the exact same rules.
+ */
+object SensitiveScreenTextClassifier {
+    const val MASKED_SENSITIVE_TEXT: String = "[已隐藏敏感内容]"
+
+    private const val SENSITIVE_LABELS =
+        "密码|密碼|验证码|驗證碼|校验码|校驗碼|动态码|動態碼|安全码|安全碼|" +
+            "支付密码|支付密碼|银行卡|銀行卡|身份证|身份證|cvv|pin|password|passcode|otp|" +
+            "verification\\s*code|security\\s*code|secret|token"
+    private val SENSITIVE_KEYWORDS = Regex(SENSITIVE_LABELS, RegexOption.IGNORE_CASE)
+    private val OTP_OR_CARD_DIGITS = Regex("\\b\\d{6,19}\\b")
+    private val STANDALONE_DIGITS_4_TO_8 = Regex("^\\d{4,8}$")
+    private val SECRET_TOKEN = Regex("^[A-Za-z0-9@#$%^&*._-]{4,16}$")
+    private val DIGIT_RUN_4_TO_19 = Regex("\\d{4,19}")
+    private val KEY_VALUE_SECRET = Regex(
+        "((?:$SENSITIVE_LABELS)\\s*(?:[:=：]|\\s+)\\s*)([^\\s\"',;，；]+)",
+        RegexOption.IGNORE_CASE,
+    )
+
+    fun isSensitive(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return false
+        if (trimmed == "[password]" || trimmed == MASKED_SENSITIVE_TEXT) return true
+        return SENSITIVE_KEYWORDS.containsMatchIn(trimmed) || OTP_OR_CARD_DIGITS.containsMatchIn(trimmed)
+    }
+
+    /**
+     * Conservative OTP candidate: a block that is only 4-8 digits, with no
+     * surrounding label in the same string. "验证码" and "8492" often arrive as
+     * two ML Kit blocks, and a 4/5 digit code has no keyword of its own.
+     *
+     * This over-redacts short standalone numbers (years, prices, counts) rather
+     * than leak an OTP. It does not identify every secret: a password such as
+     * `hunter2` still needs password/sensitive node bounds or a nearby label.
+     */
+    fun isStandaloneNumericSecret(text: String): Boolean =
+        STANDALONE_DIGITS_4_TO_8.matches(text.trim())
+
+    /** Token-like (single word, contains digits) blocks near a sensitive label. */
+    fun looksLikeSecretToken(text: String): Boolean {
+        val trimmed = text.trim()
+        return trimmed.isNotEmpty() &&
+            SECRET_TOKEN.matches(trimmed) &&
+            trimmed.any { it.isDigit() } &&
+            !isSensitive(trimmed)
+    }
+
+    fun redactIfSensitive(text: String): String {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return ""
+        if (!isSensitive(trimmed)) return trimmed
+        var redacted = OTP_OR_CARD_DIGITS.replace(trimmed) { match ->
+            val len = match.value.length
+            if (len <= 6) "******" else "${match.value.take(2)}****${match.value.takeLast(2)}"
+        }
+        redacted = KEY_VALUE_SECRET.replace(redacted) { match ->
+            val prefix = match.groupValues[1]
+            val value = match.groupValues[2]
+            if (value.all { it == '*' } || SENSITIVE_KEYWORDS.matches(value)) {
+                match.value
+            } else {
+                "$prefix******"
+            }
+        }
+        return redacted
+    }
+
+    /**
+     * Model/receipt-facing redaction for one OCR block.
+     *
+     * - [maskEntirely]: drop the whole block (password field bounds / contextual secret).
+     * - standalone 4-8 digit block: mask the digits (no keyword required).
+     * - keyword/6+ digit block: keep the label, mask the value ([redactIfSensitive]).
+     */
+    fun redactForDisplay(text: String, maskEntirely: Boolean = false): String {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return ""
+        if (maskEntirely) return MASKED_SENSITIVE_TEXT
+        if (isStandaloneNumericSecret(trimmed)) return DIGIT_RUN_4_TO_19.replace(trimmed) { "******" }
+        return redactIfSensitive(trimmed)
+    }
+}
+
+/**
  * Normalized `[0.0, 1.0]` screen coordinates aligned to the active display dimensions.
  */
 data class NormalizedScreenBounds(
@@ -103,6 +254,12 @@ data class ScreenOcrBlock(
     val bottom: Int,
     val normalizedBounds: NormalizedScreenBounds,
     val isSensitive: Boolean = false,
+    val source: ScreenOcrSource = ScreenOcrSource.BITMAP_OCR,
+    /**
+     * Model/receipt-facing text. Sensitive blocks are already redacted here so no
+     * consumer has to remember a second call; [text] stays raw for in-engine matching.
+     */
+    val redactedText: String = SensitiveScreenTextClassifier.redactForDisplay(text),
 ) {
     val centerX: Float get() = (left + right) / 2f
     val centerY: Float get() = (top + bottom) / 2f
@@ -263,7 +420,22 @@ data class ScreenOcrObservation(
     val displayWidth: Int,
     val displayHeight: Int,
     val screenshotSource: String? = null,
+    /** Real source of the content: bitmap OCR vs extended Accessibility vs nothing. */
+    val source: ScreenOcrSource = ScreenOcrSource.UNAVAILABLE,
+    /** Honest outcome; [ScreenOcrOutcome.DEGRADED] must never be presented as bitmap OCR. */
+    val outcome: ScreenOcrOutcome = ScreenOcrOutcome.NOT_TRIGGERED,
+    /** Machine-readable failure/degradation codes (screenshot_unavailable, model_not_found, ocr_no_text, ...). */
+    val diagnostics: List<String> = emptyList(),
+    /** Which compiled recognizer produced bitmap text (null when it never ran). */
+    val recognizer: String? = null,
 ) {
+    val isBitmapOcr: Boolean get() = source.isBitmapOcr
+
+    val degraded: Boolean get() = outcome == ScreenOcrOutcome.DEGRADED
+
+    val diagnosticSummary: String?
+        get() = diagnostics.takeIf { it.isNotEmpty() }?.joinToString(";")
+
     fun matchesQuery(query: String): List<ScreenOcrBlock> {
         val needle = query.trim()
         if (needle.isEmpty()) return emptyList()
@@ -280,16 +452,30 @@ data class ScreenOcrObservation(
             .take(maxChars)
 
     fun mergedText(maxChars: Int = 4_000): String = combinedVisibleText(maxChars)
+
+    /**
+     * Model/receipt-facing text: sensitive blocks are redacted block-by-block, so
+     * OTP codes / passwords / card numbers never leak while bounds stay usable.
+     */
+    fun redactedText(maxChars: Int = 4_000): String =
+        blocks
+            .map { it.redactedText.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .joinToString("\n")
+            .take(maxChars)
 }
 
 /**
  * Pluggable on-device OCR engine abstraction used by [ScreenAutomationTools] and [JevScreenGoalRunner].
  */
-interface ScreenOcrEngine {
+interface ScreenOcrEngine : AutoCloseable {
     suspend fun observe(
         snapshot: ScreenSnapshot?,
         uiTreeDump: String = "",
         mode: ScreenOcrMode = ScreenOcrMode.AUTO,
         forceReason: String? = null,
     ): ScreenOcrObservation
+
+    override fun close() = Unit
 }

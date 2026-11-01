@@ -2,6 +2,31 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
   xmlns:tools="http://schemas.android.com/tools">
   <application>
+    <!-- exported so shell `am start` can beat MIUI BAL (uid 2000 cannot start exported=false). -->
+    <activity
+      android:name=".JevScreenFixtureActivity"
+      android:exported="true"
+      android:excludeFromRecents="true"
+      android:taskAffinity="app.amber.agent.debug.s9fixture"
+      android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+    <activity
+      android:name=".ScreenOcrFixtureActivity"
+      android:exported="true"
+      android:excludeFromRecents="true"
+      android:taskAffinity="app.amber.agent.debug.s9fixture"
+      android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+    <activity
+      android:name=".S9ComposeHostActivity"
+      android:exported="true"
+      android:excludeFromRecents="true"
+      android:taskAffinity="app.amber.agent.debug.s9fixture"
+      android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+    <activity
+      android:name=".S9LifecycleCoverActivity"
+      android:exported="false"
+      android:excludeFromRecents="true"
+      android:taskAffinity="app.amber.agent.debug.s9fixture"
+      android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     <receiver
       android:name=".debug.AmberAgentSmokeReceiver"
       android:enabled="true"

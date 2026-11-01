@@ -246,7 +246,10 @@ class PhoneAutomationTakeoverControllerTest {
         val settings = Settings(
             jev = JevSetting(
                 enabled = true,
-                purposes = mapOf(JevPurpose.SCREEN_AUTOMATION to JevMode.ACTIVE),
+                purposes = mapOf(
+                    JevPurpose.PHONE_VERIFICATION to JevMode.ACTIVE,
+                    JevPurpose.PHONE_ACTIONS to JevMode.ACTIVE,
+                ),
                 dataScopes = setOf(JevDataScope.SCREEN_CONTENT, JevDataScope.TASK_TEXT),
             ),
             agentRuntime = AgentRuntimeSetting(autoReturnToHostOnScreenGoalComplete = false),
@@ -339,7 +342,10 @@ class PhoneAutomationTakeoverControllerTest {
         val settings = Settings(
             jev = JevSetting(
                 enabled = true,
-                purposes = mapOf(JevPurpose.SCREEN_AUTOMATION to JevMode.ACTIVE),
+                purposes = mapOf(
+                    JevPurpose.PHONE_VERIFICATION to JevMode.ACTIVE,
+                    JevPurpose.PHONE_ACTIONS to JevMode.ACTIVE,
+                ),
                 dataScopes = setOf(JevDataScope.SCREEN_CONTENT, JevDataScope.TASK_TEXT),
             ),
         )

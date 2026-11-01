@@ -22,6 +22,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -29,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import app.amber.agent.R
 import app.amber.core.utils.navigateToChatPage
 import app.amber.feature.ui.context.LocalToaster
+import app.amber.feature.ui.utils.ChatPerfTargetKind
+import app.amber.feature.ui.utils.ChatPerfTrace
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -37,7 +40,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -154,6 +159,13 @@ internal fun ChatPageTimelineHost(
     // History fades in once it can compose; a page shown without an enter slide
     // (returning from another screen) starts fully visible.
     val timelineVisible = timelineReady && timelinePrepared
+    val readinessTick = remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    if (ChatPerfTrace.enabled) {
+        DisposableEffect(Unit) {
+            ChatPerfTrace.readinessInvalidation = { readinessTick.intValue++ }
+            onDispose { ChatPerfTrace.readinessInvalidation = null }
+        }
+    }
     val timelineFade = remember(conversationId) { Animatable(if (timelineVisible) 1f else 0f) }
     LaunchedEffect(timelineVisible) {
         if (timelineVisible) timelineFade.animateTo(1f, tween(durationMillis = 180))
@@ -173,6 +185,19 @@ internal fun ChatPageTimelineHost(
         loading = loading,
         settings = setting,
     ) { timelineConversation, chatTimelinePlan ->
+        val targetNode = timelineConversation.messageNodes.lastOrNull()
+        SideEffect {
+            if (timelineReady && timelinePrepared) {
+                ChatPerfTrace.beginTarget(
+                    kind = if (targetNode == null) {
+                        ChatPerfTargetKind.EMPTY_HERO
+                    } else {
+                        ChatPerfTargetKind.MESSAGE
+                    },
+                    nodeId = targetNode?.id,
+                )
+            }
+        }
         val latestJumpConversation by rememberUpdatedState(timelineConversation)
         val latestJumpPlan by rememberUpdatedState(chatTimelinePlan)
         LaunchedEffect(jumpTarget) {
@@ -229,6 +254,27 @@ internal fun ChatPageTimelineHost(
                 )
             }
         } else {
+            // A draw callback, not withFrameNanos: the background prewarm is only
+            // released after this layer has actually been drawn for the first
+            // time. reset per mount so restore/re-entry waits for its own draw.
+            val firstDraw = remember(conversationId) { booleanArrayOf(false) }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawWithContent {
+                        // Draw-scope state read: late parse/image/viewport
+                        // readiness invalidates a fresh draw of ready content.
+                        readinessTick.intValue
+                        drawContent()
+                        if (ChatPerfTrace.enabled) {
+                            ChatPerfTrace.onTargetDraw(timelineFade.value)
+                        }
+                        if (!firstDraw[0]) {
+                            firstDraw[0] = true
+                            vm.onTimelineFirstFrameRendered()
+                        }
+                    }
+            ) {
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = timelineFade.value }) {
                 ChatList(
                     innerPadding = innerPadding,
@@ -348,6 +394,7 @@ internal fun ChatPageTimelineHost(
                 // 401/慢响应时整屏空白看着像卡死. 改成 isEmpty 时 hero 一直保留 (loading 时 hero 上叠
                 // 半透蒙层 spinner 反馈), 直到第一个 chunk 落 (messageNodes 非空) 再切到 ChatList.
                 if (!hasMessages) {
+                    SideEffect { ChatPerfTrace.onEmptyHeroComposed() }
                     val startSuggestions by rememberChatStartSuggestions(vm, setting)
                     val nick = setting.displaySetting.userNickname.trim()
                     val heroText = if (nick.isNotEmpty()) {
@@ -369,6 +416,7 @@ internal fun ChatPageTimelineHost(
                     )
                 }
             }  // end timeline fade Box
+            }  // end first-draw Box
         }  // end if (!initialized) else branch (ChatList + hero)
     }
 }

@@ -102,10 +102,42 @@ internal fun List<UIMessagePart>.searchWebOutputsSignature(): String {
 
 @Composable
 internal fun rememberSearchPresentation(parts: List<UIMessagePart>): SearchPresentation {
-    val signature = parts.searchWebOutputsSignature()
-    return remember(signature) {
-        deriveSearchPresentation(parts)
+    // One message is split across several lazy items (header / markdown slices /
+    // footer). They all pass the SAME parts list, so derive the presentation
+    // once per list identity instead of rebuilding the search-output signature
+    // and JSON maps for every slice.
+    return remember(parts) { searchPresentationFor(parts) }
+}
+
+private const val SEARCH_PRESENTATION_CACHE_SLOTS = 32
+
+private class CachedSearchPresentation(
+    parts: List<UIMessagePart>,
+    val presentation: SearchPresentation,
+) {
+    // Do not extend a message's lifetime just because it was once composed.
+    private val partsRef = java.lang.ref.WeakReference(parts)
+
+    fun matches(candidate: List<UIMessagePart>): Boolean = partsRef.get() === candidate
+}
+
+private val searchPresentationCache =
+    arrayOfNulls<CachedSearchPresentation>(SEARCH_PRESENTATION_CACHE_SLOTS)
+
+/**
+ * Identity-keyed memo for [deriveSearchPresentation]. The message-parts list is
+ * immutable between model updates (the same identity assumption the virtual
+ * item cache already relies on), and a single history entry can otherwise
+ * re-derive it for every visible Markdown slice.
+ */
+internal fun searchPresentationFor(parts: List<UIMessagePart>): SearchPresentation {
+    val slot = (System.identityHashCode(parts) ushr 1) % searchPresentationCache.size
+    searchPresentationCache[slot]?.let { cached ->
+        if (cached.matches(parts)) return cached.presentation
     }
+    val presentation = deriveSearchPresentation(parts)
+    searchPresentationCache[slot] = CachedSearchPresentation(parts, presentation)
+    return presentation
 }
 
 internal fun deriveSearchPresentation(parts: List<UIMessagePart>): SearchPresentation {

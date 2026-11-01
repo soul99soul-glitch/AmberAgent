@@ -20,8 +20,11 @@ import app.amber.feature.runtime.DurableRuntimeTestBase
 import app.amber.feature.runtime.PermissionDecisionResolver
 import app.amber.feature.runtime.ToolEffectStatus
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -162,6 +165,63 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
         assertEquals(1, transport.calls)
     }
 
+    @Test
+    fun `jev triage tightens auto approved calls to manual approval`() = runTest {
+        val executions = mutableListOf<String>()
+        val transport = TriageTransport(choice = "deny", highRisk = 0.95)
+        val engine = FakeRoundEngine(listOf(
+            { toolCallAssistant("rm_1", "terminal_execute", """{"command":"rm -rf build"}""") },
+            { textAssistant("已完成") },
+        ))
+        val terminals = mutableListOf<GenerationTerminal>()
+        val chunks = kernel(engine, triage = triage(transport)).run(
+            session(
+                listOf(UIMessage.user("整理一下目录")), listOf(approvalTool("terminal_execute", executions)),
+                terminals = terminals, autoApproveHighRiskTools = true,
+            ),
+        ).toList()
+
+        assertTrue(executions.isEmpty())
+        assertEquals(1, transport.calls)
+        assertEquals(listOf<GenerationTerminal>(GenerationTerminal.WaitingUser), terminals)
+        val tool = lastMessages(chunks).last().getTools().single()
+        assertTrue(tool.isPending)
+        assertTrue(tool.metadata?.containsKey(app.amber.core.jev.JevApprovalTriage.METADATA_KEY) == true)
+        assertEquals(
+            "ask",
+            tool.metadata?.get(app.amber.core.jev.JevApprovalTriage.METADATA_KEY)
+                ?.jsonObject?.get("applied")?.jsonPrimitive?.content,
+        )
+    }
+
+    @Test
+    fun `jev triage cannot relax a pending ask into auto approval`() = runTest {
+        val executions = mutableListOf<String>()
+        val transport = TriageTransport(choice = "allow", highRisk = 0.0)
+        val engine = FakeRoundEngine(listOf(
+            { toolCallAssistant("rm_1", "terminal_execute", """{"command":"rm -rf build"}""") },
+            { textAssistant("已完成") },
+        ))
+        val terminals = mutableListOf<GenerationTerminal>()
+        val chunks = kernel(engine, triage = triage(transport)).run(
+            session(
+                listOf(UIMessage.user("整理一下目录")), listOf(approvalTool("terminal_execute", executions)),
+                terminals = terminals, autoApproveHighRiskTools = false,
+            ),
+        ).toList()
+
+        assertTrue(executions.isEmpty())
+        assertEquals(1, transport.calls)
+        assertEquals(listOf<GenerationTerminal>(GenerationTerminal.WaitingUser), terminals)
+        val tool = lastMessages(chunks).last().getTools().single()
+        assertTrue(tool.isPending)
+        assertEquals(
+            "ask",
+            tool.metadata?.get(app.amber.core.jev.JevApprovalTriage.METADATA_KEY)
+                ?.jsonObject?.get("applied")?.jsonPrimitive?.content,
+        )
+    }
+
     /** 只读调用不需要审批，不问 Jev。 */
     @Test
     fun `jev gate never asks about read only calls`() = runTest {
@@ -176,6 +236,139 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
         ).toList()
 
         assertEquals(0, transport.calls)
+    }
+
+    @Test
+    fun `script judgment active annotates persisted terminal output and is consumed`() = runTest {
+        val output = """{"ok":true,"exit_code":0}"""
+        val transport = ScriptJudgmentTransport("ok")
+        val engine = FakeRoundEngine(listOf(
+            { toolCallAssistant("term_1", "terminal_execute", """{"command":"ls"}""") },
+            { textAssistant("已完成") },
+        ))
+        val chunks = kernel(engine, scriptJudgment = scriptJudgment(transport, app.amber.core.jev.JevMode.ACTIVE)).run(
+            session(
+                listOf(UIMessage.user("列出目录")),
+                listOf(terminalTool(output)),
+                autoApproveHighRiskTools = true,
+            ),
+        ).toList()
+
+        val tool = executedTerminal(chunks)
+        assertEquals(output, tool.output.filterIsInstance<UIMessagePart.Text>().single().text)
+        val notice = app.amber.core.jev.JevScriptJudgment.noticeFor(tool)
+        assertEquals("ok", notice?.verdict)
+        assertEquals(1, transport.calls)
+        assertEquals(
+            app.amber.feature.ui.components.message.AgentToolStatus.SUCCEEDED,
+            app.amber.feature.ui.components.message.toolStatusFromMessagePart(
+                tool = tool,
+                loading = false,
+                content = json.parseToJsonElement(output),
+            ),
+        )
+    }
+
+    @Test
+    fun `script judgment does not override failed tool status or retry`() = runTest {
+        val output = """{"error":"boom","exit_code":1}"""
+        val transport = ScriptJudgmentTransport("ok")
+        val engine = FakeRoundEngine(listOf(
+            { toolCallAssistant("term_1", "terminal_execute", """{"command":"false"}""") },
+            { textAssistant("看到错误") },
+        ))
+        val chunks = kernel(engine, scriptJudgment = scriptJudgment(transport, app.amber.core.jev.JevMode.ACTIVE)).run(
+            session(
+                listOf(UIMessage.user("跑一条命令")),
+                listOf(terminalTool(output)),
+                autoApproveHighRiskTools = true,
+            ),
+        ).toList()
+
+        val tool = executedTerminal(chunks)
+        assertEquals(output, tool.output.filterIsInstance<UIMessagePart.Text>().single().text)
+        assertEquals("ok", app.amber.core.jev.JevScriptJudgment.noticeFor(tool)?.verdict)
+        assertEquals(
+            app.amber.feature.ui.components.message.AgentToolStatus.FAILED,
+            app.amber.feature.ui.components.message.toolStatusFromMessagePart(
+                tool = tool,
+                loading = false,
+                content = json.parseToJsonElement(output),
+            ),
+        )
+        assertEquals(1, transport.calls)
+        assertEquals(2, engine.requests.size)
+    }
+
+    @Test
+    fun `script judgment off leaves persisted tools unconsumed`() = runTest {
+        val output = """{"ok":true,"exit_code":0}"""
+        val transport = ScriptJudgmentTransport("failed")
+        val engine = FakeRoundEngine(listOf(
+            { toolCallAssistant("term_1", "terminal_execute", """{"command":"ls"}""") },
+            { textAssistant("已完成") },
+        ))
+        val chunks = kernel(engine, scriptJudgment = scriptJudgment(transport, app.amber.core.jev.JevMode.OFF)).run(
+            session(
+                listOf(UIMessage.user("列出目录")),
+                listOf(terminalTool(output)),
+                autoApproveHighRiskTools = true,
+            ),
+        ).toList()
+
+        val tool = executedTerminal(chunks)
+        assertEquals(output, tool.output.filterIsInstance<UIMessagePart.Text>().single().text)
+        assertNull(app.amber.core.jev.JevScriptJudgment.noticeFor(tool))
+        assertNull(tool.metadata?.get(app.amber.core.jev.JevScriptJudgment.METADATA_KEY))
+        assertEquals(0, transport.calls)
+        assertEquals(
+            app.amber.feature.ui.components.message.AgentToolStatus.SUCCEEDED,
+            app.amber.feature.ui.components.message.toolStatusFromMessagePart(
+                tool = tool,
+                loading = false,
+                content = json.parseToJsonElement(output),
+            ),
+        )
+    }
+
+    @Test
+    fun `script judgment shadow does not change persisted tools or status`() = runTest {
+        val output = """{"ok":true,"exit_code":0}"""
+        val transport = ScriptJudgmentTransport("failed")
+        val engine = FakeRoundEngine(listOf(
+            { toolCallAssistant("term_1", "terminal_execute", """{"command":"ls"}""") },
+            { textAssistant("已完成") },
+        ))
+        val chunks = kernel(
+            engine,
+            scriptJudgment = scriptJudgment(
+                transport,
+                app.amber.core.jev.JevMode.SHADOW,
+                backgroundScope = backgroundScope,
+            ),
+        ).run(
+            session(
+                listOf(UIMessage.user("列出目录")),
+                listOf(terminalTool(output)),
+                autoApproveHighRiskTools = true,
+            ),
+        ).toList()
+
+        val tool = executedTerminal(chunks)
+        assertEquals(output, tool.output.filterIsInstance<UIMessagePart.Text>().single().text)
+        assertNull(app.amber.core.jev.JevScriptJudgment.noticeFor(tool))
+        assertNull(tool.metadata?.get(app.amber.core.jev.JevScriptJudgment.METADATA_KEY))
+        assertEquals(
+            app.amber.feature.ui.components.message.AgentToolStatus.SUCCEEDED,
+            app.amber.feature.ui.components.message.toolStatusFromMessagePart(
+                tool = tool,
+                loading = false,
+                content = json.parseToJsonElement(output),
+            ),
+        )
+        runCurrent()
+        assertEquals(1, transport.calls)
+        assertNull(app.amber.core.jev.JevScriptJudgment.noticeFor(tool))
     }
 
     /**
@@ -281,6 +474,24 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
         jevRuntime(transport, app.amber.core.jev.JevPurpose.AUTO_APPROVAL_GATE),
     )
 
+    private class TriageTransport(
+        private val choice: String,
+        private val highRisk: Double,
+    ) : app.amber.core.jev.JevTransport {
+        var calls = 0
+
+        override suspend fun execute(request: app.amber.core.jev.JevHttpRequest): app.amber.core.jev.JevTransportResponse {
+            calls++
+            val body = """{"model":"jev-test","answers":{"posture":{"type":"choice","choice":"$choice","confidence":0.9},""" +
+                """"high_risk":{"type":"noul","noul":$highRisk}}}"""
+            return app.amber.core.jev.JevTransportResponse.Http(200, body.toByteArray(), null)
+        }
+    }
+
+    private fun triage(transport: TriageTransport) = app.amber.core.jev.JevApprovalTriage(
+        jevRuntime(transport, app.amber.core.jev.JevPurpose.APPROVAL_TRIAGE),
+    )
+
     private fun approvalTool(name: String, executions: MutableList<String>) = Tool(
         name = name,
         description = "approval-required test tool",
@@ -292,19 +503,72 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
         },
     )
 
-    private fun kernel(engine: GenerationRoundEngine, gate: app.amber.core.jev.JevAutoApprovalGate): DefaultRunKernel =
-        DefaultRunKernel(
-            context = testContext(),
-            toolDispatcher = AgentToolDispatcher(json, PermissionDecisionResolver()),
-            roundEngine = engine,
-            autoApprovalGate = gate,
-        )
-
-    private fun kernel(engine: GenerationRoundEngine): DefaultRunKernel = DefaultRunKernel(
+    private fun kernel(
+        engine: GenerationRoundEngine,
+        gate: app.amber.core.jev.JevAutoApprovalGate? = null,
+        triage: app.amber.core.jev.JevApprovalTriage? = null,
+        scriptJudgment: app.amber.core.jev.JevScriptJudgment? = null,
+    ): DefaultRunKernel = DefaultRunKernel(
         context = testContext(),
         toolDispatcher = AgentToolDispatcher(json, PermissionDecisionResolver()),
         roundEngine = engine,
+        autoApprovalGate = gate,
+        approvalTriage = triage,
+        scriptJudgment = scriptJudgment,
     )
+
+    private class ScriptJudgmentTransport(private val choice: String) : app.amber.core.jev.JevTransport {
+        var calls = 0
+
+        override suspend fun execute(request: app.amber.core.jev.JevHttpRequest): app.amber.core.jev.JevTransportResponse {
+            calls++
+            val body = """{"model":"jev-test","answers":{"verdict":{"type":"choice","choice":"$choice","confidence":0.9}}}"""
+            return app.amber.core.jev.JevTransportResponse.Http(200, body.toByteArray(), null)
+        }
+    }
+
+    private fun scriptJudgment(
+        transport: ScriptJudgmentTransport,
+        mode: app.amber.core.jev.JevMode,
+        backgroundScope: kotlinx.coroutines.CoroutineScope? = null,
+    ) = app.amber.core.jev.JevScriptJudgment(
+        app.amber.core.jev.JevRuntime(
+            coordinator = app.amber.core.jev.JevDecisionCoordinator(
+                client = app.amber.core.jev.JevClient(transport = transport),
+                apiKeyProvider = { "key" },
+                clock = { 1_000_000L },
+            ),
+            settingsProvider = {
+                Settings(
+                    jev = app.amber.core.jev.JevSetting(
+                        enabled = mode != app.amber.core.jev.JevMode.OFF,
+                        purposes = if (mode == app.amber.core.jev.JevMode.OFF) emptyMap()
+                        else mapOf(app.amber.core.jev.JevPurpose.SCRIPT_JUDGMENT to mode),
+                        dataScopes = setOf(app.amber.core.jev.JevDataScope.TOOL_OUTPUT),
+                    ),
+                )
+            },
+            backgroundScope = backgroundScope ?: kotlinx.coroutines.CoroutineScope(
+                kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined,
+            ),
+        ),
+    )
+
+    private fun terminalTool(output: String) = Tool(
+        name = "terminal_execute",
+        description = "run a command",
+        needsApproval = true,
+        allowsAutoApproval = false,
+        execute = { listOf(UIMessagePart.Text(output)) },
+    )
+
+    private fun executedTerminal(chunks: List<GenerationChunk>, callId: String = "term_1"): UIMessagePart.Tool {
+        val tools = chunks.filterIsInstance<GenerationChunk.Messages>()
+            .flatMap { it.messages }
+            .flatMap { it.getTools() }
+            .filter { it.toolCallId == callId && it.isExecuted }
+        return tools.last()
+    }
 
     private fun durableKernel(
         engine: GenerationRoundEngine,
