@@ -24,10 +24,12 @@ import app.amber.core.files.FilesManager
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.settings.Settings
+import app.amber.feature.macgateway.MacGatewayRepository
 import app.amber.feature.runtime.OutcomeUnknownPrompt
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.ui.components.ai.ChatInput
 import app.amber.feature.ui.components.ai.ChatInputSubmissionOwner
+import app.amber.feature.ui.components.ai.CloudDialogueStatusDock
 import app.amber.feature.ui.components.ai.SubAgentStatusDock
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.hooks.ChatInputState
@@ -74,6 +76,9 @@ internal fun ChatPageComposerHost(
     val toaster = LocalToaster.current
     val filesManager: FilesManager = koinInject()
     val conversationRepository: ConversationRepository = koinInject()
+    val macGatewayRepository: MacGatewayRepository = koinInject()
+    val gatewayState by macGatewayRepository.state.collectAsStateWithLifecycle()
+    val cloudDialogueState by macGatewayRepository.cloudDialogueState.collectAsStateWithLifecycle()
     val webMountSessionOwner: WebMountSessionOwner = koinInject()
     val webMountSessions by webMountSessionOwner.sessions.collectAsStateWithLifecycle()
     val conversationWebMountSessions = webMountSessions.filter {
@@ -126,6 +131,22 @@ internal fun ChatPageComposerHost(
         ChatInput(
             submissionOwner = inputSubmissionOwner,
             aboveComposerContent = {
+                CloudDialogueStatusDock(
+                    conversationId = conversation.id.toString(),
+                    cloudActive = gatewayState.isCloudDialogueActive,
+                    uiState = cloudDialogueState,
+                    onSelectFollowupTarget = { workItemId ->
+                        macGatewayRepository.selectFollowupTarget(workItemId)
+                    },
+                    onStopTask = { workItemId ->
+                        scope.launch {
+                            runCatching { macGatewayRepository.stopCloudWorkItem(workItemId) }
+                                .onFailure { error ->
+                                    toaster.show(error.message ?: "Stop failed", type = ToastType.Error)
+                                }
+                        }
+                    },
+                )
                 SubAgentStatusDock(
                     currentConversationId = conversation.id,
                     onOpenConversation = { sourceId ->

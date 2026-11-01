@@ -160,6 +160,8 @@ sealed class MacGatewayException(message: String) : Exception(message) {
     /** The Mac answered with a different certificate than the one pinned at pairing. */
     class CertificateMismatch : MacGatewayException("certificate mismatch")
     class Unauthorized : MacGatewayException("unauthorized")
+    class NotFound(val code: String) : MacGatewayException(code)
+    class Conflict(val code: String) : MacGatewayException(code)
     class Server(message: String) : MacGatewayException(message)
     class InvalidResponse : MacGatewayException("invalid response")
 }
@@ -177,6 +179,7 @@ class MacGatewayClient(
     private val port: Int,
     private val fingerprint: String,
     private val token: String?,
+    private val scheme: String = "https",
 ) {
     private class PinMismatchException : CertificateException("SPKI pin mismatch")
 
@@ -245,10 +248,79 @@ class MacGatewayClient(
         send("POST", listOf("v1", "unpair"))
     }
 
+    /** `POST /v2/dialogue/messages` — submit a new main-dialogue message to the paired cloud Router. */
+    suspend fun messages(requestId: String, text: String): CloudDialogueReceipt {
+        CloudDialogueContract.requireValidRequestId(requestId)
+        CloudDialogueContract.requireValidText(text)
+        return decode(
+            send(
+                method = "POST",
+                segments = listOf("v2", "dialogue", "messages"),
+                body = mapOf("requestId" to requestId, "text" to text),
+            ),
+        )
+    }
+
+    /** `POST /v2/work-items/{id}/inputs` — append a followup input to a specific non-terminal task. */
+    suspend fun inputs(workItemId: String, requestId: String, text: String): CloudDialogueReceipt {
+        require(workItemId.isNotBlank()) { "workItemId must not be blank" }
+        CloudDialogueContract.requireValidRequestId(requestId)
+        CloudDialogueContract.requireValidText(text)
+        return decode(
+            send(
+                method = "POST",
+                segments = listOf("v2", "work-items", workItemId, "inputs"),
+                body = mapOf("requestId" to requestId, "text" to text),
+            ),
+        )
+    }
+
+    /** `POST /v2/work-items/{id}/stop` — physically stop and settle a running task. */
+    suspend fun stop(workItemId: String, requestId: String): CloudDialogueReceipt {
+        require(workItemId.isNotBlank()) { "workItemId must not be blank" }
+        CloudDialogueContract.requireValidRequestId(requestId)
+        return decode(
+            send(
+                method = "POST",
+                segments = listOf("v2", "work-items", workItemId, "stop"),
+                body = mapOf("requestId" to requestId),
+            ),
+        )
+    }
+
+    /** `GET /v2/dialogue/receipts/{requestId}` — query receipt state (`received`/`consumed`/`cancelled`) and `workItemIds`. */
+    suspend fun receipts(requestId: String): CloudDialogueReceipt {
+        CloudDialogueContract.requireValidRequestId(requestId)
+        return decode(
+            send(
+                method = "GET",
+                segments = listOf("v2", "dialogue", "receipts", requestId),
+            ),
+        )
+    }
+
+    /** `GET /v2/dialogue/events?after={after}&limit={limit}` — poll incremental dialogue timeline events. */
+    suspend fun events(after: Long = 0L, limit: Int = 100): CloudDialogueEventsPage {
+        require(after >= 0L) { "after cursor must be non-negative" }
+        val clampedLimit = limit.coerceIn(1, 100)
+        return decode(
+            send(
+                method = "GET",
+                segments = listOf("v2", "dialogue", "events"),
+                queryParameters = mapOf("after" to after.toString(), "limit" to clampedLimit.toString()),
+            ),
+        )
+    }
+
     private inline fun <reified T> decode(text: String): T =
         runCatching { MacGatewayJson.decodeFromString<T>(text) }.getOrElse { throw MacGatewayException.InvalidResponse() }
 
-    private suspend fun send(method: String, segments: List<String>, body: Map<String, Any>? = null): String =
+    private suspend fun send(
+        method: String,
+        segments: List<String>,
+        body: Map<String, Any>? = null,
+        queryParameters: Map<String, String> = emptyMap(),
+    ): String =
         withContext(Dispatchers.IO) {
             val requestBody = body?.let { map ->
                 JsonObject(map.mapValues { (_, value) ->
@@ -261,8 +333,11 @@ class MacGatewayClient(
             val ordered = preferredAddress?.let { preferred -> listOf(preferred) + addrs.filter { it != preferred } } ?: addrs
             var sawPinMismatch = false
             for (address in ordered) {
-                val url = HttpUrl.Builder().scheme("https").host(address).port(port)
-                    .apply { segments.forEach { addPathSegment(it) } }
+                val url = HttpUrl.Builder().scheme(scheme).host(address).port(port)
+                    .apply {
+                        segments.forEach { addPathSegment(it) }
+                        queryParameters.forEach { (key, value) -> addQueryParameter(key, value) }
+                    }
                     .build()
                 val request = Request.Builder().url(url)
                     .method(method, requestBody ?: if (method == "POST") ByteArray(0).toRequestBody() else null)
@@ -275,15 +350,17 @@ class MacGatewayClient(
                     continue
                 }
                 preferredAddress = address
+                val errorMessage = if (code !in 200..299) {
+                    runCatching {
+                        MacGatewayJson.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.content
+                    }.getOrNull()
+                } else null
                 when {
                     code in 200..299 -> return@withContext text
                     code == 401 -> throw MacGatewayException.Unauthorized()
-                    else -> {
-                        val message = runCatching {
-                            MacGatewayJson.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.content
-                        }.getOrNull()
-                        throw MacGatewayException.Server(message ?: "HTTP $code")
-                    }
+                    code == 404 -> throw MacGatewayException.NotFound(errorMessage ?: "HTTP 404")
+                    code == 409 -> throw MacGatewayException.Conflict(errorMessage ?: "HTTP 409")
+                    else -> throw MacGatewayException.Server(errorMessage ?: "HTTP $code")
                 }
             }
             throw if (sawPinMismatch) MacGatewayException.CertificateMismatch() else MacGatewayException.Unreachable()

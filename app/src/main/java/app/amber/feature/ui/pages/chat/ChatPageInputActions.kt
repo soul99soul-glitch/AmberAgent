@@ -16,12 +16,13 @@ internal class ChatPageInputActions(
     private val submission: ChatInputSubmissionOwner,
     private val configurationIssue: ChatConfigurationIssue?,
     private val generating: Boolean,
+    private val cloudDialogueMode: Boolean = false,
     private val showError: (messageRes: Int) -> Unit,
     private val sendMessage: (parts: List<UIMessagePart>, answer: Boolean, queueMode: PendingUserMessageMode) -> Boolean,
     private val editMessage: (parts: List<UIMessagePart>, messageId: Uuid, regenerate: Boolean) -> Boolean,
 ) {
     fun canSendWithoutChatModel(parts: List<UIMessagePart>): Boolean =
-        parseDeepReadSlashCommand(parts) != null
+        cloudDialogueMode || parseDeepReadSlashCommand(parts) != null
 
     fun confirmEdit(regenerate: Boolean) {
         val unresolved = input.attachmentImports.firstOrNull {

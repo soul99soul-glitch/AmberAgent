@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -22,6 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import app.amber.core.recap.RECAP_MIN_USER_MESSAGES
@@ -32,6 +34,8 @@ import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
+import app.amber.feature.macgateway.MacGatewayRepository
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findProvider
@@ -111,6 +115,16 @@ internal fun ChatPageScaffold(
     var suggestionFillPulseKey by remember(conversation.id) { mutableIntStateOf(0) }
     var selectedSandboxIndex by rememberSaveable(conversation.id) { mutableStateOf<Int?>(null) }
     val activityStore: AgentToolActivityStore = koinInject()
+    val macGatewayRepository: MacGatewayRepository = koinInject()
+    val gatewayState by macGatewayRepository.state.collectAsStateWithLifecycle()
+    val cloudDialogueState by macGatewayRepository.cloudDialogueState.collectAsStateWithLifecycle()
+    val cloudScope = rememberCoroutineScope()
+    val conversationIdString = conversation.id.toString()
+    LaunchedEffect(conversationIdString, gatewayState.isCloudDialogueActive) {
+        if (gatewayState.isCloudDialogueActive) {
+            macGatewayRepository.bindActiveConversation(conversationIdString)
+        }
+    }
     val liveSandboxActivity by activityStore.sandboxActivity.collectAsStateWithLifecycle()
     val sandboxProjection = rememberChatSandboxProjection(
         conversation = conversation,
@@ -138,11 +152,39 @@ internal fun ChatPageScaffold(
         submission = inputSubmissionOwner,
         configurationIssue = configurationIssue,
         generating = loadingJob != null,
+        cloudDialogueMode = gatewayState.isCloudDialogueActive,
         showError = { messageRes ->
             toaster.show(context.getString(messageRes), type = ToastType.Error)
         },
         sendMessage = { parts, answer, queueMode ->
-            vm.handleMessageSend(parts, answer, queueMode)
+            if (gatewayState.isCloudDialogueActive) {
+                val text = parts
+                    .filterIsInstance<UIMessagePart.Text>()
+                    .joinToString("\n") { it.text }
+                    .trim()
+                if (text.isEmpty()) {
+                    false
+                } else {
+                    val followupTarget = cloudDialogueState.resolvedFollowupTarget(conversationIdString)
+                    cloudScope.launch {
+                        if (followupTarget != null) {
+                            macGatewayRepository.sendCloudFollowup(
+                                conversationId = conversationIdString,
+                                workItemId = followupTarget.workItemId,
+                                text = text,
+                            )
+                        } else {
+                            macGatewayRepository.sendCloudMessage(
+                                conversationId = conversationIdString,
+                                text = text,
+                            )
+                        }
+                    }
+                    true
+                }
+            } else {
+                vm.handleMessageSend(parts, answer, queueMode)
+            }
         },
         editMessage = vm::handleMessageEdit,
     )

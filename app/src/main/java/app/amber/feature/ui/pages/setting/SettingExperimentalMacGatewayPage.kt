@@ -171,17 +171,26 @@ fun SettingExperimentalMacGatewayPage(
                     }
                 }
 
-                connection == null -> item {
-                    ExperimentSectionCard(title = stringResource(R.string.mac_gateway_section_pair)) {
-                        ExperimentNote(stringResource(R.string.mac_gateway_pair_hint))
-                        ExperimentActionRow {
-                            ExperimentActionButton(stringResource(R.string.mac_gateway_scan), enabled = true, primary = true) {
-                                scanLauncher.launch(null)
-                            }
-                            ExperimentActionButton(stringResource(R.string.mac_gateway_paste), enabled = true) {
-                                receiveLink(context.clipboardText())
+                connection == null -> {
+                    item {
+                        ExperimentSectionCard(title = stringResource(R.string.mac_gateway_section_pair)) {
+                            ExperimentNote(stringResource(R.string.mac_gateway_pair_hint))
+                            ExperimentActionRow {
+                                ExperimentActionButton(stringResource(R.string.mac_gateway_scan), enabled = true, primary = true) {
+                                    scanLauncher.launch(null)
+                                }
+                                ExperimentActionButton(stringResource(R.string.mac_gateway_paste), enabled = true) {
+                                    receiveLink(context.clipboardText())
+                                }
                             }
                         }
+                    }
+                    item {
+                        CloudDialogueSection(
+                            enabled = false,
+                            paired = false,
+                            onEnabledChange = {},
+                        )
                     }
                 }
 
@@ -226,6 +235,15 @@ fun SettingExperimentalMacGatewayPage(
                                 }
                             }
                         }
+                    }
+                    item {
+                        CloudDialogueSection(
+                            enabled = state.cloudDialogueEnabled,
+                            paired = true,
+                            onEnabledChange = { checked ->
+                                scope.launch { repository.setCloudDialogueEnabled(checked) }
+                            },
+                        )
                     }
                     status?.health?.let { health -> item { HealthSection(health) } }
                     item {
@@ -276,6 +294,45 @@ fun SettingExperimentalMacGatewayPage(
                 TextButton(onClick = { confirmsUnpair = false }) { Text(stringResource(R.string.mac_gateway_keep)) }
             },
         )
+    }
+}
+
+@Composable
+internal fun CloudDialogueSection(
+    enabled: Boolean,
+    paired: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    val workspace = workspaceColors()
+    ExperimentSectionCard(title = stringResource(R.string.mac_gateway_cloud_dialogue_section)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.mac_gateway_cloud_dialogue_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = workspace.ink,
+                )
+                Text(
+                    text = stringResource(
+                        if (paired) R.string.mac_gateway_cloud_dialogue_desc
+                        else R.string.mac_gateway_cloud_dialogue_unpaired_hint,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspace.muted,
+                )
+            }
+            Switch(
+                checked = enabled && paired,
+                onCheckedChange = { if (paired) onEnabledChange(it) },
+            )
+        }
     }
 }
 

@@ -352,6 +352,27 @@ class ConversationStore(
         }
     }
 
+    suspend fun appendCloudDialogueNode(
+        conversationId: Uuid,
+        node: MessageNode,
+        titleHint: String? = null,
+    ) {
+        ensureInitialized(conversationId)
+        val currentConversation = session(conversationId).state.value
+        val resolvedTitle = if (currentConversation.title.isBlank() && !titleHint.isNullOrBlank()) {
+            titleHint.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(48).orEmpty()
+        } else {
+            currentConversation.title
+        }
+        val newConversation = currentConversation.copy(
+            title = resolvedTitle,
+            messageNodes = currentConversation.messageNodes + node,
+            updateAt = Instant.now(),
+        )
+        updateConversation(conversationId, newConversation)
+        persistConversationWindow(conversationId, newConversation, indexFts = true)
+    }
+
     internal suspend fun checkpointConversation(
         conversationId: Uuid,
         conversation: Conversation,
