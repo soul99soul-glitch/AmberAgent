@@ -113,13 +113,14 @@ class ScreenOcrDeviceTest {
         val height = 1600
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val ready = CountDownLatch(1)
+        val contentReady = CountDownLatch(1)
         var host: View? = null
         instrumentation.runOnMainSync {
             val context = instrumentation.targetContext
             val view = if (mode == ScreenOcrFixtureActivity.MODE_CANVAS) {
-                ScreenOcrFixtureActivity.createCanvasView(context)
+                ScreenOcrFixtureActivity.createCanvasView(context).also { contentReady.countDown() }
             } else {
-                ScreenOcrFixtureActivity.createWebView(context) {}
+                ScreenOcrFixtureActivity.createWebView(context) { contentReady.countDown() }
             }
             val specW = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
             val specH = View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
@@ -129,6 +130,8 @@ class ScreenOcrDeviceTest {
             ready.countDown()
         }
         check(ready.await(8, TimeUnit.SECONDS)) { "fixture $mode did not become ready" }
+        // Measuring the WebView does not mean its asynchronous page load has finished.
+        check(contentReady.await(20, TimeUnit.SECONDS)) { "fixture $mode content did not become ready" }
         Thread.sleep(if (mode == ScreenOcrFixtureActivity.MODE_WEBVIEW) 1500 else 200)
         instrumentation.runOnMainSync {
             val view = requireNotNull(host)
