@@ -11,6 +11,7 @@ import { completeConversationAuxiliary } from '../platform_impl/ConversationRunA
 import type { ConversationRunExecution, ConversationRunToolPorts } from '../platform_impl/ConversationRunPorts.ets';
 import type { PreparedConversationSeed, DetachedConversationContext } from '../platform_impl/ConversationRunService.ets';
 import { ConversationRunService } from '../platform_impl/ConversationRunService.ets';
+import { ConversationTaskRunner } from '../platform_impl/ConversationTaskRunner.ets';
 import { buildConversationToolLoop } from '../platform_impl/ConversationRunTools.ets';
 import { createEntryBase64ImageTransformer } from '../platform_impl/Base64ImageSupport.ets';
 import { createEntryDocumentReader } from '../platform_impl/DocumentSupport.ets';
@@ -387,10 +388,16 @@ const createConversationExecution = (): ConversationRunExecution => {
     };
 };
 let conversationRunService: ConversationRunService | null = null;
+let conversationTaskRunner: ConversationTaskRunner | null = null;
 export const getConversationRunService = (): ConversationRunService => {
     if (conversationRunService === null)
         conversationRunService = new ConversationRunService({ repository: getChatRepository(), kv: getChatKvStore(), compactStore: getCompactStore(), loadAssistants: getChatAssistants }, createConversationExecution());
     return conversationRunService;
+};
+export const getConversationTaskRunner = (): ConversationTaskRunner => {
+    if (conversationTaskRunner === null)
+        conversationTaskRunner = new ConversationTaskRunner(getConversationRunService());
+    return conversationTaskRunner;
 };
 export const resolveChatRuntime = async (assistantId?: string, exactModelId?: string, exactProviderId?: string): Promise<ChatRuntime | null> => {
     const runtime: ChatProviderRuntime | null = await providers.resolveChatProviderRuntime(assistantId, exactModelId, exactProviderId);

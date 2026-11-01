@@ -22,11 +22,11 @@ export struct ChatCloudDialogueStrip {
   }
 
   build(): void {
-    if (this.session.uiTick >= 0 && this.session.isActiveMode()) {
+    if (this.session.uiTick >= 0 && this.session.isStripVisible()) {
       Column({ space: 6 }) {
         // 顶部状态与当前输入路由提示（普通新问题 vs 指定任务补充）
         Row({ space: 6 }) {
-          Text(`云主对话 · ${this.session.gatewayName}`)
+          Text(this.session.modeHeaderLabel())
             .fontSize(11)
             .fontFamily(FONT_MONO)
             .fontColor(this.accentColorStore)
@@ -49,7 +49,9 @@ export struct ChatCloudDialogueStrip {
                 this.session.clearFollowupTarget();
               })
           } else {
-            Text(this.session.runningTasks().length > 0 ? '输入框可直接提新问题，或点任务「补充」追问' : '输入框消息将发往云端执行')
+            Text(this.session.runningTasks().length > 0
+              ? '输入框可直接提新问题，或点任务「补充」追问'
+              : (this.session.isActiveMode() ? '输入框消息将发往云端执行' : '输入框可直接发送新提问'))
               .fontSize(11)
               .fontFamily(FONT_SANS)
               .fontColor(INK3)
@@ -60,14 +62,24 @@ export struct ChatCloudDialogueStrip {
         }
         .width('100%')
 
-        // 运行中云任务单行进度条（process_event 原地刷新同一处单行进度，不生成每工具卡片）
+        // 运行中/排队中任务单行进度条（原地刷新同一处单行进度，不生成每工具卡片）
         ForEach(this.session.runningTasks(), (task: CloudDialogueTaskRecord): void => {
           Row({ space: 8 }) {
-            LoadingProgress()
-              .width(13)
-              .height(13)
-              .color(this.accentColorStore)
-            Text(`${task.title} · ${task.progressText.length > 0 ? task.progressText : '云端执行中…'}`)
+            if (task.status === 'queued') {
+              Text('排队')
+                .fontSize(10)
+                .fontFamily(FONT_MONO)
+                .fontColor(STATUS_AMBER)
+                .padding({ left: 5, right: 5, top: 2, bottom: 2 })
+                .backgroundColor(BG)
+                .borderRadius(6)
+            } else {
+              LoadingProgress()
+                .width(13)
+                .height(13)
+                .color(this.accentColorStore)
+            }
+            Text(`${task.title} · ${task.progressText.length > 0 ? task.progressText : '执行中…'}`)
               .fontSize(META)
               .fontFamily(FONT_SANS)
               .fontColor(INK2)
@@ -110,7 +122,12 @@ export struct ChatCloudDialogueStrip {
           Scroll() {
             Row({ space: 6 }) {
               ForEach(this.session.recentInputs(), (item: CloudDialogueInputRecord): void => {
-                Text(formatCloudInputStateBadge(item.kind, item.state, shortWorkItemId(item.workItemId)))
+                Text(formatCloudInputStateBadge(
+                  item.kind,
+                  item.state,
+                  shortWorkItemId(item.workItemId),
+                  !this.session.isActiveMode(),
+                ))
                   .fontSize(10.5)
                   .fontFamily(FONT_MONO)
                   .fontColor(this.inputBadgeColor(item.state))

@@ -94,6 +94,14 @@ const waitDebugVisual = (ms: number, signal: AbortSignalLike): Promise<boolean> 
     timer = setTimeout((): void => { finish(true); }, Math.max(0, ms));
   });
 
+export interface DetachedTaskHooks {
+  save: (conversation: Conversation) => Promise<void>;
+  activeConversation: () => Conversation;
+  mutateConversation: (update: (latest: Conversation) => Conversation | null) => Promise<Conversation | null>;
+  publish: (patch: Partial<ConversationRunSnapshot>) => void;
+  consumeSteer: () => Promise<UIMessage[]>;
+}
+
 export class DetachedConversationContext {
   readonly conversationId: string;
   readonly runId: string;
@@ -105,24 +113,35 @@ export class DetachedConversationContext {
   baseTools: AgentTool[] = [];
   subAgentTools: AgentTool[] = [];
   private readonly service: ConversationRunService;
+  private readonly hooks: DetachedTaskHooks | null;
 
   constructor(service: ConversationRunService, runId: string, conversation: Conversation,
-    seed: PreparedConversationSeed, signal: AbortSignalLike) {
+    seed: PreparedConversationSeed, signal: AbortSignalLike, hooks: DetachedTaskHooks | null = null) {
     this.service = service;
     this.runId = runId;
     this.conversationId = conversation.id;
     this.conversation = conversation;
     this.seed = seed;
     this.signal = signal;
+    this.hooks = hooks;
   }
-  save(conversation: Conversation): Promise<void> { return this.service.saveContext(this, conversation); }
-  activeConversation(): Conversation { return this.service.activeContextConversation(this); }
+  save(conversation: Conversation): Promise<void> {
+    return this.hooks !== null ? this.hooks.save(conversation) : this.service.saveContext(this, conversation);
+  }
+  activeConversation(): Conversation {
+    return this.hooks !== null ? this.hooks.activeConversation() : this.service.activeContextConversation(this);
+  }
   mutateConversation(update: (latest: Conversation) => Conversation | null): Promise<Conversation | null> {
-    return this.service.mutateContext(this, update);
+    return this.hooks !== null ? this.hooks.mutateConversation(update) : this.service.mutateContext(this, update);
   }
-  publish(patch: Partial<ConversationRunSnapshot>): void { this.service.publishContext(this, patch); }
+  publish(patch: Partial<ConversationRunSnapshot>): void {
+    if (this.hooks !== null) { this.hooks.publish(patch); return; }
+    this.service.publishContext(this, patch);
+  }
   pending(): PendingUserMessage[] { return this.service.pending(this.conversationId); }
-  consumeSteer(): Promise<UIMessage[]> { return this.service.consumeSteer(this); }
+  consumeSteer(): Promise<UIMessage[]> {
+    return this.hooks !== null ? this.hooks.consumeSteer() : this.service.consumeSteer(this);
+  }
   cancelPending(messageId: string): Promise<void> { return this.service.cancelPending(this.conversationId, messageId); }
   clearPending(): Promise<void> { return this.service.clearPending(this.conversationId); }
   hasNavigationCollector(): boolean { return this.service.hasNavigationCollector(this.conversationId); }
@@ -199,11 +218,20 @@ const copySnapshot = (s: ConversationRunSnapshot): ConversationRunSnapshot => ({
 export class ConversationRunService {
   private readonly storage: ConversationRunStorage;
   private readonly execution: ConversationRunExecution;
+  private externalActiveConversations: (() => string[]) | null = null;
 
   constructor(storage: ConversationRunStorage, execution: ConversationRunExecution) {
     this.storage = storage;
     this.execution = execution;
   }
+
+  getStorage(): ConversationRunStorage { return this.storage; }
+  getExecution(): ConversationRunExecution { return this.execution; }
+  setExternalActiveConversations(provider: (() => string[]) | null): void {
+    this.externalActiveConversations = provider;
+    this.aggregate();
+  }
+  notifyExternalStateChange(): void { this.aggregate(); }
 
   private readonly sessions: Map<string, ConversationSession> = new Map<string, ConversationSession>();
   private runningListeners: Array<(ids: string[]) => void> = [];
@@ -325,7 +353,9 @@ export class ConversationRunService {
   }
   isBusy(conversationId: string): boolean {
     const session: ConversationSession | undefined = this.sessions.get(conversationId);
-    return session !== undefined && (session.record !== null || session.appendActive || session.drainActive);
+    if (session !== undefined && (session.record !== null || session.appendActive || session.drainActive)) return true;
+    const externalIds: string[] = this.externalActiveConversations !== null ? this.externalActiveConversations() : [];
+    return externalIds.indexOf(conversationId) >= 0;
   }
   async compact(conversationId: string): Promise<ManualCompactionOutcome> {
     const session: ConversationSession = this.session(conversationId);
@@ -361,12 +391,18 @@ export class ConversationRunService {
   activeCount(): number {
     let count: number = 0;
     for (const session of this.sessions.values()) if (session.record !== null && session.state.sending) count++;
+    if (this.externalActiveConversations !== null) count += this.externalActiveConversations().length;
     return count;
   }
   runningConversationIds(): string[] {
     const ids: string[] = [];
     for (const session of this.sessions.values()) {
       if (session.record !== null && session.state.sending) ids.push(session.id);
+    }
+    if (this.externalActiveConversations !== null) {
+      for (const id of this.externalActiveConversations()) {
+        if (ids.indexOf(id) < 0) ids.push(id);
+      }
     }
     return ids;
   }

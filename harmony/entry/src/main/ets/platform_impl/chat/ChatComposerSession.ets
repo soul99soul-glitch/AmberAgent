@@ -604,6 +604,13 @@ export class ChatComposerSession {
       if (!await this.prepareComposerSend(inputParts, owner, sequence) || this.editingNodeId !== editingNodeId ||
         this.editingMessageId !== editingMessageId || !this.deps.continuationCurrent(continuation)) return;
       this.deps.dismissKeyboard();
+      if (editingNodeId.length === 0 && cloud !== null && cloud.isLocalAsyncReady()) {
+        const sent: boolean = await cloud.submitLocalComposer(owner, inputParts, sendText);
+        if (sent && this.pageAlive && this.conversation?.id === owner) {
+          this.clearAcceptedComposer(acceptedText, acceptedImages, acceptedDocs);
+        }
+        return;
+      }
       if (this.sending) await this.enqueuePendingParts(inputParts, true, queueMode);
       else if (editingNodeId.length > 0) {
         if (!this.sendEdit(text)) return;

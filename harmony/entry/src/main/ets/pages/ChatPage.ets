@@ -58,6 +58,7 @@ import { MarkdownText } from '../components/MarkdownText.ets';
 import type { TopModelMenuGroup, ReasoningLevelOption, ReasoningLevel } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, ChatRuntime, getConversationRunService,
+  getConversationTaskRunner,
   getChatKvStore, getCompactStore, ChatProviderChoice, prepareProviderApi, readTaskModelReference, TASK_TITLE_MODEL_KEY, TASK_COMPRESS_MODEL_KEY,
   resolveTaskModelReference, loadTaskPrompts, TaskPrompts, initMcpManager, getAgentTaskTools,
   getAgentCronTools, hydrateSubAgentSetting, getSubAgentManager, isModelCouncilEnabled,
@@ -534,6 +535,7 @@ struct ChatPage {
       error: (message: string): void => { this.presentation.errorMsg = message; },
       autoScrollEnabled: (): boolean => this.timeline.enableAutoScroll,
       jumpToBottom: (): void => { this.timeline.jumpToBottom(); },
+      taskRunner: getConversationTaskRunner,
     });
     this.modelContext.start({
       currentConversation: (): Conversation | null => this.presentation.conversation,

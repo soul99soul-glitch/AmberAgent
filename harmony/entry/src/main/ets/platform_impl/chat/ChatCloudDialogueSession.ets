@@ -13,6 +13,9 @@ import {
   type MacGatewayConnection, type CloudDialogueInputState,
   type CloudDialogueReceipt, type CloudDialogueEvent, type CloudDialogueEventsPage,
 } from '../MacGatewayClient.ets';
+import type {
+  ConversationTaskRunner, LocalTaskRecord, LocalTaskInputRecord,
+} from '../ConversationTaskRunner.ets';
 
 export type { CloudDialogueClientLike } from '../MacGatewayClient.ets';
 
@@ -39,7 +42,7 @@ export interface CloudDialogueTaskRecord {
   workItemId: string;
   topicId: string;
   title: string;
-  status: 'running' | 'completed' | 'blocked' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'completed' | 'blocked' | 'failed' | 'cancelled' | 'interrupted';
   progressText: string;
   stopRequested: boolean;
   resultText: string;
@@ -78,16 +81,18 @@ export interface ChatCloudDialoguePorts {
   autoScrollEnabled: () => boolean;
   jumpToBottom: () => void;
   clientFactory?: (connection: MacGatewayConnection) => CloudDialogueClientLike;
+  taskRunner?: () => ConversationTaskRunner | null;
 }
 
 export const formatCloudInputStateBadge = (
   kind: 'message' | 'followup' | 'stop',
   state: CloudDialogueInputState,
   workItemId: string = '',
+  isLocal: boolean = false,
 ): string => {
   const prefix: string = kind === 'followup'
     ? (workItemId.length > 0 ? `补充说明(${shortWorkItemId(workItemId)})` : '补充说明')
-    : (kind === 'stop' ? '停止请求' : '云端消息');
+    : (kind === 'stop' ? '停止请求' : (isLocal ? '本地提问' : '云端消息'));
   if (state === 'received') return `${prefix} · 已接收待消费 [received]`;
   if (state === 'consumed') return `${prefix} · 已消费 [consumed]`;
   return `${prefix} · 已取消未执行 [cancelled]`;
@@ -140,16 +145,19 @@ export class ChatCloudDialogueSession {
   private pollInFlight: boolean = false;
   private pageAlive: boolean = false;
   private pageVisible: boolean = false;
+  private unsubLocalRunner: (() => void) | null = null;
 
   start(ports: ChatCloudDialoguePorts): void {
     this.ports = ports;
     this.pageAlive = true;
     this.pageVisible = true;
+    this.attachLocalRunner();
     this.refreshConfigAndStart();
   }
 
   show(): void {
     this.pageVisible = true;
+    this.attachLocalRunner();
     this.refreshConfigAndStart();
   }
 
@@ -162,24 +170,99 @@ export class ChatCloudDialogueSession {
     this.pageVisible = false;
     this.pageAlive = false;
     this.stopPolling();
+    if (this.unsubLocalRunner !== null) {
+      this.unsubLocalRunner();
+      this.unsubLocalRunner = null;
+    }
+  }
+
+  private localRunner(): ConversationTaskRunner | null {
+    return this.ports !== null && this.ports.taskRunner !== undefined ? this.ports.taskRunner() : null;
+  }
+
+  private attachLocalRunner(): void {
+    if (this.unsubLocalRunner !== null) return;
+    const runner: ConversationTaskRunner | null = this.localRunner();
+    if (runner === null) return;
+    runner.ensureHydrated().catch((): void => {});
+    this.unsubLocalRunner = runner.subscribe((): void => {
+      if (this.pageAlive) this.uiTick++;
+    });
   }
 
   isActiveMode(): boolean {
     return this.enabled && this.paired && this.connection !== null;
   }
 
+  isLocalAsyncReady(): boolean {
+    return !this.isActiveMode() && this.localRunner() !== null;
+  }
+
+  isStripVisible(): boolean {
+    if (this.isActiveMode()) return true;
+    if (!this.isLocalAsyncReady()) return false;
+    return this.runningTasks().length > 0 || this.recentInputs().length > 0;
+  }
+
+  modeHeaderLabel(): string {
+    if (this.isActiveMode()) return `云主对话 · ${this.gatewayName}`;
+    const runner: ConversationTaskRunner | null = this.localRunner();
+    const convId: string = this.ports?.currentConversation()?.id ?? '';
+    if (runner === null || convId.length === 0) return '本地异步执行';
+    const active: LocalTaskRecord[] = runner.activeAndQueuedTasksForConversation(convId);
+    const runningCount: number = active.filter((t: LocalTaskRecord): boolean => t.status === 'running').length;
+    const queuedCount: number = active.filter((t: LocalTaskRecord): boolean => t.status === 'queued').length;
+    if (runningCount > 0 && queuedCount > 0) return `本地异步执行 · 运行 ${runningCount} · 排队 ${queuedCount}`;
+    if (runningCount > 0) return `本地异步执行 · 运行 ${runningCount}`;
+    if (queuedCount > 0) return `本地异步执行 · 排队 ${queuedCount}`;
+    return '本地异步执行';
+  }
+
   runningTasks(): CloudDialogueTaskRecord[] {
-    return this.tasks.filter((t: CloudDialogueTaskRecord): boolean => t.status === 'running');
+    if (this.isActiveMode()) {
+      return this.tasks.filter((t: CloudDialogueTaskRecord): boolean => t.status === 'running');
+    }
+    const runner: ConversationTaskRunner | null = this.localRunner();
+    const convId: string = this.ports?.currentConversation()?.id ?? '';
+    if (runner === null || convId.length === 0) return [];
+    return runner.activeAndQueuedTasksForConversation(convId).map((t: LocalTaskRecord): CloudDialogueTaskRecord => ({
+      workItemId: t.taskId,
+      topicId: t.conversationId,
+      title: t.title,
+      status: t.status,
+      progressText: t.progressText,
+      stopRequested: t.stopRequested,
+      resultText: t.resultText,
+      updatedAt: t.updatedAt,
+    }));
   }
 
   recentInputs(): CloudDialogueInputRecord[] {
-    return this.inputs.slice(Math.max(0, this.inputs.length - 4));
+    if (this.isActiveMode()) {
+      return this.inputs.slice(Math.max(0, this.inputs.length - 4));
+    }
+    const runner: ConversationTaskRunner | null = this.localRunner();
+    const convId: string = this.ports?.currentConversation()?.id ?? '';
+    if (runner === null || convId.length === 0) return [];
+    const list: LocalTaskInputRecord[] = runner.inputsForConversation(convId);
+    return list.slice(Math.max(0, list.length - 4)).map((i: LocalTaskInputRecord): CloudDialogueInputRecord => ({
+      requestId: i.requestId,
+      eventId: i.requestId,
+      kind: i.kind,
+      text: i.text,
+      topicId: i.conversationId,
+      workItemId: i.taskId,
+      state: i.state,
+      messageId: i.messageId,
+      updatedAt: i.updatedAt,
+    }));
   }
 
   followupTargetTask(): CloudDialogueTaskRecord | null {
     if (this.followupTargetWorkItemId.length === 0) return null;
-    const found: CloudDialogueTaskRecord | undefined = this.tasks.find(
-      (t: CloudDialogueTaskRecord): boolean => t.workItemId === this.followupTargetWorkItemId && t.status === 'running',
+    const found: CloudDialogueTaskRecord | undefined = this.runningTasks().find(
+      (t: CloudDialogueTaskRecord): boolean =>
+        t.workItemId === this.followupTargetWorkItemId && (t.status === 'running' || t.status === 'queued'),
     );
     return found ?? null;
   }
@@ -401,10 +484,65 @@ export class ChatCloudDialogueSession {
     return receipt;
   }
 
+  async submitLocalComposer(
+    conversationId: string,
+    parts: UIMessagePart[],
+    rawText: string,
+  ): Promise<boolean> {
+    const runner: ConversationTaskRunner | null = this.localRunner();
+    if (runner === null || this.ports === null) return false;
+    const trimmed: string = rawText.trim();
+    try {
+      const explicitFollowup = this.parseExplicitFollowupPrefix(trimmed);
+      if (explicitFollowup !== null) {
+        const followupParts: UIMessagePart[] = [
+          { type: 'text', text: explicitFollowup.text, metadata: null },
+        ];
+        for (const p of parts) {
+          if (p.type !== 'text') followupParts.push(p);
+        }
+        await runner.submitFollowup(conversationId, explicitFollowup.workItemId, followupParts, explicitFollowup.text);
+        if (this.followupTargetWorkItemId === explicitFollowup.workItemId) {
+          this.followupTargetWorkItemId = '';
+        }
+        if (this.ports.autoScrollEnabled()) this.ports.jumpToBottom();
+        this.uiTick++;
+        return true;
+      }
+      const targetTask: CloudDialogueTaskRecord | null = this.followupTargetTask();
+      if (targetTask !== null && targetTask.topicId === conversationId) {
+        await runner.submitFollowup(conversationId, targetTask.workItemId, parts, trimmed);
+        this.followupTargetWorkItemId = '';
+        if (this.ports.autoScrollEnabled()) this.ports.jumpToBottom();
+        this.uiTick++;
+        return true;
+      }
+      const fallbackConv: Conversation | null = this.ports.currentConversation();
+      await runner.submitQuestion(conversationId, parts, trimmed, fallbackConv);
+      if (this.ports.autoScrollEnabled()) this.ports.jumpToBottom();
+      this.uiTick++;
+      return true;
+    } catch (e) {
+      this.ports.error((e as Error).message);
+      return false;
+    }
+  }
+
   async stopTask(workItemId: string, explicitRequestId?: string): Promise<CloudDialogueReceipt | null> {
-    if (!this.isActiveMode() || this.ports === null) return null;
+    if (this.ports === null) return null;
     const targetId: string = workItemId.trim();
     if (targetId.length === 0) return null;
+    if (!this.isActiveMode()) {
+      const runner: ConversationTaskRunner | null = this.localRunner();
+      const convId: string = this.ports.currentConversation()?.id ?? '';
+      if (runner === null || convId.length === 0) return null;
+      await runner.stopTask(convId, targetId);
+      if (this.followupTargetWorkItemId === targetId) {
+        this.followupTargetWorkItemId = '';
+      }
+      this.uiTick++;
+      return null;
+    }
     const reqId: string = this.resolveRequestId('stop', targetId, '', explicitRequestId);
     this.submitting = true;
     this.uiTick++;
@@ -892,7 +1030,8 @@ export class ChatCloudDialogueSession {
 
   private async handleGatewayError(err: Error): Promise<void> {
     if (this.ports === null) return;
-    if (err instanceof MacGatewayError && err.kind === 'unauthorized') {
+    const kind: string = err instanceof MacGatewayError ? (err as MacGatewayError).kind : '';
+    if (kind === 'unauthorized') {
       this.stopPolling();
       this.enabled = false;
       this.paired = false;
