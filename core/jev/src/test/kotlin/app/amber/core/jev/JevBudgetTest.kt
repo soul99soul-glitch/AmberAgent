@@ -17,14 +17,14 @@ class JevBudgetTest {
     }
 
     @Test
-    fun ordinaryBudgetDoesNotStarveScreenAutomation() {
+    fun ordinaryBudgetDoesNotStarvePhonePurposes() {
         val budget = JevBudget(store(), clock = { 0L })
 
         repeat(JevLimits.PER_RUN_MAX_REQUESTS) {
             assertTrue(budget.consume("run-1", bodyBytes = 1, purpose = JevPurpose.MEMORY_RECALL))
         }
         assertFalse(budget.consume("run-1", bodyBytes = 1, purpose = JevPurpose.MEMORY_RECALL))
-        assertTrue(budget.consume("run-1", bodyBytes = 1, purpose = JevPurpose.SCREEN_AUTOMATION))
+        assertTrue(budget.consume("run-1", bodyBytes = 1, purpose = JevPurpose.PHONE_ACTIONS))
 
         assertEquals(JevLimits.PER_RUN_MAX_REQUESTS + 1, budget.runUsage("run-1").requests)
     }
@@ -33,17 +33,17 @@ class JevBudgetTest {
     fun screenAutomationHasItsOwnRequestAndStateCeilings() {
         val budget = JevBudget(store(), clock = { 0L })
 
-        repeat(JevBudget.SCREEN_AUTOMATION_MAX_REQUESTS) {
-            assertTrue(budget.consume("run-1", bodyBytes = 1, purpose = JevPurpose.SCREEN_AUTOMATION))
+        repeat(JevBudget.PHONE_MAX_REQUESTS) {
+            assertTrue(budget.consume("run-1", bodyBytes = 1, purpose = JevPurpose.PHONE_ACTIONS))
         }
-        assertFalse(budget.consume("run-1", bodyBytes = 1, purpose = JevPurpose.SCREEN_AUTOMATION))
+        assertFalse(budget.consume("run-1", bodyBytes = 1, purpose = JevPurpose.PHONE_ACTIONS))
 
         val stateBudget = JevBudget(store(), clock = { 0L })
         val requestBytes = 64 * 1024L
-        repeat(JevBudget.SCREEN_AUTOMATION_MAX_STATE_BYTES / requestBytes.toInt()) {
-            assertTrue(stateBudget.consume("run-2", bodyBytes = requestBytes, purpose = JevPurpose.SCREEN_AUTOMATION))
+        repeat(JevBudget.PHONE_MAX_STATE_BYTES / requestBytes.toInt()) {
+            assertTrue(stateBudget.consume("run-2", bodyBytes = requestBytes, purpose = JevPurpose.PHONE_VERIFICATION))
         }
-        assertFalse(stateBudget.consume("run-2", bodyBytes = 1, purpose = JevPurpose.SCREEN_AUTOMATION))
+        assertFalse(stateBudget.consume("run-2", bodyBytes = 1, purpose = JevPurpose.PHONE_ACTIONS))
     }
 
     @Test
@@ -55,10 +55,24 @@ class JevBudgetTest {
                 runKey = null,
                 requestCount = JevLimits.DAILY_MAX_REQUESTS,
                 bodyBytes = 0,
-                purpose = JevPurpose.SCREEN_AUTOMATION,
+                purpose = JevPurpose.PHONE_VERIFICATION,
             ),
         )
         assertFalse(budget.consume(null, bodyBytes = 1, purpose = JevPurpose.MEMORY_RECALL))
         assertEquals(JevLimits.DAILY_MAX_REQUESTS, budget.dailyUsage().requests)
+    }
+
+    @Test
+    fun phoneVerificationAndActionsShareOneBucket() {
+        val budget = JevBudget(store(), clock = { 0L })
+        val half = JevBudget.PHONE_MAX_REQUESTS / 2
+        repeat(half) {
+            assertTrue(budget.consume("run-1", bodyBytes = 1, purpose = JevPurpose.PHONE_VERIFICATION))
+        }
+        repeat(JevBudget.PHONE_MAX_REQUESTS - half) {
+            assertTrue(budget.consume("run-1", bodyBytes = 1, purpose = JevPurpose.PHONE_ACTIONS))
+        }
+        assertFalse(budget.consume("run-1", bodyBytes = 1, purpose = JevPurpose.PHONE_VERIFICATION))
+        assertFalse(budget.consume("run-1", bodyBytes = 1, purpose = JevPurpose.PHONE_ACTIONS))
     }
 }

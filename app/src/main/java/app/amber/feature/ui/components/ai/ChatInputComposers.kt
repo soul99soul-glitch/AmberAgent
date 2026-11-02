@@ -75,6 +75,8 @@ import app.amber.feature.ui.hooks.ChatInputAttachmentKind
 import app.amber.feature.ui.hooks.ChatInputState
 import app.amber.core.utils.appLocale
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.utils.ChatPerfCommandBridge
+import app.amber.feature.ui.utils.ChatPerfTrace
 import app.amber.feature.ui.theme.LocalAmberType
 import org.koin.compose.koinInject
 
@@ -119,18 +121,27 @@ internal fun TextInputRow(
         skillFallbackDescription = stringResource(R.string.chat_input_skill_description_fallback),
     )
     val councilMentionDescription = stringResource(R.string.chat_input_mention_council_description)
-    val quickMessages = remember(settings.quickMessages, webMountEnabled) {
-        settings.getAmberQuickMessages().filterNot { quickMessage ->
-            !webMountEnabled && quickMessage.title.equals("webmount", ignoreCase = true)
+    // Slash/mention menus are inactive on entry. Building every command and
+    // listing enabled skills eagerly loaded optional classes and did disk/IO
+    // work before the user ever typed "/".
+    val slashQuery = state.textContent.text.toString().slashCommandQuery()
+    val slashActive = slashQuery != null
+    val quickMessages = if (!slashActive) {
+        emptyList()
+    } else {
+        remember(settings.quickMessages, webMountEnabled) {
+            settings.getAmberQuickMessages().filterNot { quickMessage ->
+                !webMountEnabled && quickMessage.title.equals("webmount", ignoreCase = true)
+            }
         }
     }
     val enabledSkills by produceState(
         initialValue = emptyList<SkillMetadata>(),
         key1 = settings.enabledSkills,
         key2 = skillManager,
-        key3 = localeTag,
+        key3 = localeTag to slashActive,
     ) {
-        value = if (settings.enabledSkills.isEmpty()) {
+        value = if (!slashActive || settings.enabledSkills.isEmpty()) {
             emptyList()
         } else {
             withContext(Dispatchers.IO) {
@@ -155,22 +166,25 @@ internal fun TextInputRow(
                 filesManager.deleteChatFiles(files)
             }
         }
-        val slashQuery = state.textContent.text.toString().slashCommandQuery()
-        val allSlashCommands = remember(
-            quickMessages,
-            enabledSkills,
-            slashCommandLabels,
-            settings.agentRuntime.subAgent.enabled,
-            settings.agentRuntime.subAgent.mode,
-            settings.agentRuntime.modelCouncil.enabled,
-        ) {
-            buildSlashCommandItems(
-                quickMessages = quickMessages,
-                enabledSkills = enabledSkills,
-                subAgentEnabled = settings.agentRuntime.subAgent.enabled,
-                subAgentMode = settings.agentRuntime.subAgent.mode,
-                labels = slashCommandLabels,
-            )
+        val allSlashCommands = if (!slashActive) {
+            emptyList()
+        } else {
+            remember(
+                quickMessages,
+                enabledSkills,
+                slashCommandLabels,
+                settings.agentRuntime.subAgent.enabled,
+                settings.agentRuntime.subAgent.mode,
+                settings.agentRuntime.modelCouncil.enabled,
+            ) {
+                buildSlashCommandItems(
+                    quickMessages = quickMessages,
+                    enabledSkills = enabledSkills,
+                    subAgentEnabled = settings.agentRuntime.subAgent.enabled,
+                    subAgentMode = settings.agentRuntime.subAgent.mode,
+                    labels = slashCommandLabels,
+                )
+            }
         }
         val slashCommands = remember(allSlashCommands, slashQuery) {
             slashQuery?.let { query ->
@@ -431,6 +445,10 @@ internal fun TextInputRow(
                 .contentReceiver(receiveContentListener)
                 .onFocusChanged {
                     isFocused = it.isFocused
+                    if (it.isFocused) {
+                        ChatPerfTrace.observeFirstFocus()
+                        ChatPerfCommandBridge.reportInteraction("input-tap", "input-focus")
+                    }
                 },
             contentPadding = if (minimalChrome) {
                 // 单行高度压到 ≤46dp，让外层 pill 的 heightIn(min=46) 钳到 46dp，与两侧圆按钮齐平

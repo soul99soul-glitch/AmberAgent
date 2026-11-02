@@ -18,22 +18,26 @@ fun ListSelectableItem(
     enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        if (enabled) {
+    if (app.amber.agent.BuildConfig.DEBUG) android.os.Trace.beginSection("Amber selectable item")
+    if (!enabled) {
+        Box(modifier = modifier.fillMaxWidth()) { content() }
+    } else {
+        Row(
+            modifier = modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             Checkbox(
                 checked = key in selectedKeys,
                 onCheckedChange = {
                     onSelectChange(key)
                 }
             )
-        }
-        Box(
-            modifier = Modifier.weight(1f)
-        ) {
-            content()
+            Box(
+                modifier = Modifier.weight(1f)
+            ) {
+                content()
+            }
         }
     }
+    if (app.amber.agent.BuildConfig.DEBUG) android.os.Trace.endSection()
 }

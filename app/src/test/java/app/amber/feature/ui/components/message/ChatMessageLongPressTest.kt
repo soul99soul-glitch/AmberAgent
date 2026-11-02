@@ -7,7 +7,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -31,6 +39,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.shadows.ShadowDialog
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -60,7 +69,9 @@ class ChatMessageLongPressTest {
     @Test
     fun virtualizedParagraphOpensTheFullMessageActions() {
         val heading = "Long answer"
-        val node = MessageNode.of(UIMessage.assistant("# $heading\n\n" + "A longer paragraph. ".repeat(45)))
+        // Keep this above ChatMessageSingleItemTextMaxChars so the virtualized
+        // path is exercised (short plain replies intentionally stay one item).
+        val node = MessageNode.of(UIMessage.assistant("# $heading\n\n" + "A longer paragraph. ".repeat(200)))
         val item = buildChatMessageVirtualItems(
             node = node, assistant = emptyList(), showAssistantBubble = false,
             loading = false, lastMessage = false,
@@ -101,12 +112,116 @@ class ChatMessageLongPressTest {
         assertEquals("raw child tap must reach its clickable", 1, clicks)
     }
 
+    @Test
+    fun backDismissesOnlyTheMenuWithoutRunningAnAction() {
+        val text = "Keep this conversation visible after Back"
+        var actions = 0
+        content {
+            ChatMessage(
+                node = MessageNode.of(UIMessage.assistant(text)),
+                onFork = { actions++ }, onRegenerate = { actions++ }, onEdit = { actions++ },
+                onShare = { actions++ }, onDelete = { actions++ }, onQuote = { actions++ }, onUpdate = {},
+            )
+        }
+        compose.onNodeWithText(text).performTouchInput { longClick() }
+        compose.runOnIdle { ShadowDialog.getLatestDialog().onBackPressed() }
+        compose.waitForIdle()
+        compose.onNodeWithText(RuntimeEnvironment.getApplication().getString(R.string.copy)).assertDoesNotExist()
+        compose.onNodeWithText(text).assertExists()
+        assertEquals(0, actions)
+    }
+
+    @Test
+    fun actionWaitsForExitAnimationAndIgnoresRepeatedTaps() {
+        val events = mutableListOf<String>()
+        content {
+            var visible by remember { mutableStateOf(true) }
+            if (visible) {
+                ChatMessageActionsSheet(
+                    message = UIMessage.assistant("A completed reply"),
+                    model = null,
+                    onDelete = {}, onEdit = {}, onShare = {}, onFork = {}, onSelectAndCopy = {},
+                    onCopy = { events += "copy" },
+                    onDismissRequest = {
+                        events += "dismiss"
+                        visible = false
+                    },
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        val copy = compose.onNodeWithText(RuntimeEnvironment.getApplication().getString(R.string.copy))
+        copy.performClick()
+        copy.performClick()
+        compose.runOnIdle { assertEquals(emptyList<String>(), events) }
+
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        assertEquals(listOf("dismiss", "copy"), events)
+        copy.assertDoesNotExist()
+    }
+
+    @Test
+    fun tappingScrimDuringExitDoesNotCancelChosenAction() {
+        val events = mutableListOf<String>()
+        content {
+            var visible by remember { mutableStateOf(true) }
+            if (visible) {
+                ChatMessageActionsSheet(
+                    message = UIMessage.assistant("A completed reply"),
+                    model = null,
+                    onDelete = {}, onEdit = {}, onShare = {}, onFork = {}, onSelectAndCopy = {},
+                    onCopy = { events += "copy" },
+                    onDismissRequest = { events += "dismiss"; visible = false },
+                )
+            }
+        }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithText(RuntimeEnvironment.getApplication().getString(R.string.copy)).performClick()
+        compose.mainClock.advanceTimeByFrame()
+        clickOutsideActionsSheet()
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+
+        assertEquals(listOf("dismiss", "copy"), events)
+    }
+
+    @Test
+    fun tappingScrimNormallyDismissesWithoutAction() {
+        val events = mutableListOf<String>()
+        content {
+            var visible by remember { mutableStateOf(true) }
+            if (visible) {
+                ChatMessageActionsSheet(
+                    message = UIMessage.assistant("A completed reply"),
+                    model = null,
+                    onDelete = {}, onEdit = {}, onShare = {}, onFork = {}, onSelectAndCopy = {},
+                    onCopy = { events += "copy" },
+                    onDismissRequest = { events += "dismiss"; visible = false },
+                )
+            }
+        }
+        compose.waitForIdle()
+        clickOutsideActionsSheet()
+        compose.waitForIdle()
+        assertEquals(listOf("dismiss"), events)
+    }
+
+    private fun clickOutsideActionsSheet() {
+        val copy = RuntimeEnvironment.getApplication().getString(R.string.copy)
+        compose.onNode(isRoot() and hasAnyDescendant(hasText(copy)), useUnmergedTree = true)
+            .performTouchInput { click(Offset(5f, 5f)) }
+    }
+
     private fun openMenuAndRegenerate(text: String) {
         val context = RuntimeEnvironment.getApplication()
         compose.onNodeWithContentDescription(context.getString(R.string.copy)).assertDoesNotExist()
         compose.onNodeWithText(text).performTouchInput { longClick() }
         compose.onNodeWithText(context.getString(R.string.copy)).assertExists()
         compose.onNodeWithText(context.getString(R.string.regenerate)).performClick()
+        compose.waitForIdle()
     }
 
     private fun content(block: @Composable () -> Unit) {

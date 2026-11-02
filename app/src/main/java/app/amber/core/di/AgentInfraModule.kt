@@ -25,6 +25,8 @@ import app.amber.feature.tools.SystemAccessTools
 import app.amber.feature.tools.TerminalTools
 import app.amber.feature.webview.WebViewOperationStore
 import app.amber.core.automation.ScreenCaptureManager
+import org.koin.core.module.dsl.onClose
+import org.koin.core.module.dsl.withOptions
 import org.koin.dsl.module
 
 /**
@@ -61,7 +63,10 @@ val agentInfraModule = module {
     single { RunOwnershipRegistry() }
     // 跨对话活动提示：只读投影，不参与取消或所有权决策。
     single {
-        app.amber.feature.runtime.ConversationActivityCenter(get()) { conversationId ->
+        app.amber.feature.runtime.ConversationActivityCenter(
+            registry = get(),
+            terminals = get(),
+        ) { conversationId ->
             runCatching {
                 get<app.amber.core.repository.ConversationRepository>()
                     .getConversationTitleById(kotlin.uuid.Uuid.parse(conversationId))
@@ -98,7 +103,14 @@ val agentInfraModule = module {
     single { ScreenCaptureManager(get()) }
 
     single<app.amber.core.automation.ScreenOcrEngine> {
-        app.amber.core.automation.DefaultScreenOcrEngine(get(), get())
+        app.amber.core.automation.DefaultScreenOcrEngine(
+            context = get(),
+            screenCaptureManager = get(),
+        )
+    } withOptions {
+        // Koin does not close AutoCloseable on its own; this is the production
+        // release path for the cached ML Kit recognizer.
+        onClose { engine -> engine?.close() }
     }
 
     single { ScreenAutomationTools(get(), get(), get(), get(), get(), get(), getOrNull()) }

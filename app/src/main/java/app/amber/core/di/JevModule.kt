@@ -55,6 +55,11 @@ val jevModule = module {
     single<JevCalibrationStore> {
         FileJevCalibrationStore(File(androidContext().filesDir, "jev/calibration.jsonl"))
     }
+    single<app.amber.core.jev.PerAppSuccessPathStore> {
+        app.amber.core.jev.FilePerAppSuccessPathStore(
+            File(androidContext().filesDir, "jev/per_app_success_paths.json"),
+        )
+    }
     single {
         JevRuntime(
             coordinator = get(),
@@ -69,7 +74,11 @@ val jevModule = module {
     single { JevToolOutputProjector(get()) }
     single { JevToolResultRetention(get()) }
     single { app.amber.core.jev.JevAutoApprovalGate(get()) }
+    single { app.amber.core.jev.JevApprovalTriage(get()) }
     single { app.amber.core.jev.JevCompletionCheck(get()) }
+    single { app.amber.core.jev.JevSubagentIntent(get()) }
+    single<app.amber.feature.subagent.SubAgentIntentAlignment> { get<app.amber.core.jev.JevSubagentIntent>() }
+    single { app.amber.core.jev.JevScriptJudgment(get()) }
     single { JevCouncilPoolRanker(get()) }
     single<CouncilPoolRanker> { get<JevCouncilPoolRanker>() }
     single { JevWebGoalRunner(get()) }
@@ -110,6 +119,7 @@ val jevModule = module {
             },
             ocrEngine = getOrNull(),
             takeoverController = getOrNull(),
+            successPathStore = get(),
         )
     }
 }

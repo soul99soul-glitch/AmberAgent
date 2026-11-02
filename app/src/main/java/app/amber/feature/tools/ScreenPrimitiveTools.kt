@@ -21,7 +21,6 @@ import app.amber.core.automation.ScreenOcrBlock
 import app.amber.core.automation.ScreenOcrEngine
 import app.amber.core.automation.ScreenOcrMode
 import app.amber.core.automation.ScreenOcrObservation
-import app.amber.core.automation.SensitiveScreenTextClassifier
 
 /** Approved single actions, legacy reads and screenshot tools; no operation state. */
 internal class ScreenPrimitiveTools(
@@ -244,7 +243,7 @@ internal class ScreenPrimitiveTools(
 
     val screenReadUiTool = Tool(
         name = "screen_read_ui",
-        description = "Read the current Accessibility UI tree for screen reasoning (with automatic on-device OCR fallback for low-coverage/WebView/Canvas screens). For a multi-step phone goal, first discover screen_run_goal: when enabled it uses Jev inside Accessibility to select and execute validated actions, reducing model round trips. Use this raw tree tool for inspection or when that tool hands back.",
+        description = "Read the current Accessibility UI tree for screen reasoning (with automatic compiled on-device OCR fallback for low-coverage/WebView/Canvas screens). OCR uses bundled ML Kit text recognition for Chinese (Simplified/Traditional) and Latin/English; `ocr_source`/`ocr_outcome` in the result distinguish real bitmap OCR from Accessibility-only metadata. For a multi-step phone goal, first discover screen_run_goal: when enabled it uses Jev inside Accessibility to select and execute validated actions, reducing model round trips. Use this raw tree tool for inspection or when that tool hands back.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -263,7 +262,6 @@ internal class ScreenPrimitiveTools(
                 val snapshot = runCatching { service.captureScreenSnapshot() }.getOrNull()
                 val ocrObservation = ocrEngine.observe(
                     snapshot = snapshot,
-                    uiTreeDump = uiTree,
                     mode = ocrMode,
                     forceReason = if (ocrMode == ScreenOcrMode.AUTO && uiTree.isBlank()) "empty_ui_tree_dump" else null,
                 )
@@ -294,7 +292,11 @@ internal class ScreenPrimitiveTools(
                 val service = requireScreenAccessibility()
                 val query = input.requiredString("text")
                 val ocrMode = input.resolveOcrMode()
-                val treeMatches = service.findTextNodes(query = query, maxNodes = input.int("max_nodes") ?: 160)
+                val treeMatches = if (ocrMode == ScreenOcrMode.ON) {
+                    service.findTextNodes(query = query, maxNodes = input.int("max_nodes") ?: 160)
+                } else {
+                    service.findTextNodes(query = query, maxNodes = input.int("max_nodes") ?: 160)
+                }
                 val ocrObservation = if (ocrMode == ScreenOcrMode.ON || (ocrMode == ScreenOcrMode.AUTO && treeMatches.isEmpty())) {
                     val snapshot = runCatching { service.captureScreenSnapshot() }.getOrNull()
                     ocrEngine.observe(
@@ -387,18 +389,10 @@ internal class ScreenPrimitiveTools(
                             }
                         }
                         ocrMatch != null -> {
-                            // The OCR frame is the whole display, which can be larger than this app's
-                            // window metrics in split-screen; validate against the frame it came from.
-                            val ocrWidth = ocrObservation?.displayWidth
-                                ?: context.resources.displayMetrics.widthPixels
-                            val ocrHeight = ocrObservation?.displayHeight
-                                ?: context.resources.displayMetrics.heightPixels
                             val point = requireDisplayPoint(
                                 x = ocrMatch.centerX,
                                 y = ocrMatch.centerY,
                                 label = "screen_tap_text.ocr",
-                                width = ocrWidth,
-                                height = ocrHeight,
                             )
                             val ok = service.tap(point.x, point.y)
                             textJson {
@@ -609,18 +603,13 @@ internal class ScreenPrimitiveTools(
             }
         }
     )
-    private fun requireDisplayPoint(
-        x: Float,
-        y: Float,
-        label: String,
-        width: Int = context.resources.displayMetrics.widthPixels,
-        height: Int = context.resources.displayMetrics.heightPixels,
-    ): ScreenPoint {
+    private fun requireDisplayPoint(x: Float, y: Float, label: String): ScreenPoint {
+        val metrics = context.resources.displayMetrics
         return requirePointInDisplayBounds(
             x = x,
             y = y,
-            width = width,
-            height = height,
+            width = metrics.widthPixels,
+            height = metrics.heightPixels,
             label = label
         )
     }
@@ -661,75 +650,6 @@ internal class ScreenPrimitiveTools(
         })
     }
 
-    private fun ScreenOcrBlock.toMatchJson(index: Int) = buildJsonObject {
-        put("index", index)
-        put("source", "ocr")
-        put("id", id)
-        put("text", SensitiveScreenTextClassifier.redactIfSensitive(text))
-        put("content_description", "")
-        put("class_name", "ocr.text_block")
-        put("view_id", "")
-        put("clickable", true)
-        put("enabled", true)
-        put("confidence", confidence.toDouble())
-        put("sensitive", isSensitive)
-        put("bounds", buildJsonObject {
-            put("left", left)
-            put("top", top)
-            put("right", right)
-            put("bottom", bottom)
-            put("center_x", centerX.toDouble())
-            put("center_y", centerY.toDouble())
-        })
-        put("normalized_bounds", buildJsonObject {
-            put("left", normalizedBounds.left.toDouble())
-            put("top", normalizedBounds.top.toDouble())
-            put("right", normalizedBounds.right.toDouble())
-            put("bottom", normalizedBounds.bottom.toDouble())
-            put("center_x", normalizedBounds.centerX.toDouble())
-            put("center_y", normalizedBounds.centerY.toDouble())
-        })
-    }
-
-    private fun kotlinx.serialization.json.JsonObjectBuilder.appendOcrTelemetry(
-        observation: ScreenOcrObservation,
-    ) {
-        put("ocr_mode", observation.mode.wireName())
-        put("ocr_triggered", observation.triggered)
-        put("ocr_reason", observation.triggerReason)
-        put("ocr_block_count", observation.blocks.size)
-        put("ocr_pixel_frame", observation.pixelFrame)
-        if (observation.triggered) {
-            // Keep the flat text export consistent with the per-block export below: both are
-            // user-visible and must not leak OTP/password text from OCR.
-            put(
-                "ocr_text",
-                observation.blocks
-                    .map { SensitiveScreenTextClassifier.redactIfSensitive(it.text) }
-                    .filter { it.isNotBlank() }
-                    .distinct()
-                    .joinToString("\n")
-                    .take(4_000),
-            )
-            put("ocr_blocks", buildJsonArray {
-                observation.blocks.forEachIndexed { index, block ->
-                    add(block.toMatchJson(index))
-                }
-            })
-        }
-        observation.coverage?.let { cov ->
-            put("tree_coverage", buildJsonObject {
-                put("total_nodes", cov.totalNodes)
-                put("labeled_nodes", cov.labeledNodes)
-                put("interactive_nodes", cov.interactiveNodes)
-                put("unlabeled_interactive_nodes", cov.unlabeledInteractiveNodes)
-                put("custom_canvas_or_webview_nodes", cov.customCanvasOrWebViewNodes)
-                put("coverage_ratio", cov.coverageRatio.toDouble())
-                put("is_low_coverage", cov.isLowCoverage)
-                put("reason", cov.reason)
-            })
-        }
-    }
 }
 
 internal fun JsonElement.requiredFloat(name: String): Float =

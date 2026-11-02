@@ -43,6 +43,8 @@ import app.amber.agent.data.db.dao.ThreadGraphDAO
 import app.amber.agent.data.db.dao.ThemePackageDAO
 import app.amber.agent.data.db.dao.ToolEffectDAO
 import app.amber.agent.data.db.entity.ConversationEntity
+import app.amber.agent.data.db.entity.ConversationActivityBaselineEntity
+import app.amber.agent.data.db.entity.ConversationActivitySeenEntity
 import app.amber.agent.data.db.entity.ConversationCompactEntity
 import app.amber.agent.data.db.entity.ConversationContextEventEntity
 import app.amber.agent.data.db.entity.ConversationDraftEntity
@@ -141,8 +143,10 @@ import kotlinx.serialization.json.JsonPrimitive
         ContinueCandidateDismissEntity::class,
         ThemePackageEntity::class,
         LiveCardEntity::class,
+        ConversationActivitySeenEntity::class,
+        ConversationActivityBaselineEntity::class,
     ],
-    version = 21
+    version = 22
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -628,6 +632,32 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE `deep_read_cache` ADD COLUMN `template_id` TEXT")
                 db.execSQL("ALTER TABLE `deep_read_cache` ADD COLUMN `structured_json` TEXT")
                 db.execSQL("ALTER TABLE `hot_topic_cache` ADD COLUMN `template_id` TEXT")
+            }
+        }
+
+        /**
+         * Cross-conversation activity watermarks. Does not change [run_terminal];
+         * seen rows are per runId so a mismatched mark cannot clear another run.
+         */
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `conversation_activity_seen` (" +
+                        "`run_id` TEXT NOT NULL, " +
+                        "`conversation_id` TEXT NOT NULL, " +
+                        "`version_ms` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`run_id`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_conversation_activity_seen_conversation_id` " +
+                        "ON `conversation_activity_seen` (`conversation_id`)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `conversation_activity_baseline` (" +
+                        "`id` INTEGER NOT NULL, " +
+                        "`established_at_ms` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))"
+                )
             }
         }
 

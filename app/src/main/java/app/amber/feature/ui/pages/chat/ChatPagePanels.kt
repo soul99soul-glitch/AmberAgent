@@ -96,13 +96,13 @@ internal fun ChatRecapPanelHost(
     }
 }
 
-/** 跨对话活动面板：复用顶栏面板外壳，语义只有"谁在跑"。 */
+/** 跨对话活动面板：复用顶栏面板外壳，按 kind 展示等待/失败/完成/运行。 */
 @Composable
 internal fun ChatActivityPanelHost(
     visible: Boolean,
     notices: List<app.amber.feature.runtime.ConversationActivityNotice>,
     onDismiss: () -> Unit,
-    onOpen: (String) -> Unit,
+    onOpen: (app.amber.feature.runtime.ConversationActivityNotice) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     ChatTopPanel(

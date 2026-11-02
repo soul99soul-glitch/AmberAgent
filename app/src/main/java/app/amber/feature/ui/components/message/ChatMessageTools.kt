@@ -121,7 +121,17 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp)
-            .animateContentSize(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()),
+            // Settled history tool steps never change size; the spring only
+            // pays off while input/output are still arriving.
+            .then(
+                if (loading) {
+                    Modifier.animateContentSize(
+                        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+                    )
+                } else {
+                    Modifier
+                },
+            ),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         if (isPending && !dedicatedThemeApproval) {
@@ -143,7 +153,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 onApprove = { onToolApproval?.invoke(tool.toolCallId, true, "") },
                 actionsEnabled = onToolApproval != null,
                 approveEnabled = sshCanApprove,
-                notice = jevAutoApprovalNotice(tool),
+                notice = jevApprovalNotice(tool),
                 extraContent = sshExtraContent,
             )
         } else {
@@ -156,6 +166,19 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 loading = loading,
                 onClick = { showResult = true },
                 approvalActions = null,
+            )
+        }
+
+        val scriptJudgmentNotice = if (!isPending && !isDenied && tool.isExecuted) {
+            jevScriptJudgmentNotice(tool)
+        } else {
+            null
+        }
+        if (scriptJudgmentNotice != null) {
+            Text(
+                text = scriptJudgmentNotice,
+                style = MaterialTheme.typography.labelSmall,
+                color = workspace.muted,
             )
         }
 
@@ -372,7 +395,13 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     }
 }
 
-/** Jev 复核把自动批准收紧为人工审批时，审批卡上说明命中的风险类别。 */
+/** Jev 复核/分诊把权限收紧为人工审批时，审批卡上说明原因。 */
+@Composable
+private fun jevApprovalNotice(tool: UIMessagePart.Tool): String? {
+    val parts = listOfNotNull(jevAutoApprovalNotice(tool), jevApprovalTriageNotice(tool))
+    return parts.takeIf { it.isNotEmpty() }?.joinToString("\n")
+}
+
 @Composable
 private fun jevAutoApprovalNotice(tool: UIMessagePart.Tool): String? {
     val keys = (tool.metadata?.get(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) as? kotlinx.serialization.json.JsonArray)
@@ -388,4 +417,31 @@ private fun jevAutoApprovalNotice(tool: UIMessagePart.Tool): String? {
         }
     }
     return stringResource(R.string.chat_tool_jev_auto_approval_paused, labels.joinToString(stringResource(R.string.chat_tool_jev_risk_separator)))
+}
+
+@Composable
+private fun jevApprovalTriageNotice(tool: UIMessagePart.Tool): String? {
+    val triage = tool.metadata?.get(app.amber.core.jev.JevApprovalTriage.METADATA_KEY) as? kotlinx.serialization.json.JsonObject
+        ?: return null
+    val applied = triage["applied"]?.jsonPrimitive?.contentOrNull ?: return null
+    if (applied == "allow") return null
+    val facts = (triage["facts"] as? kotlinx.serialization.json.JsonArray)
+        ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+        .orEmpty()
+    val detail = facts.takeIf { it.isNotEmpty() }?.joinToString(stringResource(R.string.chat_tool_jev_risk_separator))
+        ?: applied
+    return stringResource(R.string.chat_tool_jev_approval_triage_paused, detail)
+}
+
+/** Neutral SCRIPT_JUDGMENT caption. Does not change tool status or retry. */
+@Composable
+private fun jevScriptJudgmentNotice(tool: UIMessagePart.Tool): String? {
+    val notice = app.amber.core.jev.JevScriptJudgment.noticeFor(tool) ?: return null
+    val res = when (notice.verdict) {
+        "ok" -> R.string.chat_tool_jev_script_judgment_ok
+        "failed" -> R.string.chat_tool_jev_script_judgment_failed
+        "needs_attention" -> R.string.chat_tool_jev_script_judgment_needs_attention
+        else -> return null
+    }
+    return stringResource(res)
 }

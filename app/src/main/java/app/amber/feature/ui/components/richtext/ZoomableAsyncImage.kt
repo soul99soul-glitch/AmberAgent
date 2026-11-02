@@ -2,6 +2,8 @@ package app.amber.feature.ui.components.richtext
 
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,6 +24,10 @@ import app.amber.feature.ui.components.ui.ImagePreviewDialog
 import app.amber.feature.ui.components.ui.LocalExportContext
 import app.amber.feature.ui.modifier.shimmer
 import app.amber.feature.ui.theme.LocalDarkMode
+import app.amber.feature.ui.utils.ChatPerfImageModelOverride
+import app.amber.feature.ui.utils.ChatPerfProbeToken
+import app.amber.feature.ui.utils.LocalImageReadinessDispose
+import app.amber.feature.ui.utils.LocalImageReadinessProbe
 
 /** Test hook: decoded pixel size after Coil success. Null in production. */
 internal val LocalMarkdownImageDecodeProbe = staticCompositionLocalOf<((Int, Int) -> Unit)?> { null }
@@ -40,21 +46,38 @@ fun ZoomableAsyncImage(
     val placeholder = if(LocalDarkMode.current) R.drawable.placeholder_dark else R.drawable.placeholder
     val export = LocalExportContext.current
     val decodeProbe = LocalMarkdownImageDecodeProbe.current
+    val readinessProbe = LocalImageReadinessProbe.current
+    val readinessDispose = LocalImageReadinessDispose.current
+    val readinessToken = remember(model, readinessProbe) {
+        if (readinessProbe != null && !model.isNullOrBlank()) ChatPerfProbeToken.next() else 0
+    }
+    // Fixture-only URL -> local file mapping. Production leaves this null.
+    val effectiveModel = remember(model) {
+        model?.let { ChatPerfImageModelOverride.resolve?.invoke(it) } ?: model
+    }
     // 必须记住请求：流式渲染每帧都会重组，每次新建 ImageRequest 会让 Coil 把它当成
     // 新请求重启加载，图还在屏幕里就退回占位/水波纹——这正是"滚回屏幕前一直是空白"。
     // data 是稳定 String，remember 后同一个请求复用内存缓存，命中即绘制。
-    val coilModel = remember(model, export, context, placeholder) {
+    val coilModel = remember(effectiveModel, export, context, placeholder) {
         ImageRequest.Builder(context)
-            .data(model)
+            .data(effectiveModel)
             .placeholder(placeholder)
             .crossfade(false)
             .allowHardware(!export)
             .build()
     }
-    var loading by remember(model) { mutableStateOf(model.isNullOrBlank()) }
+    DisposableEffect(readinessToken) {
+        onDispose {
+            if (readinessToken != 0) readinessDispose?.invoke(readinessToken)
+        }
+    }
+    var loading by remember(effectiveModel) { mutableStateOf(effectiveModel.isNullOrBlank()) }
     // 一旦这张图成功画过，就再也不用水波纹盖住它：水波纹是"还没有图"的提示，
     // 覆盖已画好的内容只会看起来像图片又变空白了。
-    var loaded by remember(model) { mutableStateOf(false) }
+    var loaded by remember(effectiveModel) { mutableStateOf(false) }
+    SideEffect {
+        if (readinessToken != 0) readinessProbe?.invoke(readinessToken, !loading)
+    }
     AsyncImage(
         model = coilModel,
         contentDescription = contentDescription,
@@ -82,7 +105,7 @@ fun ZoomableAsyncImage(
         },
     )
     if (showImageViewer) {
-        ImagePreviewDialog(images = listOf(model ?: "")) {
+        ImagePreviewDialog(images = listOf(effectiveModel ?: "")) {
             showImageViewer = false
         }
     }

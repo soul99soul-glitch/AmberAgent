@@ -1,12 +1,7 @@
 package app.amber.agent
 
-import android.app.Activity
 import android.app.UiAutomation
 import android.os.Bundle
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
-import android.content.Intent
 import androidx.test.platform.app.InstrumentationRegistry
 import app.amber.core.automation.getActiveAccessibilityController
 import app.amber.core.di.JevApiKeyDescriptor
@@ -23,7 +18,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -32,122 +26,32 @@ import org.junit.Test
 import org.koin.core.context.GlobalContext
 import java.io.File
 
-/** Native UI fixture installed only in the test APK; no external-account side effects. */
-class JevScreenFixtureActivity : Activity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        showPage(0)
-    }
-
-    private fun showPage(page: Int) {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 160, 48, 48)
-            addView(TextView(context).apply {
-                textSize = 24f
-                text = when (page) {
-                    0 -> "无障碍实测首页。请打开评论列表，再进入第二页。"
-                    1 -> "评论列表第 1 页。评论甲：画质清晰。"
-                    else -> "评论列表第 2 页。验证标记：琥珀验证完成。评论乙：声音清晰。"
-                }
-            })
-            if (page < 2) addView(Button(context).apply {
-                text = if (page == 0) "打开评论列表" else "下一页"
-                setOnClickListener { showPage(page + 1) }
-            })
-            addView(Button(context).apply { text = "删除全部评论" })
-        }
-        setContentView(layout)
-    }
-}
-
 /** Explicit opt-in: uses the user's saved Jev key and real Accessibility service + HTTP. */
 class JevScreenDeviceTest {
     private suspend fun connectAccessibility() {
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val automation = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
-        val resolver = instrumentation.targetContext.contentResolver
-        val key = android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        val component = "${instrumentation.targetContext.packageName}/app.amber.core.automation.AmberAccessibilityService"
-        val original = android.provider.Settings.Secure.getString(resolver, key).orEmpty()
-        require(component in original.split(':')) { "Enable Amber Accessibility before testing" }
-        if (getActiveAccessibilityController() != null) return
-        // The instrumentation process is the target app process, so an enabled service normally
-        // binds to it. Prefer waiting: on API 34 an unbind/rebind through Settings can leave the
-        // service stuck in "crashed services" until reboot, which breaks every later capture.
-        val boundByWaiting = kotlinx.coroutines.withTimeoutOrNull(10_000) {
-            while (getActiveAccessibilityController() == null) delay(250)
-            true
-        } ?: false
-        if (boundByWaiting) return
-        // OEM fallback: force the accessibility manager to re-read the service list.
-        automation.adoptShellPermissionIdentity(android.Manifest.permission.WRITE_SECURE_SETTINGS)
-        try {
-            android.provider.Settings.Secure.putString(resolver, key, original.split(':').filterNot { it == component }.joinToString(":"))
-            delay(250)
-        } finally {
-            try { android.provider.Settings.Secure.putString(resolver, key, original) }
-            finally { automation.dropShellPermissionIdentity() }
-        }
+        AmberS9DeviceSupport.enableAmberAccessibility()
         withTimeout(20_000) { while (getActiveAccessibilityController() == null) delay(250) }
     }
 
-    private suspend fun launchFixture(activityName: String) {
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val testPackage = instrumentation.context.packageName
-        val fd = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
-            // FLAG_ACTIVITY_NEW_TASK|CLEAR_TASK; `am start --activity-new-task` is not a valid
-            // option on API 34, which made this helper fail before it ever launched the fixture.
-            .executeShellCommand("am start -W -n $testPackage/$activityName -f 0x10008000")
-        android.os.ParcelFileDescriptor.AutoCloseInputStream(fd).bufferedReader().use { it.readText() }
-    }
-
-    private suspend fun openFixture(activityName: String = "app.amber.agent.JevScreenFixtureActivity") {
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val testPackage = instrumentation.context.packageName
-        launchFixture(activityName)
-        withTimeout(10_000) {
-            while (kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                getActiveAccessibilityController()?.captureScreenSnapshot()?.packageName
-            } != testPackage) delay(250)
-        }
-    }
-
-    @Test
-    fun canvasScreenIsLowCoverageAndOcrReadsItsPixels() = runBlocking {
-        connectAccessibility()
-        // A canvas-only window has no accessibility text, so the snapshot package settles as soon
-        // as the activity is resumed; the 10s package wait in openFixture is unnecessary here.
-        launchFixture("app.amber.agent.OcrCanvasFixtureActivity")
-        delay(800)
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val controller = getActiveAccessibilityController()!!
-        val snapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-            controller.captureScreenSnapshot()
-        } ?: error("accessibility snapshot missing for the canvas fixture")
-        val observation = app.amber.core.automation.DefaultScreenOcrEngine(
-            context = context,
-            screenCaptureManager = app.amber.core.automation.ScreenCaptureManager(context),
-        ).observe(snapshot = snapshot, mode = app.amber.core.automation.ScreenOcrMode.AUTO)
-        val text = observation.blocks.joinToString(" ") { it.text }
-        val diagnostics = "pkg=${snapshot.packageName} nodes=${observation.coverage.totalNodes} " +
-            "labeled=${observation.coverage.labeledNodes} ratio=${observation.coverage.coverageRatio} " +
-            "reason=${observation.coverage.reason} ocr='$text'"
-
-        assertTrue(
-            "canvas screen should be low coverage: $diagnostics",
-            observation.coverage.isLowCoverage,
+    private suspend fun openFixture() {
+        AmberS9DeviceSupport.launchTestPackageActivity("app.amber.agent.JevScreenFixtureActivity")
+        AmberS9DeviceSupport.waitForSnapshotPackage(
+            AmberS9DeviceSupport.targetPackage,
+            timeoutMs = 10_000,
         )
-        assertTrue("AUTO should trigger OCR on the canvas screen: $diagnostics", observation.triggered)
-        assertTrue("pixel frame expected: $diagnostics", observation.pixelFrame)
-        assertTrue("OCR did not read the canvas text: $diagnostics", text.contains("AMBER", ignoreCase = true))
+    }
+
+    @org.junit.After
+    fun restoreAccessibility() {
+        AmberS9DeviceSupport.restoreAmberAccessibility()
     }
 
     @Test
     fun nativeSnapshotsRejectStaleAndVerifyLocalActions() = runBlocking {
+        AmberS9DeviceSupport.assumeUnlocked()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         connectAccessibility()
-        val testPackage = instrumentation.context.packageName
+        val testPackage = AmberS9DeviceSupport.targetPackage
         openFixture()
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
             val controller = getActiveAccessibilityController()!!
@@ -170,12 +74,14 @@ class JevScreenDeviceTest {
     @Test
     fun realJevBilibiliSearch() = runBlocking {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
+        AmberS9DeviceSupport.assumeUnlocked()
+        AmberS9DeviceSupport.assumeS9FixtureApplication()
         org.junit.Assume.assumeTrue(InstrumentationRegistry.getArguments().getString("bilibiliJev") == "true")
         instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
         val koin = GlobalContext.get()
         val settings = koin.get<SettingsAggregator>()
         withTimeout(15_000) { settings.settingsFlow.first { !it.init } }
-        assertEquals(JevMode.ACTIVE, settings.settingsFlow.value.jev.modeFor(JevPurpose.SCREEN_AUTOMATION))
+        assertEquals(JevMode.ACTIVE, settings.settingsFlow.value.jev.modeFor(JevPurpose.PHONE_ACTIONS))
         connectAccessibility()
         // W08：多步自控只进显式授权的应用；测试操作员在此显式授权。
         settings.update { current ->
@@ -208,6 +114,8 @@ class JevScreenDeviceTest {
     @Test
     fun realJevRunsNativeGoalThroughProductionTool() = runBlocking {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
+        AmberS9DeviceSupport.assumeUnlocked()
+        AmberS9DeviceSupport.assumeS9FixtureApplication()
         val args = InstrumentationRegistry.getArguments()
         org.junit.Assume.assumeTrue(args.getString("realJev") == "true")
         instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
@@ -218,14 +126,18 @@ class JevScreenDeviceTest {
         // This opt-in test also enables the feature requested by the device owner.
         settings.update { current -> current.copy(jev = current.jev.copy(
             enabled = true,
-            purposes = current.jev.purposes + (JevPurpose.SCREEN_AUTOMATION to JevMode.ACTIVE),
+            purposes = current.jev.purposes +
+                (JevPurpose.PHONE_VERIFICATION to JevMode.ACTIVE) +
+                (JevPurpose.PHONE_ACTIONS to JevMode.ACTIVE),
             dataScopes = current.jev.dataScopes + JevDataScope.SCREEN_CONTENT + JevDataScope.TASK_TEXT,
         )) }
         withTimeout(10_000) { settings.settingsFlow.first {
-            it.jev.modeFor(JevPurpose.SCREEN_AUTOMATION) == JevMode.ACTIVE && JevDataScope.SCREEN_CONTENT in it.jev.dataScopes
+            it.jev.modeFor(JevPurpose.PHONE_VERIFICATION) == JevMode.ACTIVE &&
+                it.jev.modeFor(JevPurpose.PHONE_ACTIONS) == JevMode.ACTIVE &&
+                JevDataScope.SCREEN_CONTENT in it.jev.dataScopes
         } }
         connectAccessibility()
-        val testPackage = instrumentation.context.packageName
+        val testPackage = AmberS9DeviceSupport.targetPackage
         // W08：先显式授权测试夹具包名，再跑多步目标。
         settings.update { current ->
             val scope = current.agentRuntime.screenAutomation

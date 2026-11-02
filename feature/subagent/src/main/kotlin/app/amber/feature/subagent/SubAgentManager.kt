@@ -66,6 +66,7 @@ class SubAgentManager(
     // keeps the exact legacy in-memory behavior — no store writes, no reads.
     private val threadGraphStore: ThreadGraphStore? = null,
     private val capabilityFlags: CapabilityFlags? = null,
+    private val intentAlignment: SubAgentIntentAlignment? = null,
 ) {
     private val turnLauncher = SubAgentTurnLauncher(agentRunner, turnPayloads, appScope)
     private val runDir = File(context.filesDir, "amberagent/subagents/runs").also { it.mkdirs() }
@@ -199,6 +200,21 @@ class SubAgentManager(
         } else {
             task
         }
+        val alignment = intentAlignment?.assess(
+            definition = effectiveDefinition,
+            task = effectiveTask,
+            runKey = parentRunId,
+        ) ?: SubAgentIntentAlignment.Result.NotJudged
+        if (alignment.judged && !alignment.aligned) {
+            return@withContext errorPayload(
+                "intent_misaligned",
+                alignment.reason ?: "Task objective is outside the selected subagent role.",
+                extra = buildJsonObject {
+                    put("intent_aligned", false)
+                    put("subagent_id", effectiveDefinition.id)
+                },
+            )
+        }
 
         val now = Instant.now().toEpochMilli()
         val runId = Uuid.random().toString()
@@ -321,7 +337,7 @@ class SubAgentManager(
                     return@withLock errorPayload("launch_failed", "Sub-agent turn could not be launched.")
                 }
 
-                runToPayload(run)
+                startPayload(run, alignment)
             } catch (error: Exception) {
                 // No observation job owns a failed startup. Release its admission through the
                 // normal terminal path, retaining the captured restore epoch and original error.
@@ -1286,10 +1302,28 @@ class SubAgentManager(
     private fun runToPayload(run: SubAgentRun, includeDisplayText: Boolean = false): JsonObject =
         subAgentRunToPayload(run, json, includeDisplayText)
 
-    private fun errorPayload(code: String, message: String): JsonObject = buildJsonObject {
+    private fun startPayload(
+        run: SubAgentRun,
+        alignment: SubAgentIntentAlignment.Result,
+    ): JsonObject {
+        val base = runToPayload(run)
+        if (!alignment.judged) return base
+        return JsonObject(
+            base + mapOf(
+                "intent_aligned" to kotlinx.serialization.json.JsonPrimitive(alignment.aligned),
+            ),
+        )
+    }
+
+    private fun errorPayload(
+        code: String,
+        message: String,
+        extra: JsonObject = JsonObject(emptyMap()),
+    ): JsonObject = buildJsonObject {
         put("status", "failed")
         put("error", message)
         put("code", code)
+        extra.forEach { (key, value) -> put(key, value) }
     }
 
     private class RuntimeRun(

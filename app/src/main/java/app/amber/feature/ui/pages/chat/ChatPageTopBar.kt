@@ -37,6 +37,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
@@ -222,6 +223,7 @@ private fun TopBar(
                         modifier = Modifier
                             .size(48.dp)
                             .clip(androidx.compose.foundation.shape.CircleShape)
+                            .testTag("chat-header-back")
                             .clickable { onBack() },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -262,6 +264,7 @@ private fun TopBar(
                         modifier = Modifier
                             .heightIn(min = 28.dp)
                             .clip(RoundedCornerShape(8.dp))
+                            .testTag("chat-header-model-menu")
                             .clickable { onToggleModelMenu() }
                             .padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,

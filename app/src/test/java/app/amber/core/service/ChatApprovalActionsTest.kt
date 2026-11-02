@@ -158,7 +158,10 @@ class ChatApprovalActionsTest : DurableRuntimeTestBase() {
         val jev = tool("jev", "terminal_execute").copy(metadata = buildJsonObject {
             put(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY, true)
         })
-        val conversation = Conversation.ofId(Uuid.random()).copy(messageNodes = listOf(assistantTools(ordinary, ask, jev)))
+        val triage = tool("triage", "terminal_execute").copy(metadata = buildJsonObject {
+            put(app.amber.core.jev.JevApprovalTriage.METADATA_KEY, true)
+        })
+        val conversation = Conversation.ofId(Uuid.random()).copy(messageNodes = listOf(assistantTools(ordinary, ask, jev, triage)))
         fixture.repo.insertConversation(conversation)
 
         val decision = fixture.actions.approvePendingAutoApprovableTools(conversation.id)!!
@@ -168,6 +171,7 @@ class ChatApprovalActionsTest : DurableRuntimeTestBase() {
         assertEquals(ToolApprovalState.Approved, persisted[0].approvalState)
         assertTrue(persisted[1].isPending)
         assertTrue(persisted[2].isPending)
+        assertTrue(persisted[3].isPending)
         assertNull(fixture.actions.approvePendingAutoApprovableTools(conversation.id))
         assertNull(fixture.store.session(conversation.id).getJob())
     }

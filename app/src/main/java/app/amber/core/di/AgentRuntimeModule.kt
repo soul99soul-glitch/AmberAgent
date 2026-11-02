@@ -286,6 +286,7 @@ val agentRuntimeModule = module {
             // P4-02: persistent thread graph (thread_graph_v2 flag gates usage).
             threadGraphStore = get(),
             capabilityFlags = get(),
+            intentAlignment = get(),
         )
     }
 
