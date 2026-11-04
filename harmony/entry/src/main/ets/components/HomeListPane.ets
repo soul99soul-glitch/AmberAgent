@@ -64,6 +64,8 @@ export struct HomeListPane {
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @StorageProp('agentSoulDisplayName') agentSoulDisplayName: string = 'Amber';
+  @StorageProp('agentSoulIsDefault') agentSoulIsDefault: boolean = true;
   // 主题包(C2):包切换 → 本页重建重读 HOME_* 令牌;画布纹理由 DesignCanvasLayer 自绘
   @StorageProp('themePackId') themePackId: string = '';
   // 宿主页可见性:宿主在 onPageShow/onPageHide 里翻转(组件收不到页面生命周期)
@@ -454,8 +456,32 @@ export struct HomeListPane {
   HeaderBlock(): void {
     Column() {
       Row() {
-        // 两栏左栏窄(320–400vp):词标缩一档、搜索收成圆钮,给顶栏新对话让位
-        AmberWordmark({ color: HOME_INK, cell: this.twoPane ? 3.5 : 4 })
+        // 顶栏左侧品牌/角色称呼(点击打开「形象人设」;自定义人设实时展示角色称呼)
+        Row({ space: 6 }) {
+          if (this.agentSoulIsDefault || this.agentSoulDisplayName.trim().length === 0
+            || this.agentSoulDisplayName === 'Amber') {
+            AmberWordmark({ color: HOME_INK, cell: this.twoPane ? 3.5 : 4 })
+          } else {
+            Text(this.agentSoulDisplayName)
+              .fontSize(this.twoPane ? 18 : 20)
+              .fontWeight(FontWeight.Bold)
+              .fontFamily(FONT_SANS_SEMIBOLD)
+              .fontColor(HOME_INK)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .constraintSize({ maxWidth: this.twoPane ? 132 : 176 })
+            Column()
+              .width(6).height(6).borderRadius(3)
+              .backgroundColor(this.accentColorStore)
+          }
+        }
+        .constraintSize({ minHeight: 44 })
+        .alignItems(VerticalAlign.Center)
+        .accessibilityText('形象人设')
+        .onClick((): void => {
+          this.collapseSearch();
+          router.pushUrl({ url: 'pages/AgentSoulPage' });
+        })
         Blank()
         if (!this.searchExpanded) {
           PressGlowButton({

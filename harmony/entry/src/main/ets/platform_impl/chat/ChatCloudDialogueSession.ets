@@ -82,6 +82,8 @@ export interface ChatCloudDialoguePorts {
   jumpToBottom: () => void;
   clientFactory?: (connection: MacGatewayConnection) => CloudDialogueClientLike;
   taskRunner?: () => ConversationTaskRunner | null;
+  onDialogueConnected?: (connection: MacGatewayConnection) => void;
+  onSoulRevision?: (soulRevision: number, connection: MacGatewayConnection) => void;
 }
 
 export const formatCloudInputStateBadge = (
@@ -304,6 +306,9 @@ export class ChatCloudDialogueSession {
       this.paired = nextPaired;
       this.gatewayName = parsedConn?.name ?? '';
       this.enabled = nextEnabled;
+      if (parsedConn !== null && this.ports.onDialogueConnected !== undefined) {
+        this.ports.onDialogueConnected(parsedConn);
+      }
       if (!nextEnabled) {
         this.stopPolling();
         this.followupTargetWorkItemId = '';
@@ -709,6 +714,9 @@ export class ChatCloudDialogueSession {
     try {
       await this.refreshPendingReceipts();
       const page: CloudDialogueEventsPage = await this.client().events(this.cursor, 100);
+      if (typeof page.soulRevision === 'number' && this.connection !== null && this.ports.onSoulRevision !== undefined) {
+        this.ports.onSoulRevision(page.soulRevision, this.connection);
+      }
       let changed: boolean = false;
       if (Array.isArray(page.items) && page.items.length > 0) {
         for (const ev of page.items) {

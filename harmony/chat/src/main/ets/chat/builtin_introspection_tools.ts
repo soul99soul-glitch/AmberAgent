@@ -52,6 +52,8 @@ const RESIDENT_EXACT_TOOLS: string[] = [
   'generate_image',
   // Users configure providers by pasting keys/docs in chat; keep these discoverable without tool_search.
   'provider_list', 'provider_configure', 'provider_models', 'settings_set_model_slot',
+  // Agent Soul persona tools must always stay resident in main chat without tool_search.
+  'agent_soul_get', 'agent_soul_update',
 ];
 
 const RESIDENT_CONTEXT_TOOLS: string[] = [
@@ -292,6 +294,9 @@ const searchAliases = (metadata: ToolMetadata): string[] => {
   const out: string[] = [];
   const name: string = metadata.name;
   const category: string = metadata.category;
+  if (name === 'agent_soul_get' || name === 'agent_soul_update') {
+    out.push('形象人设', '人设', '角色', '性格', '说话口吻', '称呼', '改名', 'soul', 'persona');
+  }
   if (name === 'screen_screenshot') {
     out.push('截图', '截屏', '屏幕截图', '看屏幕', 'screenshot');
   } else if (name === 'screen_read_ui') {

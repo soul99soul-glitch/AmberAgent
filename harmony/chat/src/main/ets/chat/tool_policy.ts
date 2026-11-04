@@ -217,7 +217,9 @@ export const toolCategory = (name: string): string => {
       'wifi_status', 'device_info', 'settings_open', 'intent_open', 'share_text',
       'share_file', 'notification_post'].includes(name)) return 'system';
   if (name.startsWith('memory_')) return 'memory';
-  if (name === 'agent_prompt_config') return 'prompt_config';
+  if (name === 'agent_prompt_config' || name === 'agent_soul_get' || name === 'agent_soul_update') {
+    return 'prompt_config';
+  }
   if (name.startsWith('conversation_') || name.startsWith('session_')) return 'context';
   if (name.startsWith('deep_read_')) return 'deep_read';
   if (name.startsWith('cron_task_')) return 'cron';
@@ -523,6 +525,20 @@ export const toolInvocationPolicy = (tool: AgentTool, input: JsonValue | null): 
     needsApproval = false;
     autoApprovable = true;
     concurrencySafe = true;
+  } else if (name === 'agent_soul_get') {
+    mutates = false;
+    risk = 'normal';
+    riskExplicit = true;
+    needsApproval = false;
+    autoApprovable = true;
+    concurrencySafe = true;
+  } else if (name === 'agent_soul_update') {
+    mutates = true;
+    risk = 'normal';
+    riskExplicit = true;
+    needsApproval = false;
+    autoApprovable = true;
+    concurrencySafe = false;
   } else if (name === 'agent_prompt_config') {
     const action: string = inputStringValue(input, 'action') ?? 'get';
     const readOnly: boolean = action === 'get';

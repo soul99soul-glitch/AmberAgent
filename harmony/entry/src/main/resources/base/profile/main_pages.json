@@ -1,6 +1,7 @@
 {
   "src": [
     "pages/BoardPage",
+    "pages/AgentSoulPage",
     "pages/DeepReadRootPage",
     "pages/ChatAgentPermissionsPage",
     "pages/ChatListPage",

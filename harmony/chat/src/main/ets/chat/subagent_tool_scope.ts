@@ -144,9 +144,12 @@ const createScopedToolPolicyExplainTool = (registry: ToolRegistry): AgentTool =>
 export const scopedSubAgentTools = (allowedTools: AgentTool[]): AgentTool[] => {
   if (allowedTools.length === 0) return [];
 
-  // SSH 配置写工具只留给主会话:子代理拿不到 create/update/delete。
+  // SSH 配置写工具与形象人设写工具只留给主会话:子代理拿不到 create/update/delete。
   const availableTools: AgentTool[] = allowedTools.filter(
-    (tool: AgentTool): boolean => !tool.name.startsWith('subagent_') && !isSSHProfileMainSessionOnly(tool.name));
+    (tool: AgentTool): boolean =>
+      !tool.name.startsWith('subagent_')
+      && !isSSHProfileMainSessionOnly(tool.name)
+      && tool.name !== 'agent_soul_update');
   if (availableTools.length === 0) return [];
 
   const requestedTools: Set<string> = new Set<string>();

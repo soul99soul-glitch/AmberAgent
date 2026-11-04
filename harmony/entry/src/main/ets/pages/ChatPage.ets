@@ -176,6 +176,7 @@ import { ChatArtifactPanels } from '../components/chat/ChatArtifactPanels.ets';
 import { ChatTimelineSession, buildRows, buildRowsFromNodes, TIMELINE_PAGE_SIZE } from '../platform_impl/chat/ChatTimelineSession.ets';
 import { getChatSmartUiDraftStore } from '../platform_impl/SmartUiDraftSupport.ets';
 import { mimeByName, readUriBytes, loadAttachDataUrl } from '../platform_impl/chat/ChatAttachmentIO.ets';
+import { observeGatewaySoulRevision, syncAgentSoulFromCloud } from '../platform_impl/AgentSoulSync.ets';
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
 interface ChatArchiveRouteParams { conversationId: string; nodeId: string; }
@@ -218,6 +219,9 @@ struct ChatPage {
   // 主题切换时触发整页重建(build 重读可变令牌)
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @StorageProp('agentSoulDisplayName') agentSoulDisplayName: string = 'Amber';
+  @StorageProp('agentSoulTagline') agentSoulTagline: string = '';
+  @StorageProp('agentSoulIsDefault') agentSoulIsDefault: boolean = true;
   @StorageProp('activeArtifactInteraction') activeArtifactInteraction: string = '';
   @StorageProp('chatStorageDegraded') storageDegraded: boolean = false;
   // 两栏(平板 / 折叠屏展开横屏):左侧首页窄栏 + 右侧本页聊天,见 design/adaptive.ets
@@ -536,6 +540,8 @@ struct ChatPage {
       autoScrollEnabled: (): boolean => this.timeline.enableAutoScroll,
       jumpToBottom: (): void => { this.timeline.jumpToBottom(); },
       taskRunner: getConversationTaskRunner,
+      onDialogueConnected: (c): void => { syncAgentSoulFromCloud(c); },
+      onSoulRevision: (rev, c): void => { observeGatewaySoulRevision(rev, c); },
     });
     this.modelContext.start({
       currentConversation: (): Conversation | null => this.presentation.conversation,
@@ -976,18 +982,20 @@ struct ChatPage {
         // amber-zhenji:chat-head 左侧为返回(抽屉入口收归首页)。
         //   两栏时左边就是列表,去掉返回;占位保留,标题仍居中(系统返回照旧回首页)。
         if (this.twoPane()) {
-          Row().width(48).height(48)
+          Row().width(80).height(48)
         } else {
           Row() {
-            Icon({ name: 'back', iconSize: 24, color: INK })
+            Row() {
+              Icon({ name: 'back', iconSize: 24, color: INK })
+            }
+            .width(48).height(48)
+            .padding({ right: 8 })
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .onClick((): void => { this.navigateBack(); })
+            .accessibilityText('返回')
           }
-          .width(48).height(48)
-          // 窄 chevron 墨迹比右侧产物架图标内缩 4vp:右 padding 8 把墨迹左移,左右墨迹边距对称
-          .padding({ right: 8 })
-          .justifyContent(FlexAlign.Center)
-          .alignItems(VerticalAlign.Center)
-          .onClick((): void => { this.navigateBack(); })
-          .accessibilityText('返回')
+          .width(80).justifyContent(FlexAlign.Start).alignItems(VerticalAlign.Center)
         }
 
         // 两行文字共用中轴，左右各保留 48vp 按钮区域。
@@ -1053,17 +1061,31 @@ struct ChatPage {
           }
         } else {
           Row() {
-            // 产物架入口(图片/文件/小应用陈列;40 热区)
+            // 形象人设入口(40×44 热区;自定义人设时高亮 accent 色)
+            Row() {
+              Icon({
+                name: 'ph_maskHappy',
+                iconSize: 19,
+                color: this.agentSoulIsDefault ? INK : this.accentColorStore,
+              })
+            }
+            .width(40).height(44)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .onClick((): void => { router.pushUrl({ url: 'pages/AgentSoulPage' }); })
+            .accessibilityText('形象人设')
+
+            // 产物架入口(图片/文件/小应用陈列;40×44 热区)
             Row() {
               Icon({ name: 'box', iconSize: 20, color: INK })
             }
-            .width(40).height(40)
+            .width(40).height(44)
             .justifyContent(FlexAlign.Center)
             .alignItems(VerticalAlign.Center)
             .onClick((): void => { this.artifacts.openArtifactShelf(); })
             .accessibilityText('产物架')
           }
-          .width(48).justifyContent(FlexAlign.Center)
+          .width(80).justifyContent(FlexAlign.End)
           .alignItems(VerticalAlign.Center)
         }
       }
@@ -1131,16 +1153,26 @@ struct ChatPage {
       && this.timeline.rows.length === 0 && !this.presentation.sending) {
       Column() {
         Row() {
-          DotText({ text: 'AMBER', dotScale: 3.6, color: INK, glow: true })
+          if (this.agentSoulIsDefault || this.agentSoulDisplayName === 'Amber') {
+            DotText({ text: 'AMBER', dotScale: 3.6, color: INK, glow: true })
+          } else {
+            Text(this.agentSoulDisplayName)
+              .fontSize(30).fontWeight(FontWeight.Bold).fontColor(INK)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
           Text('')
             .width(12).height(30).backgroundColor(this.accentColorStore).borderRadius(2)
             .margin({ left: 4 })
             .opacity(this.cursorOn ? 1 : 0)
         }
-        Text(GREETINGS[this.greetIdx])
+        .constraintSize({ minHeight: 44 })
+        .alignItems(VerticalAlign.Center)
+        .accessibilityText('形象人设')
+        .onClick((): void => { router.pushUrl({ url: 'pages/AgentSoulPage' }); })
+        Text(this.agentSoulTagline.trim().length > 0 ? this.agentSoulTagline : GREETINGS[this.greetIdx])
           .fontSize(15).fontColor(INK3)
           .margin({ top: 14 })
-          .opacity(this.greetOpacity)
+          .opacity(this.agentSoulTagline.trim().length > 0 ? 1 : this.greetOpacity)
       }
       .alignItems(HorizontalAlign.Center)
       .width('100%')

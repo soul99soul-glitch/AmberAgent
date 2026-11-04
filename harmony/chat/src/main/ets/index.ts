@@ -965,7 +965,21 @@ export type { ToolProfileFilterResult } from './chat/tool_profile_filter.ts';
 // Memory capability public surface.
 export * from './public/memory.ts';
 export {
-  buildAgentSoulPrompt, DEFAULT_AGENT_SOUL_MARKDOWN,
+  AGENT_SOUL_STORAGE_KEY, DEFAULT_AGENT_SOUL_NAME, MAX_AGENT_SOUL_HISTORY,
+  MAX_AGENT_SOUL_NAME_CHARS, MAX_AGENT_SOUL_TAGLINE_CHARS, MAX_AGENT_SOUL_MARKDOWN_CHARS,
+  AGENT_SOUL_GET_TOOL_NAME, AGENT_SOUL_UPDATE_TOOL_NAME,
+  normalizeAgentSoulDisplayName, normalizeAgentSoulTagline, normalizeAgentSoulMarkdown,
+  computeIsAgentSoulDefault, defaultAgentSoulState, cloneAgentSoulState,
+  parseAgentSoulState, serializeAgentSoulState, AgentSoulStore, createAgentSoulCoreTools,
+} from './chat/agent_soul.ts';
+export type {
+  AgentSoulHistoryEntry, RemoteAgentSoulPayload, AgentSoulState,
+  AgentSoulUpdatePatch, AgentSoulMutationResult, AgentSoulRemoteApplyResult,
+  AgentSoulCoreToolsDeps,
+} from './chat/agent_soul.ts';
+export {
+  buildAgentSoulPrompt, buildAgentPersonaPrompt,
+  DEFAULT_AGENT_SOUL_MARKDOWN, AGENT_SOUL_SELF_SHAPING_RULE,
 } from './chat/agent_soul_prompt.ts';
 
 // ===== D-086:FilesRepository 跟踪(managed_files) =====

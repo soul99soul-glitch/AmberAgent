@@ -26,6 +26,8 @@ export const PROFILE_MINIMAL_TOOLS: readonly string[] = Object.freeze([
   'agent_task_list',
   'agent_task_read',
   'conversation_context_status',
+  'agent_soul_get',
+  'agent_soul_update',
 ]);
 
 export const PROFILE_WEB_READ_TOOLS: readonly string[] = Object.freeze([

@@ -45,6 +45,8 @@ struct SettingAgentMemoryPageFull {
   @State autoMemory: boolean = true;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
+  @StorageProp('agentSoulDisplayName') agentSoulDisplayName: string = 'Amber';
+  @StorageProp('agentSoulTagline') agentSoulTagline: string = '';
   private ops: MemoryLibraryOps = getMemoryLibraryOps();
   private reloadInFlight: boolean = false;
   private reloadRequested: boolean = false;
@@ -419,6 +421,22 @@ struct SettingAgentMemoryPageFull {
     MemoryChangeLog({ events: this.events, accentColor: this.accentColorStore })
   }
 
+  @Builder
+  private PersonaEntryCard(): void {
+    CardRow({
+      label: '形象人设',
+      desc: this.agentSoulTagline.trim().length > 0
+        ? this.agentSoulTagline.trim()
+        : '多端同步的角色称呼、签名与性格设定',
+      valueText: this.agentSoulDisplayName,
+      iconName: 'ph_maskHappy',
+      plateStyle: 'accent',
+      plateSize: 28,
+      isLast: true,
+      onRowClick: (): void => { router.pushUrl({ url: 'pages/AgentSoulPage' }); },
+    })
+  }
+
   build(): void {
     Stack() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
@@ -427,6 +445,11 @@ struct SettingAgentMemoryPageFull {
         CenteredTitleBar({ title: '灵魂与记忆', subtitle: 'Amber 的核心指令与长期记忆' })
         Scroll() {
           Column() {
+            PlainSection({ label: '形象人设' })
+            CardGroup({ radius: 18, stroke: true, content: (): void => { this.PersonaEntryCard(); } })
+              .margin({ left: GUTTER, right: GUTTER })
+            FooterNote({ text: '角色称呼与性格口吻在「形象人设」中独立管理并跨端同步，与下方底层执行守则解耦。' })
+
             PlainSection({ label: '灵魂' })
             CardGroup({ radius: 18, stroke: true, content: (): void => { this.SoulCard(); } })
               .margin({ left: GUTTER, right: GUTTER })

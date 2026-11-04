@@ -18,6 +18,9 @@ import {
   type MacGatewayConnection, type MacGatewayPairingPayload, type MacGatewayStatus, type MacGatewaySession,
   type MacGatewayHealth,
 } from '../platform_impl/MacGatewayClient.ets';
+import {
+  observeGatewaySoulRevision, syncAgentSoulFromCloud,
+} from '../platform_impl/AgentSoulSync.ets';
 
 const REFRESH_INTERVAL_MS: number = 10000;
 const VISIBLE_TASK_LIMIT: number = 20;
@@ -92,6 +95,7 @@ struct SettingMacGatewayPage {
       if (this.connection !== c) return;
       this.status = status;
       this.reachable = 1;
+      observeGatewaySoulRevision(status.soulRevision, c);
     } catch (e) {
       // 请求期间已取消/重新配对:旧连接的结果(包括 401)不能作用到新状态上
       if (this.connection !== c) return;
@@ -164,6 +168,7 @@ struct SettingMacGatewayPage {
       this.pending = null;
       this.connection = c;
       this.showNotice('', false);
+      syncAgentSoulFromCloud(c);
       if (!(await this.notificationsAllowed())) {
         this.showNotice(NOTIFICATIONS_OFF, true);
       } else {

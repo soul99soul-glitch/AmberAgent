@@ -16,6 +16,8 @@ import { FONT_MONO } from '../design/fonts.ets';
 export struct ChatMessageAvatar {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @StorageProp('agentSoulDisplayName') agentSoulDisplayName: string = 'Amber';
+  @StorageProp('agentSoulIsDefault') agentSoulIsDefault: boolean = true;
   @Prop message: UIMessage;
   // F09:仅 streaming=true 时闪烁;@Watch 对称启停(不再只看 role)
   @Prop @Watch('onStreamingChange') streaming: boolean = false;
@@ -69,10 +71,21 @@ export struct ChatMessageAvatar {
     return '';
   }
 
-  // F16:真实模型名优先;message.modelId 空才回退品牌标签 'amber'
+  // F16 + C-SOUL-V1:自定义形象人设时优先展示角色称呼;默认态沿用真实模型名或回退 'amber'
   private modelLabel(): string {
+    const personaName: string = this.agentSoulDisplayName.trim();
+    const hasCustomPersona: boolean = !this.agentSoulIsDefault
+      && personaName.length > 0
+      && personaName !== 'Amber';
     const id: string | null = this.message.modelId;
-    if (id !== null && id.trim().length > 0) return id;
+    const cleanId: string = id !== null ? id.trim() : '';
+    if (hasCustomPersona) {
+      if (cleanId.length > 0 && cleanId !== 'cloud-gateway') {
+        return `${personaName} · ${cleanId}`;
+      }
+      return personaName;
+    }
+    if (cleanId.length > 0) return cleanId;
     return 'amber';
   }
 

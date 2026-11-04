@@ -2,6 +2,7 @@ import type { Context } from '@kit.AbilityKit';
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import BuildProfile from 'BuildProfile';
 import type {
+  AgentSoulState,
   Conversation, UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartTool,
   PendingUserMessage, PendingUserMessageMode, ConversationCompact, KernelPhase,
   SandboxActivityUiState, ToolApprovalVerdict, ToolApprovalPartLocator, AgentTool,
@@ -63,6 +64,7 @@ export interface DebugVisualReplayCommand {
 }
 export interface PreparedConversationSeed {
   runtime: ChatRuntime; agentRuntime: AgentRuntimeSnapshot;
+  agentSoulPersona?: AgentSoulState;
   compressChoice: ChatProviderChoice | null; taskPrompts: TaskPrompts;
   searchSettings: SearchSettings; ocrSeed: OcrSeed | null; miniAppSetting: MiniAppSetting;
   userNickname: string;

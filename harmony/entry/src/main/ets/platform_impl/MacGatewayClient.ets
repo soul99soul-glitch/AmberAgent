@@ -86,6 +86,39 @@ export interface MacGatewayStatus {
   // 在外网回复/确认 Synara 任务的网页地址,用浏览器打开
   synaraURL?: string;
   sessions: MacGatewaySession[];
+  // C-SOUL-V1:可选的云端形象人设修订号,大于本地已同步 revision 时拉取 /v2/soul
+  soulRevision?: number;
+}
+
+export type CloudAgentSoulWriteSource = 'harmony_ui' | 'harmony_chat';
+
+export interface CloudAgentSoulHistoryItem {
+  id: string;
+  displayName: string;
+  tagline: string;
+  soulMarkdown: string;
+  updatedAtMs: number;
+  source: string;
+}
+
+export interface CloudAgentSoulPayload {
+  revision: number;
+  updatedAtMs: number;
+  displayName: string;
+  tagline: string;
+  soulMarkdown: string;
+  isDefault: boolean;
+  source: string;
+  history: CloudAgentSoulHistoryItem[];
+}
+
+export interface CloudAgentSoulPutRequest {
+  displayName: string;
+  tagline: string;
+  soulMarkdown: string;
+  isDefault: boolean;
+  updatedAtMs: number;
+  source: CloudAgentSoulWriteSource;
 }
 
 export type CloudDialogueInputState = 'received' | 'consumed' | 'cancelled';
@@ -125,6 +158,8 @@ export interface CloudDialogueEvent {
 export interface CloudDialogueEventsPage {
   items: CloudDialogueEvent[];
   nextCursor: number;
+  // C-SOUL-V1:轮询顺带返回最新 soulRevision
+  soulRevision?: number;
 }
 
 export interface CloudDialogueClientLike {
@@ -133,6 +168,9 @@ export interface CloudDialogueClientLike {
   stop(workItemId: string, requestId: string): Promise<CloudDialogueReceipt>;
   receipts(requestId: string): Promise<CloudDialogueReceipt>;
   events(after?: number, limit?: number): Promise<CloudDialogueEventsPage>;
+  timeline?(limit?: number): Promise<CloudDialogueEventsPage>;
+  getSoul?(): Promise<CloudAgentSoulPayload>;
+  putSoul?(req: CloudAgentSoulPutRequest): Promise<CloudAgentSoulPayload>;
 }
 
 export const isValidCloudRequestId = (requestId: string): boolean => {
@@ -314,6 +352,22 @@ export class MacGatewayClient implements CloudDialogueClientLike {
     const safeLimit: number = Math.max(1, Math.min(200, Math.floor(limit)));
     const path: string = `/v2/dialogue/events?after=${safeAfter}&limit=${safeLimit}`;
     return this.parseJson<CloudDialogueEventsPage>(await this.send('GET', path, undefined));
+  }
+
+  async timeline(limit: number = 50): Promise<CloudDialogueEventsPage> {
+    const safeLimit: number = Math.max(1, Math.min(200, Math.floor(limit)));
+    const path: string = `/v2/dialogue/timeline?limit=${safeLimit}`;
+    return this.parseJson<CloudDialogueEventsPage>(await this.send('GET', path, undefined));
+  }
+
+  async getSoul(): Promise<CloudAgentSoulPayload> {
+    return this.parseJson<CloudAgentSoulPayload>(await this.send('GET', '/v2/soul', undefined));
+  }
+
+  async putSoul(req: CloudAgentSoulPutRequest): Promise<CloudAgentSoulPayload> {
+    return this.parseJson<CloudAgentSoulPayload>(
+      await this.send('PUT', '/v2/soul', JSON.stringify(req)),
+    );
   }
 
   private parseJson<T>(raw: string): T {

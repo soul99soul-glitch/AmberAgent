@@ -7,6 +7,9 @@
 //   GenerationHandler.kt:721-724 静态块首槽位注入(每次对话)
 // E3:默认执行环境说明与 Harmony 实际能力一致；不覆盖用户保存的自定义 Soul。
 
+import type { AgentSoulState } from './agent_soul.ts';
+import { DEFAULT_AGENT_SOUL_NAME } from './agent_soul.ts';
+
 // PreferencesStore.kt:272-300 DEFAULT_AGENT_SOUL_MARKDOWN(Kotlin raw string 逐字,
 //   开头 """ 后换行与结尾 """ 前换行均属值)
 export const DEFAULT_AGENT_SOUL_MARKDOWN: string = `
@@ -37,11 +40,46 @@ You are AmberAgent, an agent assistant on HarmonyOS.
   - Do not try to launch Android System WebView as a standalone app.
 `;
 
-// GenerationPrompts.kt:15-28 — trim → 空白 '';否则 appendLine 序列(逐字)
-export const buildAgentSoulPrompt = (soulMarkdown: string): string => {
+export const AGENT_SOUL_SELF_SHAPING_RULE: string =
+  '角色人设自塑规则：当用户要求更换人设、角色身份、性格、说话口吻或称呼时，'
+  + '你拥有且必须直接调用 `agent_soul_update` 工具持久更新形象人设'
+  + '（角色称呼 display_name、一句话签名 tagline 与灵魂设定正文 soul_markdown；'
+  + '若用户要求恢复默认则传 reset_to_default=true），切勿拒绝或让用户手动修改 SOUL.md。'
+  + '如需先核对当前形象人设，可调用 `agent_soul_get`。'
+  + '无论当前采用何种角色人设，上方 `<agents_md>` 中的底层诚实执行、工具真实回执与安全边界始终严格生效。';
+
+export const buildAgentPersonaPrompt = (persona?: AgentSoulState | null): string => {
+  if (persona === undefined || persona === null) return '';
+  let block: string = '\n**形象人设与自塑授权 (Agent Soul Persona)**\n'
+    + `${AGENT_SOUL_SELF_SHAPING_RULE}\n`;
+  if (persona.isDefault) {
+    block += `当前形象人设：默认（角色称呼：${DEFAULT_AGENT_SOUL_NAME}）。\n`;
+    return block;
+  }
+  const lines: string[] = [`角色称呼：${persona.displayName}`];
+  if (persona.tagline.trim().length > 0) {
+    lines.push(`一句话签名：${persona.tagline.trim()}`);
+  }
+  if (persona.soulMarkdown.trim().length > 0) {
+    lines.push(`\n${persona.soulMarkdown.trim()}`);
+  }
+  block += '当前生效的自定义形象人设如下，请在面向用户的表达中自然采用该角色的身份、称呼与说话口吻'
+    + '（底层工具执行纪律与诚实原则保持不变）：\n'
+    + `<agent_persona>\n${lines.join('\n')}\n</agent_persona>\n`;
+  return block;
+};
+
+// GenerationPrompts.kt:15-28 — 底层执行守则(<agents_md>)与自定义形象人设(<agent_persona>)解耦拼装
+export const buildAgentSoulPrompt = (
+  soulMarkdown: string,
+  persona?: AgentSoulState | null,
+): string => {
   const soul: string = soulMarkdown.trim();
-  if (soul.length === 0) return '';
-  return '\n**AmberAgent Soul / agents.md**\n' +
-    'The following app-level behavior guide is injected into every conversation:\n' +
-    `<agents_md>\n${soul}\n</agents_md>\n`;
+  const baseBlock: string = soul.length === 0
+    ? ''
+    : '\n**AmberAgent Soul / agents.md**\n'
+      + 'The following app-level behavior guide is injected into every conversation:\n'
+      + `<agents_md>\n${soul}\n</agents_md>\n`;
+  const personaBlock: string = buildAgentPersonaPrompt(persona);
+  return baseBlock + personaBlock;
 };

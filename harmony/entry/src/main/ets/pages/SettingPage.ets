@@ -31,6 +31,7 @@ struct SettingPage {
   @StorageProp('systemDarkMode') systemDarkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @StorageProp('agentSoulDisplayName') agentSoulDisplayName: string = 'Amber';
   @State appearanceValue: string = '跟随系统';
   // 真实值装配:默认模型标签 + 聊天记录存储统计 + 版本号(不写死占位)
   @State modelLabel: string = '';
@@ -122,6 +123,8 @@ struct SettingPage {
 
   @Builder
   AgentCard(): void {
+    CardRow({ label: '形象人设', valueText: this.agentSoulDisplayName, iconName: 'ph_maskHappy', plateStyle: 'accent',
+      onRowClick: (): void => { this.go('pages/AgentSoulPage'); } })
     CardRow({ label: '灵魂与记忆', iconName: 'ph_database', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
     CardRow({ label: '运行环境', iconName: 'ph_terminalWindow', plateStyle: 'accent',

@@ -2,6 +2,7 @@ import { beginConversationCompaction } from './ConversationRunGuard.ets';
 // Detached Chat dependencies: existing Entry loaders and chat-domain factories.
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
+  AgentSoulState,
   ChatTurnDeps, ChatStreamProvider, CompactPolicy, CompactResult, Conversation,
   ConversationSummary, DisplaySetting, MemoryRecallRuntimeGate, MemoryRecallSelection,
   MemoryRecord, MemoryScope, MemoryProfileSelection, MemoryReadRepository,
@@ -9,6 +10,7 @@ import type {
   SubAgentRuntimeSetting, UIMessage, MessageChunk, StreamOpts, JevPreparedToolResults,
 } from '@amber/chat-domain';
 import {
+  AGENT_SOUL_STORAGE_KEY, defaultAgentSoulState, parseAgentSoulState,
   asChatStreamProvider, buildAgentSoulPrompt, buildMemoryContext, resolveGenerativeWidgetInstruction,
   buildRecentChatsPrompt, conversationWithMessagesAsNodes, createDocumentTransformer,
   createMiniAppOutputTransformer, createMiniAppPromptTransformer,
@@ -136,9 +138,11 @@ export const prepareConversationSeed = async (
     subAgent = makeSubAgentRuntimeSetting();
     hilog.warn(DOMAIN, TAG, 'Subagent settings unavailable for this run');
   }
+  const agentSoulPersona: AgentSoulState = parseAgentSoulState(await kv.get(AGENT_SOUL_STORAGE_KEY));
   return {
     runtime,
     agentRuntime: await loadAgentRuntimeSnapshot(kv),
+    agentSoulPersona,
     compressChoice: await ports.resolveTaskChoice(compressReference, runtime.resolvedChoice),
     taskPrompts: await ports.loadTaskPrompts(),
     searchSettings: await loadSearchPrefs(kv),
@@ -362,7 +366,10 @@ export const buildConversationTurnDeps = (ctx: DetachedConversationContext, port
   return {
     assistant: rt.assistant,
     finalTokenBudget: Math.max(Math.trunc(window * seed.agentRuntime.contextCompaction.forceRatio), 4000),
-    agentSoul: buildAgentSoulPrompt(seed.agentRuntime.agentSoulMarkdown),
+    agentSoul: buildAgentSoulPrompt(
+      seed.agentRuntime.agentSoulMarkdown,
+      seed.agentSoulPersona ?? defaultAgentSoulState(),
+    ),
     inputTransformers: inputTransformers(ctx, ports),
     modelSupportsImageInput: rt.modelSupportsImageInput,
     outputTransformers: [

@@ -8,9 +8,14 @@
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import type { AgentTool, JsonValue, UIMessagePart, InputSchemaObj, JsonObject } from '@amber/chat-domain';
-import { makeAgentTool, makeInputSchemaObj, inputStringValue } from '@amber/chat-domain';
+import {
+  makeAgentTool, makeInputSchemaObj, inputStringValue, createAgentSoulCoreTools,
+} from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { loadAgentRuntimeSnapshot, updateAgentSoulMarkdown } from './AgentRuntimePrefs.ets';
+import {
+  loadAgentSoulState, updateAgentSoulFromChat, resetAgentSoulFromChat,
+} from './AgentSoulSync.ets';
 import { workspaceRootAbs } from './WorkspaceStore.ets';
 import { sha256HexUtf8 } from './EntryLocalToolPorts.ets';
 
@@ -124,7 +129,12 @@ const soulPreviewPayload = async (workspacePath: string): Promise<JsonObject> =>
   };
 };
 
-export const createSoulTools = (): AgentTool[] => [
+export const createSoulTools = (): AgentTool[] =>
+  createAgentSoulCoreTools({
+    getState: () => loadAgentSoulState(),
+    updateFromChat: updateAgentSoulFromChat,
+    resetFromChat: resetAgentSoulFromChat,
+  }).concat([
   makeAgentTool({
     name: 'soul_preview',
     description: 'Preview an agent soul (app-level behavior guide injected into every '
@@ -202,4 +212,4 @@ export const createSoulTools = (): AgentTool[] => [
       });
     },
   }),
-];
+]);

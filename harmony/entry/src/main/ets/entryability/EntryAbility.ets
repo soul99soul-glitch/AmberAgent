@@ -21,6 +21,7 @@ import { themePackStore, applyCurrentTheme, resolveThemeDark } from '../design/t
 import type { ThemePack } from '../design/theme_packs.ets';
 import { registerAmberFonts, registerAmberFontsFor } from '../design/fonts.ets';
 import { syncMacGatewayPushTokenOnLaunch } from '../platform_impl/MacGatewayClient.ets';
+import { hydrateAgentSoulOnForeground } from '../platform_impl/AgentSoulSync.ets';
 import { setGenerationKeepAliveBackground, disposeGenerationKeepAlive } from '../platform_impl/BackgroundGenerationKeepAlive.ets';
 import { hydrateWorkspaceCustomDir, activateWorkspaceCustomDir, currentWorkspaceCustomDir } from '../platform_impl/WorkspaceStore.ets';
 import { warmMediaCache } from '../platform_impl/MediaCache.ets';
@@ -351,7 +352,10 @@ export default class EntryAbility extends UIAbility {
           notificationManager.requestEnableNotification(this.context).catch((): void => {
             hilog.warn(DOMAIN, TAG, 'requestEnableNotification rejected');
           });
-          if (getProductKind() === 'agent') syncMacGatewayPushTokenOnLaunch();
+          if (getProductKind() === 'agent') {
+            syncMacGatewayPushTokenOnLaunch();
+            hydrateAgentSoulOnForeground();
+          }
         }
       });
     };
@@ -422,7 +426,10 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, TAG, 'onForeground — 回前台续跑');
     AppStorage.setOrCreate<boolean>('appBackgrounded', false);
     if (getProductKind() === 'deepread' || getProductKind() === 'novel') this.motionPreferences.refresh();
-    if (getProductKind() === 'agent') getMemoryTopicCoordinator().foreground();
+    if (getProductKind() === 'agent') {
+      getMemoryTopicCoordinator().foreground();
+      hydrateAgentSoulOnForeground();
+    }
     // 后台生成保活对称释放(回到前台即不需要长时任务;desired 先行再串行停止)
     setGenerationKeepAliveBackground(this.context, false).catch((): void => {});
   }
