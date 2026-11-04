@@ -1,5 +1,7 @@
 package app.amber.feature.macgateway
 
+import app.amber.feature.prompts.AgentSoulPutRequest
+import app.amber.feature.prompts.AgentSoulState
 import java.io.IOException
 import java.security.MessageDigest
 import java.security.cert.CertificateException
@@ -76,6 +78,8 @@ data class MacGatewayStatus(
     val health: Health? = null,
     /** Synara web address for replying to / approving Synara-hosted tasks; opened in the browser. */
     val synaraURL: String? = null,
+    /** Monotonic server revision for the unified Agent Soul (`C-SOUL-V1`). */
+    val soulRevision: Long? = null,
     val sessions: List<Session>,
 ) {
     @Serializable
@@ -312,6 +316,32 @@ class MacGatewayClient(
         )
     }
 
+    /** `GET /v2/soul` — fetch authoritative cross-platform Agent Soul state (`C-SOUL-V1`). */
+    suspend fun getSoul(): AgentSoulState =
+        decode(
+            send(
+                method = "GET",
+                segments = listOf("v2", "soul"),
+            ),
+        )
+
+    /** `PUT /v2/soul` — update cross-platform Agent Soul state (`C-SOUL-V1`). */
+    suspend fun putSoul(request: AgentSoulPutRequest): AgentSoulState =
+        decode(
+            send(
+                method = "PUT",
+                segments = listOf("v2", "soul"),
+                body = mapOf(
+                    "displayName" to request.displayName,
+                    "tagline" to request.tagline,
+                    "soulMarkdown" to request.soulMarkdown,
+                    "isDefault" to request.isDefault,
+                    "updatedAtMs" to request.updatedAtMs,
+                    "source" to request.source,
+                ),
+            ),
+        )
+
     private inline fun <reified T> decode(text: String): T =
         runCatching { MacGatewayJson.decodeFromString<T>(text) }.getOrElse { throw MacGatewayException.InvalidResponse() }
 
@@ -326,6 +356,7 @@ class MacGatewayClient(
                 JsonObject(map.mapValues { (_, value) ->
                     when (value) {
                         is Boolean -> JsonPrimitive(value)
+                        is Number -> JsonPrimitive(value)
                         else -> JsonPrimitive(value.toString())
                     }
                 }).toString().toRequestBody("application/json".toMediaType())
@@ -340,7 +371,7 @@ class MacGatewayClient(
                     }
                     .build()
                 val request = Request.Builder().url(url)
-                    .method(method, requestBody ?: if (method == "POST") ByteArray(0).toRequestBody() else null)
+                    .method(method, requestBody ?: if (method == "POST" || method == "PUT") ByteArray(0).toRequestBody() else null)
                     .apply { token?.let { header("Authorization", "Bearer $it") } }
                     .build()
                 val (code, text) = try {

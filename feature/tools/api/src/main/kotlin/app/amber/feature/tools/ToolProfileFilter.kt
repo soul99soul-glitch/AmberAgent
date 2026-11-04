@@ -75,6 +75,8 @@ object ToolProfileFilter {
         "agent_task_read",
         "conversation_context_status",
         "jev_status",
+        "agent_soul_get",
+        "agent_soul_update",
     )
 
     private val WEB_READ_TOOLS = setOf(

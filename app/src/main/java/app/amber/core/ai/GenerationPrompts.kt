@@ -9,19 +9,45 @@ import app.amber.core.ai.generative.GuizangHtmlDeckValidator
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.utils.JsonInstantPretty
 import app.amber.core.utils.toLocalDate
+import app.amber.feature.prompts.AgentSoulState
+import app.amber.feature.prompts.AgentSoulStore
 import java.util.Locale
 
 internal fun buildAgentSoulPrompt(soulMarkdown: String) =
     soulMarkdown.trim().takeIf { it.isNotBlank() }?.let { soul ->
         buildString {
             appendLine()
-            appendLine("**AmberAgent Soul / agents.md**")
-            appendLine("The following app-level behavior guide is injected into every conversation:")
+            appendLine("**AmberAgent Execution Guide / agents.md**")
+            appendLine("The following underlying tool & execution discipline guide applies to every conversation (distinct from your mutable role persona):")
             appendLine("<agents_md>")
             appendLine(soul)
             appendLine("</agents_md>")
         }
     }.orEmpty()
+
+internal fun buildAgentPersonaPrompt(soul: AgentSoulState): String = buildString {
+    appendLine()
+    appendLine("**形象人设（Agent Soul & Persona）**")
+    val name = soul.displayName.trim().ifEmpty { AgentSoulStore.DEFAULT_DISPLAY_NAME }
+    val tagline = soul.tagline.trim()
+    val markdown = soul.soulMarkdown.trim()
+    if (soul.isDefault) {
+        appendLine("- 当前默认称呼：「$name」（默认形象人设）。")
+    } else {
+        appendLine("- 你在本对话中的当前称呼是「$name」，请以这个名字自然地指代自己。")
+        if (tagline.isNotEmpty()) {
+            appendLine("- 一句话签名：$tagline")
+        }
+        if (markdown.isNotEmpty()) {
+            appendLine("- 角色性格、语气、身份背景与相处方式：")
+            appendLine("<agent_soul_persona>")
+            appendLine(markdown)
+            appendLine("</agent_soul_persona>")
+        }
+        appendLine("- 保持以上称呼、性格与口吻自然交流；同时完整保留既有的工具调用、后台任务与诚实执行能力，不因角色扮演而拒绝本应执行的工具操作。")
+    }
+    appendLine("- 当用户要求更换人设、角色身份、性格、说话口吻或称呼时，你拥有且必须直接调用 agent_soul_update 工具持久更新形象人设（可先调用 agent_soul_get 查看当前人设；底层诚实执行守则与角色人设完全分离，切勿以不能修改 SOUL.md 或系统底线为由拒绝）。")
+}.trim()
 
 internal fun buildGenerativeUiPrompt(setting: GenerativeUiSetting): String =
     buildGenerativeUiPrompt(setting = setting, model = null)

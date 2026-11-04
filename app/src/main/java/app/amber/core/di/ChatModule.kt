@@ -186,6 +186,7 @@ val chatModule = module {
             secretStore = get(),
             themePackageManager = get(),
             jevToolSemanticSearch = get(),
+            agentSoulStore = get(),
         )
     }
 

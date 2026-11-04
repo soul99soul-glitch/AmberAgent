@@ -349,13 +349,22 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
             }
         }
 
-        "cron_task_list", "agent_task_list", "agent_task_read", "agent_runtime_status", "tool_policy_explain", "tool_search", "tools_list", "provider_config_status", "jev_status" -> {
+        "cron_task_list", "agent_task_list", "agent_task_read", "agent_runtime_status", "tool_policy_explain", "tool_search", "tools_list", "provider_config_status", "jev_status", "agent_soul_get" -> {
             mutates = false
             risk = ToolRisk.Normal
             riskExplicit = true
             needsApproval = false
             autoApprovable = true
             concurrencySafe = true
+        }
+
+        "agent_soul_update" -> {
+            mutates = false
+            risk = ToolRisk.Normal
+            riskExplicit = true
+            needsApproval = false
+            autoApprovable = true
+            concurrencySafe = false
         }
 
         // Provider config writers: mutating settings; High risk, always needs
@@ -656,7 +665,7 @@ private fun Tool.mutatesState(): Boolean {
     if (name.startsWith("mcp__")) return true
     if (name == "memory_tool") return true
     if (name == "deep_read_open") return true
-    if (name == "run_plan_update") return false
+    if (name == "run_plan_update" || name == "agent_soul_update" || name == "agent_soul_get") return false
     // screen_stop 只结束本次自控会话，不改用户数据；把它当写入会让"停手"也需要审批。
     if (name == "screen_stop") return false
     // screen_add_app 落盘一个可被 screen_run_goal 进入的应用（扩权），

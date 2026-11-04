@@ -1,6 +1,7 @@
 package app.amber.core.ai.tools
 
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -10,8 +11,154 @@ import kotlinx.serialization.json.put
 import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
+import app.amber.feature.prompts.AgentSoulStore
 import app.amber.feature.prompts.SoulImportTransaction
 import app.amber.feature.workspace.WorkspaceManager
+
+const val AGENT_SOUL_GET_TOOL_NAME = "agent_soul_get"
+const val AGENT_SOUL_UPDATE_TOOL_NAME = "agent_soul_update"
+
+/**
+ * 常驻直出工具 `agent_soul_get` 与 `agent_soul_update`（C-SOUL-V1 协议）。
+ *
+ * 注册在主对话 Always-Loaded / Core Tools 中，供模型在用户要求更换人设、角色身份、
+ * 性格、说话口吻或称呼时直接读取或持久更新「形象人设」（自动保存最近 8 条历史快照并异步同步云端）。
+ */
+fun createAgentSoulTools(
+    store: AgentSoulStore,
+): List<Tool> = listOf(
+    Tool(
+        name = AGENT_SOUL_GET_TOOL_NAME,
+        description = "Read the current agent persona (形象人设 / Soul): display_name, one-line tagline, soul_markdown, revision, is_default, and recent history snapshots. Read-only and approval-free.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {},
+                required = emptyList(),
+            )
+        },
+        needsApproval = false,
+        allowsAutoApproval = true,
+        execute = {
+            val state = store.state.value
+            val payload = buildJsonObject {
+                put("ok", true)
+                put("status", "ok")
+                put("revision", state.revision)
+                put("updatedAtMs", state.updatedAtMs)
+                put("displayName", state.displayName)
+                put("display_name", state.displayName)
+                put("tagline", state.tagline)
+                put("soulMarkdown", state.soulMarkdown)
+                put("soul_markdown", state.soulMarkdown)
+                put("isDefault", state.isDefault)
+                put("is_default", state.isDefault)
+                put("source", state.source)
+                put("snapshotCount", state.history.size)
+                put("snapshotDigest", store.snapshotDigest(state))
+                put("history", buildJsonArray {
+                    state.history.forEach { snap ->
+                        add(buildJsonObject {
+                            put("id", snap.id)
+                            put("displayName", snap.displayName)
+                            put("tagline", snap.tagline)
+                            put("soulMarkdown", snap.soulMarkdown)
+                            put("updatedAtMs", snap.updatedAtMs)
+                            put("source", snap.source)
+                        })
+                    }
+                })
+            }
+            listOf(UIMessagePart.Text(payload.toString()))
+        },
+    ),
+    Tool(
+        name = AGENT_SOUL_UPDATE_TOOL_NAME,
+        description = "Create, update, or reset the agent's persistent persona (形象人设 / Soul). Call this directly whenever the user asks to change your persona, character identity, personality, speaking tone, or display name. Underlying honest execution rules remain separate; never refuse a persona change by claiming SOUL.md cannot be edited. Previous versions are snapshotted automatically (up to 8) for instant rollback.",
+        parameters = {
+            InputSchema.Obj(
+                properties = buildJsonObject {
+                    put("display_name", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Optional display name / how the user calls you (e.g. 赵匡胤, 赵大哥). Shown in header and chat.")
+                    })
+                    put("tagline", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Optional one-line persona signature / vibe summary.")
+                    })
+                    put("soul_markdown", buildJsonObject {
+                        put("type", "string")
+                        put("description", "Optional full persona markdown: character identity, personality, speaking tone, background, and how you interact with the user.")
+                    })
+                    put("reset_to_default", buildJsonObject {
+                        put("type", "boolean")
+                        put("description", "Optional. Set to true to reset the persona back to the default Amber identity.")
+                    })
+                },
+                required = emptyList(),
+            )
+        },
+        needsApproval = false,
+        allowsAutoApproval = true,
+        execute = { input ->
+            val obj = runCatching { input.jsonObject }.getOrNull()
+            val resetToDefault = obj?.get("reset_to_default")?.jsonPrimitive?.let {
+                it.booleanOrNull ?: it.contentOrNull?.equals("true", ignoreCase = true)
+            } ?: obj?.get("resetToDefault")?.jsonPrimitive?.let {
+                it.booleanOrNull ?: it.contentOrNull?.equals("true", ignoreCase = true)
+            } ?: false
+
+            val displayName = (obj?.get("display_name") ?: obj?.get("displayName"))
+                ?.jsonPrimitive?.contentOrNull
+            val tagline = obj?.get("tagline")?.jsonPrimitive?.contentOrNull
+            val soulMarkdown = (
+                obj?.get("soul_markdown")
+                    ?: obj?.get("soulMarkdown")
+                    ?: obj?.get("soul_prompt")
+                    ?: obj?.get("soulPrompt")
+                )?.jsonPrimitive?.contentOrNull
+
+            if (
+                !resetToDefault &&
+                displayName.isNullOrBlank() &&
+                tagline == null &&
+                soulMarkdown.isNullOrBlank()
+            ) {
+                val errorPayload = buildJsonObject {
+                    put("status", "error")
+                    put("error_code", "empty_update")
+                    put("message", "Provide at least one of display_name, tagline, soul_markdown, or set reset_to_default=true.")
+                }
+                return@Tool listOf(UIMessagePart.Text(errorPayload.toString()))
+            }
+
+            val changed = store.update(
+                displayName = displayName,
+                tagline = tagline,
+                soulMarkdown = soulMarkdown,
+                resetToDefault = resetToDefault,
+                source = AgentSoulStore.SOURCE_ANDROID_CHAT,
+            )
+            val updated = store.state.value
+            val payload = buildJsonObject {
+                put("ok", true)
+                put("status", "ok")
+                put("changed", changed)
+                put("revision", updated.revision)
+                put("updatedAtMs", updated.updatedAtMs)
+                put("displayName", updated.displayName)
+                put("display_name", updated.displayName)
+                put("tagline", updated.tagline)
+                put("soulMarkdown", updated.soulMarkdown)
+                put("soul_markdown", updated.soulMarkdown)
+                put("isDefault", updated.isDefault)
+                put("is_default", updated.isDefault)
+                put("source", updated.source)
+                put("snapshotCount", updated.history.size)
+            }
+            listOf(UIMessagePart.Text(payload.toString()))
+        },
+    ),
+)
 
 /**
  * P2-07 agent-driven soul (agentSoulMarkdown) update tools

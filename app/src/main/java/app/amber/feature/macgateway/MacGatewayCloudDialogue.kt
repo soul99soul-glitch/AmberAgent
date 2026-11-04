@@ -74,6 +74,8 @@ data class CloudDialogueEvent(
 data class CloudDialogueEventsPage(
     val items: List<CloudDialogueEvent> = emptyList(),
     val nextCursor: Long = 0L,
+    /** Optional top-level monotonic revision for cross-platform Agent Soul (`C-SOUL-V1`). */
+    val soulRevision: Long? = null,
 )
 
 @Serializable
@@ -191,6 +193,7 @@ class CloudDialogueCoordinator(
     private val persistState: suspend (CloudDialoguePersistedState) -> Unit,
     private val onUnauthorized: suspend () -> Unit = {},
     private val onStateChanged: (CloudDialogueUiState) -> Unit = {},
+    private val onSoulRevision: suspend (Long) -> Unit = {},
 ) {
     private val mutex = Mutex()
 
@@ -487,6 +490,9 @@ class CloudDialogueCoordinator(
         val currentCursor = mutex.withLock { cursor }
         try {
             val page = client.events(after = currentCursor, limit = 100)
+            page.soulRevision?.let { rev ->
+                runCatching { onSoulRevision(rev) }
+            }
             mutex.withLock {
                 var dirty = false
                 for (event in page.items.sortedBy { it.seq }) {

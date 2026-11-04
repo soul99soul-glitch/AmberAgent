@@ -75,6 +75,9 @@ internal fun ChatPageTopBar(
     activityOpen: Boolean,
     otherActivityCount: Int,
     modelMenuOpen: Boolean,
+    soulDisplayName: String = "Amber",
+    soulIsDefault: Boolean = true,
+    onOpenAgentSoul: () -> Unit = {},
     onToggleModelMenu: () -> Unit,
     onIslandOpenRecap: () -> Unit,
     onIslandJumpToLive: () -> Unit,
@@ -104,6 +107,9 @@ internal fun ChatPageTopBar(
         activityOpen = activityOpen,
         otherActivityCount = otherActivityCount,
         modelMenuOpen = modelMenuOpen,
+        soulDisplayName = soulDisplayName,
+        soulIsDefault = soulIsDefault,
+        onOpenAgentSoul = onOpenAgentSoul,
         onToggleModelMenu = onToggleModelMenu,
         onIslandOpenRecap = onIslandOpenRecap,
         onIslandJumpToLive = onIslandJumpToLive,
@@ -190,6 +196,9 @@ private fun TopBar(
     activityOpen: Boolean,
     otherActivityCount: Int,
     modelMenuOpen: Boolean,
+    soulDisplayName: String,
+    soulIsDefault: Boolean,
+    onOpenAgentSoul: () -> Unit,
     onToggleModelMenu: () -> Unit,
     onIslandOpenRecap: () -> Unit,
     onIslandJumpToLive: () -> Unit,
@@ -261,37 +270,76 @@ private fun TopBar(
                         label = "modelMenuChevron",
                     )
                     Row(
-                        modifier = Modifier
-                            .heightIn(min = 28.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .testTag("chat-header-model-menu")
-                            .clickable { onToggleModelMenu() }
-                            .padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
-                        Text(
-                            text = currentChatModel?.modelId
-                                ?: stringResource(R.string.model_list_select_model),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = amberType.meta.copy(
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                            ),
-                            // ink3↔ink2 中点：ink3 偏淡、ink2 偏深，取中间的暖中灰
-                            color = lerp(amberTokens.ink3, amberTokens.ink2, 0.5f),
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        Icon(
-                            imageVector = Lucide.ArrowDown,
-                            contentDescription = null,
-                            tint = amberTokens.ink3,
-                            // 箭头 14→13，陪着字号一起缩
+                        Row(
                             modifier = Modifier
-                                .size(13.dp)
-                                .rotate(chevronRotation),
-                        )
+                                .heightIn(min = 28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .testTag("chat-header-model-menu")
+                                .clickable { onToggleModelMenu() }
+                                .padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                text = currentChatModel?.modelId
+                                    ?: stringResource(R.string.model_list_select_model),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = amberType.meta.copy(
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                ),
+                                // ink3↔ink2 中点：ink3 偏淡、ink2 偏深，取中间的暖中灰
+                                color = lerp(amberTokens.ink3, amberTokens.ink2, 0.5f),
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            Icon(
+                                imageVector = Lucide.ArrowDown,
+                                contentDescription = null,
+                                tint = amberTokens.ink3,
+                                // 箭头 14→13，陪着字号一起缩
+                                modifier = Modifier
+                                    .size(13.dp)
+                                    .rotate(chevronRotation),
+                            )
+                        }
+                        Row(
+                            modifier = Modifier
+                                .heightIn(min = 28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .testTag("chat-header-agent-soul")
+                                .clickable { onOpenAgentSoul() }
+                                .padding(horizontal = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(
+                                        if (soulIsDefault) amberTokens.ink3.copy(alpha = 0.55f)
+                                        else amberTokens.accent,
+                                    ),
+                            )
+                            Text(
+                                text = if (soulIsDefault) "形象人设" else soulDisplayName.ifBlank { "形象人设" },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = amberType.secondary.copy(
+                                    fontSize = 11.sp,
+                                    fontWeight = if (soulIsDefault) FontWeight.Medium else FontWeight.SemiBold,
+                                ),
+                                color = if (soulIsDefault) {
+                                    lerp(amberTokens.ink3, amberTokens.ink2, 0.5f)
+                                } else {
+                                    amberTokens.accent
+                                },
+                            )
+                        }
                     }
                 }
 

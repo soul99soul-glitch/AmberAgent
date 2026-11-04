@@ -367,6 +367,9 @@ class ToolSearchIndex(
         if (name.startsWith("theme_pack_")) {
             addAll(listOf("主题", "生成主题", "修改主题", "微调主题", "换肤", "配色", "外观", "试穿", "theme", "appearance", "skin"))
         }
+        if (name.startsWith("agent_soul_")) {
+            addAll(listOf("形象人设", "人设", "角色", "性格", "称呼", "口吻", "soul", "persona"))
+        }
     }
 
     private fun ScoredTool.toJson(): JsonObject = buildJsonObject {
@@ -482,6 +485,8 @@ class ToolExposureState private constructor(
             "permissions_status",
             "agent_runtime_status",
             "jev_status",
+            "agent_soul_get",
+            "agent_soul_update",
             "file_list",
             "file_read",
             "file_write",

@@ -48,7 +48,9 @@ import app.amber.ai.provider.ModelType
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.macgateway.MacGatewayRepository
+import app.amber.feature.prompts.AgentSoulStore
 import app.amber.feature.runtime.AgentToolActivityStore
+import app.amber.feature.ui.components.ai.AgentSoulSheet
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.defaultReasoningLevelForModel
@@ -132,6 +134,9 @@ internal fun ChatPageScaffold(
     var selectedSandboxIndex by rememberSaveable(conversation.id) { mutableStateOf<Int?>(null) }
     val activityStore: AgentToolActivityStore = koinInject()
     val macGatewayRepository: MacGatewayRepository = koinInject()
+    val agentSoulStore: AgentSoulStore = koinInject()
+    val soulState by agentSoulStore.state.collectAsStateWithLifecycle()
+    var agentSoulSheetOpen by rememberSaveable { mutableStateOf(false) }
     val localAsyncTaskCoordinator: app.amber.core.service.LocalAsyncTaskCoordinator = koinInject()
     val gatewayState by macGatewayRepository.state.collectAsStateWithLifecycle()
     val cloudDialogueState by macGatewayRepository.cloudDialogueState.collectAsStateWithLifecycle()
@@ -347,6 +352,13 @@ internal fun ChatPageScaffold(
                         activityOpen = activityOpen,
                         otherActivityCount = otherActivity.size,
                         modelMenuOpen = modelMenuOpen,
+                        soulDisplayName = soulState.displayName,
+                        soulIsDefault = soulState.isDefault,
+                        onOpenAgentSoul = {
+                            closeHeaderPanels()
+                            modelMenuOpen = false
+                            agentSoulSheetOpen = true
+                        },
                         onToggleModelMenu = {
                             closeHeaderPanels()
                             modelMenuOpen = !modelMenuOpen
@@ -657,6 +669,10 @@ internal fun ChatPageScaffold(
                         vm.updateTitle(it)
                     },
                 )
+            }
+
+            if (agentSoulSheetOpen) {
+                AgentSoulSheet(onDismiss = { agentSoulSheetOpen = false })
             }
         }
     }  // end CompositionLocalProvider(LocalTimelineHighlight)

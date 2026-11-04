@@ -12,8 +12,10 @@ import app.amber.core.event.AppEventBus
 import app.amber.core.utils.EmojiData
 import app.amber.core.utils.EmojiUtils
 import app.amber.core.utils.JsonInstant
+import android.content.Context
 import app.amber.feature.macgateway.ConversationStoreCloudDialogueSink
 import app.amber.feature.macgateway.MacGatewayRepository
+import app.amber.feature.prompts.AgentSoulStore
 import org.koin.dsl.module
 
 val appModule = module {
@@ -38,10 +40,15 @@ val appModule = module {
     single<kotlinx.coroutines.CoroutineScope> { get<AppScope>() }
 
     single {
+        AgentSoulStore(context = get<Context>())
+    }
+
+    single {
         MacGatewayRepository(
             context = get(),
             appScope = get<AppScope>(),
             timelineSink = ConversationStoreCloudDialogueSink(get()),
+            agentSoulStore = get<AgentSoulStore>(),
         )
     }
 

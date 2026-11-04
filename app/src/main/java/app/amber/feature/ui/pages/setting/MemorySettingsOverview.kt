@@ -46,6 +46,8 @@ import com.composables.icons.lucide.Sparkles
 import app.amber.agent.R
 import app.amber.core.model.AssistantMemory
 import app.amber.core.model.MemoryKind
+import app.amber.feature.ui.components.ai.AgentSoulOverviewCard
+import app.amber.feature.ui.components.ai.AgentSoulSheet
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 
@@ -63,7 +65,13 @@ internal fun MemoryOverviewSubpage(
     longTermMemories: List<AssistantMemory>,
     onOpen: (MemorySettingsSubpage) -> Unit,
 ) {
+    var showPersonaSheet by remember { mutableStateOf(false) }
+    AgentSoulOverviewCard(onOpenSheet = { showPersonaSheet = true })
+    Spacer(Modifier.height(10.dp))
     AgentSoulCard(value = soulMarkdown, onSave = onSaveSoul)
+    if (showPersonaSheet) {
+        AgentSoulSheet(onDismiss = { showPersonaSheet = false })
+    }
     MemoryOverviewEntries(
         pendingCandidateCount = pendingCandidateCount,
         coreCount = coreCount,

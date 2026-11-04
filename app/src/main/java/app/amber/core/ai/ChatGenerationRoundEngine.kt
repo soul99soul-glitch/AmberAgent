@@ -91,6 +91,7 @@ class ChatGenerationRoundEngine(
     private val conversationRepo: ConversationRepository,
     private val aiLoggingManager: AILoggingManager,
     private val conversationContextEngine: ConversationContextEngine,
+    private val agentSoulStore: app.amber.feature.prompts.AgentSoulStore? = null,
 ) : GenerationRoundEngine {
 
     override suspend fun generateRound(
@@ -468,6 +469,12 @@ class ChatGenerationRoundEngine(
         ).filter { it.isNotBlank() }.joinToString("\n\n")
 
         val dynamicPrompt = buildList {
+            if (
+                agentSoulStore != null &&
+                (settings.agentSoulMarkdown.isNotBlank() || tools.any { it.name == "agent_soul_update" })
+            ) {
+                add(buildAgentPersonaPrompt(agentSoulStore.state.value))
+            }
             if (memoryContextPrompt.isNotBlank()) add(memoryContextPrompt)
             if (loopBudgetPrompt.isNotBlank()) add(loopBudgetPrompt)
             buildGenerativeUiPrompt(settings.generativeUi, model).takeIf { it.isNotBlank() }?.let(::add)

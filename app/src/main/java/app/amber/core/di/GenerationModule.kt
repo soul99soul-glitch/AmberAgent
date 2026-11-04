@@ -20,6 +20,7 @@ val generationModule = module {
             conversationRepo = get(),
             aiLoggingManager = get(),
             conversationContextEngine = get(),
+            agentSoulStore = get(),
         )
     }
     single {

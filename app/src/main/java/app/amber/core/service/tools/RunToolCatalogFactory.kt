@@ -18,6 +18,8 @@ import app.amber.core.ai.tools.createMcpManagementTools
 import app.amber.core.ai.tools.createProviderConfigTools
 import app.amber.core.ai.tools.createSearchTools
 import app.amber.core.ai.tools.createSkillTools
+import app.amber.core.ai.tools.AGENT_SOUL_UPDATE_TOOL_NAME
+import app.amber.core.ai.tools.createAgentSoulTools
 import app.amber.core.ai.tools.createSoulTools
 import app.amber.core.ai.tools.createThemePackTools
 import app.amber.core.context.ConversationContextEngine
@@ -93,6 +95,7 @@ class RunToolCatalogFactory(
     private val secretStore: SecretStore? = null,
     private val themePackageManager: ThemePackageManager? = null,
     private val jevToolSemanticSearch: JevToolSemanticSearch? = null,
+    private val agentSoulStore: app.amber.feature.prompts.AgentSoulStore? = null,
 ) {
     fun createDebugRunTools(settings: Settings): List<Tool> =
         createRunTools(settings, null, casAuditEnabled = false)
@@ -288,6 +291,11 @@ class RunToolCatalogFactory(
                     runId = runId,
                 )
             )
+            addAll(
+                createAgentSoulTools(
+                    store = agentSoulStore ?: app.amber.feature.prompts.AgentSoulStore(context),
+                )
+            )
             if (conversationId != null) {
                 addAll(
                     ConversationContextTools(
@@ -325,8 +333,9 @@ class RunToolCatalogFactory(
         // leave the subagent's own catalog too — otherwise a child run could
         // still reach them through its parent list. The read-only listing stays
         // available to subagents.
-        val subAgentCatalogTools = profiledRawTools.filterNot { it.name in SSH_PROFILE_WRITE_TOOL_NAMES }
-        val subAgentParentTools = baseTools.filterNot { it.name in SSH_PROFILE_WRITE_TOOL_NAMES }
+        val subAgentExcludedTools = SSH_PROFILE_WRITE_TOOL_NAMES + AGENT_SOUL_UPDATE_TOOL_NAME
+        val subAgentCatalogTools = profiledRawTools.filterNot { it.name in subAgentExcludedTools }
+        val subAgentParentTools = baseTools.filterNot { it.name in subAgentExcludedTools }
         val subAgentRawTools = if (conversationId != null && settings.agentRuntime.subAgent.enabled) {
             subAgentCatalogTools + SubAgentTools(
                 subAgentManager = subAgentManager,
