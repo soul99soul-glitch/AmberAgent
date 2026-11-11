@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -201,11 +202,7 @@ class ChatApprovalActions(
         val updatedNodes = conversation.messageNodes.map { node ->
             val messages = node.messages.map { message ->
                 val parts = message.parts.map { part ->
-                    if (part !is UIMessagePart.Tool || !part.isPending || part.toolName == "ask_user" ||
-                        // Jev 复核收紧的调用不随开关批量批准，只能由用户在卡片上决定。
-                        part.metadata?.containsKey(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) == true ||
-                        part.metadata?.containsKey(app.amber.core.jev.JevApprovalTriage.METADATA_KEY) == true
-                    ) {
+                    if (part !is UIMessagePart.Tool || !part.isPending || !isBatchAutoApprovable(part)) {
                         part
                     } else {
                         changed = true
@@ -232,6 +229,32 @@ class ChatApprovalActions(
         val hasPendingTools = updatedNodes.any { node -> node.currentMessage.getTools().any { it.isPending } }
 
         return ApprovalDecisionResult(shouldResume = !hasPendingTools)
+    }
+
+    private fun isBatchAutoApprovable(part: UIMessagePart.Tool): Boolean {
+        if (part.toolName == ASK_USER_TOOL_NAME) return false
+        // Jev 复核收紧的调用不随开关批量批准，只能由用户在卡片上决定。
+        if (part.metadata?.containsKey(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) == true ||
+            part.metadata?.containsKey(app.amber.core.jev.JevApprovalTriage.METADATA_KEY) == true
+        ) {
+            return false
+        }
+        if (!canApproveSensitiveTool(part.toolName)) return false
+        if (app.amber.feature.runtime.AgentLiveStatusNotifier.requiresInAppApprovalOnly(part)) return false
+        if (part.toolName == "mcp_call_tool" || part.toolName.startsWith("mcp__")) return false
+        if (part.toolName.startsWith("screen_") || part.toolName == "vlm_task") return false
+        val traceAutoApprovable = runCatching {
+            part.metadata
+                ?.get("permission_trace")
+                ?.jsonObject
+                ?.get("policy")
+                ?.jsonObject
+                ?.get("auto_approvable")
+                ?.jsonPrimitive
+                ?.booleanOrNull
+        }.getOrNull()
+        if (traceAutoApprovable == false) return false
+        return true
     }
 
     internal suspend fun recordCapabilityApproval(

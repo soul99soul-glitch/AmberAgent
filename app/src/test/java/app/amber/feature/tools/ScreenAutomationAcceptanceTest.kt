@@ -12,6 +12,8 @@ import app.amber.core.automation.AmberAccessibilityService
 import app.amber.core.automation.PhoneAutomationTakeoverController
 import app.amber.core.automation.PhoneTakeoverPhase
 import app.amber.core.automation.ScreenCaptureManager
+import app.amber.core.automation.ScreenCapturePermissionActivity
+import app.amber.core.automation.ScreenCaptureService
 import app.amber.core.automation.ScreenNode
 import app.amber.core.automation.ScreenOcrBlock
 import app.amber.core.automation.ScreenOcrEngine
@@ -342,6 +344,73 @@ class ScreenAutomationAcceptanceTest {
             output = emptyList(),
         )
         assertTrue(app.amber.feature.runtime.AgentLiveStatusNotifier.requiresInAppApprovalOnly(highRiskTool))
+    }
+
+    @Test
+    fun buildingToolsForSecondRunDoesNotTerminateActiveUserTakeoverPauseOnFirstRun() = runTest {
+        val takeover = PhoneAutomationTakeoverController(clock = { testScheduler.currentTime })
+        takeover.startSession(runId = "run-A", packageName = "test.target", goal = "goal-A", maxSteps = 2)
+        takeover.confirmPaused(snapshotId = "snap-A", reason = "user_requested")
+        val controller = FakeController(snapshot(listOf(node("root/0", "Next"))))
+        AccessibilityActive.activeController = controller
+        val tools = ScreenAutomationTools(
+            context = context,
+            screenCaptureManager = ScreenCaptureManager(context),
+            activityStore = AgentToolActivityStore(),
+            takeoverController = takeover,
+        )
+
+        val runATools = tools.getTools("run-A")
+        // Another conversation / background task builds its tool catalog before run-A's primitive executes.
+        tools.getTools("run-B")
+
+        val pendingTap = launch {
+            runATools.single { it.name == "screen_click" }.execute(Json.parseToJsonElement("""{"x":1,"y":1}"""))
+        }
+        runCurrent()
+
+        assertEquals(PhoneTakeoverPhase.PAUSED, takeover.state.value.phase)
+        assertEquals(0, controller.tapCalls)
+
+        assertTrue(takeover.requestResume())
+        advanceUntilIdle()
+        pendingTap.join()
+        assertEquals(1, controller.tapCalls)
+    }
+
+    @Test
+    fun screenCapturePermissionActivityRecreationAndStaleRequestGuard() {
+        val captureManager = ScreenCaptureManager(context)
+        org.koin.core.context.startKoin {
+            modules(org.koin.dsl.module { single { captureManager } })
+        }
+        try {
+            val shadowApp = org.robolectric.Shadows.shadowOf(context as android.app.Application)
+            shadowApp.clearNextStartedActivities()
+            val intent = android.content.Intent(context, ScreenCapturePermissionActivity::class.java)
+                .putExtra(ScreenCaptureManager.EXTRA_REQUEST_ID, "stale-request-id")
+            val activityController = Robolectric.buildActivity(ScreenCapturePermissionActivity::class.java, intent)
+                .setup()
+            // Initial creation launches one system MediaProjection permission intent
+            val shadowActivity = org.robolectric.Shadows.shadowOf(activityController.get())
+            val firstLaunched = shadowActivity.nextStartedActivityForResult
+            assertTrue(firstLaunched != null)
+
+            // Recreating due to configuration change must NOT launch a duplicate permission dialog
+            activityController.recreate()
+            val recreatedShadow = org.robolectric.Shadows.shadowOf(activityController.get())
+            assertNull(recreatedShadow.nextStartedActivityForResult)
+
+            // Receiving RESULT_OK for an expired/non-pending requestId must NOT start ScreenCaptureService
+            recreatedShadow.receiveResult(
+                firstLaunched!!.intent,
+                android.app.Activity.RESULT_OK,
+                android.content.Intent(),
+            )
+            assertNull(shadowApp.nextStartedService)
+        } finally {
+            org.koin.core.context.stopKoin()
+        }
     }
 
     private suspend fun clickWithExpectation(controller: FakeController, expectation: String): JsonObject {

@@ -132,6 +132,37 @@ class AgentBubbleReducerTest {
     }
 
     @Test
+    fun `high risk and mandatory in app approval tools mark waitingAskUser to prevent blind bubble approval`() {
+        val highRiskGoal = AgentBubbleReducer.reduce(
+            previous = AgentBubbleUiState(),
+            pickedConversationId = conversationA,
+            activity = null,
+            messages = listOf(
+                assistantMessage(
+                    pendingToolPart(toolName = "screen_run_goal", callId = "call_goal"),
+                ),
+            ),
+            nowMillis = 1_000L,
+        )
+        assertTrue(highRiskGoal.waitingApproval)
+        assertTrue(highRiskGoal.waitingAskUser)
+
+        val mandatoryMcp = AgentBubbleReducer.reduce(
+            previous = AgentBubbleUiState(),
+            pickedConversationId = conversationA,
+            activity = null,
+            messages = listOf(
+                assistantMessage(
+                    pendingToolPart(toolName = "mcp_server_manage", callId = "call_mcp"),
+                ),
+            ),
+            nowMillis = 1_000L,
+        )
+        assertTrue(mandatoryMcp.waitingApproval)
+        assertTrue(mandatoryMcp.waitingAskUser)
+    }
+
+    @Test
     fun `running screen tool sets step title and touch passthrough`() {
         val state = AgentBubbleReducer.reduce(
             previous = AgentBubbleUiState(),

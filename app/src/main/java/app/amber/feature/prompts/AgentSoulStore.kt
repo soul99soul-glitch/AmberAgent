@@ -59,6 +59,7 @@ data class AgentSoulPutRequest(
 private data class PersistedAgentSoulEnvelope(
     val state: AgentSoulState = AgentSoulState(),
     val lastSyncedRevision: Long = 0L,
+    val pendingSync: Boolean = false,
 )
 
 /**
@@ -99,12 +100,17 @@ class AgentSoulStore(
     var lastSyncedRevision: Long = 0L
         private set
 
+    @Volatile
+    var hasPendingSync: Boolean = false
+        private set
+
     init {
         val loaded = loadFromDisk()
         val normalized = normalizeState(loaded.state)
         _state = MutableStateFlow(normalized)
         state = _state.asStateFlow()
         lastSyncedRevision = loaded.lastSyncedRevision.coerceAtLeast(0L)
+        hasPendingSync = loaded.pendingSync
     }
 
     fun setLocalMutationListener(listener: ((AgentSoulState) -> Unit)?) {
@@ -161,7 +167,8 @@ class AgentSoulStore(
                 history = nextHistory,
             )
             _state.value = next
-            persistLocked(next, lastSyncedRevision)
+            hasPendingSync = true
+            persistLocked(next, lastSyncedRevision, pendingSync = true)
             next
         }
         if (mutated != null) {
@@ -227,7 +234,8 @@ class AgentSoulStore(
                 history = nextHistory,
             )
             _state.value = next
-            persistLocked(next, lastSyncedRevision)
+            hasPendingSync = true
+            persistLocked(next, lastSyncedRevision, pendingSync = true)
             next
         }
         if (mutated != null) {
@@ -243,14 +251,40 @@ class AgentSoulStore(
      */
     fun applyRemoteSoul(remote: AgentSoulState): Boolean = synchronized(lock) {
         val current = _state.value
+        val wasDirty = hasPendingSync
         val normalizedRemote = normalizeState(remote)
+        val localDiffersFromRemote = !current.isDefault && (
+            current.displayName != normalizedRemote.displayName ||
+                current.tagline != normalizedRemote.tagline ||
+                current.soulMarkdown != normalizedRemote.soulMarkdown
+            )
         val mergedHistory = when {
-            normalizedRemote.history.isNotEmpty() -> normalizedRemote.history.take(MAX_HISTORY)
-            !current.isDefault && (
-                current.displayName != normalizedRemote.displayName ||
-                    current.tagline != normalizedRemote.tagline ||
-                    current.soulMarkdown != normalizedRemote.soulMarkdown
-                ) -> pushSnapshot(current)
+            normalizedRemote.history.isNotEmpty() -> {
+                val baseHistory = normalizedRemote.history.take(MAX_HISTORY)
+                if ((wasDirty || current.revision > lastSyncedRevision) && localDiffersFromRemote) {
+                    val top = baseHistory.firstOrNull()
+                    if (top != null &&
+                        top.displayName == current.displayName &&
+                        top.tagline == current.tagline &&
+                        top.soulMarkdown == current.soulMarkdown
+                    ) {
+                        baseHistory
+                    } else {
+                        val localSnap = AgentSoulSnapshot(
+                            id = UUID.randomUUID().toString(),
+                            displayName = current.displayName.ifBlank { DEFAULT_DISPLAY_NAME },
+                            tagline = current.tagline,
+                            soulMarkdown = current.soulMarkdown,
+                            updatedAtMs = current.updatedAtMs.takeIf { it > 0L } ?: clock(),
+                            source = current.source.ifBlank { SOURCE_ANDROID_UI },
+                        )
+                        (listOf(localSnap) + baseHistory).take(MAX_HISTORY)
+                    }
+                } else {
+                    baseHistory
+                }
+            }
+            localDiffersFromRemote -> pushSnapshot(current)
             else -> current.history
         }
         val next = normalizedRemote.copy(history = mergedHistory)
@@ -258,8 +292,9 @@ class AgentSoulStore(
         val changed = next != current || newSyncedRevision != lastSyncedRevision
         _state.value = next
         lastSyncedRevision = newSyncedRevision
-        if (changed) {
-            persistLocked(next, lastSyncedRevision)
+        hasPendingSync = false
+        if (changed || wasDirty) {
+            persistLocked(next, lastSyncedRevision, pendingSync = false)
         }
         changed
     }
@@ -332,13 +367,17 @@ class AgentSoulStore(
         }.getOrElse { PersistedAgentSoulEnvelope() }
     }
 
-    private fun persistLocked(state: AgentSoulState, syncedRevision: Long) {
+    private fun persistLocked(state: AgentSoulState, syncedRevision: Long, pendingSync: Boolean = hasPendingSync) {
         val file = storageFile ?: return
         runCatching {
             file.parentFile?.mkdirs()
             val payload = AgentSoulJson.encodeToString(
                 PersistedAgentSoulEnvelope.serializer(),
-                PersistedAgentSoulEnvelope(state = state, lastSyncedRevision = syncedRevision),
+                PersistedAgentSoulEnvelope(
+                    state = state,
+                    lastSyncedRevision = syncedRevision,
+                    pendingSync = pendingSync,
+                ),
             )
             file.writeText(payload)
         }

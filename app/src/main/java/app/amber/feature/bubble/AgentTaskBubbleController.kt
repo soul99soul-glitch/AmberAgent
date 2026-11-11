@@ -213,6 +213,19 @@ class AgentTaskBubbleController(
         }
         val uuid = state.conversationId?.let(::parseUuid) ?: return
         val toolCallId = state.approvalToolCallId ?: return
+        if (approved) {
+            val pendingTool = chatService.getConversationFlow(uuid).value.currentMessages
+                .asSequence()
+                .flatMap { it.parts.asSequence() }
+                .filterIsInstance<app.amber.ai.ui.UIMessagePart.Tool>()
+                .firstOrNull { it.toolCallId == toolCallId }
+            if (pendingTool == null ||
+                app.amber.feature.runtime.AgentLiveStatusNotifier.requiresInAppApprovalOnly(pendingTool)
+            ) {
+                openConversation()
+                return
+            }
+        }
         chatService.handleToolApproval(uuid, toolCallId, approved)
     }
 

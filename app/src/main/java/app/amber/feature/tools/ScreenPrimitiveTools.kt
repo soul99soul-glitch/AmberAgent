@@ -29,7 +29,7 @@ internal class ScreenPrimitiveTools(
     private val operations: ScreenOperationOwner,
     private val ocrEngine: ScreenOcrEngine = DefaultScreenOcrEngine(context, screenCaptureManager),
 ) {
-    val screenClickTool = Tool(
+    fun screenClickTool(runId: String? = null) = Tool(
         name = "screen_click",
         description = "Tap screen coordinates using AmberAgent Accessibility after user approval. " +
             "Optional verify_text polls the UI tree post-action (with automatic on-device OCR fallback) " +
@@ -51,7 +51,7 @@ internal class ScreenPrimitiveTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            operations.trackScreenTool("screen_click", "点击屏幕", input) {
+            operations.trackScreenTool("screen_click", "点击屏幕", input, runId = runId, enforceScreenStop = false) {
                 val service = requireScreenAccessibility()
                 val point = requireDisplayPoint(
                     x = input.requiredFloat("x"),
@@ -65,7 +65,7 @@ internal class ScreenPrimitiveTools(
         }
     )
 
-    val screenLongClickTool = Tool(
+    fun screenLongClickTool(runId: String? = null) = Tool(
         name = "screen_long_click",
         description = "Long-press screen coordinates using AmberAgent Accessibility after user approval.",
         parameters = {
@@ -82,7 +82,7 @@ internal class ScreenPrimitiveTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            operations.trackScreenTool("screen_long_click", "长按屏幕", input) {
+            operations.trackScreenTool("screen_long_click", "长按屏幕", input, runId = runId, enforceScreenStop = false) {
                 val service = requireScreenAccessibility()
                 val point = requireDisplayPoint(
                     x = input.requiredFloat("x"),
@@ -100,7 +100,7 @@ internal class ScreenPrimitiveTools(
         }
     )
 
-    val screenSwipeTool = Tool(
+    fun screenSwipeTool(runId: String? = null) = Tool(
         name = "screen_swipe",
         description = "Swipe between screen coordinates using AmberAgent Accessibility after user approval.",
         parameters = {
@@ -122,7 +122,7 @@ internal class ScreenPrimitiveTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            operations.trackScreenTool("screen_swipe", "滑动屏幕", input) {
+            operations.trackScreenTool("screen_swipe", "滑动屏幕", input, runId = runId, enforceScreenStop = false) {
                 val service = requireScreenAccessibility()
                 val from = requireDisplayPoint(
                     x = input.requiredFloat("from_x"),
@@ -146,7 +146,7 @@ internal class ScreenPrimitiveTools(
         }
     )
 
-    val screenInputTextTool = Tool(
+    fun screenInputTextTool(runId: String? = null) = Tool(
         name = "screen_input_text",
         description = "Set text on the currently focused editable field using Accessibility.",
         parameters = {
@@ -160,38 +160,38 @@ internal class ScreenPrimitiveTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            operations.trackScreenTool("screen_input_text", "输入文字", input) {
+            operations.trackScreenTool("screen_input_text", "输入文字", input, runId = runId, enforceScreenStop = false) {
                 val service = requireScreenAccessibility()
                 screenActionResult(service.setFocusedText(input.requiredString("text")))
             }
         }
     )
 
-    val screenBackTool = Tool(
+    fun screenBackTool(runId: String? = null) = Tool(
         name = "screen_back",
         description = "Press Android Back using Accessibility.",
         parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
         needsApproval = true,
         execute = { input ->
-            operations.trackScreenTool("screen_back", "返回", input) {
+            operations.trackScreenTool("screen_back", "返回", input, runId = runId, enforceScreenStop = false) {
                 screenActionResult(requireScreenAccessibility().back())
             }
         }
     )
 
-    val screenHomeTool = Tool(
+    fun screenHomeTool(runId: String? = null) = Tool(
         name = "screen_home",
         description = "Press Android Home using Accessibility.",
         parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
         needsApproval = true,
         execute = { input ->
-            operations.trackScreenTool("screen_home", "回到桌面", input) {
+            operations.trackScreenTool("screen_home", "回到桌面", input, runId = runId, enforceScreenStop = false) {
                 screenActionResult(requireScreenAccessibility().home())
             }
         }
     )
 
-    val screenOpenAppTool = Tool(
+    fun screenOpenAppTool(runId: String? = null) = Tool(
         name = "screen_open_app",
         description = "Open an installed Android app by package name.",
         parameters = {
@@ -205,7 +205,7 @@ internal class ScreenPrimitiveTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            operations.trackScreenTool("screen_open_app", "打开应用", input) {
+            operations.trackScreenTool("screen_open_app", "打开应用", input, runId = runId, enforceScreenStop = false) {
                 val packageName = input.requiredString("package_name")
                 val intent = context.packageManager.getLaunchIntentForPackage(packageName)
                     ?: error("No launch intent for package: $packageName")
@@ -216,7 +216,7 @@ internal class ScreenPrimitiveTools(
         }
     )
 
-    val screenOpenUrlTool = Tool(
+    fun screenOpenUrlTool(runId: String? = null) = Tool(
         name = "screen_open_url",
         description = "Open an http/https URL with Android ACTION_VIEW. Prefer webview_open for in-app visual preview; use this when the user wants the system browser/app.",
         parameters = {
@@ -230,7 +230,7 @@ internal class ScreenPrimitiveTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            operations.trackScreenTool("screen_open_url", "打开 URL", input, runtime = "Android Intent") {
+            operations.trackScreenTool("screen_open_url", "打开 URL", input, runtime = "Android Intent", runId = runId, enforceScreenStop = false) {
                 val url = input.requiredString("url")
                 require(url.startsWith("http://") || url.startsWith("https://")) {
                     "Only http and https URLs are allowed"
@@ -241,7 +241,7 @@ internal class ScreenPrimitiveTools(
         }
     )
 
-    val screenReadUiTool = Tool(
+    fun screenReadUiTool(runId: String? = null) = Tool(
         name = "screen_read_ui",
         description = "Read the current Accessibility UI tree for screen reasoning (with automatic compiled on-device OCR fallback for low-coverage/WebView/Canvas screens). OCR uses bundled ML Kit text recognition for Chinese (Simplified/Traditional) and Latin/English; `ocr_source`/`ocr_outcome` in the result distinguish real bitmap OCR from Accessibility-only metadata. For a multi-step phone goal, first discover screen_run_goal: when enabled it uses Jev inside Accessibility to select and execute validated actions, reducing model round trips. Use this raw tree tool for inspection or when that tool hands back.",
         parameters = {
@@ -254,7 +254,7 @@ internal class ScreenPrimitiveTools(
             )
         },
         execute = { input ->
-            operations.trackScreenTool("screen_read_ui", "读取 UI 树", input) {
+            operations.trackScreenTool("screen_read_ui", "读取 UI 树", input, runId = runId, enforceScreenStop = false) {
                 val service = requireScreenAccessibility()
                 val maxNodes = input.int("max_nodes") ?: 120
                 val uiTree = service.dumpUiTree(maxNodes)
@@ -273,7 +273,7 @@ internal class ScreenPrimitiveTools(
         }
     )
 
-    val screenFindTextTool = Tool(
+    fun screenFindTextTool(runId: String? = null) = Tool(
         name = "screen_find_text",
         description = "Find text in the current Accessibility UI tree (with automatic on-device OCR fallback when the tree misses) and return matching node bounds.",
         parameters = {
@@ -288,7 +288,7 @@ internal class ScreenPrimitiveTools(
             )
         },
         execute = { input ->
-            operations.trackScreenTool("screen_find_text", "查找屏幕文字", input) {
+            operations.trackScreenTool("screen_find_text", "查找屏幕文字", input, runId = runId, enforceScreenStop = false) {
                 val service = requireScreenAccessibility()
                 val query = input.requiredString("text")
                 val ocrMode = input.resolveOcrMode()
@@ -330,7 +330,7 @@ internal class ScreenPrimitiveTools(
         }
     )
 
-    val screenTapTextTool = Tool(
+    fun screenTapTextTool(runId: String? = null) = Tool(
         name = "screen_tap_text",
         description = "Tap the first Accessibility node (or on-device OCR text block fallback) containing the requested text.",
         parameters = {
@@ -347,7 +347,7 @@ internal class ScreenPrimitiveTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            operations.trackScreenTool("screen_tap_text", "点击文字", input) {
+            operations.trackScreenTool("screen_tap_text", "点击文字", input, runId = runId, enforceScreenStop = false) {
                 val service = requireScreenAccessibility()
                 val query = input.requiredString("text")
                 val ocrMode = input.resolveOcrMode()
@@ -411,7 +411,7 @@ internal class ScreenPrimitiveTools(
         }
     )
 
-    val screenWaitForTextTool = Tool(
+    fun screenWaitForTextTool(runId: String? = null) = Tool(
         name = "screen_wait_for_text",
         description = "Wait until text appears in the Accessibility UI tree (with automatic on-device OCR fallback).",
         parameters = {
@@ -427,7 +427,7 @@ internal class ScreenPrimitiveTools(
             )
         },
         execute = { input ->
-            operations.trackScreenTool("screen_wait_for_text", "等待屏幕文字", input) {
+            operations.trackScreenTool("screen_wait_for_text", "等待屏幕文字", input, runId = runId, enforceScreenStop = false) {
                 val query = input.requiredString("text")
                 val ocrMode = input.resolveOcrMode()
                 val deadline = System.currentTimeMillis() + (input.long("timeout_ms") ?: 10_000L).coerceIn(500L, 60_000L)
@@ -471,7 +471,7 @@ internal class ScreenPrimitiveTools(
         }
     )
 
-    val screenScrollUntilTool = Tool(
+    fun screenScrollUntilTool(runId: String? = null) = Tool(
         name = "screen_scroll_until",
         description = "Swipe repeatedly until target text appears in the Accessibility UI tree (with automatic on-device OCR fallback).",
         parameters = {
@@ -489,7 +489,7 @@ internal class ScreenPrimitiveTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            operations.trackScreenTool("screen_scroll_until", "滚动查找文字", input) {
+            operations.trackScreenTool("screen_scroll_until", "滚动查找文字", input, runId = runId, enforceScreenStop = false) {
                 val service = requireScreenAccessibility()
                 val maxSwipes = (input.int("max_swipes") ?: 8).coerceIn(1, 20)
                 val direction = input.string("direction") ?: "down"
@@ -560,13 +560,13 @@ internal class ScreenPrimitiveTools(
      * （导航、搜索、填写草稿）。逐步从新观察重新定位，不保存 ref 或坐标；
      * 任何歧义、页面偏离或验收不满足都交回主模型，不预猜后续。
      */
-    val screenScreenshotTool = Tool(
+    fun screenScreenshotTool(runId: String? = null) = Tool(
         name = "screen_screenshot",
         description = "Capture one screen frame for VLM reasoning using Android MediaProjection after user approval.",
         parameters = { InputSchema.Obj(properties = buildJsonObject { }) },
         needsApproval = true,
         execute = { input ->
-            operations.trackScreenTool("screen_screenshot", "截取屏幕", input, runtime = "MediaProjection") {
+            operations.trackScreenTool("screen_screenshot", "截取屏幕", input, runtime = "MediaProjection", runId = runId, enforceScreenStop = false) {
                 val result = screenCaptureManager.capture()
                 textJson {
                     put("status", "captured")
@@ -580,7 +580,7 @@ internal class ScreenPrimitiveTools(
         }
     )
 
-    val vlmTaskTool = Tool(
+    fun vlmTaskTool(runId: String? = null) = Tool(
         name = "vlm_task",
         description = "Plan a phone automation task with VLM-style trace semantics. Stage 0 records the " +
             "intent only — it performs no actions; execute via screen_read_ui plus low-level screen tools.",
@@ -594,7 +594,7 @@ internal class ScreenPrimitiveTools(
         },
         needsApproval = true,
         execute = { input ->
-            operations.trackScreenTool("vlm_task", "规划 VLM 任务", input, runtime = "vlm-contract-stage0") {
+            operations.trackScreenTool("vlm_task", "规划 VLM 任务", input, runtime = "vlm-contract-stage0", runId = runId, enforceScreenStop = false) {
                 textJson {
                     put("status", "planned")
                     put("goal", input.requiredString("goal"))

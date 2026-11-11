@@ -3,6 +3,7 @@ package app.amber.core.service
 import android.content.Context
 import android.util.Log
 import app.amber.ai.core.MessageRole
+import app.amber.ai.provider.ResponseResumeStore
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageAnnotation
@@ -16,10 +17,14 @@ import app.amber.core.agent.runtime.AgentRunner
 import app.amber.core.agent.runtime.AssistantId
 import app.amber.core.agent.runtime.ConversationId
 import app.amber.core.agent.runtime.MessageNodeId
+import app.amber.core.agent.runtime.RunStatus
+import app.amber.core.agent.runtime.RunTransitionResult
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import app.amber.core.model.toMessageNode
+import app.amber.core.settings.Capability
+import app.amber.core.settings.CapabilityFlags
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.utils.withSettledCredentialArgumentsRedacted
 import app.amber.feature.chat.api.ChatTurnDescriptor
@@ -32,8 +37,12 @@ import app.amber.feature.macgateway.CloudSubmissionKind
 import app.amber.feature.macgateway.CloudTaskSession
 import app.amber.feature.runtime.PauseReason
 import app.amber.feature.runtime.RunOwnershipRegistry
+import app.amber.feature.runtime.RunRecoveryService
 import app.amber.feature.runtime.RunTerminalState
 import app.amber.feature.runtime.RunTerminalStore
+import app.amber.feature.runtime.StoredResponseGateway
+import app.amber.feature.runtime.StoredResponseStopCancel
+import app.amber.feature.runtime.ToolEffectLedger
 import java.io.File
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
@@ -75,6 +84,9 @@ enum class LocalTaskStatus(val wireValue: String) {
 
     val isActiveOrQueued: Boolean
         get() = this == QUEUED || this == RUNNING
+
+    val isStoppable: Boolean
+        get() = isActiveOrQueued || this == PAUSED
 }
 
 @Serializable
@@ -114,6 +126,7 @@ internal class ManagedLocalTask(
     @Volatile var status: LocalTaskStatus = LocalTaskStatus.QUEUED
     @Volatile var progressText: String? = null
     @Volatile var cancelledByUser: Boolean = false
+    @Volatile var unconfirmedServerStop: Boolean = false
     @Volatile var executionJob: Job? = null
 }
 
@@ -140,6 +153,12 @@ class LocalAsyncTaskCoordinator(
     private val agentEventStore: AgentEventStore? = null,
     private val runTerminalStore: RunTerminalStore? = null,
     private val runOwnershipRegistry: RunOwnershipRegistry? = null,
+    private val capabilityFlags: CapabilityFlags? = null,
+    private val toolEffectLedger: ToolEffectLedger? = null,
+    private val runRecovery: RunRecoveryService? = null,
+    private val responsesResumeStore: ResponseResumeStore? = null,
+    private val storedResponseGateway: StoredResponseGateway? = null,
+    private val storedResponseStopCancel: StoredResponseStopCancel? = null,
     val maxConcurrentTasks: Int = DEFAULT_MAX_CONCURRENT_LOCAL_TASKS,
     private val recoveryFileOverride: File? = null,
 ) {
@@ -171,11 +190,20 @@ class LocalAsyncTaskCoordinator(
         conversationId: Uuid,
         content: List<UIMessagePart>,
         answer: Boolean = true,
+        queueMode: PendingUserMessageMode = PendingUserMessageMode.FOLLOWUP,
     ): Boolean {
         if (content.isEmptyInputMessage()) return false
         val selectedTarget = resolvedFollowupTarget(conversationId)
         if (answer && selectedTarget != null) {
             return submitFollowup(conversationId, selectedTarget.workItemId, content)
+        }
+        if (answer && queueMode == PendingUserMessageMode.STEER) {
+            val steerTarget = tasksById.values
+                .filter { it.conversationId == conversationId && it.status.isActiveOrQueued }
+                .maxByOrNull { it.createdOrder }
+            if (steerTarget != null) {
+                return submitFollowup(conversationId, steerTarget.taskId, content)
+            }
         }
 
         val processed = userInputPreprocessor.process(content)
@@ -431,14 +459,18 @@ class LocalAsyncTaskCoordinator(
 
     suspend fun stopTask(conversationId: Uuid, taskIdOrRunId: String? = null): Boolean = withContext(NonCancellable) {
         val target = if (taskIdOrRunId != null) {
-            findTask(taskIdOrRunId)?.takeIf { it.conversationId == conversationId }
+            findTask(taskIdOrRunId)?.takeIf { it.conversationId == conversationId && it.status.isStoppable }
         } else {
             val selectedId = selectedFollowupByConversation[conversationId.toString()]
             val selectedTask = selectedId?.let(::findTask)
-                ?.takeIf { it.conversationId == conversationId && it.status.isActiveOrQueued }
-            selectedTask ?: tasksById.values
-                .filter { it.conversationId == conversationId && it.status.isActiveOrQueued }
-                .maxByOrNull { it.createdOrder }
+                ?.takeIf { it.conversationId == conversationId && it.status.isStoppable }
+            selectedTask
+                ?: tasksById.values
+                    .filter { it.conversationId == conversationId && it.status.isActiveOrQueued }
+                    .maxByOrNull { it.createdOrder }
+                ?: tasksById.values
+                    .filter { it.conversationId == conversationId && it.status == LocalTaskStatus.PAUSED }
+                    .maxByOrNull { it.createdOrder }
         } ?: return@withContext false
 
         stopSpecificTask(target)
@@ -447,24 +479,63 @@ class LocalAsyncTaskCoordinator(
 
     suspend fun stopAllForConversation(conversationId: Uuid) = withContext(NonCancellable) {
         val active = tasksById.values
-            .filter { it.conversationId == conversationId && it.status.isActiveOrQueued }
+            .filter { it.conversationId == conversationId && it.status.isStoppable }
             .sortedByDescending { it.createdOrder }
         for (task in active) {
             stopSpecificTask(task)
         }
     }
 
+    private suspend fun durableRuntimeForStop(): Boolean =
+        chatDurableRuntimeEnabled(capabilityFlags, toolEffectLedger, runTerminalStore, runRecovery) &&
+            capabilityFlags?.isEnabled(Capability.OpenAIResponsesResume) == true &&
+            responsesResumeStore != null &&
+            storedResponseGateway != null
+
+    private suspend fun storedResponseToggleOnForRun(runId: String): Boolean {
+        val gateway = storedResponseGateway ?: return false
+        return gateway.resolve(runId)?.api != null
+    }
+
     private suspend fun stopSpecificTask(task: ManagedLocalTask) {
-        task.cancelledByUser = true
+        val runId = task.runId
+        var serverCancelUnconfirmed = false
+        val stopCancel = storedResponseStopCancel
+        if (runId != null &&
+            task.status != LocalTaskStatus.QUEUED &&
+            stopCancel != null &&
+            durableRuntimeForStop() &&
+            storedResponseToggleOnForRun(runId)
+        ) {
+            runCatching { stopCancel.cancelStored(runId) }
+                .onSuccess { decidable ->
+                    if (!decidable) serverCancelUnconfirmed = true
+                }
+                .onFailure { error ->
+                    Log.w(TAG, "stopSpecificTask: server cancel failed for run $runId", error)
+                    serverCancelUnconfirmed = true
+                }
+        }
+
         val wasQueuedOnly: Boolean
+        val wasPaused: Boolean
         var nextToLaunch: ManagedLocalTask? = null
         synchronized(slotLock) {
             wasQueuedOnly = waitQueue.remove(task.taskId)
+            wasPaused = !wasQueuedOnly && !runningTaskIds.contains(task.taskId) && task.status == LocalTaskStatus.PAUSED
             if (runningTaskIds.remove(task.taskId)) {
                 nextToLaunch = pollNextQueuedTaskLocked()
             }
-            task.status = LocalTaskStatus.CANCELLED
-            task.progressText = "已停止"
+            if (serverCancelUnconfirmed && !wasQueuedOnly) {
+                task.unconfirmedServerStop = true
+                task.status = LocalTaskStatus.PAUSED
+                task.progressText = "等待远端确认停止…"
+            } else {
+                task.unconfirmedServerStop = false
+                task.cancelledByUser = true
+                task.status = LocalTaskStatus.CANCELLED
+                task.progressText = "已停止"
+            }
         }
         cancelUnconsumedFollowups(task)
         if (selectedFollowupByConversation[task.conversationId.toString()] == task.taskId) {
@@ -478,32 +549,242 @@ class LocalAsyncTaskCoordinator(
             task.userNodePersisted.join()
             settleTaskMessagesInConversation(task, reason = "user_cancelled")
             finishConversationKeepAliveIfIdle(task.conversationId)
+            if (!hasStoppableTasks(task.conversationId)) {
+                runPresenter.cancelLiveStatus(task.conversationId)
+            }
             refreshConversationSessionJob(task.conversationId)
             task.settled.complete(Unit)
             return
         }
 
-        val runId = task.runId
-        if (runId != null) {
+        if (serverCancelUnconfirmed && runId != null) {
+            var parkAttempt = if (wasPaused) {
+                parkUnconfirmedStoppedPausedTask(task, runId, allowRunningEventState = false)
+            } else {
+                UnconfirmedParkAttempt.LOST_TO_ACTIVE_RUN
+            }
+            if (parkAttempt == UnconfirmedParkAttempt.LOST_TO_ACTIVE_RUN) {
+                stopCancel?.markStopUnconfirmed(runId)
+                runCatching {
+                    runOwnershipRegistry?.cancel(
+                        runId = runId,
+                        conversationId = task.conversationId.toString(),
+                    )
+                }
+                runCatching { agentRunner.cancel(AgentRunId(runId)) }
+                runCatching { agentRunner.awaitRunSettled(AgentRunId(runId)) }
+                task.executionJob?.cancel()
+                runCatching { task.executionJob?.join() }
+                val unconsumed = stopCancel?.consumeStopUnconfirmed(runId) == true
+                val parkedByHandler = !unconsumed &&
+                    runCatching { runTerminalStore?.get(runId) }.getOrNull()?.let {
+                        it.conversationId == task.conversationId.toString() &&
+                            it.state == RunTerminalState.WAITING_EXTERNAL &&
+                            it.finishedAtMs == null
+                    } == true
+                parkAttempt = if (parkedByHandler) {
+                    UnconfirmedParkAttempt.PARKED
+                } else {
+                    parkUnconfirmedStoppedPausedTask(task, runId, allowRunningEventState = true)
+                }
+            }
+            if (parkAttempt == UnconfirmedParkAttempt.PARKED) {
+                finishConversationKeepAliveIfIdle(task.conversationId)
+                refreshConversationSessionJob(task.conversationId)
+                task.settled.complete(Unit)
+                nextToLaunch?.let { next ->
+                    launchTaskExecution(next, statusCollectorJob = next.executionJob)
+                }
+                return
+            }
+
+            stopCancel?.clearStopUnconfirmed(runId)
+            runCatching { responsesResumeStore?.clear(runId) }
+            val existingTerminal = runCatching { runTerminalStore?.get(runId) }.getOrNull()
+                ?.takeIf { it.conversationId == task.conversationId.toString() }
+            if (existingTerminal != null &&
+                existingTerminal.state.isTerminal &&
+                existingTerminal.state != RunTerminalState.CANCELLED
+            ) {
+                val (settledStatus, settledText) = when (existingTerminal.state) {
+                    RunTerminalState.COMPLETED -> LocalTaskStatus.COMPLETED to "已完成"
+                    RunTerminalState.INTERRUPTED -> LocalTaskStatus.INTERRUPTED to "已中断"
+                    else -> LocalTaskStatus.FAILED to "执行失败"
+                }
+                synchronized(slotLock) {
+                    task.unconfirmedServerStop = false
+                    task.cancelledByUser = false
+                    task.status = settledStatus
+                    task.progressText = settledText
+                }
+                runCatching {
+                    val targetRunStatus = RunStatus.valueOf(existingTerminal.state.name)
+                    if (targetRunStatus == RunStatus.COMPLETED) {
+                        agentEventStore?.transitionRun(
+                            AgentRunId(runId),
+                            RunStatus.PAUSE_STATES,
+                            RunStatus.RUNNING,
+                            reason = "reconcile_completed_stop_race",
+                        )
+                    }
+                    agentEventStore?.transitionRun(
+                        AgentRunId(runId),
+                        RunStatus.LIVE_STATES,
+                        targetRunStatus,
+                        reason = "reconcile_terminal_stop_race",
+                    )
+                }
+                persistRecoverySnapshot()
+                publishUiState()
+                if (existingTerminal.state == RunTerminalState.INTERRUPTED) {
+                    settleTaskMessagesInConversation(task, reason = InterruptedRunProjection.DEFAULT_REASON)
+                }
+                finishConversationKeepAliveIfIdle(task.conversationId)
+                if (!hasStoppableTasks(task.conversationId)) {
+                    runPresenter.cancelLiveStatus(task.conversationId)
+                }
+                refreshConversationSessionJob(task.conversationId)
+                task.settled.complete(Unit)
+                nextToLaunch?.let { next ->
+                    launchTaskExecution(next, statusCollectorJob = next.executionJob)
+                }
+                return
+            }
+
+            synchronized(slotLock) {
+                task.unconfirmedServerStop = false
+                task.cancelledByUser = true
+                task.status = LocalTaskStatus.CANCELLED
+                task.progressText = "已停止"
+            }
+            if (existingTerminal != null && !existingTerminal.state.isTerminal) {
+                runCatching {
+                    runTerminalStore?.finish(runId, RunTerminalState.CANCELLED, PauseReason.USER_STOP)
+                }
+            }
             runCatching {
+                agentEventStore?.transitionRun(
+                    AgentRunId(runId),
+                    RunStatus.LIVE_STATES,
+                    RunStatus.CANCELLED,
+                    reason = "user_stop",
+                )
+            }
+            runCatching { runRecovery?.reconcileStartedEffects(runId) }
+            persistRecoverySnapshot()
+            publishUiState()
+        }
+
+        if (runId != null) {
+            val cancelledByOwner = runCatching {
                 runOwnershipRegistry?.cancel(
                     runId = runId,
                     conversationId = task.conversationId.toString(),
-                )
-            }
+                ) == true
+            }.getOrDefault(false)
             runCatching { agentRunner.cancel(AgentRunId(runId)) }
             runCatching { agentRunner.awaitRunSettled(AgentRunId(runId)) }
+            val cancelledWaiting = !cancelledByOwner && runCatching {
+                runTerminalStore?.cancelWaitingUser(
+                    runId = runId,
+                    conversationId = task.conversationId.toString(),
+                ) == true
+            }.getOrDefault(false)
+            if (wasPaused || cancelledWaiting) {
+                runCatching {
+                    agentEventStore?.transitionRun(
+                        AgentRunId(runId),
+                        RunStatus.PAUSE_STATES,
+                        RunStatus.CANCELLED,
+                        reason = "user_stop",
+                    )
+                }
+                runCatching { runRecovery?.reconcileStartedEffects(runId) }
+            }
         }
         task.executionJob?.cancel()
         runCatching { task.executionJob?.join() }
         settleTaskMessagesInConversation(task, reason = "user_cancelled")
         finishConversationKeepAliveIfIdle(task.conversationId)
+        if (!hasStoppableTasks(task.conversationId)) {
+            runPresenter.cancelLiveStatus(task.conversationId)
+        }
         refreshConversationSessionJob(task.conversationId)
         task.settled.complete(Unit)
 
         nextToLaunch?.let { next ->
             launchTaskExecution(next, statusCollectorJob = next.executionJob)
         }
+    }
+
+    private fun hasStoppableTasks(conversationId: Uuid): Boolean =
+        tasksById.values.any { it.conversationId == conversationId && it.status.isStoppable }
+
+    private enum class UnconfirmedParkAttempt {
+        PARKED,
+        LOST_TO_ACTIVE_RUN,
+        FAILED,
+    }
+
+    private suspend fun parkUnconfirmedStoppedPausedTask(
+        task: ManagedLocalTask,
+        runId: String,
+        allowRunningEventState: Boolean,
+    ): UnconfirmedParkAttempt {
+        val terminalStore = runTerminalStore ?: return UnconfirmedParkAttempt.FAILED
+        val terminal = terminalStore.get(runId)?.takeIf {
+            it.conversationId == task.conversationId.toString() &&
+                !it.state.isTerminal &&
+                it.finishedAtMs == null
+        } ?: return UnconfirmedParkAttempt.FAILED
+        val id = AgentRunId(runId)
+        val expectedForClaim = if (allowRunningEventState) {
+            RunStatus.PAUSE_STATES + RunStatus.CREATED
+        } else {
+            RunStatus.PAUSE_STATES
+        }
+        val claim = agentEventStore?.transitionRun(
+            id,
+            expectedForClaim,
+            RunStatus.RUNNING,
+            reason = "user_stop_server_cancel_pending",
+        )
+        if (!allowRunningEventState &&
+            claim is RunTransitionResult.Rejected &&
+            claim.current in setOf(RunStatus.CREATED, RunStatus.RUNNING)
+        ) {
+            return UnconfirmedParkAttempt.LOST_TO_ACTIVE_RUN
+        }
+        val eventReadyForPark = agentEventStore == null ||
+            claim is RunTransitionResult.Applied ||
+            claim is RunTransitionResult.UnknownRun ||
+            (allowRunningEventState &&
+                claim is RunTransitionResult.Rejected &&
+                claim.current in setOf(RunStatus.RUNNING, RunStatus.WAITING_EXTERNAL))
+        if (!eventReadyForPark) {
+            return UnconfirmedParkAttempt.FAILED
+        }
+        terminalStore.pause(terminal.runId, RunTerminalState.WAITING_EXTERNAL, PauseReason.USER_STOP)
+        if (terminalStore.get(runId)?.state != RunTerminalState.WAITING_EXTERNAL) {
+            return UnconfirmedParkAttempt.FAILED
+        }
+        val parkTransition = agentEventStore?.transitionRun(
+            id,
+            setOf(RunStatus.RUNNING, RunStatus.WAITING_EXTERNAL),
+            RunStatus.WAITING_EXTERNAL,
+            reason = "user_stop_server_cancel_pending",
+        )
+        val eventParked = agentEventStore == null ||
+            parkTransition is RunTransitionResult.Applied ||
+            parkTransition is RunTransitionResult.UnknownRun ||
+            (parkTransition is RunTransitionResult.Rejected &&
+                parkTransition.current == RunStatus.WAITING_EXTERNAL)
+        if (!eventParked) {
+            return UnconfirmedParkAttempt.FAILED
+        }
+        storedResponseStopCancel?.clearStopUnconfirmed(runId)
+        runCatching { runRecovery?.reconcileStartedEffects(runId) }
+        return UnconfirmedParkAttempt.PARKED
     }
 
     private fun launchTaskExecution(task: ManagedLocalTask, statusCollectorJob: Job?) {
@@ -572,7 +853,7 @@ class LocalAsyncTaskCoordinator(
     ) {
         var nextToLaunch: ManagedLocalTask? = null
         synchronized(slotLock) {
-            if (task.status != LocalTaskStatus.CANCELLED) {
+            if (task.status != LocalTaskStatus.CANCELLED && !task.unconfirmedServerStop) {
                 task.status = finalStatus
             }
             if (runningTaskIds.remove(task.taskId)) {
@@ -692,15 +973,31 @@ class LocalAsyncTaskCoordinator(
         for (record in records) {
             val conversationId = runCatching { Uuid.parse(record.conversationId) }.getOrNull() ?: continue
             val anchorNodeId = runCatching { Uuid.parse(record.anchorUserNodeId) }.getOrNull() ?: continue
+            val existingTerminal = record.runId?.let { runId ->
+                runCatching { runTerminalStore?.get(runId) }.getOrNull()
+            }
+            // RunRecoveryService runs before recoverInterruptedTasks() on cold start.
+            // Never overwrite runs already converged to a terminal outcome (e.g. COMPLETED
+            // stored responses) or escalated/parked in a durable pause (e.g. OUTCOME_UNKNOWN,
+            // WAITING_USER, WAITING_EXTERNAL, RESUMABLE).
+            if (existingTerminal != null &&
+                existingTerminal.state !in setOf(RunTerminalState.RUNNING, RunTerminalState.INTERRUPTED)
+            ) {
+                continue
+            }
             record.runId?.let { runId ->
                 runCatching {
-                    val existing = runTerminalStore?.get(runId)
-                    if (existing != null && existing.state == RunTerminalState.RUNNING) {
-                        runTerminalStore.finish(runId, RunTerminalState.INTERRUPTED, PauseReason.PROCESS_RESTART)
+                    if (existingTerminal != null && existingTerminal.state == RunTerminalState.RUNNING) {
+                        runTerminalStore?.finish(runId, RunTerminalState.INTERRUPTED, PauseReason.PROCESS_RESTART)
                     }
                 }
                 runCatching {
-                    agentEventStore?.markInterrupted(AgentRunId(runId), reason = InterruptedRunProjection.DEFAULT_REASON)
+                    agentEventStore?.transitionRun(
+                        AgentRunId(runId),
+                        setOf(RunStatus.CREATED, RunStatus.RUNNING),
+                        RunStatus.INTERRUPTED,
+                        reason = InterruptedRunProjection.DEFAULT_REASON,
+                    )
                 }
             }
             runCatching {

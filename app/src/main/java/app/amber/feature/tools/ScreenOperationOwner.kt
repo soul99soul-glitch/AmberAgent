@@ -48,11 +48,14 @@ internal class ScreenOperationOwner(
         input: JsonElement,
         runtime: String = "Android Accessibility",
         runId: String? = null,
+        enforceScreenStop: Boolean = true,
         block: suspend () -> List<UIMessagePart>,
     ): List<UIMessagePart> {
         // 只有能界定"本次 run"的入口才受 screen_stop 约束；低级手势由每次审批把关。
-        check(!isStopped(runId)) {
-            "Screen control was ended by screen_stop for this run; no further action is dispatched."
+        if (enforceScreenStop) {
+            check(!isStopped(runId)) {
+                "Screen control was ended by screen_stop for this run; no further action is dispatched."
+            }
         }
         check(screenOwner.tryLock()) { "Another screen operation is active; wait for it to finish before observing again." }
         try {

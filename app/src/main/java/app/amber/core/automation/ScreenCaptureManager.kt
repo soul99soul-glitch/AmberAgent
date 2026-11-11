@@ -89,6 +89,9 @@ class ScreenCaptureManager(private val context: Context) {
         pending.deferred.completeExceptionally(error)
     }
 
+    internal fun isRequestPending(requestId: String): Boolean =
+        pendingCapture.get()?.requestId == requestId
+
     internal fun markSessionActive(active: Boolean) {
         sessionActive = active
     }
@@ -96,11 +99,7 @@ class ScreenCaptureManager(private val context: Context) {
     fun releaseSession() {
         if (!sessionActive) return
         sessionActive = false
-        ContextCompat.startForegroundService(
-            context,
-            Intent(context, ScreenCaptureService::class.java)
-                .setAction(ScreenCaptureService.ACTION_STOP_SESSION)
-        )
+        context.stopService(Intent(context, ScreenCaptureService::class.java))
     }
 
     companion object {

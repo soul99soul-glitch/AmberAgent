@@ -43,7 +43,6 @@ class ScreenAutomationTools(
     private val collection = ScreenListCollection(operations)
 
     fun getTools(runId: String? = null): List<Tool> {
-        operations.bindRun(runId)
         return listOf(
             scope.screenStatusTool(runId),
             scope.screenAppsTool,
@@ -51,23 +50,23 @@ class ScreenAutomationTools(
             scope.screenRemoveAppTool,
             scope.screenStopTool(runId),
             scope.screenGoalTool(runId),
-            primitives.screenClickTool,
-            primitives.screenLongClickTool,
-            primitives.screenSwipeTool,
-            primitives.screenInputTextTool,
-            primitives.screenBackTool,
-            primitives.screenHomeTool,
-            primitives.screenOpenAppTool,
-            primitives.screenOpenUrlTool,
-            primitives.screenReadUiTool,
-            primitives.screenFindTextTool,
-            primitives.screenTapTextTool,
-            primitives.screenWaitForTextTool,
-            primitives.screenScrollUntilTool,
+            primitives.screenClickTool(runId),
+            primitives.screenLongClickTool(runId),
+            primitives.screenSwipeTool(runId),
+            primitives.screenInputTextTool(runId),
+            primitives.screenBackTool(runId),
+            primitives.screenHomeTool(runId),
+            primitives.screenOpenAppTool(runId),
+            primitives.screenOpenUrlTool(runId),
+            primitives.screenReadUiTool(runId),
+            primitives.screenFindTextTool(runId),
+            primitives.screenTapTextTool(runId),
+            primitives.screenWaitForTextTool(runId),
+            primitives.screenScrollUntilTool(runId),
             flow.screenRunFlowTool(runId),
-            collection.screenCollectListTool,
-            primitives.screenScreenshotTool,
-            primitives.vlmTaskTool,
+            collection.screenCollectListTool(runId),
+            primitives.screenScreenshotTool(runId),
+            primitives.vlmTaskTool(runId),
         )
     }
 }

@@ -377,4 +377,145 @@ class AgentSoulSyncAndToolsTest {
             server.stop(0)
         }
     }
+
+    @Test
+    fun offlineLocalEditPushesOnReconnectAndPreservesUnsyncedSnapshotWhenRemoteAdvances() = runBlocking {
+        val observedRequests = CopyOnWriteArrayList<Triple<String, String, String>>()
+        val failNetwork = AtomicBoolean(false)
+        val serverSoulJson = AtomicReference(
+            """
+            {
+              "revision": 1,
+              "updatedAtMs": 1000,
+              "displayName": "初始云端",
+              "tagline": "v1",
+              "soulMarkdown": "初始设定",
+              "isDefault": false,
+              "source": "macos_ui",
+              "history": []
+            }
+            """.trimIndent(),
+        )
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange ->
+            val path = exchange.requestURI.path
+            val body = exchange.requestBody.bufferedReader().readText()
+            observedRequests += Triple(exchange.requestMethod, path, body)
+            val (status, payload) = when {
+                failNetwork.get() -> 503 to """{"error":"offline"}"""
+                exchange.requestMethod == "GET" && path == "/v2/soul" -> 200 to serverSoulJson.get()
+                exchange.requestMethod == "PUT" && path == "/v2/soul" -> {
+                    val reqJson = Json.parseToJsonElement(body).jsonObject
+                    val nextRev = Json.parseToJsonElement(serverSoulJson.get()).jsonObject["revision"]!!.jsonPrimitive.long + 1L
+                    val nextJson = """
+                        {
+                          "revision": $nextRev,
+                          "updatedAtMs": ${reqJson["updatedAtMs"]!!.jsonPrimitive.long},
+                          "displayName": "${reqJson["displayName"]!!.jsonPrimitive.content}",
+                          "tagline": "${reqJson["tagline"]!!.jsonPrimitive.content}",
+                          "soulMarkdown": "${reqJson["soulMarkdown"]!!.jsonPrimitive.content}",
+                          "isDefault": ${reqJson["isDefault"]!!.jsonPrimitive.boolean},
+                          "source": "${reqJson["source"]!!.jsonPrimitive.content}",
+                          "history": []
+                        }
+                    """.trimIndent()
+                    serverSoulJson.set(nextJson)
+                    200 to nextJson
+                }
+                else -> 500 to """{"error":"unexpected"}"""
+            }
+            val bytes = payload.toByteArray()
+            exchange.responseHeaders.add("Content-Type", "application/json")
+            exchange.sendResponseHeaders(status, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        val tempDir = Files.createTempDirectory("agent_soul_offline_test").toFile()
+        try {
+            val storageFile = File(tempDir, "agent_soul_state.json")
+            val client = MacGatewayClient(
+                addrs = listOf("127.0.0.1"),
+                port = server.address.port,
+                fingerprint = "unused-over-http",
+                token = "pair-token-soul",
+                scheme = "http",
+            )
+            val store = AgentSoulStore(storageFile = storageFile, clock = { 2_000L })
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            val syncCoordinator = AgentSoulCloudSyncCoordinator(
+                store = store,
+                scope = scope,
+                clientProvider = { client },
+            )
+
+            // Sync initial v1 from server
+            syncCoordinator.syncOnce()
+            assertEquals(1L, store.lastSyncedRevision)
+
+            // Go offline and edit locally -> async PUT fails, pending dirty state must persist
+            failNetwork.set(true)
+            store.update(
+                displayName = "离线草稿",
+                tagline = "断网修改",
+                soulMarkdown = "断网期间编写的设定",
+                source = AgentSoulStore.SOURCE_ANDROID_UI,
+            )
+            delay(50L)
+            assertEquals(1L, store.lastSyncedRevision)
+
+            // Reconnect while server is still at revision 1 -> syncOnce must push the pending local edit
+            observedRequests.clear()
+            failNetwork.set(false)
+            syncCoordinator.syncOnce()
+            assertEquals(1, observedRequests.count { it.first == "PUT" && it.second == "/v2/soul" })
+            assertEquals(2L, store.lastSyncedRevision)
+            assertEquals("离线草稿", store.state.value.displayName)
+
+            // Second outage: local edits while another device advances server to revision 9 with non-empty history
+            failNetwork.set(true)
+            store.update(
+                displayName = "本地未同步版",
+                tagline = "离线版本",
+                soulMarkdown = "不应丢失的本地人设正文",
+                source = AgentSoulStore.SOURCE_ANDROID_CHAT,
+            )
+            delay(50L)
+            serverSoulJson.set(
+                """
+                {
+                  "revision": 9,
+                  "updatedAtMs": 9000,
+                  "displayName": "远端新版",
+                  "tagline": "桌面端修改",
+                  "soulMarkdown": "远端权威内容",
+                  "isDefault": false,
+                  "source": "macos_ui",
+                  "history": [
+                    {
+                      "id": "remote-snap-1",
+                      "displayName": "远端历史1",
+                      "tagline": "旧版",
+                      "soulMarkdown": "旧版内容",
+                      "updatedAtMs": 5000,
+                      "source": "macos_ui"
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            failNetwork.set(false)
+            syncCoordinator.syncOnce()
+            assertEquals("远端新版", store.state.value.displayName)
+            assertEquals(9L, store.lastSyncedRevision)
+            assertTrue(
+                "Unsynced local persona must be preserved in merged history when overwritten by higher remote revision",
+                store.state.value.history.any {
+                    it.displayName == "本地未同步版" && it.soulMarkdown == "不应丢失的本地人设正文"
+                },
+            )
+        } finally {
+            server.stop(0)
+            tempDir.deleteRecursively()
+        }
+    }
 }

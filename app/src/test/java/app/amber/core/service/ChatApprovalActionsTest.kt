@@ -177,6 +177,41 @@ class ChatApprovalActionsTest : DurableRuntimeTestBase() {
     }
 
     @Test
+    fun `batch approval keeps high risk mandatory mcp screen and locked sensitive tools pending`() = runBlocking {
+        val fixture = fixture()
+        val ordinary = tool("ordinary", "file_write")
+        val highRisk = tool("high_risk", "screen_run_goal")
+        val mandatory = tool("mandatory", "mcp_server_manage")
+        val mcpCall = tool("mcp_call", "mcp__github__create_issue")
+        val screenTap = tool("screen_tap", "screen_click")
+        val lockedTerminal = tool("locked_term", "terminal_execute")
+        val conversation = Conversation.ofId(Uuid.random()).copy(
+            messageNodes = listOf(
+                assistantTools(ordinary, highRisk, mandatory, mcpCall, screenTap, lockedTerminal),
+            ),
+        )
+        fixture.repo.insertConversation(conversation)
+
+        val keyguard = context.getSystemService(android.app.KeyguardManager::class.java)
+        val shadow = org.robolectric.Shadows.shadowOf(keyguard)
+        shadow.setKeyguardLocked(true)
+        try {
+            val decision = fixture.actions.approvePendingAutoApprovableTools(conversation.id)!!
+            assertFalse(decision.shouldResume)
+            val persisted = fixture.repo.getConversationById(conversation.id)!!
+                .currentMessages.last().getTools().associateBy { it.toolCallId }
+            assertEquals(ToolApprovalState.Approved, persisted.getValue("ordinary").approvalState)
+            assertTrue(persisted.getValue("high_risk").isPending)
+            assertTrue(persisted.getValue("mandatory").isPending)
+            assertTrue(persisted.getValue("mcp_call").isPending)
+            assertTrue(persisted.getValue("screen_tap").isPending)
+            assertTrue(persisted.getValue("locked_term").isPending)
+        } finally {
+            shadow.setKeyguardLocked(false)
+        }
+    }
+
+    @Test
     fun `settings resume requires the matching live run and leaves tools unmodified`() = runBlocking {
         val fixture = fixture()
         val runId = "approval-run"

@@ -1,24 +1,42 @@
 package app.amber.core.service
 
 import android.content.ContextWrapper
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
 import app.amber.agent.data.db.fts.MessageFtsManager
 import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.ResponseCursor
+import app.amber.ai.provider.ResponseResumeStore
+import app.amber.ai.provider.providers.openai.StoredResponseApi
+import app.amber.ai.provider.providers.openai.StoredResponseCancelResult
+import app.amber.ai.provider.providers.openai.StoredResponseState
+import app.amber.ai.provider.providers.openai.StoredResponseStatus
+import app.amber.ai.ui.MessageChunk
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.agent.runtime.AgentDescriptorId
+import app.amber.core.agent.runtime.AgentEventStore
 import app.amber.core.agent.runtime.AgentInput
 import app.amber.core.agent.runtime.AgentRunHandle
 import app.amber.core.agent.runtime.AgentRunId
+import app.amber.core.agent.runtime.AgentRunRecord
 import app.amber.core.agent.runtime.AgentRunSnapshot
 import app.amber.core.agent.runtime.AgentRunner
 import app.amber.core.agent.runtime.InMemoryAgentEventStore
 import app.amber.core.agent.runtime.RunStatus
+import androidx.room.Room
 import app.amber.core.agent.runtime.adapter.LegacyRunScope
+import app.amber.core.agent.store.AgentRuntimeDatabase
+import app.amber.core.agent.store.RoomAgentEventStore
+import app.amber.core.model.MessageNode
+import app.amber.feature.runtime.PauseReason
+import app.amber.feature.runtime.RunTerminalState
 import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.GenerationRunSession
 import app.amber.core.ai.RunKernel
@@ -28,6 +46,7 @@ import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.FilesRepository
+import app.amber.core.settings.CapabilityFlags
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.utils.JsonInstant
@@ -42,6 +61,9 @@ import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.runtime.DurableRuntimeTestBase
 import app.amber.feature.runtime.NotificationApprovalTokenRegistry
 import app.amber.feature.runtime.RunOwnershipRegistry
+import app.amber.feature.runtime.RunRecoveryService
+import app.amber.feature.runtime.StoredResponseGateway
+import app.amber.feature.runtime.StoredResponseStopCancel
 import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.feature.task.AgentTaskScheduler
 import app.amber.feature.task.AgentTaskStore
@@ -70,6 +92,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -424,12 +447,494 @@ class LocalAsyncTaskCoordinatorTest : DurableRuntimeTestBase() {
         }
     }
 
+    @Test
+    fun `cold start recovery preserves COMPLETED and OUTCOME_UNKNOWN runs settled by RunRecoveryService`() = runBlocking {
+        withTimeout(15_000) {
+            val recoveryFile = File(directory.newFolder(), "recovery_converged.json")
+            val fixture = createFixture(recoveryFile = recoveryFile)
+            val convId = Uuid.random()
+            val userCompleted = MessageNode.of(UIMessage.user("Question settled completed"))
+            val assistantCompleted = MessageNode.of(UIMessage.assistant("Authoritative server final answer"))
+            val userUnknown = MessageNode.of(UIMessage.user("Question with unknown tool outcome"))
+            val assistantUnknown = MessageNode.of(
+                UIMessage(
+                    role = MessageRole.ASSISTANT,
+                    parts = listOf(
+                        UIMessagePart.Tool(
+                            toolCallId = "call-non-idem",
+                            toolName = "external_file_write",
+                            input = """{"path":"a.txt"}""",
+                            approvalState = ToolApprovalState.Approved,
+                        ),
+                    ),
+                ),
+            )
+            fixture.repo.insertConversation(
+                Conversation.ofId(convId).copy(
+                    messageNodes = listOf(userCompleted, assistantCompleted, userUnknown, assistantUnknown),
+                ),
+            )
+
+            val completedRunId = "run-already-completed"
+            val unknownRunId = "run-already-outcome-unknown"
+            runTerminalStore.begin(completedRunId, convId.toString(), null)
+            runTerminalStore.finish(completedRunId, RunTerminalState.COMPLETED, null)
+            fixture.events.appendRun(
+                AgentRunRecord(
+                    runId = completedRunId,
+                    parentRunId = null,
+                    agentDescriptorId = "chat",
+                    agentVersion = "1",
+                    conversationId = convId.toString(),
+                    messageNodeId = userCompleted.id.toString(),
+                    producesMessageId = null,
+                    assistantId = null,
+                    status = RunStatus.COMPLETED,
+                    inputDigest = "d1",
+                    inputSnapshotRef = null,
+                    inputSchemaVersion = 1,
+                    startedAt = 1L,
+                    finishedAt = 2L,
+                    interruptedReason = null,
+                ),
+            )
+
+            runTerminalStore.begin(unknownRunId, convId.toString(), null)
+            runTerminalStore.pause(unknownRunId, RunTerminalState.OUTCOME_UNKNOWN, PauseReason.OUTCOME_UNKNOWN)
+            fixture.events.appendRun(
+                AgentRunRecord(
+                    runId = unknownRunId,
+                    parentRunId = null,
+                    agentDescriptorId = "chat",
+                    agentVersion = "1",
+                    conversationId = convId.toString(),
+                    messageNodeId = userUnknown.id.toString(),
+                    producesMessageId = null,
+                    assistantId = null,
+                    status = RunStatus.OUTCOME_UNKNOWN,
+                    inputDigest = "d2",
+                    inputSnapshotRef = null,
+                    inputSchemaVersion = 1,
+                    startedAt = 1L,
+                    finishedAt = null,
+                    interruptedReason = "ledger_escalation",
+                ),
+            )
+
+            recoveryFile.writeText(
+                """
+                [
+                  {"taskId":"$completedRunId","conversationId":"$convId","anchorUserNodeId":"${userCompleted.id}","title":"Q1","status":"running","runId":"$completedRunId"},
+                  {"taskId":"$unknownRunId","conversationId":"$convId","anchorUserNodeId":"${userUnknown.id}","title":"Q2","status":"running","runId":"$unknownRunId"}
+                ]
+                """.trimIndent(),
+            )
+
+            fixture.coordinator.recoverInterruptedTasks()
+
+            val persisted = fixture.repo.getConversationById(convId)!!
+            assertFalse(
+                "Completed stored response must not be stamped GenerationInterrupted",
+                persisted.messageNodes[1].currentMessage.annotations.any { it is UIMessageAnnotation.GenerationInterrupted },
+            )
+            assertEquals(
+                "outcome_unknown",
+                fixture.runtimeDb.agentRuntimeDao().getRun(unknownRunId)?.status,
+            )
+            assertFalse(
+                "Outcome-unknown paused run must not be stamped GenerationInterrupted",
+                persisted.messageNodes[3].currentMessage.annotations.any { it is UIMessageAnnotation.GenerationInterrupted },
+            )
+        }
+    }
+
+    @Test
+    fun `stopping WAITING_USER paused task by runId settles durable terminal and event store`() = runBlocking {
+        withTimeout(15_000) {
+            val fixture = createFixture(maxConcurrentTasks = 2)
+            val convId = Uuid.random()
+            fixture.repo.insertConversation(Conversation.ofId(convId))
+            fixture.store.ensureInitialized(convId)
+
+            fixture.runner.onTurn("Need approval") { session ->
+                emit(
+                    GenerationChunk.Messages(
+                        session.messages + UIMessage(
+                            role = MessageRole.ASSISTANT,
+                            parts = listOf(
+                                UIMessagePart.Tool(
+                                    toolCallId = "call-wait-1",
+                                    toolName = "file_write",
+                                    input = """{"path":"note.md","content":"hi"}""",
+                                    approvalState = ToolApprovalState.Pending,
+                                ),
+                            ),
+                        ),
+                    ),
+                )
+            }
+
+            assertTrue(fixture.coordinator.submitMessage(convId, listOf(UIMessagePart.Text("Need approval"))))
+            fixture.runner.awaitTurnCompleted("Need approval")
+
+            val taskSession = fixture.coordinator.uiState.value.tasks.single { it.title == "Need approval" }
+            assertEquals("paused", taskSession.outcome)
+            val runId = taskSession.workItemId
+
+            runTerminalStore.begin(runId, convId.toString(), null)
+            runTerminalStore.pause(runId, RunTerminalState.WAITING_USER, PauseReason.TOOL_APPROVAL)
+            fixture.events.appendRun(
+                AgentRunRecord(
+                    runId = runId,
+                    parentRunId = null,
+                    agentDescriptorId = "chat",
+                    agentVersion = "1",
+                    conversationId = convId.toString(),
+                    messageNodeId = null,
+                    producesMessageId = null,
+                    assistantId = null,
+                    status = RunStatus.WAITING_USER,
+                    inputDigest = "d",
+                    inputSnapshotRef = null,
+                    inputSchemaVersion = 1,
+                    startedAt = 1L,
+                    finishedAt = null,
+                    interruptedReason = null,
+                ),
+            )
+
+            assertTrue(fixture.coordinator.stopTask(convId, runId))
+            assertEquals(RunTerminalState.CANCELLED, runTerminalStore.get(runId)?.state)
+            assertEquals("cancelled", fixture.runtimeDb.agentRuntimeDao().getRun(runId)?.status)
+        }
+    }
+
+    @Test
+    fun `stopping stored response task invokes StoredResponseStopCancel and parks WAITING_EXTERNAL when unconfirmed`() = runBlocking {
+        withTimeout(15_000) {
+            val cancelledResponseIds = mutableListOf<String>()
+            val resumeStore = object : ResponseResumeStore {
+                private var cursor: ResponseCursor? = ResponseCursor("resp-unconfirmed-1", 3L, "openai-p1")
+                override suspend fun save(runId: String, responseId: String, sequence: Long, providerId: String) {
+                    cursor = ResponseCursor(responseId, sequence, providerId)
+                }
+                override suspend fun load(runId: String): ResponseCursor? = cursor
+                override suspend fun clear(runId: String) { cursor = null }
+            }
+            val unconfirmedApi = object : StoredResponseApi {
+                override suspend fun cancel(
+                    providerSetting: ProviderSetting.OpenAI,
+                    responseId: String,
+                ): StoredResponseCancelResult {
+                    cancelledResponseIds += responseId
+                    return StoredResponseCancelResult.CancelFailed
+                }
+                override suspend fun fetchStatus(
+                    providerSetting: ProviderSetting.OpenAI,
+                    responseId: String,
+                ): StoredResponseStatus = error("unused")
+                override suspend fun streamStored(
+                    providerSetting: ProviderSetting.OpenAI,
+                    responseId: String,
+                    cursor: ResponseCursor?,
+                    store: ResponseResumeStore,
+                    runId: String,
+                ): Flow<MessageChunk> = kotlinx.coroutines.flow.emptyFlow()
+            }
+            val gateway = object : StoredResponseGateway {
+                override suspend fun resolve(runId: String) = StoredResponseGateway.StoredResponseSession(
+                    cursor = ResponseCursor("resp-unconfirmed-1", 3L, "openai-p1"),
+                    providerSetting = ProviderSetting.OpenAI(
+                        baseUrl = "https://api.openai.com/v1",
+                        useResponseApi = true,
+                        enableResponsesResume = true,
+                    ),
+                    api = unconfirmedApi,
+                )
+            }
+            val stopCancel = StoredResponseStopCancel(gateway, resumeStore)
+            val fixture = createFixture(
+                maxConcurrentTasks = 2,
+                responsesResumeStore = resumeStore,
+                storedResponseGateway = gateway,
+                storedResponseStopCancel = stopCancel,
+            )
+            val convId = Uuid.random()
+            fixture.repo.insertConversation(Conversation.ofId(convId))
+            fixture.store.ensureInitialized(convId)
+
+            val blockGate = CompletableDeferred<Unit>()
+            fixture.runner.onTurn("Stored response run") { session ->
+                emit(
+                    GenerationChunk.Messages(
+                        session.messages + UIMessage(
+                            role = MessageRole.ASSISTANT,
+                            parts = listOf(UIMessagePart.Text("Streaming stored...")),
+                        ),
+                    ),
+                )
+                blockGate.await()
+            }
+
+            assertTrue(fixture.coordinator.submitMessage(convId, listOf(UIMessagePart.Text("Stored response run"))))
+            fixture.runner.awaitTurnStarted("Stored response run")
+            val runId = fixture.coordinator.uiState.value.tasks.single { it.title == "Stored response run" }.workItemId
+            runTerminalStore.begin(runId, convId.toString(), null)
+            fixture.events.appendRun(
+                AgentRunRecord(
+                    runId = runId,
+                    parentRunId = null,
+                    agentDescriptorId = "chat",
+                    agentVersion = "1",
+                    conversationId = convId.toString(),
+                    messageNodeId = null,
+                    producesMessageId = null,
+                    assistantId = null,
+                    status = RunStatus.RUNNING,
+                    inputDigest = "d-stored",
+                    inputSnapshotRef = null,
+                    inputSchemaVersion = 1,
+                    startedAt = 1L,
+                    finishedAt = null,
+                    interruptedReason = null,
+                ),
+            )
+
+            assertTrue(fixture.coordinator.stopTask(convId, runId))
+            assertEquals(listOf("resp-unconfirmed-1"), cancelledResponseIds)
+            assertEquals(RunTerminalState.WAITING_EXTERNAL, runTerminalStore.get(runId)?.state)
+            assertEquals("waiting_external", fixture.runtimeDb.agentRuntimeDao().getRun(runId)?.status)
+            assertFalse(
+                "Unconfirmed server cancel must not pretend local user_cancelled on message",
+                fixture.store.getConversationFlow(convId).value.messageNodes.any { node ->
+                    node.currentMessage.annotations.any { it is UIMessageAnnotation.GenerationInterrupted }
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `unconfirmed server stop settles deterministically when parking WAITING_EXTERNAL fails`() = runBlocking {
+        withTimeout(15_000) {
+            val cursors = ConcurrentHashMap<String, ResponseCursor>()
+            val resumeStore = object : ResponseResumeStore {
+                override suspend fun save(runId: String, responseId: String, sequence: Long, providerId: String) {
+                    cursors[runId] = ResponseCursor(responseId, sequence, providerId)
+                }
+                override suspend fun load(runId: String): ResponseCursor? = cursors[runId]
+                override suspend fun clear(runId: String) {
+                    cursors.remove(runId)
+                }
+            }
+            val unconfirmedApi = object : StoredResponseApi {
+                override suspend fun cancel(
+                    providerSetting: ProviderSetting.OpenAI,
+                    responseId: String,
+                ): StoredResponseCancelResult = StoredResponseCancelResult.CancelFailed
+
+                override suspend fun fetchStatus(
+                    providerSetting: ProviderSetting.OpenAI,
+                    responseId: String,
+                ): StoredResponseStatus = StoredResponseStatus(StoredResponseState.CANCELLED, responseId)
+
+                override suspend fun streamStored(
+                    providerSetting: ProviderSetting.OpenAI,
+                    responseId: String,
+                    cursor: ResponseCursor?,
+                    store: ResponseResumeStore,
+                    runId: String,
+                ): Flow<MessageChunk> = kotlinx.coroutines.flow.emptyFlow()
+            }
+            val gateway = object : StoredResponseGateway {
+                override suspend fun resolve(runId: String): StoredResponseGateway.StoredResponseSession? {
+                    val cursor = cursors[runId] ?: return null
+                    return StoredResponseGateway.StoredResponseSession(
+                        cursor = cursor,
+                        providerSetting = ProviderSetting.OpenAI(
+                            baseUrl = "https://api.openai.com/v1",
+                            useResponseApi = true,
+                            enableResponsesResume = true,
+                        ),
+                        api = unconfirmedApi,
+                    )
+                }
+            }
+            val stopCancel = StoredResponseStopCancel(gateway, resumeStore)
+            val fixture = createFixture(
+                maxConcurrentTasks = 3,
+                responsesResumeStore = resumeStore,
+                storedResponseGateway = gateway,
+                storedResponseStopCancel = stopCancel,
+            )
+            val convId = Uuid.random()
+            fixture.repo.insertConversation(Conversation.ofId(convId))
+            fixture.store.ensureInitialized(convId)
+
+            // 1. Illegal event-store transition on WAITING_USER pause (agent_run already terminal):
+            // RunRecoveryService excludes WAITING_USER from RESUME_RESOLVABLE_STATES, so leaving
+            // run_terminal at WAITING_USER and task at PAUSED creates an unrecoverable zombie pause.
+            fixture.runner.onTurn("Paused illegal transition") { session ->
+                emit(
+                    GenerationChunk.Messages(
+                        session.messages + UIMessage(
+                            role = MessageRole.ASSISTANT,
+                            parts = listOf(
+                                UIMessagePart.Tool(
+                                    toolCallId = "call-illegal-1",
+                                    toolName = "file_write",
+                                    input = """{"path":"a.txt","content":"x"}""",
+                                    approvalState = ToolApprovalState.Pending,
+                                ),
+                            ),
+                        ),
+                    ),
+                )
+            }
+            assertTrue(fixture.coordinator.submitMessage(convId, listOf(UIMessagePart.Text("Paused illegal transition"))))
+            fixture.runner.awaitTurnCompleted("Paused illegal transition")
+            val pausedRunId = fixture.coordinator.uiState.value.tasks
+                .single { it.title == "Paused illegal transition" }
+                .workItemId
+            resumeStore.save(pausedRunId, "resp-illegal-1", 2L, "openai-p1")
+            runTerminalStore.begin(pausedRunId, convId.toString(), null)
+            runTerminalStore.pause(pausedRunId, RunTerminalState.WAITING_USER, PauseReason.TOOL_APPROVAL)
+            fixture.events.appendRun(
+                AgentRunRecord(
+                    runId = pausedRunId,
+                    parentRunId = null,
+                    agentDescriptorId = "chat",
+                    agentVersion = "1",
+                    conversationId = convId.toString(),
+                    messageNodeId = null,
+                    producesMessageId = null,
+                    assistantId = null,
+                    status = RunStatus.INTERRUPTED,
+                    inputDigest = "d-illegal",
+                    inputSnapshotRef = null,
+                    inputSchemaVersion = 1,
+                    startedAt = 1L,
+                    finishedAt = 2L,
+                    interruptedReason = "prior_terminal",
+                ),
+            )
+
+            assertTrue(fixture.coordinator.stopTask(convId, pausedRunId))
+            fixture.recovery.recover()
+
+            assertEquals(
+                "cancelled",
+                fixture.coordinator.uiState.value.tasks.single { it.workItemId == pausedRunId }.outcome,
+            )
+            assertEquals(RunTerminalState.CANCELLED, runTerminalStore.get(pausedRunId)?.state)
+            assertNull(resumeStore.load(pausedRunId))
+            val pausedConvTools = fixture.store.getConversationFlow(convId).value.currentMessages
+                .flatMap { it.parts.filterIsInstance<UIMessagePart.Tool>() }
+                .filter { it.toolCallId == "call-illegal-1" }
+            assertFalse(
+                "Stopped unrecoverable approval card must not stay pending",
+                pausedConvTools.single().isPending,
+            )
+
+            // 2. Missing durable run_terminal row: RunRecoveryService only scans runTerminalStore.unfinished(),
+            // so missing run_terminal must fall back to local CANCELLED settlement instead of parking PAUSED.
+            val missingRowGate = CompletableDeferred<Unit>()
+            fixture.runner.onTurn("Missing terminal row") { session ->
+                emit(GenerationChunk.Messages(session.messages + UIMessage.assistant("Partial without terminal row")))
+                missingRowGate.await()
+            }
+            assertTrue(fixture.coordinator.submitMessage(convId, listOf(UIMessagePart.Text("Missing terminal row"))))
+            fixture.runner.awaitTurnStarted("Missing terminal row")
+            val missingRowRunId = fixture.coordinator.uiState.value.tasks
+                .single { it.title == "Missing terminal row" }
+                .workItemId
+            resumeStore.save(missingRowRunId, "resp-missing-2", 4L, "openai-p1")
+            fixture.events.appendRun(
+                AgentRunRecord(
+                    runId = missingRowRunId,
+                    parentRunId = null,
+                    agentDescriptorId = "chat",
+                    agentVersion = "1",
+                    conversationId = convId.toString(),
+                    messageNodeId = null,
+                    producesMessageId = null,
+                    assistantId = null,
+                    status = RunStatus.RUNNING,
+                    inputDigest = "d-missing",
+                    inputSnapshotRef = null,
+                    inputSchemaVersion = 1,
+                    startedAt = 1L,
+                    finishedAt = null,
+                    interruptedReason = null,
+                ),
+            )
+
+            assertTrue(fixture.coordinator.stopTask(convId, missingRowRunId))
+            assertEquals(
+                "cancelled",
+                fixture.coordinator.uiState.value.tasks.single { it.workItemId == missingRowRunId }.outcome,
+            )
+            assertEquals("cancelled", fixture.runtimeDb.agentRuntimeDao().getRun(missingRowRunId)?.status)
+            assertNull(resumeStore.load(missingRowRunId))
+
+            // 3. State race: run_terminal already settled to COMPLETED while cancelStored was unconfirmed.
+            // Task must reconcile to completed instead of staying stuck in PAUSED ("等待远端确认停止…").
+            val completedRaceGate = CompletableDeferred<Unit>()
+            fixture.runner.onTurn("Completed race") { session ->
+                emit(GenerationChunk.Messages(session.messages + UIMessage.assistant("Finished reply")))
+                completedRaceGate.await()
+            }
+            assertTrue(fixture.coordinator.submitMessage(convId, listOf(UIMessagePart.Text("Completed race"))))
+            fixture.runner.awaitTurnStarted("Completed race")
+            val completedRunId = fixture.coordinator.uiState.value.tasks
+                .single { it.title == "Completed race" }
+                .workItemId
+            resumeStore.save(completedRunId, "resp-completed-3", 6L, "openai-p1")
+            runTerminalStore.begin(completedRunId, convId.toString(), null)
+            runTerminalStore.finish(completedRunId, RunTerminalState.COMPLETED, null)
+            fixture.events.appendRun(
+                AgentRunRecord(
+                    runId = completedRunId,
+                    parentRunId = null,
+                    agentDescriptorId = "chat",
+                    agentVersion = "1",
+                    conversationId = convId.toString(),
+                    messageNodeId = null,
+                    producesMessageId = null,
+                    assistantId = null,
+                    status = RunStatus.COMPLETED,
+                    inputDigest = "d-completed",
+                    inputSnapshotRef = null,
+                    inputSchemaVersion = 1,
+                    startedAt = 1L,
+                    finishedAt = 3L,
+                    interruptedReason = null,
+                ),
+            )
+
+            assertTrue(fixture.coordinator.stopTask(convId, completedRunId))
+            assertEquals(
+                "completed",
+                fixture.coordinator.uiState.value.tasks.single { it.workItemId == completedRunId }.outcome,
+            )
+            assertEquals(RunTerminalState.COMPLETED, runTerminalStore.get(completedRunId)?.state)
+            assertNull(resumeStore.load(completedRunId))
+        }
+    }
+
     private fun createFixture(
         maxConcurrentTasks: Int = 3,
         recoveryFile: File = File(directory.newFolder(), "recovery.json"),
         sharedStore: ConversationStore? = null,
         sharedRepo: ConversationRepository? = null,
+        sharedRuntimeDb: AgentRuntimeDatabase? = null,
+        responsesResumeStore: ResponseResumeStore? = null,
+        storedResponseGateway: StoredResponseGateway? = null,
+        storedResponseStopCancel: StoredResponseStopCancel? = null,
     ): AsyncFixture {
+        val runtimeDb = sharedRuntimeDb ?: Room.inMemoryDatabaseBuilder(context, AgentRuntimeDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        val agentEventStore: AgentEventStore = RoomAgentEventStore(runtimeDb.agentRuntimeDao())
         val root = directory.newFolder()
         val fileContext = object : ContextWrapper(context) { override fun getFilesDir() = root }
         val scope = AppScope()
@@ -473,8 +978,22 @@ class LocalAsyncTaskCoordinatorTest : DurableRuntimeTestBase() {
             AgentLiveStatusNotifier(context, NotificationApprovalTokenRegistry()),
             scheduler,
         )
-        val events = InMemoryAgentEventStore()
         val ownership = RunOwnershipRegistry()
+        val flags = CapabilityFlags(object : DataStore<Preferences> {
+            override val data = MutableStateFlow(emptyPreferences())
+            override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
+                transform(data.value).also { data.value = it }
+        })
+        val recovery = RunRecoveryService(
+            ledger = ledger,
+            runTerminalStore = runTerminalStore,
+            conversationRepo = repo,
+            json = Json,
+            storedResponseGateway = storedResponseGateway,
+            capabilityFlags = flags,
+            resumeStore = responsesResumeStore,
+            agentEventStore = agentEventStore,
+        )
         val runner = ScriptedTurnRunner(scope, store)
         val coordinator = LocalAsyncTaskCoordinator(
             context = fileContext,
@@ -484,14 +1003,32 @@ class LocalAsyncTaskCoordinatorTest : DurableRuntimeTestBase() {
             userInputPreprocessor = UserInputPreprocessor(settings),
             runPresenter = presenter,
             agentRunner = runner,
-            agentEventStore = events,
+            agentEventStore = agentEventStore,
             runTerminalStore = runTerminalStore,
             runOwnershipRegistry = ownership,
+            capabilityFlags = flags,
+            toolEffectLedger = ledger,
+            runRecovery = recovery,
+            responsesResumeStore = responsesResumeStore,
+            storedResponseGateway = storedResponseGateway,
+            storedResponseStopCancel = storedResponseStopCancel,
             maxConcurrentTasks = maxConcurrentTasks,
             recoveryFileOverride = recoveryFile,
         )
         runner.coordinator = coordinator
-        return AsyncFixture(coordinator, store, repo, scope, runner, presenter, queue).also(fixtures::add)
+        return AsyncFixture(
+            coordinator,
+            store,
+            repo,
+            scope,
+            runner,
+            presenter,
+            queue,
+            agentEventStore,
+            recovery,
+            runtimeDb,
+            ownsRuntimeDb = sharedRuntimeDb == null,
+        ).also(fixtures::add)
     }
 
     private class AsyncFixture(
@@ -502,11 +1039,18 @@ class LocalAsyncTaskCoordinatorTest : DurableRuntimeTestBase() {
         val runner: ScriptedTurnRunner,
         val presenter: ChatRunPresenter,
         val queue: PendingMessageQueue,
+        val events: AgentEventStore,
+        val recovery: RunRecoveryService,
+        val runtimeDb: AgentRuntimeDatabase,
+        private val ownsRuntimeDb: Boolean,
     ) {
         fun close() {
             presenter.cleanup()
             queue.cleanup()
             scope.cancel()
+            if (ownsRuntimeDb) {
+                runtimeDb.close()
+            }
         }
     }
 
@@ -625,7 +1169,12 @@ class LocalAsyncTaskCoordinatorTest : DurableRuntimeTestBase() {
             val job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
                 try {
                     agent.handler.handle(turnInput, LegacyRunScope(runId = runId))
-                    snapshotFlow.value = snapshotFlow.value.copy(status = RunStatus.COMPLETED)
+                    val convId = Uuid.parse(turnInput.conversationId.value)
+                    val paused = conversationStore.getConversationFlow(convId).value
+                        .currentMessages.lastOrNull()?.getTools()?.any { it.isPending } == true
+                    snapshotFlow.value = snapshotFlow.value.copy(
+                        status = if (paused) RunStatus.WAITING_USER else RunStatus.COMPLETED,
+                    )
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
                     snapshotFlow.value = snapshotFlow.value.copy(status = RunStatus.CANCELLED)
                     throw cancelled

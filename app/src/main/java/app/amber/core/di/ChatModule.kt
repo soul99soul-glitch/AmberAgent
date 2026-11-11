@@ -233,6 +233,12 @@ val chatModule = module {
             agentEventStore = get(),
             runTerminalStore = get(),
             runOwnershipRegistry = get(),
+            capabilityFlags = get(),
+            toolEffectLedger = get(),
+            runRecovery = get(),
+            responsesResumeStore = get(),
+            storedResponseGateway = get(),
+            storedResponseStopCancel = get(),
         ).also { coordinator ->
             get<ChatRunHooksFactory>().bindLocalAsyncTaskCoordinator(coordinator)
         }

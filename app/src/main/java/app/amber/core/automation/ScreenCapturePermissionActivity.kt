@@ -19,6 +19,10 @@ class ScreenCapturePermissionActivity : ComponentActivity() {
             finish()
             return@registerForActivityResult
         }
+        if (!captureManager.isRequestPending(requestId)) {
+            finish()
+            return@registerForActivityResult
+        }
         val data = result.data
         if (result.resultCode == Activity.RESULT_OK && data != null) {
             ContextCompat.startForegroundService(
@@ -38,7 +42,13 @@ class ScreenCapturePermissionActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val projectionManager = getSystemService(MediaProjectionManager::class.java)
-        capturePermissionLauncher.launch(projectionManager.createScreenCaptureIntent())
+        if (intent.getStringExtra(ScreenCaptureManager.EXTRA_REQUEST_ID).isNullOrBlank()) {
+            finish()
+            return
+        }
+        if (savedInstanceState == null) {
+            val projectionManager = getSystemService(MediaProjectionManager::class.java)
+            capturePermissionLauncher.launch(projectionManager.createScreenCaptureIntent())
+        }
     }
 }

@@ -77,6 +77,8 @@ class AgentSoulCloudSyncCoordinator(
             }
             if (rev > store.lastSyncedRevision) {
                 pullRemoteSoulLocked()
+            } else if (store.hasPendingSync) {
+                pushLocalSoulLocked(store.state.value)
             }
         }
     }
@@ -98,8 +100,11 @@ class AgentSoulCloudSyncCoordinator(
                 }
                 return remote
             }
+            if (store.hasPendingSync && remote.revision <= store.lastSyncedRevision) {
+                return pushLocalSoulLocked(store.state.value)
+            }
             if (remote.revision > store.lastSyncedRevision ||
-                (remote.revision > 0L && store.state.value.isDefault && !remote.isDefault)
+                (remote.revision > 0L && store.state.value.isDefault && !remote.isDefault && !store.hasPendingSync)
             ) {
                 store.applyRemoteSoul(remote)
             }

@@ -88,7 +88,6 @@ class ScreenCaptureService : Service() {
             }
 
             ACTION_STOP_SESSION -> {
-                startForegroundCompat()
                 releaseCaptureSession(stopProjection = true)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf(startId)
@@ -282,16 +281,16 @@ class ScreenCaptureService : Service() {
     }
 
     private fun releaseCaptureSession(stopProjection: Boolean) {
+        mainHandler.removeCallbacks(idleStopRunnable)
+        captureManager.markSessionActive(false)
         val session = captureSession ?: return
         captureSession = null
-        mainHandler.removeCallbacks(idleStopRunnable)
         runCatching { session.virtualDisplay.release() }
         runCatching { session.imageReader.close() }
         runCatching { session.projection.unregisterCallback(session.projectionCallback) }
         if (stopProjection) {
             runCatching { session.projection.stop() }
         }
-        captureManager.markSessionActive(false)
     }
 
     private fun captureMetrics(): DisplayMetrics {

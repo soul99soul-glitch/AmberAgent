@@ -20,7 +20,7 @@ internal class ScreenListCollection(private val operations: ScreenOperationOwner
      * 只读列表采集：在唯一滚动容器里逐屏读取可见行，仅按"两屏都唯一的稳定 id"
      * 合并相邻页重叠；覆盖范围只代表已观察屏幕，绝不宣称列表完整。
      */
-    val screenCollectListTool = Tool(
+    fun screenCollectListTool(runId: String? = null) = Tool(
         name = "screen_collect_list",
         description = "Read visible rows of one scrollable list, swiping screen by screen, and return " +
             "them in reading order. Only stable identifiers seen uniquely on both adjacent screens are " +
@@ -45,7 +45,13 @@ internal class ScreenListCollection(private val operations: ScreenOperationOwner
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            operations.trackScreenTool("screen_collect_list", "读取列表", input) {
+            operations.trackScreenTool(
+                "screen_collect_list",
+                "读取列表",
+                input,
+                runId = runId,
+                enforceScreenStop = false,
+            ) {
                 val containerLabel = input.requiredString("container")
                 val direction = input.string("direction") ?: "down"
                 val maxSwipes = (input.int("max_swipes") ?: 3).coerceIn(0, MAX_COLLECT_SWIPES)

@@ -242,7 +242,7 @@ class ChatService(
     ): Boolean {
         val localAsync = localAsyncTaskCoordinator
         if (localAsync != null) {
-            return localAsync.submitMessage(conversationId, content, answer)
+            return localAsync.submitMessage(conversationId, content, answer, queueMode)
         }
         return runCoordinator.sendMessage(conversationId, content, answer, queueMode)
     }

@@ -169,7 +169,8 @@ object AgentBubbleReducer {
             waitingApproval = pendingTool != null,
             waitingAskUser = pendingTool != null && (
                 pendingTool.toolName == ASK_USER_TOOL ||
-                    pendingTool.toolName in app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES
+                    pendingTool.toolName in app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES ||
+                    app.amber.feature.runtime.AgentLiveStatusNotifier.requiresInAppApprovalOnly(pendingTool)
                 ),
             approvalToolCallId = pendingTool?.toolCallId,
             approvalToolTitle = pendingTool?.toolName.orEmpty(),
