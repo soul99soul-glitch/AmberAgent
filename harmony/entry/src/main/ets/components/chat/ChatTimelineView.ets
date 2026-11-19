@@ -59,6 +59,8 @@ export struct ChatTimelineView {
   onShowCompact: (messageId: string) => void = (): void => {};
   onSendSuggestion: (text: string) => void = (): void => {};
   onNavigate: (kind: string, id: string) => void = (): void => {};
+  onOpenTurnDetails: (headline: string, tools: UIMessagePartTool[]) => void =
+    (_h: string, _t: UIMessagePartTool[]): void => {};
 
   private previewScrollChanged(scrolling: boolean): void {
     if (AppStorage.get<boolean>('threePreviewScrolling') !== scrolling) {
@@ -90,6 +92,7 @@ export struct ChatTimelineView {
           onRunDetails: this.onRunDetails, onDocument: this.onDocument, onDraft: this.onDraft,
           onModifyImage: this.onModifyImage, onSmartUiDraft: this.onSmartUiDraft,
           onShowCompact: this.onShowCompact, onNavigate: this.onNavigate,
+          onOpenTurnDetails: this.onOpenTurnDetails,
         })
       }
     }, (item: ChatTimelineItem): string => item.key)

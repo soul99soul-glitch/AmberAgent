@@ -1,8 +1,8 @@
 import { window, KeyboardAvoidMode, LengthMetrics } from '@kit.ArkUI';
 import { inputMethod } from '@kit.IMEKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import type { Conversation, ConversationRepository, MessageNode, UIMessage, ChatTimelineRow, ConversationTimelineLoadState, FollowMode } from '@amber/chat-domain';
-import { buildChatTimelineRows, createInitialTimelineLoadState, applyTailWindow, beginLoadOlder, applyOlderPage, canLoadOlder, coversIndex, nextOlderPageOffset, mergeOlderNodes, isCloseEnoughToBottom, FOLLOW_BOTTOM_TOLERANCE_VP, transitionOnUserScroll, transitionOnStreamUpdate, transitionOnGenerateEnd, transitionOnJumpToBottom, shouldScrollOnStreamUpdate, shouldScrollOnAppend } from '@amber/chat-domain';
+import type { Conversation, ConversationRepository, MessageNode, UIMessage, ChatTimelineRow, ConversationTimelineLoadState, FollowMode, ChatEpisodeLedger } from '@amber/chat-domain';
+import { buildChatTimelineRows, createInitialTimelineLoadState, applyTailWindow, beginLoadOlder, applyOlderPage, canLoadOlder, coversIndex, nextOlderPageOffset, mergeOlderNodes, isCloseEnoughToBottom, FOLLOW_BOTTOM_TOLERANCE_VP, transitionOnUserScroll, transitionOnStreamUpdate, transitionOnGenerateEnd, transitionOnJumpToBottom, shouldScrollOnStreamUpdate, shouldScrollOnAppend, projectAssistantTurns } from '@amber/chat-domain';
 import { NativeTimelineFollow } from '../../components/NativeTimelineFollow.ets';
 import { ChatTimelineDataSource } from './ChatTimelineDataSource.ets';
 const HILOG_DOMAIN: number = 0x0001;
@@ -25,6 +25,7 @@ export interface ChatTimelineCallbacks {
   statusBarHeight: () => number;
   activeArtifactInteraction: () => string;
   compactBoundaryCount: (messageId: string) => number;
+  episodeLedger?: () => ChatEpisodeLedger | null;
 }
 
 interface TimelinePrependAnchor {
@@ -84,9 +85,13 @@ export class ChatTimelineSession {
       }
       this.dataSourceConversationId = conversationId;
     }
+    const ledger: ChatEpisodeLedger | null = this.episodeLedgerProvider !== null
+      ? this.episodeLedgerProvider()
+      : (this.callbacks?.episodeLedger !== undefined ? this.callbacks.episodeLedger() : null);
     this.dataSource.sync(this.rows, this.streamingTail, this.regenTail,
       this.callbacks?.currentRegenNodeId?.() ?? '',
-      (messageId: string): number => this.compactBoundaryCount(messageId));
+      (messageId: string): number => this.compactBoundaryCount(messageId),
+      ledger, projectAssistantTurns);
   }
 
   private loaderItemCount(): number {
@@ -138,6 +143,10 @@ export class ChatTimelineSession {
   private uiContext: UIContext | null = null;
   private repository: ConversationRepository | null = null;
   private callbacks: ChatTimelineCallbacks | null = null;
+  private episodeLedgerProvider: (() => ChatEpisodeLedger | null) | null = null;
+  setEpisodeLedgerProvider(provider: () => ChatEpisodeLedger | null): void {
+    this.episodeLedgerProvider = provider;
+  }
   start(context: UIContext, repository: ConversationRepository, callbacks: ChatTimelineCallbacks): void {
     this.uiContext = context;
     this.repository = repository;

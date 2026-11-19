@@ -220,7 +220,7 @@ export const toolCategory = (name: string): string => {
   if (name === 'agent_prompt_config' || name === 'agent_soul_get' || name === 'agent_soul_update') {
     return 'prompt_config';
   }
-  if (name.startsWith('conversation_') || name.startsWith('session_')) return 'context';
+  if (name.startsWith('conversation_') || name.startsWith('session_') || name === 'episode_recall') return 'context';
   if (name.startsWith('deep_read_')) return 'deep_read';
   if (name.startsWith('cron_task_')) return 'cron';
   if (name.startsWith('agent_task_') || name === 'agent_runtime_status') return 'task';

@@ -1,7 +1,8 @@
 // Builds platform capabilities for a captured run; live catalog refresh remains in ConversationRunTools.
 import type { SubAgentToolsContext, ChatRuntime } from './ChatRuntimeContracts.ets';
-import type { McpSettingsPort, AgentTool, AgentToolActivityStore, Assistant, ChatStreamProvider, Conversation, LocalToolOption, McpToolActivityPort, PendingUserMessage, TerminalApprovalGuard, TextGenerationParams, UIMessage, UIMessagePart, UIMessagePartImage, JsonObject, JevWebCandidate, MessageChunk, WebMountGoalCandidate, WebMountGoalDecision, WebMountGoalHostPorts, WebMountGoalRequest, WebMountObservation, AutoApprovalReview, ConversationRepository, KeyValueStore, CompactStore, SkillWorkspacePort, SessionAccessGrantStore, McpManager, SkillManager, PosixWorkspaceManager, RecipeStore, PluginStore, ModelSlotPort, WeatherPort, ToolSearchReranker } from '@amber/chat-domain';
-import { asChatStreamProvider, createClipboardTool, createConversationContextTools, createConversationHistoryTools, createConversationQueueTools, createHealthSummaryTool, createPersonalContextTools, createWeatherReadTool, createDeviceScheduleTools, createMcpManagementTools, createMcpServerTools, createMemoryTools, createRunPlanUpdateTool, createSearchTools, createSkillTools, createTerminalApprovalGuard, createProviderManagementTools, PROVIDERS_KEY, createModelSlotTool, createMcpDescribeTool, currentMessages, filterToolProfile, makeCompactPolicy, makeTextGenerationParams, patchAssistant, createWebMountGoalAdapter, createWebMountGoalTool, makeSystemMessage, makeUserMessage, toText } from '@amber/chat-domain';
+import type { McpSettingsPort, AgentTool, AgentToolActivityStore, Assistant, ChatStreamProvider, Conversation, LocalToolOption, McpToolActivityPort, PendingUserMessage, TerminalApprovalGuard, TextGenerationParams, UIMessage, UIMessagePart, UIMessagePartImage, JsonObject, JevWebCandidate, MessageChunk, WebMountGoalCandidate, WebMountGoalDecision, WebMountGoalHostPorts, WebMountGoalRequest, WebMountObservation, AutoApprovalReview, ConversationRepository, KeyValueStore, CompactStore, SkillWorkspacePort, SessionAccessGrantStore, McpManager, SkillManager, PosixWorkspaceManager, RecipeStore, PluginStore, ModelSlotPort, WeatherPort, ToolSearchReranker, ChatEpisodeLedger } from '@amber/chat-domain';
+import { asChatStreamProvider, createClipboardTool, createConversationContextTools, createConversationHistoryTools, createConversationQueueTools, createEpisodeRecallTool, createHealthSummaryTool, createPersonalContextTools, createWeatherReadTool, createDeviceScheduleTools, createMcpManagementTools, createMcpServerTools, createMemoryTools, createRunPlanUpdateTool, createSearchTools, createSkillTools, createTerminalApprovalGuard, createProviderManagementTools, PROVIDERS_KEY, createModelSlotTool, createMcpDescribeTool, currentMessages, filterToolProfile, makeCompactPolicy, makeTextGenerationParams, patchAssistant, createWebMountGoalAdapter, createWebMountGoalTool, makeSystemMessage, makeUserMessage, toText } from '@amber/chat-domain';
+import { loadEpisodeLedger } from '../platform_impl/chat/ChatEpisodeStore.ets';
 import type { WebMountParityToolsDeps } from '../platform_impl/WebMountParityTools.ets';
 import type { WebMountAdvancedToolsDeps } from '../platform_impl/WebMountAdvancedTools.ets';
 import type { ImageGenToolDeps, EditSourceImage } from '../platform_impl/ImageGenTool.ets';
@@ -312,6 +313,10 @@ export const createConversationToolComposition = (ports: ConversationToolComposi
                     sourceImageResolver: (): Promise<EditSourceImage | null> => resolveEditSourceImage(ctx) })] : []),
             ...createConversationHistoryTools({ repository: ports.getChatRepository(),
                 currentConversationProvider: conversationProvider, grantStore: ports.getSessionGrantStore() }),
+            createEpisodeRecallTool({
+                loadLedger: (): Promise<ChatEpisodeLedger> => loadEpisodeLedger(ctx.conversationId),
+                loadMessages: (): Promise<UIMessage[]> => Promise.resolve(currentMessages(ctx.activeConversation())),
+            }),
             ...createConversationQueueTools({
                 pendingProvider: (): Promise<PendingUserMessage[]> => Promise.resolve(ctx.pending()),
                 cancelOne: (messageId: string): Promise<void> => ctx.cancelPending(messageId),

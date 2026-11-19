@@ -84,6 +84,7 @@ const TOOL_STATIC_LABELS: Record<string, string> = {
   'wm_act': '执行网页动作批',
   'agent_soul_get': '读取形象人设',
   'agent_soul_update': '更新形象人设',
+  'episode_recall': '回忆归档话题',
 };
 
 const stringField = (obj: JsonObject, key: string): string | null => {

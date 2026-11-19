@@ -32,7 +32,7 @@ import type {
   AgentTool, MessageChunk, OpenAIChatApi, AskedAnswers, ConversationCompact, ImageGuardSettings,
   VisionModelHealth, VisionProbeDeps, ProviderModel, ProviderSetting, SandboxActivityUiState,
   InteractiveTurnRunResult, ChatTimelineRow, SmartUiDocument, SmartUiDraftSource, SmartUiScalar,
-  SmartUiStateValue,
+  SmartUiStateValue, ChatEpisodeLedger, ChatEpisodeRecord,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, seedConversationWithPresets, nodeCurrentMessage,
@@ -40,7 +40,7 @@ import {
   runAutoTitle, makeUserMessage, toText, messageCopyText, makeTextGenerationParams, pendingPreviewText, convertSteerToFollowup,
   invalidateCompacts, copyValidCompactsToConversation, ContextCompactionFailedError, recoverInterruptedRecipes,
   recoverInterruptedPlugins, recoverInterruptedWebMountGoals, estimateConversationInputTokens, formatNumberInt,
-  formatContextTokens, nativeTokenizerForModel, loadSearchPrefs, SearchSettings,
+  formatContextTokens, nativeTokenizerForModel, loadSearchPrefs, SearchSettings, toolInputDisplayTitle, toolStaticLabel, toolInputAsJson,
   buildMentionRoleItems, MentionRoleItem, ConversationSummary, toChatModel,
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
   reasoningLevelForModel, withReasoningLevelForModel, defaultReasoningLevelForModel, reasoningLevelsForModel,
@@ -97,6 +97,11 @@ import { ChatProgressiveEdgeBlur } from '../components/chat/ChatProgressiveEdgeB
 import { ChatTopBarOverlay, type TopBarNoticeItem } from '../components/chat/ChatTopBarOverlay.ets';
 import { AmberPersonaMedallion } from '../components/chat/AmberPersonaMedallion.ets';
 import type { BottomDockTab } from '../components/chat/AmberBottomModeBar.ets';
+import {
+  loadEpisodeLedger, subscribeEpisodeLedger, startNewEpisode, sealIfIdleTimeoutExceeded,
+  getCachedEpisodeLedger, activeEpisodeHeaderTitle, refineEpisodeSummaryInBackground,
+  type RefinedEpisodeSummary,
+} from '../platform_impl/chat/ChatEpisodeStore.ets';
 import { listFavoriteNodeIds, setNodeFavorite } from '../platform_impl/FavoriteStore.ets';
 import { ChatArtifactShelf } from '../components/ChatArtifactShelf.ets';
 import type { ConversationArtifactIndex, ConversationArtifactSource, ConversationDocumentArtifact } from '@amber/chat-domain';
@@ -293,6 +298,12 @@ struct ChatPage {
   @State composerHeight: number = 132;
   @State bottomDockTab: BottomDockTab = 'chat';
   @State dismissedNoticeIds: string[] = [];
+  @State episodeHeaderTitle: string = '';
+  @State turnStepsSheetOpen: boolean = false;
+  @State turnStepsTitle: string = '';
+  @State turnStepsTools: UIMessagePartTool[] = [];
+  private unsubEpisodeLedger: (() => void) | null = null;
+  private boundEpisodeConvId: string = '';
   // 装配请求由关闭/离页失效，迟到回调不能重开菜单或覆盖下一次请求。
   // D-038:待发图片(data: URL 物化,发送后清空)
   // D-041:regenerate 流式预览(目标节点行下渲染;完成后清空)
@@ -335,6 +346,10 @@ struct ChatPage {
     this.artifacts.dispose();
     this.timeline.dispose();
     this.smartUi.dispose();
+    if (this.unsubEpisodeLedger !== null) {
+      this.unsubEpisodeLedger();
+      this.unsubEpisodeLedger = null;
+    }
     if (this.greetTimer !== -1) { clearInterval(this.greetTimer); this.greetTimer = -1; }
     if (this.cursorTimer !== -1) { clearInterval(this.cursorTimer); this.cursorTimer = -1; }
   }
@@ -533,6 +548,12 @@ struct ChatPage {
         isModelCouncilEnabled().then((enabled: boolean): MentionRoleItem[] => buildMentionRoleItems(setting.enabled, enabled, setting.mode, setting.customDefinitions))),
       abilityContext: (): common.UIAbilityContext => getContext(this) as common.UIAbilityContext,
       cloudDialogue: (): ChatCloudDialogueSession => this.cloudDialogue,
+      sealIdleEpisode: async (conversationId: string, messages: UIMessage[]): Promise<void> => {
+        const res = await sealIfIdleTimeoutExceeded(conversationId, messages);
+        if (res.sealed !== null && this.pageAlive) {
+          this.refreshEpisodeUi();
+        }
+      },
     };
     this.composer.start(composerPorts);
     this.cloudDialogue.start({
@@ -647,6 +668,13 @@ struct ChatPage {
       compactBoundaryCount: (id: string): number => this.modelContext.compactBoundaryCount(id),
     };
     this.timeline.start(this.getUIContext(), getChatRepository(), timelinePorts);
+    this.timeline.setEpisodeLedgerProvider((): ChatEpisodeLedger | null => {
+      const convId: string = this.presentation.conversation?.id ?? '';
+      if (convId.length > 0 && convId !== this.boundEpisodeConvId) {
+        this.bindEpisodeLedger(convId);
+      }
+      return convId.length > 0 ? getCachedEpisodeLedger(convId) : null;
+    });
     this.timeline.enableKeyboardAvoidance();
     this.pageAlive = true;
     this.smartUi.start(getChatSmartUiDraftStore(getChatKvStore()), (message: string): void => {
@@ -1001,8 +1029,166 @@ struct ChatPage {
     this.dismissedNoticeIds = next;
   }
 
+  private bindEpisodeLedger(convId: string): void {
+    if (convId.length === 0 || convId === this.boundEpisodeConvId) return;
+    this.boundEpisodeConvId = convId;
+    if (this.unsubEpisodeLedger !== null) {
+      this.unsubEpisodeLedger();
+      this.unsubEpisodeLedger = null;
+    }
+    this.unsubEpisodeLedger = subscribeEpisodeLedger(convId, (): void => {
+      if (this.pageAlive) this.refreshEpisodeUi();
+    });
+    loadEpisodeLedger(convId).then((): void => {
+      if (this.pageAlive && (this.presentation.conversation?.id ?? '') === convId) {
+        this.refreshEpisodeUi();
+      }
+    }).catch((): void => {});
+  }
+
+  private refreshEpisodeUi(): void {
+    const conv: Conversation | null = this.presentation.conversation;
+    if (conv === null) {
+      this.episodeHeaderTitle = '';
+      return;
+    }
+    this.episodeHeaderTitle = activeEpisodeHeaderTitle(conv.id, currentMessages(conv), this.presentation.title);
+    this.timeline.syncDataSource();
+  }
+
   private startNewTopicAction(): void {
-    this.newChat();
+    const conv: Conversation | null = this.presentation.conversation;
+    if (conv === null) {
+      this.newChat();
+      return;
+    }
+    const msgs: UIMessage[] = currentMessages(conv);
+    startNewEpisode(conv.id, msgs).then((res): void => {
+      if (!this.pageAlive) return;
+      if (res.sealed === null) {
+        promptAction.showToast({ message: '当前已是新话题起点', duration: 1500 });
+        return;
+      }
+      this.refreshEpisodeUi();
+      promptAction.showToast({ message: '✦ 已开启新话题分段', duration: 1600 });
+      const sealedEp: ChatEpisodeRecord = res.sealed;
+      if (sealedEp.turnCount >= 2) {
+        this.refineSealedEpisodeAsync(conv, sealedEp, msgs);
+      }
+    }).catch((err: Error): void => {
+      if (this.pageAlive) this.presentation.errorMsg = err.message;
+    });
+  }
+
+  private refineSealedEpisodeAsync(conv: Conversation, ep: ChatEpisodeRecord, msgs: UIMessage[]): void {
+    refineEpisodeSummaryInBackground(conv.id, ep, msgs, async (segment: UIMessage[]): Promise<RefinedEpisodeSummary | null> => {
+      const choice = await resolveEffectiveChatChoice(conv.assistantId);
+      if (choice === null) return null;
+      const api: OpenAIChatApi = await prepareProviderApi(choice.provider, {});
+      const preview: string = segment.slice(0, 8).map((m: UIMessage): string =>
+        `${m.role === 'user' ? '用户' : '助手'}: ${toText(m).substring(0, 120)}`).join('\n');
+      const promptMsg: UIMessage = makeUserMessage(
+        `请为以下对话分段提炼极简标题（不超过16字）和单行摘要（不超过50字），严格输出 JSON {"title":"...","summary":"..."}：\n\n${preview}`,
+      );
+      const params = makeTextGenerationParams({ model: toChatModel(choice.model) });
+      const chunk: MessageChunk = await api.generateText([promptMsg], params);
+      let collected: string = '';
+      for (const c of chunk.choices) {
+        const piece: UIMessage | null = c.delta ?? c.message;
+        if (piece !== null) collected += toText(piece);
+      }
+      const match = /\{[\s\S]*\}/.exec(collected);
+      if (match === null) return null;
+      const parsed = JSON.parse(match[0]) as Record<string, string>;
+      if (typeof parsed['title'] === 'string' && typeof parsed['summary'] === 'string') {
+        const res: RefinedEpisodeSummary = { title: parsed['title'], summary: parsed['summary'] };
+        return res;
+      }
+      return null;
+    });
+  }
+
+  private toolStepDisplayTitle(part: UIMessagePartTool): string {
+    try {
+      const inputObj = toolInputAsJson(part);
+      const dt: string | null = toolInputDisplayTitle(inputObj);
+      if (dt !== null && dt.length > 0) return dt;
+      const st: string | null = toolStaticLabel(part.toolName, inputObj);
+      if (st !== null && st.length > 0) return st;
+    } catch (_e) {}
+    return toolStaticLabel(part.toolName) ?? part.toolName;
+  }
+
+  @Builder
+  TurnStepsSheet(): void {
+    Column({ space: 10 }) {
+      Row() {
+        Text(this.turnStepsTitle.length > 0 ? this.turnStepsTitle : '本轮步骤明细')
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(INK)
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text('关闭')
+          .fontSize(14)
+          .fontColor(this.accentColorStore)
+          .onClick((): void => { this.turnStepsSheetOpen = false; })
+      }
+      .width('100%')
+      .padding({ left: 20, right: 20, top: 18, bottom: 6 })
+
+      if (this.turnStepsTools.length === 0) {
+        Text('本轮主要为推理思考，无独立工具记录。')
+          .fontSize(13)
+          .fontColor(INK3)
+          .padding({ left: 20, right: 20, top: 8 })
+      } else {
+        Scroll() {
+          Column({ space: 8 }) {
+            ForEach(this.turnStepsTools, (tool: UIMessagePartTool): void => {
+              Row({ space: 10 }) {
+                Column()
+                  .width(7)
+                  .height(7)
+                  .borderRadius(999)
+                  .backgroundColor(tool.approvalState.type === 'denied' ? ERROR : (tool.output.length > 0 ? SIGNAL : this.accentColorStore))
+                Column({ space: 2 }) {
+                  Text(this.toolStepDisplayTitle(tool))
+                    .fontSize(13.5)
+                    .fontColor(INK)
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(tool.toolName)
+                    .fontSize(11)
+                    .fontFamily(FONT_MONO)
+                    .fontColor(INK3)
+                    .maxLines(1)
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+                Text('查看 ›')
+                  .fontSize(12)
+                  .fontColor(this.accentColorStore)
+              }
+              .width('100%')
+              .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+              .borderRadius(14)
+              .backgroundColor(SURFACE2)
+              .onClick((): void => {
+                this.turnStepsSheetOpen = false;
+                this.runDetails.openToolPreview(tool);
+              })
+            }, (t: UIMessagePartTool): string => t.toolCallId)
+          }
+          .padding({ left: 20, right: 20, bottom: 24 })
+        }
+        .layoutWeight(1)
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(BG)
   }
 
   // SandboxActivitySheet(:1113+;web 预览路径 = webview 子系统未移植 P1)
@@ -1037,6 +1223,14 @@ struct ChatPage {
     })
 
     ChatCompactSummaryHost({ session: this.modelContext })
+
+    Column() {}
+      .width(0).height(0)
+      .hitTestBehavior(HitTestMode.None)
+      .bindSheet(this.turnStepsSheetOpen, this.TurnStepsSheet(), {
+        height: SheetSize.MEDIUM,
+        onDisappear: (): void => { this.turnStepsSheetOpen = false; },
+      })
 
   }
 
@@ -1099,6 +1293,11 @@ struct ChatPage {
         onShowCompact: (messageId: string): void => { this.modelContext.showCompactSummary(messageId); },
         onSendSuggestion: (text: string): void => { this.composer.sendSuggestion(text); },
         onNavigate: (kind: string, id: string): void => { router.pushUrl({ url: kind === 'miniApp' ? 'pages/MiniAppRunnerPage' : 'pages/MiniAppListPage', params: { appId: id } }); },
+        onOpenTurnDetails: (headline: string, tools: UIMessagePartTool[]): void => {
+          this.turnStepsTitle = headline;
+          this.turnStepsTools = tools;
+          this.turnStepsSheetOpen = true;
+        },
       })
 
       // 空状态 hero：居中于消息舞台上，避开顶栏悬垂岛与底栏
@@ -1156,6 +1355,7 @@ struct ChatPage {
       ChatTopBarOverlay({
         twoPane: this.twoPane(),
         title: this.presentation.title,
+        episodeTitle: this.episodeHeaderTitle,
         editingTitle: this.presentation.editingTitle,
         titleInput: this.presentation.titleInput,
         sending: this.presentation.sending,

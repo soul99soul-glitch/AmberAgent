@@ -74,6 +74,7 @@ export interface ChatComposerPorts {
   loadMentionRoles: () => Promise<MentionRoleItem[]>;
   abilityContext: () => common.UIAbilityContext;
   cloudDialogue?: () => ChatCloudDialogueSession | null;
+  sealIdleEpisode?: (conversationId: string, messages: UIMessage[]) => Promise<void>;
 }
 
 @Observed
@@ -404,6 +405,9 @@ export class ChatComposerSession {
     for (const url of acceptedImages) inputParts.push({ type: 'image', url, metadata: null });
     for (const doc of acceptedDocs) inputParts.push({ type: 'document', url: doc.url,
       fileName: doc.fileName, mime: doc.mime, metadata: null });
+    if (editingNodeId.length === 0 && this.deps.sealIdleEpisode !== undefined) {
+      await this.deps.sealIdleEpisode(owner, currentMessages(this.conversation));
+    }
     const cloud: ChatCloudDialogueSession | null = this.deps.cloudDialogue !== undefined ? this.deps.cloudDialogue() : null;
     if (editingNodeId.length === 0 && cloud !== null && cloud.isActiveMode()) {
       if (acceptedImages.length > 0 || acceptedDocs.length > 0) {
@@ -575,6 +579,9 @@ export class ChatComposerSession {
     for (const url of acceptedImages) inputParts.push({ type: 'image', url, metadata: null });
     for (const doc of acceptedDocs) inputParts.push({ type: 'document', url: doc.url,
       fileName: doc.fileName, mime: doc.mime, metadata: null });
+    if (editingNodeId.length === 0 && this.deps.sealIdleEpisode !== undefined) {
+      await this.deps.sealIdleEpisode(owner, currentMessages(this.conversation));
+    }
     const cloud: ChatCloudDialogueSession | null = this.deps.cloudDialogue !== undefined ? this.deps.cloudDialogue() : null;
     if (editingNodeId.length === 0 && cloud !== null && cloud.isActiveMode()) {
       if (acceptedImages.length > 0 || acceptedDocs.length > 0) {

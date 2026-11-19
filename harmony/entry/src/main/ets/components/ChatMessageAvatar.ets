@@ -24,6 +24,7 @@ export struct ChatMessageAvatar {
   // F16:显示设置消费(默认值与当前渲染一致:名称开、图标关)
   @Prop showModelName: boolean = true;
   @Prop showModelIcon: boolean = false;
+  @Prop isAssistantContinuation: boolean = false;
   @State cursorOn: boolean = true;
   private blinkTimer: number = -1;
 
@@ -71,26 +72,17 @@ export struct ChatMessageAvatar {
     return '';
   }
 
-  // F16 + C-SOUL-V1:自定义形象人设时优先展示角色称呼;默认态沿用真实模型名或回退 'amber'
+  // C-SOUL-V1 + Muse: 仅在回合首条显示当前角色名（displayName），不再每条显示底层模型 ID
   private modelLabel(): string {
     const personaName: string = this.agentSoulDisplayName.trim();
-    const hasCustomPersona: boolean = !this.agentSoulIsDefault
-      && personaName.length > 0
-      && personaName !== 'Amber';
+    if (personaName.length > 0) return personaName;
     const id: string | null = this.message.modelId;
     const cleanId: string = id !== null ? id.trim() : '';
-    if (hasCustomPersona) {
-      if (cleanId.length > 0 && cleanId !== 'cloud-gateway') {
-        return `${personaName} · ${cleanId}`;
-      }
-      return personaName;
-    }
-    if (cleanId.length > 0) return cleanId;
-    return 'amber';
+    return cleanId.length > 0 ? cleanId : 'Amber';
   }
 
   build(): void {
-    if (this.themeEpoch >= 0 && this.message.role !== 'user') {
+    if (this.themeEpoch >= 0 && this.message.role !== 'user' && !this.isAssistantContinuation) {
       Row() {
         if (this.modelIconChar().length > 0) {
           Text(this.modelIconChar())

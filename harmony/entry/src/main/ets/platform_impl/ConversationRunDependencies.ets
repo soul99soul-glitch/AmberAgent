@@ -8,6 +8,7 @@ import type {
   MemoryRecord, MemoryScope, MemoryProfileSelection, MemoryReadRepository,
   MessageTransformer, MiniAppRecord, PreparedContext, RecentChatItem,
   SubAgentRuntimeSetting, UIMessage, MessageChunk, StreamOpts, JevPreparedToolResults,
+  ChatEpisodeLedger,
 } from '@amber/chat-domain';
 import {
   AGENT_SOUL_STORAGE_KEY, defaultAgentSoulState, parseAgentSoulState,
@@ -21,8 +22,9 @@ import {
   makeTextGenerationParams, prepareContext, RECENT_CHATS_PROMPT_LIMIT,
   regexOutputTransformer, createThinkTagTransformer, toChatModel, toText,
   recallMemorySelections, memoryRecallScoreToDebugText, selectMemoryProfile, createMemoryCitationTransformer,
-  annotateSmartUiWeatherBindings,
+  annotateSmartUiWeatherBindings, activeEpisodeMessages, formatRecentEpisodesIndex,
 } from '@amber/chat-domain';
+import { loadEpisodeLedger } from './chat/ChatEpisodeStore.ets';
 import type { ChatRuntime, ChatProviderRuntime, ChatProviderChoice, TaskPrompts } from '../di/ChatRuntimeContracts.ets';
 import type {
   DetachedConversationContext, PreparedConversationSeed,
@@ -197,6 +199,9 @@ const latestUserQuery = (conversation: Conversation, fallback: string = ''): str
 const extraSystemBlocks = async (ctx: DetachedConversationContext, ports: ConversationTurnPorts): Promise<string[]> => {
   const blocks: string[] = ctx.seed.generativeWidgetsEnabled
     ? [resolveGenerativeWidgetInstruction('declared-content-v1')] : [];
+  const episodeLedger: ChatEpisodeLedger = await loadEpisodeLedger(ctx.conversationId);
+  const episodesIndex: string = formatRecentEpisodesIndex(episodeLedger);
+  if (episodesIndex.length > 0) blocks.push(episodesIndex);
   if (!ctx.seed.agentRuntime.enableRecentChatsReference) return blocks;
   let recent: ConversationSummary[] = await ports.repository.listRecent(RECENT_CHATS_PROMPT_LIMIT);
   if (recent.length > 1) {
@@ -335,11 +340,13 @@ const prepareMessages = (ctx: DetachedConversationContext, ports: ConversationTu
     ctx.publish({ compactActiveCount });
   };
   return async (messages: UIMessage[]): Promise<UIMessage[]> => {
-    const effective: Conversation = conversationWithMessagesAsNodes(ctx.activeConversation(), messages);
+    const ledger: ChatEpisodeLedger = await loadEpisodeLedger(ctx.conversationId);
+    const activeMessages: UIMessage[] = activeEpisodeMessages(messages, ledger);
+    const effective: Conversation = conversationWithMessagesAsNodes(ctx.activeConversation(), activeMessages);
     // Keep the original compress-prompt refresh; the provider/model remains this run's seed.
     const prompts: TaskPrompts = await ports.loadTaskPrompts();
     const prepared: PreparedContext = await prepareContext(effective, policy,
-      rt.modelContextWindowTokens, messages, rt.contextMessageSize, {
+      rt.modelContextWindowTokens, activeMessages, rt.contextMessageSize, {
         abortSignal: ctx.signal,
         prepareToolResults: (source: UIMessage[], keep: number): Promise<JevPreparedToolResults> => jev.prepare(source, keep),
         provider,
@@ -369,6 +376,7 @@ export const buildConversationTurnDeps = (ctx: DetachedConversationContext, port
     agentSoul: buildAgentSoulPrompt(
       seed.agentRuntime.agentSoulMarkdown,
       seed.agentSoulPersona ?? defaultAgentSoulState(),
+      true,
     ),
     inputTransformers: inputTransformers(ctx, ports),
     modelSupportsImageInput: rt.modelSupportsImageInput,

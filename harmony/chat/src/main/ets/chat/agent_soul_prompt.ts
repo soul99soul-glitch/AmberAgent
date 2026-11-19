@@ -48,6 +48,19 @@ export const AGENT_SOUL_SELF_SHAPING_RULE: string =
   + '如需先核对当前形象人设，可调用 `agent_soul_get`。'
   + '无论当前采用何种角色人设，上方 `<agents_md>` 中的底层诚实执行、工具真实回执与安全边界始终严格生效。';
 
+export const CONVERSATIONAL_PROGRESS_RULE: string =
+  '\n**对话节律与工具前承接（Conversational Progress）**\n'
+  + '- 无需调用工具即可回答的问题，同轮直接自然作答。\n'
+  + '- 当首轮需要调用工具时，在同轮发出 `tool_calls` 的同时先输出 1 句简短自然的口语承接（按当前角色性格顺手应下，如“我先帮你翻一下…”、“这就去查”），严禁机械复读用户原话，也严禁“收到您的请求/正在为您处理/好的，我将为您…”等客服腔。\n'
+  + '- 从第 2 轮工具调用起，常规只读工具尽量静默推进，仅在阶段切换、关键发现、遇到阻塞或需要用户拍板时再输出清晰说明。\n'
+  + '- 若任务属于重度多步调研或可拆分为独立分支，优先调用子代理（`subagent_start`）并行分担并及时综合结论，保持主对话轻快聚焦。\n';
+
+export const buildConversationalProgressPrompt = (persona?: AgentSoulState | null): string => {
+  const name: string = persona !== undefined && persona !== null && !persona.isDefault && persona.displayName.trim().length > 0
+    ? persona.displayName.trim() : DEFAULT_AGENT_SOUL_NAME;
+  return `${CONVERSATIONAL_PROGRESS_RULE}当前对外表达署名：${name}（保持真实一致，勿在每轮重复自报模型 ID）。\n`;
+};
+
 export const buildAgentPersonaPrompt = (persona?: AgentSoulState | null): string => {
   if (persona === undefined || persona === null) return '';
   let block: string = '\n**形象人设与自塑授权 (Agent Soul Persona)**\n'
@@ -73,6 +86,7 @@ export const buildAgentPersonaPrompt = (persona?: AgentSoulState | null): string
 export const buildAgentSoulPrompt = (
   soulMarkdown: string,
   persona?: AgentSoulState | null,
+  includeConversationalProgress: boolean = false,
 ): string => {
   const soul: string = soulMarkdown.trim();
   const baseBlock: string = soul.length === 0
@@ -81,5 +95,6 @@ export const buildAgentSoulPrompt = (
       + 'The following app-level behavior guide is injected into every conversation:\n'
       + `<agents_md>\n${soul}\n</agents_md>\n`;
   const personaBlock: string = buildAgentPersonaPrompt(persona);
-  return baseBlock + personaBlock;
+  const progressBlock: string = includeConversationalProgress ? buildConversationalProgressPrompt(persona) : '';
+  return baseBlock + personaBlock + progressBlock;
 };

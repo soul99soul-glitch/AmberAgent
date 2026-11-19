@@ -1452,3 +1452,28 @@ export type {
 export { createNovelProjectOperationTools, executeNovelProjectOperation } from './chat/novel_project_operations.ts';
 export type { NovelProjectOperationPort } from './chat/novel_project_operations.ts';
 export { resolveGenerativeWidgetInstruction } from './chat/generative_widget_prompt.ts';
+export {
+  CONVERSATIONAL_PROGRESS_RULE, buildConversationalProgressPrompt,
+} from './chat/agent_soul_prompt.ts';
+export {
+  EPISODE_IDLE_TIMEOUT_SECONDS, EPISODE_IDLE_TIMEOUT_MS,
+  RECENT_EPISODES_MAX_ITEMS, RECENT_EPISODES_MAX_TOKENS,
+  EPISODE_TITLE_MAX_CHARS, EPISODE_SUMMARY_MAX_CHARS,
+  createEmptyEpisodeLedger, parseEpisodeLedger, estimateEpisodeIndexTokens,
+  findLatestEpisodeBoundaryIndex, unsealedSegmentMessages, activeEpisodeMessages,
+  deterministicEpisodeSummary, sealEpisodeIfEligible, updateEpisodeSummary,
+  formatRecentEpisodesIndex, searchEpisodeMessages,
+} from './chat/episode_models.ts';
+export type {
+  ChatEpisodeSealReason, ChatEpisodeRecord, ChatEpisodeLedger,
+  ChatEpisodeSealResult, ChatEpisodeSearchHit,
+} from './chat/episode_models.ts';
+export { EPISODE_RECALL_TOOL_NAME, createEpisodeRecallTool } from './chat/builtin_episode_recall_tool.ts';
+export type { EpisodeRecallToolDeps } from './chat/builtin_episode_recall_tool.ts';
+export {
+  isToolFailureUnrecovered, isExemptStandaloneToolPart,
+  buildLaterSucceededToolSet, projectAssistantTurns,
+} from './chat/turn_tool_grouping.ts';
+export type {
+  AssistantTurnRole, TurnProgressStatusKind, TurnProgressSummary, MessageTurnProjection,
+} from './chat/turn_tool_grouping.ts';

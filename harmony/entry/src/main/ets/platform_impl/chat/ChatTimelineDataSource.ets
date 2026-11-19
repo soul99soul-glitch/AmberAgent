@@ -1,7 +1,10 @@
-import type { ChatTimelineRow, UIMessage } from '@amber/chat-domain';
+import type {
+  ChatTimelineRow, UIMessage, UIMessagePartTool, ChatEpisodeLedger, ChatEpisodeRecord,
+  MessageTurnProjection, AssistantTurnRole, TurnProgressSummary,
+} from '@amber/chat-domain';
 import { MessageRowViewState } from '../../components/MessageRowViewState.ets';
 
-export type ChatTimelineItemKind = 'message' | 'compact';
+export type ChatTimelineItemKind = 'message' | 'compact' | 'episode';
 
 @Observed
 export class ChatTimelineItem {
@@ -12,11 +15,23 @@ export class ChatTimelineItem {
   streaming: boolean;
   compactCount: number;
   rowIndex: number;
+  episodeId: string = '';
+  episodeTitle: string = '';
+  episodeSummary: string = '';
+  episodeReason: string = 'manual_new_topic';
+  isAssistantContinuation: boolean = false;
+  turnRole: AssistantTurnRole = 'none';
+  turnHeadline: string = '';
+  turnStatusKind: string = 'completed';
+  turnStepCount: number = 0;
+  turnHasError: boolean = false;
+  turnTools: UIMessagePartTool[] = [];
+  isNewEntrance: boolean = false;
   readonly viewState: MessageRowViewState;
 
   constructor(key: string, kind: ChatTimelineItemKind, row: ChatTimelineRow,
     message: UIMessage, streaming: boolean, compactCount: number, rowIndex: number,
-    viewState: MessageRowViewState) {
+    viewState: MessageRowViewState, isNewEntrance: boolean = false) {
     this.key = key;
     this.kind = kind;
     this.row = row;
@@ -24,6 +39,7 @@ export class ChatTimelineItem {
     this.streaming = streaming;
     this.compactCount = compactCount;
     this.rowIndex = rowIndex;
+    this.isNewEntrance = isNewEntrance;
     this.viewState = viewState;
   }
 
@@ -38,6 +54,34 @@ export class ChatTimelineItem {
     if (this.streaming !== streaming) this.streaming = streaming;
     if (this.compactCount !== compactCount) this.compactCount = compactCount;
     if (this.rowIndex !== rowIndex) this.rowIndex = rowIndex;
+  }
+
+  updateEpisode(ep: ChatEpisodeRecord): void {
+    if (this.episodeId !== ep.id) this.episodeId = ep.id;
+    if (this.episodeTitle !== ep.title) this.episodeTitle = ep.title;
+    if (this.episodeSummary !== ep.summary) this.episodeSummary = ep.summary;
+    if (this.episodeReason !== ep.reason) this.episodeReason = ep.reason;
+  }
+
+  updateTurn(proj: MessageTurnProjection): void {
+    if (this.isAssistantContinuation !== proj.isAssistantContinuation) {
+      this.isAssistantContinuation = proj.isAssistantContinuation;
+    }
+    if (this.turnRole !== proj.turnRole) this.turnRole = proj.turnRole;
+    const summary: TurnProgressSummary | null = proj.turnProgress;
+    const nextHeadline: string = summary !== null && summary.showSingleLineStatus ? summary.headline : '';
+    const nextKind: string = summary !== null ? summary.statusKind : 'completed';
+    const nextSteps: number = summary !== null ? summary.stepCount : 0;
+    const nextErr: boolean = summary !== null ? summary.hasError : false;
+    const nextTools: UIMessagePartTool[] = summary !== null ? summary.allTools : [];
+    if (this.turnHeadline !== nextHeadline) this.turnHeadline = nextHeadline;
+    if (this.turnStatusKind !== nextKind) this.turnStatusKind = nextKind;
+    if (this.turnStepCount !== nextSteps) this.turnStepCount = nextSteps;
+    if (this.turnHasError !== nextErr) this.turnHasError = nextErr;
+    if (this.turnTools.length !== nextTools.length ||
+      nextTools.some((t: UIMessagePartTool, i: number): boolean => t !== this.turnTools[i])) {
+      this.turnTools = nextTools;
+    }
   }
 }
 
@@ -86,18 +130,33 @@ export class ChatTimelineDataSource implements IDataSource {
   }
 
   private itemFor(key: string, kind: ChatTimelineItemKind, row: ChatTimelineRow,
-    message: UIMessage, streaming: boolean, compactCount: number, rowIndex: number): ChatTimelineItem {
+    message: UIMessage, streaming: boolean, compactCount: number, rowIndex: number,
+    animateNew: boolean = false): ChatTimelineItem {
     const previous: ChatTimelineItem | undefined = this.byKey.get(key);
     if (previous !== undefined) {
       previous.update(row, message, streaming, compactCount, rowIndex);
       return previous;
     }
     return new ChatTimelineItem(key, kind, row, message, streaming, compactCount,
-      rowIndex, this.stateFor(message.id));
+      rowIndex, this.stateFor(message.id), animateNew);
   }
 
   sync(rows: ChatTimelineRow[], streamingTail: UIMessage[], regenTail: UIMessage | null,
-    regenNodeId: string, compactCount: (messageId: string) => number): void {
+    regenNodeId: string, compactCount: (messageId: string) => number,
+    episodeLedger?: ChatEpisodeLedger | null,
+    projectTurns?: (messages: UIMessage[], streamingIds: ReadonlySet<string>, boundaryIds: ReadonlySet<string>) => MessageTurnProjection[]): void {
+    const hadItems: boolean = this.items.length > 0;
+    const episodesByAfterId: Map<string, ChatEpisodeRecord[]> = new Map<string, ChatEpisodeRecord[]>();
+    const boundaryIds: Set<string> = new Set<string>();
+    if (episodeLedger !== undefined && episodeLedger !== null) {
+      for (const ep of episodeLedger.episodes) {
+        boundaryIds.add(ep.afterMessageId);
+        const list: ChatEpisodeRecord[] = episodesByAfterId.get(ep.afterMessageId) ?? [];
+        list.push(ep);
+        episodesByAfterId.set(ep.afterMessageId, list);
+      }
+    }
+
     const next: ChatTimelineItem[] = [];
     const positions: Map<string, number> = new Map<string, number>();
     for (let index: number = 0; index < rows.length; index++) {
@@ -106,15 +165,26 @@ export class ChatTimelineDataSource implements IDataSource {
       const message: UIMessage = regenerating ? regenTail as UIMessage : row.message;
       const count: number = compactCount(row.message.id);
       positions.set(message.id, next.length);
-      next.push(this.itemFor(`message:${message.id}`, 'message', row,
-        message, regenerating, count, index));
+      const msgKey: string = `message:${message.id}`;
+      const isTailNew: boolean = hadItems && index === rows.length - 1 && !this.byKey.has(msgKey);
+      next.push(this.itemFor(msgKey, 'message', row, message, regenerating, count, index, isTailNew));
       if (count > 0) {
         next.push(this.itemFor(`compact:${row.message.id}`, 'compact', row,
           row.message, false, count, index));
       }
+      const sealedHere: ChatEpisodeRecord[] | undefined = episodesByAfterId.get(row.message.id);
+      if (sealedHere !== undefined) {
+        for (const ep of sealedHere) {
+          const epItem: ChatTimelineItem = this.itemFor(`episode:${ep.id}`, 'episode', row, row.message, false, 0, index);
+          epItem.updateEpisode(ep);
+          next.push(epItem);
+        }
+      }
     }
+    const streamingIds: Set<string> = new Set<string>();
     for (let index: number = 0; index < streamingTail.length; index++) {
       const message: UIMessage = streamingTail[index];
+      streamingIds.add(message.id);
       const existingIndex: number | undefined = positions.get(message.id);
       if (existingIndex !== undefined) {
         const existing: ChatTimelineItem = next[existingIndex];
@@ -127,8 +197,24 @@ export class ChatTimelineDataSource implements IDataSource {
         displayRevision: 0, displaySignature: '',
       };
       positions.set(message.id, next.length);
-      next.push(this.itemFor(`message:${message.id}`, 'message', row,
-        message, true, 0, rows.length + index));
+      const streamKey: string = `message:${message.id}`;
+      const isNewStream: boolean = hadItems && !this.byKey.has(streamKey);
+      next.push(this.itemFor(streamKey, 'message', row, message, true, 0, rows.length + index, isNewStream));
+    }
+
+    if (projectTurns !== undefined) {
+      const messageItems: ChatTimelineItem[] = [];
+      const orderedMessages: UIMessage[] = [];
+      for (const item of next) {
+        if (item.kind === 'message') {
+          messageItems.push(item);
+          orderedMessages.push(item.message);
+        }
+      }
+      const projections: MessageTurnProjection[] = projectTurns(orderedMessages, streamingIds, boundaryIds);
+      for (let i: number = 0; i < messageItems.length && i < projections.length; i++) {
+        messageItems[i].updateTurn(projections[i]);
+      }
     }
     const nextKeys: Set<string> = new Set<string>();
     const nextByKey: Map<string, ChatTimelineItem> = new Map<string, ChatTimelineItem>();

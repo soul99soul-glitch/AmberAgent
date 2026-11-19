@@ -8,9 +8,8 @@ import type {
 } from '@amber/chat-domain';
 import {
   ASK_USER_TOOL_NAME, buildAskUserAnswerPayload, groupMessageParts, mightContainMiniApp,
-  miniAppStatusProjection,
-  parseAskUserQuestions,
-  streamToolIndex,
+  miniAppStatusProjection, parseAskUserQuestions, streamToolIndex,
+  isExemptStandaloneToolPart, buildLaterSucceededToolSet,
 } from '@amber/chat-domain';
 import type { ToolApprovalPartLocator, UIMessagePartMiniApp } from '@amber/chat-domain';
 import { MarkdownText } from './MarkdownText.ets';
@@ -23,6 +22,7 @@ import { ChatMessageAskUserStep } from './ChatMessageAskUserStep.ets';
 import { recipeAskUserPart } from './RecipeApprovalSummary.ets';
 import { pluginAskUserPart } from './PluginApprovalSummary.ets';
 import { ChatMessageAvatar } from './ChatMessageAvatar.ets';
+import { ChatTurnProgressRow } from './chat/ChatTurnProgressRow.ets';
 import { ChatMessageSubAgentStep } from './ChatMessageSubAgentStep.ets';
 import { ChatMessageCouncilStep } from './ChatMessageCouncilStep.ets';
 import { WidgetMessageContent } from './WidgetMessageContent.ets';
@@ -217,10 +217,18 @@ export struct AgentMessageRow {
   // D-053:本会话内见过流式(Android sawStreamingMessage:123 —
   //   流式结束后保持 Preview 不自动折叠)
   @State sawStream: boolean = false;
-  // 1:1 原型 fadeRise .26s ease-out:行入场 opacity 0→1 + translateY 4→0
+  // 1:1 原型 fadeRise .22s ease-out:行入场 opacity 0→1 + translateY 6→0
+  @StorageProp('deepreadReduceMotion') reduceMotion: boolean = false;
   @Prop animateEntrance: boolean = true;
+  @Prop isAssistantContinuation: boolean = false;
+  @Prop turnRole: string = 'none';
+  @Prop turnHeadline: string = '';
+  @Prop turnStatusKind: string = 'completed';
+  @Prop turnStepCount: number = 0;
+  @Prop turnHasError: boolean = false;
+  onOpenTurnDetails: () => void = (): void => {};
   @State enterOpacity: number = 0;
-  @State enterY: number = 4;
+  @State enterY: number = 6;
   @State imagePreviewOpen: boolean = false;
   @State imagePreviewUrls: string[] = [];
   @State imagePreviewIndex: number = 0;
@@ -462,12 +470,29 @@ export struct AgentMessageRow {
       mightContainMiniApp(this.contentTextAt(partIndex));
   }
 
-  // 思考内容开关关闭时:整块只剩 reasoning 则整块隐藏(工具步骤不受影响)
+  private laterSucceededSet(): Set<string> {
+    return buildLaterSucceededToolSet([this.message]);
+  }
+
+  private shouldRenderToolStep(part: UIMessagePartTool): boolean {
+    if (this.turnRole === 'none') return true;
+    return isExemptStandaloneToolPart(part, this.laterSucceededSet());
+  }
+
+  // 思考内容开关或回合单行折叠开启时，仅保留需要用户可见的豁免步骤（审批/ask_user/未恢复错误等）
   private hasVisibleThinkingSteps(block: MessagePartBlock): boolean {
-    if (this.showThinkingContent) return true;
     const steps: ThinkingStep[] = (block as Record<string, Object>)['steps'] as ThinkingStep[];
+    const collapseRoutine: boolean = this.turnRole !== 'none';
     for (const step of steps) {
-      if (step.kind !== 'reasoning') return true;
+      if (step.kind === 'reasoning') {
+        if (!collapseRoutine && this.showThinkingContent) return true;
+      } else if (step.kind === 'tool') {
+        const toolStep = step as Record<string, Object>;
+        const toolPart = toolStep['tool'] as UIMessagePartTool;
+        if (this.shouldRenderToolStep(toolPart)) return true;
+      } else {
+        return true;
+      }
     }
     return false;
   }
@@ -625,7 +650,7 @@ export struct AgentMessageRow {
         Column() {
           ForEach(this.thinkingStepsAt(bi), (step: ThinkingStep, si: number): void => {
             if (step.kind === 'reasoning') {
-              if (this.showThinkingContent) {
+              if (this.turnRole === 'none' && this.showThinkingContent) {
                 ChatMessageReasoning({
                   part: this.reasoningPartAt(bi, si),
                   state: this.reasoningStateAt(`${bi}-${si}`),
@@ -639,7 +664,9 @@ export struct AgentMessageRow {
                 })
               }
             } else if (step.kind === 'tool') {
-              if (this.toolPartAt(bi, si).toolName === ASK_USER_TOOL_NAME) {
+              if (!this.shouldRenderToolStep(this.toolPartAt(bi, si))) {
+                // 已折叠到回合头部的单行 ChatTurnProgressRow
+              } else if (this.toolPartAt(bi, si).toolName === ASK_USER_TOOL_NAME) {
                 ChatMessageAskUserStep({
                   part: this.toolPartAt(bi, si),
                   answers: this.askAnswers,
@@ -895,7 +922,18 @@ export struct AgentMessageRow {
         streaming: this.streaming,
         showModelName: this.showModelName,
         showModelIcon: this.showModelIcon,
+        isAssistantContinuation: this.isAssistantContinuation,
       })
+      if (this.turnRole === 'head' && this.turnHeadline.length > 0) {
+        ChatTurnProgressRow({
+          statusKind: this.turnStatusKind,
+          headline: this.turnHeadline,
+          stepCount: this.turnStepCount,
+          hasError: this.turnHasError,
+          streaming: this.streaming,
+          onOpenDetails: (): void => { this.onOpenTurnDetails(); },
+        })
+      }
       this.hostHeader()
       this.MessageContent()
       ChatMessageActionFooter({
@@ -930,14 +968,18 @@ export struct AgentMessageRow {
     })
     .alignItems(this.message.role === 'user' ? HorizontalAlign.End : HorizontalAlign.Start)
     .padding({ top: 8, bottom: 8 })
-    .opacity(this.animateEntrance ? this.enterOpacity : 1)
-    .translate({ y: this.animateEntrance ? this.enterY : 0 })
+    .opacity(this.animateEntrance && !this.reduceMotion ? this.enterOpacity : 1)
+    .translate({ y: this.animateEntrance && !this.reduceMotion ? this.enterY : 0 })
     .bindContentCover(this.imagePreviewOpen, this.MessageImagePreview(), {
       onWillDismiss: (): void => { this.imagePreviewOpen = false; },
     })
     .onAppear((): void => {
-      if (!this.animateEntrance) return;
-      animateTo({ duration: 260, curve: Curve.EaseOut }, (): void => {
+      if (!this.animateEntrance || this.reduceMotion) {
+        this.enterOpacity = 1;
+        this.enterY = 0;
+        return;
+      }
+      animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
         this.enterOpacity = 1;
         this.enterY = 0;
       });

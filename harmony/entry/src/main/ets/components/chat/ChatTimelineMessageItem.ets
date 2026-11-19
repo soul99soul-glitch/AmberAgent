@@ -5,6 +5,7 @@ import { ChatConversationPresentation } from '../../platform_impl/chat/ChatConve
 import { ChatSmartUiSession } from '../../platform_impl/chat/ChatSmartUiSession.ets';
 import { AgentMessageRow } from '../AgentMessageRow.ets';
 import type { AgentMessageRowHostCapabilities } from '../AgentMessageRow.ets';
+import { ChatEpisodeDivider } from './ChatEpisodeDivider.ets';
 import { FONT_SANS } from '../../design/fonts.ets';
 import { ACCENT, INK3, META } from '../../design/tokens.ets';
 type MsgRow = ChatTimelineRow;
@@ -50,6 +51,8 @@ export struct ChatTimelineMessageItem {
   onSmartUiDraft: (nodeId: string, key: string) => void = (): void => {};
   onShowCompact: (messageId: string) => void = (): void => {};
   onNavigate: (kind: string, id: string) => void = (): void => {};
+  onOpenTurnDetails: (headline: string, tools: UIMessagePartTool[]) => void =
+    (_h: string, _t: UIMessagePartTool[]): void => {};
 
   @Builder
   private CompactMarker(): void {
@@ -68,9 +71,25 @@ export struct ChatTimelineMessageItem {
   build(): void {
     if (this.item.kind === 'compact') {
       this.CompactMarker()
+    } else if (this.item.kind === 'episode') {
+      ChatEpisodeDivider({
+        episodeId: this.item.episodeId,
+        title: this.item.episodeTitle,
+        summary: this.item.episodeSummary,
+        reason: this.item.episodeReason,
+      })
     } else {
       AgentMessageRow({
-        animateEntrance: false,
+        animateEntrance: this.item.isNewEntrance,
+        isAssistantContinuation: this.item.isAssistantContinuation,
+        turnRole: this.item.turnRole,
+        turnHeadline: this.item.turnHeadline,
+        turnStatusKind: this.item.turnStatusKind,
+        turnStepCount: this.item.turnStepCount,
+        turnHasError: this.item.turnHasError,
+        onOpenTurnDetails: (): void => {
+          this.onOpenTurnDetails(this.item.turnHeadline, this.item.turnTools);
+        },
         viewState: this.item.viewState,
         message: this.item.message,
         streaming: this.item.streaming,

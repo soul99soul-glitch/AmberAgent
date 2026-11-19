@@ -57,7 +57,7 @@ const RESIDENT_EXACT_TOOLS: string[] = [
 ];
 
 const RESIDENT_CONTEXT_TOOLS: string[] = [
-  'conversation_context_status', 'conversation_search', 'conversation_expand',
+  'conversation_context_status', 'conversation_search', 'conversation_expand', 'episode_recall',
 ];
 
 const RESIDENT_MODEL_COUNCIL_TOOLS: string[] = [
