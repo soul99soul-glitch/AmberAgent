@@ -308,7 +308,7 @@ export const getAgentSoulSynchronizer = (): AgentSoulCloudSynchronizer => {
 };
 
 export const loadAgentSoulState = (forceReload: boolean = false): Promise<AgentSoulState> =>
-  getAgentSoulSynchronizer().hydrateLocal(forceReload);
+  getAgentSoulSynchronizer().getStore().load(forceReload);
 
 export const hydrateAgentSoulOnForeground = (): void => {
   const sync: AgentSoulCloudSynchronizer = getAgentSoulSynchronizer();

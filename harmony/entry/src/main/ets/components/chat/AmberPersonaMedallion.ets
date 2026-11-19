@@ -23,18 +23,19 @@ export struct AmberPersonaMedallion {
   @Prop isDefault: boolean = true;
   @Prop @Watch('onSendingChange') sending: boolean = false;
   @Prop customAvatarUri: string = '';
+  @Prop previewPreset: string = '';
   @State private pulseScale: number = 1.0;
   @State private pulseOpacity: number = 0.35;
   private pulseTimer: number = -1;
 
   private activeAvatarUri(): string {
     const propUri: string = this.customAvatarUri.trim();
-    if (propUri.length > 0) return propUri;
+    if (this.previewPreset.length > 0 || propUri.length > 0) return propUri;
     return this.avatarUriStore.trim();
   }
 
   private presetIconName(): string {
-    const p: string = this.avatarPresetStore.trim();
+    const p: string = (this.previewPreset || this.avatarPresetStore).trim();
     if (p === 'star') return 'ph_star';
     if (p === 'rocket') return 'ph_rocket';
     if (p === 'yinyang') return 'ph_yinYang';

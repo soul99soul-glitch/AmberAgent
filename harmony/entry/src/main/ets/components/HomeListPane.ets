@@ -645,8 +645,6 @@ export struct HomeListPane {
           .padding({ left: 16, right: 16 })
         }
         Row() {
-          Column() { this.ShortcutItem('reader', '深度阅读', 'ph_bookOpen') }.height('100%').layoutWeight(1)
-          Column() { this.ShortcutItem('novel', '小说创作', 'ph_notebook') }.height('100%').layoutWeight(1)
           Column() { this.ShortcutItem('council', '模型议会', 'ph_chatCircleDots') }.height('100%').layoutWeight(1)
           Column() { this.ShortcutItem('apps', '小应用', 'ph_squaresFour') }.height('100%').layoutWeight(1)
           Column() { this.ShortcutItem('webmount', '站点', 'ph_globe') }.height('100%').layoutWeight(1)

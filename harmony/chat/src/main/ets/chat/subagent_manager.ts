@@ -553,6 +553,12 @@ export class SubAgentManager {
     return out.sort((a: SubAgentRun, b: SubAgentRun): number => b.startedAtMs - a.startedAtMs);
   }
 
+  recentRuns(limit: number): SubAgentRun[] {
+    const runs: SubAgentRun[] = [];
+    this.runs.forEach((runtimeRun: RuntimeRun): void => { runs.push(runtimeRun.snapshot); });
+    return runs.sort((a: SubAgentRun, b: SubAgentRun): number => b.updatedAtMs - a.updatedAtMs).slice(0, limit);
+  }
+
   subscribeLiveText(
     runId: string, listener: (text: string) => void,
   ): (() => void) | null {

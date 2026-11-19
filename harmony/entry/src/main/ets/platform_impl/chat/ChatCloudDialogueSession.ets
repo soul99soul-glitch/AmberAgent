@@ -35,6 +35,7 @@ export interface CloudDialogueInputRecord {
   workItemId: string;
   state: CloudDialogueInputState;
   messageId: string;
+  conversationId?: string;
   updatedAt: number;
 }
 
@@ -131,6 +132,7 @@ export class ChatCloudDialogueSession {
   paired: boolean = false;
   gatewayName: string = '';
   submitting: boolean = false;
+  switchingMode: boolean = false;
   cursor: number = 0;
   boundConversationId: string = '';
   followupTargetWorkItemId: string = '';
@@ -286,10 +288,18 @@ export class ChatCloudDialogueSession {
   }
 
   async setCloudModeEnabled(enabled: boolean): Promise<void> {
-    if (this.ports === null) return;
+    if (this.ports === null || this.switchingMode) return;
     if (enabled && !this.paired) return;
-    await this.ports.kvStore.put(CLOUD_DIALOGUE_ENABLED_KEY, enabled ? 'true' : 'false');
-    await this.refreshConfigAndStart();
+    this.switchingMode = true;
+    this.clearFollowupTarget();
+    try {
+      await this.ports.kvStore.put(CLOUD_DIALOGUE_ENABLED_KEY, enabled ? 'true' : 'false');
+      await this.refreshConfigAndStart();
+    } catch (error) {
+      this.ports.error((error as Error).message);
+    } finally {
+      this.switchingMode = false;
+    }
   }
 
   async refreshConfigAndStart(): Promise<void> {
@@ -316,17 +326,20 @@ export class ChatCloudDialogueSession {
       if (parsedConn !== null && this.ports.onDialogueConnected !== undefined) {
         this.ports.onDialogueConnected(parsedConn);
       }
-      if (!nextEnabled) {
-        this.stopPolling();
-        this.followupTargetWorkItemId = '';
-        this.uiTick++;
-        return;
-      }
-      if (prevScope !== nextScope || this.seenEventIds.length === 0) {
+      if (nextScope.length === 0) {
+        this.resetMemoryState();
+      } else if (prevScope !== nextScope) {
         await this.restorePersistedSlice(nextScope);
       }
-      this.ensurePolling();
-      await this.pollOnce();
+      if (!nextEnabled) this.clearFollowupTarget();
+      this.syncActiveProgressText();
+      this.uiTick++;
+      if (this.shouldPollCloud()) {
+        this.ensurePolling();
+        await this.pollOnce();
+      } else {
+        this.stopPolling();
+      }
     } catch (_e) {
       // 配置读取异常不阻塞页面
     }
@@ -386,8 +399,14 @@ export class ChatCloudDialogueSession {
     await this.ports.kvStore.put(CLOUD_DIALOGUE_STATE_KEY, JSON.stringify(slice));
   }
 
+  private shouldPollCloud(): boolean {
+    return this.paired && (this.enabled ||
+      this.tasks.some((task: CloudDialogueTaskRecord): boolean => task.status === 'running' || task.status === 'queued') ||
+      this.inputs.some((input: CloudDialogueInputRecord): boolean => input.state === 'received'));
+  }
+
   private ensurePolling(): void {
-    if (!this.pageAlive || !this.pageVisible || !this.isActiveMode() || this.pollTimer >= 0) return;
+    if (!this.pageAlive || !this.pageVisible || !this.shouldPollCloud() || this.pollTimer >= 0) return;
     this.pollTimer = setInterval((): void => {
       this.pollOnce().catch((): void => {});
     }, POLL_INTERVAL_MS);
@@ -474,10 +493,12 @@ export class ChatCloudDialogueSession {
 
   async sendMessage(text: string, explicitRequestId?: string): Promise<CloudDialogueReceipt> {
     const trimmed: string = text.trim();
+    const conversationId: string = this.ports?.currentConversation()?.id ?? '';
+    if (this.boundConversationId.length === 0) this.boundConversationId = conversationId;
     const reqId: string = this.resolveRequestId('message', '', trimmed, explicitRequestId);
     const receipt: CloudDialogueReceipt = await this.client().messages(reqId, trimmed);
     this.clearPendingRetryIfMatched(reqId);
-    await this.recordInputReceipt('message', reqId, trimmed, '', receipt);
+    await this.recordInputReceipt('message', reqId, trimmed, '', receipt, conversationId);
     await this.pollOnce();
     return receipt;
   }
@@ -485,10 +506,11 @@ export class ChatCloudDialogueSession {
   async sendFollowup(workItemId: string, text: string, explicitRequestId?: string): Promise<CloudDialogueReceipt> {
     const trimmed: string = text.trim();
     const targetId: string = workItemId.trim();
+    const conversationId: string = this.conversationIdForTask(targetId);
     const reqId: string = this.resolveRequestId('followup', targetId, trimmed, explicitRequestId);
     const receipt: CloudDialogueReceipt = await this.client().inputs(targetId, reqId, trimmed);
     this.clearPendingRetryIfMatched(reqId);
-    await this.recordInputReceipt('followup', reqId, trimmed, targetId, receipt);
+    await this.recordInputReceipt('followup', reqId, trimmed, targetId, receipt, conversationId);
     if (this.followupTargetWorkItemId === targetId) {
       this.followupTargetWorkItemId = '';
     }
@@ -555,6 +577,12 @@ export class ChatCloudDialogueSession {
       this.uiTick++;
       return null;
     }
+    return await this.stopCloudTask(targetId, explicitRequestId);
+  }
+
+  async stopCloudTask(workItemId: string, explicitRequestId?: string): Promise<CloudDialogueReceipt | null> {
+    const targetId: string = workItemId.trim();
+    if (!this.paired || targetId.length === 0) return null;
     const reqId: string = this.resolveRequestId('stop', targetId, '', explicitRequestId);
     this.submitting = true;
     this.uiTick++;
@@ -613,6 +641,7 @@ export class ChatCloudDialogueSession {
     text: string,
     explicitWorkItemId: string,
     receipt: CloudDialogueReceipt,
+    conversationId: string = '',
   ): Promise<void> {
     const resolvedWorkItemId: string = explicitWorkItemId.length > 0
       ? explicitWorkItemId
@@ -621,14 +650,12 @@ export class ChatCloudDialogueSession {
     const existingIdx: number = this.inputs.findIndex(
       (item: CloudDialogueInputRecord): boolean => item.requestId === requestId || item.eventId === receipt.eventId,
     );
-    let messageId: string = existingIdx >= 0 ? this.inputs[existingIdx].messageId : '';
-    if (kind !== 'stop' && messageId.length === 0) {
-      messageId = `cloud-input-${receipt.eventId}`;
+    const previous: CloudDialogueInputRecord | undefined = existingIdx >= 0 ? this.inputs[existingIdx] : undefined;
+    const ownerId: string = previous?.conversationId ?? conversationId;
+    const messageId: string = kind === 'stop' ? '' : (previous?.messageId || `cloud-input-${receipt.eventId}`);
+    if (kind !== 'stop') {
       const display: string = formatUserCloudMessageText(kind, text, receipt.state, resolvedWorkItemId);
-      await this.appendOrUpdateConversationMessage(messageId, 'user', display);
-    } else if (kind !== 'stop' && messageId.length > 0) {
-      const display: string = formatUserCloudMessageText(kind, text, receipt.state, resolvedWorkItemId);
-      await this.appendOrUpdateConversationMessage(messageId, 'user', display);
+      await this.appendOrUpdateConversationMessage(ownerId, messageId, 'user', display);
     }
     const record: CloudDialogueInputRecord = {
       requestId: requestId,
@@ -639,6 +666,7 @@ export class ChatCloudDialogueSession {
       workItemId: resolvedWorkItemId,
       state: receipt.state,
       messageId: messageId,
+      conversationId: ownerId,
       updatedAt: Date.now(),
     };
     if (existingIdx >= 0) {
@@ -716,7 +744,7 @@ export class ChatCloudDialogueSession {
   }
 
   async pollOnce(): Promise<void> {
-    if (!this.isActiveMode() || this.pollInFlight || this.ports === null) return;
+    if (!this.shouldPollCloud() || this.pollInFlight || this.ports === null) return;
     this.pollInFlight = true;
     try {
       await this.refreshPendingReceipts();
@@ -749,6 +777,7 @@ export class ChatCloudDialogueSession {
       await this.handleGatewayError(e as Error);
     } finally {
       this.pollInFlight = false;
+      if (!this.shouldPollCloud()) this.stopPolling();
     }
   }
 
@@ -782,6 +811,7 @@ export class ChatCloudDialogueSession {
             workItemId: resolvedWid,
             state: receipt.state,
             messageId: item.messageId,
+            conversationId: item.conversationId,
             updatedAt: Date.now(),
           };
           const nextInputs: CloudDialogueInputRecord[] = this.inputs.slice();
@@ -791,7 +821,8 @@ export class ChatCloudDialogueSession {
             const display: string = formatUserCloudMessageText(
               updated.kind, updated.text, updated.state, updated.workItemId,
             );
-            await this.appendOrUpdateConversationMessage(updated.messageId, 'user', display);
+            await this.appendOrUpdateConversationMessage(
+              updated.conversationId ?? this.boundConversationId, updated.messageId, 'user', display);
           }
           changed = true;
         }
@@ -854,7 +885,7 @@ export class ChatCloudDialogueSession {
     if (ev.kind === 'assistant_reply') {
       await this.markTopicInputsConsumed(topicId, wid);
       const msgId: string = `cloud-reply-${ev.id}`;
-      await this.appendOrUpdateConversationMessage(msgId, 'assistant', ev.text);
+      await this.appendOrUpdateConversationMessage(this.conversationIdForTask(wid, topicId), msgId, 'assistant', ev.text);
       return;
     }
     if (ev.kind === 'task_result') {
@@ -895,7 +926,7 @@ export class ChatCloudDialogueSession {
       const header: string = `[${taskTitle} · ${statusLabel}]`;
       const body: string = ev.text.trim().length > 0 ? `${header}\n${ev.text}` : header;
       const msgId: string = `cloud-result-${ev.id}`;
-      await this.appendOrUpdateConversationMessage(msgId, 'assistant', body);
+      await this.appendOrUpdateConversationMessage(this.conversationIdForTask(wid, topicId), msgId, 'assistant', body);
     }
   }
 
@@ -957,6 +988,7 @@ export class ChatCloudDialogueSession {
       workItemId: nextWid,
       state: nextState,
       messageId: cur.messageId,
+      conversationId: cur.conversationId,
       updatedAt: Date.now(),
     };
     const nextInputs: CloudDialogueInputRecord[] = this.inputs.slice();
@@ -966,7 +998,8 @@ export class ChatCloudDialogueSession {
       const display: string = formatUserCloudMessageText(
         updated.kind, updated.text, updated.state, updated.workItemId,
       );
-      await this.appendOrUpdateConversationMessage(updated.messageId, 'user', display);
+      await this.appendOrUpdateConversationMessage(
+        updated.conversationId ?? this.boundConversationId, updated.messageId, 'user', display);
     }
   }
 
@@ -980,24 +1013,29 @@ export class ChatCloudDialogueSession {
     this.activeProgressText = latest.progressText;
   }
 
-  private targetConversationId(): string {
-    const current: Conversation | null = this.ports !== null ? this.ports.currentConversation() : null;
-    if (current !== null && current.id.length > 0) {
-      if (this.boundConversationId.length === 0) {
-        this.boundConversationId = current.id;
+  conversationIdForTask(workItemId: string, topicId: string = ''): string {
+    const matches: CloudDialogueInputRecord[] = this.inputs.filter((item: CloudDialogueInputRecord): boolean =>
+      item.kind === 'message' && workItemId.length > 0 && item.workItemId === workItemId);
+    if (matches.length === 0 && topicId.length > 0) {
+      for (const item of this.inputs) {
+        if (item.kind === 'message' && item.topicId === topicId) matches.push(item);
       }
-      return current.id;
     }
-    return this.boundConversationId;
+    const owners: Set<string> = new Set<string>();
+    for (const item of matches) {
+      const id: string = item.conversationId ?? this.boundConversationId;
+      if (id.length > 0) owners.add(id);
+    }
+    return owners.size === 1 ? Array.from(owners)[0] : '';
   }
 
   private async appendOrUpdateConversationMessage(
+    convId: string,
     messageId: string,
     role: 'user' | 'assistant',
     text: string,
   ): Promise<void> {
     if (this.ports === null) return;
-    const convId: string = this.targetConversationId();
     if (convId.length === 0) return;
     const ports: ChatCloudDialoguePorts = this.ports;
     let appendedNew: boolean = false;
@@ -1038,7 +1076,7 @@ export class ChatCloudDialogueSession {
         : latest.title;
       return patchConversation(latest, { messageNodes: nextNodes, title: nextTitle });
     });
-    if (appendedNew && ports.autoScrollEnabled()) {
+    if (appendedNew && ports.currentConversation()?.id === convId && ports.autoScrollEnabled()) {
       ports.jumpToBottom();
     }
   }

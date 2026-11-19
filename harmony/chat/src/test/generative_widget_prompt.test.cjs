@@ -14,15 +14,15 @@ test('actual run prompt follows the declared-content switch even when recent-cha
   const actual = ts.transpileModule(source.slice(begin, end), {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  const run = new Function('resolveGenerativeWidgetInstruction', 'getChatRepository', 'loadEpisodeLedger', 'formatRecentEpisodesIndex', actual + '\nreturn extraSystemBlocks;')(
+  const run = new Function('resolveGenerativeWidgetInstruction', 'formatRecentEpisodesIndex', actual + '\nreturn extraSystemBlocks;')(
     domain.resolveGenerativeWidgetInstruction,
-    () => { throw new Error('recent-chat repository must not be queried'); },
-    async () => domain.createEmptyEpisodeLedger(),
     domain.formatRecentEpisodesIndex,
   );
+  const ports = { repository: { listRecent() { throw new Error('recent-chat repository must not be queried'); } } };
+  const episodes = Promise.resolve(domain.createEmptyEpisodeLedger('conversation'));
   for (const enabled of [true, false]) {
     const blocks = await run({ seed: { generativeWidgetsEnabled: enabled,
-      agentRuntime: { enableRecentChatsReference: false } } });
+      agentRuntime: { enableRecentChatsReference: false } } }, ports, episodes);
     assert.deepEqual(blocks, enabled ? [domain.resolveGenerativeWidgetInstruction('declared-content-v1')] : []);
   }
   assert.match(domain.GENERATIVE_WIDGET_INSTRUCTION, /renderer:"threejs"/);

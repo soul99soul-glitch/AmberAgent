@@ -152,6 +152,7 @@ function chat({ loadProviders = () => Promise.resolve([]), resolveChoice = () =>
   page.smartUi = new ChatSmartUiSession();
   page.smartUi.start({ flush: async () => {} }, () => {});
   page.cloudDialogue = { hide() {}, dispose() {} };
+  page.unsubEpisodeLedger = null;
   page.bottomDockTab = 'chat';
   return page;
 }

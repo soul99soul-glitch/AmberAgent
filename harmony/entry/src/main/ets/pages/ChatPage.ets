@@ -184,7 +184,8 @@ import { getChatSmartUiDraftStore } from '../platform_impl/SmartUiDraftSupport.e
 import { mimeByName, readUriBytes, loadAttachDataUrl } from '../platform_impl/chat/ChatAttachmentIO.ets';
 import { observeGatewaySoulRevision, syncAgentSoulFromCloud } from '../platform_impl/AgentSoulSync.ets';
 import { AgentEmbodimentSheet } from '../components/soul/AgentEmbodimentSheet.ets';
-import { isToolFailureUnrecovered, buildLaterSucceededToolSet } from '@amber/chat-domain';
+import { consecutiveTurnToolFailures, projectEpisodeLedger } from '@amber/chat-domain';
+import { toggleConversationInHub } from '../platform_impl/chat/AmberHubStore.ets';
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
 interface ChatArchiveRouteParams { conversationId: string; nodeId: string; }
@@ -305,6 +306,8 @@ struct ChatPage {
   @State turnStepsSheetOpen: boolean = false;
   @State turnStepsTitle: string = '';
   @State turnStepsTools: UIMessagePartTool[] = [];
+  @State turnStepsReasoning: string[] = [];
+  private openingHubConversation: boolean = false;
   private unsubEpisodeLedger: (() => void) | null = null;
   private boundEpisodeConvId: string = '';
   // 装配请求由关闭/离页失效，迟到回调不能重开菜单或覆盖下一次请求。
@@ -551,11 +554,11 @@ struct ChatPage {
         isModelCouncilEnabled().then((enabled: boolean): MentionRoleItem[] => buildMentionRoleItems(setting.enabled, enabled, setting.mode, setting.customDefinitions))),
       abilityContext: (): common.UIAbilityContext => getContext(this) as common.UIAbilityContext,
       cloudDialogue: (): ChatCloudDialogueSession => this.cloudDialogue,
-      sealIdleEpisode: async (conversationId: string, messages: UIMessage[]): Promise<void> => {
-        const res = await sealIfIdleTimeoutExceeded(conversationId, messages);
-        if (res.sealed !== null && this.pageAlive) {
-          this.refreshEpisodeUi();
-        }
+      sealIdleEpisode: async (conv: Conversation): Promise<void> => {
+        if (getConversationTaskRunner().activeAndQueuedTasksForConversation(conv.id).length > 0) return;
+        const messages: UIMessage[] = currentMessages(conv);
+        const res = await sealIfIdleTimeoutExceeded(conv.id, messages, Date.now(), conv.messageNodes);
+        if (res.sealed !== null) this.refineSealedEpisodeAsync(conv, res.sealed, messages);
       },
     };
     this.composer.start(composerPorts);
@@ -672,11 +675,12 @@ struct ChatPage {
     };
     this.timeline.start(this.getUIContext(), getChatRepository(), timelinePorts);
     this.timeline.setEpisodeLedgerProvider((): ChatEpisodeLedger | null => {
-      const convId: string = this.presentation.conversation?.id ?? '';
+      const conv: Conversation | null = this.presentation.conversation;
+      const convId: string = conv?.id ?? '';
       if (convId.length > 0 && convId !== this.boundEpisodeConvId) {
         this.bindEpisodeLedger(convId);
       }
-      return convId.length > 0 ? getCachedEpisodeLedger(convId) : null;
+      return conv !== null ? projectEpisodeLedger(getCachedEpisodeLedger(conv.id), conv.messageNodes) : null;
     });
     this.timeline.enableKeyboardAvoidance();
     this.pageAlive = true;
@@ -788,6 +792,7 @@ struct ChatPage {
     const initialIndexParam: string = params ? (params['initialMessageIndex'] ?? '') : '';
     const initialNodeIdParam: string = params ? (params['nodeId'] ?? '') : '';
     if (convId.length > 0) {
+      this.composer.useExistingConversationDraft();
       const existingRun: ConversationRunSnapshot | null = getConversationRunService().snapshot(convId);
       this.presentation.attachConversationRun(convId);
       if (existingRun !== null && (existingRun.sending || existingRun.conversation !== null)) {
@@ -948,6 +953,32 @@ struct ChatPage {
     router.replaceUrl({ url: 'pages/ChatPage' });
   }
 
+  private async startHubConversation(hubId: string, instruction: string, title: string): Promise<void> {
+    if (this.openingHubConversation) return;
+    this.openingHubConversation = true;
+    const draft: string = instruction.trim().length > 0
+      ? `[专题·${title}] ${instruction.trim()}\n\n` : `[专题·${title}] `;
+    const assistantId: string | undefined = this.presentation.conversation?.assistantId;
+    try {
+      const assistants: Assistant[] = await getChatAssistants();
+      const picked: Assistant = assistants.find((item: Assistant): boolean => item.id === assistantId) ?? assistants[0];
+      if (!this.pageAlive || !this.pageVisible) return;
+      this.composer.flushInputDraft();
+      const conversation: Conversation = seedConversationWithPresets(
+        makeConversation(newId(), [], { assistantId: picked.id, title: title }), picked);
+      await getChatRepository().save(conversation);
+      await getChatKvStore().put(`chat_input_draft/${conversation.id}`, draft);
+      await toggleConversationInHub(getChatKvStore(), hubId, conversation.id);
+      if (this.pageAlive && this.pageVisible) {
+        await router.pushUrl({ url: 'pages/ChatPage', params: { conversationId: conversation.id } });
+      }
+    } catch (error) {
+      if (this.pageAlive) this.presentation.errorMsg = (error as Error).message;
+    } finally {
+      this.openingHubConversation = false;
+    }
+  }
+
   private countTimelineArtifacts(): number {
     let count: number = 0;
     for (const row of this.timeline.rows) {
@@ -977,22 +1008,7 @@ struct ChatPage {
   }
 
   private consecutiveErrorCount(): number {
-    const messages: UIMessage[] = this.timeline.rows.map((r: ChatTimelineRow): UIMessage => r.message);
-    const laterSucceeded: Set<string> = buildLaterSucceededToolSet(messages);
-    let streak: number = 0;
-    for (let i: number = this.timeline.rows.length - 1; i >= 0; i--) {
-      const row: ChatTimelineRow = this.timeline.rows[i];
-      if (row.message.role !== 'assistant') break;
-      let rowError: boolean = false;
-      for (const part of row.message.parts) {
-        if (part.type === 'tool' && isToolFailureUnrecovered(part as UIMessagePartTool, laterSucceeded)) {
-          rowError = true;
-        }
-      }
-      if (!rowError) break;
-      streak++;
-    }
-    return streak;
+    return consecutiveTurnToolFailures(this.timeline.rows.map((r: ChatTimelineRow): UIMessage => r.message));
   }
 
   private attentionTaskBadgeCount(): number {
@@ -1011,19 +1027,20 @@ struct ChatPage {
     for (const task of this.cloudDialogue.tasks) {
       const nid: string = `cloud:${task.workItemId}`;
       if (this.dismissedNoticeIds.indexOf(nid) >= 0) continue;
+      const ownerId: string = this.cloudDialogue.conversationIdForTask(task.workItemId, task.topicId);
       if (task.status === 'failed') {
         notices.push({
           id: nid, kind: 'failed',
           title: task.title.length > 0 ? task.title : '云端任务失败',
           subtitle: task.progressText.length > 0 ? task.progressText : '点击查看详情',
-          conversationId: task.topicId || currentId,
+          conversationId: ownerId,
         });
-      } else if (task.status === 'completed' && task.topicId.length > 0 && task.topicId !== currentId) {
+      } else if (task.status === 'completed' && ownerId.length > 0 && ownerId !== currentId) {
         notices.push({
           id: nid, kind: 'completed',
           title: task.title.length > 0 ? task.title : '云端任务已完成',
           subtitle: '来自其他对话',
-          conversationId: task.topicId,
+          conversationId: ownerId,
         });
       }
     }
@@ -1081,7 +1098,8 @@ struct ChatPage {
       this.episodeHeaderTitle = '';
       return;
     }
-    this.episodeHeaderTitle = activeEpisodeHeaderTitle(conv.id, currentMessages(conv), this.presentation.title);
+    const ledger: ChatEpisodeLedger = projectEpisodeLedger(getCachedEpisodeLedger(conv.id), conv.messageNodes);
+    this.episodeHeaderTitle = activeEpisodeHeaderTitle(ledger, currentMessages(conv), this.presentation.title);
     this.timeline.syncDataSource();
   }
 
@@ -1091,9 +1109,14 @@ struct ChatPage {
       this.newChat();
       return;
     }
+    if (this.composer.sendPrechecking || this.presentation.sending ||
+      getConversationTaskRunner().activeAndQueuedTasksForConversation(conv.id).length > 0) {
+      promptAction.showToast({ message: '请等当前任务结束后再开启新话题', duration: 1600 });
+      return;
+    }
     const msgs: UIMessage[] = currentMessages(conv);
-    startNewEpisode(conv.id, msgs).then((res): void => {
-      if (!this.pageAlive) return;
+    startNewEpisode(conv.id, msgs, Date.now(), conv.messageNodes).then((res): void => {
+      if (!this.pageAlive || this.presentation.conversation?.id !== conv.id) return;
       if (res.sealed === null) {
         promptAction.showToast({ message: '当前已是新话题起点', duration: 1500 });
         return;
@@ -1167,14 +1190,17 @@ struct ChatPage {
       .width('100%')
       .padding({ left: 20, right: 20, top: 18, bottom: 6 })
 
-      if (this.turnStepsTools.length === 0) {
-        Text('本轮主要为推理思考，无独立工具记录。')
+      if (this.turnStepsTools.length === 0 && this.turnStepsReasoning.length === 0) {
+        Text('暂无可查看的步骤明细。')
           .fontSize(13)
           .fontColor(INK3)
           .padding({ left: 20, right: 20, top: 8 })
       } else {
         Scroll() {
           Column({ space: 8 }) {
+            ForEach(this.turnStepsReasoning, (reasoning: string): void => {
+              Text(reasoning).fontSize(13).fontColor(INK2).width('100%')
+            }, (_text: string, index: number): string => `reasoning-${index}`)
             ForEach(this.turnStepsTools, (tool: UIMessagePartTool): void => {
               Row({ space: 10 }) {
                 Column()
@@ -1343,9 +1369,10 @@ struct ChatPage {
         onShowCompact: (messageId: string): void => { this.modelContext.showCompactSummary(messageId); },
         onSendSuggestion: (text: string): void => { this.composer.sendSuggestion(text); },
         onNavigate: (kind: string, id: string): void => { router.pushUrl({ url: kind === 'miniApp' ? 'pages/MiniAppRunnerPage' : 'pages/MiniAppListPage', params: { appId: id } }); },
-        onOpenTurnDetails: (headline: string, tools: UIMessagePartTool[]): void => {
+        onOpenTurnDetails: (headline: string, tools: UIMessagePartTool[], reasoning: string[]): void => {
           this.turnStepsTitle = headline;
           this.turnStepsTools = tools;
+          this.turnStepsReasoning = reasoning;
           this.turnStepsSheetOpen = true;
         },
       })
@@ -1410,7 +1437,7 @@ struct ChatPage {
         titleInput: this.presentation.titleInput,
         sending: this.presentation.sending,
         recapLoading: this.presentation.recapState.loading,
-        activityLabel: this.cloudDialogue.activeProgressText,
+        activityLabel: this.cloudDialogue.isActiveMode() ? this.cloudDialogue.activeProgressText : '',
         agentSoulDisplayName: this.agentSoulDisplayName,
         agentSoulIsDefault: this.agentSoulIsDefault,
         artifactCount: this.countTimelineArtifacts(),
@@ -1462,12 +1489,8 @@ struct ChatPage {
             }
           },
           onFocusApproval: (): void => { this.timeline.jumpToBottom(); },
-          onStartWithHubInstruction: (instruction: string, title: string): void => {
-            const prefix: string = instruction.trim().length > 0
-              ? `[专题·${title}] ${instruction.trim()}\n\n`
-              : `[专题·${title}] `;
-            this.bottomDockTab = 'chat';
-            this.composer.setInputText(prefix);
+          onStartWithHubInstruction: (hubId: string, instruction: string, title: string): void => {
+            this.startHubConversation(hubId, instruction, title);
           },
           sandboxContent: (): void => { this.sandboxContent(); },
           runtimeContent: (): void => { this.runtimeContent(); },

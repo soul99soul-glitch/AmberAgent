@@ -3,8 +3,7 @@ import { test } from 'node:test';
 import type { UIMessage, UIMessagePartTool, UIMessagePartReasoning } from '../main/ets/chat/message.ts';
 import {
   projectAssistantTurns,
-  isExemptStandaloneToolPart,
-  buildLaterSucceededToolSet,
+  consecutiveTurnToolFailures,
 } from '../main/ets/chat/turn_tool_grouping.ts';
 
 const textMsg = (
@@ -75,23 +74,22 @@ test('projectAssistantTurns deduplicates continuation headers and summarizes sin
   assert.equal(projections[4].isAssistantContinuation, false);
 });
 
-test('isExemptStandaloneToolPart keeps pending approvals, ask_user, and unrecovered failures visible', () => {
+test('turn projection keeps pending approvals, media and failures without a later recovery visible', () => {
   const pendingSsh = toolPart('t1', 'terminal_execute', { pending: true });
   const askUser = toolPart('t2', 'ask_user', { ok: true });
   const routineRead = toolPart('t3', 'file_read', { ok: true });
   const failedOnce = toolPart('t4', 'file_read', { error: 'ENOENT' });
-  const failedUnrecovered = toolPart('t5', 'http_request', { error: '502' });
+  const lastRead = toolPart('t5', 'file_read', { error: 'ENOENT' });
+  const python = toolPart('t6', 'python_execute');
+  python.output = [{ type: 'text', text: '{"exit_code":1}', metadata: null }];
+  const photo = toolPart('t7', 'photos_pick');
+  photo.output = [{ type: 'image', url: 'file:///test/photo', metadata: null }];
+  const first = textMsg('m1', 'assistant', '', [pendingSsh, askUser, failedOnce]);
+  const second = textMsg('m2', 'assistant', '', [routineRead, photo, lastRead, python]);
 
-  const laterSucceeded = buildLaterSucceededToolSet([
-    textMsg('m1', 'assistant', '', [failedOnce, routineRead, failedUnrecovered]),
-  ]);
-
-  assert.equal(isExemptStandaloneToolPart(pendingSsh, laterSucceeded), true);
-  assert.equal(isExemptStandaloneToolPart(askUser, laterSucceeded), true);
-  // routine read is collapsed
-  assert.equal(isExemptStandaloneToolPart(routineRead, laterSucceeded), false);
-  // failedOnce was later recovered by a successful file_read
-  assert.equal(isExemptStandaloneToolPart(failedOnce, laterSucceeded), false);
-  // failedUnrecovered was never recovered -> exempt and stays visible
-  assert.equal(isExemptStandaloneToolPart(failedUnrecovered, laterSucceeded), true);
+  const [head, member] = projectAssistantTurns([first, second]);
+  assert.deepEqual(head.standaloneToolIds, ['t1', 't2']);
+  assert.deepEqual(member.standaloneToolIds, ['t7', 't5', 't6']);
+  assert.equal(head.turnProgress?.hasError, true);
+  assert.equal(consecutiveTurnToolFailures([first, second]), 2);
 });

@@ -51,8 +51,8 @@ test('composition and extracted session owners do not read back through AppConta
     'ConversationRunTools', 'ConversationRunAuxiliary']) {
     owners.push(path.join(entry, 'platform_impl', `${name}.ets`));
   }
-  for (const directory of ['platform_impl/chat', 'platform_impl/home', 'platform_impl/novel',
-    'platform_impl/provider', 'platform_impl/deepread_settings', 'platform_impl/search_settings',
+  for (const directory of ['platform_impl/chat', 'platform_impl/home',
+    'platform_impl/provider', 'platform_impl/search_settings',
     'platform_impl/webmount_settings']) {
     owners.push(...fs.readdirSync(path.join(entry, directory))
       .filter(name => name.endsWith('.ets'))

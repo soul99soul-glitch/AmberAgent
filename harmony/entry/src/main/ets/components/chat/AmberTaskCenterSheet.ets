@@ -93,7 +93,7 @@ export struct AmberTaskCenterSheet {
 
   private refreshAsyncSources(): void {
     getSubAgentManager().then((mgr: SubAgentManager): void => {
-      if (this.alive) this.subAgentRuns = mgr.listActive();
+      if (this.alive) this.subAgentRuns = mgr.recentRuns(24);
     }).catch((): void => {});
 
     if (this.cloudDialogue.paired) {
@@ -163,7 +163,7 @@ export struct AmberTaskCenterSheet {
         channelBadge: '☁️ 云端后台',
         title: t.title.length > 0 ? t.title : '云端任务',
         detail: t.progressText.length > 0 ? t.progressText : (t.resultText.length > 0 ? t.resultText : t.status),
-        conversationId: t.topicId || this.currentConversationId,
+        conversationId: this.cloudDialogue.conversationIdForTask(t.workItemId, t.topicId),
         canFollowup: isActive,
         canStop: isActive,
         stopRequested: t.stopRequested,
@@ -176,7 +176,8 @@ export struct AmberTaskCenterSheet {
       if (seenIds.has(sid)) continue;
       seenIds.add(sid);
       const stateLower: string = s.state.toLowerCase();
-      const needsAttention: boolean = s.abnormal || (s.waitReason !== undefined && s.waitReason.trim().length > 0);
+      const needsAttention: boolean = s.abnormal || stateLower === 'waiting' || stateLower === 'stalled' ||
+        (s.waitReason !== undefined && s.waitReason.trim().length > 0);
       const isActive: boolean = stateLower === 'running' || stateLower === 'working' || stateLower === 'active';
       const bucket: TaskCenterBucket = needsAttention ? 'attention' : isActive ? 'running' : 'recent';
       items.push({
@@ -217,7 +218,7 @@ export struct AmberTaskCenterSheet {
     }
 
     for (const run of this.subAgentRuns) {
-      const bucket: TaskCenterBucket = run.status === 'approval_required' || run.status === 'failed'
+      const bucket: TaskCenterBucket = run.status === 'approval_required' || run.status === 'failed' || run.status === 'interrupted'
         ? 'attention'
         : run.status === 'running' ? 'running' : 'recent';
       items.push({
@@ -246,7 +247,7 @@ export struct AmberTaskCenterSheet {
   private stopItem(item: UnifiedTaskCardItem): void {
     if (this.busyAction) return;
     if (item.channelKind === 'cloud') {
-      this.cloudDialogue.stopTask(item.id).catch((err: Error): void => {
+      this.cloudDialogue.stopCloudTask(item.id).catch((err: Error): void => {
         this.onStatusMessage(err.message);
       });
     } else if (item.channelKind === 'local') {

@@ -122,7 +122,7 @@ struct AgentSoulPage {
 
   private hydrateFromStore(overwriteDrafts: boolean): void {
     loadAgentSoulState(true).then((state: AgentSoulState): void => {
-      this.applyState(state, overwriteDrafts);
+      this.applyState(state, overwriteDrafts && !this.dirty);
     }).catch((): void => {
       this.loaded = true;
     });

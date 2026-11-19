@@ -240,6 +240,7 @@ test('Cloud mode switch disabled keeps local composer path untouched; enabled ro
   let localSubmits = 0;
   let cloudMessagesCalls = 0;
   let failCloudMessage = false;
+  let onSeal;
 
   const cloudSession = new cloudMod.ChatCloudDialogueSession();
   cloudSession.start({
@@ -328,6 +329,7 @@ test('Cloud mode switch disabled keeps local composer path untouched; enabled ro
     loadMentionRoles: async () => [],
     abilityContext: () => ({}),
     cloudDialogue: () => cloudSession,
+    sealIdleEpisode: async () => { if (onSeal) await onSeal(); },
   });
 
   // 1. Default (disabled): sends via local submit, zero cloud calls
@@ -336,6 +338,22 @@ test('Cloud mode switch disabled keeps local composer path untouched; enabled ro
   assert.equal(localSubmits, 1);
   assert.equal(cloudMessagesCalls, 0);
   assert.equal(composer.inputText, '');
+
+  // Switching hosts while a local Episode is being written must leave the accepted draft unsent.
+  let releaseSeal;
+  let startedSeal;
+  const sealing = new Promise(resolve => { startedSeal = resolve; });
+  onSeal = () => new Promise(resolve => { releaseSeal = resolve; startedSeal(); });
+  composer.setInputText('保持本机草稿');
+  const interruptedSend = composer.send();
+  await sealing;
+  await cloudSession.setCloudModeEnabled(true);
+  releaseSeal();
+  await interruptedSend;
+  onSeal = null;
+  assert.equal(localSubmits, 1);
+  assert.equal(cloudMessagesCalls, 0);
+  assert.equal(composer.inputText, '保持本机草稿');
 
   // 2. Enable cloud mode explicitly: sends via cloud, zero local submits
   await gatewayMod.setCloudDialogueEnabled(true);
@@ -367,6 +385,7 @@ test('Contract replay: 长 A → 问 B → 补充 A → 停止 A with seq resume
   const cloudMod = loadCloudDialogueModule(gatewayMod);
 
   let conversation = domain.makeConversation('conv-async-flow');
+  let visibleConversation;
   const errors = [];
   const apiLog = [];
   const receiptsByReq = new Map();
@@ -428,8 +447,9 @@ test('Contract replay: 长 A → 问 B → 补充 A → 停止 A with seq resume
     const s = new cloudMod.ChatCloudDialogueSession();
     s.start({
       kvStore: kv,
-      currentConversation: () => conversation,
-      mutateConversation: async (_id, update) => {
+      currentConversation: () => visibleConversation ?? conversation,
+      mutateConversation: async (id, update) => {
+        assert.equal(id, conversation.id);
         const next = update(conversation);
         if (next !== null) conversation = next;
         return conversation;
@@ -552,7 +572,11 @@ test('Contract replay: 长 A → 问 B → 补充 A → 停止 A with seq resume
 
   // Verify all 3 states (received, consumed) are visible before stop, and cancelled after stop
   // Step 4: Stop Task A -> cancels unconsumed followup #2 and emits task_result(cancelled)
-  const stopReceipt = await session.stopTask('work-A');
+  await session.setCloudModeEnabled(false);
+  assert.equal(session.isActiveMode(), false);
+  visibleConversation = domain.makeConversation('conv-local-now-visible');
+  assert.equal(session.conversationIdForTask('work-A', 'topic-a'), conversation.id);
+  const stopReceipt = await session.stopCloudTask('work-A');
   assert.equal(stopReceipt.state, 'consumed');
   assert.equal(apiLog[4].op, 'stop');
   assert.equal(apiLog[4].workItemId, 'work-A');

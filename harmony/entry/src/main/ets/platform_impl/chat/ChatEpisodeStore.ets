@@ -5,13 +5,14 @@
 import { fileIo } from '@kit.CoreFileKit';
 import type { Context } from '@kit.AbilityKit';
 import type {
-  UIMessage, ChatEpisodeLedger, ChatEpisodeRecord, ChatEpisodeSealResult,
+  UIMessage, MessageNode, ChatEpisodeLedger, ChatEpisodeRecord, ChatEpisodeSealResult,
 } from '@amber/chat-domain';
 import {
   createEmptyEpisodeLedger, parseEpisodeLedger, sealEpisodeIfEligible,
-  updateEpisodeSummary, unsealedSegmentMessages,
+  updateEpisodeSummary, unsealedSegmentMessages, projectEpisodeLedger,
 } from '@amber/chat-domain';
 import { KeyedAsyncMutex, writeTextFileAtomic } from '../AtomicJsonFile.ets';
+import { sha256HexUtf8 } from '../EntryLocalToolPorts.ets';
 
 const EPISODE_DIR: string = 'conversation-episodes';
 const ledgerCache: Map<string, ChatEpisodeLedger> = new Map<string, ChatEpisodeLedger>();
@@ -20,8 +21,7 @@ const listenersByConv: Map<string, Set<(ledger: ChatEpisodeLedger) => void>> =
   new Map<string, Set<(ledger: ChatEpisodeLedger) => void>>();
 
 const safeFileId = (conversationId: string): string => {
-  const clean: string = conversationId.replace(/[^A-Za-z0-9_.-]/g, '_');
-  return clean.length > 0 ? clean : '_empty';
+  return /^[A-Za-z0-9_.-]{1,128}$/.test(conversationId) ? conversationId : `%${sha256HexUtf8(conversationId)}`;
 };
 
 const ledgerPathFor = (conversationId: string): string | null => {
@@ -77,9 +77,13 @@ export const loadEpisodeLedger = async (conversationId: string): Promise<ChatEpi
   try {
     const raw: string = await fileIo.readText(path);
     const parsed: ChatEpisodeLedger = parseEpisodeLedger(raw, conversationId);
+    const current: ChatEpisodeLedger | undefined = ledgerCache.get(conversationId);
+    if (current !== undefined) return current;
     ledgerCache.set(conversationId, parsed);
     return parsed;
   } catch (_e) {
+    const current: ChatEpisodeLedger | undefined = ledgerCache.get(conversationId);
+    if (current !== undefined) return current;
     const empty: ChatEpisodeLedger = createEmptyEpisodeLedger(conversationId);
     ledgerCache.set(conversationId, empty);
     return empty;
@@ -87,11 +91,11 @@ export const loadEpisodeLedger = async (conversationId: string): Promise<ChatEpi
 };
 
 const saveEpisodeLedger = async (conversationId: string, ledger: ChatEpisodeLedger): Promise<void> => {
-  ledgerCache.set(conversationId, ledger);
   const path: string | null = ledgerPathFor(conversationId);
   if (path !== null) {
     await writeTextFileAtomic(path, JSON.stringify(ledger));
   }
+  ledgerCache.set(conversationId, ledger);
   notifyLedgerListeners(conversationId, ledger);
 };
 
@@ -99,13 +103,15 @@ export const startNewEpisode = async (
   conversationId: string,
   messages: UIMessage[],
   nowMs: number = Date.now(),
+  nodes?: MessageNode[],
 ): Promise<ChatEpisodeSealResult> => {
   if (conversationId.length === 0) {
     return { ledger: createEmptyEpisodeLedger(''), sealed: null };
   }
   return await ledgerMutex.withLock(conversationId, async (): Promise<ChatEpisodeSealResult> => {
     const current: ChatEpisodeLedger = await loadEpisodeLedger(conversationId);
-    const res: ChatEpisodeSealResult = sealEpisodeIfEligible(current, messages, 'manual_new_topic', nowMs);
+    const ledger: ChatEpisodeLedger = nodes === undefined ? current : projectEpisodeLedger(current, nodes, true);
+    const res: ChatEpisodeSealResult = sealEpisodeIfEligible(ledger, messages, 'manual_new_topic', nowMs);
     if (res.sealed === null) return res;
     await saveEpisodeLedger(conversationId, res.ledger);
     return res;
@@ -116,13 +122,15 @@ export const sealIfIdleTimeoutExceeded = async (
   conversationId: string,
   messages: UIMessage[],
   nowMs: number = Date.now(),
+  nodes?: MessageNode[],
 ): Promise<ChatEpisodeSealResult> => {
   if (conversationId.length === 0) {
     return { ledger: createEmptyEpisodeLedger(''), sealed: null };
   }
   return await ledgerMutex.withLock(conversationId, async (): Promise<ChatEpisodeSealResult> => {
     const current: ChatEpisodeLedger = await loadEpisodeLedger(conversationId);
-    const res: ChatEpisodeSealResult = sealEpisodeIfEligible(current, messages, 'idle_timeout', nowMs);
+    const ledger: ChatEpisodeLedger = nodes === undefined ? current : projectEpisodeLedger(current, nodes, true);
+    const res: ChatEpisodeSealResult = sealEpisodeIfEligible(ledger, messages, 'idle_timeout', nowMs);
     if (res.sealed === null) return res;
     await saveEpisodeLedger(conversationId, res.ledger);
     return res;
@@ -174,8 +182,7 @@ export const refineEpisodeSummaryInBackground = (
   });
 };
 
-export const activeEpisodeHeaderTitle = (conversationId: string, messages: UIMessage[], fallbackTitle: string): string => {
-  const ledger: ChatEpisodeLedger = getCachedEpisodeLedger(conversationId);
+export const activeEpisodeHeaderTitle = (ledger: ChatEpisodeLedger, messages: UIMessage[], fallbackTitle: string): string => {
   if (ledger.episodes.length === 0) return fallbackTitle;
   const active: UIMessage[] = unsealedSegmentMessages(messages, ledger);
   for (const m of active) {

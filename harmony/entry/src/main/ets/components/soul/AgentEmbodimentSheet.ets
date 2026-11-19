@@ -107,6 +107,7 @@ export struct AgentEmbodimentSheet {
     this.draftAvatarUri = this.avatarUriStore;
     this.hydrateSoul(true);
     loadAgentSoulAvatarPrefs().then((prefs): void => {
+      if (this.editing) return;
       this.draftPreset = prefs.preset;
       this.draftAvatarUri = prefs.customUri;
     }).catch((): void => {});
@@ -126,7 +127,7 @@ export struct AgentEmbodimentSheet {
       this.revision = state.revision;
       this.source = state.source;
       this.history = state.history;
-      if (overwriteDrafts) {
+      if (overwriteDrafts && !this.dirty) {
         this.draftName = state.displayName;
         this.draftTagline = state.tagline;
         this.draftMarkdown = state.soulMarkdown;
@@ -170,6 +171,7 @@ export struct AgentEmbodimentSheet {
     const apply = (): void => {
       this.editing = !this.editing;
       if (!this.editing) {
+        this.dirty = false;
         this.hydrateSoul(true);
         this.draftPreset = this.avatarPresetStore;
         this.draftAvatarUri = this.avatarUriStore;
@@ -277,6 +279,7 @@ export struct AgentEmbodimentSheet {
           isDefault: this.previewIsDefault(),
           sending: false,
           customAvatarUri: this.editing ? this.draftAvatarUri : this.avatarUriStore,
+          previewPreset: this.editing ? this.draftPreset : '',
         })
         Column({ space: 4 }) {
           Row({ space: 8 }) {
@@ -350,7 +353,6 @@ export struct AgentEmbodimentSheet {
                 })
                 .onClick((): void => {
                   this.draftPreset = opt.id;
-                  saveAgentSoulAvatarPrefs(this.draftPreset, this.draftAvatarUri).catch((): void => {});
                 })
               }, (opt: AvatarPresetOption): string => opt.id)
             }

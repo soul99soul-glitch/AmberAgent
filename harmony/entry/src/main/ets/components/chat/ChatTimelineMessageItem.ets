@@ -51,8 +51,8 @@ export struct ChatTimelineMessageItem {
   onSmartUiDraft: (nodeId: string, key: string) => void = (): void => {};
   onShowCompact: (messageId: string) => void = (): void => {};
   onNavigate: (kind: string, id: string) => void = (): void => {};
-  onOpenTurnDetails: (headline: string, tools: UIMessagePartTool[]) => void =
-    (_h: string, _t: UIMessagePartTool[]): void => {};
+  onOpenTurnDetails: (headline: string, tools: UIMessagePartTool[], reasoning: string[]) => void =
+    (_h: string, _t: UIMessagePartTool[], _r: string[]): void => {};
 
   @Builder
   private CompactMarker(): void {
@@ -83,12 +83,14 @@ export struct ChatTimelineMessageItem {
         animateEntrance: this.item.isNewEntrance,
         isAssistantContinuation: this.item.isAssistantContinuation,
         turnRole: this.item.turnRole,
+        standaloneToolIds: this.item.standaloneToolIds,
         turnHeadline: this.item.turnHeadline,
         turnStatusKind: this.item.turnStatusKind,
         turnStepCount: this.item.turnStepCount,
         turnHasError: this.item.turnHasError,
         onOpenTurnDetails: (): void => {
-          this.onOpenTurnDetails(this.item.turnHeadline, this.item.turnTools);
+          this.onOpenTurnDetails(this.item.turnHeadline, this.item.turnTools,
+            this.presentation.displaySettings.showThinkingContent ? this.item.turnReasoning : []);
         },
         viewState: this.item.viewState,
         message: this.item.message,

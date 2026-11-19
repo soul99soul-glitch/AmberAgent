@@ -26,6 +26,8 @@ export class ChatTimelineItem {
   turnStepCount: number = 0;
   turnHasError: boolean = false;
   turnTools: UIMessagePartTool[] = [];
+  turnReasoning: string[] = [];
+  standaloneToolIds: string[] = [];
   isNewEntrance: boolean = false;
   readonly viewState: MessageRowViewState;
 
@@ -74,6 +76,7 @@ export class ChatTimelineItem {
     const nextSteps: number = summary !== null ? summary.stepCount : 0;
     const nextErr: boolean = summary !== null ? summary.hasError : false;
     const nextTools: UIMessagePartTool[] = summary !== null ? summary.allTools : [];
+    const nextReasoning: string[] = summary !== null ? summary.reasoning : [];
     if (this.turnHeadline !== nextHeadline) this.turnHeadline = nextHeadline;
     if (this.turnStatusKind !== nextKind) this.turnStatusKind = nextKind;
     if (this.turnStepCount !== nextSteps) this.turnStepCount = nextSteps;
@@ -81,6 +84,14 @@ export class ChatTimelineItem {
     if (this.turnTools.length !== nextTools.length ||
       nextTools.some((t: UIMessagePartTool, i: number): boolean => t !== this.turnTools[i])) {
       this.turnTools = nextTools;
+    }
+    if (this.turnReasoning.length !== nextReasoning.length ||
+      nextReasoning.some((item: string, i: number): boolean => item !== this.turnReasoning[i])) {
+      this.turnReasoning = nextReasoning;
+    }
+    if (this.standaloneToolIds.length !== proj.standaloneToolIds.length ||
+      proj.standaloneToolIds.some((id: string, i: number): boolean => id !== this.standaloneToolIds[i])) {
+      this.standaloneToolIds = proj.standaloneToolIds;
     }
   }
 }
@@ -182,6 +193,7 @@ export class ChatTimelineDataSource implements IDataSource {
       }
     }
     const streamingIds: Set<string> = new Set<string>();
+    if (regenTail !== null) streamingIds.add(regenTail.id);
     for (let index: number = 0; index < streamingTail.length; index++) {
       const message: UIMessage = streamingTail[index];
       streamingIds.add(message.id);

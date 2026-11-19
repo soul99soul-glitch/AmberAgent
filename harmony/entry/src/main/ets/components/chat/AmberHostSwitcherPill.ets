@@ -2,7 +2,7 @@
 // 严格直连现有 ChatCloudDialogueSession（不新建并行状态机）。
 
 import {
-  ACCENT, BG_GLASS, HOME_GLASS_EDGE, INK, INK2, INK3, LINE, SIGNAL, SURFACE2, accentEdge, accentSoftBg,
+  ACCENT, BG_GLASS, HOME_GLASS_EDGE, INK, INK2, INK3, LINE, SURFACE2, accentEdge, accentSoftBg,
 } from '../../design/tokens.ets';
 import { FONT_SANS } from '../../design/fonts.ets';
 import { ChatCloudDialogueSession } from '../../platform_impl/chat/ChatCloudDialogueSession.ets';
@@ -55,11 +55,7 @@ export struct AmberHostSwitcherPill {
         .width(7)
         .height(7)
         .borderRadius(999)
-        .backgroundColor(
-          this.isCloudActive()
-            ? SIGNAL
-            : (this.cloudDialogue.paired ? this.accentColorStore : INK3),
-        )
+        .backgroundColor(this.isCloudActive() ? this.accentColorStore : INK3)
 
       Icon({
         name: this.isCloudActive() ? 'ph_globe' : 'ph_laptop',
@@ -92,6 +88,7 @@ export struct AmberHostSwitcherPill {
     })
     .justifyContent(FlexAlign.Center)
     .alignItems(VerticalAlign.Center)
+    .enabled(!this.cloudDialogue.switchingMode)
     .onClick((): void => {
       this.handlePrimaryTap();
     })

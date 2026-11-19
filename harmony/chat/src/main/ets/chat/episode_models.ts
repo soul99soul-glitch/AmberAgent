@@ -3,6 +3,7 @@
 
 import type { UIMessage, UIMessagePart } from './message.ts';
 import { toText } from './message.ts';
+import type { MessageNode } from './conversation.ts';
 
 export const EPISODE_IDLE_TIMEOUT_SECONDS: number = 10800; // 3 hours
 export const EPISODE_IDLE_TIMEOUT_MS: number = EPISODE_IDLE_TIMEOUT_SECONDS * 1000;
@@ -78,7 +79,8 @@ export const parseEpisodeLedger = (raw: string, conversationId: string): ChatEpi
   if (raw.trim().length === 0) return createEmptyEpisodeLedger(conversationId);
   try {
     const parsed = JSON.parse(raw) as Partial<ChatEpisodeLedger>;
-    if (parsed === null || typeof parsed !== 'object' || !Array.isArray(parsed.episodes)) {
+    if (parsed === null || typeof parsed !== 'object' || parsed.conversationId !== conversationId ||
+      !Array.isArray(parsed.episodes)) {
       return createEmptyEpisodeLedger(conversationId);
     }
     const clean: ChatEpisodeRecord[] = [];
@@ -101,13 +103,35 @@ export const parseEpisodeLedger = (raw: string, conversationId: string): ChatEpi
     }
     return {
       version: 1,
-      conversationId: typeof parsed.conversationId === 'string' && parsed.conversationId.length > 0
-        ? parsed.conversationId : conversationId,
+      conversationId,
       episodes: clean,
     };
   } catch (_e) {
     return createEmptyEpisodeLedger(conversationId);
   }
+};
+
+// The recorded message remains in the node when an older assistant branch is selected.
+export const projectEpisodeLedger = (
+  ledger: ChatEpisodeLedger, nodes: MessageNode[], retainMissing: boolean = false,
+): ChatEpisodeLedger => {
+  if (ledger.episodes.length === 0) return ledger;
+  const anchors: Set<string> = new Set<string>(ledger.episodes.map((ep: ChatEpisodeRecord): string => ep.afterMessageId));
+  const selectedByAnchor: Map<string, string> = new Map<string, string>();
+  for (const node of nodes) {
+    const selected: UIMessage | undefined = node.messages[node.selectIndex];
+    if (selected === undefined) continue;
+    for (const msg of node.messages) {
+      if (anchors.has(msg.id)) selectedByAnchor.set(msg.id, selected.id);
+    }
+  }
+  const episodes: ChatEpisodeRecord[] = [];
+  for (const ep of ledger.episodes) {
+    const selected: string | undefined = selectedByAnchor.get(ep.afterMessageId);
+    if (selected === undefined && !retainMissing) continue;
+    episodes.push(selected === undefined || selected === ep.afterMessageId ? ep : { ...ep, afterMessageId: selected });
+  }
+  return { version: ledger.version, conversationId: ledger.conversationId, episodes };
 };
 
 const nonSystemMessages = (messages: UIMessage[]): UIMessage[] =>
@@ -310,7 +334,7 @@ const sliceMessagesForEpisode = (
   return nonSystemMessages(messages.slice(startIdx, endIdx + 1));
 };
 
-const messageExcerpt = (m: UIMessage): string => {
+const messageExcerpt = (m: UIMessage, query: string, metadataMatches: boolean): string => {
   const roleLabel: string = m.role === 'user' ? '用户' : '助手';
   const textParts: string[] = [];
   for (const part of m.parts as UIMessagePart[]) {
@@ -318,8 +342,11 @@ const messageExcerpt = (m: UIMessage): string => {
       textParts.push(part.text.trim());
     }
   }
-  const body: string = clampChars(textParts.join(' '), 180);
-  return body.length > 0 ? `${roleLabel}: ${body}` : '';
+  const body: string = textParts.join(' ');
+  const hit: number = query.length > 0 ? body.toLowerCase().indexOf(query) : 0;
+  if (body.length === 0 || (hit < 0 && !metadataMatches)) return '';
+  const start: number = Math.max(0, hit - 36);
+  return `${roleLabel}: ${start > 0 ? '…' : ''}${clampChars(body.slice(start), 180)}`;
 };
 
 export const searchEpisodeMessages = (
@@ -339,24 +366,17 @@ export const searchEpisodeMessages = (
     const ep: ChatEpisodeRecord = ledger.episodes[i];
     if (cleanId.length > 0 && ep.id !== cleanId) continue;
     const segment: UIMessage[] = sliceMessagesForEpisode(messages, ledger.episodes, i);
+    if (segment.length === 0) continue;
+    const metadataMatches: boolean = ep.title.toLowerCase().includes(cleanQuery) ||
+      ep.summary.toLowerCase().includes(cleanQuery);
     const excerpts: string[] = [];
     for (const msg of segment) {
-      const line: string = messageExcerpt(msg);
+      const line: string = messageExcerpt(msg, cleanQuery, metadataMatches);
       if (line.length === 0) continue;
-      if (cleanQuery.length > 0) {
-        const matchedMsg: boolean = line.toLowerCase().includes(cleanQuery)
-          || ep.title.toLowerCase().includes(cleanQuery)
-          || ep.summary.toLowerCase().includes(cleanQuery);
-        if (!matchedMsg) continue;
-      }
       excerpts.push(line);
       if (excerpts.length >= 6) break;
     }
-    if (cleanId.length === 0 && cleanQuery.length > 0 && excerpts.length === 0) {
-      if (!ep.title.toLowerCase().includes(cleanQuery) && !ep.summary.toLowerCase().includes(cleanQuery)) {
-        continue;
-      }
-    }
+    if (cleanQuery.length > 0 && excerpts.length === 0 && !metadataMatches) continue;
     hits.push({
       episodeId: ep.id,
       title: ep.title,

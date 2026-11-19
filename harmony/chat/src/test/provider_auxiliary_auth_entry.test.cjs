@@ -189,7 +189,7 @@ test('Entry foreground context preparation forwards the owning run signal to the
     signal, conversation: h.domain.makeConversation('conversation'), publish() {},
     activeConversation() { return this.conversation; },
     seed: { runtime: h.runtime, compressChoice: h.choice, agentRuntime: { contextCompaction: {} } } };
-  await h.host.prepareMessages(ctx, h.host)(messages);
+  await h.host.prepareMessages(ctx, h.host, Promise.resolve(h.domain.createEmptyEpisodeLedger(ctx.conversationId)))(messages);
   assert.equal(captured.abortSignal, signal);
   const prepared = await captured.prepareToolResults(messages, 4);
   assert.equal(prepared.messages, messages, 'Disabled Jev preserves the same prepared source');

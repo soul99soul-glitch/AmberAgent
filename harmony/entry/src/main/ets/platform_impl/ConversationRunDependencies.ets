@@ -22,7 +22,7 @@ import {
   makeTextGenerationParams, prepareContext, RECENT_CHATS_PROMPT_LIMIT,
   regexOutputTransformer, createThinkTagTransformer, toChatModel, toText,
   recallMemorySelections, memoryRecallScoreToDebugText, selectMemoryProfile, createMemoryCitationTransformer,
-  annotateSmartUiWeatherBindings, activeEpisodeMessages, formatRecentEpisodesIndex,
+  annotateSmartUiWeatherBindings, activeEpisodeMessages, formatRecentEpisodesIndex, projectEpisodeLedger,
 } from '@amber/chat-domain';
 import { loadEpisodeLedger } from './chat/ChatEpisodeStore.ets';
 import type { ChatRuntime, ChatProviderRuntime, ChatProviderChoice, TaskPrompts } from '../di/ChatRuntimeContracts.ets';
@@ -196,10 +196,11 @@ const latestUserQuery = (conversation: Conversation, fallback: string = ''): str
   return fallback;
 };
 
-const extraSystemBlocks = async (ctx: DetachedConversationContext, ports: ConversationTurnPorts): Promise<string[]> => {
+const extraSystemBlocks = async (ctx: DetachedConversationContext, ports: ConversationTurnPorts,
+  episodes: Promise<ChatEpisodeLedger>): Promise<string[]> => {
   const blocks: string[] = ctx.seed.generativeWidgetsEnabled
     ? [resolveGenerativeWidgetInstruction('declared-content-v1')] : [];
-  const episodeLedger: ChatEpisodeLedger = await loadEpisodeLedger(ctx.conversationId);
+  const episodeLedger: ChatEpisodeLedger = await episodes;
   const episodesIndex: string = formatRecentEpisodesIndex(episodeLedger);
   if (episodesIndex.length > 0) blocks.push(episodesIndex);
   if (!ctx.seed.agentRuntime.enableRecentChatsReference) return blocks;
@@ -320,7 +321,8 @@ export const buildConversationCompressProvider = (seed: PreparedConversationSeed
   };
 };
 
-const prepareMessages = (ctx: DetachedConversationContext, ports: ConversationTurnPorts):
+const prepareMessages = (ctx: DetachedConversationContext, ports: ConversationTurnPorts,
+  episodes: Promise<ChatEpisodeLedger>):
   ((messages: UIMessage[]) => Promise<UIMessage[]>) => {
   const rt: ChatRuntime = ctx.seed.runtime;
   const jev = ports.beginJevContextRun(ctx.conversationId, ctx.runId, ctx.signal);
@@ -340,7 +342,7 @@ const prepareMessages = (ctx: DetachedConversationContext, ports: ConversationTu
     ctx.publish({ compactActiveCount });
   };
   return async (messages: UIMessage[]): Promise<UIMessage[]> => {
-    const ledger: ChatEpisodeLedger = await loadEpisodeLedger(ctx.conversationId);
+    const ledger: ChatEpisodeLedger = await episodes;
     const activeMessages: UIMessage[] = activeEpisodeMessages(messages, ledger);
     const effective: Conversation = conversationWithMessagesAsNodes(ctx.activeConversation(), activeMessages);
     // Keep the original compress-prompt refresh; the provider/model remains this run's seed.
@@ -370,6 +372,9 @@ export const buildConversationTurnDeps = (ctx: DetachedConversationContext, port
   const seed: PreparedConversationSeed = ctx.seed;
   const rt: ChatRuntime = seed.runtime;
   const window: number = estimateContextWindow(rt.modelContextWindowTokens);
+  const nodes = ctx.activeConversation().messageNodes;
+  const episodes: Promise<ChatEpisodeLedger> = loadEpisodeLedger(ctx.conversationId)
+    .then((ledger: ChatEpisodeLedger): ChatEpisodeLedger => projectEpisodeLedger(ledger, nodes));
   return {
     assistant: rt.assistant,
     finalTokenBudget: Math.max(Math.trunc(window * seed.agentRuntime.contextCompaction.forceRatio), 4000),
@@ -449,9 +454,9 @@ export const buildConversationTurnDeps = (ctx: DetachedConversationContext, port
     }),
     store: { save: (conversation: Conversation): Promise<void> => ctx.save(conversation) },
     contextMessageSize: rt.contextMessageSize,
-    prepareContextMessages: prepareMessages(ctx, ports),
+    prepareContextMessages: prepareMessages(ctx, ports, episodes),
     memorySystemBlocks: (): Promise<string[]> => memorySystemBlocks(ctx, ports),
-    extraSystemBlocks: (): Promise<string[]> => extraSystemBlocks(ctx, ports),
+    extraSystemBlocks: (): Promise<string[]> => extraSystemBlocks(ctx, ports, episodes),
     abortSignal: ctx.signal,
     retrySetting: makeGenerationRetrySetting({
       enabled: seed.agentRuntime.generationRetry.enabled,

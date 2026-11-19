@@ -4,8 +4,9 @@ import type { UIMessage } from '../main/ets/chat/message.ts';
 import {
   createEmptyEpisodeLedger, parseEpisodeLedger, sealEpisodeIfEligible,
   activeEpisodeMessages, formatRecentEpisodesIndex, estimateEpisodeIndexTokens,
-  searchEpisodeMessages, updateEpisodeSummary, EPISODE_IDLE_TIMEOUT_MS,
+  searchEpisodeMessages, updateEpisodeSummary, projectEpisodeLedger, EPISODE_IDLE_TIMEOUT_MS,
 } from '../main/ets/chat/episode_models.ts';
+import { makeMessageNode } from '../main/ets/chat/conversation.ts';
 import { createEpisodeRecallTool } from '../main/ets/chat/builtin_episode_recall_tool.ts';
 
 const msg = (id: string, role: 'user' | 'assistant' | 'system', text: string, createdAtMs: number): UIMessage => ({
@@ -17,6 +18,21 @@ const msg = (id: string, role: 'user' | 'assistant' | 'system', text: string, cr
   modelId: null,
   usage: null,
   annotations: [],
+});
+
+test('a sealed boundary follows the selected message branch, and recall searches beyond the excerpt prefix', () => {
+  const question = msg('u1', 'user', '旧问题', 1000);
+  const original = msg('a1', 'assistant', '旧回答', 2000);
+  const selected = msg('a2', 'assistant', '例'.repeat(240) + '尾部关键词', 2000);
+  const next = msg('u2', 'user', '新问题', 3000);
+  const { ledger } = sealEpisodeIfEligible(createEmptyEpisodeLedger('c1'), [question, original], 'manual_new_topic', 2500);
+  const projected = projectEpisodeLedger(ledger, [
+    makeMessageNode([question]), makeMessageNode([original, selected], 1), makeMessageNode([next]),
+  ]);
+  assert.deepEqual(activeEpisodeMessages([question, selected, next], projected).map(m => m.id), ['u2']);
+  assert.match(searchEpisodeMessages(projected, [question, selected, next], undefined, '尾部关键词')[0].excerpts[0], /尾部关键词/);
+  assert.deepEqual(parseEpisodeLedger(JSON.stringify(ledger), 'c2').episodes, []);
+  assert.deepEqual(projectEpisodeLedger(ledger, [makeMessageNode([next])]).episodes, []);
 });
 
 test('sealEpisodeIfEligible: manual_new_topic is idempotent on empty boundary', () => {

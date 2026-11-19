@@ -74,7 +74,7 @@ export interface ChatComposerPorts {
   loadMentionRoles: () => Promise<MentionRoleItem[]>;
   abilityContext: () => common.UIAbilityContext;
   cloudDialogue?: () => ChatCloudDialogueSession | null;
-  sealIdleEpisode?: (conversationId: string, messages: UIMessage[]) => Promise<void>;
+  sealIdleEpisode?: (conversation: Conversation) => Promise<void>;
 }
 
 @Observed
@@ -105,6 +105,7 @@ export class ChatComposerSession {
   private ports: ChatComposerPorts | null = null;
   private pageAlive: boolean = false;
   private pageVisible: boolean = false;
+  private existingConversationDraft: boolean = false;
   private get deps(): ChatComposerPorts { return this.ports as ChatComposerPorts; }
   private get conversation(): Conversation | null { return this.deps.currentConversation(); }
   private get sending(): boolean { return this.deps.isSending(); }
@@ -122,7 +123,9 @@ export class ChatComposerSession {
 
   inputDraftKey(): string {
     const conv: Conversation | null = this.conversation;
-    if (conv === null || conv.messageNodes.length === 0) return 'chat_input_draft/__unsaved__';
+    if (conv === null || (!this.existingConversationDraft && conv.messageNodes.length === 0)) {
+      return 'chat_input_draft/__unsaved__';
+    }
     return `chat_input_draft/${conv.id}`;
   }
 
@@ -137,7 +140,7 @@ export class ChatComposerSession {
   persistInputDraft(): void {
     if (this.conversation === null) return;
     this.deps.kvStore.put(this.inputDraftKey(), this.inputText).catch((): void => {});
-    if (this.inputText.length === 0) {
+    if (!this.existingConversationDraft && this.inputText.length === 0) {
       this.deps.kvStore.put('chat_input_draft/__unsaved__', '').catch((): void => {});
     }
   }
@@ -159,6 +162,8 @@ export class ChatComposerSession {
       })
       .catch((): void => {});
   }
+
+  useExistingConversationDraft(): void { this.existingConversationDraft = true; }
 
   refreshQuickMessages(): void {
     const seq: number = ++this.quickMessagesSeq;
@@ -405,27 +410,22 @@ export class ChatComposerSession {
     for (const url of acceptedImages) inputParts.push({ type: 'image', url, metadata: null });
     for (const doc of acceptedDocs) inputParts.push({ type: 'document', url: doc.url,
       fileName: doc.fileName, mime: doc.mime, metadata: null });
-    if (editingNodeId.length === 0 && this.deps.sealIdleEpisode !== undefined) {
-      await this.deps.sealIdleEpisode(owner, currentMessages(this.conversation));
-    }
     const cloud: ChatCloudDialogueSession | null = this.deps.cloudDialogue !== undefined ? this.deps.cloudDialogue() : null;
-    if (editingNodeId.length === 0 && cloud !== null && cloud.isActiveMode()) {
-      if (acceptedImages.length > 0 || acceptedDocs.length > 0) {
-        this.errorMsg = '云主对话暂不支持图片或文件附件';
-        return;
-      }
-      this.deps.dismissKeyboard();
-      const sent: boolean = await cloud.submitComposerText(sendText);
-      if (sent && this.pageAlive && this.conversation?.id === owner) {
-        this.clearAcceptedComposer(acceptedText, acceptedImages, acceptedDocs);
-      }
-      return;
-    }
+    if (cloud?.switchingMode) return;
+    const wasCloud: boolean = cloud?.isActiveMode() ?? false;
+    const followupId: string = cloud?.followupTargetWorkItemId ?? '';
     this.sendPrechecking = true;
     const sequence: number = ++this.sendPreflightSeq;
     try {
+      if (editingNodeId.length === 0 && wasCloud && cloud !== null) {
+        await this.sendCloudText(cloud, sendText, owner, acceptedText, acceptedImages, acceptedDocs);
+        return;
+      }
       if (!await this.prepareComposerSend(inputParts, owner, sequence) || this.editingNodeId !== editingNodeId ||
         this.editingMessageId !== editingMessageId || !this.deps.continuationCurrent(continuation)) return;
+      if (!await this.prepareLocalEpisode(owner, sequence, cloud, wasCloud, followupId, editingNodeId) ||
+        this.editingNodeId !== editingNodeId || this.editingMessageId !== editingMessageId ||
+        !this.deps.continuationCurrent(continuation)) return;
       this.deps.dismissKeyboard();
       if (this.sending) await this.enqueuePendingParts(inputParts, true, 'STEER');
       else if (this.deps.runService.isBusy(owner)) await this.enqueuePendingParts(inputParts, false);
@@ -450,6 +450,32 @@ export class ChatComposerSession {
 
   finishComposerPreflight(sequence: number): void {
     if (sequence === this.sendPreflightSeq) this.sendPrechecking = false;
+  }
+
+  private async prepareLocalEpisode(owner: string, sequence: number, cloud: ChatCloudDialogueSession | null,
+    wasCloud: boolean, followupId: string, editingNodeId: string): Promise<boolean> {
+    if (cloud?.switchingMode || (cloud?.isActiveMode() ?? false) !== wasCloud ||
+      (cloud?.followupTargetWorkItemId ?? '') !== followupId) return false;
+    const conversation: Conversation | null = this.conversation;
+    if (editingNodeId.length === 0 && followupId.length === 0 && !this.sending &&
+      conversation !== null && this.deps.sealIdleEpisode !== undefined) {
+      await this.deps.sealIdleEpisode(conversation);
+    }
+    return this.composerSendCurrent(owner, sequence) && !cloud?.switchingMode &&
+      (cloud?.isActiveMode() ?? false) === wasCloud && (cloud?.followupTargetWorkItemId ?? '') === followupId;
+  }
+
+  private async sendCloudText(cloud: ChatCloudDialogueSession, text: string, owner: string,
+    acceptedText: string, acceptedImages: string[], acceptedDocs: PendingDoc[]): Promise<void> {
+    if (acceptedImages.length > 0 || acceptedDocs.length > 0) {
+      this.errorMsg = '云主对话暂不支持图片或文件附件';
+      return;
+    }
+    this.deps.dismissKeyboard();
+    const sent: boolean = await cloud.submitComposerText(text);
+    if (sent && this.pageAlive && this.conversation?.id === owner) {
+      this.clearAcceptedComposer(acceptedText, acceptedImages, acceptedDocs);
+    }
   }
 
   async prepareComposerSend(inputParts: UIMessagePart[], owner: string, sequence: number): Promise<boolean> {
@@ -579,27 +605,22 @@ export class ChatComposerSession {
     for (const url of acceptedImages) inputParts.push({ type: 'image', url, metadata: null });
     for (const doc of acceptedDocs) inputParts.push({ type: 'document', url: doc.url,
       fileName: doc.fileName, mime: doc.mime, metadata: null });
-    if (editingNodeId.length === 0 && this.deps.sealIdleEpisode !== undefined) {
-      await this.deps.sealIdleEpisode(owner, currentMessages(this.conversation));
-    }
     const cloud: ChatCloudDialogueSession | null = this.deps.cloudDialogue !== undefined ? this.deps.cloudDialogue() : null;
-    if (editingNodeId.length === 0 && cloud !== null && cloud.isActiveMode()) {
-      if (acceptedImages.length > 0 || acceptedDocs.length > 0) {
-        this.errorMsg = '云主对话暂不支持图片或文件附件';
-        return;
-      }
-      this.deps.dismissKeyboard();
-      const sent: boolean = await cloud.submitComposerText(sendText);
-      if (sent && this.pageAlive && this.conversation?.id === owner) {
-        this.clearAcceptedComposer(acceptedText, acceptedImages, acceptedDocs);
-      }
-      return;
-    }
+    if (cloud?.switchingMode) return;
+    const wasCloud: boolean = cloud?.isActiveMode() ?? false;
+    const followupId: string = cloud?.followupTargetWorkItemId ?? '';
     this.sendPrechecking = true;
     const sequence: number = ++this.sendPreflightSeq;
     try {
+      if (editingNodeId.length === 0 && wasCloud && cloud !== null) {
+        await this.sendCloudText(cloud, sendText, owner, acceptedText, acceptedImages, acceptedDocs);
+        return;
+      }
       if (!await this.prepareComposerSend(inputParts, owner, sequence) || this.editingNodeId !== editingNodeId ||
         this.editingMessageId !== editingMessageId || !this.deps.continuationCurrent(continuation)) return;
+      if (!await this.prepareLocalEpisode(owner, sequence, cloud, wasCloud, followupId, editingNodeId) ||
+        this.editingNodeId !== editingNodeId || this.editingMessageId !== editingMessageId ||
+        !this.deps.continuationCurrent(continuation)) return;
       this.deps.dismissKeyboard();
       if (editingNodeId.length === 0 && cloud !== null && cloud.isLocalAsyncReady()) {
         const sent: boolean = await cloud.submitLocalComposer(owner, inputParts, sendText);

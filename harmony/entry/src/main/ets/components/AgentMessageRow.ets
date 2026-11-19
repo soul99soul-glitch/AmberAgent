@@ -9,7 +9,6 @@ import type {
 import {
   ASK_USER_TOOL_NAME, buildAskUserAnswerPayload, groupMessageParts, mightContainMiniApp,
   miniAppStatusProjection, parseAskUserQuestions, streamToolIndex,
-  isExemptStandaloneToolPart, buildLaterSucceededToolSet,
 } from '@amber/chat-domain';
 import type { ToolApprovalPartLocator, UIMessagePartMiniApp } from '@amber/chat-domain';
 import { MarkdownText } from './MarkdownText.ets';
@@ -220,6 +219,7 @@ export struct AgentMessageRow {
   @Prop animateEntrance: boolean = true;
   @Prop isAssistantContinuation: boolean = false;
   @Prop turnRole: string = 'none';
+  @Prop standaloneToolIds: string[] = [];
   @Prop turnHeadline: string = '';
   @Prop turnStatusKind: string = 'completed';
   @Prop turnStepCount: number = 0;
@@ -468,13 +468,13 @@ export struct AgentMessageRow {
       mightContainMiniApp(this.contentTextAt(partIndex));
   }
 
-  private laterSucceededSet(): Set<string> {
-    return buildLaterSucceededToolSet([this.message]);
-  }
-
   private shouldRenderToolStep(part: UIMessagePartTool): boolean {
     if (this.turnRole === 'none') return true;
-    return isExemptStandaloneToolPart(part, this.laterSucceededSet());
+    return part.approvalState.type === 'pending' || this.standaloneToolIds.indexOf(part.toolCallId) >= 0;
+  }
+
+  private isRetiredTool(part: UIMessagePartTool): boolean {
+    return part.toolName.startsWith('novel_') || part.toolName.startsWith('deep_read_');
   }
 
   // 思考内容开关或回合单行折叠开启时，仅保留需要用户可见的豁免步骤（审批/ask_user/未恢复错误等）
@@ -682,8 +682,9 @@ export struct AgentMessageRow {
                   viewState: this.viewState,
                   part: this.toolPartAt(bi, si),
                   jevSubjectHash: this.jevSubjectHashForPart(this.toolPartAt(bi, si), this.locatorFor(this.toolPartAt(bi, si))),
-                  canApprove: this.capabilities.approveTool && this.packageAskUserPart(this.toolPartAt(bi, si)) === null,
-                  canDeny: this.capabilities.denyTool,
+                  canApprove: this.capabilities.approveTool && !this.isRetiredTool(this.toolPartAt(bi, si)) &&
+                    this.packageAskUserPart(this.toolPartAt(bi, si)) === null,
+                  canDeny: this.capabilities.denyTool && !this.isRetiredTool(this.toolPartAt(bi, si)),
                   canOpenPreview: this.capabilities.openToolPreview,
                   streaming: this.streaming,
                   onModifyImage: (url: string): void => { this.onModifyGeneratedImage(url); },

@@ -2,7 +2,6 @@
 
 import type { ConversationSummary, KeyValueStore } from '@amber/chat-domain';
 import { newId } from '@amber/chat-domain';
-import { getChatKvStore } from '../../di/AppContainer.ets';
 
 export const AMBER_HUBS_STORAGE_KEY: string = 'amber_local_hubs_v1';
 const SMART_HUB_WINDOW_MS: number = 14 * 24 * 60 * 60 * 1000;
@@ -143,9 +142,8 @@ const normalizeHubList = (raw: AmberHubRecord[]): AmberHubRecord[] => {
   return out.sort((a: AmberHubRecord, b: AmberHubRecord): number => b.updatedAt - a.updatedAt);
 };
 
-export const loadAmberHubs = async (): Promise<AmberHubRecord[]> => {
+export const loadAmberHubs = async (kv: KeyValueStore): Promise<AmberHubRecord[]> => {
   try {
-    const kv: KeyValueStore = getChatKvStore();
     const raw: string | null = await kv.get(AMBER_HUBS_STORAGE_KEY);
     if (raw === null || raw.trim().length === 0) return [];
     const parsed = JSON.parse(raw) as AmberHubRecord[];
@@ -155,17 +153,16 @@ export const loadAmberHubs = async (): Promise<AmberHubRecord[]> => {
   }
 };
 
-export const saveAmberHubs = async (hubs: AmberHubRecord[]): Promise<AmberHubRecord[]> => {
+const saveAmberHubs = async (kv: KeyValueStore, hubs: AmberHubRecord[]): Promise<AmberHubRecord[]> => {
   const clean: AmberHubRecord[] = normalizeHubList(hubs);
-  const kv: KeyValueStore = getChatKvStore();
   await kv.put(AMBER_HUBS_STORAGE_KEY, JSON.stringify(clean));
   return clean;
 };
 
-export const createAmberHub = async (input: CreateAmberHubInput): Promise<AmberHubRecord[]> => {
+export const createAmberHub = async (kv: KeyValueStore, input: CreateAmberHubInput): Promise<AmberHubRecord[]> => {
   const title: string = input.title.trim();
-  if (title.length === 0) return await loadAmberHubs();
-  const current: AmberHubRecord[] = await loadAmberHubs();
+  if (title.length === 0) return await loadAmberHubs(kv);
+  const current: AmberHubRecord[] = await loadAmberHubs(kv);
   const now: number = Date.now();
   const nextHub: AmberHubRecord = {
     id: newId(),
@@ -176,14 +173,15 @@ export const createAmberHub = async (input: CreateAmberHubInput): Promise<AmberH
     createdAt: now,
     updatedAt: now,
   };
-  return await saveAmberHubs([nextHub].concat(current));
+  return await saveAmberHubs(kv, [nextHub].concat(current));
 };
 
 export const toggleConversationInHub = async (
+  kv: KeyValueStore,
   hubId: string,
   conversationId: string,
 ): Promise<AmberHubRecord[]> => {
-  const current: AmberHubRecord[] = await loadAmberHubs();
+  const current: AmberHubRecord[] = await loadAmberHubs(kv);
   const now: number = Date.now();
   const next: AmberHubRecord[] = current.map((hub: AmberHubRecord): AmberHubRecord => {
     if (hub.id !== hubId) return hub;
@@ -201,14 +199,15 @@ export const toggleConversationInHub = async (
       updatedAt: now,
     };
   });
-  return await saveAmberHubs(next);
+  return await saveAmberHubs(kv, next);
 };
 
 export const updateAmberHubInstruction = async (
+  kv: KeyValueStore,
   hubId: string,
   instruction: string,
 ): Promise<AmberHubRecord[]> => {
-  const current: AmberHubRecord[] = await loadAmberHubs();
+  const current: AmberHubRecord[] = await loadAmberHubs(kv);
   const now: number = Date.now();
   const next: AmberHubRecord[] = current.map((hub: AmberHubRecord): AmberHubRecord => {
     if (hub.id !== hubId) return hub;
@@ -222,10 +221,10 @@ export const updateAmberHubInstruction = async (
       updatedAt: now,
     };
   });
-  return await saveAmberHubs(next);
+  return await saveAmberHubs(kv, next);
 };
 
-export const deleteAmberHub = async (hubId: string): Promise<AmberHubRecord[]> => {
-  const current: AmberHubRecord[] = await loadAmberHubs();
-  return await saveAmberHubs(current.filter((hub: AmberHubRecord): boolean => hub.id !== hubId));
+export const deleteAmberHub = async (kv: KeyValueStore, hubId: string): Promise<AmberHubRecord[]> => {
+  const current: AmberHubRecord[] = await loadAmberHubs(kv);
+  return await saveAmberHubs(kv, current.filter((hub: AmberHubRecord): boolean => hub.id !== hubId));
 };

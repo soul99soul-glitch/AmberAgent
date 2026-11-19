@@ -126,23 +126,9 @@ export const markWantRoutingReady = (pageRouter: Router): void => {
   routePendingWant();
 };
 
-// 校验后的目标写入待处理槽 + 自增序列号。三类语义:
-//   1) 完整目标(topic、novel 三键、conversation 或 workspace project)→ 落参 + seq++ + 派发。
-//   2) 含 topic/novel 路由字段但**不完整**(如只有 novelProjectId)→ 这是一个新的
-//      畸形意图,作废旧 pending(wantRouteSeq=0),避免用户被误路由到上一条合法目标;
-//      既有 seq 守卫保证旧的在途 push 迟到回调不会再清/跳。
-//   3) 完全不含路由字段的普通激活(如无参数点图标、或只有无关参数)→ **保留** pending,
-//      不机械清;否则冷启动已挂起的目标会被一次无关激活吞掉。
-export const publishWantRoute = (
-  _topicId: string, _title: string,
-  _novelProjectId: string, _novelBranchId: string, _novelJobId: string,
-  conversationId: string = '', _novelWorkspaceProjectId: string = '',
-): void => {
-  const hasConversation: boolean = conversationId.length > 0;
-  if (!hasConversation) {
-    clearPendingWantRoute();
-    return;
-  }
+// 普通激活不能清掉尚在等待根页就绪的会话通知。
+export const publishWantRoute = (conversationId: string): void => {
+  if (conversationId.length === 0) return;
   AppStorage.setOrCreate<string>('wantConversationId', conversationId);
   AppStorage.setOrCreate<number>(WANT_ROUTE_SEQ_KEY,
     (AppStorage.get<number>(WANT_ROUTE_SEQ_KEY) ?? 0) + 1);
@@ -216,11 +202,7 @@ export default class EntryAbility extends UIAbility {
     if (params === undefined || params === null) return;
     // R23:校验后在统一待处理槽落参并触发派发(ready 前只挂起,冷启动由
     // 根页 onPageShow 补跳;前台任意栈顶由 onNewWant 立即派发)。
-    publishWantRoute(
-      '', '', '', '', '',
-      validatedWantParameter(params['conversationId']),
-      '',
-    );
+    publishWantRoute(validatedWantParameter(params['conversationId']));
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {

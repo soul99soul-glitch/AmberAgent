@@ -2,7 +2,7 @@
 // 轻量本地 Topic Hubs：聚合关联对话 + 专属指令；近 14 天内 ≥4 条同主题未归类对话自动推荐一键收拢。
 
 import type { ConversationSummary } from '@amber/chat-domain';
-import { getChatRepository } from '../../di/AppContainer.ets';
+import { getChatKvStore, getChatRepository } from '../../di/AppContainer.ets';
 import {
   AmberHubRecord, SmartHubSuggestion, createAmberHub, deleteAmberHub,
   detectSmartHubCluster, loadAmberHubs, toggleConversationInHub, updateAmberHubInstruction,
@@ -20,7 +20,8 @@ export struct AmberHubsSheet {
 
   onBackToChat: () => void = (): void => {};
   onOpenConversation: (conversationId: string) => void = (_conversationId: string): void => {};
-  onStartWithInstruction: (instruction: string, title: string) => void = (_inst: string, _title: string): void => {};
+  onStartWithInstruction: (hubId: string, instruction: string, title: string) => void =
+    (_id: string, _inst: string, _title: string): void => {};
   onOpenMiniApps: () => void = (): void => {};
 
   @State private hubs: AmberHubRecord[] = [];
@@ -40,7 +41,7 @@ export struct AmberHubsSheet {
 
   private reload(): void {
     this.loading = true;
-    Promise.all([loadAmberHubs(), getChatRepository().list()])
+    Promise.all([loadAmberHubs(getChatKvStore()), getChatRepository().list()])
       .then((res): void => {
         this.hubs = res[0];
         this.summaries = res[1];
@@ -63,7 +64,7 @@ export struct AmberHubsSheet {
     const sug: SmartHubSuggestion | null = this.suggestion;
     if (sug === null) return;
     const ids: string[] = sug.matchedConversations.map((c: ConversationSummary): string => c.id);
-    createAmberHub({
+    createAmberHub(getChatKvStore(), {
       title: sug.topicLabel,
       description: `由近 14 天内 ${ids.length} 条相似对话自动聚合`,
       customInstruction: `当前位于「${sug.topicLabel}」专题中心，请延续该主题的上下文和术语约定。`,
@@ -78,7 +79,7 @@ export struct AmberHubsSheet {
     const title: string = this.draftTitle.trim();
     if (title.length === 0) return;
     const initialIds: string[] = this.currentConversationId.length > 0 ? [this.currentConversationId] : [];
-    createAmberHub({
+    createAmberHub(getChatKvStore(), {
       title,
       customInstruction: this.draftInstruction.trim(),
       conversationIds: initialIds,
@@ -255,7 +256,7 @@ export struct AmberHubsSheet {
                         .borderRadius(999)
                         .backgroundColor(SURFACE)
                         .onClick((): void => {
-                          updateAmberHubInstruction(hub.id, this.editingInstruction).then((next): void => {
+                          updateAmberHubInstruction(getChatKvStore(), hub.id, this.editingInstruction).then((next): void => {
                             this.applyResult(next);
                           }).catch((): void => {});
                         })
@@ -267,7 +268,7 @@ export struct AmberHubsSheet {
                           .borderRadius(999)
                           .backgroundColor(SURFACE)
                           .onClick((): void => {
-                            toggleConversationInHub(hub.id, this.currentConversationId).then((next): void => {
+                            toggleConversationInHub(getChatKvStore(), hub.id, this.currentConversationId).then((next): void => {
                               this.applyResult(next);
                             }).catch((): void => {});
                           })
@@ -279,15 +280,14 @@ export struct AmberHubsSheet {
                         .borderRadius(999)
                         .backgroundColor(this.accentColorStore)
                         .onClick((): void => {
-                          this.onStartWithInstruction(this.editingInstruction || hub.customInstruction, hub.title);
-                          this.onBackToChat();
+                          this.onStartWithInstruction(hub.id, this.editingInstruction, hub.title);
                         })
                       Blank()
                       Text('删除')
                         .fontSize(11.5)
                         .fontColor(ERROR)
                         .onClick((): void => {
-                          deleteAmberHub(hub.id).then((next): void => {
+                          deleteAmberHub(getChatKvStore(), hub.id).then((next): void => {
                             this.selectedHubId = '';
                             this.applyResult(next);
                           }).catch((): void => {});

@@ -43,7 +43,8 @@ export struct ChatComposerPane {
   onOpenHubsPlaceholder: () => void = (): void => {};
   onOpenConversation: (conversationId: string) => void = (_id: string): void => {};
   onFocusApproval: () => void = (): void => {};
-  onStartWithHubInstruction: (instruction: string, title: string) => void = (_inst: string, _title: string): void => {};
+  onStartWithHubInstruction: (hubId: string, instruction: string, title: string) => void =
+    (_id: string, _inst: string, _title: string): void => {};
   @Builder
   PendingQueueSheet(): void {
     ChatPendingQueueSheet({
@@ -91,8 +92,8 @@ export struct ChatComposerPane {
             this.onSelectTab('chat');
             this.onOpenConversation(id);
           },
-          onStartWithInstruction: (instruction: string, title: string): void => {
-            this.onStartWithHubInstruction(instruction, title);
+          onStartWithInstruction: (hubId: string, instruction: string, title: string): void => {
+            this.onStartWithHubInstruction(hubId, instruction, title);
           },
           onOpenMiniApps: (): void => { this.onOpenHubsPlaceholder(); },
         })
