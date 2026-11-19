@@ -32,7 +32,6 @@ import { ProviderLoginSession } from '../platform_impl/provider/ProviderLoginSes
 import { ProviderModelCatalogSession } from '../platform_impl/provider/ProviderModelCatalogSession.ets';
 import { takePendingProvider } from '../platform_impl/provider/PendingProviderDraft.ets';
 import { exportProvider } from '../platform_impl/provider/ProviderExport.ets';
-import { ProviderReadingForm } from '../components/provider/ProviderReadingForm.ets';
 import { ProviderConnectionForm } from '../components/provider/ProviderConnectionForm.ets';
 import { ProviderLoginOverlays } from '../components/provider/ProviderLoginOverlays.ets';
 
@@ -143,7 +142,7 @@ struct ChatProviderDetailPage {
     if (raw === null || this.edit.ioBusy) return;
     this.edit.ioBusy = true;
     AlertDialog.show({
-      title: getProductKind() === 'deepread' ? '删除模型服务' : '删除 Provider',
+      title: '删除 Provider',
       message: `删除「${this.edit.name}」?其 API Key 与模型配置将从本机移除。`,
       primaryButton: { value: '取消', action: (): void => { this.edit.ioBusy = false; } },
       secondaryButton: { value: '删除', fontColor: ERROR, action: (): void => {
@@ -159,27 +158,14 @@ struct ChatProviderDetailPage {
   build(): void {
     Stack() {
       ForEach([this.themeEpoch], (_epoch: number): void => {
-        if (getProductKind() === 'deepread') {
-          ProviderReadingForm({ edit: this.edit, login: this.login, catalog: this.catalog,
-            onOpenReadingModel: (id: string): void => { this.openReadingModel(id); },
-            onSaveAndBack: (): void => { this.saveAndBack(); },
-            onConfigureReadingGoogle: (): void => { this.configureReadingGoogle(); },
-            onRemoveSelf: (): void => { this.removeSelf(); },
-            onExportProvider: (): void => { this.exportCurrentProvider(); },
-            onBack: (): void => { router.back(); },
-            advancedOpen: this.advancedOpen,
-            onToggleReadingAdvanced: (): void => { this.toggleReadingAdvanced(); },
-          })
-        } else {
-          ProviderConnectionForm({ edit: this.edit, login: this.login, catalog: this.catalog,
-            onOpenGoogleAuth: (): void => { this.openGoogleAuth(); },
-            onOpenModelParameters: (id: string): void => { this.openModelParameters(id); },
-            onRemoveSelf: (): void => { this.removeSelf(); },
-            onExportProvider: (): void => { this.exportCurrentProvider(); },
-            onBack: (): void => { router.back(); },
-            tab: this.tab,
-          })
-        }
+        ProviderConnectionForm({ edit: this.edit, login: this.login, catalog: this.catalog,
+          onOpenGoogleAuth: (): void => { this.openGoogleAuth(); },
+          onOpenModelParameters: (id: string): void => { this.openModelParameters(id); },
+          onRemoveSelf: (): void => { this.removeSelf(); },
+          onExportProvider: (): void => { this.exportCurrentProvider(); },
+          onBack: (): void => { router.back(); },
+          tab: this.tab,
+        })
         ProviderLoginOverlays({ login: this.login })
       }, (epoch: number): string => `theme-${epoch}`)
     }.width('100%').height('100%')

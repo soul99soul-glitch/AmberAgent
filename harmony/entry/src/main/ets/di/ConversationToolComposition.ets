@@ -8,7 +8,7 @@ import type { WebMountAdvancedToolsDeps } from '../platform_impl/WebMountAdvance
 import type { ImageGenToolDeps, EditSourceImage } from '../platform_impl/ImageGenTool.ets';
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
-import type { AbortSignalLike, HttpClient, DeepReadPlaybookRepository } from '@amber/deepread-domain';
+import type { AbortSignalLike, HttpClient } from '@amber/deepread-domain';
 import { systemLanguage } from '../platform_impl/AgentRuntimePrefs.ets';
 import { sharedKvMutex } from '../platform_impl/AtomicJsonFile.ets';
 import { createAssistantLocalPrimitives } from '../platform_impl/AssistantLocalPrimitives.ets';
@@ -34,7 +34,6 @@ export interface ConversationToolCompositionPorts {
     getChatKvStore: () => KeyValueStore;
     getChatRepository: () => ConversationRepository;
     getCompactStore: () => CompactStore;
-    getDeepReadPlaybookRepository: () => DeepReadPlaybookRepository;
     getMcpManager: () => McpManager;
     getPermissionsStatusTool: () => AgentTool;
     getPluginStore: () => Promise<PluginStore>;

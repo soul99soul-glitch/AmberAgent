@@ -1,5 +1,4 @@
 import { isComplete } from '../domain/helpers.ts';
-import { synthesisTemplate } from '../domain/synthesis_templates.ts';
 // deepReadProgressSnapshot — 进度百分比快照(照搬 Android DeepReadProgress.kt)
 //
 // 供 UI 胶囊与通知共用:准备 6% → 收集 10% → 规划 24% → 写作按段递增
@@ -58,8 +57,6 @@ export const deepReadProgressSnapshot = (
   if (output.generationPhase === 'COLLECTING') return { percent: 10, label: '正在收集资料' };
   if (output.generationPhase === 'PLANNING') return { percent: 24, label: '正在规划结构' };
   if (output.generationPhase === 'WRITING') {
-    const template = synthesisTemplate(output.templateArticle?.template ?? output.templateSnapshot?.id ?? output.templateId);
-    if (template !== null) return { percent: 56, label: `正在生成${template.name}` };
     return writingProgress(output);
   }
   // IDLE

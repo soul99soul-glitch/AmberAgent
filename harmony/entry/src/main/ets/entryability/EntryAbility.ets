@@ -12,10 +12,9 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import BuildProfile from 'BuildProfile';
 import { getSkillManager, rescheduleCronTasksOnStartup, getChatKvStore, resetWorkspaceManager,
   interruptTerminalForBackground } from '../di/AppContainer.ets';
-import { loadDisplaySetting, initializeDeepReadSearchPrefs } from '@amber/chat-domain';
+import { loadDisplaySetting } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
-import { DeepReadDesign } from '../design/DeepReadDesign.ets';
 import { DeepReadMotionPreferences } from '../platform_impl/DeepReadMotionPreferences.ets';
 import { themePackStore, applyCurrentTheme, resolveThemeDark } from '../design/theme_packs.ets';
 import type { ThemePack } from '../design/theme_packs.ets';
@@ -35,7 +34,7 @@ import { getWebMountOAuthRuntime } from '../platform_impl/WebMountOAuthRuntime.e
 import { publishWindowSize } from '../design/adaptive.ets';
 
 const DOMAIN: number = 0x0001;
-const TAG: string = 'DeepRead.EntryAbility';
+const TAG: string = 'Amber.EntryAbility';
 const MAX_WANT_PARAMETER_LENGTH: number = 512;
 const WINDOW_SYSTEM_BAR_TRANSPARENT: string = '#00000000';
 const WINDOW_LIGHT_CONTENT: string = '#1B1A17';
@@ -45,7 +44,7 @@ let themeWindow: window.Window | null = null;
 export const applyWindowTheme = (dark: boolean): void => {
   if (themeWindow === null) return;
   try {
-    themeWindow.setWindowBackgroundColor(getProductKind() === 'deepread' ? DeepReadDesign.paper : BG);
+    themeWindow.setWindowBackgroundColor(BG);
     themeWindow.setWindowSystemBarProperties({
       statusBarColor: WINDOW_SYSTEM_BAR_TRANSPARENT,
       statusBarContentColor: dark ? WINDOW_DARK_CONTENT : WINDOW_LIGHT_CONTENT,
@@ -178,11 +177,7 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<Context>('abilityContext', this.context);
     warmMediaCache();
     AppStorage.setOrCreate('productKind', productKindForBundle(this.context.applicationInfo.name));
-    DeepReadDesign.registerFonts();
-    if (getProductKind() === 'deepread') {
-      AppStorage.delete('deepreadSettingsSessionDraft');
-    }
-    if (getProductKind() === 'deepread' || getProductKind() === 'novel') this.motionPreferences.start();
+    this.motionPreferences.start();
     // Want 契约(§7.2):分享/deep-link 收 URL/title → 写 AppStorage 供 Index 跳转
     this.routeFromWant(want);
     if (BuildProfile.DEBUG && getProductKind() === 'agent') {
@@ -274,7 +269,6 @@ export default class EntryAbility extends UIAbility {
       // 独立 try:getUIContext 竞态抛异常时不得连累沉浸式设置
       try {
         registerAmberFontsFor(win.getUIContext().getFont());
-        DeepReadDesign.registerFonts(win.getUIContext().getFont());
       } catch (e) {
         hilog.warn(DOMAIN, TAG, 'uicontext font register failed: %{public}s', String(e));
       }
@@ -301,7 +295,6 @@ export default class EntryAbility extends UIAbility {
           // 竞态兜底:内容加载后 UIContext 必然就绪,再注册一次字体(幂等)
           try {
             registerAmberFontsFor(windowStage.getMainWindowSync().getUIContext().getFont());
-            DeepReadDesign.registerFonts(windowStage.getMainWindowSync().getUIContext().getFont());
           } catch (e) {
             hilog.warn(DOMAIN, TAG, 'post-load font register failed: %{public}s', String(e));
           }
@@ -344,12 +337,10 @@ export default class EntryAbility extends UIAbility {
         .then((s: DisplaySetting): Promise<DisplaySetting> => packReady.then((): DisplaySetting => s));
     }).then((s: DisplaySetting): Promise<void> => {
       const currentPack: ThemePack = themePackStore.current();
-      const accent: string = getProductKind() === 'novel' && currentPack.id.startsWith('novel-') ? currentPack.accent
-        : (s.accentColor.length > 0 ? s.accentColor : ACCENT);
+      const accent: string = s.accentColor.length > 0 ? s.accentColor : ACCENT;
       setAccentColor(accent, accent === currentPack.accent ? currentPack.accentInk : undefined);
       AppStorage.setOrCreate<string>('accentColor', accent);
-      return getProductKind() === 'deepread'
-        ? initializeDeepReadSearchPrefs(getChatKvStore()) : Promise.resolve();
+      return Promise.resolve();
     }).then((): void => { start(); }).catch((error: Error): void => {
       hilog.error(DOMAIN, TAG, 'startup preferences failed: %{public}s', String(error));
       start();

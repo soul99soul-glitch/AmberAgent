@@ -1,21 +1,3 @@
-import { DeepReadSubpageDock, DeepReadDockLayout } from '../components/deepread/DeepReadSubpageDock.ets';
-// ChatModelParamsPage — 模型级自定义参数编辑面(D-109)
-// Android 锚点:
-//   SettingProviderModelSettingsForm.kt:259-271(高级设置 tab 的
-//     ModelCustomHeaders/ModelCustomBodies 两节;ProviderOverrideSettings
-//     = overwrite 编辑面,单独 P1 未移植)
-//   :315-395(ModelCustomHeaders:节标 '自定义 Headers' + count;
-//     行 'HEADER N' + 删除;name/value 字段,存储 = trim)
-//   :397-499(ModelCustomBodies:'BODY N';key trim;value = JSON 文本,
-//     逐键解析(:458-472)— 合法 → 更新草稿 + 清错;非法 → 行内
-//     '无效的 JSON: <msg.take(100)>' 并保留旧值;添加 = CustomBody("",""))
-//   SettingProviderModelTabPage.kt:694-721(草稿语义:编辑中改 dialogState,
-//     确认才落库,取消丢弃;displayName 非空使能 — 本页不改 displayName,N/A)
-//   values-zh/strings.xml:41-42,49-50,69-70,79-80,82
-// 偏差登记:
-//   - Android 逐键 trim 入草稿(显示保留原始按键)→ 确认时统一 trim,
-//     持久化结果等价;显示态 raw 保留
-//   - 提供商覆写保留展示/移除入口；内置工具按实际请求提供商说明支持边界。
 import {
   ACCENT, BG, ERROR, INK, INK3, LINE, RAISED, TEXT_STYLES,
 } from '../design/tokens.ets';
@@ -28,11 +10,6 @@ import type {
 } from '@amber/chat-domain';
 import { loadProviders, saveProviders } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { getProductKind } from '../platform_impl/ProductIdentity.ets';
-import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
-import { DeepReadSettingsHeader, DeepReadSettingsSection, DeepReadSettingsGroup,
-  DeepReadSettingsToggle, DeepReadSettingsPicker, DeepReadSettingsButton,
-  DeepReadSettingsRow, DeepReadSettingsNote } from '../components/deepread/DeepReadSettingsVisual.ets';
 
 interface ModelFieldOptions {
   label: string;
@@ -60,12 +37,12 @@ const MODEL_TYPE_OPTIONS: string[] = ['聊天', '生图', '嵌入'];
 const MODEL_TYPE_VALUES: string[] = ['chat', 'image', 'embedding'];
 
 class ModelParameterColors {
-  background: string = getProductKind() === 'deepread' ? D.paper : BG;
-  ink: string = getProductKind() === 'deepread' ? D.ink : INK;
-  muted: string = getProductKind() === 'deepread' ? D.muted : INK3;
-  line: string = getProductKind() === 'deepread' ? D.rule : LINE;
-  raised: string = getProductKind() === 'deepread' ? D.paper : RAISED;
-  error: string = getProductKind() === 'deepread' ? D.danger : ERROR;
+  background: string = BG;
+  ink: string = INK;
+  muted: string = INK3;
+  line: string = LINE;
+  raised: string = RAISED;
+  error: string = ERROR;
 }
 
 @Entry
@@ -446,187 +423,7 @@ struct ChatModelParamsPage {
     return parts.length > 0 ? parts.join(' · ') : '类型、输入模态与自定义请求';
   }
 
-  @Builder
-  private ReadingField(options: ModelFieldOptions): void {
-    Column({ space: 7 }) {
-      Text(options.label).fontSize(13).fontColor(D.muted).width('100%')
-      TextInput({ text: options.value, placeholder: options.placeholder }).height(44)
-        .fontSize(15).fontFamily(FONT_MONO).fontColor(D.ink).placeholderColor(D.muted)
-        .backgroundColor(D.paper).borderRadius(10).onChange(options.onChange)
-    }.width('100%').padding(16).alignItems(HorizontalAlign.Start)
-  }
-
-  @Builder
-  private BasicReadingOptions(): void {
-    if (this.modelType === 'chat') {
-      DeepReadSettingsToggle({ label: '工具调用', checked: this.toolCallingEnabled, last: false,
-        onChange: (checked: boolean): void => { this.toolCallingEnabled = checked; } })
-    }
-    this.ReadingField({ label: '上下文窗口（tokens）', value: this.contextWindowText, placeholder: '留空表示未知',
-      onChange: (value: string): void => { this.contextWindowText = value; } })
-  }
-
-  @Builder
-  private ReadingModelAttributes(): void {
-    DeepReadSettingsPicker({ label: '模型类型', options: MODEL_TYPE_OPTIONS, selected: this.modelTypeIndex(),
-      onSelect: (index: number): void => { this.modelType = MODEL_TYPE_VALUES[index]; } })
-    DeepReadSettingsToggle({ label: '文本输入', checked: this.inputText,
-      onChange: (checked: boolean): void => { this.inputText = checked; } })
-    DeepReadSettingsToggle({ label: '图片输入', checked: this.inputImage,
-      onChange: (checked: boolean): void => { this.inputImage = checked; } })
-    DeepReadSettingsToggle({ label: '音频输入', checked: this.inputAudio, last: true,
-      onChange: (checked: boolean): void => { this.inputAudio = checked; } })
-  }
-
-  @Builder
-  private ReadingBuiltInTools(): void {
-    DeepReadSettingsToggle({ label: '联网搜索', checked: this.toolSearch,
-      onChange: (checked: boolean): void => { this.toolSearch = checked; } })
-    DeepReadSettingsToggle({ label: '网址上下文（Google）', checked: this.toolUrlContext,
-      onChange: (checked: boolean): void => { this.toolUrlContext = checked; } })
-    DeepReadSettingsToggle({ label: '生成图片', checked: this.toolImageGen, last: true,
-      onChange: (checked: boolean): void => { this.toolImageGen = checked; } })
-  }
-
-  @Builder
-  private ReadingUa(): void {
-    ForEach(UA_PRESETS, (preset: string[]): void => {
-      DeepReadSettingsRow({ label: preset[0], value: this.uaCurrent() === preset[1] ? '已选' : '',
-        valueAccent: true, chevron: false, onTap: (): void => { this.applyUaPreset(preset[1]); } })
-    }, (preset: string[]): string => preset[0])
-    if (this.uaIndex() >= 0) {
-      DeepReadSettingsRow({ label: '清除 User-Agent', destructive: true, chevron: false, last: true,
-        onTap: (): void => { this.clearUa(); } })
-    }
-  }
-
-  @Builder
-  private ReadingHeaders(): void {
-    ForEach(this.headerNames, (_name: string, index: number): void => {
-      this.ReadingField({ label: `Header ${index + 1} 名称`, value: this.headerNames[index] ?? '', placeholder: 'Header 名称',
-        onChange: (value: string): void => { this.setHeaderName(index, value); } })
-      this.ReadingField({ label: '值', value: this.headerValues[index] ?? '', placeholder: 'Header 值',
-        onChange: (value: string): void => { this.setHeaderValue(index, value); } })
-      DeepReadSettingsRow({ label: '删除此 Header', destructive: true, chevron: false,
-        onTap: (): void => { this.removeHeader(index); } })
-    }, (_name: string, index: number): string => `reading-header-${index}`)
-    DeepReadSettingsRow({ label: '添加 Header', action: true, chevron: false, last: true,
-      onTap: (): void => { this.addHeader(); } })
-  }
-
-  @Builder
-  private ReadingBodies(): void {
-    ForEach(this.bodyKeys, (_key: string, index: number): void => {
-      this.ReadingField({ label: `Body ${index + 1} Key`, value: this.bodyKeys[index] ?? '', placeholder: 'Body Key',
-        onChange: (value: string): void => { this.setBodyKey(index, value); } })
-      Column({ space: 7 }) {
-        Text('值（JSON）').fontSize(13).fontColor(D.muted).width('100%')
-        TextArea({ text: this.bodyTexts[index] ?? '', placeholder: 'JSON 值' }).height(100)
-          .fontFamily(FONT_MONO).fontSize(15).fontColor(D.ink).placeholderColor(D.muted)
-          .backgroundColor(D.paper).borderRadius(10).onChange((value: string): void => { this.setBodyText(index, value); })
-        if ((this.bodyErrors[index] ?? '').length > 0) {
-          Text(this.bodyErrors[index]).fontSize(13).fontColor(D.danger).width('100%')
-        }
-      }.width('100%').padding(16)
-      DeepReadSettingsRow({ label: '删除此 Body', destructive: true, chevron: false,
-        onTap: (): void => { this.removeBody(index); } })
-    }, (_key: string, index: number): string => `reading-body-${index}`)
-    DeepReadSettingsRow({ label: '添加 Body', action: true, chevron: false, last: true,
-      onTap: (): void => { this.addBody(); } })
-  }
-
-  @Builder
-  private ReadingAdvancedOptions(): void {
-    if (this.hasOverwrite) {
-      DeepReadSettingsSection({ title: '服务商覆写' })
-      DeepReadSettingsGroup({ content: (): void => { this.ReadingOverwrite(); } })
-      DeepReadSettingsNote({ text: '移除覆写会立即保存，其他修改仍需点击下方保存。' })
-    }
-    DeepReadSettingsSection({ title: '模型属性' })
-    DeepReadSettingsGroup({ content: (): void => { this.ReadingModelAttributes(); } })
-    DeepReadSettingsSection({ title: '服务商内置工具' })
-    DeepReadSettingsGroup({ content: (): void => { this.ReadingBuiltInTools(); } })
-    DeepReadSettingsNote({ text: `实际请求服务商：${this.toolProviderName}。这些选项会保留；深度阅读使用设置页中的搜索服务，内置工具是否生效取决于生成管线与服务商协议，不能替代搜索服务配置。` })
-    DeepReadSettingsSection({ title: 'User-Agent 预设' })
-    DeepReadSettingsGroup({ content: (): void => { this.ReadingUa(); } })
-    DeepReadSettingsSection({ title: '自定义 Headers' })
-    DeepReadSettingsGroup({ content: (): void => { this.ReadingHeaders(); } })
-    DeepReadSettingsSection({ title: '自定义 Body' })
-    DeepReadSettingsGroup({ content: (): void => { this.ReadingBodies(); } })
-    DeepReadSettingsNote({ text: '自定义 Body 按原规则覆盖请求字段，包括 tools。保存前请确认 JSON 与请求协议一致。' })
-  }
-
-  @Builder
-  private ReadingOverwrite(): void {
-    DeepReadSettingsRow({ label: this.overwriteName, detail: '当前模型使用独立的服务商参数', chevron: false })
-    DeepReadSettingsRow({ label: '移除覆写', destructive: true, chevron: false, last: true,
-      onTap: (): void => { this.removeOverwrite(); } })
-  }
-
-  private toggleReadingAdvanced(): void {
-    if (this.saving) return;
-    if (this.reduceMotion || this.appBackgrounded) {
-      this.advancedExpanded = !this.advancedExpanded;
-      return;
-    }
-    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
-      this.advancedExpanded = !this.advancedExpanded;
-    });
-  }
-
-  @Builder
-  private ReadingAdvancedEntry(): void {
-    DeepReadSettingsRow({ label: this.advancedExpanded ? '收起高级设置' : '高级设置', detail: this.advancedSummary(),
-      picker: !this.advancedExpanded, last: true, onTap: (): void => { this.toggleReadingAdvanced(); } })
-  }
-
-  @Builder
-  private ReadingPage(): void {
-    Stack({ alignContent: Alignment.Bottom }) {
-      Column() {
-        DeepReadSettingsHeader({ title: '模型设置', onBack: (): void => { if (!this.saving) router.back(); } })
-        if (!this.loaded) {
-          Text('加载中…').fontSize(15).fontColor(D.muted).margin({ top: 32 })
-        } else if (this.provider === null) {
-          Text(this.error.length > 0 ? this.error : '模型不存在').fontSize(15).fontColor(D.muted).padding(18)
-        } else {
-          Scroll() {
-            Column() {
-              Text(this.modelLabel).fontSize(24).fontFamily(D.serif).fontWeight(FontWeight.Bold)
-                .fontColor(D.ink).width('100%').padding({ left: 16, right: 16, top: 12 }).wordBreak(WordBreak.BREAK_ALL)
-              Text(this.provider.name).fontSize(13).fontColor(D.muted).width('100%').padding({ left: 16, right: 16, top: 6 })
-              DeepReadSettingsSection({ title: '基础设置' })
-              DeepReadSettingsGroup({ content: (): void => { this.BasicReadingOptions(); } })
-              DeepReadSettingsNote({ text: '工具调用允许生成流程使用已配置的工具；模型是否支持以服务商实际返回为准。上下文窗口用于描述模型容量，留空不会覆写为 0。' })
-              DeepReadSettingsSection({ title: '高级设置' })
-              DeepReadSettingsGroup({ content: (): void => { this.ReadingAdvancedEntry(); } })
-              if (this.advancedExpanded) {
-                Column() { this.ReadingAdvancedOptions(); }.width('100%')
-                  .transition(TransitionEffect.OPACITY.animation({ duration: this.reduceMotion || this.appBackgrounded ? 0 : 160 }))
-              }
-            }.width('100%').padding({ left: D.gutter, right: D.gutter, bottom: 24 }).enabled(!this.saving)
-          }.layoutWeight(1).width('100%').align(Alignment.TopStart)
-          Column({ space: 10 }) {
-            if (this.error.length > 0) { Text(this.error).fontSize(13).fontColor(D.danger).width('100%') }
-            DeepReadSettingsButton({ label: this.saving ? '保存中…' : '保存模型设置', icon: 'check_circle', disabled: this.saving,
-              onTap: (): void => { this.confirm(); } })
-          }.width('100%').padding({ left: D.gutter, right: D.gutter, top: 8, bottom: DeepReadDockLayout.bottomInset(this.navBarHeight) })
-        }
-      }.width('100%').height('100%').backgroundColor(D.paper)
-      DeepReadSubpageDock({ onBeforeLeave: (): boolean => { return !this.saving; } }).align(Alignment.Bottom).hitTestBehavior(HitTestMode.Transparent)
-    }.width('100%').height('100%')
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-  }
-
   build(): void {
-    if (getProductKind() === 'deepread') {
-      ForEach([`${this.themeEpoch}:${this.darkMode}:${this.accentColor}`], (_epoch: string): void => { this.ReadingPage(); },
-        (epoch: string): string => epoch)
-    } else { this.HostPage(); }
-  }
-
-  @Builder
-  private HostPage(): void {
     Column() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
@@ -844,7 +641,7 @@ struct ChatModelParamsPage {
       }
     
       }, (e: number): string => `theme-${e}`)
-}
+    }
       .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%').height('100%').backgroundColor(this.colors.background)
   }

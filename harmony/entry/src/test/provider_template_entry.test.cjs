@@ -145,23 +145,6 @@ function method(source, name) {
   for (; depth; end++) { if (source[end] === '{') depth++; if (source[end] === '}') depth--; }
   return source.slice(begin, end);
 }
-test('DeepRead permits a second preset without overwriting its existing provider or model IDs', () => {
-  let next = 0;
-  const pending = [], preset = { id: 'original-provider', models: [{ id: 'original-model', modelId: 'text-model' }] };
-  const page = { sheetShow: true };
-  callback(arrow(settings, settings.indexOf('onPickPreset:')), {
-    getProductKind: () => 'deepread', newId: () => `new-${++next}`,
-    setPendingProvider: p => pending.push(p), router: { pushUrl() {} },
-  }).call(page, preset);
-  assert.notEqual(pending[0].id, preset.id);
-  assert.notEqual(pending[0].models[0].id, preset.models[0].id);
-  assert.equal(preset.id, 'original-provider'); assert.equal(preset.models[0].id, 'original-model');
-  const picker = evaluate('class Picker { ' + method(sheet, 'bundled') + ' } return new Picker();', {
-    DEFAULT_PROVIDERS: [preset], getProductKind: () => 'deepread',
-  });
-  picker.existingIds = JSON.stringify([preset.id]);
-  assert.deepEqual(picker.bundled(), [preset]);
-});
 test('Provider import merges the latest catalog and refuses to overwrite it after a read failure', async () => {
   const writes = [], toasts = [], imported = { id: 'imported' };
   let fail = false;

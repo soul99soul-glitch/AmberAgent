@@ -3,15 +3,12 @@ import type {
 } from '@amber/chat-domain';
 import { mergeContinueCandidates } from '@amber/chat-domain';
 import type {
-  NovelCreation, DeepReadScheduler, DeepReadRepository, ModelCouncilManager, ModelCouncilRun
+  ModelCouncilManager, ModelCouncilRun
 } from '@amber/deepread-domain';
 import { relativeTimeMs } from './HomePresentation.ets';
 
 export interface HomeContinuePorts {
-  getNovelCreation: () => NovelCreation;
   getAgentCronManager: () => Promise<AgentCronManager>;
-  getDeepReadScheduler: () => Promise<DeepReadScheduler>;
-  getRepository: () => DeepReadRepository;
   getMiniAppRepositorySync: () => MiniAppRepository;
   getCouncilManager: () => ModelCouncilManager | null;
   getFilesRepository: () => FilesRepository;

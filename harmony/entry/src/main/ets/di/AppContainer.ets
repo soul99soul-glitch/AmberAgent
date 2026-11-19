@@ -54,12 +54,8 @@ import type { CronRuntime } from './CronRuntime.ets';
 import { createCronRuntime } from './CronRuntime.ets';
 import type { SubAgentRuntime } from './SubAgentRuntime.ets';
 import { createSubAgentRuntime } from './SubAgentRuntime.ets';
-import type { DeepReadRuntime } from './DeepReadRuntime.ets';
-import { createDeepReadRuntime } from './DeepReadRuntime.ets';
 import type { CouncilRuntime } from './CouncilRuntime.ets';
 import { createCouncilRuntime } from './CouncilRuntime.ets';
-import type { NovelRuntime } from './NovelRuntime.ets';
-import { createNovelRuntime } from './NovelRuntime.ets';
 import type { ChatProviderRuntime, ChatRuntime } from './ChatRuntimeContracts.ets';
 import { createEntryJevAutoApprovalReview } from '../platform_impl/JevAutoApprovalSupport.ets';
 import type { HttpClient, Storage, AbortSignalLike, ModelCouncilTextRunner } from '@amber/deepread-domain';
@@ -74,7 +70,6 @@ import { getMcpFilesStore } from '../platform_impl/McpFilesStore.ets';
 import { configureEntryScopedRecipeLoop } from '../platform_impl/ScopedRecipeLoop.ets';
 import { createEntryPluginAdapter } from '../platform_impl/EntryPluginRuntime.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
-import { loadNovelResearchTools } from '../platform_impl/NovelResearchSupport.ets';
 // The root wires concrete platform adapters. Each runtime owns its cached resources and lifecycle.
 const resources: AppResources = createAppResources({
     initializeHost: (httpClient: HttpClient): void => {
@@ -156,18 +151,6 @@ const subAgents: SubAgentRuntime = createSubAgentRuntime({
     getSessionGrantStore: resources.getSessionGrantStore,
     isModelCouncilEnabled: agentSettings.isModelCouncilEnabled
 });
-const deepRead: DeepReadRuntime = createDeepReadRuntime({
-    getHttpClient: (): HttpClient => resources.getAppContainer().httpClient,
-    getStorage: (): Storage => resources.getAppContainer().storage,
-    getPrefetcher: resources.getPrefetcher,
-    getAiClient: resources.getAiClient,
-    getNotifier: resources.getNotifier,
-    getRepository: resources.getRepository,
-    getChatKvStore: resources.getChatKvStore,
-    getFileStore: resources.getFileStore,
-    resolveDeepReadRuntimeCore: providers.resolveDeepReadRuntimeCore,
-    ensureSearchSdk: ensureSearchSdk
-});
 const council: CouncilRuntime = createCouncilRuntime({
     getHttpClient: (): HttpClient => resources.getAppContainer().httpClient,
     getModelRegistry: resources.getModelRegistry,
@@ -190,19 +173,11 @@ const council: CouncilRuntime = createCouncilRuntime({
         loadCompressPrompt: async (): Promise<string> => (await loadTaskPrompts()).compressPrompt,
         repository: getChatRepository(), grantStore: getSessionGrantStore(),
         getRecipeStore, getPluginStore, getAgentTaskTools, getAgentCronTools,
-        getPermissionsStatusTool, getAgentPromptConfigTool, playbookRepository: getDeepReadPlaybookRepository(),
+        getPermissionsStatusTool, getAgentPromptConfigTool,
     })
-});
-const novel: NovelRuntime = createNovelRuntime({
-    getFileStore: resources.getFileStore,
-    getChatKvStore: resources.getChatKvStore,
-    resolveChatRuntime: (assistantId?: string, exactModelId?: string, exactProviderId?: string): Promise<ChatRuntime | null> => resolveChatRuntime(assistantId, exactModelId, exactProviderId),
-    buildProviderApi: providers.buildProviderApi,
-    loadNovelResearchTools: loadNovelResearchTools
 });
 export const getAppContainer = resources.getAppContainer;
 export const getNotifier = resources.getNotifier;
-export const getPrefetcher = resources.getPrefetcher;
 export const getAiClient = resources.getAiClient;
 export const getRepository = resources.getRepository;
 export const getFileStore = resources.getFileStore;
@@ -240,8 +215,6 @@ export const loadTaskModelIds = providers.loadTaskModelIds;
 export const saveTaskModelId = providers.saveTaskModelId;
 export const loadTaskPrompts = providers.loadTaskPrompts;
 export const saveTaskPrompt = providers.saveTaskPrompt;
-export const loadDeepReadModelOptions = providers.loadDeepReadModelOptions;
-export const loadNovelModelOptions = providers.loadNovelModelOptions;
 export const resolveTaskChatModelChoice = providers.resolveTaskChatModelChoice;
 export const resolveConfiguredTaskModel = providers.resolveConfiguredTaskModel;
 export const resolveTaskModelReference = providers.resolveTaskModelReference;
@@ -280,31 +253,20 @@ export const isAgentCronExecutionAvailable = cron.isAgentCronExecutionAvailable;
 export const rescheduleCronTasksOnStartup = cron.rescheduleCronTasksOnStartup;
 export const getSubAgentManager = subAgents.getSubAgentManager;
 export const getSubAgentTools = subAgents.getSubAgentTools;
-export const getDeepReadArtifactStore = deepRead.getDeepReadArtifactStore;
-export const getDeepReadTextRuntime = deepRead.getDeepReadTextRuntime;
-export const getDeepReadScheduler = deepRead.getDeepReadScheduler;
-export const getDeepReadPlaybookRepository = deepRead.getDeepReadPlaybookRepository;
 export const getCouncilRunner = council.getCouncilRunner;
 export const prepareCouncilManager = council.prepareCouncilManager;
 export const getCouncilManager = council.getCouncilManager;
-export const getNovelProjectRepository = novel.getNovelProjectRepository;
-export const getNovelWorkspaceService = novel.getNovelWorkspaceService;
-export const getNovelCreation = novel.getNovelCreation;
 export type { ChatProviderChoice, ChatProviderRuntime, ChatRuntime, SubAgentToolsContext, TaskPrompts } from './ChatRuntimeContracts.ets';
 export type { ChatModelSelection } from './ProviderModelRuntime.ets';
 export { TASK_TITLE_MODEL_KEY } from './ProviderModelRuntime.ets';
 export { TASK_SUGGESTION_MODEL_KEY } from './ProviderModelRuntime.ets';
 export { TASK_COMPRESS_MODEL_KEY } from './ProviderModelRuntime.ets';
 export { TASK_IMAGE_MODEL_KEY } from './ProviderModelRuntime.ets';
-export { TASK_DEEPREAD_MODEL_KEY } from './ProviderModelRuntime.ets';
 export type { TaskModelIds } from './ProviderModelRuntime.ets';
 export type { TaskModelReferences } from './ProviderModelRuntime.ets';
 export { TASK_TITLE_PROMPT_KEY } from './ProviderModelRuntime.ets';
 export { TASK_SUGGESTION_PROMPT_KEY } from './ProviderModelRuntime.ets';
 export { TASK_COMPRESS_PROMPT_KEY } from './ProviderModelRuntime.ets';
-export type { NovelModelOption } from './ProviderModelRuntime.ets';
-export type { DeepReadModelOption } from './ProviderModelRuntime.ets';
-export type { DeepReadTextRuntime } from './DeepReadRuntime.ets';
 const executionResources: ChatExecutionResources = {
     getTerminalRuntime, getMoshRuntime, getPythonRuntime, getSSHProfileStore,
     listSkills: (): SkillMetadata[] => getSkillManager().listSkills(),
@@ -350,7 +312,6 @@ const createConversationExecution = (): ConversationRunExecution => {
         getChatKvStore: getChatKvStore,
         getChatRepository: getChatRepository,
         getCompactStore: getCompactStore,
-        getDeepReadPlaybookRepository: getDeepReadPlaybookRepository,
         getMcpManager: getMcpManager,
         getPermissionsStatusTool: getPermissionsStatusTool,
         getPluginStore: getPluginStore,

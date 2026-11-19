@@ -1,5 +1,5 @@
 // Owns subagent lifecycle and isolated generation ports.
-import type { KeyValueStore, Assistant, OpenAIChatApi, TextGenerationParams, ProviderSetting, ProviderModel, AgentTool, ChatStreamProvider, CustomHeader, SubAgentRuntimeSetting, SubAgentManagerDeps, SubAgentRunner, SubAgentGenerationRequest, SubAgentAssistantResolution, SubAgentGenerationPort, ProviderAuthSnapshot, NovelResponsesStreamOptions, ToolLoopOptions } from '@amber/chat-domain';
+import type { KeyValueStore, Assistant, OpenAIChatApi, TextGenerationParams, ProviderSetting, ProviderModel, AgentTool, ChatStreamProvider, CustomHeader, SubAgentRuntimeSetting, SubAgentManagerDeps, SubAgentRunner, SubAgentGenerationRequest, SubAgentAssistantResolution, SubAgentGenerationPort, ProviderAuthSnapshot, ToolLoopOptions } from '@amber/chat-domain';
 import { loadProviders, SessionAccessGrantStore, AgentTaskStore, asChatStreamProvider, makeGenerationRetrySetting, SubAgentManager, GenerationSubAgentRunner, ChatStreamSubAgentGenerationPort, SubAgentTools } from '@amber/chat-domain';
 import { createEntrySubAgentTranscriptPort, subAgentTranscriptPathForRun } from '../platform_impl/SubAgentStore.ets';
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
@@ -12,7 +12,7 @@ export interface SubAgentRuntimePorts {
     resolveChatProviderChoice: (assistant?: Assistant) => Promise<ChatProviderChoice | null>;
     resolveTaskChatModelChoice: (modelId: string, fallbackChoice?: ChatProviderChoice) => Promise<ChatProviderChoice | null>;
     getChatAssistants: () => Promise<Assistant[]>;
-    buildProviderApi: (chosen: ProviderSetting, customHeaderRecord: Record<string, string>, oauthAccountId?: string, responses?: NovelResponsesStreamOptions) => OpenAIChatApi;
+    buildProviderApi: (chosen: ProviderSetting, customHeaderRecord: Record<string, string>, oauthAccountId?: string) => OpenAIChatApi;
     prepareChoiceAuth: (provider: ProviderSetting) => Promise<ProviderAuthSnapshot>;
     jevChoiceSelect: (purpose: string, taskHint: string, candidates: Record<string, string>) => Promise<JevChoiceResult | null>;
     configureRecipeLoop: (loop: ToolLoopOptions, request: SubAgentGenerationRequest, conversationId: string | null) => Promise<void>;

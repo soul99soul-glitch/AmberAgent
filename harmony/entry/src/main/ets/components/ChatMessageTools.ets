@@ -19,8 +19,6 @@ import { SSHUIColors } from './SSHUIColors.ets';
 import { RecipeApprovalView, recipeApprovalView } from './RecipeApprovalSummary.ets';
 import { pluginApprovalView } from './PluginApprovalSummary.ets';
 import { JevApprovalFacts } from './JevApprovalFacts.ets';
-import { NovelChapterPlanProposalCard } from './NovelChapterPlanProposalCard.ets';
-import { parseNovelChapterPlanProposal } from '../platform_impl/NovelPlanProposalProjection.ets';
 import { ToolApprovalSummaryCard } from './ToolApprovalSummary.ets';
 import type { MessageRowViewState } from './MessageRowViewState.ets';
 import {
@@ -118,7 +116,6 @@ export struct ChatMessageTools {
   private genericApprovalSummary(): ToolApprovalSummary | null {
     if (!this.isPending()) return null;
     if (this.packageApprovalView() !== null || isSSHApprovalTool(this.part.toolName)) return null;
-    if (parseNovelChapterPlanProposal(this.part) !== null) return null;
     // 改/删 SSH 配置时补上保存的 profile,卡片才能写清「改哪一条」。
     const input: JsonObject = toolInputAsJson(this.part);
     const profileId: JsonValue | undefined = input['id'];
@@ -194,10 +191,6 @@ export struct ChatMessageTools {
         .width('100%').padding(PAD_ITEM)
         .backgroundColor(this.sshColors.inset).borderRadius(RADIUS).margin({ bottom: 6 })
         .onClick((): void => { if (this.canOpenPreview) this.onOpenPreview(); })
-      }
-      // E13:本章计划提案专用摘要(批准/拒绝仍走下方原胶囊回调,同一 toolCallId)
-      if (this.part.approvalState.type === 'pending') {
-        NovelChapterPlanProposalCard({ view: parseNovelChapterPlanProposal(this.part) })
       }
       // 通用待授权摘要(日历/提醒/通知/闹钟/模型槽位/WebMount… + 未知工具标量参数兜底)
       if (this.genericApprovalSummary() !== null) {

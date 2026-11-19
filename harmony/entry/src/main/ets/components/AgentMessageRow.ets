@@ -15,8 +15,6 @@ import type { ToolApprovalPartLocator, UIMessagePartMiniApp } from '@amber/chat-
 import { MarkdownText } from './MarkdownText.ets';
 import { ChatMessageReasoning } from './ChatMessageReasoning.ets';
 import { ChatMessageTools } from './ChatMessageTools.ets';
-import { NovelChapterPlanProposalCard } from './NovelChapterPlanProposalCard.ets';
-import { parseNovelChapterPlanProposal } from '../platform_impl/NovelPlanProposalProjection.ets';
 import { JevApprovalFacts } from './JevApprovalFacts.ets';
 import { ChatMessageAskUserStep } from './ChatMessageAskUserStep.ets';
 import { recipeAskUserPart } from './RecipeApprovalSummary.ets';
@@ -218,7 +216,7 @@ export struct AgentMessageRow {
   //   流式结束后保持 Preview 不自动折叠)
   @State sawStream: boolean = false;
   // 1:1 原型 fadeRise .22s ease-out:行入场 opacity 0→1 + translateY 6→0
-  @StorageProp('deepreadReduceMotion') reduceMotion: boolean = false;
+  @StorageProp('reduceMotion') reduceMotion: boolean = false;
   @Prop animateEntrance: boolean = true;
   @Prop isAssistantContinuation: boolean = false;
   @Prop turnRole: string = 'none';
@@ -678,22 +676,6 @@ export struct AgentMessageRow {
                   onAnswer: (qid: string, value: string): void => { this.setAskAnswer(qid, value); },
                   onToggleMulti: (qid: string, opt: string): void => { this.toggleAskMulti(qid, opt); },
                   onClear: (): void => { this.clearAskDrafts(); },
-                })
-              } else if (parseNovelChapterPlanProposal(this.toolPartAt(bi, si)) !== null) {
-                NovelChapterPlanProposalCard({
-                  view: parseNovelChapterPlanProposal(this.toolPartAt(bi, si)),
-                  canApprove: this.capabilities.approveTool,
-                  canDeny: this.capabilities.denyTool,
-                  onApprove: (): void => {
-                    this.onApproveTool(this.toolPartAt(bi, si).toolCallId, this.locatorFor(this.toolPartAt(bi, si)));
-                  },
-                  onDeny: (): void => {
-                    this.onDenyTool(this.toolPartAt(bi, si).toolCallId, this.locatorFor(this.toolPartAt(bi, si)));
-                  },
-                })
-                JevApprovalFacts({
-                  part: this.toolPartAt(bi, si),
-                  subjectHash: this.jevSubjectHashForPart(this.toolPartAt(bi, si), this.locatorFor(this.toolPartAt(bi, si))),
                 })
               } else {
                 ChatMessageTools({

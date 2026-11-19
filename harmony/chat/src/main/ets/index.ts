@@ -77,13 +77,6 @@ export type {
   InteractiveTurnOperation,
 } from './chat/interactive_turn_runtime.ts';
 export { runInteractiveTurn } from './chat/interactive_turn_runtime.ts';
-export type {
-  NovelInteractiveRuntimeConfig, NovelInteractiveAdapterDeps,
-  NovelResponsesStreamOptions,
-} from './chat/novel_interactive_adapter.ts';
-export { createNovelInteractiveAdapter } from './chat/novel_interactive_adapter.ts';
-export type { NovelWorkspaceToolPort } from './chat/novel_workspace_tools.ts';
-export { createNovelWorkspaceTools, novelAuditToolResult } from './chat/novel_workspace_tools.ts';
 export { selectMessageBranch, runRegenerateAt } from './chat/regenerate.ts';
 export { deleteMessage } from './chat/delete_message.ts';
 export { editMessage } from './chat/edit_message.ts';
@@ -295,12 +288,6 @@ export {
   parseDeepReadSlashCommand, DEEP_READ_ROUTE_TAG, DEEP_READ_FORCE_FLAGS,
 } from './chat/builtin_local_tools.ts';
 
-// ===== D-127:Deep Read Playbook 工具四件(LocalTools.kt:187 无条件) =====
-export type {
-  DeepReadPlaybookSnapshot, DeepReadPlaybookResult, DeepReadPlaybookPort,
-} from './chat/builtin_deepread_playbook_tools.ts';
-export { createDeepReadPlaybookTools } from './chat/builtin_deepread_playbook_tools.ts';
-
 // ===== D-062:ToolExposureState 懒暴露 =====
 export type { ToolExposureState } from './chat/tool_exposure.ts';
 export { createToolExposureState } from './chat/tool_exposure.ts';
@@ -364,8 +351,6 @@ export type {
 } from './chat/openai_request.ts';
 
 export { createOpenAIChatApi, asChatStreamProvider, openAIAuthHeaders } from './chat/openai_chat_api.ts';
-export { createChatDeepReadAiClient } from './chat/deepread_ai_client.ts';
-export type { ChatDeepReadAiClientOptions } from './chat/deepread_ai_client.ts';
 export { prepareProviderRuntime, prepareProviderAuth } from './chat/provider_runtime.ts';
 export type {
   ProviderRuntimeSnapshot, ProviderRuntimeOptions, ProviderOAuthSnapshot, ProviderAuthOptions, ProviderAuthSnapshot,
@@ -1427,10 +1412,6 @@ export { createCouncilTools } from './chat/council_tools.ts';
 export type { CouncilToolsDeps } from './chat/council_tools.ts';
 export { councilRunFromTools } from './chat/council_display.ts';
 
-export { makeNovelTextGenerationParams, resolveNovelMaxOutputTokens } from './chat/novel_request_config.ts';
-export { applyNovelStateReasoning } from './chat/novel_state_reasoning.ts';
-export { freezeNovelRuntimeConfiguration, readNovelRuntimeConfiguration } from './chat/novel_runtime_snapshot.ts';
-export type { NovelFrozenRuntimeConfiguration } from './chat/novel_runtime_snapshot.ts';
 export { createProviderManagementTools } from './chat/provider_tools.ts';
 export type { ProviderManagementToolsDeps } from './chat/provider_tools.ts';
 export { createModelSlotTool, MODEL_SLOTS, resolveModelSlotTarget } from './chat/model_slot_tool.ts';
@@ -1449,8 +1430,6 @@ export type {
   ConversationUiDefinition, ConversationUiSnapshotArtifact, ArtifactFileExport, SceneArtifactExport,
 } from './chat/conversation_artifacts.ts';
 
-export { createNovelProjectOperationTools, executeNovelProjectOperation } from './chat/novel_project_operations.ts';
-export type { NovelProjectOperationPort } from './chat/novel_project_operations.ts';
 export { resolveGenerativeWidgetInstruction } from './chat/generative_widget_prompt.ts';
 export {
   CONVERSATIONAL_PROGRESS_RULE, buildConversationalProgressPrompt,
@@ -1477,3 +1456,8 @@ export {
 export type {
   AssistantTurnRole, TurnProgressStatusKind, TurnProgressSummary, MessageTurnProjection,
 } from './chat/turn_tool_grouping.ts';
+export { buildMemoryPortrait, buildMemoryStarterPrompts } from './chat/memory_portrait.ts';
+export type {
+  MemoryPortrait, MemoryPortraitBucketFilter, MemoryPortraitDimension,
+  MemoryPortraitDimensionKey, MemoryPortraitItem, MemoryPortraitOptions,
+} from './chat/memory_portrait.ts';

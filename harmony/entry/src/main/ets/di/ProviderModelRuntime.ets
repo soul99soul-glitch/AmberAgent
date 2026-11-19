@@ -1,7 +1,7 @@
 // Provider/model selection and authenticated API construction, without local execution side effects.
 import type { HttpClient, Storage } from '@amber/deepread-domain';
 import { getChatKeyRoulette } from '../platform_impl/KeyRouletteSupport.ets';
-import type { KeyValueStore, Assistant, OpenAIChatApi, ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude, ProviderSettingGoogle, ProviderModel, ModelType, TaskModelPair, TaskModelReference, ProviderRuntimeSnapshot, ProviderAuthSnapshot, NovelResponsesStreamOptions, ProviderOAuthSnapshot, TextGenerationParams } from '@amber/chat-domain';
+import type { KeyValueStore, Assistant, OpenAIChatApi, ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude, ProviderSettingGoogle, ProviderModel, ModelType, TaskModelPair, TaskModelReference, ProviderRuntimeSnapshot, ProviderAuthSnapshot, ProviderOAuthSnapshot, TextGenerationParams } from '@amber/chat-domain';
 import { loadProviders, makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi, hasUsableAuth, openAIAuthHeaders, copyProviderSettingWithModels, taskModelReferenceId, taskModelReferenceFromId, findTaskProviderModel, prepareProviderRuntime, prepareProviderAuth, DEFAULT_AUTO_MODEL_ID, DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT, createKvResponseResumeStore } from '@amber/chat-domain';
 import { loadTaskModelReference, storeTaskModelPair } from '../platform_impl/TaskModelSelectionSupport.ets';
 import { resolveEntryGoogleAuth } from '../platform_impl/GoogleAuthSupport.ets';
@@ -21,7 +21,6 @@ export const TASK_SUGGESTION_MODEL_KEY: string = 'suggestion_model';
 export const TASK_COMPRESS_MODEL_KEY: string = 'compress_model';
 // 生图模型槽(Android imageGenerationModel 语义;AUTO/空 = 未配置,工具不装配)
 export const TASK_IMAGE_MODEL_KEY: string = 'image_generation_model';
-export const TASK_DEEPREAD_MODEL_KEY: string = 'deepread_task_model';
 export interface TaskModelIds {
     titleModelId: string;
     suggestionModelId: string;
@@ -41,21 +40,6 @@ export interface TaskModelReferences {
 export const TASK_TITLE_PROMPT_KEY: string = 'title_prompt';
 export const TASK_SUGGESTION_PROMPT_KEY: string = 'suggestion_prompt';
 export const TASK_COMPRESS_PROMPT_KEY: string = 'compress_prompt';
-export interface NovelModelOption {
-    providerId: string;
-    // ProviderModel.id；固定策略只保存这个配置 UUID，不保存模型 API 名。
-    modelId: string;
-    label: string;
-    providerLabel: string;
-    available: boolean;
-}
-export interface DeepReadModelOption {
-    providerId: string;
-    modelId: string;
-    label: string;
-    providerLabel: string;
-    available: boolean;
-}
 export interface ProviderModelRuntimePorts {
     getChatKvStore: () => KeyValueStore;
     getChatAssistants: () => Promise<Assistant[]>;
@@ -78,8 +62,6 @@ export interface ProviderModelRuntime {
     saveTaskModelId: (key: string, modelUuid: string) => Promise<void>;
     loadTaskPrompts: () => Promise<TaskPrompts>;
     saveTaskPrompt: (key: string, value: string) => Promise<void>;
-    loadDeepReadModelOptions: () => Promise<DeepReadModelOption[]>;
-    loadNovelModelOptions: () => Promise<NovelModelOption[]>;
     resolveTaskChatModelChoice: (modelId: string, fallbackChoice?: ChatProviderChoice) => Promise<ChatProviderChoice | null>;
     resolveConfiguredTaskModel: (reference: TaskModelReference, type: ModelType) => Promise<ChatProviderChoice | null>;
     resolveTaskModelReference: (reference: TaskModelReference, fallbackChoice?: ChatProviderChoice) => Promise<ChatProviderChoice | null>;
@@ -89,9 +71,8 @@ export interface ProviderModelRuntime {
     resolveTaskModelChain: (candidates: string[], fallbackChoice?: ChatProviderChoice) => Promise<ChatProviderChoice | null>;
     currentChatModelUuid: () => Promise<string>;
     describeChatModel: () => Promise<string>;
-    buildProviderApi: (chosen: ProviderSetting, customHeaderRecord: Record<string, string>, oauthAccountId?: string, responses?: NovelResponsesStreamOptions) => OpenAIChatApi;
+    buildProviderApi: (chosen: ProviderSetting, customHeaderRecord: Record<string, string>, oauthAccountId?: string) => OpenAIChatApi;
     prepareProviderApi: (provider: ProviderSetting, customHeaderRecord: Record<string, string>) => Promise<OpenAIChatApi>;
-    resolveDeepReadRuntimeCore: () => Promise<ProviderRuntimeSnapshot>;
     resolveProviderRuntimeCore: (choice: ChatProviderChoice, assistant: Assistant) => Promise<ProviderRuntimeSnapshot>;
     resolveConfiguredTaskChatModel: (modelId: string) => Promise<ChatProviderChoice | null>;
     resolveConfiguredProviderChatModel: (providerId: string, modelId: string) => Promise<ChatProviderChoice | null>;
@@ -271,45 +252,6 @@ export const createProviderModelRuntime = (ports: ProviderModelRuntimePorts): Pr
         }
         return null;
     };
-    const loadDeepReadModelOptions = async (): Promise<DeepReadModelOption[]> => {
-        const providers: ProviderSetting[] = (await loadProviders(ports.getChatKvStore())) ?? [];
-        const options: DeepReadModelOption[] = [];
-        for (const provider of providers) {
-            for (const model of provider.models) {
-                if (model.type !== 'chat')
-                    continue;
-                options.push({
-                    providerId: provider.id, modelId: model.id,
-                    label: model.displayName.trim().length > 0 ? model.displayName : model.modelId,
-                    providerLabel: provider.name,
-                    available: makeProviderChoice(provider, model) !== null,
-                });
-            }
-        }
-        return options;
-    };
-    // C5 项目策略 picker 的唯一 provider/model 事实源。不可用模型仍返回，
-    // 以便固定选择失效后 UI 能原位呈现并引导用户修复，而不是静默替换。
-    const loadNovelModelOptions = async (): Promise<NovelModelOption[]> => {
-        const providers = await loadProviders(ports.getChatKvStore());
-        if (providers === null)
-            return [];
-        const options: NovelModelOption[] = [];
-        for (const provider of providers) {
-            for (const model of provider.models) {
-                if (model.type !== 'chat')
-                    continue;
-                options.push({
-                    providerId: provider.id,
-                    modelId: model.id,
-                    label: model.displayName.trim().length > 0 ? model.displayName : model.modelId,
-                    providerLabel: provider.name,
-                    available: hasUsableAuth(provider) && makeProviderChoice(provider, model) !== null,
-                });
-            }
-        }
-        return options;
-    };
     // resolveTaskChatModel(PreferencesStore.kt:479-481)—
     //   findModelById(modelId) ?: getCurrentChatModel(= resolveChatProviderChoice)
     const resolveTaskChatModelChoice = async (modelId: string, fallbackChoice?: ChatProviderChoice): Promise<ChatProviderChoice | null> => (await resolveConfiguredTaskChatModel(modelId)) ?? fallbackChoice ?? resolveChatProviderChoice();
@@ -362,7 +304,7 @@ export const createProviderModelRuntime = (ports: ProviderModelRuntimePorts): Pr
     };
     // D-087:三变体 api 构建公共化(resolveChatRuntime 与任务模型链路共用;
     //   分发/auth/header 语义与 D-046/D-078 逐字一致,未落地传输显式抛错)
-    const buildProviderApi = (chosen: ProviderSetting, customHeaderRecord: Record<string, string>, oauthAccountId: string = '', responses?: NovelResponsesStreamOptions): OpenAIChatApi => {
+    const buildProviderApi = (chosen: ProviderSetting, customHeaderRecord: Record<string, string>, oauthAccountId: string = ''): OpenAIChatApi => {
         // useResponseApi=true 走 createOpenAIChatApi 内部分流(Responses);不再在此 throw
         if (!hasUsableAuth(chosen)) {
             throw new Error('Provider 鉴权未配置或当前 Harmony 版本不支持');
@@ -425,14 +367,10 @@ export const createProviderModelRuntime = (ports: ProviderModelRuntimePorts): Pr
             // D-038:图片编码(data:/http(s): 直通,file:// 读文件编码;失败即抛)
             encodeImage: encodeImageForChat,
             // P6-01:官方 OpenAI + api_key 时注入 resume cursor KV Port
-            resumeStore: responses === undefined && openaiSetting.useResponseApi === true
+            resumeStore: openaiSetting.useResponseApi === true
                 ? createKvResponseResumeStore(ports.getChatKvStore())
                 : undefined,
             enableResponsesResume: openaiSetting.useResponseApi === true,
-            runId: responses?.runId,
-            resumeFrom: responses?.resumeFrom,
-            resumeMessages: responses?.partialMessages,
-            onResumeCheckpoint: responses?.onCheckpoint,
         });
     };
     // Auxiliary tasks keep their existing model/parameter/header policy and share OAuth refresh.
@@ -451,19 +389,6 @@ export const createProviderModelRuntime = (ports: ProviderModelRuntimePorts): Pr
         refreshGrok: ports.getValidGrokToken,
         buildApi: buildProviderApi,
     });
-    const resolveDeepReadRuntimeCore = async (): Promise<ProviderRuntimeSnapshot> => {
-        const reference: TaskModelReference = await readTaskModelReference(TASK_DEEPREAD_MODEL_KEY);
-        const choice: ChatProviderChoice | null = reference.kind === 'auto'
-            ? await resolveChatProviderChoice()
-            : await resolveConfiguredTaskModel(reference, 'chat');
-        if (choice === null) {
-            throw new Error(reference.kind === 'auto'
-                ? '请先在提供商设置中配置可用的聊天模型。'
-                : '指定的深读模型已不可用，请检查提供商认证或重新选择模型。');
-        }
-        const assistants: Assistant[] = await ports.getChatAssistants();
-        return resolveProviderRuntimeCore(choice, assistants[0]);
-    };
     const resolveChatProviderRuntime = async (assistantId?: string, exactModelId?: string, exactProviderId?: string): Promise<ChatProviderRuntime | null> => {
         // 助手解析(D-028):会话绑定 assistantId 优先,未命中/未传 → 首个(D-019 延续)
         const assistants: Assistant[] = await ports.getChatAssistants();
@@ -498,5 +423,5 @@ export const createProviderModelRuntime = (ports: ProviderModelRuntimePorts): Pr
         };
     };
     const prepareChoiceAuth = (provider: ProviderSetting): Promise<ProviderAuthSnapshot> => prepareProviderAuth({ provider, refreshCodex: ports.getValidCodexToken, refreshGrok: ports.getValidGrokToken });
-    return { resolveChatProviderRuntime, prepareChoiceAuth, getChatModelSelection, saveChatModelSelection, resolveChatProviderChoice, readTaskModelReference, saveTaskModelPair, loadTaskModelReferences, loadTaskModelIds, saveTaskModelId, loadTaskPrompts, saveTaskPrompt, loadDeepReadModelOptions, loadNovelModelOptions, resolveTaskChatModelChoice, resolveConfiguredTaskModel, resolveTaskModelReference, resolveTaskModelReferenceChain, taskModelReferenceForChoice, currentChatModelReference, resolveTaskModelChain, currentChatModelUuid, describeChatModel, buildProviderApi, prepareProviderApi, resolveDeepReadRuntimeCore, resolveProviderRuntimeCore, resolveConfiguredTaskChatModel, resolveConfiguredProviderChatModel };
+    return { resolveChatProviderRuntime, prepareChoiceAuth, getChatModelSelection, saveChatModelSelection, resolveChatProviderChoice, readTaskModelReference, saveTaskModelPair, loadTaskModelReferences, loadTaskModelIds, saveTaskModelId, loadTaskPrompts, saveTaskPrompt, resolveTaskChatModelChoice, resolveConfiguredTaskModel, resolveTaskModelReference, resolveTaskModelReferenceChain, taskModelReferenceForChoice, currentChatModelReference, resolveTaskModelChain, currentChatModelUuid, describeChatModel, buildProviderApi, prepareProviderApi, resolveProviderRuntimeCore, resolveConfiguredTaskChatModel, resolveConfiguredProviderChatModel };
 };

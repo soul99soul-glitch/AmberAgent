@@ -12,7 +12,9 @@ function loadPureModule(filename) {
   cache.set(filename, exports);
   const requireModule = spec => {
     if (spec === '@amber/deepread-domain') return Object.assign({},
-      ...['models.ts', 'helpers.ts', 'enums.ts', 'input_sources.ts', 'synthesis_templates.ts'].map(name => loadPureModule(path.join(domainRoot, name))));
+      ...['models.ts', 'helpers.ts', 'enums.ts', '../agent/message.ts', '../agent/reasoning_metadata.ts', '../agent/ids.ts']
+        .filter(name => fs.existsSync(path.join(domainRoot, name)))
+        .map(name => loadPureModule(path.join(domainRoot, name))));
     if (spec === '@amber/chat-domain') return loadPureModule(path.resolve(__dirname, '../../../chat/src/main/ets/chat/markdown_blocks.ts'));
     if (spec.startsWith('.')) {
       const resolved = path.resolve(path.dirname(filename), spec);

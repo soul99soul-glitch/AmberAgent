@@ -1,8 +1,3 @@
-import { DeepReadSubpageDock, DeepReadDockLayout } from '../components/deepread/DeepReadSubpageDock.ets';
-import { getProductKind } from '../platform_impl/ProductIdentity.ets';
-import { DeepReadDesign as D } from '../design/DeepReadDesign.ets';
-import { DeepReadSettingsHeader, DeepReadSettingsSection, DeepReadSettingsGroup, DeepReadSettingsRow,
-  DeepReadSettingsNote } from '../components/deepread/DeepReadSettingsVisual.ets';
 // ChatProviderSettingsPage — Provider 设置(D-047:三变体列表 + 编辑)
 // Android 基准:SettingProviderConfigPage.kt
 //   OpenAIEndpointFields(:531-561) / GoogleAuthConsole(:436-487)
@@ -342,25 +337,12 @@ struct ChatProviderSettingsPage {
 
   @Builder
   ConfigurationLinks(): void {
-    if (getProductKind() === 'novel') {
-      CardRow({ label: '小说模型设置', desc: '写作、审稿和剧情同步的默认模型', isLast: true,
-        onRowClick: (): void => { router.pushUrl({ url: 'pages/NovelStandaloneSettingsPage' }); } })
-    } else if (getProductKind() === 'deepread') {
-      CardRow({ label: '阅读模型设置', desc: '选择深度阅读和模板生成使用的模型', isLast: true,
-        onRowClick: (): void => { router.pushUrl({ url: 'pages/SettingDeepReadPage' }); } })
-    } else {
     CardRow({
       label: '模型与提示词',
       desc: '聊天模型与标题、建议、压缩等任务模型可单独选择服务商与模型',
+      isLast: true,
       onRowClick: (): void => { router.pushUrl({ url: 'pages/ChatTaskModelsPage' }); },
     })
-    CardRow({
-      label: '深度阅读配置',
-      desc: '深度阅读模型可跟随聊天配置，也可从模型库单独选择',
-      isLast: true,
-      onRowClick: (): void => { router.pushUrl({ url: 'pages/SettingDeepReadPage' }); },
-    })
-      }
   }
 
   @Builder
@@ -373,115 +355,10 @@ struct ChatProviderSettingsPage {
     })
   }
 
-  private configured(row: ProviderRow): boolean {
-    return row.auth === 'key' || row.auth === 'google_ready'
-      || row.auth === 'google_service_account_configured' || row.auth === 'google_configured'
-      || row.auth === 'google_authorizing';
-  }
-
-  private readingRows(configured: boolean): ProviderRow[] {
-    return this.filteredRows().filter((row: ProviderRow): boolean => this.configured(row) === configured);
-  }
-
-  @Builder
-  DeepReadRows(configured: boolean): void {
-    ForEach(this.readingRows(configured), (row: ProviderRow, index: number): void => {
-      DeepReadSettingsRow({ label: row.name,
-        detail: `${row.modelsCount} 个模型 · ${row.enabled ? '已启用' : '已停用'}`,
-        value: this.chipLabel(row.auth), last: index === this.readingRows(configured).length - 1,
-        onTap: (): void => { router.pushUrl({ url: 'pages/ChatProviderDetailPage', params: { providerId: row.id } }); } })
-    }, (row: ProviderRow): string => `${row.id}:${row.viewVersion}`)
-  }
-
-  @Builder
-  DeepReadPage(): void {
-    Stack({ alignContent: Alignment.Bottom }) {
-      Column() {
-        DeepReadSettingsHeader({ title: '模型服务' })
-        Scroll() {
-          Column() {
-            if (!this.loaded) {
-              DeepReadSettingsNote({ text: this.loadError.length > 0 ? this.loadError : '正在读取模型服务…' })
-              if (this.loadError.length > 0) {
-                DeepReadSettingsGroup({ content: (): void => { this.DeepReadRetry(); } })
-              }
-            } else {
-              Row({ space: 8 }) {
-                Icon({ name: 'search', iconSize: 17, color: D.muted })
-                TextInput({ text: this.filterQuery, placeholder: '搜索模型服务' })
-                  .fontSize(17).fontColor(D.ink).placeholderColor(D.muted)
-                  .backgroundColor(Color.Transparent).padding(0).layoutWeight(1)
-                  .onChange((value: string): void => { this.filterQuery = value; })
-              }.width('100%').height(48).padding({ left: 16, right: 16 }).backgroundColor(D.card).borderRadius(D.radius)
-              DeepReadSettingsNote({ text: '配置服务地址与凭据，再添加需要的模型。' })
-              if (this.secretRecoveryNotice) {
-                DeepReadSettingsNote({ text: '本机安全存储不可用，已清除无法解密的密钥，请重新填写服务商与模型的 API Key。' })
-              }
-              DeepReadSettingsSection({ title: '已配置' })
-              if (this.readingRows(true).length > 0) {
-                DeepReadSettingsGroup({ content: (): void => { this.DeepReadRows(true); } })
-              } else {
-                DeepReadSettingsNote({ text: this.filterQuery.trim().length > 0 ? '没有匹配的已配置服务。' : '还没有配置服务。' })
-              }
-              if (this.readingRows(false).length > 0) {
-                DeepReadSettingsSection({ title: '待配置' })
-                DeepReadSettingsGroup({ content: (): void => { this.DeepReadUnconfigured(); } })
-              }
-              DeepReadSettingsSection({ title: '添加服务' })
-              DeepReadSettingsGroup({ content: (): void => { this.DeepReadAdd(); } })
-              DeepReadSettingsNote({ text: `${this.all.length} 个服务 · ${this.totalModelCount()} 个模型 · ${this.onlineCount()} 个已启用` })
-            }
-          }.width('100%').padding({ left: D.gutter, right: D.gutter, top: 12, bottom: DeepReadDockLayout.bottomInset(this.navBarHeight) })
-        }.align(Alignment.TopStart).layoutWeight(1).scrollBar(BarState.Off)
-      }.width('100%').height('100%').backgroundColor(D.paper)
-      DeepReadSubpageDock().align(Alignment.Bottom).hitTestBehavior(HitTestMode.Transparent)
-    }.width('100%').height('100%')
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-  }
-
-  @Builder
-  DeepReadRetry(): void {
-    DeepReadSettingsRow({ label: '重新读取', valueAccent: true, last: true,
-      onTap: (): void => { this.load(); } })
-  }
-
-  private toggleUnconfigured(): void {
-    if (!this.loaded) return;
-    if (this.reduceMotion || this.appBackgrounded) {
-      this.unconfiguredExpanded = !this.unconfiguredExpanded;
-      return;
-    }
-    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
-      this.unconfiguredExpanded = !this.unconfiguredExpanded;
-    });
-  }
-
-  @Builder
-  DeepReadUnconfigured(): void {
-    DeepReadSettingsRow({ label: `${this.readingRows(false).length} 个待配置服务`,
-      value: this.unconfiguredExpanded ? '收起' : '展开', picker: true, last: !this.unconfiguredExpanded,
-      onTap: (): void => { this.toggleUnconfigured(); } })
-    if (this.unconfiguredExpanded) {
-      Column() { this.DeepReadRows(false); }.width('100%')
-        .transition(TransitionEffect.OPACITY.animation({ duration: this.reduceMotion || this.appBackgrounded ? 0 : 160 }))
-    }
-  }
-
-  @Builder
-  DeepReadAdd(): void {
-    DeepReadSettingsRow({ label: '添加模型服务', action: true,
-      onTap: (): void => { this.sheetShow = true; } })
-    DeepReadSettingsRow({ label: '从文件导入', last: true,
-      onTap: (): void => { this.importProvider().catch((): void => {}); } })
-  }
-
   build() {
     Stack() {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
-    if (getProductKind() === 'deepread') {
-      this.DeepReadPage()
-    } else {
     Column() {
       CenteredTitleBar({
         title: '服务商',
@@ -507,11 +384,7 @@ struct ChatProviderSettingsPage {
         Scroll() {
           Column() {
             FooterNote({
-              text: getProductKind() === 'deepread'
-                ? '这里配置本应用的服务商与模型。到阅读模型设置选择文章和模板生成使用的模型。'
-                : getProductKind() === 'novel'
-                  ? '这里配置本应用的服务商与模型。项目设置可以指定创作模型，代笔和润色任务可单独选择模型。'
-                  : '聊天和小说共用这里的服务商与模型。小说默认跟随聊天，也可在项目设置中指定。任务模型可单独选择服务商；深度阅读可跟随聊天或从模型库单独选择。',
+              text: '这里配置本应用的服务商与模型；标题、建议与上下文压缩等任务模型可单独指定，也可默认跟随当前对话模型。',
             })
             if (this.secretRecoveryNotice) {
               Text('本机安全存储不可用，已清除无法解密的密钥。请在下方重新填写服务商与模型的 API Key。')
@@ -617,20 +490,12 @@ struct ChatProviderSettingsPage {
     }
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-    }
     ProviderTemplatePickerSheet({
             show: this.sheetShow,
             existingIds: JSON.stringify(this.all.map((p: ProviderSetting): string => p.id)),
             onPickPreset: (p: ProviderSetting): void => {
               this.sheetShow = false;
-              if (getProductKind() === 'deepread') {
-                const draft: ProviderSetting = JSON.parse(JSON.stringify(p)) as ProviderSetting;
-                draft.id = newId();
-                draft.models = draft.models.map((model: ProviderModel): ProviderModel => { model.id = newId(); return model; });
-                setPendingProvider(draft);
-              } else {
-                setPendingProvider(p);
-              }
+              setPendingProvider(p);
               const params: Record<string, string> = {};
               params['isNew'] = '1';
               router.pushUrl({ url: 'pages/ChatProviderDetailPage', params: params });

@@ -2,10 +2,12 @@ import type { PendingUserMessageMode } from '@amber/chat-domain';
 import { ChatComposerSession } from '../../platform_impl/chat/ChatComposerSession.ets';
 import type { PendingChipRow } from '../../platform_impl/chat/ChatComposerSession.ets';
 import { ChatConversationPresentation } from '../../platform_impl/chat/ChatConversationPresentation.ets';
-import { ChatCloudDialogueSession, type CloudDialogueTaskRecord } from '../../platform_impl/chat/ChatCloudDialogueSession.ets';
+import { ChatCloudDialogueSession } from '../../platform_impl/chat/ChatCloudDialogueSession.ets';
 import { ChatModelContextSession } from '../../platform_impl/chat/ChatModelContextSession.ets';
 import { ChatCloudDialogueStrip } from './ChatCloudDialogueStrip.ets';
 import { AmberBottomModeBar, type BottomDockTab } from './AmberBottomModeBar.ets';
+import { AmberTaskCenterSheet } from './AmberTaskCenterSheet.ets';
+import { AmberHubsSheet } from './AmberHubsSheet.ets';
 import { ChatInput } from '../ChatInput.ets';
 import { ChatPendingQueueSheet } from '../ChatPendingQueueSheet.ets';
 import { JevCompletionNoticeView } from '../JevCompletionNotice.ets';
@@ -27,6 +29,9 @@ export struct ChatComposerPane {
   @Prop activeTab: BottomDockTab = 'chat';
   @Prop attentionTaskCount: number = 0;
   @Prop runningTaskCount: number = 0;
+  @Prop pendingApprovalCount: number = 0;
+  @Prop consecutiveErrorCount: number = 0;
+  @Prop hasUnrecoveredError: boolean = false;
   @BuilderParam sandboxContent: () => void;
   @BuilderParam runtimeContent: () => void;
   onCompact: () => void = (): void => {};
@@ -36,6 +41,9 @@ export struct ChatComposerPane {
   onOpenGatewaySettings: () => void = (): void => {};
   onOpenTasksSettings: () => void = (): void => {};
   onOpenHubsPlaceholder: () => void = (): void => {};
+  onOpenConversation: (conversationId: string) => void = (_id: string): void => {};
+  onFocusApproval: () => void = (): void => {};
+  onStartWithHubInstruction: (instruction: string, title: string) => void = (_inst: string, _title: string): void => {};
   @Builder
   PendingQueueSheet(): void {
     ChatPendingQueueSheet({
@@ -53,100 +61,43 @@ export struct ChatComposerPane {
   @Builder
   InlineDockPanel(): void {
     if (this.activeTab === 'tasks') {
-      Column({ space: 10 }) {
-        Row() {
-          Text('后台任务')
-            .fontSize(15)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(INK)
-          Blank()
-          Text('定时与任务页 ›')
-            .fontSize(12)
-            .fontColor(this.accentColorStore)
-            .onClick((): void => { this.onOpenTasksSettings(); })
-        }
-        .width('100%')
-
-        if (this.cloudDialogue.runningTasks().length === 0) {
-          Text(this.cloudDialogue.isActiveMode()
-            ? '当前云端主对话暂无运行中任务；回到对话发送消息即可委派。'
-            : '当前会话暂无运行中异步任务。')
-            .fontSize(13)
-            .fontColor(INK3)
-            .width('100%')
-        } else {
-          ForEach(this.cloudDialogue.runningTasks(), (task: CloudDialogueTaskRecord): void => {
-            Row({ space: 8 }) {
-              Text(this.cloudDialogue.isActiveMode() ? '☁️ 云端' : '📱 本机')
-                .fontSize(11)
-                .fontColor(this.accentColorStore)
-              Text(task.title.length > 0 ? task.title : '运行中任务')
-                .fontSize(13)
-                .fontColor(INK)
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .layoutWeight(1)
-              Text(task.stopRequested ? '停止中…' : '停止')
-                .fontSize(12)
-                .fontColor(ERROR)
-                .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-                .borderRadius(999)
-                .backgroundColor(SURFACE2)
-                .enabled(!task.stopRequested)
-                .onClick((): void => {
-                  this.cloudDialogue.stopTask(task.workItemId);
-                })
-            }
-            .width('100%')
-            .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-            .borderRadius(16)
-            .backgroundColor(SURFACE2)
-          }, (task: CloudDialogueTaskRecord): string => `${task.workItemId}-${task.status}-${task.stopRequested}`)
-        }
+      Column() {
+        AmberTaskCenterSheet({
+          cloudDialogue: this.cloudDialogue,
+          currentConversationId: this.presentation.conversation?.id ?? '',
+          pendingApprovalCount: this.pendingApprovalCount,
+          consecutiveErrorCount: this.consecutiveErrorCount,
+          hasUnrecoveredError: this.hasUnrecoveredError,
+          onBackToChat: (): void => { this.onSelectTab('chat'); },
+          onOpenTasksSettings: (): void => { this.onOpenTasksSettings(); },
+          onOpenGatewaySettings: (): void => { this.onOpenGatewaySettings(); },
+          onJumpToConversation: (id: string): void => {
+            this.onSelectTab('chat');
+            this.onOpenConversation(id);
+          },
+          onFocusApproval: (): void => { this.onFocusApproval(); },
+          onStatusMessage: (msg: string): void => { this.presentation.errorMsg = msg; },
+        })
       }
       .width('100%')
-      .padding(16)
-      .borderRadius(28)
-      .backgroundColor(SURFACE)
-      .border({ width: 0.75, color: HOME_GLASS_EDGE })
-      .shadow({ radius: 16, color: HOME_GLASS_SHADOW, offsetY: 4 })
-      .margin({ left: 16, right: 16, bottom: 8 })
       .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 20 }))
         .animation({ duration: 200, curve: Curve.EaseOut }))
     } else if (this.activeTab === 'hubs') {
-      Column({ space: 8 }) {
-        Row() {
-          Text('专题中心')
-            .fontSize(15)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(INK)
-          Blank()
-          Text('返回对话')
-            .fontSize(12)
-            .fontColor(this.accentColorStore)
-            .onClick((): void => { this.onSelectTab('chat'); })
-        }
-        .width('100%')
-        Text('按主题聚合关联对话与专属指令，帮助把长期项目沉淀为专注工作区。')
-          .fontSize(13)
-          .fontColor(INK3)
-          .width('100%')
-        Row() {
-          Text('管理现有小应用 ›')
-            .fontSize(12.5)
-            .fontColor(this.accentColorStore)
-            .onClick((): void => { this.onOpenHubsPlaceholder(); })
-        }
-        .width('100%')
-        .padding({ top: 4 })
+      Column() {
+        AmberHubsSheet({
+          currentConversationId: this.presentation.conversation?.id ?? '',
+          onBackToChat: (): void => { this.onSelectTab('chat'); },
+          onOpenConversation: (id: string): void => {
+            this.onSelectTab('chat');
+            this.onOpenConversation(id);
+          },
+          onStartWithInstruction: (instruction: string, title: string): void => {
+            this.onStartWithHubInstruction(instruction, title);
+          },
+          onOpenMiniApps: (): void => { this.onOpenHubsPlaceholder(); },
+        })
       }
       .width('100%')
-      .padding(16)
-      .borderRadius(28)
-      .backgroundColor(SURFACE)
-      .border({ width: 0.75, color: HOME_GLASS_EDGE })
-      .shadow({ radius: 16, color: HOME_GLASS_SHADOW, offsetY: 4 })
-      .margin({ left: 16, right: 16, bottom: 8 })
       .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 20 }))
         .animation({ duration: 200, curve: Curve.EaseOut }))
     }

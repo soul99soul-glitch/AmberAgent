@@ -20,11 +20,11 @@ function load(relative, storage, imports = {}) {
 }
 
 for (const [bundle, kind, root] of [
-  ['app.amber.deepread', 'agent', 'pages/ChatListPage'],
-  ['app.amber.novel', 'novel', 'pages/NovelProjectsPage'],
-  ['app.amber.deepread.reader', 'deepread', 'pages/DeepReadRootPage'],
+  ['app.amber.deepread', 'agent', 'pages/ChatPage'],
+  ['app.amber.novel', 'novel', 'pages/ChatPage'],
+  ['app.amber.deepread.reader', 'deepread', 'pages/ChatPage'],
 ]) {
-  test(`${kind} root and both notification types target their installed sandbox`, async () => {
+  test(`${kind} root and notification target their installed sandbox (${bundle})`, async () => {
     const storage = new Map([['abilityContext', { applicationInfo: { name: bundle } }]]);
     const identity = load('platform_impl/ProductIdentity.ets', storage);
     storage.set('productKind', identity.productKindForBundle(identity.getAppBundleName()));
@@ -43,29 +43,10 @@ for (const [bundle, kind, root] of [
       '@kit.PerformanceAnalysisKit': { hilog: { warn() {} } },
     });
     await notifier.createNotificationNotifier().notifyRunning('topic', 'Article', 1);
-    await notifier.buildNovelJobWantAgent('project', 'branch', 'job');
-    assert.equal(wants.length, 2);
-    assert.ok(wants.every(want => want.bundleName === bundle && want.abilityName === 'EntryAbility'));
+    assert.equal(wants.length, 1);
+    assert.equal(wants[0].bundleName, bundle);
+    assert.equal(wants[0].abilityName, 'EntryAbility');
     assert.equal(wants[0].parameters.topicId, 'topic');
-    assert.equal(wants[1].parameters.novelJobId, 'job');
-  });
-  test(`${kind} work scheduling follows the WorkAbility context`, () => {
-    const storage = new Map([['abilityContext', { applicationInfo: { name: bundle } }]]);
-    const identity = load('platform_impl/ProductIdentity.ets', storage);
-    const calls = [];
-    const scheduler = load('platform_impl/NovelPolishWorkScheduler.ets', storage, {
-      './ProductIdentity.ets': identity,
-      '@kit.BackgroundTasksKit': { workScheduler: {
-        NetworkType: { NETWORK_TYPE_ANY: 0 }, startWork: work => calls.push(work),
-        stopWork: work => calls.push(work),
-      } },
-      '@kit.PerformanceAnalysisKit': { hilog: { error() {}, warn() {} } },
-    });
-    const key = { projectId: 'p', branchId: 'b', jobId: 'j' };
-    scheduler.scheduleNovelPolishWork(key); scheduler.cancelNovelPolishWork(key);
-    assert.equal(calls.length, 2);
-    assert.ok(calls.every(work => work.bundleName === bundle));
-    assert.equal(calls[0].workId, calls[1].workId);
   });
 }
 

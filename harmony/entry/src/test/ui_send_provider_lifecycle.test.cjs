@@ -182,71 +182,6 @@ test('UI-08 saved provider parameters retain the ordinary navigation', async () 
   const f = provider(); await f.page.openModelParameters('model'); await tick();
   assert.equal(f.navigation.length, 1); assert.equal(f.navigation[0].params.modelId, 'model');
 });
-test('UI-04 notification entry cannot override an explicit branch switch', async () => {
-  let active = 'A'; const calls = [];
-  const creation = { open: async () => ({ messages: [] }), activeRun: () => null,
-    readOrdinaryRun: async () => ({ record: null, active: false, retryAllowed: false, resumeAllowed: false }),
-    stopActiveRun: async () => {},
-    workspaceStatus: async () => ({ activeBranchId: active }),
-    switchBranch: async (_id, branch) => { active = branch; calls.push(branch); },
-    ghostwriteJob: async () => null, latestGhostwriteReport: async () => null,
-    polishJob: async (_id, job) => job ? ({ jobId: job, branchId: 'A', stage: 'completed' }) : null,
-    validateGhostwriteModels: async () => {} };
-  const loadNovelOwner = name => {
-    const ownerSource = fs.readFileSync(path.join(root, '../platform_impl/novel', `${name}.ets`), 'utf8');
-    const code = ts.transpileModule(ownerSource, {
-      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
-    }).outputText;
-    const exported = {};
-    new Function('exports', 'require', 'Observed', 'Scroller', code)(exported, dependency => {
-      if (dependency === '@amber/deepread-domain') return require('../../../deepread/src/main/ets/novel/models.ts');
-      if (dependency === '@amber/chat-domain') return {};
-      if (dependency.endsWith('/ProductIdentity.ets')) return { getProductKind: () => 'novel' };
-      if (dependency.endsWith('/NovelComposerState')) return require('../main/ets/novel/NovelComposerState.ts');
-      if (dependency === '@kit.ArkUI') return { router: {}, promptAction: { showToast() {} } };
-      if (dependency === '@kit.BasicServicesKit' || dependency.endsWith('/NativeTimelineFollow.ets') ||
-        dependency.endsWith('/NovelArchivePresentation.ets') || dependency.endsWith('/NovelSettingProposalProjection.ets')) return {};
-      throw Error('Unexpected novel owner dependency: ' + dependency);
-    }, constructor => constructor, class {});
-    return new exported[name]();
-  };
-  const page = actualPage('NovelWorkspacePage', ['reload', 'selectWorkspaceBranch', 'stopAndSwitchWorkspaceBranch',
-    'clearStudioFeedback', 'hasBlockingNovelRun'], {
-    getNovelCreation: () => creation, composerOwner: (p, b) => JSON.stringify([p, b]),
-    promptAction: { showToast() {} }, getProductKind: () => 'novel',
-  });
-  Object.assign(page, { projectId: 'P', requestedBranchId: 'A', requestedPolishJobId: 'old', reloadToken: 0,
-    pageAlive: true, busy: false, project: null, workspaceStatus: { activeBranchId: 'A' },
-    studioVisibleCycle: 0, collectionStamp: 0,
-    discussion: loadNovelOwner('NovelDiscussionSession'), jobs: loadNovelOwner('NovelJobSession'),
-    manuscript: { clearCollectionFeedback() {} }, compendium: { settingTab: 0 },
-    showWorkspaceOperationError: (_label, error) => { throw error; },
-  });
-  const commonPorts = {
-    creation, projectId: () => page.projectId, currentProject: () => page.project,
-    currentStatus: () => page.workspaceStatus, isBusy: () => page.busy,
-    error: value => { page.errorMsg = value; },
-    hasBlockingNovelRun: () => page.hasBlockingNovelRun(), reload: () => page.reload(),
-  };
-  page.discussion.start({ ...commonPorts,
-    composerDraftStore: { load: async () => ({ text: '', mode: 'whole_chapter' }), save: async () => {} },
-    setBusy: value => { page.busy = value; }, operationError: page.showWorkspaceOperationError,
-    jobLocksWorkspace: () => page.jobs.novelJobLocksWorkspace(),
-    currentGhostwriteJob: () => page.jobs.ghostwriteJob, currentGhostwriteReport: () => page.jobs.ghostwriteReport,
-    reloadToken: () => page.reloadToken, selectedTab: () => 0, backgrounded: () => false,
-    closeControl() {}, uiContext: () => ({}),
-  });
-  page.jobs.start({ ...commonPorts,
-    requestedPolishJobId: () => page.requestedPolishJobId,
-    clearRequestedPolishJob: () => { page.requestedPolishJobId = ''; },
-    hasOrdinaryRun: () => page.discussion.activeRunId.length > 0,
-    publishWorkspace: (project, status) => { page.project = project; page.workspaceStatus = status; },
-    operationError: page.showWorkspaceOperationError, closeControl() {}, showJobSettings() {},
-  });
-  await page.reload(); assert.equal(page.jobs.polishJob.jobId, 'old');
-  await page.selectWorkspaceBranch('B'); assert.equal(active, 'B');
-  assert.equal(page.workspaceStatus.activeBranchId, 'B'); assert.deepEqual(calls, ['B']);
-});
 test('UI-05 reverse title search completion cannot overwrite the current query', async () => {
   const old = deferred(), fresh = deferred();
   const Drawer = loadDrawerSession();
@@ -256,34 +191,6 @@ test('UI-05 reverse title search completion cannot overwrite the current query',
   page.refreshDrawerConversations('old'); page.refreshDrawerConversations('new');
   fresh.resolve([{ id: 'new-hit' }]); await tick(); old.resolve([{ id: 'old-hit' }]); await tick();
   assert.equal(page.drawerSearchText, 'new'); assert.equal(page.drawerConversations[0].id, 'new-hit');
-});
-test('UI-07 returning from the reader refreshes history completion state', async () => {
-  require('../../../chat/node_modules/tsx/dist/cjs/index.cjs');
-  const { observeDeepReadLibrary } = require('../../../deepread/src/main/ets/domain/library.ts');
-  let complete = false;
-  const limits = [];
-  const currentEntries = () => [{ topicId: 'a', output: { generationComplete: complete } }];
-  const page = actualPage('DeepReadHistoryPage',
-    ['aboutToAppear', 'onPageShow', 'onPageHide', 'leaveVisible', 'settleArrival', 'settleEmptyFeedback', 'stopObservation', 'startObservation',
-      'attachObservation', 'connectScheduler', 'reloadHistory', 'loadHistorySnapshot'], {
-      getRepository: () => ({ observeHistory: () => ({ subscribe: callback => { callback(currentEntries()); return () => {}; } }), listHistory: async limit => {
-        limits.push(limit);
-        return currentEntries();
-      } }),
-      getDeepReadScheduler: async () => ({ getActiveRuns: () => [], observeActiveRuns: () => ({ subscribe: callback => { callback([]); return () => {}; } }) }),
-      observeDeepReadLibrary, KeyboardAvoidMode: { OFFSET: 'offset', RESIZE: 'resize' }, getProductKind: () => 'agent',
-    });
-  Object.assign(page, { pageAlive: false, pageVisible: false, loadToken: 0, observationToken: 0, unsubscribeLibrary: null,
-    entries: [], activeRuns: [], loaded: false, loadError: '', runtimeError: '', keyboardAdjusted: false,
-    arrivalTimer: -1, arrivalOffset: 0, emptyBounceTimer: -1, emptyBounceId: 0, emptyIconScale: 1,
-    getUIContext: () => ({ getKeyboardAvoidMode: () => 'offset', setKeyboardAvoidMode() {} }) });
-  page.aboutToAppear(); page.onPageShow(); await tick();
-  assert.equal(page.entries[0].output.generationComplete, false);
-  page.onPageHide(); complete = true; page.onPageShow(); await tick();
-  assert.equal(page.entries[0].output.generationComplete, true);
-  assert.equal(page.loaded, true);
-  assert.equal(page.loadError, '');
-  assert.deepEqual(limits, [0, 0], 'every entry reads the complete persisted library');
 });
 
 test('UI-03 edit-mode long press preserves new draft typed during durable append', async () => {

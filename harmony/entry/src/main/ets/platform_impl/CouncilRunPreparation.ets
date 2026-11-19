@@ -1,11 +1,11 @@
-import type { CouncilGenerateRequest, DeepReadPlaybookRepository, FileStore, HttpClient,
+import type { CouncilGenerateRequest, FileStore, HttpClient,
   ModelCouncilTextRunner } from '@amber/deepread-domain';
 import type { AgentTool, Assistant, ChatModel, ChatStreamProvider, ChatToolDefinition, CompactStore,
   Conversation, ConversationRepository, KeyValueStore, McpSettingsPort, McpToolActivityPort,
   McpToolIdentity, MemoryToolDeps, MoshRuntime, PluginStore, PosixWorkspaceManager, PythonRuntime,
   RecipeStore, SessionAccessGrantStore, SkillMetadata, SkillWorkspacePort, SSHProfileStore,
   TerminalRuntime, ToolInvocationRequest, ToolLoopOptions } from '@amber/chat-domain';
-import { AgentToolActivityStore, createClipboardTool, createDeepReadPlaybookTools,
+import { AgentToolActivityStore, createClipboardTool,
   createHealthSummaryTool, createMcpServerTools, createRunPlanUpdateTool, loadSearchPrefs,
   makeAgentTool, makeConversation, McpManager, SkillManager } from '@amber/chat-domain';
 import { loadAgentRuntimeSnapshot } from './AgentRuntimePrefs.ets';
@@ -55,7 +55,6 @@ export interface CouncilRunPreparationDeps {
   getAgentCronTools: () => Promise<AgentTool[]>;
   getPermissionsStatusTool: () => AgentTool;
   getAgentPromptConfigTool: () => AgentTool;
-  playbookRepository: DeepReadPlaybookRepository;
 }
 
 const activityPort = (store: AgentToolActivityStore): McpToolActivityPort => ({
@@ -122,7 +121,7 @@ export const prepareCouncilToolRunner = async (deps: CouncilRunPreparationDeps):
   const cronTools: AgentTool[] = await deps.getAgentCronTools();
   const commonTools: AgentTool[] = taskTools.concat(cronTools, [deps.getPermissionsStatusTool(),
     createJevStatusTool(), createRunPlanUpdateTool(), createHealthSummaryTool(createEntryHealthReadPort()),
-    deps.getAgentPromptConfigTool()], createSoulTools(), createDeepReadPlaybookTools(deps.playbookRepository));
+    deps.getAgentPromptConfigTool()], createSoulTools());
   const readLiveScope = async (assistantId: string): Promise<CouncilLiveScope> => {
     const current: Assistant | null = (await deps.getAssistants()).find(
       (item: Assistant): boolean => item.id === assistantId) ?? null;

@@ -30,6 +30,63 @@ export const APP_STORAGE_SOUL_DISPLAY_NAME: string = 'agentSoulDisplayName';
 export const APP_STORAGE_SOUL_TAGLINE: string = 'agentSoulTagline';
 export const APP_STORAGE_SOUL_IS_DEFAULT: string = 'agentSoulIsDefault';
 export const APP_STORAGE_SOUL_REVISION: string = 'agentSoulRevision';
+export const APP_STORAGE_SOUL_AVATAR_URI: string = 'agentSoulAvatarUri';
+export const APP_STORAGE_SOUL_AVATAR_PRESET: string = 'agentSoulAvatarPreset';
+
+const AGENT_SOUL_AVATAR_PREFS_KEY: string = 'agent_soul_avatar_prefs_v1';
+
+export interface AgentSoulAvatarPrefs {
+  preset: string;
+  customUri: string;
+}
+
+const VALID_AVATAR_PRESETS: string[] = ['muse', 'star', 'rocket', 'yinyang', 'alien', 'ghost'];
+
+const normalizeAvatarPreset = (raw: string): string => {
+  const trimmed: string = raw.trim();
+  return VALID_AVATAR_PRESETS.indexOf(trimmed) >= 0 ? trimmed : 'muse';
+};
+
+export const publishSoulAvatarPrefsToAppStorage = (prefs: AgentSoulAvatarPrefs): void => {
+  try {
+    AppStorage.setOrCreate<string>(APP_STORAGE_SOUL_AVATAR_PRESET, normalizeAvatarPreset(prefs.preset));
+    AppStorage.setOrCreate<string>(APP_STORAGE_SOUL_AVATAR_URI, prefs.customUri.trim());
+  } catch (_e) {
+    // 非 ArkUI 测试环境忽略
+  }
+};
+
+export const loadAgentSoulAvatarPrefs = async (): Promise<AgentSoulAvatarPrefs> => {
+  try {
+    const kv: KeyValueStore = getChatKvStore();
+    const raw: string | null = await kv.get(AGENT_SOUL_AVATAR_PREFS_KEY);
+    if (raw !== null && raw.trim().length > 0) {
+      const parsed = JSON.parse(raw) as Partial<AgentSoulAvatarPrefs>;
+      const prefs: AgentSoulAvatarPrefs = {
+        preset: normalizeAvatarPreset(typeof parsed.preset === 'string' ? parsed.preset : 'muse'),
+        customUri: typeof parsed.customUri === 'string' ? parsed.customUri.trim() : '',
+      };
+      publishSoulAvatarPrefsToAppStorage(prefs);
+      return prefs;
+    }
+  } catch (_e) {
+    // 回退默认形象预设
+  }
+  const fallback: AgentSoulAvatarPrefs = { preset: 'muse', customUri: '' };
+  publishSoulAvatarPrefsToAppStorage(fallback);
+  return fallback;
+};
+
+export const saveAgentSoulAvatarPrefs = async (preset: string, customUri: string): Promise<AgentSoulAvatarPrefs> => {
+  const prefs: AgentSoulAvatarPrefs = {
+    preset: normalizeAvatarPreset(preset),
+    customUri: customUri.trim(),
+  };
+  const kv: KeyValueStore = getChatKvStore();
+  await kv.put(AGENT_SOUL_AVATAR_PREFS_KEY, JSON.stringify(prefs));
+  publishSoulAvatarPrefsToAppStorage(prefs);
+  return prefs;
+};
 
 export interface SoulGatewayClientLike {
   getSoul(): Promise<CloudAgentSoulPayload>;
@@ -255,6 +312,7 @@ export const loadAgentSoulState = (forceReload: boolean = false): Promise<AgentS
 
 export const hydrateAgentSoulOnForeground = (): void => {
   const sync: AgentSoulCloudSynchronizer = getAgentSoulSynchronizer();
+  loadAgentSoulAvatarPrefs().catch((): void => {});
   sync.hydrateLocal().then((): Promise<AgentSoulState> => sync.syncFromCloudOnce()).catch((): void => {});
 };
 

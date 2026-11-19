@@ -10,8 +10,8 @@ import { router, promptAction, curves } from '@kit.ArkUI';
 import type { Conversation, ConversationSummary, DisplaySetting, ContinueCandidate } from '@amber/chat-domain';
 import { loadDisplaySetting, patchConversation } from '@amber/chat-domain';
 import {
-  getChatKvStore, getChatRepository, getNovelCreation, getAgentCronManager, getRepository, getCouncilManager,
-  getConversationRunService, getDeepReadScheduler
+  getChatKvStore, getChatRepository, getAgentCronManager, getCouncilManager,
+  getConversationRunService,
 } from '../di/AppContainer.ets';
 import { cleanupDeletedConversation, getFilesRepository } from '../platform_impl/ManagedFileStore.ets';
 import { getMiniAppRepositorySync } from '../platform_impl/MiniAppPlatform.ets';
@@ -100,8 +100,7 @@ export struct HomeListPane {
     cleanupDeletedConversation,
   });
   @State continuation: HomeContinueSession = new HomeContinueSession({
-    getNovelCreation, getAgentCronManager, getDeepReadScheduler, getRepository,
-    getMiniAppRepositorySync, getCouncilManager, getFilesRepository,
+    getAgentCronManager, getMiniAppRepositorySync, getCouncilManager, getFilesRepository,
   });
   private pageAlive: boolean = false;
   private firstShowDone: boolean = false;
@@ -212,22 +211,12 @@ export struct HomeListPane {
   }
 
   private openContinue(item: ContinueCandidate): void {
-    if (item.route.kind === 'novel') {
-      this.pushOnce({
-        url: 'pages/NovelWorkspacePage',
-        params: { projectId: item.route.projectId },
-      });
-    } else if (item.route.kind === 'cron') {
+    if (item.route.kind === 'cron') {
       this.pushOnce({ url: 'pages/SettingCronTasksPage' });
     } else if (item.route.kind === 'miniapp') {
       this.pushOnce({
         url: 'pages/MiniAppRunnerPage',
         params: { appId: item.route.appId },
-      });
-    } else if (item.route.kind === 'deepread') {
-      this.pushOnce({
-        url: 'pages/DeepReadArticlePage',
-        params: { topicId: item.route.topicId, title: item.route.title },
       });
     } else if (item.route.kind === 'council') {
       const runId: string = item.route.runId ?? '';
@@ -341,9 +330,7 @@ export struct HomeListPane {
   }
 
   private onFeature(id: string): void {
-    if (id === 'reader') this.pushOnce({ url: 'pages/BoardPage' });
-    else if (id === 'novel') this.pushOnce({ url: 'pages/NovelProjectsPage' });
-    else if (id === 'council') this.pushOnce({ url: 'pages/CouncilPage' });
+    if (id === 'council') this.pushOnce({ url: 'pages/CouncilPage' });
     else if (id === 'apps') this.pushOnce({ url: 'pages/MiniAppListPage' });
     else if (id === 'webmount') this.pushOnce({ url: 'pages/SettingExperimentalWebMountPage' });
     else promptAction.showToast({ message: '该功能即将上线', duration: 1500 });

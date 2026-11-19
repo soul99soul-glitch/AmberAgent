@@ -2,8 +2,6 @@
 // 对照 Android:20 个搜索源,这里实现主要 provider(免费 + 需 key)
 
 import type { AbortSignalLike, HttpClient, HttpRequest, HttpResponse, Storage, SearchProviderRegistry, SearchProvider, SearchHit } from '@amber/deepread-domain';
-import { createTavilyProvider } from '@amber/deepread-domain';
-import { createNewsNowProvider } from './NewsNowProvider.ets';
 import type { FreeEngineId, SearchServiceOptions, SearchSettings, DeepReadSearchGoogle } from '@amber/chat-domain';
 import {
   FREE_ENGINE_NAMES, SEARCH_SERVICE_TYPES, enabledServices, freeEngineCoolingDown, getSearchService,
@@ -424,18 +422,12 @@ class MultiProviderRegistry implements SearchProviderRegistry {
     // 用户配置的 API 源排最前(质量最好)
     const providers: SearchProvider[] = [
       new ConfiguredServicesProvider(this.loadSearchSettings, this.ensureSdk),
-      createNewsNowProvider(this.http),
     ];
     // 开关在每次搜索时现读(构造期读设置会在 AppContainer 未建好时回调 getAppContainer)
     for (let i = 0; i < DEEPREAD_FREE_ENGINES.length; i++) {
       providers.push(new FreeEngineProvider(DEEPREAD_FREE_ENGINES[i], this.loadSearchSettings, this.ensureSdk));
     }
     // 以下独立存储键目前没有任何写入方(设置页不写),属历史遗留;保留不动
-    // Tavily
-    const tavilyKey: string = await this.storage.get<string>('tavily_api_key', '');
-    if (tavilyKey.length > 0) {
-      providers.push(createTavilyProvider(this.http, { apiKey: tavilyKey }));
-    }
     // Bocha
     const bochaKey: string = await this.storage.get<string>('bocha_api_key', '');
     if (bochaKey.length > 0) {

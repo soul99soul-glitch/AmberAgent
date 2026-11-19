@@ -1,4 +1,3 @@
-import { hasSynthesisBody } from './synthesis_article.ts';
 // Deep Read 纯函数辅助 — HarmonyOS port of Android DeepReadModels.kt helpers
 import { DeepReadOutput, DeepReadSectionState, DeepReadUncertainty } from './models.ts';
 import { STAGE_ORDER, DeepReadGenerationStage, DeepReadSectionStatus, IMAGE_CONFIDENCE } from './enums.ts';
@@ -8,7 +7,9 @@ export const statusOf = (o: DeepReadOutput, stage: DeepReadGenerationStage): Dee
 };
 
 export const sectionsReady = (o: DeepReadOutput): boolean => {
-  if (o.templateArticle !== undefined) return hasSynthesisBody(o.templateArticle);
+  if (o.templateArticle !== undefined) {
+    return (o.templateArticle.markdown?.trim().length ?? 0) > 0 || (o.templateArticle.title?.trim().length ?? 0) > 0;
+  }
   // 严格:4 个 stage 都必须存在且 READY (Android DeepReadModels.kt:109-110)
   return STAGE_ORDER.every(s => o.sectionStates[s]?.status === 'READY');
 };
@@ -192,7 +193,7 @@ const articleTextForQualityCheck = (o: DeepReadOutput): string => {
 };
 
 export const hasReadableArticle = (o: DeepReadOutput): boolean => {
-  if (o.templateArticle !== undefined) return hasSynthesisBody(o.templateArticle);
+  if (o.templateArticle !== undefined) return false;
   // Android DeepReadModels.kt:309-322 — 注意:Android 用 AND 逻辑(三项都满足)
   if (o.summary.trim().length < 80) return false;
   // Android :311 检查 visibleTextForLanguageCheck() 全文,不只 summary
@@ -210,7 +211,7 @@ export const hasReadableArticle = (o: DeepReadOutput): boolean => {
 
 /** Presentation gate only: partial content stays visible without claiming completion or research quality. */
 export const hasDisplayableDeepReadOutput = (o: DeepReadOutput): boolean => {
-  if (o.templateArticle !== undefined && hasSynthesisBody(o.templateArticle)) return true;
+  if (o.templateArticle !== undefined) return true;
   return (o.bottomLine?.trim().length ?? 0) > 0
     || (o.impacts?.some(impact => impact.effect.trim().length > 0) ?? false)
     || (o.watch?.some(item => item.trim().length > 0) ?? false)

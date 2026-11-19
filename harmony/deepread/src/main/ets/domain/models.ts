@@ -1,8 +1,8 @@
 // Deep Read output data model — HarmonyOS port of Android DeepReadModels.kt
 // ArkTS: interface + factory functions, no runtime mutation
 
-import type { DeepReadTemplateArticle } from './synthesis_article.ts';
-import type { DeepReadInputSource } from './input_sources.ts';
+export interface DeepReadTemplateArticle { markdown?: string; title?: string; }
+export interface DeepReadInputSource { id?: string; url?: string; title?: string; kind?: string; }
 import type { DeepReadSectionStatus, DeepReadGenerationPhase } from './enums.ts';
 
 export interface TimelineEvent {

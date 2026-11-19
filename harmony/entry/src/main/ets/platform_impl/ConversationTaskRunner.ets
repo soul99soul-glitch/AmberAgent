@@ -241,6 +241,13 @@ export class ConversationTaskRunner {
     return this.tasks.filter((t: LocalTaskRecord): boolean => t.conversationId === conversationId);
   }
 
+  recentTasks(limit: number = 24): LocalTaskRecord[] {
+    const cap: number = Math.max(1, limit);
+    return this.tasks.slice().sort(
+      (a: LocalTaskRecord, b: LocalTaskRecord): number => b.updatedAt - a.updatedAt,
+    ).slice(0, cap);
+  }
+
   activeAndQueuedTasksForConversation(conversationId: string): LocalTaskRecord[] {
     return this.tasks.filter((t: LocalTaskRecord): boolean =>
       t.conversationId === conversationId && (t.status === 'running' || t.status === 'queued'));

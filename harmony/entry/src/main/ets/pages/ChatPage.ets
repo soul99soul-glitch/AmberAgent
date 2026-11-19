@@ -183,6 +183,8 @@ import { ChatTimelineSession, buildRows, buildRowsFromNodes, TIMELINE_PAGE_SIZE 
 import { getChatSmartUiDraftStore } from '../platform_impl/SmartUiDraftSupport.ets';
 import { mimeByName, readUriBytes, loadAttachDataUrl } from '../platform_impl/chat/ChatAttachmentIO.ets';
 import { observeGatewaySoulRevision, syncAgentSoulFromCloud } from '../platform_impl/AgentSoulSync.ets';
+import { AgentEmbodimentSheet } from '../components/soul/AgentEmbodimentSheet.ets';
+import { isToolFailureUnrecovered, buildLaterSucceededToolSet } from '@amber/chat-domain';
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
 interface ChatArchiveRouteParams { conversationId: string; nodeId: string; }
@@ -299,6 +301,7 @@ struct ChatPage {
   @State bottomDockTab: BottomDockTab = 'chat';
   @State dismissedNoticeIds: string[] = [];
   @State episodeHeaderTitle: string = '';
+  @State embodimentSheetOpen: boolean = false;
   @State turnStepsSheetOpen: boolean = false;
   @State turnStepsTitle: string = '';
   @State turnStepsTools: UIMessagePartTool[] = [];
@@ -627,8 +630,8 @@ struct ChatPage {
         if (target === 'conversation') { router.replaceUrl({ url: 'pages/ChatPage', params: { conversationId: id } }); return; }
         if (target === 'deletedCurrent') { router.replaceUrl({ url: 'pages/ChatPage' }); return; }
         if (target === 'tasks') { this.bottomDockTab = 'tasks'; return; }
+        if (target === 'persona') { this.embodimentSheetOpen = true; return; }
         const url: string = target === 'history' ? 'pages/HistoryPage'
-          : target === 'persona' ? 'pages/AgentSoulPage'
           : target === 'council' ? 'pages/CouncilPage'
           : target === 'webmount' ? 'pages/SettingExperimentalWebMountPage'
           : target === 'apps' ? 'pages/MiniAppListPage'
@@ -963,16 +966,42 @@ struct ChatPage {
     return cloudOrLocal + otherRunning;
   }
 
-  private attentionTaskBadgeCount(): number {
+  private pendingApprovalCount(): number {
     let count: number = 0;
-    for (const task of this.cloudDialogue.tasks) {
-      if (task.status === 'failed' && this.dismissedNoticeIds.indexOf(`cloud:${task.workItemId}`) < 0) count++;
-    }
     for (const row of this.timeline.rows) {
       for (const part of row.message.parts) {
         if (part.type === 'tool' && (part as UIMessagePartTool).approvalState.type === 'pending') count++;
       }
     }
+    return count;
+  }
+
+  private consecutiveErrorCount(): number {
+    const messages: UIMessage[] = this.timeline.rows.map((r: ChatTimelineRow): UIMessage => r.message);
+    const laterSucceeded: Set<string> = buildLaterSucceededToolSet(messages);
+    let streak: number = 0;
+    for (let i: number = this.timeline.rows.length - 1; i >= 0; i--) {
+      const row: ChatTimelineRow = this.timeline.rows[i];
+      if (row.message.role !== 'assistant') break;
+      let rowError: boolean = false;
+      for (const part of row.message.parts) {
+        if (part.type === 'tool' && isToolFailureUnrecovered(part as UIMessagePartTool, laterSucceeded)) {
+          rowError = true;
+        }
+      }
+      if (!rowError) break;
+      streak++;
+    }
+    return streak;
+  }
+
+  private attentionTaskBadgeCount(): number {
+    let count: number = 0;
+    for (const task of this.cloudDialogue.tasks) {
+      if (task.status === 'failed' && this.dismissedNoticeIds.indexOf(`cloud:${task.workItemId}`) < 0) count++;
+    }
+    count += this.pendingApprovalCount();
+    if (this.consecutiveErrorCount() >= 4) count++;
     return count;
   }
 
@@ -1212,6 +1241,19 @@ struct ChatPage {
   }
 
   @Builder
+  EmbodimentSheet(): void {
+    AgentEmbodimentSheet({
+      onClose: (): void => { this.embodimentSheetOpen = false; },
+      onPickStarter: (prompt: string): void => {
+        this.bottomDockTab = 'chat';
+        this.composer.setInputText(prompt);
+      },
+      onOpenMemoryRecords: (): void => { router.pushUrl({ url: 'pages/MemoryRecordsPage' }); },
+      onOpenMemoryTopics: (): void => { router.pushUrl({ url: 'pages/MemoryTopicsPage' }); },
+    })
+  }
+
+  @Builder
   chatSheetHosts(): void {
     // bindSheet 按宿主节点注册；每张 sheet 保持独立且稳定的宿主。
     ChatMessageActionsView({ session: this.messageActions })
@@ -1230,6 +1272,14 @@ struct ChatPage {
       .bindSheet(this.turnStepsSheetOpen, this.TurnStepsSheet(), {
         height: SheetSize.MEDIUM,
         onDisappear: (): void => { this.turnStepsSheetOpen = false; },
+      })
+
+    Column() {}
+      .width(0).height(0)
+      .hitTestBehavior(HitTestMode.None)
+      .bindSheet(this.embodimentSheetOpen, this.EmbodimentSheet(), {
+        height: SheetSize.LARGE,
+        onDisappear: (): void => { this.embodimentSheetOpen = false; },
       })
 
   }
@@ -1313,7 +1363,7 @@ struct ChatPage {
             })
           }
           .margin({ bottom: 14 })
-          .onClick((): void => { router.pushUrl({ url: 'pages/AgentSoulPage' }); })
+          .onClick((): void => { this.embodimentSheetOpen = true; })
 
           Row() {
             if (this.agentSoulIsDefault || this.agentSoulDisplayName === 'Amber') {
@@ -1331,7 +1381,7 @@ struct ChatPage {
           .constraintSize({ minHeight: 44 })
           .alignItems(VerticalAlign.Center)
           .accessibilityText('形象人设')
-          .onClick((): void => { router.pushUrl({ url: 'pages/AgentSoulPage' }); })
+          .onClick((): void => { this.embodimentSheetOpen = true; })
 
           Text(this.agentSoulTagline.trim().length > 0 ? this.agentSoulTagline : GREETINGS[this.greetIdx])
             .fontSize(15).fontColor(INK3)
@@ -1366,7 +1416,7 @@ struct ChatPage {
         artifactCount: this.countTimelineArtifacts(),
         notices: this.buildTopBarNotices(),
         onOpenDrawer: (): void => { this.drawer.openDrawer(); },
-        onOpenPersona: (): void => { router.pushUrl({ url: 'pages/AgentSoulPage' }); },
+        onOpenPersona: (): void => { this.embodimentSheetOpen = true; },
         onOpenRecap: (): void => {
           if (!this.presentation.editingTitle) this.presentation.openRecap();
         },
@@ -1396,6 +1446,9 @@ struct ChatPage {
           activeTab: this.bottomDockTab,
           attentionTaskCount: this.attentionTaskBadgeCount(),
           runningTaskCount: this.runningTaskBadgeCount(),
+          pendingApprovalCount: this.pendingApprovalCount(),
+          consecutiveErrorCount: this.consecutiveErrorCount(),
+          hasUnrecoveredError: this.consecutiveErrorCount() >= 4,
           onCompact: (): void => { this.modelContext.compactCurrentConversation(); },
           onRetryStorage: (): void => { getChatRepository().list().catch((error: Error): void => { this.presentation.errorMsg = error.message; }); },
           onSelectTab: (tab: BottomDockTab): void => { this.bottomDockTab = tab; },
@@ -1403,6 +1456,19 @@ struct ChatPage {
           onOpenGatewaySettings: (): void => { router.pushUrl({ url: 'pages/SettingMacGatewayPage' }); },
           onOpenTasksSettings: (): void => { router.pushUrl({ url: 'pages/SettingCronTasksPage' }); },
           onOpenHubsPlaceholder: (): void => { router.pushUrl({ url: 'pages/MiniAppListPage' }); },
+          onOpenConversation: (id: string): void => {
+            if (id.length > 0 && id !== (this.presentation.conversation?.id ?? '')) {
+              router.replaceUrl({ url: 'pages/ChatPage', params: { conversationId: id } });
+            }
+          },
+          onFocusApproval: (): void => { this.timeline.jumpToBottom(); },
+          onStartWithHubInstruction: (instruction: string, title: string): void => {
+            const prefix: string = instruction.trim().length > 0
+              ? `[专题·${title}] ${instruction.trim()}\n\n`
+              : `[专题·${title}] `;
+            this.bottomDockTab = 'chat';
+            this.composer.setInputText(prefix);
+          },
           sandboxContent: (): void => { this.sandboxContent(); },
           runtimeContent: (): void => { this.runtimeContent(); },
         })

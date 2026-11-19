@@ -71,6 +71,7 @@ test('skill management refreshes the real run catalog and discovery while preser
     }) },
     './McpSettingsStore.ets': { getMcpSettingsStore: () => ({}) }, './MemoryStore.ets': {},
     './SoulTools.ets': { createSoulTools: () => [] }, './WebMountSession.ets': {}, './WebMountSites.ets': {},
+    './chat/ChatEpisodeStore.ets': { loadEpisodeLedger: async () => domain.createEmptyEpisodeLedger() },
     './WebMountTools.ets': {}, './WebMountAdvancedTools.ets': {}, './WebMountParityTools.ets': {}, './JevWebDecision.ets': {},
     './EntryPluginRuntime.ets': { createEntryPluginAdapter: () => ({ supports: () => false }) },
   };
@@ -156,6 +157,7 @@ const loadPreparation = domain => {
     if (name === '@kit.PerformanceAnalysisKit') return { hilog: { warn: () => {} } };
     if (name === './AgentRuntimePrefs.ets') return { systemLanguage: () => 'zh-CN' };
     if (name === './ConversationRunGuard.ets') return {};
+    if (name === './chat/ChatEpisodeStore.ets') return { loadEpisodeLedger: async () => domain.createEmptyEpisodeLedger() };
     throw new Error(`Unexpected preparation runtime import: ${name}`);
   }, Error, Promise });
   return exports;

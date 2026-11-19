@@ -15,8 +15,6 @@
 import {
   applyTheme, setAccentColor, applyPaperPalette, applyAmoledBlack, BG,
 } from './tokens.ets';
-import { getProductKind } from '../platform_impl/ProductIdentity.ets';
-import { NOVEL_THEMES } from './novel_themes.ets';
 import type { KeyValueStore } from '@amber/chat-domain';
 
 // D0-11:AMOLED 纯黑(深色模式画布纯黑;持久化 KV theme_amoled_black)
@@ -338,7 +336,6 @@ class ThemePackStore {
   async hydrate(kv: KeyValueStore): Promise<void> {
     if (this.hydrated) return;
     this.hydrated = true;
-    if (getProductKind() === 'novel') this.currentPack = NOVEL_THEMES[0];
     try {
       const rawCustom: string | null = await kv.get(THEME_CUSTOM_PACKS_KEY);
       if (rawCustom !== null) {
@@ -374,8 +371,7 @@ class ThemePackStore {
   }
 
   all(): ThemePack[] {
-    return getProductKind() === 'novel'
-      ? [...NOVEL_THEMES, ...BUILTIN_PACKS, ...this.imported] : [...BUILTIN_PACKS, ...this.imported];
+    return [...BUILTIN_PACKS, ...this.imported];
   }
 
   importedPacks(): ThemePack[] {
@@ -383,13 +379,8 @@ class ThemePackStore {
   }
 
   async select(kv: KeyValueStore, pack: ThemePack): Promise<void> {
-    if (getProductKind() !== 'novel') {
-      this.currentPack = pack;
-      await kv.put(THEME_PACK_ID_KEY, pack.id);
-      return;
-    }
-    await kv.put(THEME_PACK_ID_KEY, pack.id);
     this.currentPack = pack;
+    await kv.put(THEME_PACK_ID_KEY, pack.id);
   }
 
   async addImported(kv: KeyValueStore, pack: ThemePack): Promise<void> {
@@ -400,7 +391,7 @@ class ThemePackStore {
   async removeImported(kv: KeyValueStore, id: string): Promise<void> {
     this.imported = this.imported.filter((p: ThemePack): boolean => p.id !== id);
     if (this.currentPack.id === id) {
-      this.currentPack = getProductKind() === 'novel' ? NOVEL_THEMES[0] : BUILTIN_PACKS[0];
+      this.currentPack = BUILTIN_PACKS[0];
       await kv.put(THEME_PACK_ID_KEY, this.currentPack.id);
     }
     await this.saveImported(kv);

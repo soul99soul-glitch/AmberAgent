@@ -15,7 +15,7 @@ export struct AmberPersonaMedallion {
   @StorageProp('themeEpoch') themeEpoch: number = 0;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @StorageProp('appBackgrounded') appBackgrounded: boolean = false;
-  @StorageProp('deepreadReduceMotion') reduceMotion: boolean = false;
+  @StorageProp('reduceMotion') reduceMotion: boolean = false;
   @StorageProp(APP_STORAGE_SOUL_AVATAR_URI) avatarUriStore: string = '';
   @StorageProp(APP_STORAGE_SOUL_AVATAR_PRESET) avatarPresetStore: string = 'muse';
   @Prop medallionSize: number = 76;
@@ -35,10 +35,10 @@ export struct AmberPersonaMedallion {
 
   private presetIconName(): string {
     const p: string = this.avatarPresetStore.trim();
-    if (p === 'cat') return 'ph_cat';
-    if (p === 'moon') return 'ph_moon';
-    if (p === 'flower') return 'ph_flower';
-    if (p === 'robot') return 'ph_robot';
+    if (p === 'star') return 'ph_star';
+    if (p === 'rocket') return 'ph_rocket';
+    if (p === 'yinyang') return 'ph_yinYang';
+    if (p === 'alien') return 'ph_alien';
     if (p === 'ghost') return 'ph_ghost';
     return 'ph_maskHappy';
   }

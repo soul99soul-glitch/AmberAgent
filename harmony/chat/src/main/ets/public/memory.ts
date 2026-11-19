@@ -102,3 +102,9 @@ export { invalidateMemoryTopicsForSource } from '../chat/memory_topics.ts';
 export { parseStoredMemoryProfile } from '../chat/memory_profile.ts';
 
 export { extractionMessagesContaminated } from '../chat/memory_extractor.ts';
+
+export { buildMemoryPortrait, buildMemoryStarterPrompts } from '../chat/memory_portrait.ts';
+export type {
+  MemoryPortrait, MemoryPortraitBucketFilter, MemoryPortraitDimension,
+  MemoryPortraitDimensionKey, MemoryPortraitItem, MemoryPortraitOptions,
+} from '../chat/memory_portrait.ts';

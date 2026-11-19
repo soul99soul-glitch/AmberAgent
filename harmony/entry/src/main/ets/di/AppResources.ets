@@ -1,6 +1,6 @@
 // Shared persistence, HTTP and activity resources; all lazy instances belong to this factory.
-import type { AiClient, HttpClient, Storage, DeepReadRepository, SearchProviderRegistry, Notifier, SourcePrefetcher, FileStore, ModelRegistry } from '@amber/deepread-domain';
-import { createSourcePrefetcher, createStorageModelRegistry } from '@amber/deepread-domain';
+import type { AiClient, HttpClient, Storage, DeepReadRepository, SearchProviderRegistry, Notifier, FileStore, ModelRegistry } from '@amber/deepread-domain';
+import { createStorageModelRegistry } from '@amber/deepread-domain';
 import { createRcpHttpClient } from '../platform_impl/RcpHttpClient.ets';
 import { createPreferencesStorage } from '../platform_impl/PreferencesStorage.ets';
 import { createRdbRepository } from '../platform_impl/RdbRepository.ets';
@@ -8,7 +8,6 @@ import { createOpenAiCompatibleAiClient } from '../platform_impl/OpenAiCompatibl
 import { createTavilyAndFallbackRegistry } from '../platform_impl/SearchRegistry.ets';
 import { createNotificationNotifier } from '../platform_impl/NotificationNotifier.ets';
 import { createFileStore } from '../platform_impl/FileStore.ets';
-import { createEntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import type { ConversationRepository, KeyValueStore, Assistant, CompactStore, SearchSettings } from '@amber/chat-domain';
 import { loadAssistants, makeAssistant, saveAssistants, SessionAccessGrantStore, AgentToolActivityStore, loadSearchPrefs } from '@amber/chat-domain';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
@@ -21,7 +20,6 @@ export interface Container {
     storage: Storage;
     repository: DeepReadRepository;
     searchRegistry: SearchProviderRegistry;
-    prefetcher: SourcePrefetcher;
     aiClient: AiClient;
     notifier: Notifier;
     fileStore: FileStore;
@@ -35,7 +33,6 @@ export interface AppResourcesPorts {
 export interface AppResources {
     getAppContainer: () => Container;
     getNotifier: () => Notifier;
-    getPrefetcher: () => SourcePrefetcher;
     getAiClient: () => AiClient;
     getRepository: () => DeepReadRepository;
     getFileStore: () => FileStore;
@@ -57,13 +54,12 @@ export const createAppResources = (ports: AppResourcesPorts): AppResources => {
         const repository: DeepReadRepository = createRdbRepository();
         // 深度阅读复用聊天「搜索服务」设置(已配置 API + 免费源开关);均在搜索时惰性读取
         const searchRegistry: SearchProviderRegistry = createTavilyAndFallbackRegistry(httpClient, storage, (): Promise<SearchSettings> => loadSearchPrefs(getChatKvStore()), ports.ensureSearchSdk);
-        const prefetcher: SourcePrefetcher = createSourcePrefetcher(httpClient, searchRegistry, createEntryAbortController);
         const aiClient: AiClient = createOpenAiCompatibleAiClient(httpClient, storage);
         const notifier: Notifier = createNotificationNotifier();
         const fileStore: FileStore = createFileStore();
         const modelRegistry: ModelRegistry = createStorageModelRegistry(storage);
         return {
-            httpClient, storage, repository, searchRegistry, prefetcher, aiClient, notifier,
+            httpClient, storage, repository, searchRegistry, aiClient, notifier,
             fileStore, modelRegistry,
         };
     };
@@ -74,7 +70,6 @@ export const createAppResources = (ports: AppResourcesPorts): AppResources => {
         return cached;
     };
     const getNotifier = (): Notifier => getAppContainer().notifier;
-    const getPrefetcher = (): SourcePrefetcher => getAppContainer().prefetcher;
     const getAiClient = (): AiClient => getAppContainer().aiClient;
     const getRepository = (): DeepReadRepository => getAppContainer().repository;
     const getFileStore = (): FileStore => getAppContainer().fileStore;
@@ -129,5 +124,5 @@ export const createAppResources = (ports: AppResourcesPorts): AppResources => {
         await saveAssistants(kv, seeded);
         return seeded;
     };
-    return { getAppContainer, getNotifier, getPrefetcher, getAiClient, getRepository, getFileStore, getModelRegistry, getChatKvStore, getChatRepository, getCompactStore, getSessionGrantStore, getToolActivityStore, getChatAssistants };
+    return { getAppContainer, getNotifier, getAiClient, getRepository, getFileStore, getModelRegistry, getChatKvStore, getChatRepository, getCompactStore, getSessionGrantStore, getToolActivityStore, getChatAssistants };
 };

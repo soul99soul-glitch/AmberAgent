@@ -84,6 +84,7 @@ const harness = async mode => {
     ChatStreamSubAgentGenerationPort: class { constructor(config) { this.config = config; } },
     AppStorage: { get: () => false }, EntryAbortController: AbortController,
     MemoryDocumentRefreshError: class extends Error {},
+    loadEpisodeLedger: async () => domain.createEmptyEpisodeLedger(),
     getMemoryTopicStoreOps: () => ({ snapshotForTopics: async () => [{ id: 'a' }, { id: 'b' }],
       applyOptimization: async () => ({ topicIds: [], staleCount: 0, rejectedReasons: [], changed: false,
         profileUpdated: false, mergedIds: [] }) }),
