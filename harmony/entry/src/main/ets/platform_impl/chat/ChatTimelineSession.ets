@@ -89,7 +89,13 @@ export class ChatTimelineSession {
       (messageId: string): number => this.compactBoundaryCount(messageId));
   }
 
-  private loaderItemCount(): number { return this.timelineLoadState.fullyLoaded ? 0 : 1; }
+  private loaderItemCount(): number {
+    return (this.hasTopSpacer ? 1 : 0) + (this.timelineLoadState.fullyLoaded ? 0 : 1);
+  }
+
+  hasTopSpacer: boolean = false;
+  hasBottomSpacer: boolean = false;
+  bottomSpacerHeight: number = 0;
 
   listIndexForRow(rowIndex: number): number {
     const dataIndex: number = this.dataSource.dataIndexForRow(rowIndex);
@@ -387,7 +393,7 @@ export class ChatTimelineSession {
 
   activeListItemCount(): number {
     return this.dataSource.totalCount() + this.loaderItemCount() +
-      (this.suggestions.length > 0 ? 1 : 0);
+      ((this.hasBottomSpacer || this.suggestions.length > 0) ? 1 : 0);
   }
 
   isGenerationActive(): boolean {
@@ -449,8 +455,9 @@ export class ChatTimelineSession {
     if (lastIndex < 0) return current;
     // Text growth can push the existing 52vp suggestion spacer out of view.
     // Its preceding item still measures the same bottom, including that fixed spacer.
-    const hiddenSuggestionInset: number = this.suggestions.length > 0 && lastIndex > 0 &&
-      this.lastVisibleListIndex === lastIndex - 1 ? 52 : 0;
+    const bottomExtra: number = (this.suggestions.length > 0 ? 52 : 0) + (this.hasBottomSpacer ? this.bottomSpacerHeight : 0);
+    const hiddenSuggestionInset: number = bottomExtra > 0 && lastIndex > 0 &&
+      this.lastVisibleListIndex === lastIndex - 1 ? bottomExtra : 0;
     const measuredIndex: number = hiddenSuggestionInset > 0 ? lastIndex - 1 : lastIndex;
     if (this.lastVisibleListIndex < measuredIndex || this.listViewportHeight <= 0) return null;
     const rect: RectResult = this.scroller.getItemRect(measuredIndex);

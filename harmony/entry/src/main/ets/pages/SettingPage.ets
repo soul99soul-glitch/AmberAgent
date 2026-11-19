@@ -156,12 +156,8 @@ struct SettingPage {
       onRowClick: (): void => { this.go('pages/SettingSubAgentPage'); } })
     CardRow({ label: '模型议会', iconName: 'ph_quotes', plateStyle: 'accent',
       onRowClick: (): void => { this.go('pages/SettingModelCouncilPage'); } })
-    CardRow({ label: '小应用', iconName: 'ph_squaresFour', plateStyle: 'accent',
+    CardRow({ label: '小应用', iconName: 'ph_squaresFour', plateStyle: 'accent', isLast: true,
       onRowClick: (): void => { this.go('pages/MiniAppSettingsPage'); } })
-    CardRow({ label: '小说创作', iconName: 'ph_pencil', plateStyle: 'accent',
-      onRowClick: (): void => { this.go('pages/NovelProjectsPage'); } })
-    CardRow({ label: '深度阅读', iconName: 'ph_bookOpen', plateStyle: 'accent', isLast: true,
-      onRowClick: (): void => { this.go('pages/SettingDeepReadPage'); } })
   }
 
   @Builder

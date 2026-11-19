@@ -16,7 +16,7 @@
 //   ❌ +→× 形变动画(后续迭代)
 //   ❌ 用量面板(后续迭代)
 
-import { MOTION_OVERLAY, ACCENT, ACCENT_INK, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, SURFACE, SURFACE2, lineHeightForSize, accentSoftBg } from '../design/tokens.ets';
+import { MOTION_OVERLAY, ACCENT, ACCENT_INK, BG_GLASS, BODY, ERROR, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, INK, INK2, INK3, INK4, LABEL, LINE, META, SURFACE, SURFACE2, lineHeightForSize, accentSoftBg } from '../design/tokens.ets';
 import { FONT_SANS, FONT_MONO } from '../design/fonts.ets';
 import { SlashCommandPanel, SlashCommand, QuickMessage, buildSlashCommands } from './SlashCommandPanel.ets';
 import { Icon } from './ui/Icon.ets';
@@ -37,6 +37,7 @@ export struct ChatInput {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @StorageProp('appBackgrounded') appBackgrounded: boolean = false;
   @Prop text: string = '';
   @Prop sending: boolean = false;
   @Prop disabled: boolean = false;
@@ -72,6 +73,7 @@ export struct ChatInput {
   onClearInput: () => void = (): void => {};
   onCompactContext: () => void = (): void => {};
   onInsertText: (text: string) => void = (_t: string): void => {};
+  onFocusChange: (focused: boolean) => void = (_focused: boolean): void => {};
 
   // 1:1 原型 .pressable:active scale(.975) .14s ease-out
   @State attachScale: number = 1;
@@ -139,8 +141,6 @@ export struct ChatInput {
     } else if (cmd.id === 'core.compact') {
       this.onCompactContext();
       this.onClearInput();
-    } else if (cmd.id === 'core.deepread') {
-      this.onInsertText('/deepread ');
     } else if (cmd.id === 'core.subagent') {
       if (this.subAgentMode === 'smart_dynamic') {
         this.onInsertText('请根据这个任务的复杂度，判断是否需要用 custom_subagent 临时创建 SubAgent，不要使用 subagent_id；名称可省略由应用分配英文名；纯创作或无需外部读取时设 tool_profile=none，需要资料时再选择只读 profile，写清楚 prompt、边界和输出格式，等待返回后再综合结论：');
@@ -264,8 +264,13 @@ export struct ChatInput {
           .width(this.attachExpanded ? 44 + ATTACH_TRAY_W + 2 : 44).height(44)
           .animation({ duration: 220, curve: Curve.EaseOut })
           .borderRadius(999)
-          .backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE })
+          .backgroundColor(this.appBackgrounded ? BG_GLASS : SURFACE)
+          .backgroundBlurStyle(
+            this.appBackgrounded ? BlurStyle.NONE : BlurStyle.Thin,
+            { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.6 },
+          )
+          .border({ width: 0.75, color: HOME_GLASS_EDGE })
+          .shadow({ radius: 10, color: HOME_GLASS_SHADOW, offsetY: 2 })
           .alignItems(VerticalAlign.Center)
           .opacity(this.sending ? 0.4 : 1)
           .scale({ x: this.attachScale, y: this.attachScale })
@@ -293,6 +298,8 @@ export struct ChatInput {
             .lineHeight(lineHeightForSize(BODY))
             .enabled(!this.disabled)
             .onChange((v: string): void => { if (!this.disabled) this.onTextChange(v); })
+            .onFocus((): void => { this.onFocusChange(true); })
+            .onBlur((): void => { this.onFocusChange(false); })
             .onTextSelectionChange((start: number, end: number): void => {
               this.selectionStart = start;
               this.selectionEnd = end;
@@ -326,23 +333,29 @@ export struct ChatInput {
           }
         }
         .layoutWeight(1)
-        .constraintSize({ minHeight: 44, maxHeight: this.attachExpanded ? 44 : 111 })
-        .borderRadius(this.text.length > 0 ? 24 : 999)
-        .backgroundColor(SURFACE)
-        .border({ width: 1, color: LINE })
+        .constraintSize({ minHeight: 54, maxHeight: this.attachExpanded ? 54 : 116 })
+        .borderRadius(27)
+        .backgroundColor(this.appBackgrounded ? BG_GLASS : SURFACE)
+        .backgroundBlurStyle(
+          this.appBackgrounded ? BlurStyle.NONE : BlurStyle.Thin,
+          { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.6 },
+        )
+        .border({ width: 0.75, color: HOME_GLASS_EDGE })
+        .shadow({ radius: 12, color: HOME_GLASS_SHADOW, offsetY: 3 })
         // 托盘展开时收窄内边距,给占位文字留足宽度(避免「输…」)
         .padding({ left: this.attachExpanded ? 12 : 18, right: this.attachExpanded ? 12 : 18 })
         .alignItems(VerticalAlign.Center)
         .margin({ right: 8 })
 
-        // Send/Stop button:48x48, radius 999(stop 用纯白方块 glyph,1:1 原型)
+        // 分离式 54×54vp 圆形发送/停止按钮（运行态 ERROR 底，可发态 ACCENT 底）
         if (this.sending) {
           Row() {
-            Column().width(12).height(12).backgroundColor(SURFACE).borderRadius(3)
+            Column().width(14).height(14).backgroundColor(ACCENT_INK).borderRadius(3)
           }
-          .width(44).height(44)
+          .width(54).height(54)
           .borderRadius(999)
-          .backgroundColor(INK)
+          .backgroundColor(ERROR)
+          .shadow({ radius: 12, color: HOME_GLASS_SHADOW, offsetY: 3 })
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .scale({ x: this.sendScale, y: this.sendScale })
@@ -351,15 +364,19 @@ export struct ChatInput {
           .accessibilityText('停止生成')
         } else {
           Row() {
-            Icon({ name: 'arrow_up', iconSize: 20, color: this.canSend() ? ACCENT_INK : INK2 })
+            Icon({ name: 'arrow_up', iconSize: 21, color: this.canSend() ? ACCENT_INK : INK2 })
           }
-          .width(44).height(44)
+          .width(54).height(54)
           .borderRadius(999)
-          .backgroundColor(this.canSend() ? this.accentColorStore : SURFACE2)
-          .border({ width: 1, color: this.canSend() ? this.accentColorStore : LINE })
+          .backgroundColor(this.canSend() ? this.accentColorStore : (this.appBackgrounded ? BG_GLASS : SURFACE2))
+          .backgroundBlurStyle(
+            !this.canSend() && !this.appBackgrounded ? BlurStyle.Thin : BlurStyle.NONE,
+            { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.6 },
+          )
+          .border({ width: 0.75, color: this.canSend() ? this.accentColorStore : HOME_GLASS_EDGE })
           .shadow(this.canSend()
             ? { radius: 12, color: this.accentShadow(), offsetY: 4 }
-            : { radius: 0, color: Color.Transparent, offsetY: 0 })
+            : { radius: 10, color: HOME_GLASS_SHADOW, offsetY: 2 })
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .scale({ x: this.sendScale, y: this.sendScale })
@@ -381,7 +398,7 @@ export struct ChatInput {
         .width('100%')
         .enabled(!this.disabled || this.sending)
         .opacity(this.disabled ? 0.55 : 1)
-        .padding({ left: 20, right: 20, top: 10, bottom: 14 })
+        .padding({ left: 20, right: 20, top: 6, bottom: 8 })
         .alignItems(VerticalAlign.Center)
 
       }

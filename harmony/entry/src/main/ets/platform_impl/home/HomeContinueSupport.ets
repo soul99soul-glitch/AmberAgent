@@ -5,7 +5,6 @@ import { mergeContinueCandidates } from '@amber/chat-domain';
 import type {
   NovelCreation, DeepReadScheduler, DeepReadRepository, ModelCouncilManager, ModelCouncilRun
 } from '@amber/deepread-domain';
-import { loadDeepReadContinueCandidates } from '../DeepReadContinueSupport.ets';
 import { relativeTimeMs } from './HomePresentation.ets';
 
 export interface HomeContinuePorts {
@@ -37,19 +36,6 @@ export class HomeContinueSession {
 
   refresh(): void {
     const seq: number = ++this.continueSeq;
-    const novelList: Promise<ContinueCandidate[]> = this.ports.getNovelCreation().listProjects()
-      .then((projects): ContinueCandidate[] => projects.slice(0, 3).map((p): ContinueCandidate => ({
-        sourceKind: 'novel',
-        sourceId: p.id,
-        route: { kind: 'novel', projectId: p.id },
-        title: p.name.length > 0 ? p.name : '未命名小说',
-        summary: `${p.chapters.length} 章 · ${p.messages.length} 条讨论`,
-        lastUpdatedAt: p.updatedAt,
-        status: p.chapters.length > 0 ? 'draft' : 'waiting_user',
-        priority: 0,
-        isRunning: false,
-      })))
-      .catch((_err: Error): ContinueCandidate[] => []);
     const cronList: Promise<ContinueCandidate[]> = this.ports.getAgentCronManager()
       .then((m): Promise<AgentCronTask[]> => m.listTasksSnapshot())
       .then((tasks: AgentCronTask[]): ContinueCandidate[] => {
@@ -72,10 +58,6 @@ export class HomeContinueSession {
         }
         return out;
       })
-      .catch((_err: Error): ContinueCandidate[] => []);
-    const deepList: Promise<ContinueCandidate[]> = this.ports.getDeepReadScheduler()
-      .then((scheduler: DeepReadScheduler): Promise<ContinueCandidate[]> =>
-        loadDeepReadContinueCandidates(this.ports.getRepository(), scheduler))
       .catch((_err: Error): ContinueCandidate[] => []);
     const miniList: Promise<ContinueCandidate[]> = this.ports.getMiniAppRepositorySync().listAll()
       .then((apps): ContinueCandidate[] => apps.slice(0, 2).map((app): ContinueCandidate => ({
@@ -126,7 +108,7 @@ export class HomeContinueSession {
         }];
       })
       .catch((_err: Error): ContinueCandidate[] => []);
-    Promise.all([novelList, cronList, deepList, miniList, councilList, imageList]).then((lists): void => {
+    Promise.all([cronList, miniList, councilList, imageList]).then((lists): void => {
       if (seq !== this.continueSeq || !this.pageAlive) return;
       const merged: ContinueCandidate[] = mergeContinueCandidates(lists, 6);
       this.candidate = merged.length > 0 ? merged[0] : null;

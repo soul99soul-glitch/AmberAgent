@@ -11,11 +11,18 @@ export struct ChatConversationDrawerView {
   @Prop userAvatar: string = '';
   @Prop currentConversationId: string = '';
   @Prop runningIds: string[] = [];
+  onNewTopic: () => void = (): void => {};
+  onOpenAppearance: () => void = (): void => {};
+
+  private visibleDrawerConversations(): ConversationSummary[] {
+    if (this.session.drawerSearchText.trim().length > 0) return this.session.drawerConversations;
+    return this.session.drawerConversations.slice(0, 5);
+  }
 
   @Builder
   drawerConversationList(): void {
     ChatListGrouped({
-      conversations: this.session.drawerConversations,
+      conversations: this.visibleDrawerConversations(),
       selectedId: this.currentConversationId,
       runningIds: this.runningIds,
       onOpenConversation: (id: string): void => { this.session.openDrawerConversation(id); },
@@ -48,8 +55,17 @@ export struct ChatConversationDrawerView {
       ChatDrawer({
         show: true, userNickname: this.userNickname, userAvatar: this.userAvatar,
         onNewChat: (): void => { this.session.newChat(); },
-        onOpenBoard: (): void => { this.session.openDrawerBoard(); },
+        onNewTopic: (): void => { this.onNewTopic(); },
+        onOpenPersona: (): void => { this.session.openDrawerPersona(); },
+        onOpenTasks: (): void => { this.session.openDrawerTasks(); },
+        onOpenHistory: (): void => { this.session.openDrawerHistory(); },
+        onOpenCouncil: (): void => { this.session.openDrawerCouncil(); },
         onOpenApps: (): void => { this.session.openDrawerApps(); },
+        onOpenWebMount: (): void => { this.session.openDrawerWebMount(); },
+        onOpenAppearance: (): void => {
+          this.session.closeDrawer();
+          this.onOpenAppearance();
+        },
         onOpenSettings: (): void => { this.session.openDrawerSettings(); },
         onSearchText: (text: string): void => { this.session.refreshDrawerConversations(text); },
         onDismiss: (): void => { this.session.closeDrawer(); },

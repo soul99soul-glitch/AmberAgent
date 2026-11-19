@@ -107,7 +107,6 @@ export const buildSlashCommands = (
   const commands: SlashCommand[] = [
     { id: 'core.clear', title: 'clear', description: '清空当前输入框', accent: false, group: '命令' },
     { id: 'core.compact', title: 'compact', description: '立即压缩当前对话上下文', accent: false, group: '命令' },
-    { id: 'core.deepread', title: 'deepread', description: '全屏打开深度阅读面板', accent: true, group: '命令' },
   ];
   if (subAgentEnabled) {
     commands.push({

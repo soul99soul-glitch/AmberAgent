@@ -6,7 +6,7 @@ import { util } from '@kit.ArkTS';
 import type { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { Conversation, UIMessage, UIMessagePart, PendingUserMessage, PendingUserMessageMode, KeyValueStore, ChatTimelineRow, ImageGuardSettings, VisionModelHealth, DeepReadOpenEvent, MentionRoleItem, JevCompletionNotice, JevCompletionFacts, JevVerificationComposerAction } from '@amber/chat-domain';
-import { currentMessages, toText, loadSearchPrefs, SearchSettings, firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend, parseDeepReadSlashCommand, appendSmartUiContinuation, isExplicitSmartUiContinuation, appendSmartUiDraft, jevUnverifiedChanges, jevVerificationComposerAction, pendingPreviewText } from '@amber/chat-domain';
+import { currentMessages, toText, loadSearchPrefs, SearchSettings, firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend, appendSmartUiContinuation, isExplicitSmartUiContinuation, appendSmartUiDraft, jevUnverifiedChanges, jevVerificationComposerAction, pendingPreviewText } from '@amber/chat-domain';
 import type { ChatProviderChoice } from '../../di/ChatRuntimeContracts.ets';
 import type { ConversationRunService, ConversationRunCommand, ConversationRunSnapshot, ConversationEditCommand, ConversationSendCommand } from '../ConversationRunService.ets';
 import type { SmartUiContinuationCapture } from './ChatSmartUiSession.ets';
@@ -15,7 +15,6 @@ import type { OcrSeed } from '../OcrSupport.ets';
 import type { QuickMessage } from '../../components/SlashCommandPanel.ets';
 import { compressImageAsDataUrl } from '../ImageCompress.ets';
 import { encodeImageDetailed } from '../EntryImageEncoder.ets';
-import { sha256HexUtf8 } from '../EntryLocalToolPorts.ets';
 import { mimeByName, readUriBytes, loadAttachDataUrl } from './ChatAttachmentIO.ets';
 type MsgRow = ChatTimelineRow;
 // 待发文件附件(选取时一次性读入并转 data: URL)
@@ -68,7 +67,7 @@ export interface ChatComposerPorts {
   dismissKeyboard: () => void;
   autoScrollEnabled: () => boolean;
   jumpToBottom: () => void;
-  openDeepRead: (event: DeepReadOpenEvent) => void;
+  openDeepRead?: (event: DeepReadOpenEvent) => void;
   captureContinuation: (text: string) => SmartUiContinuationCapture | null;
   continuationAvailable: () => boolean;
   continuationCurrent: (capture: SmartUiContinuationCapture | null) => boolean;
@@ -101,6 +100,7 @@ export class ChatComposerSession {
   ocrSeed: OcrSeed | null = null;
   pendingRows: PendingChipRow[] = [];
   queueSheetOpen: boolean = false;
+  inputFocused: boolean = false;
   private ports: ChatComposerPorts | null = null;
   private pageAlive: boolean = false;
   private pageVisible: boolean = false;
@@ -113,8 +113,9 @@ export class ChatComposerSession {
   private set errorMsg(value: string) { this.deps.error(value); }
   start(ports: ChatComposerPorts): void { this.ports = ports; this.pageAlive = true; this.pageVisible = true; }
   show(): void { this.pageVisible = true; }
-  hide(): void { this.pageVisible = false; this.sendPreflightSeq++; this.sendPrechecking = false; this.flushInputDraft(); this.queueSheetOpen = false; }
+  hide(): void { this.pageVisible = false; this.inputFocused = false; this.sendPreflightSeq++; this.sendPrechecking = false; this.flushInputDraft(); this.queueSheetOpen = false; }
   dispose(): void { this.hide(); this.pageAlive = false; this.invalidatePicker(true); }
+  setInputFocused(focused: boolean): void { this.inputFocused = focused; }
   setInputText(value: string): void { this.inputText = value; this.onInputTextDraftChange(); }
   appendSmartUiDraft(draft: string): void { this.setInputText(appendSmartUiDraft(this.inputText, draft)); }
 
@@ -379,15 +380,6 @@ export class ChatComposerSession {
     return this.deps.runService.enqueue(this.conversation.id, parts, answer, mode);
   }
 
-  tryRouteDeepReadSlash(inputParts: UIMessagePart[]): boolean {
-    const event: DeepReadOpenEvent | null = parseDeepReadSlashCommand(inputParts, sha256HexUtf8);
-    if (event === null) return false;
-    this.setInputText('');
-    this.invalidatePicker(true);
-    this.deps.openDeepRead(event);
-    return true;
-  }
-
   async sendWithoutAnswer(): Promise<void> {
     if (this.materializingImages || this.sendPrechecking) return;
     const text: string = this.inputText.trim();
@@ -412,7 +404,6 @@ export class ChatComposerSession {
     for (const url of acceptedImages) inputParts.push({ type: 'image', url, metadata: null });
     for (const doc of acceptedDocs) inputParts.push({ type: 'document', url: doc.url,
       fileName: doc.fileName, mime: doc.mime, metadata: null });
-    if (editingNodeId.length === 0 && this.tryRouteDeepReadSlash(inputParts)) return;
     const cloud: ChatCloudDialogueSession | null = this.deps.cloudDialogue !== undefined ? this.deps.cloudDialogue() : null;
     if (editingNodeId.length === 0 && cloud !== null && cloud.isActiveMode()) {
       if (acceptedImages.length > 0 || acceptedDocs.length > 0) {
@@ -584,7 +575,6 @@ export class ChatComposerSession {
     for (const url of acceptedImages) inputParts.push({ type: 'image', url, metadata: null });
     for (const doc of acceptedDocs) inputParts.push({ type: 'document', url: doc.url,
       fileName: doc.fileName, mime: doc.mime, metadata: null });
-    if (editingNodeId.length === 0 && this.tryRouteDeepReadSlash(inputParts)) return;
     const cloud: ChatCloudDialogueSession | null = this.deps.cloudDialogue !== undefined ? this.deps.cloudDialogue() : null;
     if (editingNodeId.length === 0 && cloud !== null && cloud.isActiveMode()) {
       if (acceptedImages.length > 0 || acceptedDocs.length > 0) {

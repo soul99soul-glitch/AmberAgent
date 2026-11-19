@@ -28,12 +28,15 @@ export struct InteractiveMessageTimeline {
   onTimelineScroll: (offset: number, state: ScrollState) => void =
     (_offset: number, _state: ScrollState): void => {};
   onTimelineScrollStop: () => void = (): void => {};
+  @Builder emptySpacer(): void {}
+  @BuilderParam topSpacer: () => void = this.emptySpacer;
   @BuilderParam rows: () => void;
   @BuilderParam activeTail: () => void;
   @BuilderParam hostTail: () => void;
 
   build(): void {
     List({ scroller: this.scroller }) {
+      this.topSpacer()
       if (this.showOlderLoader) {
         ListItem() {
           Row() {

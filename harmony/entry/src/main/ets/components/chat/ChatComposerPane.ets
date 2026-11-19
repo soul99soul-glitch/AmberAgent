@@ -2,28 +2,40 @@ import type { PendingUserMessageMode } from '@amber/chat-domain';
 import { ChatComposerSession } from '../../platform_impl/chat/ChatComposerSession.ets';
 import type { PendingChipRow } from '../../platform_impl/chat/ChatComposerSession.ets';
 import { ChatConversationPresentation } from '../../platform_impl/chat/ChatConversationPresentation.ets';
-import { ChatCloudDialogueSession } from '../../platform_impl/chat/ChatCloudDialogueSession.ets';
+import { ChatCloudDialogueSession, type CloudDialogueTaskRecord } from '../../platform_impl/chat/ChatCloudDialogueSession.ets';
+import { ChatModelContextSession } from '../../platform_impl/chat/ChatModelContextSession.ets';
 import { ChatCloudDialogueStrip } from './ChatCloudDialogueStrip.ets';
+import { AmberBottomModeBar, type BottomDockTab } from './AmberBottomModeBar.ets';
 import { ChatInput } from '../ChatInput.ets';
 import { ChatPendingQueueSheet } from '../ChatPendingQueueSheet.ets';
 import { JevCompletionNoticeView } from '../JevCompletionNotice.ets';
 import { Icon } from '../ui/Icon.ets';
-import { ACCENT, BG, INK2, INK3, ERROR, SURFACE2, OVERLAY, LINE, META } from '../../design/tokens.ets';
+import { ACCENT, BG_FADE_END, BG_FADE_START, ERROR, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, INK, INK2, INK3, META, OVERLAY, SURFACE, SURFACE2 } from '../../design/tokens.ets';
 
 @Component
 export struct ChatComposerPane {
   @ObjectLink composer: ChatComposerSession;
   @ObjectLink presentation: ChatConversationPresentation;
   @ObjectLink cloudDialogue: ChatCloudDialogueSession;
+  @ObjectLink modelContext: ChatModelContextSession;
+  @StorageProp('themeEpoch') themeEpoch: number = 0;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop navBarHeight: number = 0;
   @Prop storageDegraded: boolean = false;
   @Prop retryStatus: string = '';
   @Prop manualCompacting: boolean = false;
+  @Prop activeTab: BottomDockTab = 'chat';
+  @Prop attentionTaskCount: number = 0;
+  @Prop runningTaskCount: number = 0;
   @BuilderParam sandboxContent: () => void;
   @BuilderParam runtimeContent: () => void;
   onCompact: () => void = (): void => {};
   onRetryStorage: () => void = (): void => {};
+  onSelectTab: (tab: BottomDockTab) => void = (_tab: BottomDockTab): void => {};
+  onNewTopic: () => void = (): void => {};
+  onOpenGatewaySettings: () => void = (): void => {};
+  onOpenTasksSettings: () => void = (): void => {};
+  onOpenHubsPlaceholder: () => void = (): void => {};
   @Builder
   PendingQueueSheet(): void {
     ChatPendingQueueSheet({
@@ -38,6 +50,108 @@ export struct ChatComposerPane {
       },
     })
   }
+  @Builder
+  InlineDockPanel(): void {
+    if (this.activeTab === 'tasks') {
+      Column({ space: 10 }) {
+        Row() {
+          Text('后台任务')
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(INK)
+          Blank()
+          Text('定时与任务页 ›')
+            .fontSize(12)
+            .fontColor(this.accentColorStore)
+            .onClick((): void => { this.onOpenTasksSettings(); })
+        }
+        .width('100%')
+
+        if (this.cloudDialogue.runningTasks().length === 0) {
+          Text(this.cloudDialogue.isActiveMode()
+            ? '当前云端主对话暂无运行中任务；回到对话发送消息即可委派。'
+            : '当前会话暂无运行中异步任务。')
+            .fontSize(13)
+            .fontColor(INK3)
+            .width('100%')
+        } else {
+          ForEach(this.cloudDialogue.runningTasks(), (task: CloudDialogueTaskRecord): void => {
+            Row({ space: 8 }) {
+              Text(this.cloudDialogue.isActiveMode() ? '☁️ 云端' : '📱 本机')
+                .fontSize(11)
+                .fontColor(this.accentColorStore)
+              Text(task.title.length > 0 ? task.title : '运行中任务')
+                .fontSize(13)
+                .fontColor(INK)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+              Text(task.stopRequested ? '停止中…' : '停止')
+                .fontSize(12)
+                .fontColor(ERROR)
+                .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                .borderRadius(999)
+                .backgroundColor(SURFACE2)
+                .enabled(!task.stopRequested)
+                .onClick((): void => {
+                  this.cloudDialogue.stopTask(task.workItemId);
+                })
+            }
+            .width('100%')
+            .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+            .borderRadius(16)
+            .backgroundColor(SURFACE2)
+          }, (task: CloudDialogueTaskRecord): string => `${task.workItemId}-${task.status}-${task.stopRequested}`)
+        }
+      }
+      .width('100%')
+      .padding(16)
+      .borderRadius(28)
+      .backgroundColor(SURFACE)
+      .border({ width: 0.75, color: HOME_GLASS_EDGE })
+      .shadow({ radius: 16, color: HOME_GLASS_SHADOW, offsetY: 4 })
+      .margin({ left: 16, right: 16, bottom: 8 })
+      .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 20 }))
+        .animation({ duration: 200, curve: Curve.EaseOut }))
+    } else if (this.activeTab === 'hubs') {
+      Column({ space: 8 }) {
+        Row() {
+          Text('专题中心')
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(INK)
+          Blank()
+          Text('返回对话')
+            .fontSize(12)
+            .fontColor(this.accentColorStore)
+            .onClick((): void => { this.onSelectTab('chat'); })
+        }
+        .width('100%')
+        Text('按主题聚合关联对话与专属指令，帮助把长期项目沉淀为专注工作区。')
+          .fontSize(13)
+          .fontColor(INK3)
+          .width('100%')
+        Row() {
+          Text('管理现有小应用 ›')
+            .fontSize(12.5)
+            .fontColor(this.accentColorStore)
+            .onClick((): void => { this.onOpenHubsPlaceholder(); })
+        }
+        .width('100%')
+        .padding({ top: 4 })
+      }
+      .width('100%')
+      .padding(16)
+      .borderRadius(28)
+      .backgroundColor(SURFACE)
+      .border({ width: 0.75, color: HOME_GLASS_EDGE })
+      .shadow({ radius: 16, color: HOME_GLASS_SHADOW, offsetY: 4 })
+      .margin({ left: 16, right: 16, bottom: 8 })
+      .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 20 }))
+        .animation({ duration: 200, curve: Curve.EaseOut }))
+    }
+  }
+
   build(): void {
     Column() {
     Column() {}
@@ -163,8 +277,10 @@ export struct ChatComposerPane {
 
       // P4:输入区底部安全区(沉浸式全屏下不被导航条遮挡);
       //   Android ChatInput 沉浸式基准 = 安全区底部 + 10vp 呼吸
+      // 悬浮输入与原位双态底栏（去通栏实色底与顶硬线，底部柔和渐隐衬底）
       Column() {
-        // 第二梯队 E:ChatInput 组件替换内联输入行
+        this.InlineDockPanel()
+
         if (this.presentation.restoreReloadFailed) {
           Text('恢复后的会话读取失败，点击重试')
             .fontSize(13).fontColor(ERROR).width('100%').padding(12)
@@ -179,56 +295,75 @@ export struct ChatComposerPane {
               this.onRetryStorage();
             })
         }
-        // 子代理跨会话活动条(C5-4;有运行中子代理时显示)
         this.runtimeContent()
         ChatCloudDialogueStrip({ session: this.cloudDialogue })
         if (this.manualCompacting) {
           Text('正在压缩上下文…').fontSize(META).fontColor(INK3)
             .width('100%').padding({ left: 20, right: 20, top: 6, bottom: 4 })
         }
-        ChatInput({
-          disabled: ((this.storageDegraded || !this.presentation.conversationLoaded) && !this.presentation.sending) || this.manualCompacting,
-          text: this.composer.inputText,
-          sending: this.presentation.sending,
-          queueCount: this.presentation.pendingQueue.length,
-          onOpenQueue: (): void => { this.composer.queueSheetOpen = true; },
-          onQueueSend: (mode: string): void => { this.composer.send(mode as PendingUserMessageMode); },
-          editing: this.composer.editingNodeId.length > 0,
-          hasImages: this.composer.pendingImages.length > 0 || this.composer.pendingDocs.length > 0,
-          subAgentEnabled: this.composer.subAgentEnabled,
-          subAgentMode: this.composer.subAgentMode,
-          quickMessages: this.composer.quickMessages,
-          mentionRoles: this.composer.mentionRoles,
-          sendOnEnter: this.presentation.displaySettings.sendOnEnter,
-          pasteLongTextAsFile: this.presentation.displaySettings.pasteLongTextAsFile,
-          pasteLongTextThreshold: this.presentation.displaySettings.pasteLongTextThreshold,
-          // 1:1 原型 send 键 color/bg .18s ease:输入变化经 animateTo 驱动
-          onTextChange: (v: string): void => {
-            animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
-              this.composer.setInputText(v);
-            });
-          },
-          onSend: (): void => { this.composer.send(); },
-          onStop: (): void => {
-            // Phase 2:统一停止入口(abort + 收口标记 + steer→followup;
-            //   不抢先保存 — 生成完成 .then 单次收口)
-            this.presentation.requestStop();
-          },
-          onSendWithoutAnswer: (): void => { this.composer.sendWithoutAnswer(); },
-          onPickImage: (): void => { this.composer.pickImages(); },
-          onTakePhoto: (): void => { this.composer.takePhoto(); },
-          onPickFile: (): void => { this.composer.pickFiles(); },
-          onPasteAsFile: (t: string): void => { this.composer.attachPastedText(t); },
-          onCancelEdit: (): void => { this.composer.cancelEdit(); },
-          onClearInput: (): void => { this.composer.setInputText(''); },
-          onCompactContext: (): void => { this.onCompact(); },
-          onInsertText: (t: string): void => { this.composer.setInputText(t); },
+
+        // 点「任务」或「中心」时临时收起输入框，保持组件挂载以保留草稿不丢失
+        Column() {
+          ChatInput({
+            disabled: ((this.storageDegraded || !this.presentation.conversationLoaded) && !this.presentation.sending) || this.manualCompacting,
+            text: this.composer.inputText,
+            sending: this.presentation.sending,
+            queueCount: this.presentation.pendingQueue.length,
+            onOpenQueue: (): void => { this.composer.queueSheetOpen = true; },
+            onQueueSend: (mode: string): void => { this.composer.send(mode as PendingUserMessageMode); },
+            editing: this.composer.editingNodeId.length > 0,
+            hasImages: this.composer.pendingImages.length > 0 || this.composer.pendingDocs.length > 0,
+            subAgentEnabled: this.composer.subAgentEnabled,
+            subAgentMode: this.composer.subAgentMode,
+            quickMessages: this.composer.quickMessages,
+            mentionRoles: this.composer.mentionRoles,
+            sendOnEnter: this.presentation.displaySettings.sendOnEnter,
+            pasteLongTextAsFile: this.presentation.displaySettings.pasteLongTextAsFile,
+            pasteLongTextThreshold: this.presentation.displaySettings.pasteLongTextThreshold,
+            onTextChange: (v: string): void => {
+              animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
+                this.composer.setInputText(v);
+              });
+            },
+            onSend: (): void => { this.composer.send(); },
+            onStop: (): void => {
+              this.presentation.requestStop();
+            },
+            onSendWithoutAnswer: (): void => { this.composer.sendWithoutAnswer(); },
+            onPickImage: (): void => { this.composer.pickImages(); },
+            onTakePhoto: (): void => { this.composer.takePhoto(); },
+            onPickFile: (): void => { this.composer.pickFiles(); },
+            onPasteAsFile: (t: string): void => { this.composer.attachPastedText(t); },
+            onCancelEdit: (): void => { this.composer.cancelEdit(); },
+            onClearInput: (): void => { this.composer.setInputText(''); },
+            onCompactContext: (): void => { this.onCompact(); },
+            onInsertText: (t: string): void => { this.composer.setInputText(t); },
+            onFocusChange: (focused: boolean): void => { this.composer.setInputFocused(focused); },
+          })
+        }
+        .width('100%')
+        .visibility(this.activeTab === 'chat' ? Visibility.Visible : Visibility.None)
+
+        AmberBottomModeBar({
+          cloudDialogue: this.cloudDialogue,
+          modelContext: this.modelContext,
+          inputFocused: this.composer.inputFocused,
+          activeTab: this.activeTab,
+          attentionTaskCount: this.attentionTaskCount,
+          runningTaskCount: this.runningTaskCount,
+          onSelectTab: (tab: BottomDockTab): void => { this.onSelectTab(tab); },
+          onNewTopic: (): void => { this.onNewTopic(); },
+          onOpenGatewaySettings: (): void => { this.onOpenGatewaySettings(); },
         })
       }
       .width('100%')
-      .padding({ top: 8, bottom: this.navBarHeight + 10 })
-      .backgroundColor(BG)
-      .border({ width: { top: 0.5 }, color: LINE })
-    }.width('100%')
+      .padding({ top: 10, bottom: this.navBarHeight + 10 })
+      .linearGradient({
+        direction: GradientDirection.Bottom,
+        colors: [[BG_FADE_START, 0], [BG_FADE_END, 0.36], [BG_FADE_END, 1]],
+      })
+    }
+    .opacity(this.themeEpoch >= 0 ? 1 : 1)
+    .width('100%')
   }
 }

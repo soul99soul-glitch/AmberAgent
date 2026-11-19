@@ -78,7 +78,11 @@ export class ChatConversationDrawerSession {
     this.dependencies?.onNavigate('conversation', id);
   }
   newChat(): void { this.dependencies?.onNavigate('newChat', ''); }
-  openDrawerBoard(): void { this.drawerOpen = false; this.dependencies?.onNavigate('board', ''); }
+  openDrawerTasks(): void { this.drawerOpen = false; this.dependencies?.onNavigate('tasks', ''); }
+  openDrawerHistory(): void { this.drawerOpen = false; this.dependencies?.onNavigate('history', ''); }
+  openDrawerPersona(): void { this.drawerOpen = false; this.dependencies?.onNavigate('persona', ''); }
+  openDrawerCouncil(): void { this.drawerOpen = false; this.dependencies?.onNavigate('council', ''); }
+  openDrawerWebMount(): void { this.drawerOpen = false; this.dependencies?.onNavigate('webmount', ''); }
   openDrawerApps(): void { this.drawerOpen = false; this.dependencies?.onNavigate('apps', ''); }
   openDrawerSettings(): void { this.drawerOpen = false; this.dependencies?.onNavigate('settings', ''); }
   editDrawerNickname(_name: string): void { this.drawerOpen = false; this.dependencies?.onNavigate('profile', ''); }

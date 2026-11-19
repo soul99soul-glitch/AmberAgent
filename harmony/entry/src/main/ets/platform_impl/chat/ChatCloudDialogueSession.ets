@@ -285,6 +285,13 @@ export class ChatCloudDialogueSession {
     }
   }
 
+  async setCloudModeEnabled(enabled: boolean): Promise<void> {
+    if (this.ports === null) return;
+    if (enabled && !this.paired) return;
+    await this.ports.kvStore.put(CLOUD_DIALOGUE_ENABLED_KEY, enabled ? 'true' : 'false');
+    await this.refreshConfigAndStart();
+  }
+
   async refreshConfigAndStart(): Promise<void> {
     if (this.ports === null) return;
     try {

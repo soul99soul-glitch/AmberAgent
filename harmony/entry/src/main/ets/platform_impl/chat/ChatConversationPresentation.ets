@@ -26,7 +26,7 @@ export interface ChatPresentationPorts {
   publishModelContext: (snapshot: ConversationRunSnapshot) => void;
   reconcileSmartUi: (conversation: Conversation) => void;
   clearSmartUi: () => void;
-  openDeepRead: (event: DeepReadOpenEvent) => void;
+  openDeepRead?: (event: DeepReadOpenEvent) => void;
   timelineState: () => ConversationTimelineLoadState;
   clearTimeline: () => void;
   syncTimeline: () => void;
@@ -130,7 +130,9 @@ export class ChatConversationPresentation {
     });
     if (!this.pageVisible) return;
     this.unsubscribeRunNavigation = this.deps.runService.subscribeNavigation(id, (event: DeepReadOpenEvent): void => {
-      if (this.pageAlive && this.pageVisible && this.runConversationId === id) this.deps.openDeepRead(event);
+      if (this.pageAlive && this.pageVisible && this.runConversationId === id && this.deps.openDeepRead !== undefined) {
+        this.deps.openDeepRead(event);
+      }
     });
     this.unbindConversationBrowser = this.deps.bindBrowserPage(id);
     this.deps.bindBrowserHooks();

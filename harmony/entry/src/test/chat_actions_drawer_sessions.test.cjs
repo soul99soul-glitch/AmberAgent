@@ -61,7 +61,7 @@ function drawerFixture() {
   const events = [], errors = [], confirmations = [];
   let busy = false;
   const exports = loadOwner('ChatConversationDrawerSession.ets', {
-    '@amber/chat-domain': { patchConversation: (conv, patch) => Object.assign({}, conv, patch) },
+    '@amber/chat-domain': { patchConversation: (conv, patch) => Object.assign({}, conv, patch), clearSecretsForConversation: () => {}, currentMessages: () => [] },
     '../ConversationRunGuard.ets': { beginConversationRestore: ids => { events.push(['lock', ids]); return () => events.push(['release']); } },
     '../../design/tokens.ets': { ERROR: 'red' }, AlertDialog: { show: value => confirmations.push(value) },
   });

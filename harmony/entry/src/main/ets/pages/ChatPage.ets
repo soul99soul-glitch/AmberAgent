@@ -28,7 +28,7 @@ import { uniformTypeDescriptor as utd } from '@kit.ArkData';
 import type {
   Conversation, MessageNode, UIMessage, UIMessagePart, UIMessagePartDocument, UIMessagePartImage,
   UIMessagePartMiniApp, Assistant, PendingUserMessage, PendingUserMessageMode, DisplaySetting,
-  MessageSearchHit, UIMessagePartTool, ToolApprovalVerdict, ToolApprovalPartLocator, DeepReadOpenEvent,
+  MessageSearchHit, UIMessagePartTool, ToolApprovalVerdict, ToolApprovalPartLocator,
   AgentTool, MessageChunk, OpenAIChatApi, AskedAnswers, ConversationCompact, ImageGuardSettings,
   VisionModelHealth, VisionProbeDeps, ProviderModel, ProviderSetting, SandboxActivityUiState,
   InteractiveTurnRunResult, ChatTimelineRow, SmartUiDocument, SmartUiDraftSource, SmartUiScalar,
@@ -39,7 +39,7 @@ import {
   selectMessageBranch, deleteMessage, editMessage, buildChatTimelineRows, messageSignature, forkConversation, patchConversation,
   runAutoTitle, makeUserMessage, toText, messageCopyText, makeTextGenerationParams, pendingPreviewText, convertSteerToFollowup,
   invalidateCompacts, copyValidCompactsToConversation, ContextCompactionFailedError, recoverInterruptedRecipes,
-  recoverInterruptedPlugins, recoverInterruptedWebMountGoals, parseDeepReadSlashCommand, estimateConversationInputTokens, formatNumberInt,
+  recoverInterruptedPlugins, recoverInterruptedWebMountGoals, estimateConversationInputTokens, formatNumberInt,
   formatContextTokens, nativeTokenizerForModel, loadSearchPrefs, SearchSettings,
   buildMentionRoleItems, MentionRoleItem, ConversationSummary, toChatModel,
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
@@ -91,8 +91,12 @@ import { beginConversationRun, beginConversationRestore, hasActiveConversationRu
 import { resolveEffectiveChatChoice, saveEffectiveChatChoice } from '../platform_impl/ChatModelSelectionSupport.ets';
 import { countNativeContextTokens } from '../platform_impl/NativeTokenCounter.ets';
 import { mutateAssistant } from '../platform_impl/AssistantMutation.ets';
-import { Icon } from '../components/ui/Icon.ets';
-import { DotText, DotGround } from '../components/ui/DotMatrix.ets';
+import { DotText } from '../components/ui/DotMatrix.ets';
+import { markWantRoutingReady } from '../entryability/EntryAbility.ets';
+import { ChatProgressiveEdgeBlur } from '../components/chat/ChatProgressiveEdgeBlur.ets';
+import { ChatTopBarOverlay, type TopBarNoticeItem } from '../components/chat/ChatTopBarOverlay.ets';
+import { AmberPersonaMedallion } from '../components/chat/AmberPersonaMedallion.ets';
+import type { BottomDockTab } from '../components/chat/AmberBottomModeBar.ets';
 import { listFavoriteNodeIds, setNodeFavorite } from '../platform_impl/FavoriteStore.ets';
 import { ChatArtifactShelf } from '../components/ChatArtifactShelf.ets';
 import type { ConversationArtifactIndex, ConversationArtifactSource, ConversationDocumentArtifact } from '@amber/chat-domain';
@@ -120,13 +124,10 @@ import type { ChatMessageArchiveSource } from '@amber/chat-domain';
 import { ChatMessageToolPreviewSheet } from '../components/ChatMessageToolPreviewSheet.ets';
 import { ChatMessageActionsSheet } from '../components/ChatMessageActionsSheet.ets';
 import { AgentMessageActionsSheet } from '../components/AgentMessageActionsSheet.ets';
-import { ChatDrawer } from '../components/ChatDrawer.ets';
 import { HomeListPane } from '../components/HomeListPane.ets';
 import {
   isTwoPaneWindow, twoPaneListWidth, WINDOW_HEIGHT_VP_KEY, WINDOW_WIDTH_VP_KEY,
 } from '../design/adaptive.ets';
-import { ChatListGrouped } from '../components/ChatListGrouped.ets';
-import { TopModelMenu } from '../components/TopModelMenu.ets';
 import { sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import {
@@ -186,7 +187,7 @@ const ROW: string = SURFACE2;
 // accent rgba 混色(建议 chips 描边等;与 tokens 令牌 #RRGGBB 配合)
 // 1:1 原型空态 hero 轮换句(3.2s 淡入淡出)
 const GREETINGS: string[] = [
-  '今天想聊点什么？', '想精读哪一篇？', '描述一下，就搭给你看。', '要续写哪个世界？', '让四个模型辩一场？',
+  '今天想一起推进什么？', '随时告诉我，我来拆解处理。', '描述一下，就搭给你看。', '有需要我记住的事吗？', '让四个模型辩一场？',
 ];
 
 const HILOG_DOMAIN: number = 0x0001;
@@ -288,7 +289,10 @@ struct ChatPage {
   // D-108:拒绝理由弹窗态(ToolDenyReasonDialog;空 = 关闭)
   // D-110:上下文用量指示(ContextUsageIndicator)— compacts/窗口快照 + 压缩活动计数
   // TopModelMenu:顶部模型快速切换下拉(Android TopModelMenu.kt)
-  @State chatHeaderHeight: number = 0;
+  @State chatHeaderHeight: number = 108;
+  @State composerHeight: number = 132;
+  @State bottomDockTab: BottomDockTab = 'chat';
+  @State dismissedNoticeIds: string[] = [];
   // 装配请求由关闭/离页失效，迟到回调不能重开菜单或覆盖下一次请求。
   // D-038:待发图片(data: URL 物化,发送后清空)
   // D-041:regenerate 流式预览(目标节点行下渲染;完成后清空)
@@ -367,6 +371,7 @@ struct ChatPage {
     this.timeline.enableKeyboardAvoidance();
     this.pageVisible = true;
     this.homePaneVisible = true;
+    markWantRoutingReady(this.getUIContext().getRouter());
     this.syncStreamingFrameRate();
     if (this.presentation.conversation !== null) this.presentation.attachConversationRun(this.presentation.conversation.id, true);
     this.startGreetTimer();
@@ -441,6 +446,7 @@ struct ChatPage {
     if (this.runDetails.denyDialogOpen) { this.runDetails.dismissDenyDialog(); return true; }
     if (this.modelContext.modelMenuOpen || this.modelContext.modelMenuLoading) { this.modelContext.closeModelMenu(); return true; }
     if (this.modelContext.contextMeterOpen) { this.modelContext.contextMeterOpen = false; return true; }
+    if (this.bottomDockTab !== 'chat') { this.bottomDockTab = 'chat'; return true; }
     if (this.drawer.drawerOpen) { this.drawer.closeDrawer(); return true; }
     return false;
   }
@@ -474,7 +480,6 @@ struct ChatPage {
       publishModelContext: (snapshot: ConversationRunSnapshot): void => { this.modelContext.applyRunSnapshot(snapshot); },
       reconcileSmartUi: (conversation: Conversation): void => { this.smartUi.reconcileSmartUiSources(conversation); },
       clearSmartUi: (): void => { this.smartUi.clearSmartUiMemory(); },
-      openDeepRead: (event: DeepReadOpenEvent): void => { this.openDeepRead(event); },
       timelineState: (): ConversationTimelineLoadState => this.timeline.timelineLoadState,
       clearTimeline: (): void => { this.timeline.setRows([]); },
       syncTimeline: (): void => { this.timeline.syncDataSource(); },
@@ -521,7 +526,6 @@ struct ChatPage {
       dismissKeyboard: (): void => { this.timeline.dismissKeyboardAfterSend(); },
       autoScrollEnabled: (): boolean => this.timeline.enableAutoScroll,
       jumpToBottom: (): void => { this.timeline.jumpToBottom(); },
-      openDeepRead: (event: DeepReadOpenEvent): void => { this.openDeepRead(event); },
       captureContinuation: (text: string): SmartUiContinuationCapture | null => this.smartUi.captureSmartUiContinuation(text, this.smartUiSourceContext()),
       continuationAvailable: (): boolean => this.smartUi.latestSmartUiContinuationRuntime(this.smartUiSourceContext()) !== undefined,
       continuationCurrent: (capture: SmartUiContinuationCapture | null): boolean => this.smartUi.smartUiContinuationCurrent(capture, this.smartUiSourceContext()),
@@ -601,7 +605,14 @@ struct ChatPage {
         if (target === 'newChat') { this.newChat(); return; }
         if (target === 'conversation') { router.replaceUrl({ url: 'pages/ChatPage', params: { conversationId: id } }); return; }
         if (target === 'deletedCurrent') { router.replaceUrl({ url: 'pages/ChatPage' }); return; }
-        const url: string = target === 'board' ? 'pages/BoardPage' : target === 'apps' ? 'pages/MiniAppListPage' : target === 'settings' ? 'pages/SettingPage' : 'pages/ProfilePage';
+        if (target === 'tasks') { this.bottomDockTab = 'tasks'; return; }
+        const url: string = target === 'history' ? 'pages/HistoryPage'
+          : target === 'persona' ? 'pages/AgentSoulPage'
+          : target === 'council' ? 'pages/CouncilPage'
+          : target === 'webmount' ? 'pages/SettingExperimentalWebMountPage'
+          : target === 'apps' ? 'pages/MiniAppListPage'
+          : target === 'settings' ? 'pages/SettingPage'
+          : 'pages/ProfilePage';
         router.pushUrl({ url: url });
       },
       maybeAutoTitle: (conv: Conversation, force: boolean): Promise<void> => this.presentation.maybeAutoTitle(conv, force),
@@ -906,12 +917,92 @@ struct ChatPage {
     router.replaceUrl({ url: 'pages/ChatPage' });
   }
 
-  // 深读页路由(deep_read_open 工具 bus 与斜杠命令共用)
-  private openDeepRead(event: DeepReadOpenEvent): void {
-    const params: Record<string, string> = {};
-    params['topicId'] = event.topicId;
-    params['title'] = event.title;
-    router.pushUrl({ url: 'pages/DeepReadArticlePage', params: params });
+  private countTimelineArtifacts(): number {
+    let count: number = 0;
+    for (const row of this.timeline.rows) {
+      for (const part of row.message.parts) {
+        if (part.type === 'image' || part.type === 'document' || part.type === 'mini_app') count++;
+      }
+    }
+    return count;
+  }
+
+  private runningTaskBadgeCount(): number {
+    const cloudOrLocal: number = this.cloudDialogue.runningTasks().length;
+    const otherRunning: number = this.presentation.runningConversationIds.filter(
+      (id: string): boolean => id !== (this.presentation.conversation?.id ?? ''),
+    ).length;
+    return cloudOrLocal + otherRunning;
+  }
+
+  private attentionTaskBadgeCount(): number {
+    let count: number = 0;
+    for (const task of this.cloudDialogue.tasks) {
+      if (task.status === 'failed' && this.dismissedNoticeIds.indexOf(`cloud:${task.workItemId}`) < 0) count++;
+    }
+    for (const row of this.timeline.rows) {
+      for (const part of row.message.parts) {
+        if (part.type === 'tool' && (part as UIMessagePartTool).approvalState.type === 'pending') count++;
+      }
+    }
+    return count;
+  }
+
+  private buildTopBarNotices(): TopBarNoticeItem[] {
+    const notices: TopBarNoticeItem[] = [];
+    const currentId: string = this.presentation.conversation?.id ?? '';
+    for (const task of this.cloudDialogue.tasks) {
+      const nid: string = `cloud:${task.workItemId}`;
+      if (this.dismissedNoticeIds.indexOf(nid) >= 0) continue;
+      if (task.status === 'failed') {
+        notices.push({
+          id: nid, kind: 'failed',
+          title: task.title.length > 0 ? task.title : '云端任务失败',
+          subtitle: task.progressText.length > 0 ? task.progressText : '点击查看详情',
+          conversationId: task.topicId || currentId,
+        });
+      } else if (task.status === 'completed' && task.topicId.length > 0 && task.topicId !== currentId) {
+        notices.push({
+          id: nid, kind: 'completed',
+          title: task.title.length > 0 ? task.title : '云端任务已完成',
+          subtitle: '来自其他对话',
+          conversationId: task.topicId,
+        });
+      }
+    }
+    for (const id of this.presentation.runningConversationIds) {
+      if (id === currentId) continue;
+      const nid: string = `run:${id}`;
+      if (this.dismissedNoticeIds.indexOf(nid) >= 0) continue;
+      notices.push({
+        id: nid, kind: 'running',
+        title: '后台对话正在生成',
+        subtitle: '轻点切过去查看',
+        conversationId: id,
+      });
+    }
+    return notices;
+  }
+
+  private openTopBarNotice(notice: TopBarNoticeItem): void {
+    const currentId: string = this.presentation.conversation?.id ?? '';
+    if (notice.conversationId.length > 0 && notice.conversationId !== currentId) {
+      router.replaceUrl({ url: 'pages/ChatPage', params: { conversationId: notice.conversationId } });
+      return;
+    }
+    this.bottomDockTab = 'tasks';
+  }
+
+  private clearTopBarNotices(): void {
+    const next: string[] = this.dismissedNoticeIds.slice();
+    for (const n of this.buildTopBarNotices()) {
+      if (next.indexOf(n.id) < 0) next.push(n.id);
+    }
+    this.dismissedNoticeIds = next;
+  }
+
+  private startNewTopicAction(): void {
+    this.newChat();
   }
 
   // SandboxActivitySheet(:1113+;web 预览路径 = webview 子系统未移植 P1)
@@ -970,139 +1061,20 @@ struct ChatPage {
         Column().width(this.getUIContext().px2vp(1)).height('100%').backgroundColor(LINE2)
       }, (e: number): string => `pane-line-${e}`)
     }
-    Stack() {
+    Stack({ alignContent: Alignment.Top }) {
       // 主题纪元重挂载(勿拆):epoch 变化 → 整页子树销毁重建,全量重读令牌
       ForEach([this.themeEpoch], (_e: number): void => {
     this.chatSheetHosts()
     ChatRunDetailsView({ session: this.runDetails })
-    Column() {
-      // 顶栏参与布局，正文视口从顶栏细线开始。
-      // 顶栏位于正文视口之前，细线就是正文上边界。
-      Row() {
-        // amber-zhenji:chat-head 左侧为返回(抽屉入口收归首页)。
-        //   两栏时左边就是列表,去掉返回;占位保留,标题仍居中(系统返回照旧回首页)。
-        if (this.twoPane()) {
-          Row().width(80).height(48)
-        } else {
-          Row() {
-            Row() {
-              Icon({ name: 'back', iconSize: 24, color: INK })
-            }
-            .width(48).height(48)
-            .padding({ right: 8 })
-            .justifyContent(FlexAlign.Center)
-            .alignItems(VerticalAlign.Center)
-            .onClick((): void => { this.navigateBack(); })
-            .accessibilityText('返回')
-          }
-          .width(80).justifyContent(FlexAlign.Start).alignItems(VerticalAlign.Center)
-        }
 
-        // 两行文字共用中轴，左右各保留 48vp 按钮区域。
-        Column() {
-          if (this.presentation.editingTitle) {
-            TextInput({ text: this.presentation.titleInput, placeholder: '会话标题' })
-              .fontSize(TEXT_STYLES.sessionTitle.size)
-              .fontWeight(TEXT_STYLES.sessionTitle.weight)
-              .lineHeight(TEXT_STYLES.sessionTitle.lineHeight)
-              .fontFamily(TEXT_STYLES.sessionTitle.family)
-              .width('100%').height(36)
-              .backgroundColor(SURFACE)
-              .onChange((v: string): void => { this.presentation.titleInput = v; })
-          } else {
-            Row({ space: 6 }) {
-              if (this.presentation.sending || this.presentation.recapState.loading) {
-                LoadingProgress().width(14).height(14).color(this.accentColorStore)
-              } else {
-                Icon({ name: 'history', iconSize: 14, color: this.accentColorStore })
-              }
-              Text(this.presentation.sending ? '正在回复…' : (this.presentation.recapState.loading ? '正在整理回顾…' : this.presentation.title))
-                .fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
-                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                .flexShrink(1)
-            }
-            .height(34).constraintSize({ maxWidth: '100%' }).justifyContent(FlexAlign.Center)
-            // 右侧补齐图标 14vp + 间距 6vp，让标题文字居中。
-            .padding({ left: 10, right: 30 })
-            .backgroundColor(SURFACE2).borderRadius(17)
-            .onClick((): void => { this.presentation.openRecap(); })
-            .accessibilityText('对话回顾：' + this.presentation.title)
-          }
-          // 模型行(amber-zhenji):mono 11.5 ink3 居中 + ⌄12
-          Row() {
-            Text(this.modelContext.modelLabel.length > 0 ? this.modelContext.modelLabel : '未配置模型')
-              .fontSize(11.5).fontFamily(FONT_MONO)
-              .fontColor(this.modelContext.modelLabel.length > 0 ? INK3 : this.accentColorStore)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
-            Icon({ name: 'chevron_down', iconSize: 12, color: INK3 })
-              .rotate({ angle: this.modelContext.modelMenuOpen ? 180 : 0 })
-              .margin({ left: 2 })
-          }
-          .height(30).width('100%').justifyContent(FlexAlign.Center)
-          // 左侧补齐下拉图标 12vp + 间距 2vp，与标题文字对齐。
-          .padding({ left: 24, right: 10 })
-          .onClick((): void => {
-            if (!this.presentation.editingTitle) { this.presentation.closeRecap(); this.modelContext.toggleModelMenu(); }
-          })
-          .accessibilityText('切换模型与服务商')
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Center)
-
-        // 右侧保留产物架；编辑态沿用保存/取消。
-        if (this.presentation.editingTitle) {
-          Row() {
-            Text('保存').fontSize(META).fontColor(this.accentColorStore)
-              .padding({ left: 8, right: 4 })
-              .onClick((): void => this.presentation.saveTitle())
-            Text('取消').fontSize(META).fontColor(INK3)
-              .padding({ left: 8, right: 0 })
-              .onClick((): void => { this.presentation.editingTitle = false; })
-          }
-        } else {
-          Row() {
-            // 形象人设入口(40×44 热区;自定义人设时高亮 accent 色)
-            Row() {
-              Icon({
-                name: 'ph_maskHappy',
-                iconSize: 19,
-                color: this.agentSoulIsDefault ? INK : this.accentColorStore,
-              })
-            }
-            .width(40).height(44)
-            .justifyContent(FlexAlign.Center)
-            .alignItems(VerticalAlign.Center)
-            .onClick((): void => { router.pushUrl({ url: 'pages/AgentSoulPage' }); })
-            .accessibilityText('形象人设')
-
-            // 产物架入口(图片/文件/小应用陈列;40×44 热区)
-            Row() {
-              Icon({ name: 'box', iconSize: 20, color: INK })
-            }
-            .width(40).height(44)
-            .justifyContent(FlexAlign.Center)
-            .alignItems(VerticalAlign.Center)
-            .onClick((): void => { this.artifacts.openArtifactShelf(); })
-            .accessibilityText('产物架')
-          }
-          .width(80).justifyContent(FlexAlign.End)
-          .alignItems(VerticalAlign.Center)
-        }
-      }
-      .width('100%')
-      .constraintSize({ minHeight: 64 })
-      .padding({ left: 20, right: 20, top: this.statusBarHeight + 2, bottom: 8 })
-      .backgroundColor(BG)
-      .border({ width: { bottom: 0.5 }, color: LINE })
-      .onAreaChange((_old: Area, area: Area): void => {
-        this.chatHeaderHeight = Number(area.height);
-      })
-      Stack({ alignContent: Alignment.Top }) {
-      // 共用 Timeline 只承载 List/几何/事件透传；Chat 的窗口、首帧定位与三态跟底保持原状态机。
+    // ── 主舞台 Stack：底层全屏 Timeline ⇄ 顶部 54vp 窄模糊带 + 悬垂形象岛 ⇄ 底部悬浮胶囊输入与双态底栏 ──
+    Stack({ alignContent: Alignment.Top }) {
       ChatTimelineView({
         timeline: this.timeline, presentation: this.presentation, smartUi: this.smartUi,
         activeArtifactInteraction: this.activeArtifactInteraction,
         favoriteNodeIds: this.messageActions.favoriteNodeIds, contextCompacts: this.modelContext.contextCompacts,
+        topSpacerHeight: this.statusBarHeight + 114,
+        bottomSpacerHeight: this.composerHeight,
         onMessageCommand: (command: string, row: MsgRow, index: number): void => {
           if (command === 'switch') this.presentation.switchBranch(row.nodeId, index);
           else if (command === 'regenerate') this.presentation.regenerate(row.nodeId);
@@ -1129,62 +1101,123 @@ struct ChatPage {
         onNavigate: (kind: string, id: string): void => { router.pushUrl({ url: kind === 'miniApp' ? 'pages/MiniAppRunnerPage' : 'pages/MiniAppListPage', params: { appId: id } }); },
       })
 
-      // ContextUsagePanel(Android ContextRing.kt ContextUsagePopup):指示器下方右锚定
-      ChatContextMeterOverlay({ session: this.modelContext })
-      }
-      .layoutWeight(1)
-      .width('100%')
+      // 空状态 hero：居中于消息舞台上，避开顶栏悬垂岛与底栏
+      if (this.presentation.conversationArrivedTick >= 0 && this.presentation.conversationLoaded && this.presentation.conversation !== null
+        && this.timeline.rows.length === 0 && !this.presentation.sending) {
+        Column() {
+          Column() {
+            AmberPersonaMedallion({
+              medallionSize: 72,
+              displayName: this.agentSoulDisplayName,
+              isDefault: this.agentSoulIsDefault,
+              sending: false,
+            })
+          }
+          .margin({ bottom: 14 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/AgentSoulPage' }); })
 
-      ChatComposerPane({
-        composer: this.composer, presentation: this.presentation, cloudDialogue: this.cloudDialogue,
-        navBarHeight: this.navBarHeight, storageDegraded: this.storageDegraded,
-        manualCompacting: this.modelContext.manualCompacting, retryStatus: this.runDetails.retryStatus,
-        onCompact: (): void => { this.modelContext.compactCurrentConversation(); },
-        onRetryStorage: (): void => { getChatRepository().list().catch((error: Error): void => { this.presentation.errorMsg = error.message; }); },
-        sandboxContent: (): void => { this.sandboxContent(); },
-        runtimeContent: (): void => { this.runtimeContent(); },
+          Row() {
+            if (this.agentSoulIsDefault || this.agentSoulDisplayName === 'Amber') {
+              DotText({ text: 'AMBER', dotScale: 3.4, color: INK, glow: true })
+            } else {
+              Text(this.agentSoulDisplayName)
+                .fontSize(28).fontWeight(FontWeight.Bold).fontColor(INK)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+            Text('')
+              .width(11).height(28).backgroundColor(this.accentColorStore).borderRadius(2)
+              .margin({ left: 4 })
+              .opacity(this.cursorOn ? 1 : 0)
+          }
+          .constraintSize({ minHeight: 44 })
+          .alignItems(VerticalAlign.Center)
+          .accessibilityText('形象人设')
+          .onClick((): void => { router.pushUrl({ url: 'pages/AgentSoulPage' }); })
+
+          Text(this.agentSoulTagline.trim().length > 0 ? this.agentSoulTagline : GREETINGS[this.greetIdx])
+            .fontSize(15).fontColor(INK3)
+            .margin({ top: 10 })
+            .opacity(this.agentSoulTagline.trim().length > 0 ? 1 : this.greetOpacity)
+        }
+        .alignItems(HorizontalAlign.Center)
+        .width('100%')
+        .position({ top: '34%' })
+        .visibility(this.modelContext.modelMenuOpen ? Visibility.Hidden : Visibility.Visible)
+      }
+
+      // 底层窄渐进模糊带（statusBarHeight + 54vp，不覆盖悬垂胶囊下方正文）
+      ChatProgressiveEdgeBlur({
+        top: true,
+        bandHeight: this.statusBarHeight + 54,
+        active: true,
+      })
+
+      // 上层 overlay 居中悬垂岛（76vp 形象 + 32vp 胶囊 + 左右玻璃圆钮，正文触控透明穿透）
+      ChatTopBarOverlay({
+        twoPane: this.twoPane(),
+        title: this.presentation.title,
+        editingTitle: this.presentation.editingTitle,
+        titleInput: this.presentation.titleInput,
+        sending: this.presentation.sending,
+        recapLoading: this.presentation.recapState.loading,
+        activityLabel: this.cloudDialogue.activeProgressText,
+        agentSoulDisplayName: this.agentSoulDisplayName,
+        agentSoulIsDefault: this.agentSoulIsDefault,
+        artifactCount: this.countTimelineArtifacts(),
+        notices: this.buildTopBarNotices(),
+        onOpenDrawer: (): void => { this.drawer.openDrawer(); },
+        onOpenPersona: (): void => { router.pushUrl({ url: 'pages/AgentSoulPage' }); },
+        onOpenRecap: (): void => {
+          if (!this.presentation.editingTitle) this.presentation.openRecap();
+        },
+        onStopGeneration: (): void => { this.presentation.requestStop(); },
+        onTitleInputChange: (v: string): void => { this.presentation.titleInput = v; },
+        onSaveTitle: (): void => { this.presentation.saveTitle(); },
+        onCancelEditTitle: (): void => { this.presentation.editingTitle = false; },
+        onOpenArtifactShelf: (): void => { this.artifacts.openArtifactShelf(); },
+        onNewTopic: (): void => { this.startNewTopicAction(); },
+        onNewChat: (): void => { this.newChat(); },
+        onExportChat: (): void => { this.messageActions.exportSheetOpen = true; },
+        onOpenNotice: (notice: TopBarNoticeItem): void => { this.openTopBarNotice(notice); },
+        onClearNotices: (): void => { this.clearTopBarNotices(); },
+        onControlsHeightChange: (h: number): void => { this.chatHeaderHeight = h; },
+      })
+
+      // ContextUsagePanel：从底栏上下文环或模型面板触发
+      ChatContextMeterOverlay({ session: this.modelContext })
+
+      // 底部悬浮胶囊输入栏 + 原位双态底栏
+      Column() {
+        ChatComposerPane({
+          composer: this.composer, presentation: this.presentation, cloudDialogue: this.cloudDialogue,
+          modelContext: this.modelContext,
+          navBarHeight: this.navBarHeight, storageDegraded: this.storageDegraded,
+          manualCompacting: this.modelContext.manualCompacting, retryStatus: this.runDetails.retryStatus,
+          activeTab: this.bottomDockTab,
+          attentionTaskCount: this.attentionTaskBadgeCount(),
+          runningTaskCount: this.runningTaskBadgeCount(),
+          onCompact: (): void => { this.modelContext.compactCurrentConversation(); },
+          onRetryStorage: (): void => { getChatRepository().list().catch((error: Error): void => { this.presentation.errorMsg = error.message; }); },
+          onSelectTab: (tab: BottomDockTab): void => { this.bottomDockTab = tab; },
+          onNewTopic: (): void => { this.startNewTopicAction(); },
+          onOpenGatewaySettings: (): void => { router.pushUrl({ url: 'pages/SettingMacGatewayPage' }); },
+          onOpenTasksSettings: (): void => { router.pushUrl({ url: 'pages/SettingCronTasksPage' }); },
+          onOpenHubsPlaceholder: (): void => { router.pushUrl({ url: 'pages/MiniAppListPage' }); },
+          sandboxContent: (): void => { this.sandboxContent(); },
+          runtimeContent: (): void => { this.runtimeContent(); },
+        })
+      }
+      .width('100%')
+      .position({ left: 0, bottom: 0 })
+      .onAreaChange((_old: Area, area: Area): void => {
+        const h: number = Number(area.height);
+        if (Number.isFinite(h) && h > 0) this.composerHeight = h;
       })
     }
     .width('100%').height('100%').backgroundColor(BG)
 
-    // 空状态 hero(1:1 原型): 居中 Amber▌ 词标 36px 陶土光标闪烁 +
-    //   问候句 3.2s 淡入淡出轮换;光学中心上移(margin bottom 128)
-    if (this.presentation.conversationArrivedTick >= 0 && this.presentation.conversationLoaded && this.presentation.conversation !== null
-      && this.timeline.rows.length === 0 && !this.presentation.sending) {
-      Column() {
-        Row() {
-          if (this.agentSoulIsDefault || this.agentSoulDisplayName === 'Amber') {
-            DotText({ text: 'AMBER', dotScale: 3.6, color: INK, glow: true })
-          } else {
-            Text(this.agentSoulDisplayName)
-              .fontSize(30).fontWeight(FontWeight.Bold).fontColor(INK)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          }
-          Text('')
-            .width(12).height(30).backgroundColor(this.accentColorStore).borderRadius(2)
-            .margin({ left: 4 })
-            .opacity(this.cursorOn ? 1 : 0)
-        }
-        .constraintSize({ minHeight: 44 })
-        .alignItems(VerticalAlign.Center)
-        .accessibilityText('形象人设')
-        .onClick((): void => { router.pushUrl({ url: 'pages/AgentSoulPage' }); })
-        Text(this.agentSoulTagline.trim().length > 0 ? this.agentSoulTagline : GREETINGS[this.greetIdx])
-          .fontSize(15).fontColor(INK3)
-          .margin({ top: 14 })
-          .opacity(this.agentSoulTagline.trim().length > 0 ? 1 : this.greetOpacity)
-      }
-      .alignItems(HorizontalAlign.Center)
-      .width('100%')
-      .margin({ bottom: 128 })
-      // 模型下拉打开时隐藏 hero:面板下缘会横切问候句(只露半行)
-      .visibility(this.modelContext.modelMenuOpen ? Visibility.Hidden : Visibility.Visible)
-    }
-
-    // TopModelMenu 覆盖层(Android TopModelMenu.kt:Box { scrim; AnimatedVisibility(panel) })
-    //   Stack 子节点序:主 Column(底) → 本覆盖层 → deny-dialog(顶,确保拒绝弹窗压在菜单之上)。
-    //   组件自含全屏 dimmed scrim(28% 黑,点击 = onClose)+ 贴顶面板。
-    ChatModelMenuOverlay({ session: this.modelContext, topInset: this.chatHeaderHeight,
+    // TopModelMenu 覆盖层
+    ChatModelMenuOverlay({ session: this.modelContext, topInset: this.statusBarHeight + 112,
       onOpenFullPicker: (assistantId: string): void => { router.pushUrl({ url: 'pages/ChatModelPickerPage', params: { assistantId: assistantId } }); },
       onOpenProviderSettings: (): void => { router.pushUrl({ url: 'pages/ChatProviderSettingsPage' }); },
     })
@@ -1195,7 +1228,7 @@ struct ChatPage {
         loading: this.presentation.recapSourceLoading || this.presentation.recapState.loading,
         error: this.presentation.recapState.error,
         stale: this.presentation.recapNeedsRefresh(),
-        topInset: this.statusBarHeight + 80,
+        topInset: this.statusBarHeight + 114,
         onClose: (): void => { this.presentation.closeRecap(); },
         onRefresh: (): void => { this.presentation.openRecap(true); },
         onLocate: (node: ConversationRecapNode): void => { this.presentation.locateRecapNode(node); },
@@ -1206,6 +1239,8 @@ struct ChatPage {
     ChatConversationDrawerView({ session: this.drawer,
       currentConversationId: this.presentation.conversation?.id ?? '', runningIds: this.presentation.runningConversationIds,
       userNickname: this.presentation.userNickname, userAvatar: this.presentation.userAvatar,
+      onNewTopic: (): void => { this.startNewTopicAction(); },
+      onOpenAppearance: (): void => { router.pushUrl({ url: 'pages/SettingAppearancePage' }); },
     })
 
     if (this.messageActions.workspacePanelOpen && this.presentation.conversation !== null) {

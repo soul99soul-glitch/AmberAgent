@@ -19,8 +19,5 @@ export const getProductKind = (): ProductKind =>
   AppStorage.get<ProductKind>('productKind') ?? 'agent';
 
 export const productRootPage = (): string => {
-  const kind: ProductKind = getProductKind();
-  if (kind === 'novel') return 'pages/NovelProjectsPage';
-  if (kind === 'deepread') return 'pages/DeepReadRootPage';
-  return 'pages/ChatListPage';
+  return 'pages/ChatPage';
 };

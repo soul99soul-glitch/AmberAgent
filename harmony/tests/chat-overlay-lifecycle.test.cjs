@@ -151,6 +151,8 @@ function chat({ loadProviders = () => Promise.resolve([]), resolveChoice = () =>
     kvStore: { put: async () => {} } });
   page.smartUi = new ChatSmartUiSession();
   page.smartUi.start({ flush: async () => {} }, () => {});
+  page.cloudDialogue = { hide() {}, dispose() {} };
+  page.bottomDockTab = 'chat';
   return page;
 }
 

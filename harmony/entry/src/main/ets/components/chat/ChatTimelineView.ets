@@ -43,6 +43,8 @@ export struct ChatTimelineView {
   @Prop activeArtifactInteraction: string = '';
   @Prop favoriteNodeIds: string[] = [];
   @Prop @Watch('syncTimelineItems') contextCompacts: ConversationCompact[] = [];
+  @Prop @Watch('syncSpacerState') topSpacerHeight: number = 0;
+  @Prop @Watch('syncSpacerState') bottomSpacerHeight: number = 0;
   onMessageCommand: (command: string, row: MsgRow, index: number) => void = (): void => {};
   onApprove: (id: string, locator?: ToolApprovalPartLocator) => void = (): void => {};
   onDeny: (id: string, locator?: ToolApprovalPartLocator) => void = (): void => {};
@@ -65,8 +67,16 @@ export struct ChatTimelineView {
   }
 
   aboutToDisappear(): void { this.previewScrollChanged(false); }
-  aboutToAppear(): void { this.timeline.syncDataSource(); }
+  aboutToAppear(): void {
+    this.syncSpacerState();
+    this.timeline.syncDataSource();
+  }
   private syncTimelineItems(): void { this.timeline.syncDataSource(); }
+  private syncSpacerState(): void {
+    this.timeline.hasTopSpacer = this.topSpacerHeight > 0;
+    this.timeline.hasBottomSpacer = this.bottomSpacerHeight > 0;
+    this.timeline.bottomSpacerHeight = this.bottomSpacerHeight;
+  }
 
   @Builder
   chatTimelineRows(): void {
@@ -91,9 +101,18 @@ export struct ChatTimelineView {
   }
 
   @Builder
+  chatTimelineTopInset(): void {
+    if (this.topSpacerHeight > 0) {
+      ListItem() { Column().width('100%').height(this.topSpacerHeight) }
+    }
+  }
+
+  @Builder
   chatTimelineBottomInset(): void {
-    if (this.presentation.suggestions.length > 0) {
-      ListItem() { Column().height(52) }
+    if (this.bottomSpacerHeight > 0 || this.presentation.suggestions.length > 0) {
+      ListItem() {
+        Column().width('100%').height(this.bottomSpacerHeight + (this.presentation.suggestions.length > 0 ? 52 : 0))
+      }
     }
   }
 
@@ -131,7 +150,7 @@ export struct ChatTimelineView {
     .scrollBar(BarState.Off)
     .width('100%')
     .height(40)
-    .position({ left: 0, bottom: 8 })
+    .position({ left: 0, bottom: this.bottomSpacerHeight + 8 })
   }
 
   build(): void {
@@ -147,6 +166,7 @@ export struct ChatTimelineView {
         showOlderLoader: !this.timeline.timelineLoadState.fullyLoaded,
         showDivider: false,
         showScrollBar: false,
+        topSpacer: (): void => { this.chatTimelineTopInset(); },
         rows: (): void => { this.chatTimelineRows(); },
         activeTail: (): void => { this.chatTimelineActiveTail(); },
         hostTail: (): void => { this.chatTimelineBottomInset(); },
@@ -206,8 +226,9 @@ export struct ChatTimelineView {
           Icon({ name: 'arrow_down_to_line', iconSize: 20, color: INK })
         }
         .width(40).height(40)
-        .position(this.presentation.displaySettings.messageJumperOnLeft ? { left: 20, bottom: this.timeline.floatingControlsBottom() }
-          : { right: 20, bottom: this.timeline.floatingControlsBottom() })
+        .position(this.presentation.displaySettings.messageJumperOnLeft
+          ? { left: 20, bottom: this.timeline.floatingControlsBottom() + this.bottomSpacerHeight }
+          : { right: 20, bottom: this.timeline.floatingControlsBottom() + this.bottomSpacerHeight })
         .backgroundColor(SURFACE2)
         .borderRadius(20)
         .border({ width: 1, color: LINE })
@@ -226,8 +247,8 @@ export struct ChatTimelineView {
         }
         .width(40).height(40)
         .position(this.presentation.displaySettings.messageJumperOnLeft
-          ? { left: 20, bottom: this.timeline.floatingControlsBottom() + (this.timeline.jumpButtonVisible ? 48 : 0) }
-          : { right: 20, bottom: this.timeline.floatingControlsBottom() + (this.timeline.jumpButtonVisible ? 48 : 0) })
+          ? { left: 20, bottom: this.timeline.floatingControlsBottom() + this.bottomSpacerHeight + (this.timeline.jumpButtonVisible ? 48 : 0) }
+          : { right: 20, bottom: this.timeline.floatingControlsBottom() + this.bottomSpacerHeight + (this.timeline.jumpButtonVisible ? 48 : 0) })
         .backgroundColor(SURFACE2)
         .borderRadius(20)
         .border({ width: 1, color: LINE })

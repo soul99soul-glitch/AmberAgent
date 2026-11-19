@@ -76,13 +76,7 @@ let wantRouteInFlight: boolean = false;
 let wantRouteRouter: Router | null = null;
 
 const clearPendingWantRoute = (): void => {
-  AppStorage.setOrCreate<string>('wantTopicId', '');
-  AppStorage.setOrCreate<string>('wantTitle', '');
-  AppStorage.setOrCreate<string>('wantNovelProjectId', '');
-  AppStorage.setOrCreate<string>('wantNovelBranchId', '');
-  AppStorage.setOrCreate<string>('wantNovelJobId', '');
   AppStorage.setOrCreate<string>('wantConversationId', '');
-  AppStorage.setOrCreate<string>('wantNovelWorkspaceProjectId', '');
   AppStorage.setOrCreate<number>(WANT_ROUTE_SEQ_KEY, 0);
 };
 
@@ -93,31 +87,12 @@ export const routePendingWant = (): void => {
   if (wantRouteInFlight) return;
   const seq: number = AppStorage.get<number>(WANT_ROUTE_SEQ_KEY) ?? 0;
   if (seq <= 0) return;
-  const novelProjectId: string = AppStorage.get<string>('wantNovelProjectId') ?? '';
-  const novelBranchId: string = AppStorage.get<string>('wantNovelBranchId') ?? '';
-  const novelJobId: string = AppStorage.get<string>('wantNovelJobId') ?? '';
-  const topicId: string = AppStorage.get<string>('wantTopicId') ?? '';
-  const title: string = AppStorage.get<string>('wantTitle') ?? '';
   const conversationId: string = AppStorage.get<string>('wantConversationId') ?? '';
-  const novelWorkspaceProjectId: string = AppStorage.get<string>('wantNovelWorkspaceProjectId') ?? '';
   let targetUrl: string = '';
   const targetParams: Record<string, string> = {};
-  if (novelProjectId.length > 0 && novelBranchId.length > 0 && novelJobId.length > 0) {
-    targetUrl = 'pages/NovelWorkspacePage';
-    targetParams['projectId'] = novelProjectId;
-    targetParams['branchId'] = novelBranchId;
-    targetParams['jobId'] = novelJobId;
-    targetParams['tab'] = 'chapters';
-  } else if (topicId.length > 0) {
-    targetUrl = 'pages/DeepReadArticlePage';
-    targetParams['topicId'] = topicId;
-    targetParams['title'] = title;
-  } else if (conversationId.length > 0) {
+  if (conversationId.length > 0) {
     targetUrl = 'pages/ChatPage';
     targetParams['conversationId'] = conversationId;
-  } else if (novelWorkspaceProjectId.length > 0) {
-    targetUrl = 'pages/NovelWorkspacePage';
-    targetParams['projectId'] = novelWorkspaceProjectId;
   } else {
     clearPendingWantRoute();
     return;
@@ -160,30 +135,16 @@ export const markWantRoutingReady = (pageRouter: Router): void => {
 //   3) 完全不含路由字段的普通激活(如无参数点图标、或只有无关参数)→ **保留** pending,
 //      不机械清;否则冷启动已挂起的目标会被一次无关激活吞掉。
 export const publishWantRoute = (
-  topicId: string, title: string,
-  novelProjectId: string, novelBranchId: string, novelJobId: string,
-  conversationId: string = '', novelWorkspaceProjectId: string = '',
+  _topicId: string, _title: string,
+  _novelProjectId: string, _novelBranchId: string, _novelJobId: string,
+  conversationId: string = '', _novelWorkspaceProjectId: string = '',
 ): void => {
-  const hasNovel: boolean =
-    novelProjectId.length > 0 && novelBranchId.length > 0 && novelJobId.length > 0;
-  const hasTopic: boolean = !hasNovel && topicId.length > 0;
-  const hasConversation: boolean = !hasNovel && !hasTopic && conversationId.length > 0;
-  const hasWorkspace: boolean = !hasNovel && !hasTopic && !hasConversation && novelWorkspaceProjectId.length > 0;
-  if (!hasNovel && !hasTopic && !hasConversation && !hasWorkspace) {
-    const declaredRoute: boolean = topicId.length > 0 || title.length > 0
-      || novelProjectId.length > 0 || novelBranchId.length > 0 || novelJobId.length > 0
-      || conversationId.length > 0 || novelWorkspaceProjectId.length > 0;
-    if (declaredRoute) clearPendingWantRoute();
+  const hasConversation: boolean = conversationId.length > 0;
+  if (!hasConversation) {
+    clearPendingWantRoute();
     return;
   }
-  // 所有字段每次一起覆写，切换目标不会残留旧 id 或标题。
-  AppStorage.setOrCreate<string>('wantNovelProjectId', hasNovel ? novelProjectId : '');
-  AppStorage.setOrCreate<string>('wantNovelBranchId', hasNovel ? novelBranchId : '');
-  AppStorage.setOrCreate<string>('wantNovelJobId', hasNovel ? novelJobId : '');
-  AppStorage.setOrCreate<string>('wantTopicId', hasTopic ? topicId : '');
-  AppStorage.setOrCreate<string>('wantTitle', hasTopic ? title : '');
-  AppStorage.setOrCreate<string>('wantConversationId', hasConversation ? conversationId : '');
-  AppStorage.setOrCreate<string>('wantNovelWorkspaceProjectId', hasWorkspace ? novelWorkspaceProjectId : '');
+  AppStorage.setOrCreate<string>('wantConversationId', conversationId);
   AppStorage.setOrCreate<number>(WANT_ROUTE_SEQ_KEY,
     (AppStorage.get<number>(WANT_ROUTE_SEQ_KEY) ?? 0) + 1);
   routePendingWant();
@@ -261,13 +222,9 @@ export default class EntryAbility extends UIAbility {
     // R23:校验后在统一待处理槽落参并触发派发(ready 前只挂起,冷启动由
     // 根页 onPageShow 补跳;前台任意栈顶由 onNewWant 立即派发)。
     publishWantRoute(
-      validatedWantParameter(params['topicId']),
-      typeof params['title'] === 'string' ? (params['title'] as string).trim() : '',
-      validatedWantParameter(params['novelProjectId']),
-      validatedWantParameter(params['novelBranchId']),
-      validatedWantParameter(params['novelJobId']),
+      '', '', '', '', '',
       validatedWantParameter(params['conversationId']),
-      validatedWantParameter(params['novelWorkspaceProjectId']),
+      '',
     );
   }
 

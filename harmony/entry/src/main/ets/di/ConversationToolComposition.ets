@@ -1,7 +1,7 @@
 // Builds platform capabilities for a captured run; live catalog refresh remains in ConversationRunTools.
 import type { SubAgentToolsContext, ChatRuntime } from './ChatRuntimeContracts.ets';
-import type { McpSettingsPort, AgentTool, AgentToolActivityStore, Assistant, ChatStreamProvider, Conversation, DeepReadOpenEvent, LocalToolOption, McpToolActivityPort, PendingUserMessage, TerminalApprovalGuard, TextGenerationParams, UIMessage, UIMessagePart, UIMessagePartImage, JsonObject, JevWebCandidate, MessageChunk, WebMountGoalCandidate, WebMountGoalDecision, WebMountGoalHostPorts, WebMountGoalRequest, WebMountObservation, AutoApprovalReview, ConversationRepository, KeyValueStore, CompactStore, SkillWorkspacePort, SessionAccessGrantStore, McpManager, SkillManager, PosixWorkspaceManager, RecipeStore, PluginStore, ModelSlotPort, WeatherPort, ToolSearchReranker } from '@amber/chat-domain';
-import { asChatStreamProvider, createClipboardTool, createConversationContextTools, createConversationHistoryTools, createConversationQueueTools, createDeepReadOpenTool, createDeepReadPlaybookTools, createHealthSummaryTool, createPersonalContextTools, createWeatherReadTool, createDeviceScheduleTools, createMcpManagementTools, createMcpServerTools, createMemoryTools, createRunPlanUpdateTool, createSearchTools, createSkillTools, createTerminalApprovalGuard, createProviderManagementTools, PROVIDERS_KEY, createModelSlotTool, createMcpDescribeTool, currentMessages, filterToolProfile, makeCompactPolicy, makeTextGenerationParams, patchAssistant, createWebMountGoalAdapter, createWebMountGoalTool, makeSystemMessage, makeUserMessage, toText } from '@amber/chat-domain';
+import type { McpSettingsPort, AgentTool, AgentToolActivityStore, Assistant, ChatStreamProvider, Conversation, LocalToolOption, McpToolActivityPort, PendingUserMessage, TerminalApprovalGuard, TextGenerationParams, UIMessage, UIMessagePart, UIMessagePartImage, JsonObject, JevWebCandidate, MessageChunk, WebMountGoalCandidate, WebMountGoalDecision, WebMountGoalHostPorts, WebMountGoalRequest, WebMountObservation, AutoApprovalReview, ConversationRepository, KeyValueStore, CompactStore, SkillWorkspacePort, SessionAccessGrantStore, McpManager, SkillManager, PosixWorkspaceManager, RecipeStore, PluginStore, ModelSlotPort, WeatherPort, ToolSearchReranker } from '@amber/chat-domain';
+import { asChatStreamProvider, createClipboardTool, createConversationContextTools, createConversationHistoryTools, createConversationQueueTools, createHealthSummaryTool, createPersonalContextTools, createWeatherReadTool, createDeviceScheduleTools, createMcpManagementTools, createMcpServerTools, createMemoryTools, createRunPlanUpdateTool, createSearchTools, createSkillTools, createTerminalApprovalGuard, createProviderManagementTools, PROVIDERS_KEY, createModelSlotTool, createMcpDescribeTool, currentMessages, filterToolProfile, makeCompactPolicy, makeTextGenerationParams, patchAssistant, createWebMountGoalAdapter, createWebMountGoalTool, makeSystemMessage, makeUserMessage, toText } from '@amber/chat-domain';
 import type { WebMountParityToolsDeps } from '../platform_impl/WebMountParityTools.ets';
 import type { WebMountAdvancedToolsDeps } from '../platform_impl/WebMountAdvancedTools.ets';
 import type { ImageGenToolDeps, EditSourceImage } from '../platform_impl/ImageGenTool.ets';
@@ -15,7 +15,7 @@ import { guardConversationBrowserTools, assertConversationBrowserOwner, conversa
 import { loadWebMountSites, siteAllowsUrl } from '../platform_impl/WebMountSites.ets';
 import type { DetachedConversationContext, PreparedConversationSeed } from '../platform_impl/ConversationRunService.ets';
 import { inflateRawEntry } from '../platform_impl/EntryDocumentParser.ets';
-import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
+import { createEntryClipboardPort } from '../platform_impl/EntryLocalToolPorts.ets';
 import { createEntryPersonalContextPort } from '../platform_impl/PersonalContextPort.ets';
 import { createEntryDeviceSchedulePort } from '../platform_impl/DeviceSchedulePort.ets';
 import type { RunToolCatalogSnapshot } from '../platform_impl/RunToolCatalog.ets';
@@ -330,12 +330,7 @@ export const createConversationToolComposition = (ports: ConversationToolComposi
             }),
             createWeatherReadTool(ports.createEntryWeatherPort(systemLanguage()), { language: systemLanguage().startsWith('zh') ? 'zh' : 'en' }),
             ...createDeviceScheduleTools(createEntryDeviceSchedulePort()),
-            ports.getAgentPromptConfigTool(), ...createDeepReadPlaybookTools(ports.getDeepReadPlaybookRepository()),
-            createDeepReadOpenTool({
-                bus: { hasCollectors: (): boolean => ctx.hasNavigationCollector(),
-                    emit: (event: DeepReadOpenEvent): void => ctx.emitDeepRead(event) },
-                sha256Hex: sha256HexUtf8,
-            }),
+            ports.getAgentPromptConfigTool(),
             ...(seed.searchSettings.enableWebSearch ? createSearchTools(seed.searchSettings, { browserFallback }) : []),
         ], rt.assistant.toolProfile).tools, ctx.conversationId);
         return { profiledTools, terminalGuard, goalAdapter: webmountEnabled ? goalAdapter : undefined };
