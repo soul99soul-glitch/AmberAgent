@@ -19,6 +19,7 @@ import { finishPendingTools, finishReasoning } from './conversation.ts';
 import type { UIMessage, UIMessagePart, UIMessagePartTool } from './message.ts';
 import { nowIso } from './ids.ts';
 import { clearSecretToolPart } from './tool_input_vault.ts';
+import { markInterruptedSideEffectToolsUnknown } from './tool_safety_net.ts';
 
 // ChatService.cancelToolByUser(:1611-1620) 逐字:取消输出 JSON + denied reason
 export const CANCEL_TOOL_BY_USER_OUTPUT: string =
@@ -53,7 +54,8 @@ const partsUnchanged = (a: UIMessagePart[], b: UIMessagePart[]): boolean => {
 export const stopGenerationUpdatedMessage = (
   msg: UIMessage, cancelledAt: string,
 ): UIMessage | null => {
-  const finalized: UIMessage = finishPendingTools(msg, cancelToolByUser);
+  const safeMsg: UIMessage = markInterruptedSideEffectToolsUnknown(msg).message;
+  const finalized: UIMessage = finishPendingTools(safeMsg, cancelToolByUser);
   const withFinishedAt: UIMessage = finalized.role === 'assistant' && finalized.finishedAt === null
     ? { ...finalized, finishedAt: cancelledAt }
     : finalized;

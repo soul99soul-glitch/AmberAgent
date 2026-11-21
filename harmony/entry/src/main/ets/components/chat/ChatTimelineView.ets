@@ -7,6 +7,7 @@ import { ChatTimelineItem } from '../../platform_impl/chat/ChatTimelineDataSourc
 import { InteractiveMessageTimeline } from '../InteractiveMessageTimeline.ets';
 import { Icon } from '../ui/Icon.ets';
 import { ACCENT, INK, INK2, INK3, SURFACE2, LINE, MOTION_OVERLAY } from '../../design/tokens.ets';
+import type { ToolOutcomeResolution } from '@amber/chat-domain';
 type MsgRow = ChatTimelineRow;
 const accentAlpha = (hex: string, alpha: number): string => {
   const value: string = hex.replace('#', '');
@@ -48,6 +49,8 @@ export struct ChatTimelineView {
   onMessageCommand: (command: string, row: MsgRow, index: number) => void = (): void => {};
   onApprove: (id: string, locator?: ToolApprovalPartLocator) => void = (): void => {};
   onDeny: (id: string, locator?: ToolApprovalPartLocator) => void = (): void => {};
+  onResolveToolOutcome: (id: string, toolName: string, resolution: ToolOutcomeResolution,
+    locator?: ToolApprovalPartLocator) => void = (): void => {};
   onAnswer: (id: string, answer: string, locator?: ToolApprovalPartLocator) => void = (): void => {};
   onToolPreview: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator) => void = (): void => {};
   subjectHash: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator) => string = (): string => '';
@@ -88,6 +91,7 @@ export struct ChatTimelineView {
           item: item, timeline: this.timeline, presentation: this.presentation, smartUi: this.smartUi,
           favoriteNodeIds: this.favoriteNodeIds,
           onMessageCommand: this.onMessageCommand, onApprove: this.onApprove, onDeny: this.onDeny,
+          onResolveToolOutcome: this.onResolveToolOutcome,
           onAnswer: this.onAnswer, onToolPreview: this.onToolPreview, subjectHash: this.subjectHash,
           onRunDetails: this.onRunDetails, onDocument: this.onDocument, onDraft: this.onDraft,
           onModifyImage: this.onModifyImage, onSmartUiDraft: this.onSmartUiDraft,

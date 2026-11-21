@@ -6,12 +6,17 @@
 // 降级(跳过): shimmer / FaviconRow / ZoomableAsyncImage / TTS replay / workspace-file 卡片
 
 import type { UIMessagePartTool, UIMessagePartText, UIMessagePartImage, ToolApprovalSummary,
-  JsonObject, JsonValue } from '@amber/chat-domain';
+  JsonObject, JsonValue, ToolOutcomeResolution, ToolOutcomeState } from '@amber/chat-domain';
 import {
   toolActivityStatus, toolOutputJson, jevAutoApprovalReason, toolDisplayTitle, toolStaticDisplayTitle,
   buildToolApprovalSummary, toolInputAsJson, approvalTargetProfile,
+  readToolOutcomeState, extractUndoReceiptFromToolPart,
 } from '@amber/chat-domain';
-import { MOTION_OVERLAY, INK2, INK3, SURFACE, LINE, ERROR, META, LABEL, PAD_ITEM, RADIUS } from '../design/tokens.ets';
+import {
+  ACCENT, MOTION_OVERLAY, INK, INK2, INK3, SURFACE, SURFACE2, LINE, ERROR, ERROR_BG,
+  SUCCESS_BG, SUCCESS_FG, WARNING_BG, WARNING_FG, META, LABEL, PAD_ITEM, RADIUS,
+  accentSoftBg,
+} from '../design/tokens.ets';
 import { FONT_MONO } from '../design/fonts.ets';
 import { GeneratedImageCarousel } from './GeneratedImageCarousel.ets';
 import { isSSHApprovalTool, sshApprovalTargetLabel, sshApprovalCommand, sshApprovalProtocolLabel } from './SSHApprovalSummary.ets';
@@ -20,6 +25,7 @@ import { RecipeApprovalView, recipeApprovalView } from './RecipeApprovalSummary.
 import { pluginApprovalView } from './PluginApprovalSummary.ets';
 import { JevApprovalFacts } from './JevApprovalFacts.ets';
 import { ToolApprovalSummaryCard } from './ToolApprovalSummary.ets';
+import { loadToolDiffPreviewAsync, undoWorkspaceToolChange } from '../platform_impl/ToolDiffPreviewSupport.ets';
 import type { MessageRowViewState } from './MessageRowViewState.ets';
 import {
   AgentToolCallCapsule,
@@ -41,6 +47,7 @@ export struct ChatMessageTools {
   onApprove: (toolCallId: string) => void = (): void => {};
   onDeny: (toolCallId: string) => void = (): void => {};
   onOpenPreview: () => void = (): void => {};
+  onResolveOutcome: (toolCallId: string, resolution: ToolOutcomeResolution) => void = (): void => {};
   deniedLabel: string = '';
   @Prop canApprove: boolean = true;
   @Prop canDeny: boolean = true;
@@ -50,6 +57,10 @@ export struct ChatMessageTools {
   // generate_image 修改回调(edit 流程,回传宿主 ChatPage)
   onModifyImage: (url: string) => void = (_url: string): void => {};
   @State outputExpanded: boolean = false;
+  @State undoStatusText: string = '';
+  @State undoStatusError: boolean = false;
+  @State undoBusy: boolean = false;
+  @State undoDone: boolean = false;
   @State sshColors: SSHUIColors = new SSHUIColors();
   @StorageProp('darkMode') @Watch('refreshSSHColors') darkMode: boolean = false;
   @StorageProp('themePackId') @Watch('refreshSSHColors') themePackId: string = '';
@@ -78,6 +89,38 @@ export struct ChatMessageTools {
   }
 
   private refreshSSHColors(): void { this.sshColors = new SSHUIColors(); }
+
+  private outcomeState(): ToolOutcomeState | null {
+    return readToolOutcomeState(this.part);
+  }
+
+  private canUndoWorkspace(): boolean {
+    if (this.streaming || this.undoDone) return false;
+    if (this.resolveStatus() !== ToolStatus.Succeeded) return false;
+    return extractUndoReceiptFromToolPart(this.part) !== null;
+  }
+
+  private handleUndoClick(): void {
+    if (this.undoBusy || this.undoDone) return;
+    this.undoBusy = true;
+    this.undoStatusText = '';
+    this.undoStatusError = false;
+    undoWorkspaceToolChange(this.part).then((res): void => {
+      if (res.ok) {
+        this.undoDone = true;
+        this.undoStatusText = `已撤销对 ${res.path ?? '文件'} 的更改`;
+        this.undoStatusError = false;
+      } else {
+        this.undoStatusError = true;
+        this.undoStatusText = res.error ?? '撤销失败';
+      }
+    }).catch((err: Error): void => {
+      this.undoStatusError = true;
+      this.undoStatusText = err.message;
+    }).finally((): void => {
+      this.undoBusy = false;
+    });
+  }
 
   private packageApprovalView(): RecipeApprovalView | null {
     return recipeApprovalView(this.part) ?? pluginApprovalView(this.part);
@@ -202,6 +245,12 @@ export struct ChatMessageTools {
           onOpen: (): void => { this.onOpenPreview(); },
         })
       }
+
+      // Workspace / Memory 待授权操作 Diff 预览
+      if (this.isPending()) {
+        ToolApprovalDiffBox({ part: this.part })
+      }
+
       // 工具胶囊(pill)
       AgentToolCallCapsule({
         toolName: this.part.toolName,
@@ -227,8 +276,88 @@ export struct ChatMessageTools {
         .width('100%').padding({ left: CONTENT_INSET, top: 4 })
       }
 
+      // P1-3: 中断时副作用工具处于 outcome_unknown（禁止自动重放，提供三态人工核对）
+      if (this.outcomeState() === 'outcome_unknown') {
+        Column({ space: 8 }) {
+          Text('确认操作结果 · 禁止自动重放')
+            .fontSize(META)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(WARNING_FG)
+            .width('100%')
+          Text('该副作用工具在结果返回前中断。请先核对实际状态，避免重复写入或漏操作。')
+            .fontSize(LABEL)
+            .fontColor(INK2)
+            .lineHeight(17)
+            .width('100%')
+          Row({ space: 8 }) {
+            Text('未生效')
+              .fontSize(LABEL)
+              .fontColor(INK2)
+              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+              .borderRadius(999)
+              .backgroundColor(SURFACE2)
+              .onClick((): void => { this.onResolveOutcome(this.part.toolCallId, 'not_applied'); })
+            Text('核查当前状态')
+              .fontSize(LABEL)
+              .fontColor(ACCENT)
+              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+              .borderRadius(999)
+              .backgroundColor(accentSoftBg(ACCENT))
+              .onClick((): void => { this.onResolveOutcome(this.part.toolCallId, 'recheck_requested'); })
+            Text('已生效')
+              .fontSize(LABEL)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#FFFFFF')
+              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+              .borderRadius(999)
+              .backgroundColor(SUCCESS_FG)
+              .onClick((): void => { this.onResolveOutcome(this.part.toolCallId, 'applied'); })
+          }
+          .width('100%')
+        }
+        .width('100%')
+        .padding(10)
+        .margin({ top: 6, left: CONTENT_INSET })
+        .backgroundColor(WARNING_BG)
+        .borderRadius(RADIUS)
+        .border({ width: 0.5, color: WARNING_FG })
+      } else if (this.outcomeState() !== null) {
+        Text(this.outcomeState() === 'reconciled_applied'
+          ? '已人工确认：操作已生效'
+          : this.outcomeState() === 'recheck_requested'
+            ? '已转入状态核查（请确认后再操作）'
+            : '已人工确认：操作未生效')
+          .fontSize(LABEL)
+          .fontColor(this.outcomeState() === 'reconciled_applied' ? SUCCESS_FG : INK3)
+          .margin({ top: 4, left: CONTENT_INSET })
+      }
+
+      // Workspace 写入/编辑/移动后的 .undo/ 安全回滚入口
+      if (this.canUndoWorkspace() || this.undoStatusText.length > 0) {
+        Row({ space: 8 }) {
+          if (this.canUndoWorkspace()) {
+            Text(this.undoBusy ? '撤销中…' : '撤销本次更改')
+              .fontSize(LABEL)
+              .fontColor(INK2)
+              .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+              .borderRadius(999)
+              .backgroundColor(SURFACE2)
+              .border({ width: 0.5, color: LINE })
+              .onClick((): void => { this.handleUndoClick(); })
+          }
+          if (this.undoStatusText.length > 0) {
+            Text(this.undoStatusText)
+              .fontSize(LABEL)
+              .fontColor(this.undoStatusError ? ERROR : SUCCESS_FG)
+              .layoutWeight(1)
+          }
+        }
+        .width('100%')
+        .padding({ left: CONTENT_INSET, top: 4 })
+      }
+
       // denied → 拒绝原因
-      if (this.part.approvalState.type === 'denied' && this.deniedLabel.length > 0) {
+      if (this.part.approvalState.type === 'denied' && this.outcomeState() === null && this.deniedLabel.length > 0) {
         Text(this.deniedLabel)
           .fontSize(LABEL)
           .fontColor(ERROR)
@@ -320,5 +449,46 @@ export struct ChatMessageTools {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .margin({ bottom: 4 })
+  }
+}
+
+@Component
+struct ToolApprovalDiffBox {
+  @Prop part: UIMessagePartTool;
+  @State diffPreviewText: string = '';
+
+  aboutToAppear(): void {
+    const callId: string = this.part.toolCallId;
+    loadToolDiffPreviewAsync(this.part).then((diff: string | null): void => {
+      if (this.part.toolCallId !== callId) return;
+      this.diffPreviewText = diff ?? '';
+    }).catch((): void => {});
+  }
+
+  private diffLineColor(line: string): string {
+    if (line.startsWith('+') && !line.startsWith('+++')) return SUCCESS_FG;
+    if (line.startsWith('-') && !line.startsWith('---')) return ERROR;
+    if (line.startsWith('@@')) return ACCENT;
+    return INK2;
+  }
+
+  build(): void {
+    if (this.diffPreviewText.length > 0) {
+      Column({ space: 2 }) {
+        ForEach(this.diffPreviewText.split('\n').slice(0, 14), (line: string, idx: number): void => {
+          Text(line.length > 0 ? line : ' ')
+            .fontSize(11)
+            .fontFamily(FONT_MONO)
+            .fontColor(this.diffLineColor(line))
+            .width('100%')
+        }, (line: string, idx: number): string => `diff-${idx}-${line.length}`)
+      }
+      .width('100%')
+      .padding(8)
+      .backgroundColor(SURFACE2)
+      .borderRadius(RADIUS)
+      .border({ width: 0.5, color: LINE })
+      .margin({ top: 4, bottom: 6 })
+    }
   }
 }

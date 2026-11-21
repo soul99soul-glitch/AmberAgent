@@ -8,6 +8,7 @@ import type { AgentMessageRowHostCapabilities } from '../AgentMessageRow.ets';
 import { ChatEpisodeDivider } from './ChatEpisodeDivider.ets';
 import { FONT_SANS } from '../../design/fonts.ets';
 import { ACCENT, INK3, META } from '../../design/tokens.ets';
+import type { ToolOutcomeResolution } from '@amber/chat-domain';
 type MsgRow = ChatTimelineRow;
 
 const CHAT_MESSAGE_ROW_CAPABILITIES: AgentMessageRowHostCapabilities = {
@@ -41,6 +42,8 @@ export struct ChatTimelineMessageItem {
   onMessageCommand: (command: string, row: MsgRow, index: number) => void = (): void => {};
   onApprove: (id: string, locator?: ToolApprovalPartLocator) => void = (): void => {};
   onDeny: (id: string, locator?: ToolApprovalPartLocator) => void = (): void => {};
+  onResolveToolOutcome: (id: string, toolName: string, resolution: ToolOutcomeResolution,
+    locator?: ToolApprovalPartLocator) => void = (): void => {};
   onAnswer: (id: string, answer: string, locator?: ToolApprovalPartLocator) => void = (): void => {};
   onToolPreview: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator) => void = (): void => {};
   subjectHash: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator) => string = (): string => '';
@@ -131,6 +134,9 @@ export struct ChatTimelineMessageItem {
           this.onApprove(toolCallId, locator),
         onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator): void =>
           this.onDeny(toolCallId, locator),
+        onResolveToolOutcome: (toolCallId: string, toolName: string, resolution: ToolOutcomeResolution,
+          locator?: ToolApprovalPartLocator): void =>
+          this.onResolveToolOutcome(toolCallId, toolName, resolution, locator),
         onAnswerTool: (toolCallId: string, answer: string, locator?: ToolApprovalPartLocator): void =>
           this.onAnswer(toolCallId, answer, locator),
         onOpenCouncilRun: (rid: string, tools: UIMessagePartTool[]): void => {

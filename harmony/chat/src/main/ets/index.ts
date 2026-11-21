@@ -1478,3 +1478,43 @@ export type {
   MemoryPortrait, MemoryPortraitBucketFilter, MemoryPortraitDimension,
   MemoryPortraitDimensionKey, MemoryPortraitItem, MemoryPortraitOptions,
 } from './chat/memory_portrait.ts';
+export {
+  PERSONA_KEYFRAME_COUNT, PERSONA_FRAME_INTERVAL_MS, PERSONA_SETTLE_DEBOUNCE_MS,
+  PERSONA_BLOCKED_DWELL_MS, resolveRawPersonaMood, shouldFreezeMedallionAnimation,
+  computeMedallionFrameIndex, PersonaMoodStabilizer, detectPersonaSpriteSheetLayout,
+  moodRowIndex, spriteSheetRegionForMoodFrame,
+} from './chat/persona_medallion.ts';
+export type {
+  AmberPersonaMood, AmberPersonaCanvasPreset, AmberPersonaMoodSignals,
+  PersonaMoodUpdate, SpriteSheetLayoutSpec, SpriteSheetRegion,
+} from './chat/persona_medallion.ts';
+export {
+  normalizePendingApproval, buildMacDecisionTrustHeaders,
+  base64EncodeBytes, base64DecodeBytes, base64UrlEncodeBytes, base64UrlDecodeBytes,
+  utf8EncodeAsciiOrText, extractRsaPublicNumbersFromSpki, computeRsaJwkThumbprint,
+  verifyCloudImportKey, buildCompactJwe, normalizedCloudModelBaseUrl,
+  isValidCloudModelBaseUrl, mapLocalProviderTypeToCloudKind, describeCloudConfigErrorCode,
+} from './chat/cloud_config.ts';
+export type {
+  CloudModelProviderKind, CloudSearchMode, MacDecisionSurface,
+  CloudConfigViewModelDto, CloudConfigViewSearchDto, CloudConfigConfiguredFlagDto,
+  CloudConfigViewCredentialsDto, CloudConfigViewDto, CloudImportKeyJwkDto,
+  CloudImportKeyDto, CloudConfigApplyReceipt, CloudConfigCredentialMutation,
+  CloudConfigCredentialsPatch, CloudConfigPatch, CloudConfigPlaintextPayload,
+  VerifiedCloudImportKey, RsaSpkiNumbers, GcmEncryptedResult, CloudConfigCryptoPort,
+  MacDecisionTrustContext, MacGatewayPendingApproval,
+} from './chat/cloud_config.ts';
+export {
+  WORKSPACE_UNDO_MAX_BYTES, WORKSPACE_UNDO_MAX_PER_PATH, WORKSPACE_UNDO_TTL_MS,
+  DIFF_PREVIEW_MAX_LINES, DIFF_PREVIEW_MAX_CHARS, TOOL_OUTCOME_METADATA_KEY,
+  OUTCOME_UNKNOWN_OUTPUT_JSON, OUTCOME_UNKNOWN_REASON,
+  isSideEffectToolName, buildUnifiedLineDiff, buildWorkspaceDiffPreview,
+  buildMemoryDiffPreview, WorkspaceUndoStore, extractUndoReceiptFromToolPart,
+  readToolOutcomeState, markInterruptedSideEffectToolsUnknown,
+  applyToolOutcomeResolutionToConversation, utf8BytesForUndoSha,
+} from './chat/tool_safety_net.ts';
+export type {
+  ToolOutcomeState, ToolOutcomeResolution, WorkspaceUndoOperation,
+  WorkspaceUndoSnapshot, WorkspaceUndoPreState, WorkspaceUndoResult,
+  WorkspaceUndoStoreDeps,
+} from './chat/tool_safety_net.ts';

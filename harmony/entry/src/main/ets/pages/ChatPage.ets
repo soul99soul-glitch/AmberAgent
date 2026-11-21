@@ -186,7 +186,11 @@ import { getChatSmartUiDraftStore } from '../platform_impl/SmartUiDraftSupport.e
 import { mimeByName, readUriBytes, loadAttachDataUrl } from '../platform_impl/chat/ChatAttachmentIO.ets';
 import { observeGatewaySoulRevision, syncAgentSoulFromCloud } from '../platform_impl/AgentSoulSync.ets';
 import { AgentEmbodimentSheet } from '../components/soul/AgentEmbodimentSheet.ets';
-import { consecutiveTurnToolFailures, projectEpisodeLedger } from '@amber/chat-domain';
+import {
+  consecutiveTurnToolFailures, projectEpisodeLedger, PersonaMoodStabilizer,
+  applyToolOutcomeResolutionToConversation,
+  type AmberPersonaMood, type ToolOutcomeResolution,
+} from '@amber/chat-domain';
 import { toggleConversationInHub } from '../platform_impl/chat/AmberHubStore.ets';
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
@@ -266,15 +270,15 @@ struct ChatPage {
   // 最近一次历史页前插计数(锚点补偿已在加载回调内就地执行,无需持久读)
   // D0-10:@Watch 驱动草稿持久化(任何赋值点 — 发送清空/手动输入 — 都落 KV)
   // P2: native Smart UI state stays page-owned and keyed by message source identity.
-  @State presentation: ChatConversationPresentation = new ChatConversationPresentation();
+  @State @Watch('syncTopBarMood') presentation: ChatConversationPresentation = new ChatConversationPresentation();
   @State composer: ChatComposerSession = new ChatComposerSession();
-  @State cloudDialogue: ChatCloudDialogueSession = new ChatCloudDialogueSession();
+  @State @Watch('syncTopBarMood') cloudDialogue: ChatCloudDialogueSession = new ChatCloudDialogueSession();
   @State modelContext: ChatModelContextSession = new ChatModelContextSession();
   @State runDetails: ChatRunDetailsSession = new ChatRunDetailsSession();
   @State messageActions: ChatMessageActionsSession = new ChatMessageActionsSession();
   @State drawer: ChatConversationDrawerSession = new ChatConversationDrawerSession();
   @State artifacts: ChatArtifactSession = new ChatArtifactSession();
-  @State timeline: ChatTimelineSession = new ChatTimelineSession();
+  @State @Watch('syncTopBarMood') timeline: ChatTimelineSession = new ChatTimelineSession();
   @State smartUi: ChatSmartUiSession = new ChatSmartUiSession();
   // D-087:任务模型选择快照(compress/title/suggestion;aboutToAppear 异步加载,
   //   与 ocrSeed/searchSettings 同档;null = 未解析或无可用模型 → 回退 chat 运行态)
@@ -309,6 +313,9 @@ struct ChatPage {
   @State turnStepsTitle: string = '';
   @State turnStepsTools: UIMessagePartTool[] = [];
   @State turnStepsReasoning: string[] = [];
+  @State topBarMood: AmberPersonaMood = 'idle';
+  private moodStabilizer: PersonaMoodStabilizer = new PersonaMoodStabilizer();
+  private moodTimer: number = -1;
   private openingHubConversation: boolean = false;
   private unsubEpisodeLedger: (() => void) | null = null;
   private boundEpisodeConvId: string = '';
@@ -344,6 +351,10 @@ struct ChatPage {
     AppStorage.setOrCreate<string>('activeArtifactInteraction', '');
     this.pageAlive = false;
     this.pageVisible = false;
+    if (this.moodTimer !== -1) {
+      clearTimeout(this.moodTimer);
+      this.moodTimer = -1;
+    }
     this.presentation.dispose();
     this.composer.dispose();
     this.cloudDialogue.dispose();
@@ -1057,6 +1068,52 @@ struct ChatPage {
     return consecutiveTurnToolFailures(this.timeline.rows.map((r: ChatTimelineRow): UIMessage => r.message));
   }
 
+  private hasOverlaySheetOpen(): boolean {
+    return this.embodimentSheetOpen
+      || this.turnStepsSheetOpen
+      || this.presentation.recapOpen
+      || this.modelContext.modelMenuOpen
+      || this.drawer.drawerOpen
+      || this.messageActions.workspacePanelOpen
+      || this.messageActions.exportSheetOpen
+      || this.artifacts.artifactShelfOpen
+      || this.runDetails.denyDialogOpen;
+  }
+
+  private resetTopBarMood(): void {
+    if (this.moodTimer !== -1) {
+      clearTimeout(this.moodTimer);
+      this.moodTimer = -1;
+    }
+    this.moodStabilizer.reset('idle');
+    this.topBarMood = 'idle';
+  }
+
+  private syncTopBarMood(): void {
+    if (!this.pageAlive) return;
+    if (this.moodTimer !== -1) {
+      clearTimeout(this.moodTimer);
+      this.moodTimer = -1;
+    }
+    const hasBlocked: boolean = this.presentation.errorMsg.trim().length > 0
+      || this.consecutiveErrorCount() >= 4
+      || this.cloudDialogue.tasks.some((t): boolean => t.status === 'failed' || t.status === 'blocked');
+    const awaiting: boolean = this.pendingApprovalCount() > 0;
+    const running: boolean = this.presentation.sending || this.cloudDialogue.runningTasks().length > 0;
+    const res = this.moodStabilizer.update({
+      running,
+      awaitingApproval: awaiting,
+      hasBlockedError: hasBlocked,
+    }, Date.now());
+    if (res.mood !== this.topBarMood) this.topBarMood = res.mood;
+    if (res.recheckAfterMs !== null) {
+      this.moodTimer = setTimeout((): void => {
+        this.moodTimer = -1;
+        this.syncTopBarMood();
+      }, Math.max(50, res.recheckAfterMs));
+    }
+  }
+
   private attentionTaskBadgeCount(): number {
     let count: number = 0;
     for (const task of this.cloudDialogue.tasks) {
@@ -1402,6 +1459,17 @@ struct ChatPage {
         },
         onApprove: (id: string, locator?: ToolApprovalPartLocator): void => { this.runDetails.handleToolApproval(id, true, '', locator); },
         onDeny: (id: string, locator?: ToolApprovalPartLocator): void => { this.runDetails.openDenyDialog(id, locator); },
+        onResolveToolOutcome: (id: string, toolName: string, resolution: ToolOutcomeResolution, locator?: ToolApprovalPartLocator): void => {
+          const convId: string = this.presentation.conversation?.id ?? '';
+          if (convId.length === 0) return;
+          getConversationRunService().mutateStoredConversation(convId, (latest: Conversation): Conversation =>
+            applyToolOutcomeResolutionToConversation(latest, id, resolution, locator),
+          ).catch((): void => {});
+          if (resolution === 'recheck_requested') {
+            this.composer.setInputText(`请先只读核查刚才中断的工具（${toolName}）当前实际状态，再决定下一步，不要直接重复执行写操作。`);
+            promptAction.showToast({ message: '已填入只读核查提示，可直接发送确认状态', duration: 1800 });
+          }
+        },
         onAnswer: (id: string, answer: string, locator?: ToolApprovalPartLocator): void => { this.runDetails.handleToolAnswer(id, answer, locator); },
         onToolPreview: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator): void => { this.runDetails.openToolPreview(part, locator); },
         subjectHash: (part: UIMessagePartTool, locator?: ToolApprovalPartLocator): string => this.runDetails.jevSubjectHash(part, locator),
@@ -1481,7 +1549,9 @@ struct ChatPage {
         episodeTitle: this.episodeHeaderTitle,
         editingTitle: this.presentation.editingTitle,
         titleInput: this.presentation.titleInput,
-        sending: this.presentation.sending,
+        sending: this.presentation.sending || this.cloudDialogue.runningTasks().length > 0,
+        mood: this.topBarMood,
+        sheetOpen: this.hasOverlaySheetOpen(),
         recapLoading: this.presentation.recapState.loading,
         activityLabel: this.cloudDialogue.isActiveMode() ? this.cloudDialogue.activeProgressText : '',
         agentSoulDisplayName: this.agentSoulDisplayName,
@@ -1493,6 +1563,7 @@ struct ChatPage {
         onOpenRecap: (): void => {
           if (!this.presentation.editingTitle) this.presentation.openRecap();
         },
+        onScrollToActiveTail: (): void => { this.timeline.jumpToBottom(); },
         onStopGeneration: (): void => { this.presentation.requestStop(); },
         onTitleInputChange: (v: string): void => { this.presentation.titleInput = v; },
         onSaveTitle: (): void => { this.presentation.saveTitle(); },

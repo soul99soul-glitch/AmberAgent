@@ -14,11 +14,12 @@
 //     (随文件 sheet/terminal 切片)
 
 import { fileIo, fileShare } from '@kit.CoreFileKit';
+import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
 import type { Context } from '@kit.AbilityKit';
 import {
-  PosixWorkspaceManager,
+  PosixWorkspaceManager, WorkspaceUndoStore, newId,
 } from '@amber/chat-domain';
 import type {
   WorkspaceFsPort, WorkspaceFsEntry, KeyValueStore,
@@ -206,10 +207,31 @@ export const createEntryWorkspaceFsPort = (): WorkspaceFsPort => ({
   deleteRecursively: deleteRecursivelySync,
 });
 
+const sha256HexBytes = (bytes: Uint8Array): string => {
+  const md = cryptoFramework.createMd('SHA256');
+  md.updateSync({ data: bytes });
+  const digest = md.digestSync();
+  const arr = new Uint8Array(digest.data);
+  let hex: string = '';
+  for (let i: number = 0; i < arr.length; i++) {
+    hex += arr[i].toString(16).padStart(2, '0');
+  }
+  return hex;
+};
+
+export const createEntryWorkspaceUndoStore = (): WorkspaceUndoStore =>
+  new WorkspaceUndoStore({
+    port: createEntryWorkspaceFsPort(),
+    rootAbs: workspaceRootAbs(),
+    sha256Hex: sha256HexBytes,
+    makeId: (): string => newId(),
+  });
+
 // ===== PosixWorkspaceManager 装配(根 = 镜像目录) =====
 
 export const createEntryWorkspaceManager = (): PosixWorkspaceManager =>
   new PosixWorkspaceManager({
     port: createEntryWorkspaceFsPort(),
     rootAbs: workspaceRootAbs(),
+    undoStore: createEntryWorkspaceUndoStore(),
   });

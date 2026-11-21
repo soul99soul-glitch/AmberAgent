@@ -10,13 +10,33 @@ import { util } from '@kit.ArkTS';
 import { pushService } from '@kit.PushKit';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import type { KeyValueStore } from '@amber/chat-domain';
+import type {
+  KeyValueStore,
+  CloudConfigViewDto,
+  CloudImportKeyDto,
+  CloudConfigApplyReceipt,
+  CloudConfigPlaintextPayload,
+  CloudConfigPatch,
+  CloudConfigCredentialsPatch,
+  CloudConfigCryptoPort,
+  VerifiedCloudImportKey,
+  MacDecisionTrustContext,
+  MacGatewayPendingApproval,
+} from '@amber/chat-domain';
+import {
+  normalizePendingApproval,
+  buildMacDecisionTrustHeaders,
+  verifyCloudImportKey,
+  buildCompactJwe,
+  describeCloudConfigErrorCode,
+} from '@amber/chat-domain';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'MacGateway';
 const CONNECTION_KEY: string = 'mac_gateway_connection_v1';
 export const CLOUD_DIALOGUE_ENABLED_KEY: string = 'mac_gateway_cloud_dialogue_enabled_v1';
 export const CLOUD_DIALOGUE_STATE_KEY: string = 'mac_gateway_cloud_dialogue_state_v1';
+const CLOUD_IMPORT_KID_KEY_PREFIX: string = 'mac_gateway_cloud_import_kid_v1:';
 const MAX_LINK_LENGTH: number = 4096;
 const CLOUD_REQUEST_ID_MAX_LEN: number = 128;
 const CLOUD_TEXT_MAX_LEN: number = 24000;
@@ -76,6 +96,7 @@ export interface MacGatewaySession {
   abnormal: boolean;
   monitored: boolean;
   updatedAt: number;
+  pendingApproval?: MacGatewayPendingApproval;
 }
 
 export interface MacGatewayStatus {
@@ -225,6 +246,13 @@ export const describeMacGatewayError = (e: Error): string => {
       if (e.errorCode === 'receipt_not_found') return '未找到对应的请求回执';
       if (e.errorCode === 'invalid_cursor') return '事件游标无效';
       if (e.errorCode === 'invalid_request') return '请求参数无效（请检查内容长度与格式）';
+      if (e.errorCode === 'untrusted_device' || e.errorCode === 'envelope_expired'
+        || e.errorCode === 'credential_action_required' || e.errorCode === 'import_key_changed'
+        || e.errorCode === 'revision_conflict' || e.errorCode === 'invalid_envelope'
+        || e.errorCode === 'configuration_unavailable' || e.errorCode === 'request_too_large'
+        || e.errorCode === 'invalid_configuration') {
+        return describeCloudConfigErrorCode(e.statusCode, e.errorCode);
+      }
       if (e.statusCode === 404) return '连接的 Gateway 不支持云主对话（需升级 amber-gateway 至支持 /v2/dialogue 的版本）';
       return e.message;
   }
@@ -279,7 +307,21 @@ export class MacGatewayClient implements CloudDialogueClientLike {
   async status(): Promise<MacGatewayStatus> {
     const text: string = await this.send('GET', '/v1/status', undefined);
     try {
-      return JSON.parse(text) as MacGatewayStatus;
+      const parsed: MacGatewayStatus = JSON.parse(text) as MacGatewayStatus;
+      if (Array.isArray(parsed.sessions)) {
+        parsed.sessions = parsed.sessions.map((s: MacGatewaySession): MacGatewaySession => {
+          const normalized = normalizePendingApproval(s.pendingApproval);
+          if (normalized !== null) {
+            return {
+              key: s.key, agent: s.agent, subject: s.subject, origin: s.origin,
+              host: s.host, state: s.state, waitReason: s.waitReason, abnormal: s.abnormal,
+              monitored: s.monitored, updatedAt: s.updatedAt, pendingApproval: normalized,
+            };
+          }
+          return s;
+        });
+      }
+      return parsed;
     } catch (_e) {
       throw new MacGatewayError('invalid', 'invalid response');
     }
@@ -364,6 +406,36 @@ export class MacGatewayClient implements CloudDialogueClientLike {
     return this.parseJson<CloudAgentSoulPayload>(await this.send('GET', '/v2/soul', undefined));
   }
 
+  async decide(
+    sessionKey: string,
+    toolCallId: string,
+    allow: boolean,
+    trustContext: MacDecisionTrustContext,
+  ): Promise<void> {
+    const body: Record<string, string | boolean> = {
+      'sessionKey': sessionKey,
+      'toolCallId': toolCallId,
+      'allow': allow,
+    };
+    const trustHeaders: Record<string, string> = buildMacDecisionTrustHeaders(trustContext);
+    await this.send('POST', '/v1/amber/decision', JSON.stringify(body), trustHeaders);
+  }
+
+  async fetchCloudConfiguration(): Promise<CloudConfigViewDto> {
+    return this.parseJson<CloudConfigViewDto>(await this.send('GET', '/v2/configuration', undefined));
+  }
+
+  async fetchCloudImportKey(): Promise<CloudImportKeyDto> {
+    return this.parseJson<CloudImportKeyDto>(await this.send('GET', '/v2/configuration/import-key', undefined));
+  }
+
+  async applyCloudConfigurationJwe(jwe: string): Promise<CloudConfigApplyReceipt> {
+    const body: Record<string, string> = { 'jwe': jwe };
+    return this.parseJson<CloudConfigApplyReceipt>(
+      await this.send('POST', '/v2/configuration', JSON.stringify(body)),
+    );
+  }
+
   async putSoul(req: CloudAgentSoulPutRequest): Promise<CloudAgentSoulPayload> {
     return this.parseJson<CloudAgentSoulPayload>(
       await this.send('PUT', '/v2/soul', JSON.stringify(req)),
@@ -384,9 +456,20 @@ export class MacGatewayClient implements CloudDialogueClientLike {
     return [preferred].concat(this.addrs.filter((a: string): boolean => a !== preferred));
   }
 
-  private async send(method: rcp.HttpMethod, path: string, body: string | undefined): Promise<string> {
+  private async send(
+    method: rcp.HttpMethod,
+    path: string,
+    body: string | undefined,
+    extraHeaders?: Record<string, string>,
+  ): Promise<string> {
     const headers: rcp.RequestHeaders = { 'content-type': 'application/json' };
     if (this.token !== null) headers['authorization'] = `Bearer ${this.token}`;
+    if (extraHeaders !== undefined) {
+      const keys: string[] = Object.keys(extraHeaders);
+      for (const k of keys) {
+        headers[k] = extraHeaders[k];
+      }
+    }
     const pin: rcp.CertificatePinning = { kind: 'public-key', publicKeyHash: this.fingerprint, hashAlgorithm: 'SHA-256' };
     const config: rcp.Configuration = {
       security: { remoteValidation: 'skip', certificatePinning: pin },
@@ -442,7 +525,79 @@ export const loadMacGatewayConnection = async (kv: KeyValueStore): Promise<MacGa
   }
 };
 
+export const resetCloudImportKeyTrust = async (kv: KeyValueStore, gatewayId: string): Promise<void> => {
+  if (gatewayId.trim().length === 0) return;
+  await kv.delete(`${CLOUD_IMPORT_KID_KEY_PREFIX}${gatewayId}`);
+};
+
+export const applyCloudConfigurationWithJwe = async (
+  kv: KeyValueStore,
+  connection: MacGatewayConnection,
+  requestId: string,
+  expectedRevision: number,
+  configuration: CloudConfigPatch | undefined,
+  credentials: CloudConfigCredentialsPatch | undefined,
+  cryptoPort: CloudConfigCryptoPort,
+): Promise<CloudConfigApplyReceipt> => {
+  const client: MacGatewayClient = MacGatewayClient.of(connection);
+  const keyDto: CloudImportKeyDto = await client.fetchCloudImportKey();
+  const keyFetchedSec: number = Math.floor(Date.now() / 1000);
+  let verified: VerifiedCloudImportKey;
+  try {
+    verified = verifyCloudImportKey(keyDto, connection.gatewayId, cryptoPort.sha256);
+  } catch (_e) {
+    throw new MacGatewayError('invalid', '云端返回了无法验证的公钥载荷', 0, 'malformed_response');
+  }
+
+  const kidKey: string = `${CLOUD_IMPORT_KID_KEY_PREFIX}${connection.gatewayId}`;
+  const pinnedKid: string | null = await kv.get(kidKey);
+  if (pinnedKid !== null && pinnedKid.length > 0) {
+    if (pinnedKid !== verified.kid) {
+      throw new MacGatewayError(
+        'server',
+        describeCloudConfigErrorCode(0, 'import_key_changed'),
+        409,
+        'import_key_changed',
+      );
+    }
+  } else {
+    await kv.put(kidKey, verified.kid);
+  }
+
+  const sealAndPost = async (): Promise<CloudConfigApplyReceipt> => {
+    const elapsedSec: number = Math.max(0, Math.floor(Date.now() / 1000) - keyFetchedSec);
+    const issuedAt: number = verified.serverTime + elapsedSec;
+    const lifetime: number = Math.min(120, verified.maxEnvelopeLifetimeSeconds);
+    const payloadObj: CloudConfigPlaintextPayload = {
+      version: 1,
+      gatewayId: connection.gatewayId,
+      deviceId: verified.deviceId,
+      requestId,
+      expectedRevision,
+      issuedAt,
+      expiresAt: issuedAt + lifetime,
+      configuration,
+      credentials,
+    };
+    const jwe: string = await buildCompactJwe(JSON.stringify(payloadObj), verified, cryptoPort);
+    return client.applyCloudConfigurationJwe(jwe);
+  };
+
+  try {
+    return await sealAndPost();
+  } catch (e) {
+    if (e instanceof MacGatewayError && e.errorCode === 'envelope_expired') {
+      return await sealAndPost();
+    }
+    throw e instanceof Error ? e : new Error(String(e));
+  }
+};
+
 export const forgetMacGatewayConnection = async (kv: KeyValueStore): Promise<void> => {
+  const existing = await loadMacGatewayConnection(kv);
+  if (existing !== null && existing.gatewayId.length > 0) {
+    await kv.delete(`${CLOUD_IMPORT_KID_KEY_PREFIX}${existing.gatewayId}`);
+  }
   await kv.delete(CONNECTION_KEY);
   await kv.delete(CLOUD_DIALOGUE_ENABLED_KEY);
   await kv.delete(CLOUD_DIALOGUE_STATE_KEY);

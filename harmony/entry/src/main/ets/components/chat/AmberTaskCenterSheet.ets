@@ -3,16 +3,17 @@
 // 本机后台（ConversationTaskRunner）+ 子代理（SubAgentManager）+ 当前待审批/异常卡点；
 // 诚实展示真实来源与状态（需你处理 / 后台运行中 / 最近完成），不伪造百分比进度条，支持原位补充说明与停止。
 
-import type { SubAgentManager, SubAgentRun } from '@amber/chat-domain';
+import type { SubAgentManager, SubAgentRun, MacGatewayPendingApproval, MacDecisionTrustContext } from '@amber/chat-domain';
 import { getChatKvStore, getConversationTaskRunner, getSubAgentManager } from '../../di/AppContainer.ets';
 import {
   ChatCloudDialogueSession, type CloudDialogueTaskRecord,
 } from '../../platform_impl/chat/ChatCloudDialogueSession.ets';
 import type { LocalTaskRecord } from '../../platform_impl/ConversationTaskRunner.ets';
 import {
-  MacGatewayClient, loadMacGatewayConnection,
+  MacGatewayClient, loadMacGatewayConnection, describeMacGatewayError,
   type MacGatewayConnection, type MacGatewaySession, type MacGatewayStatus,
 } from '../../platform_impl/MacGatewayClient.ets';
+import { authenticateForMacDecision } from '../../platform_impl/MacGatewayTrustAuth.ets';
 import {
   ACCENT, ERROR, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, INK, INK2, INK3, INK4,
   LINE, SUCCESS_FG, SURFACE, SURFACE2, WARNING_FG, accentSoftBg,
@@ -32,6 +33,7 @@ export interface UnifiedTaskCardItem {
   canStop: boolean;
   stopRequested: boolean;
   updatedAt: number;
+  macPendingApproval?: MacGatewayPendingApproval;
 }
 
 @Component
@@ -176,22 +178,27 @@ export struct AmberTaskCenterSheet {
       if (seenIds.has(sid)) continue;
       seenIds.add(sid);
       const stateLower: string = s.state.toLowerCase();
-      const needsAttention: boolean = s.abnormal || stateLower === 'waiting' || stateLower === 'stalled' ||
+      const hasApproval: boolean = s.pendingApproval !== undefined;
+      const needsAttention: boolean = hasApproval || s.abnormal || stateLower === 'waiting' || stateLower === 'stalled' ||
         (s.waitReason !== undefined && s.waitReason.trim().length > 0);
       const isActive: boolean = stateLower === 'running' || stateLower === 'working' || stateLower === 'active';
       const bucket: TaskCenterBucket = needsAttention ? 'attention' : isActive ? 'running' : 'recent';
+      const detailText: string = s.pendingApproval !== undefined
+        ? `待确认工具：${s.pendingApproval.tool}${s.pendingApproval.detail ? ` · ${s.pendingApproval.detail}` : ''}`
+        : (s.waitReason && s.waitReason.length > 0 ? s.waitReason : `${s.agent} · ${s.state}`);
       items.push({
         id: s.key,
         bucket,
         channelKind: 'mac',
         channelBadge: s.host && s.host.length > 0 ? `☁️ ${s.host}` : '☁️ Mac 会话',
         title: s.subject.length > 0 ? s.subject : s.agent,
-        detail: s.waitReason && s.waitReason.length > 0 ? s.waitReason : `${s.agent} · ${s.state}`,
+        detail: detailText,
         conversationId: '',
         canFollowup: false,
         canStop: false,
         stopRequested: false,
         updatedAt: s.updatedAt,
+        macPendingApproval: s.pendingApproval,
       });
     }
 
@@ -261,6 +268,45 @@ export struct AmberTaskCenterSheet {
         this.onStatusMessage(err.message);
       });
     }
+  }
+
+  private decideMacApproval(item: UnifiedTaskCardItem, allow: boolean): void {
+    const pending: MacGatewayPendingApproval | undefined = item.macPendingApproval;
+    if (pending === undefined || this.busyAction) return;
+    if (allow && pending.highRisk) {
+      this.onStatusMessage('高风险操作请在 Mac 端确认，手机端仅支持拒绝');
+      return;
+    }
+    this.busyAction = true;
+    loadMacGatewayConnection(getChatKvStore()).then(async (conn: MacGatewayConnection | null): Promise<void> => {
+      if (conn === null) {
+        this.onStatusMessage('未连接 Mac Gateway');
+        return;
+      }
+      const gatewayMatches: boolean = conn.gatewayId.length > 0 && this.cloudDialogue.paired;
+      let trustContext: MacDecisionTrustContext;
+      if (allow) {
+        trustContext = await authenticateForMacDecision(`批准 Mac 执行 ${pending.tool}`, gatewayMatches);
+        if (!trustContext.biometricVerified || !trustContext.trustedForeground) {
+          this.onStatusMessage('前台锁屏/生物身份验证未通过，已取消发送批准');
+          return;
+        }
+      } else {
+        trustContext = {
+          surface: 'app',
+          trustedForeground: false,
+          biometricVerified: false,
+          gatewayIdMatches: gatewayMatches,
+        };
+      }
+      await MacGatewayClient.of(conn).decide(item.id, pending.toolCallId, allow, trustContext);
+      this.onStatusMessage(allow ? `已批准 ${pending.tool}` : `已拒绝 ${pending.tool}`);
+      this.refreshAsyncSources();
+    }).catch((err: Error): void => {
+      this.onStatusMessage(describeMacGatewayError(err));
+    }).finally((): void => {
+      if (this.alive) this.busyAction = false;
+    });
   }
 
   private submitInlineFollowup(): void {
@@ -387,6 +433,34 @@ export struct AmberTaskCenterSheet {
                       this.followupText = '';
                     }
                   })
+              }
+
+              if (item.macPendingApproval !== undefined) {
+                Row({ space: 6 }) {
+                  Text('拒绝')
+                    .fontSize(11.5)
+                    .fontColor(ERROR)
+                    .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+                    .borderRadius(999)
+                    .backgroundColor(SURFACE)
+                    .enabled(!this.busyAction)
+                    .onClick((): void => { this.decideMacApproval(item, false); })
+                  if (!item.macPendingApproval.highRisk) {
+                    Text('验证并批准')
+                      .fontSize(11.5)
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor('#FFFFFF')
+                      .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+                      .borderRadius(999)
+                      .backgroundColor(this.accentColorStore)
+                      .enabled(!this.busyAction)
+                      .onClick((): void => { this.decideMacApproval(item, true); })
+                  } else {
+                    Text('高风险 · 仅 Mac 可批')
+                      .fontSize(11)
+                      .fontColor(WARNING_FG)
+                  }
+                }
               }
 
               Blank()

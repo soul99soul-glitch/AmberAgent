@@ -9,6 +9,7 @@ import {
   patchConversation, applyStopGeneration, createChatKernelHost, runAgenticToolLoop,
   conversationHasPendingTools, applyUserInputRegexes, finishReasoning, finishPendingTools,
   cancelToolByUser, toText, withFollowupReceiptMetadata,
+  markInterruptedSideEffectToolsUnknown,
   type FollowupReceiptState,
 } from '@amber/chat-domain';
 import { EntryAbortController } from './EntryAbortController.ets';
@@ -320,12 +321,12 @@ export class ConversationTaskRunner {
                   id: cur.id, createdAt: cur.createdAt, finishedAt: nowIso(),
                 })
                 : finishPendingTools(
-                  finishReasoning(makeUIMessage('assistant', cur.parts.concat([
+                  finishReasoning(markInterruptedSideEffectToolsUnknown(makeUIMessage('assistant', cur.parts.concat([
                     { type: 'text', text: `\n\n${interruptedNote}`, metadata: null },
                   ]), {
                     id: cur.id, createdAt: cur.createdAt, finishedAt: nowIso(),
                     modelId: cur.modelId, usage: cur.usage, annotations: cur.annotations,
-                  })),
+                  })).message),
                   cancelToolByUser,
                 );
               nextConv = replaceNodeMessageById(nextConv, task.assistantNodeId, nextMsg);

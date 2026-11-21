@@ -42,6 +42,7 @@
       { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" },
       // 生成完成触觉反馈(D0-6;normal 档,声明即授权)
       { "name": "ohos.permission.VIBRATE", "reason": "$string:reason_vibrate" },
+      { "name": "ohos.permission.ACCESS_BIOMETRIC", "reason": "$string:reason_biometric" },
       // 自选工作区目录授权持久化(D2-1;若 debug profile 不含 ACL 将回退降级,见
       //   SettingSandboxPage 诚实注明)
       { "name": "ohos.permission.FILE_ACCESS_PERSIST", "reason": "$string:reason_file_persist" },

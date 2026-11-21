@@ -3,6 +3,7 @@
 // - 左侧 ☰ 呼出抽屉（两栏折叠时可隐藏或保持对齐），右侧 ChatTopBarTrailingDock 常态产物架/长按菜单，有提醒变卫星胶囊
 // - 居中 76vp 动态形象徽章（点按打开人设面板）+ 重叠 8vp 的 32vp 高、最大 268vp 活动/标题胶囊（长按 0.45s 停止生成）
 
+import type { AmberPersonaMood } from '@amber/chat-domain';
 import {
   ACCENT, ACCENT_INK, BG_GLASS, ERROR, HOME_GLASS_EDGE, HOME_GLASS_SHADOW,
   INK, INK2, INK3, LINE, META, SIGNAL, STATUS_AMBER, SURFACE, SURFACE2, accentEdge, accentSoftBg,
@@ -31,6 +32,8 @@ export struct ChatTopBarOverlay {
   @Prop editingTitle: boolean = false;
   @Prop titleInput: string = '';
   @Prop sending: boolean = false;
+  @Prop mood: AmberPersonaMood = 'idle';
+  @Prop sheetOpen: boolean = false;
   @Prop recapLoading: boolean = false;
   @Prop activityLabel: string = '';
   @Prop agentSoulDisplayName: string = 'Amber';
@@ -41,6 +44,7 @@ export struct ChatTopBarOverlay {
   onOpenDrawer: () => void = (): void => {};
   onOpenPersona: () => void = (): void => {};
   onOpenRecap: () => void = (): void => {};
+  onScrollToActiveTail: () => void = (): void => {};
   onStopGeneration: () => void = (): void => {};
   onTitleInputChange: (v: string) => void = (_v: string): void => {};
   onSaveTitle: () => void = (): void => {};
@@ -238,6 +242,8 @@ export struct ChatTopBarOverlay {
             displayName: this.agentSoulDisplayName,
             isDefault: this.agentSoulIsDefault,
             sending: this.sending,
+            mood: this.mood,
+            sheetOpen: this.sheetOpen || this.noticesExpanded,
           })
         }
         .margin({ top: this.statusBarHeight + 4 })
@@ -301,7 +307,13 @@ export struct ChatTopBarOverlay {
             .justifyContent(FlexAlign.Center)
             .alignItems(VerticalAlign.Center)
             .hitTestBehavior(HitTestMode.Default)
-            .onClick((): void => { this.onOpenRecap(); })
+            .onClick((): void => {
+              if (this.sending) {
+                this.onScrollToActiveTail();
+              } else {
+                this.onOpenRecap();
+              }
+            })
             .gesture(
               LongPressGesture({ duration: 450 })
                 .onAction((): void => {
@@ -309,7 +321,7 @@ export struct ChatTopBarOverlay {
                 }),
             )
             .accessibilityText(this.sending
-              ? '正在生成，轻点查看对话回顾，长按停止生成'
+              ? '正在生成，轻点定位当前输出尾部，长按停止生成'
               : `当前话题：${this.capsuleDisplayText()}，轻点查看对话回顾`)
           }
         }

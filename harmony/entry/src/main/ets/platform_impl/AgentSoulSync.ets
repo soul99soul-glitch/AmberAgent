@@ -40,7 +40,7 @@ export interface AgentSoulAvatarPrefs {
   customUri: string;
 }
 
-const VALID_AVATAR_PRESETS: string[] = ['muse', 'star', 'rocket', 'yinyang', 'alien', 'ghost'];
+const VALID_AVATAR_PRESETS: string[] = ['muse', 'fox', 'crystal', 'star', 'rocket', 'yinyang', 'alien', 'ghost'];
 
 const normalizeAvatarPreset = (raw: string): string => {
   const trimmed: string = raw.trim();

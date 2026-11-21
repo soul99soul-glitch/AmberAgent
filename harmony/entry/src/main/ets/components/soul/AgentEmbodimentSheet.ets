@@ -41,6 +41,8 @@ interface BucketChipOption {
 
 const AVATAR_PRESETS: AvatarPresetOption[] = [
   { id: 'muse', label: '缪斯', iconName: 'ph_maskHappy' },
+  { id: 'fox', label: '灵狐', iconName: 'ph_maskHappy' },
+  { id: 'crystal', label: '琥珀晶', iconName: 'ph_star' },
   { id: 'star', label: '星芒', iconName: 'ph_star' },
   { id: 'rocket', label: '探索', iconName: 'ph_rocket' },
   { id: 'yinyang', label: '平衡', iconName: 'ph_yinYang' },

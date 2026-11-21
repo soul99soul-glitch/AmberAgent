@@ -40,6 +40,7 @@ import { makeAgentTool } from './tool.ts';
 import type { AgentTool, InputSchemaObj } from './tool.ts';
 import type { UIMessagePart } from './message.ts';
 import type { AgentToolActivityStore } from './tool_activity.ts';
+import type { WorkspaceUndoStore, WorkspaceUndoPreState } from './tool_safety_net.ts';
 
 // ===== 模型(WorkspaceManager.kt:590-619) =====
 
@@ -49,11 +50,13 @@ export interface WorkspaceEntry {
   directory: boolean;
   sizeBytes: number | null;
   mimeType: string | null;
+  undoSnapshotId?: string;
 }
 
 export interface WorkspaceEditResult {
   path: string;
   replaceCount: number;
+  undoSnapshotId?: string;
 }
 
 export interface WorkspaceSearchResult {
@@ -127,6 +130,7 @@ export interface PosixWorkspaceManagerDeps {
   port: WorkspaceFsPort;
   // mirrorDir = filesDir/amberagent/workspace-mirror(:23)
   rootAbs: string;
+  undoStore?: WorkspaceUndoStore;
 }
 
 export class PosixWorkspaceManager {
@@ -203,17 +207,31 @@ export class PosixWorkspaceManager {
 
   // :117-132
   async writeText(relativePath: string, content: string, append: boolean = false): Promise<WorkspaceEntry> {
+    return this.writeTextInternal(relativePath, content, append, false);
+  }
+
+  private async writeTextInternal(
+    relativePath: string,
+    content: string,
+    append: boolean,
+    skipUndo: boolean,
+  ): Promise<WorkspaceEntry> {
     const normalized: string = this.requireFilePath(relativePath);
+    const undo: WorkspaceUndoStore | undefined = !skipUndo ? this.deps.undoStore : undefined;
+    const pre: WorkspaceUndoPreState | null = undo !== undefined ? undo.capturePreState(normalized, 'write') : null;
     const file: string = this.requireOrCreateFile(normalized);
     this.deps.port.writeText(file, content, append);
+    const snapshot = undo !== undefined ? undo.commitSnapshot(pre) : null;
     const name: string = normalized.substring(normalized.lastIndexOf('/') + 1);
-    return {
+    const entry: WorkspaceEntry = {
       path: normalized,
       name,
       directory: false,
       sizeBytes: this.deps.port.fileSize(file),
       mimeType: textMimeTypeForPath(normalized),
     };
+    if (snapshot !== null) entry.undoSnapshotId = snapshot.id;
+    return entry;
   }
 
   // :134-153 — mimeType = 入参直返(SAF file.type → 镜像无 mime 源,登记);
@@ -248,17 +266,23 @@ export class PosixWorkspaceManager {
       count = current.indexOf(oldText) >= 0 ? 1 : 0;
     }
     if (count <= 0) throw new Error(`Text not found in ${relativePath}`);
+    const normalized: string = normalizeWorkspacePath(relativePath);
+    const undo: WorkspaceUndoStore | undefined = this.deps.undoStore;
+    const pre: WorkspaceUndoPreState | null = undo !== undefined ? undo.capturePreState(normalized, 'edit') : null;
     // replaceFirst 字面替换(JS replace 串模式虽首命中,但 replacement 中 $ 序列
     //   有特殊语义 → 切片拼接保字面;replaceAll → split/join 全量)
     const firstIdx: number = current.indexOf(oldText);
     const updated: string = replaceAll
       ? current.split(oldText).join(newText)
       : current.slice(0, firstIdx) + newText + current.slice(firstIdx + oldText.length);
-    await this.writeText(relativePath, updated);
-    return {
-      path: normalizeWorkspacePath(relativePath),
+    await this.writeTextInternal(relativePath, updated, false, true);
+    const snapshot = undo !== undefined ? undo.commitSnapshot(pre) : null;
+    const res: WorkspaceEditResult = {
+      path: normalized,
       replaceCount: count,
     };
+    if (snapshot !== null) res.undoSnapshotId = snapshot.id;
+    return res;
   }
 
   // :172-201
@@ -276,12 +300,15 @@ export class PosixWorkspaceManager {
       throw new Error(`Target path already exists: ${targetNormalized}`);
     }
     const source: string = this.requireDocument(sourcePath);
+    const sourceIsDir: boolean = this.deps.port.isDirectory(source);
+    const undo: WorkspaceUndoStore | undefined = !sourceIsDir ? this.deps.undoStore : undefined;
+    const pre: WorkspaceUndoPreState | null = undo !== undefined
+      ? undo.capturePreState(targetNormalized, 'move', sourceNormalized) : null;
     this.requireOrCreateParent(targetPath);
     const targetName: string = targetNormalized.substring(targetNormalized.lastIndexOf('/') + 1);
     const sourceParent: string = substringBeforeLast(sourceNormalized, '/', '.');
     const targetParentPath: string = substringBeforeLast(targetNormalized, '/', '.');
     const targetAbs: string = this.abs(targetNormalized);
-    const sourceIsDir: boolean = this.deps.port.isDirectory(source);
     if (sourceParent === targetParentPath) {
       // :185-188 — 同父 renameTo
       this.deps.port.rename(source, targetAbs);
@@ -292,13 +319,16 @@ export class PosixWorkspaceManager {
         throw new Error(`Copied but failed to delete original path: ${sourcePath}`);
       }
     }
-    return {
+    const snapshot = undo !== undefined ? undo.commitSnapshot(pre) : null;
+    const entry: WorkspaceEntry = {
       path: targetNormalized,
       name: targetName,
       directory: sourceIsDir,
       sizeBytes: sourceIsDir ? null : this.deps.port.fileSize(targetAbs),
       mimeType: sourceIsDir ? null : textMimeTypeForPath(targetName),
     };
+    if (snapshot !== null) entry.undoSnapshotId = snapshot.id;
+    return entry;
   }
 
   // :203-231
@@ -675,10 +705,12 @@ export const createWorkspaceTools = (
             toolInputRequiredString(input, 'path'),
             toolInputRequiredString(input, 'content'),
             toolInputBoolean(input, 'append') ?? false);
-          return textJson({
+          const out: JsonObject = {
             path: entry.path,
             size_bytes: entry.sizeBytes ?? 0,
-          });
+          };
+          if (entry.undoSnapshotId !== undefined) out['undo_snapshot_id'] = entry.undoSnapshotId;
+          return textJson(out);
         }),
     }),
     // :105-133 — file_edit(needsApproval,allowsAutoApproval=false)
@@ -705,10 +737,12 @@ export const createWorkspaceTools = (
             toolInputRequiredString(input, 'old_text'),
             toolInputRequiredString(input, 'new_text'),
             toolInputBoolean(input, 'replace_all') ?? false);
-          return textJson({
+          const out: JsonObject = {
             path: result.path,
             replace_count: result.replaceCount,
-          });
+          };
+          if (result.undoSnapshotId !== undefined) out['undo_snapshot_id'] = result.undoSnapshotId;
+          return textJson(out);
         }),
     }),
     // :135-166 — file_search
@@ -757,10 +791,12 @@ export const createWorkspaceTools = (
           const entry: WorkspaceEntry = await manager.move(
             toolInputRequiredString(input, 'source_path'),
             toolInputRequiredString(input, 'target_path'));
-          return textJson({
+          const out: JsonObject = {
             path: entry.path,
             directory: entry.directory,
-          });
+          };
+          if (entry.undoSnapshotId !== undefined) out['undo_snapshot_id'] = entry.undoSnapshotId;
+          return textJson(out);
         }),
     }),
   ];

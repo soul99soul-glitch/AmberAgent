@@ -12,16 +12,34 @@ import { FONT_SANS } from '../design/fonts.ets';
 import { BG, INK3, ERROR, LABEL, META, TEXT_STYLES } from '../design/tokens.ets';
 import { CenteredTitleBar, PlainSection, CardGroup, FooterNote, NavRow, ToggleRow, BtnFill, BtnGhost, PageSpacer } from '../components/PageTemplate.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
+import type {
+  CloudConfigViewDto, ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude,
+} from '@amber/chat-domain';
+import {
+  loadProviders, newId, normalizedCloudModelBaseUrl, isValidCloudModelBaseUrl,
+  mapLocalProviderTypeToCloudKind,
+} from '@amber/chat-domain';
 import {
   MacGatewayClient, MacGatewayError, describeMacGatewayError, parsePairingLink, loadMacGatewayConnection,
   forgetMacGatewayConnection, pairMacGateway, uploadMacGatewayPushToken,
   loadCloudDialogueEnabled, setCloudDialogueEnabled,
+  applyCloudConfigurationWithJwe, resetCloudImportKeyTrust,
   type MacGatewayConnection, type MacGatewayPairingPayload, type MacGatewayStatus, type MacGatewaySession,
   type MacGatewayHealth,
 } from '../platform_impl/MacGatewayClient.ets';
+import { createHarmonyCloudConfigCryptoPort } from '../platform_impl/MacGatewayTrustAuth.ets';
 import {
   handleAgentSoulGatewayUnpaired, observeGatewaySoulRevision, syncAgentSoulFromCloud,
 } from '../platform_impl/AgentSoulSync.ets';
+
+interface LocalCloudImportOption {
+  id: string;
+  label: string;
+  providerKind: 'openai' | 'claude';
+  modelId: string;
+  baseUrl: string;
+  apiKey: string;
+}
 
 const REFRESH_INTERVAL_MS: number = 10000;
 const VISIBLE_TASK_LIMIT: number = 20;
@@ -39,6 +57,12 @@ struct SettingMacGatewayPage {
   @State pending: MacGatewayPairingPayload | null = null;
   @State busy: boolean = false;
   @State cloudDialogueEnabled: boolean = false;
+  @State cloudConfig: CloudConfigViewDto | null = null;
+  @State cloudConfigUnsupported: boolean = false;
+  @State cloudConfigLoading: boolean = false;
+  @State cloudImporting: boolean = false;
+  @State importKeyChanged: boolean = false;
+  @State localImportOptions: LocalCloudImportOption[] = [];
   @State notice: string = '';
   @State noticeIsError: boolean = false;
   private timer: number = -1;
@@ -52,6 +76,8 @@ struct SettingMacGatewayPage {
         this.cloudDialogueEnabled = res[0] !== null && res[1];
         this.loaded = true;
         this.startPolling();
+        this.loadLocalImportOptions();
+        if (res[0] !== null) this.refreshCloudConfig();
       }).catch((): void => { this.loaded = true; });
   }
 
@@ -130,8 +156,130 @@ struct SettingMacGatewayPage {
     handleAgentSoulGatewayUnpaired().catch((): void => {});
     this.connection = null;
     this.cloudDialogueEnabled = false;
+    this.cloudConfig = null;
+    this.cloudConfigUnsupported = false;
+    this.importKeyChanged = false;
     this.status = null;
     this.reachable = 0;
+  }
+
+  private async loadLocalImportOptions(): Promise<void> {
+    try {
+      const list: ProviderSetting[] = (await loadProviders(getChatKvStore())) ?? [];
+      const opts: LocalCloudImportOption[] = [];
+      for (const p of list) {
+        if (!p.enabled) continue;
+        const kind = mapLocalProviderTypeToCloudKind(p.type);
+        if (kind === null) continue;
+        let apiKey: string = '';
+        let baseUrl: string = '';
+        if (p.type === 'openai') {
+          const oa: ProviderSettingOpenAIVariant = p as ProviderSettingOpenAIVariant;
+          if (oa.authMode !== 'api_key') continue;
+          apiKey = oa.apiKey.trim();
+          baseUrl = oa.baseUrl;
+        } else if (p.type === 'claude') {
+          const cl: ProviderSettingClaude = p as ProviderSettingClaude;
+          apiKey = cl.apiKey.trim();
+          baseUrl = cl.baseUrl;
+        }
+        const normalizedUrl: string | null = normalizedCloudModelBaseUrl(baseUrl);
+        if (apiKey.length === 0 || normalizedUrl === null) continue;
+        for (const m of p.models) {
+          if (m.type !== 'chat' || m.modelId.trim().length === 0) continue;
+          opts.push({
+            id: `${p.id}:${m.modelId}`,
+            label: `${p.name || kind.toUpperCase()} · ${m.displayName || m.modelId}`,
+            providerKind: kind,
+            modelId: m.modelId,
+            baseUrl: normalizedUrl,
+            apiKey,
+          });
+        }
+      }
+      this.localImportOptions = opts.slice(0, 12);
+    } catch (_e) {
+      this.localImportOptions = [];
+    }
+  }
+
+  private async refreshCloudConfig(): Promise<void> {
+    const c: MacGatewayConnection | null = this.connection;
+    if (c === null || this.cloudConfigLoading) return;
+    this.cloudConfigLoading = true;
+    try {
+      const view: CloudConfigViewDto = await MacGatewayClient.of(c).fetchCloudConfiguration();
+      if (this.connection !== c) return;
+      this.cloudConfig = view;
+      this.cloudConfigUnsupported = false;
+    } catch (e) {
+      if (this.connection !== c) return;
+      const err: Error = e as Error;
+      if (err instanceof MacGatewayError && err.statusCode === 404) {
+        this.cloudConfig = null;
+        this.cloudConfigUnsupported = true;
+      }
+    } finally {
+      this.cloudConfigLoading = false;
+    }
+  }
+
+  private async importLocalOptionToCloud(opt: LocalCloudImportOption): Promise<void> {
+    const c: MacGatewayConnection | null = this.connection;
+    const cfg: CloudConfigViewDto | null = this.cloudConfig;
+    if (c === null || this.cloudImporting) return;
+    if (cfg === null) {
+      await this.refreshCloudConfig();
+      this.showNotice(this.cloudConfig === null ? '无法读取云端配置版本，请稍后重试' : '云端配置已刷新，请再次点击导入', true);
+      return;
+    }
+    this.cloudImporting = true;
+    this.importKeyChanged = false;
+    try {
+      const receipt = await applyCloudConfigurationWithJwe(
+        getChatKvStore(),
+        c,
+        newId(),
+        cfg.revision,
+        {
+          model: {
+            provider: opt.providerKind,
+            modelId: opt.modelId,
+            baseUrl: opt.baseUrl,
+          },
+        },
+        {
+          modelApiKey: { action: 'replace', value: opt.apiKey },
+        },
+        createHarmonyCloudConfigCryptoPort(),
+      );
+      this.showNotice(
+        receipt.replayed
+          ? '云端已应用过该配置（重复请求已合并）'
+          : `已加密导入 ${opt.label}（v${receipt.currentRevision}），新任务生效`,
+        false,
+      );
+      await this.refreshCloudConfig();
+    } catch (e) {
+      const err: Error = e as Error;
+      if (err instanceof MacGatewayError && err.errorCode === 'import_key_changed') {
+        this.importKeyChanged = true;
+      }
+      if (err instanceof MacGatewayError && err.statusCode === 409) {
+        await this.refreshCloudConfig();
+      }
+      await this.report(err);
+    } finally {
+      this.cloudImporting = false;
+    }
+  }
+
+  private async resetImportTrust(): Promise<void> {
+    const c: MacGatewayConnection | null = this.connection;
+    if (c === null) return;
+    await resetCloudImportKeyTrust(getChatKvStore(), c.gatewayId);
+    this.importKeyChanged = false;
+    this.showNotice('已重置云端导入公钥信任，下次导入将重新固定指纹', false);
   }
 
   private receiveLink(text: string): void {
@@ -417,6 +565,63 @@ struct SettingMacGatewayPage {
   }
 
   @Builder
+  CloudConfigCard(): void {
+    if (this.cloudConfigUnsupported) {
+      NavRow({ label: '云端配置同步', desc: '接口待接入（当前 Gateway 版本暂未开放 /v2/configuration）', showChevron: false, isLast: true })
+    } else if (this.cloudConfig === null) {
+      NavRow({
+        label: this.cloudConfigLoading ? '正在读取云端配置…' : '点击读取云端配置',
+        showChevron: false,
+        isLast: true,
+        onRowClick: (): void => { this.refreshCloudConfig(); },
+      })
+    } else {
+      NavRow({
+        label: '当前云端模型',
+        valueText: this.cloudConfig.model.modelId.length > 0
+          ? `${this.cloudConfig.model.provider} · ${this.cloudConfig.model.modelId}`
+          : '未配置',
+        desc: `v${this.cloudConfig.revision} · Key ${this.cloudConfig.credentials.modelApiKey.configured ? '已配置' : '未配置'} · 搜索 ${this.cloudConfig.search.sources.join('/') || '默认'}`,
+        showChevron: false,
+      })
+      if (this.importKeyChanged) {
+        NavRow({
+          label: '重新信任导入公钥',
+          desc: '云端导入公钥 kid 已变化，确认 Mac 安全后轻点重新固定',
+          danger: true,
+          showChevron: false,
+          onRowClick: (): void => { this.resetImportTrust(); },
+        })
+      }
+      if (this.localImportOptions.length === 0) {
+        NavRow({
+          label: '暂无可导出的本机模型',
+          desc: '仅已启用、含 API Key 且地址为 HTTPS 的 OpenAI/Claude 模型支持单向 JWE 加密导入',
+          showChevron: false,
+          isLast: true,
+        })
+      } else {
+        ForEach(this.localImportOptions, (opt: LocalCloudImportOption, idx: number): void => {
+          NavRow({
+            label: this.cloudImporting ? '加密导入中…' : `导入 · ${opt.label}`,
+            desc: opt.baseUrl.length > 0 ? opt.baseUrl : '协议默认地址（RSA-OAEP-256 + A256GCM）',
+            isLast: idx === this.localImportOptions.length - 1,
+            onRowClick: (): void => { this.importLocalOptionToCloud(opt); },
+          })
+        }, (opt: LocalCloudImportOption): string => opt.id)
+      }
+    }
+  }
+
+  @Builder
+  CloudConfigSection(): void {
+    PlainSection({ label: '云端配置（JWE 单向加密导入）' })
+    CardGroup({ radius: 18, stroke: true, content: (): void => { this.CloudConfigCard(); } })
+      .margin({ left: 16, right: 16 })
+    FooterNote({ text: '密钥仅在本机内存中以 RSA-OAEP-256 + A256GCM 封装后直传 Mac Gateway，不落盘、不回显。' })
+  }
+
+  @Builder
   HealthCard(): void {
     if (this.health()?.diskFreeBytes !== undefined) {
       NavRow({ label: '磁盘剩余', valueText: formatBytes(this.health()?.diskFreeBytes ?? 0), showChevron: false })
@@ -490,6 +695,7 @@ struct SettingMacGatewayPage {
             } else if (this.connection !== null) {
               this.MacSection()
               this.CloudDialogueSection()
+              this.CloudConfigSection()
               if (this.health() !== undefined) {
                 this.HealthSection()
               }

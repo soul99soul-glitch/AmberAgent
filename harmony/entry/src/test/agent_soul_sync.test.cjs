@@ -98,6 +98,7 @@ function loadMacGatewayModule(rcpFetchImpl, kvStore) {
     if (name === '@kit.PushKit') return { pushService: { async getToken() { return 'tok'; } } };
     if (name === '@kit.BasicServicesKit') return { deviceInfo: { marketName: 'HarmonyTest' } };
     if (name === '@kit.PerformanceAnalysisKit') return { hilog: { warn() {}, info() {} } };
+    if (name === '@amber/chat-domain') return domain;
     if (name.endsWith('/AppContainer.ets')) return { getChatKvStore: () => kvStore };
     throw new Error(`Unexpected dependency in MacGatewayClient: ${name}`);
   });

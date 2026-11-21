@@ -10,7 +10,7 @@ import {
   ASK_USER_TOOL_NAME, buildAskUserAnswerPayload, groupMessageParts, mightContainMiniApp,
   miniAppStatusProjection, parseAskUserQuestions, readFollowupReceipt, streamToolIndex,
 } from '@amber/chat-domain';
-import type { ToolApprovalPartLocator, UIMessagePartMiniApp } from '@amber/chat-domain';
+import type { ToolApprovalPartLocator, UIMessagePartMiniApp, ToolOutcomeResolution } from '@amber/chat-domain';
 import { MarkdownText } from './MarkdownText.ets';
 import { ChatMessageReasoning } from './ChatMessageReasoning.ets';
 import { ChatMessageTools } from './ChatMessageTools.ets';
@@ -159,6 +159,9 @@ export struct AgentMessageRow {
     (_id: string, _loc?: ToolApprovalPartLocator): void => {};
   onDenyTool: (toolCallId: string, locator?: ToolApprovalPartLocator) => void =
     (_id: string, _loc?: ToolApprovalPartLocator): void => {};
+  onResolveToolOutcome: (toolCallId: string, toolName: string, resolution: ToolOutcomeResolution,
+    locator?: ToolApprovalPartLocator) => void =
+    (_id: string, _name: string, _res: ToolOutcomeResolution, _loc?: ToolApprovalPartLocator): void => {};
   // D-105/R08:ask_user 应答回调(ChatMessageAskUserStep.kt onToolAnswer)
   onAnswerTool: (toolCallId: string, answer: string, locator?: ToolApprovalPartLocator) => void =
     (_id: string, _a: string, _loc?: ToolApprovalPartLocator): void => {};
@@ -709,6 +712,10 @@ export struct AgentMessageRow {
                   },
                   onDeny: (toolCallId: string): void => {
                     this.onDenyTool(toolCallId, this.locatorFor(this.toolPartAt(bi, si)));
+                  },
+                  onResolveOutcome: (toolCallId: string, resolution: ToolOutcomeResolution): void => {
+                    const tp: UIMessagePartTool = this.toolPartAt(bi, si);
+                    this.onResolveToolOutcome(toolCallId, tp.toolName, resolution, this.locatorFor(tp));
                   },
                   onOpenPreview: (): void => { this.onOpenToolPreview(this.toolPartAt(bi, si), this.locatorFor(this.toolPartAt(bi, si))); },
                   deniedLabel: this.toolPartAt(bi, si).approvalState.type === 'denied' ? this.deniedLabel(this.toolPartAt(bi, si)) : '',
