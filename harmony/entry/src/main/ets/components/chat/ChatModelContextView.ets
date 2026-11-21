@@ -2,46 +2,51 @@ import { ChatModelContextSession } from '../../platform_impl/chat/ChatModelConte
 import { TopModelMenu } from '../TopModelMenu.ets';
 import { MarkdownText } from '../MarkdownText.ets';
 import { formatContextTokens } from '@amber/chat-domain';
-import { BODY, INK, INK2, INK3, LINE, META, STATUS_BLUE, SURFACE, MOTION_OVERLAY } from '../../design/tokens.ets';
+import { BG, BODY, INK, INK2, INK3, LINE, META, STATUS_BLUE, SURFACE, MOTION_OVERLAY } from '../../design/tokens.ets';
 
 @Component
 export struct ChatModelMenuOverlay {
   @ObjectLink session: ChatModelContextSession;
-  @Prop topInset: number = 0;
   onOpenFullPicker: (assistantId: string) => void = (_assistantId: string): void => {};
   onOpenProviderSettings: () => void = (): void => {};
 
+  @Builder
+  ModelPickerSheet(): void {
+    TopModelMenu({
+      groups: this.session.modelMenuGroups,
+      currentProviderId: this.session.modelMenuCurrentProvider,
+      currentModelId: this.session.modelMenuCurrentModel,
+      reasoningLevels: this.session.reasoningLevels,
+      currentReasoningLevel: this.session.currentReasoningLevel,
+      onReasoningLevelChange: (level: string): void => { this.session.handleReasoningLevelChange(level); },
+      onSelect: (providerId: string, modelId: string): void => {
+        this.session.selectModelFromMenu(providerId, modelId);
+      },
+      onClose: (): void => { this.session.closeModelMenu(); },
+      onOpenFullPicker: (): void => {
+        this.session.closeModelMenu();
+        this.onOpenFullPicker(this.session.currentAssistantId());
+      },
+      onOpenProviderSettings: (): void => {
+        this.session.closeModelMenu();
+        this.onOpenProviderSettings();
+      },
+    })
+  }
+
   build(): void {
-    if (this.session.modelMenuOpen) {
-      TopModelMenu({
-        topInset: this.topInset,
-        contextUsedTokens: this.session.displayedContextTokens(),
-        contextWindowTokens: this.session.contextWindowTokens,
-        contextColor: this.session.contextRingColor(),
-        contextCompactActive: this.session.compactActiveCount > 0,
-        turnTotal: this.session.turnTotalText,
-        turnCache: this.session.turnCacheText,
-        turnSpeed: this.session.turnSpeedText,
-        groups: this.session.modelMenuGroups,
-        currentProviderId: this.session.modelMenuCurrentProvider,
-        currentModelId: this.session.modelMenuCurrentModel,
-        reasoningLevels: this.session.reasoningLevels,
-        currentReasoningLevel: this.session.currentReasoningLevel,
-        onReasoningLevelChange: (level: string): void => { this.session.handleReasoningLevelChange(level); },
-        onSelect: (providerId: string, modelId: string): void => {
-          this.session.selectModelFromMenu(providerId, modelId);
-        },
-        onClose: (): void => { this.session.closeModelMenu(); },
-        onOpenFullPicker: (): void => {
-          this.session.closeModelMenu();
-          this.onOpenFullPicker(this.session.currentAssistantId());
-        },
-        onOpenProviderSettings: (): void => {
-          this.session.closeModelMenu();
-          this.onOpenProviderSettings();
-        },
+    // 对齐 iOS ComposerModelSheet：从下到上的悬浮面板（支持中/大两档拖拽）
+    Column() {}
+      .width(0)
+      .height(0)
+      .hitTestBehavior(HitTestMode.None)
+      .bindSheet(this.session.modelMenuOpen, this.ModelPickerSheet(), {
+        detents: [SheetSize.MEDIUM, SheetSize.LARGE],
+        showClose: false,
+        dragBar: true,
+        backgroundColor: BG,
+        onDisappear: (): void => { this.session.closeModelMenu(); },
       })
-    }
   }
 }
 

@@ -1599,7 +1599,6 @@ struct ChatPage {
         .alignItems(HorizontalAlign.Center)
         .width('100%')
         .position({ top: '34%' })
-        .visibility(this.modelContext.modelMenuOpen ? Visibility.Hidden : Visibility.Visible)
       }
 
       // 底层窄渐进模糊带（statusBarHeight + 54vp，不覆盖悬垂胶囊下方正文）
@@ -1700,8 +1699,8 @@ struct ChatPage {
     // ContextUsagePanel：锚定在底栏上下文胶囊正上方，绝不遮挡顶部状态栏与头像
     ChatContextMeterOverlay({ session: this.modelContext, bottomInset: this.composerHeight + 8 })
 
-    // TopModelMenu 覆盖层
-    ChatModelMenuOverlay({ session: this.modelContext, topInset: this.statusBarHeight + 112,
+    // 模型与服务商底部悬浮面板（对齐 iOS ComposerModelSheet）
+    ChatModelMenuOverlay({ session: this.modelContext,
       onOpenFullPicker: (assistantId: string): void => { router.pushUrl({ url: 'pages/ChatModelPickerPage', params: { assistantId: assistantId } }); },
       onOpenProviderSettings: (): void => { router.pushUrl({ url: 'pages/ChatProviderSettingsPage' }); },
     })
