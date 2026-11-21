@@ -122,14 +122,25 @@ struct ParagraphBubbleCard {
 
   @State private revealOpacity: number = 1;
   @State private revealOffsetY: number = 0;
+  @State private revealScale: number = 1;
+  private revealTimer: number = -1;
 
   aboutToAppear(): void {
     if (this.animateReveal && !this.reduceMotion) {
       this.revealOpacity = 0;
-      this.revealOffsetY = 8;
+      this.revealOffsetY = 16;
+      this.revealScale = 0.97;
     } else {
       this.revealOpacity = 1;
       this.revealOffsetY = 0;
+      this.revealScale = 1;
+    }
+  }
+
+  aboutToDisappear(): void {
+    if (this.revealTimer !== -1) {
+      clearTimeout(this.revealTimer);
+      this.revealTimer = -1;
     }
   }
 
@@ -159,12 +170,19 @@ struct ParagraphBubbleCard {
     .borderRadius(18)
     .opacity(this.revealOpacity)
     .translate({ y: this.revealOffsetY })
+    .scale({ x: this.revealScale, y: this.revealScale, centerX: '0%', centerY: '50%' })
     .onAppear((): void => {
       if (!this.animateReveal || this.reduceMotion) return;
-      this.getUIContext().animateTo({ duration: 260, curve: Curve.EaseOut }, (): void => {
-        this.revealOpacity = 1;
-        this.revealOffsetY = 0;
-      });
+      if (this.revealTimer !== -1) clearTimeout(this.revealTimer);
+      // 延迟一帧确保首帧 opacity=0 已提交到合成器，再执行 520ms 柔和淡入上浮
+      this.revealTimer = setTimeout((): void => {
+        this.revealTimer = -1;
+        this.getUIContext().animateTo({ duration: 520, curve: Curve.EaseOut }, (): void => {
+          this.revealOpacity = 1;
+          this.revealOffsetY = 0;
+          this.revealScale = 1;
+        });
+      }, 16);
     })
   }
 }
