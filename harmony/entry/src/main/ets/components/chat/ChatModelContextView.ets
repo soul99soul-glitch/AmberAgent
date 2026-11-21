@@ -15,7 +15,7 @@ export struct ChatModelMenuOverlay {
     if (this.session.modelMenuOpen) {
       TopModelMenu({
         topInset: this.topInset,
-        contextUsedTokens: this.session.contextUsedTokens,
+        contextUsedTokens: this.session.displayedContextTokens(),
         contextWindowTokens: this.session.contextWindowTokens,
         contextColor: this.session.contextRingColor(),
         contextCompactActive: this.session.compactActiveCount > 0,
@@ -48,10 +48,11 @@ export struct ChatModelMenuOverlay {
 @Component
 export struct ChatContextMeterOverlay {
   @ObjectLink session: ChatModelContextSession;
+  @Prop bottomInset: number = 140;
 
   build(): void {
     if (this.session.contextMeterOpen) {
-      Stack({ alignContent: Alignment.TopStart }) {
+      Stack({ alignContent: Alignment.BottomEnd }) {
         Column()
           .width('100%').height('100%')
           .hitTestBehavior(HitTestMode.Block)
@@ -59,8 +60,8 @@ export struct ChatContextMeterOverlay {
         Column() {
           ChatContextUsagePanel({ session: this.session })
         }
-        .position({ top: 0, right: 8 })
-        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -8 }))
+        .margin({ right: 16, bottom: Math.max(72, this.bottomInset) })
+        .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 10 }))
           .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }.width('100%').height('100%')
     }
@@ -120,8 +121,8 @@ export struct ChatContextUsagePanel {
         Text('Context')
           .fontSize(13).fontColor(INK).fontWeight(FontWeight.Medium).letterSpacing(0.2)
         Blank()
-        Text(`${this.session.contextUsedTokens > 0
-          ? formatContextTokens(this.session.contextUsedTokens) : '0'} / ${this.session.contextWindowTokens !== null
+        Text(`${this.session.displayedContextTokens() > 0
+          ? formatContextTokens(this.session.displayedContextTokens()) : '0'} / ${this.session.contextWindowTokens !== null
           ? formatContextTokens(this.session.contextWindowTokens) : '--'}`)
           .fontSize(11.5).fontColor(INK2).letterSpacing(0.3)
       }

@@ -2,6 +2,7 @@
 // - 静息态：黄金配重 3+1（[ 对话 | 任务 [N] | 中心 ] + [ 本机 ⇄ 云端 ]）
 // - 聚焦态：150ms 淡变切为写作元控制栏（[ 模型名 ] + [ ✦ 新话题 | 💭 思考强度 | 上下文环 ]）
 
+import { formatContextTokens } from '@amber/chat-domain';
 import {
   ACCENT, ACCENT_INK, BG_GLASS, ERROR, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, INK, INK2, INK3, LINE,
   STATUS_AMBER, SURFACE, SURFACE2, accentEdge, accentSoftBg,
@@ -133,8 +134,13 @@ export struct AmberBottomModeBar {
   }
 
   private contextPercentLabel(): string {
-    const pct: number = Math.round(this.modelContext.contextUsageRatio() * 100);
-    return `${pct}%`;
+    const w: number | null = this.modelContext.contextWindowTokens;
+    if (w !== null && w > 0) {
+      const pct: number = Math.round(this.modelContext.contextUsageRatio() * 100);
+      return `${pct}%`;
+    }
+    const used: number = this.modelContext.displayedContextTokens();
+    return used > 0 ? formatContextTokens(used) : '—';
   }
 
   @Builder

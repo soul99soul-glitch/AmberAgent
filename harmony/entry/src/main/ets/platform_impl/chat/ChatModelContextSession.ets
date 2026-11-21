@@ -253,11 +253,19 @@ export class ChatModelContextSession {
     return 0;
   }
 
+  displayedContextTokens(): number {
+    const est: number = this.estimatedContextTokens();
+    const u: TokenUsage | null = this.lastTurnUsage();
+    if (u === null) return est;
+    const reported: number = u.totalTokens > 0 ? u.totalTokens : u.promptTokens;
+    return Math.max(est, reported);
+  }
+
   contextUsageRatio(): number {
     const conv: Conversation | null = this.currentConversation();
     const w: number | null = this.contextWindowTokens;
     if (w === null || w <= 0 || conv === null) return 0;
-    const used: number = this.estimatedContextTokens();
+    const used: number = this.displayedContextTokens();
     const r: number = used / w;
     return r < 0 ? 0 : (r > 1 ? 1 : r);
   }

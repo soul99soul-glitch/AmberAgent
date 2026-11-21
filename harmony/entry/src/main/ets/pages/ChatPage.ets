@@ -1620,9 +1620,6 @@ struct ChatPage {
         onControlsHeightChange: (h: number): void => { this.chatHeaderHeight = h; },
       })
 
-      // ContextUsagePanel：从底栏上下文环或模型面板触发
-      ChatContextMeterOverlay({ session: this.modelContext })
-
       // 底部悬浮胶囊输入栏 + 原位双态底栏
       Column() {
         ChatComposerPane({
@@ -1660,10 +1657,23 @@ struct ChatPage {
       .position({ left: 0, bottom: 0 })
       .onAreaChange((_old: Area, area: Area): void => {
         const h: number = Number(area.height);
-        if (Number.isFinite(h) && h > 0) this.composerHeight = h;
+        if (Number.isFinite(h) && h > 0) {
+          const grew: boolean = h > this.composerHeight + 4;
+          this.composerHeight = h;
+          if (grew && !this.timeline.userTouchActive && this.timeline.atBottomApprox) {
+            setTimeout((): void => {
+              if (this.pageAlive && !this.timeline.userTouchActive && this.timeline.atBottomApprox) {
+                this.timeline.scrollToBottom();
+              }
+            }, 40);
+          }
+        }
       })
     }
     .width('100%').height('100%').backgroundColor(BG)
+
+    // ContextUsagePanel：锚定在底栏上下文胶囊正上方，绝不遮挡顶部状态栏与头像
+    ChatContextMeterOverlay({ session: this.modelContext, bottomInset: this.composerHeight + 8 })
 
     // TopModelMenu 覆盖层
     ChatModelMenuOverlay({ session: this.modelContext, topInset: this.statusBarHeight + 112,

@@ -423,10 +423,10 @@ export struct ChatComposerPane {
         })
       }
       .width('100%')
-      .padding({ top: 10, bottom: this.navBarHeight + 10 })
+      .padding({ top: 14, bottom: this.navBarHeight + 10 })
       .linearGradient({
         direction: GradientDirection.Bottom,
-        colors: [[BG_FADE_START, 0], [BG_FADE_END, 0.36], [BG_FADE_END, 1]],
+        colors: [[BG_FADE_START, 0], [BG_FADE_END, 0.14], [BG_FADE_END, 1]],
       })
     }
     .opacity(this.themeEpoch >= 0 ? 1 : 1)
