@@ -46,8 +46,17 @@ function rootComponentInitializers(source) {
   return (source.match(/^  (?:@\w+(?:\([^)]*\))?\s*)*(?:onBackHandler|embeddedRoot|rootVisible|rootCreate):.*$/gm) || [])
     .map(line => line.replace(/@\w+(?:\([^)]*\))?\s*/g, '')).join('\n');
 }
-function actualPage(file, names, env) {
-  const source = fs.readFileSync(path.join(entryRoot, file), 'utf8');
+function actualPage(file, names, env, { component } = {}) {
+  let source = fs.readFileSync(path.join(entryRoot, file), 'utf8');
+  if (component) {
+    // ArkTS files may contain several top-level components with the same lifecycle names.
+    const declaration = new RegExp('^(?:export )?struct ' + component + ' \\{[^\\n]*\\n', 'm').exec(source);
+    if (!declaration) throw Error('missing actual component ' + component);
+    const body = source.slice(declaration.index + declaration[0].length);
+    const end = /^\}[ \t]*\r?$/m.exec(body);
+    if (!end) throw Error('unclosed actual component ' + component);
+    source = body.slice(0, end.index);
+  }
   const code = ts.transpileModule('class Page {' + rootComponentInitializers(source) + '\n' + names.map(name => method(source, name)).join('\n') + '} return new Page();',
     { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   return new Function(...Object.keys(env), code)(...Object.values(env));

@@ -1,6 +1,5 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const path = require('node:path');
 const { actualPage, entryRoot, loadPureModule } = require('../../../deepread/src/test/deepread_ui_fixture.cjs');
 const { MessageRowViewState } = loadPureModule(path.join(entryRoot, 'components/MessageRowViewState.ets'));
@@ -8,13 +7,12 @@ const plain = value => JSON.parse(JSON.stringify(value));
 
 function row(viewState, streaming = false) {
   const file = 'components/AgentMessageRow.ets';
-  const source = fs.readFileSync(path.join(entryRoot, file), 'utf8');
   const names = ['aboutToAppear', 'aboutToDisappear', 'restoreViewState', 'saveViewState',
     'setAskAnswer', 'toggleAskMulti', 'clearAskDrafts', 'toggleReasoning', 'reasoningStateAt',
     'autoCollapseReasoning', 'captureMiniAppStreamText'];
-  const page = actualPage(file, names.filter(name => new RegExp(`^  (?:private )?${name}\\(`, 'm').test(source)), {
+  const page = actualPage(file, names, {
     MessageRowViewState, mightContainMiniApp: text => text.startsWith('mini-app:'),
-  });
+  }, { component: 'AgentMessageRow' });
   Object.assign(page, { viewState, streaming, autoCloseThinking: true,
     message: { id: 'message', parts: [] }, reasoningStates: {}, askAnswers: {}, askMultiAnswers: {},
     sawStream: false, lastMiniAppStreamText: '', lastMiniAppStreamMessageId: '' });
