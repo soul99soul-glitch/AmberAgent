@@ -149,14 +149,14 @@ export const BUILTIN_PACKS: ThemePack[] = [
     designDark: true,
     builtin: true,
     light: {
-      bg: '#F6F1E7', surface: '#EDE6D8', surface2: '#E4DBC9',
-      ink: '#1E1B18', ink2: '#413B34', muted: '#635A50', muted2: '#8E8376',
-      border: '#DDD3C2', borderSoft: '#E7DFD1',
+      bg: '#F3ECE0', surface: '#FFFCF6', surface2: '#E7DEC9',
+      ink: '#1E1B18', ink2: '#413B34', muted: '#635A50', muted2: '#8B7F71',
+      border: '#CCC0AA', borderSoft: '#E2D8C6',
     },
     dark: {
-      bg: '#151210', surface: '#221D19', surface2: '#2D2621',
+      bg: '#151210', surface: '#241F1A', surface2: '#312A24',
       ink: '#F4EFE6', ink2: '#CDC5B9', muted: '#A69B8E', muted2: '#766C61',
-      border: '#3A312A', borderSoft: '#2B241F',
+      border: '#443931', borderSoft: '#302822',
     },
   },
   {
@@ -169,14 +169,14 @@ export const BUILTIN_PACKS: ThemePack[] = [
     designDark: true,
     builtin: true,
     light: {
-      bg: '#FBF9F5', surface: '#F3EFEA', surface2: '#EAE4DC',
-      ink: '#1E1B18', ink2: '#4B453F', muted: '#787067', muted2: '#9E958B',
-      border: '#E6E0D6', borderSoft: '#EFEAE1',
+      bg: '#F6F1E9', surface: '#FFFFFF', surface2: '#EAE3D8',
+      ink: '#1E1B18', ink2: '#4B453F', muted: '#746C63', muted2: '#988F85',
+      border: '#D3C9BA', borderSoft: '#E6DFD3',
     },
     dark: {
-      bg: '#141210', surface: '#211D19', surface2: '#2C2722',
+      bg: '#141210', surface: '#221E1A', surface2: '#2E2823',
       ink: '#F5F0E8', ink2: '#CEC7BD', muted: '#A89E92', muted2: '#766D63',
-      border: '#38312A', borderSoft: '#2A251F',
+      border: '#413830', borderSoft: '#2E2822',
     },
   },
   {
@@ -189,14 +189,14 @@ export const BUILTIN_PACKS: ThemePack[] = [
     designDark: true,
     builtin: true,
     light: {
-      bg: '#FFFFFF', surface: '#F4F6F9', surface2: '#EBF0F5',
+      bg: '#F2F5F9', surface: '#FFFFFF', surface2: '#E5EAF2',
       ink: '#1D1D1F', ink2: '#3E4148', muted: '#5E6572', muted2: '#8B929F',
-      border: '#E3E7ED', borderSoft: '#EDF0F5',
+      border: '#CBD3DF', borderSoft: '#E0E6EF',
     },
     dark: {
-      bg: '#101216', surface: '#1B1E24', surface2: '#252A33',
+      bg: '#101216', surface: '#1D2128', surface2: '#282E38',
       ink: '#F3F5F8', ink2: '#C4C8D0', muted: '#949BA8', muted2: '#666D7A',
-      border: '#2C313B', borderSoft: '#20242D',
+      border: '#353C49', borderSoft: '#242933',
     },
   },
   {
@@ -209,14 +209,14 @@ export const BUILTIN_PACKS: ThemePack[] = [
     designDark: true,
     builtin: true,
     light: {
-      bg: '#F7F4EC', surface: '#EEE9DD', surface2: '#E4DDD0',
+      bg: '#F3EFE5', surface: '#FDFBF7', surface2: '#E6E0D1',
       ink: '#141B29', ink2: '#373F4E', muted: '#5A6373', muted2: '#89909E',
-      border: '#DDD6C7', borderSoft: '#E8E2D6',
+      border: '#CAC2B0', borderSoft: '#E0D9CA',
     },
     dark: {
-      bg: '#0E131D', surface: '#182030', surface2: '#222C40',
+      bg: '#0E131D', surface: '#1A2334', surface2: '#253046',
       ink: '#F0EDE4', ink2: '#C2C6CB', muted: '#949FB2', muted2: '#657084',
-      border: '#2A354B', borderSoft: '#1E2738',
+      border: '#334059', borderSoft: '#222C3F',
     },
   },
   {
@@ -229,14 +229,14 @@ export const BUILTIN_PACKS: ThemePack[] = [
     designDark: true,
     builtin: true,
     light: {
-      bg: '#F6F6F1', surface: '#ECEEE6', surface2: '#E2E5DB',
+      bg: '#F1F2EB', surface: '#FCFDF9', surface2: '#E3E6DA',
       ink: '#17211B', ink2: '#36423B', muted: '#55635B', muted2: '#849089',
-      border: '#D8DDD3', borderSoft: '#E5E9E1',
+      border: '#C6CEC0', borderSoft: '#DCE1D6',
     },
     dark: {
-      bg: '#0F1512', surface: '#19221D', surface2: '#232F28',
+      bg: '#0F1512', surface: '#1B2520', surface2: '#26332C',
       ink: '#EEF2EE', ink2: '#C0CAC3', muted: '#92A198', muted2: '#64736A',
-      border: '#2A362F', borderSoft: '#1F2923',
+      border: '#324138', borderSoft: '#222E27',
     },
   },
   {

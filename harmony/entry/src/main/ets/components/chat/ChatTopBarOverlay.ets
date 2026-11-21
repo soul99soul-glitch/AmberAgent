@@ -107,12 +107,8 @@ export struct ChatTopBarOverlay {
             .width(40)
             .height(40)
             .borderRadius(999)
-            .backgroundColor(this.appBackgrounded ? BG_GLASS : SURFACE2)
-            .backgroundBlurStyle(
-              this.appBackgrounded ? BlurStyle.NONE : BlurStyle.Thin,
-              { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.6 },
-            )
-            .border({ width: 0.75, color: HOME_GLASS_EDGE })
+            .backgroundColor(SURFACE)
+            .border({ width: 0.9, color: LINE })
             .shadow({ radius: 10, color: HOME_GLASS_SHADOW, offsetY: 2 })
             .justifyContent(FlexAlign.Center)
             .alignItems(VerticalAlign.Center)
@@ -197,12 +193,8 @@ export struct ChatTopBarOverlay {
               .width(40)
               .height(40)
               .borderRadius(999)
-              .backgroundColor(this.appBackgrounded ? BG_GLASS : SURFACE2)
-              .backgroundBlurStyle(
-                this.appBackgrounded ? BlurStyle.NONE : BlurStyle.Thin,
-                { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.6 },
-              )
-              .border({ width: 0.75, color: HOME_GLASS_EDGE })
+              .backgroundColor(SURFACE)
+              .border({ width: 0.9, color: LINE })
               .shadow({ radius: 10, color: HOME_GLASS_SHADOW, offsetY: 2 })
               .justifyContent(FlexAlign.Center)
               .alignItems(VerticalAlign.Center)
@@ -294,14 +286,10 @@ export struct ChatTopBarOverlay {
             .constraintSize({ minWidth: 88, maxWidth: 268 })
             .padding({ left: 12, right: 14 })
             .borderRadius(999)
-            .backgroundColor(this.appBackgrounded ? BG_GLASS : SURFACE)
-            .backgroundBlurStyle(
-              this.appBackgrounded ? BlurStyle.NONE : BlurStyle.Thin,
-              { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.6 },
-            )
+            .backgroundColor(SURFACE)
             .border({
-              width: 0.75,
-              color: this.sending ? accentEdge(this.accentColorStore) : HOME_GLASS_EDGE,
+              width: 0.9,
+              color: this.sending ? accentEdge(this.accentColorStore) : LINE,
             })
             .shadow({ radius: 10, color: HOME_GLASS_SHADOW, offsetY: 2 })
             .justifyContent(FlexAlign.Center)

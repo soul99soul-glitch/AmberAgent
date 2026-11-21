@@ -77,14 +77,10 @@ export struct AmberHostSwitcherPill {
     .borderRadius(999)
     .backgroundColor(this.isCloudActive()
       ? accentSoftBg(this.accentColorStore)
-      : (this.appBackgrounded ? BG_GLASS : SURFACE2))
-    .backgroundBlurStyle(
-      this.appBackgrounded ? BlurStyle.NONE : BlurStyle.Thin,
-      { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.6 },
-    )
+      : SURFACE)
     .border({
-      width: 0.75,
-      color: this.isCloudActive() ? accentEdge(this.accentColorStore) : (this.cloudDialogue.paired ? HOME_GLASS_EDGE : LINE),
+      width: 0.9,
+      color: this.isCloudActive() ? accentEdge(this.accentColorStore) : LINE,
     })
     .justifyContent(FlexAlign.Center)
     .alignItems(VerticalAlign.Center)

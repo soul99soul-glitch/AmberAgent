@@ -191,7 +191,7 @@ export struct AmberBottomModeBar {
             .height(30)
             .borderRadius(999)
             .backgroundColor(SURFACE)
-            .border({ width: 0.6, color: HOME_GLASS_EDGE })
+            .border({ width: 0.75, color: LINE })
             .shadow({ radius: 6, color: HOME_GLASS_SHADOW, offsetY: 1 })
             .translate({ x: this.indicatorX })
             .hitTestBehavior(HitTestMode.None)
@@ -207,12 +207,8 @@ export struct AmberBottomModeBar {
       .height(36)
       .padding({ left: 3, right: 3 })
       .borderRadius(999)
-      .backgroundColor(this.appBackgrounded ? BG_GLASS : SURFACE2)
-      .backgroundBlurStyle(
-        this.appBackgrounded ? BlurStyle.NONE : BlurStyle.Thin,
-        { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.6 },
-      )
-      .border({ width: 0.75, color: HOME_GLASS_EDGE })
+      .backgroundColor(SURFACE2)
+      .border({ width: 0.9, color: LINE })
       .gesture(
         PanGesture({ direction: PanDirection.Horizontal, distance: 10 })
           .onActionUpdate((event: GestureEvent): void => {

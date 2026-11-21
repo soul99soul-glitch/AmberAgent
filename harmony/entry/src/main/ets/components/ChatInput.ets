@@ -264,12 +264,8 @@ export struct ChatInput {
           .width(this.attachExpanded ? 44 + ATTACH_TRAY_W + 2 : 44).height(44)
           .animation({ duration: 220, curve: Curve.EaseOut })
           .borderRadius(999)
-          .backgroundColor(this.appBackgrounded ? BG_GLASS : SURFACE)
-          .backgroundBlurStyle(
-            this.appBackgrounded ? BlurStyle.NONE : BlurStyle.Thin,
-            { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.6 },
-          )
-          .border({ width: 0.75, color: HOME_GLASS_EDGE })
+          .backgroundColor(SURFACE)
+          .border({ width: 0.9, color: LINE })
           .shadow({ radius: 10, color: HOME_GLASS_SHADOW, offsetY: 2 })
           .alignItems(VerticalAlign.Center)
           .opacity(this.sending ? 0.4 : 1)
@@ -336,12 +332,8 @@ export struct ChatInput {
         .layoutWeight(1)
         .constraintSize({ minHeight: 54, maxHeight: this.attachExpanded ? 54 : 116 })
         .borderRadius(27)
-        .backgroundColor(this.appBackgrounded ? BG_GLASS : SURFACE)
-        .backgroundBlurStyle(
-          this.appBackgrounded ? BlurStyle.NONE : BlurStyle.Thin,
-          { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.6 },
-        )
-        .border({ width: 0.75, color: HOME_GLASS_EDGE })
+        .backgroundColor(SURFACE)
+        .border({ width: 1, color: LINE })
         .shadow({ radius: 12, color: HOME_GLASS_SHADOW, offsetY: 3 })
         // 托盘展开时收窄内边距,给占位文字留足宽度(避免「输…」)
         .padding({ left: this.attachExpanded ? 12 : 18, right: this.attachExpanded ? 12 : 18 })
@@ -369,12 +361,8 @@ export struct ChatInput {
           }
           .width(54).height(54)
           .borderRadius(999)
-          .backgroundColor(this.canSend() ? this.accentColorStore : (this.appBackgrounded ? BG_GLASS : SURFACE2))
-          .backgroundBlurStyle(
-            !this.canSend() && !this.appBackgrounded ? BlurStyle.Thin : BlurStyle.NONE,
-            { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.6 },
-          )
-          .border({ width: 0.75, color: this.canSend() ? this.accentColorStore : HOME_GLASS_EDGE })
+          .backgroundColor(this.canSend() ? this.accentColorStore : SURFACE)
+          .border({ width: 0.9, color: this.canSend() ? this.accentColorStore : LINE })
           .shadow(this.canSend()
             ? { radius: 12, color: this.accentShadow(), offsetY: 4 }
             : { radius: 10, color: HOME_GLASS_SHADOW, offsetY: 2 })
