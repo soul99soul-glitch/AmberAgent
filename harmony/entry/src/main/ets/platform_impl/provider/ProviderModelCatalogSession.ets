@@ -16,6 +16,7 @@ export interface ProviderCatalogDraft {
 export interface ProviderModelCatalogPorts {
   currentDraft: () => ProviderCatalogDraft;
   setModelsText: (text: string) => void;
+  saveModels?: () => void;
   httpClient: HttpClient;
   loadGoogleModelCatalog: (provider: ProviderSettingGoogle, signal: AbortSignalLike) => Promise<GoogleModelCatalog>;
 }
@@ -25,6 +26,7 @@ export class ProviderModelCatalogSession {
   fetchBusy: boolean = false;
   fetchMsg: string = '';
   fetchedIds: string[] = [];
+  private allFetchedIds: string[] = [];
   private googleCatalogController: EntryAbortController | null = null;
   private googleFetchedModels: GoogleCatalogModel[] = [];
   private ports: ProviderModelCatalogPorts | null = null;
@@ -64,9 +66,8 @@ export class ProviderModelCatalogSession {
       this.deps.loadGoogleModelCatalog(raw as ProviderSettingGoogle, controller.signal).then((catalog: GoogleModelCatalog): void => {
         if (controller.signal.aborted) return;
         this.googleFetchedModels = catalog.models;
-        const existing: string[] = this.modelsText.split(',').map((id: string): string => id.trim());
-        this.fetchedIds = catalog.models.map((model): string => model.modelId)
-          .filter((id: string): boolean => existing.indexOf(id) < 0);
+        this.allFetchedIds = catalog.models.map((model): string => model.modelId);
+        this.syncFetchedIds();
         this.fetchMsg = !catalog.supported ? catalog.message
           : (this.fetchedIds.length > 0 ? `发现 ${catalog.models.length} 个模型，${this.fetchedIds.length} 个可添加`
             : `发现 ${catalog.models.length} 个模型，全部已在列表中`);
@@ -102,12 +103,11 @@ export class ProviderModelCatalogSession {
         this.fetchMsg = '返回为空或无法解析';
         return;
       }
-      const existing: string[] = this.modelsText.split(',').map((s: string): string => s.trim());
-      const fresh: string[] = ids.filter((id: string): boolean => existing.indexOf(id) < 0);
-      this.fetchedIds = fresh;
-      this.fetchMsg = fresh.length > 0
-        ? `发现 ${ids.length} 个模型,${fresh.length} 个可添加`
-        : `发现 ${ids.length} 个模型,全部已在列表中`;
+      this.allFetchedIds = ids;
+      this.syncFetchedIds();
+      this.fetchMsg = this.fetchedIds.length > 0
+        ? `发现 ${ids.length} 个模型，${this.fetchedIds.length} 个可添加`
+        : `发现 ${ids.length} 个模型，全部已在列表中`;
     }).catch((e: Error): void => {
       this.fetchBusy = false;
       this.fetchMsg = `拉取失败:${e.message}`;
@@ -142,24 +142,63 @@ export class ProviderModelCatalogSession {
     }
   }
 
+  private currentIds(): string[] {
+    const out: string[] = [];
+    for (const part of this.modelsText.split(/[,\n]/)) {
+      const id: string = part.trim();
+      if (id.length > 0 && out.indexOf(id) < 0) out.push(id);
+    }
+    return out;
+  }
+
+  private syncFetchedIds(): void {
+    const existing: string[] = this.currentIds();
+    this.fetchedIds = this.allFetchedIds.filter((id: string): boolean => existing.indexOf(id) < 0);
+  }
+
+  private commitIds(ids: string[]): void {
+    this.modelsText = ids.join(', ');
+    this.syncFetchedIds();
+    this.deps.saveModels?.();
+  }
+
   addFetchedId(id: string): void {
-    const parts: string[] = this.modelsText.split(',')
-      .map((s: string): string => s.trim())
-      .filter((s: string): boolean => s.length > 0);
+    const parts: string[] = this.currentIds();
     if (parts.indexOf(id) >= 0) return;
     parts.push(id);
-    this.modelsText = parts.join(', ');
-    this.fetchedIds = this.fetchedIds.filter((s: string): boolean => s !== id);
+    this.commitIds(parts);
   }
 
   addAllFetched(): void {
-    const parts: string[] = this.modelsText.split(',')
-      .map((s: string): string => s.trim())
-      .filter((s: string): boolean => s.length > 0);
+    const parts: string[] = this.currentIds();
+    let changed: boolean = false;
     for (const id of this.fetchedIds) {
-      if (parts.indexOf(id) < 0) parts.push(id);
+      if (parts.indexOf(id) < 0) {
+        parts.push(id);
+        changed = true;
+      }
     }
-    this.modelsText = parts.join(', ');
-    this.fetchedIds = [];
+    if (!changed) return;
+    this.commitIds(parts);
+  }
+
+  addManualIds(rawInput: string): boolean {
+    const parts: string[] = this.currentIds();
+    let added: boolean = false;
+    for (const raw of rawInput.split(/[,\n]/)) {
+      const id: string = raw.trim();
+      if (id.length > 0 && parts.indexOf(id) < 0) {
+        parts.push(id);
+        added = true;
+      }
+    }
+    if (!added) return false;
+    this.commitIds(parts);
+    return true;
+  }
+
+  removeModelId(modelId: string): void {
+    const parts: string[] = this.currentIds().filter((id: string): boolean => id !== modelId);
+    this.commitIds(parts);
   }
 }

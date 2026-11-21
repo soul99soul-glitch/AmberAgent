@@ -720,7 +720,7 @@ export class ConversationTaskRunner {
     const execution = this.runService.getExecution();
     const storage = this.runService.getStorage();
     let workingConversation: Conversation | null = null;
-    let baseMessageCount: number = 0;
+    let segmentStartIndex: number = 0;
     let latestGeneratedMessages: UIMessage[] = [];
     let lastStreamWriteAt: number = 0;
     let context: DetachedConversationContext | null = null;
@@ -732,6 +732,59 @@ export class ConversationTaskRunner {
         task.conversationId,
         (latest: Conversation): Conversation => replaceNodeMessageById(latest, task.assistantNodeId, combined),
       );
+    };
+
+    // Grok Bot 式中途插话续跑：消费插话后把前段已输出的回复封口留在插话上方，
+    // 并在插话气泡正下方新建续跑助手节点接管后续流式输出与进度指示。
+    const consumeAndAdvanceSegment = async (): Promise<UIMessage[]> => {
+      if (context === null || workingConversation === null) return [];
+      const consumed: UIMessage[] = await this.consumeFollowupsForTask(task, context);
+      if (consumed.length === 0 || task.stopRequested || active.controller.signal.aborted) return [];
+      const currentMsgs: UIMessage[] = currentMessages(workingConversation);
+      const fromWorking: UIMessage[] = currentMsgs.slice(segmentStartIndex);
+      const priorMessages: UIMessage[] = fromWorking.length > 0 ? fromWorking : latestGeneratedMessages;
+      const priorHasContent: boolean = priorMessages.some(
+        (msg: UIMessage): boolean => msg.role === 'assistant' && msg.parts.length > 0);
+      const oldAssistantNodeId: string = task.assistantNodeId;
+      const oldAssistantMsgId: string = task.assistantMessageId;
+      const nextAssistantMsg: UIMessage = makeUIMessage('assistant', [], { finishedAt: null });
+      const nextAssistantNode: MessageNode = toMessageNode(nextAssistantMsg);
+      const consumedIds: Set<string> = new Set<string>(consumed.map((m: UIMessage): string => m.id));
+
+      await this.runService.mutateStoredConversation(task.conversationId, (latest: Conversation): Conversation => {
+        let nextConv: Conversation = latest;
+        if (priorHasContent) {
+          const sealed: UIMessage = combineTaskGeneratedAssistantMessage(
+            oldAssistantMsgId, priorMessages, '', true);
+          nextConv = replaceNodeMessageById(nextConv, oldAssistantNodeId, sealed);
+        } else {
+          nextConv = patchConversation(nextConv, {
+            messageNodes: nextConv.messageNodes.filter((n: MessageNode): boolean => n.id !== oldAssistantNodeId),
+            updateAt: nowIso(),
+          });
+        }
+        const nodes: MessageNode[] = nextConv.messageNodes.slice();
+        let anchorIdx: number = -1;
+        for (let i: number = 0; i < nodes.length; i++) {
+          if (nodes[i].messages.some((m: UIMessage): boolean => consumedIds.has(m.id))) {
+            anchorIdx = i;
+          }
+        }
+        if (anchorIdx >= 0) {
+          nodes.splice(anchorIdx + 1, 0, nextAssistantNode);
+        } else {
+          nodes.push(nextAssistantNode);
+        }
+        return patchConversation(nextConv, { messageNodes: nodes, updateAt: nowIso() });
+      });
+
+      task.assistantNodeId = nextAssistantNode.id;
+      task.assistantMessageId = nextAssistantMsg.id;
+      segmentStartIndex = currentMsgs.length + consumed.length;
+      latestGeneratedMessages = [];
+      await this.persistState();
+      this.emit();
+      return consumed;
     };
 
     try {
@@ -751,14 +804,14 @@ export class ConversationTaskRunner {
 
       const refreshed: Conversation = (await storage.repository.getById(task.conversationId)) ?? loaded;
       workingConversation = this.buildIsolatedWorkingConversation(refreshed, task, acceptedUserParts);
-      baseMessageCount = currentMessages(workingConversation).length;
+      segmentStartIndex = currentMessages(workingConversation).length;
       active.tracker.seedBaseline(currentMessages(workingConversation));
 
       const hooks: DetachedTaskHooks = {
         save: async (snapshot: Conversation): Promise<void> => {
           workingConversation = snapshot;
           if (context !== null) context.conversation = snapshot;
-          latestGeneratedMessages = currentMessages(snapshot).slice(baseMessageCount);
+          latestGeneratedMessages = currentMessages(snapshot).slice(segmentStartIndex);
           if (!task.stopRequested) {
             task.progressText = summarizeStreamingProgress(latestGeneratedMessages);
             task.updatedAt = Date.now();
@@ -777,8 +830,7 @@ export class ConversationTaskRunner {
             this.emit();
           }
         },
-        consumeSteer: (): Promise<UIMessage[]> =>
-          context === null ? Promise.resolve([]) : this.consumeFollowupsForTask(task, context),
+        consumeSteer: (): Promise<UIMessage[]> => consumeAndAdvanceSegment(),
       };
 
       context = new DetachedConversationContext(
@@ -797,7 +849,7 @@ export class ConversationTaskRunner {
       const deps: ChatTurnDeps = execution.buildTurnDeps(context);
       deps.onUpdate = (messages: UIMessage[]): void => {
         if (active.controller.signal.aborted || task.stopRequested) return;
-        latestGeneratedMessages = messages.slice(baseMessageCount);
+        latestGeneratedMessages = messages.slice(segmentStartIndex);
         task.progressText = summarizeStreamingProgress(latestGeneratedMessages);
         task.updatedAt = Date.now();
         this.emit();
@@ -808,7 +860,7 @@ export class ConversationTaskRunner {
         }
       };
       deps.onRawFlushSnapshot = (messages: UIMessage[]): void => {
-        latestGeneratedMessages = messages.slice(baseMessageCount);
+        latestGeneratedMessages = messages.slice(segmentStartIndex);
         const gained = active.tracker.observe(messages);
         if (gained.chars > 0 || gained.bytes > 0) this.reportTaskKeepAlive(active, task.title, true);
       };
@@ -829,8 +881,7 @@ export class ConversationTaskRunner {
 
           while (!active.controller.signal.aborted && !task.stopRequested &&
             !conversationHasPendingTools(currentWorking)) {
-            const followups: UIMessage[] = await this.consumeFollowupsForTask(
-              task, context as DetachedConversationContext);
+            const followups: UIMessage[] = await consumeAndAdvanceSegment();
             if (followups.length === 0) break;
             const nextNodes: MessageNode[] = currentWorking.messageNodes.slice();
             for (const fMsg of followups) nextNodes.push(toMessageNode(fMsg));
@@ -846,7 +897,7 @@ export class ConversationTaskRunner {
       );
 
       workingConversation = outcome.conversation;
-      latestGeneratedMessages = currentMessages(workingConversation).slice(baseMessageCount);
+      latestGeneratedMessages = currentMessages(workingConversation).slice(segmentStartIndex);
 
       if (active.controller.signal.aborted || task.stopRequested) {
         await this.finalizeStoppedTask(task, latestGeneratedMessages);

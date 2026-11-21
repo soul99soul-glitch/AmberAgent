@@ -527,21 +527,25 @@ test('local_agent_async: same conversation长 A → 问 B → 补充 A → 停�
   assert.equal(followup1.state, 'consumed');
   assert.equal(followup2.state, 'cancelled', 'Unconsumed follow-up must become cancelled when Task A is stopped');
 
-  // Verify anchored node positions in the conversation:
-  // [userNodeA, assistantNodeA, userNodeB, assistantNodeB, followupNode1, followupNode2]
+  // Verify Grok-Bot-style node positions in the conversation:
+  // [userNodeA, assistantNodeA_stage1, userNodeB, assistantNodeB, followupNode1, assistantNodeA_stage2, followupNode2]
   const finalConv = convMap.get('conv-local-1');
   const nodeIds = finalConv.messageNodes.map((n) => n.id);
   const idxUserA = nodeIds.indexOf(taskARec.userNodeId);
-  const idxAssistantA = nodeIds.indexOf(taskARec.assistantNodeId);
+  const idxAssistantAStage1 = idxUserA + 1;
   const idxUserB = nodeIds.indexOf(taskBRec.userNodeId);
   const idxAssistantB = nodeIds.indexOf(taskBRec.assistantNodeId);
-  assert.equal(idxAssistantA, idxUserA + 1, 'Task A result must stay anchored right after User A');
+  const idxFollowup1 = finalConv.messageNodes.findIndex(
+    (n) => n.messages.some((m) => m.id === followup1.messageId));
+  const idxAssistantAStage2 = nodeIds.indexOf(taskARec.assistantNodeId);
   assert.equal(idxAssistantB, idxUserB + 1, 'Task B result must stay anchored right after User B');
+  assert.equal(idxAssistantAStage2, idxFollowup1 + 1, 'Task A continuation after follow-up must anchor right below Follow-up 1');
 
-  const assistantAMsg = domain.nodeCurrentMessage(finalConv.messageNodes[idxAssistantA]);
+  const assistantAStage1Msg = domain.nodeCurrentMessage(finalConv.messageNodes[idxAssistantAStage1]);
+  const assistantAStage2Msg = domain.nodeCurrentMessage(finalConv.messageNodes[idxAssistantAStage2]);
   const assistantBMsg = domain.nodeCurrentMessage(finalConv.messageNodes[idxAssistantB]);
-  assert.ok(domain.toText(assistantAMsg).includes('长任务 A 第一阶段'));
-  assert.ok(domain.toText(assistantAMsg).includes('长任务 A 第二阶段'));
+  assert.ok(domain.toText(assistantAStage1Msg).includes('长任务 A 第一阶段'));
+  assert.ok(domain.toText(assistantAStage2Msg).includes('长任务 A 第二阶段'));
   assert.equal(domain.toText(assistantBMsg), '短问题 B 的回答：1+1=2');
 });
 

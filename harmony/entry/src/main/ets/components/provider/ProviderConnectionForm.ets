@@ -36,6 +36,22 @@ export struct ProviderConnectionForm {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @StorageProp('navBarHeight') navBarHeight: number = 0;
   @Link tab: number;
+  @State manualAddOpen: boolean = false;
+  @State manualModelInput: string = '';
+  @State fetchedSearch: string = '';
+
+  private filteredFetchedIds(): string[] {
+    const q: string = this.fetchedSearch.trim().toLowerCase();
+    if (q.length === 0) return this.catalog.fetchedIds;
+    return this.catalog.fetchedIds.filter((id: string): boolean => id.toLowerCase().includes(q));
+  }
+
+  private submitManualModels(): void {
+    if (this.catalog.addManualIds(this.manualModelInput)) {
+      this.manualModelInput = '';
+      this.manualAddOpen = false;
+    }
+  }
 
   @Builder
   field(options: ProviderFieldOptions) {
@@ -355,112 +371,220 @@ export struct ProviderConnectionForm {
             .alignItems(VerticalAlign.Center)
             .padding({ left: 16, right: 16 })
           } else {
-            SectionHeader({ label: '模型列表' })
+            // 顶部快捷操作栏：自动获取 + 手动添加（即点即存，告别逗号文本编辑与底部二次保存）
+            Row({ space: 10 }) {
+              Row({ space: 6 }) {
+                Icon({ name: 'retry', iconSize: 14, color: this.catalog.fetchBusy ? INK3 : this.accentColorStore })
+                Text(this.catalog.fetchBusy ? '正在获取…' : '自动获取模型')
+                  .fontSize(13.5).fontWeight(FontWeight.Medium)
+                  .fontColor(this.catalog.fetchBusy ? INK3 : this.accentColorStore)
+              }
+              .layoutWeight(1).height(42)
+              .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+              .backgroundColor(SURFACE).borderRadius(12)
+              .border({ width: 0.75, color: LINE })
+              .onClick((): void => { this.catalog.fetchModels(); })
+
+              Row({ space: 6 }) {
+                Icon({ name: 'plus', iconSize: 14, color: this.accentColorStore })
+                Text('手动添加')
+                  .fontSize(13.5).fontWeight(FontWeight.Medium)
+                  .fontColor(this.accentColorStore)
+              }
+              .layoutWeight(1).height(42)
+              .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+              .backgroundColor(SURFACE).borderRadius(12)
+              .border({ width: 0.75, color: LINE })
+              .onClick((): void => { this.manualAddOpen = !this.manualAddOpen; })
+            }
+            .width('100%')
+            .padding({ left: 16, right: 16, top: 14, bottom: 4 })
+
+            if (this.manualAddOpen) {
+              Row({ space: 8 }) {
+                TextInput({ text: this.manualModelInput, placeholder: '输入模型 ID（支持逗号分隔多个）' })
+                  .layoutWeight(1).height(38)
+                  .fontSize(13.5).fontFamily(FONT_MONO).fontColor(INK)
+                  .placeholderColor(INK4)
+                  .backgroundColor(SURFACE2).borderRadius(10)
+                  .padding({ left: 12, right: 12 })
+                  .onChange((v: string): void => { this.manualModelInput = v; })
+                  .onSubmit((): void => { this.submitManualModels(); })
+                Text('添加')
+                  .fontSize(13.5).fontWeight(FontWeight.Medium)
+                  .fontColor('#FFFFFF')
+                  .height(38).padding({ left: 14, right: 14 })
+                  .backgroundColor(this.manualModelInput.trim().length > 0 ? this.accentColorStore : INK4)
+                  .borderRadius(10)
+                  .textAlign(TextAlign.Center)
+                  .onClick((): void => { this.submitManualModels(); })
+              }
+              .width('100%')
+              .padding(12)
+              .margin({ left: 16, right: 16, top: 8 })
+              .backgroundColor(SURFACE).borderRadius(14)
+              .border({ width: 0.75, color: LINE })
+              .alignItems(VerticalAlign.Center)
+            }
+
+            if (this.catalog.fetchMsg.length > 0 || this.edit.savedMsg.length > 0) {
+              Text(this.edit.savedMsg.length > 0 ? this.edit.savedMsg : this.catalog.fetchMsg)
+                .fontSize(META).fontColor(INK3)
+                .width('100%')
+                .padding({ left: 18, right: 18, top: 6 })
+            }
+
+            SectionHeader({
+              label: `已启用模型 (${this.edit.provider !== null ? this.edit.provider.models.length : 0})`,
+            })
             Column() {
-              ForEach(this.edit.provider !== null ? this.edit.provider.models : [],
-                (m: ProviderModel, mIdx: number): void => {
-                  Column() {
-                    Row() {
-                      Column() {
-                        Text(m.displayName.length > 0 ? m.displayName : m.modelId)
-                          .fontSize(BODY).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
-                          .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
-                          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                        Text(m.modelId)
-                          .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
-                          .fontFamily(FONT_MONO).fontColor(INK3)
-                          .margin({ top: 3 })
-                          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              if (this.edit.provider !== null && this.edit.provider.models.length > 0) {
+                ForEach(this.edit.provider.models,
+                  (m: ProviderModel, mIdx: number): void => {
+                    Column() {
+                      Row({ space: 8 }) {
+                        Column() {
+                          Text(m.displayName.length > 0 ? m.displayName : m.modelId)
+                            .fontSize(15).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+                            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+                            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                          if (m.displayName.length > 0 && m.displayName !== m.modelId) {
+                            Text(m.modelId)
+                              .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+                              .fontFamily(FONT_MONO).fontColor(INK3)
+                              .margin({ top: 2 })
+                              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                          }
+                        }
+                        .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                        .onClick((): void => { this.onOpenModelParameters(m.id); })
+
+                        if (m.type === 'image') {
+                          Chip({ text: '生图' })
+                        }
+                        Text('参数')
+                          .fontSize(META).fontWeight(FontWeight.Medium)
+                          .fontFamily(FONT_MONO_MEDIUM).fontColor(this.accentColorStore)
+                          .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+                          .onClick((): void => { this.onOpenModelParameters(m.id); })
+                        Row() {
+                          Icon({ name: 'close', iconSize: 12, color: INK3 })
+                        }
+                        .width(30).height(30).borderRadius(15)
+                        .backgroundColor(SURFACE2)
+                        .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+                        .accessibilityText(`移除模型 ${m.modelId}`)
+                        .onClick((): void => { this.catalog.removeModelId(m.modelId); })
                       }
-                      .alignItems(HorizontalAlign.Start).layoutWeight(1)
-                      if (m.type === 'image') {
-                        Chip({ text: '生图' }).margin({ right: 8 })
+                      .width('100%').alignItems(VerticalAlign.Center)
+                      .constraintSize({ minHeight: 52 })
+                      .padding({ left: 16, right: 12, top: 10, bottom: 10 })
+
+                      if (mIdx < (this.edit.provider !== null ? this.edit.provider.models.length : 0) - 1) {
+                        PaperSeparator()
                       }
-                      Text('参数')
-                        .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
-                        .fontFamily(FONT_MONO_MEDIUM).fontColor(this.accentColorStore)
                     }
-                    .width('100%').alignItems(VerticalAlign.Center)
-                    .constraintSize({ minHeight: 64 })
-                    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-                    .onClick((): void => {
-                      this.onOpenModelParameters(m.id);
-                    })
-                    if (mIdx < (this.edit.provider !== null ? this.edit.provider.models.length : 0) - 1) {
+                    .width('100%')
+                  }, (m: ProviderModel): string => m.id)
+              } else {
+                Text('还没有模型，点上方「自动获取模型」或「手动添加」')
+                  .fontSize(META).fontColor(INK4)
+                  .width('100%').textAlign(TextAlign.Center)
+                  .padding({ left: 16, right: 16, top: 20, bottom: 20 })
+              }
+            }
+            .width('calc(100% - 32vp)')
+            .margin({ left: 16, right: 16 })
+            .backgroundColor(SURFACE)
+            .borderRadius(16)
+            .border({ width: 0.75, color: LINE })
+            .clip(true)
+
+            if (this.catalog.fetchedIds.length > 0) {
+              Row() {
+                Text(`可添加 (${this.filteredFetchedIds().length})`)
+                  .fontSize(META).fontWeight(FontWeight.Medium).fontColor(INK3).layoutWeight(1)
+                Text('全部添加')
+                  .fontSize(META).fontWeight(FontWeight.Medium).fontColor(this.accentColorStore)
+                  .padding({ left: 12, top: 6, bottom: 6 })
+                  .onClick((): void => { this.catalog.addAllFetched(); })
+              }
+              .width('100%')
+              .padding({ left: 18, right: 18, top: 18, bottom: 6 })
+
+              if (this.catalog.fetchedIds.length >= 6) {
+                Row({ space: 6 }) {
+                  Icon({ name: 'search', iconSize: 14, color: INK4 })
+                  TextInput({ text: this.fetchedSearch, placeholder: '搜索可添加模型…' })
+                    .layoutWeight(1).height(34)
+                    .fontSize(13).fontFamily(FONT_MONO).fontColor(INK)
+                    .placeholderColor(INK4)
+                    .backgroundColor(Color.Transparent)
+                    .padding({ left: 2, right: 2 })
+                    .onChange((v: string): void => { this.fetchedSearch = v; })
+                  if (this.fetchedSearch.length > 0) {
+                    Row() {
+                      Icon({ name: 'close', iconSize: 11, color: INK3 })
+                    }
+                    .width(24).height(24).borderRadius(12)
+                    .backgroundColor(SURFACE2)
+                    .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+                    .onClick((): void => { this.fetchedSearch = ''; })
+                  }
+                }
+                .width('calc(100% - 32vp)')
+                .height(38)
+                .padding({ left: 12, right: 10 })
+                .margin({ left: 16, right: 16, bottom: 8 })
+                .backgroundColor(SURFACE)
+                .borderRadius(12)
+                .border({ width: 0.75, color: LINE })
+                .alignItems(VerticalAlign.Center)
+              }
+
+              Column() {
+                ForEach(this.filteredFetchedIds(), (id: string, fIdx: number): void => {
+                  Column() {
+                    Row({ space: 10 }) {
+                      Text(id)
+                        .fontSize(14).fontFamily(FONT_MONO).fontColor(INK)
+                        .layoutWeight(1)
+                        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      Row({ space: 3 }) {
+                        Icon({ name: 'plus', iconSize: 11, color: this.accentColorStore })
+                        Text('添加')
+                          .fontSize(12.5).fontWeight(FontWeight.Medium).fontColor(this.accentColorStore)
+                      }
+                      .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                      .backgroundColor(SURFACE2)
+                      .borderRadius(999)
+                      .border({ width: 0.75, color: LINE })
+                    }
+                    .width('100%').constraintSize({ minHeight: 48 })
+                    .padding({ left: 16, right: 14, top: 10, bottom: 10 })
+                    .alignItems(VerticalAlign.Center)
+                    .onClick((): void => { this.catalog.addFetchedId(id); })
+
+                    if (fIdx < this.filteredFetchedIds().length - 1) {
                       PaperSeparator()
                     }
                   }
                   .width('100%')
-                }, (m: ProviderModel): string => m.id)
-              if (this.edit.provider !== null && this.edit.provider.models.length === 0) {
-                Text('暂无模型 — 在下方以逗号分隔添加 modelId')
-                  .fontSize(LABEL).lineHeight(TEXT_STYLES.eyebrow.lineHeight)
-                  .fontFamily(TEXT_STYLES.eyebrow.family).fontColor(INK4)
-                  .width('100%').textAlign(TextAlign.Center)
-                  .padding({ top: 16, bottom: 16 })
-              }
-            }
-            .width('100%')
-
-            Column() {
-              Text('添加模型(逗号分隔 modelId,保存后生效)')
-                .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
-                .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
-                .margin({ left: 16, bottom: 8 })
-              Column() {
-                TextArea({ text: this.edit.modelsText, placeholder: 'gpt-4o, gpt-4o-mini' })
-                  .fontSize(BODY2).lineHeight(TEXT_STYLES.secondary.lineHeight)
-                  .fontFamily(FONT_MONO).fontColor(INK)
-                  .backgroundColor(SURFACE2).borderRadius(8)
-                  .border({ width: 1, color: LINE })
-                  .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-                  .height(80)
-                  .onChange((v: string): void => { this.edit.modelsText = v; })
-              }.width('100%').padding({ left: 16, right: 16 })
-              Row() {
-                Text(this.catalog.fetchMsg)
-                  .fontSize(META).fontColor(INK3).layoutWeight(1)
-                  .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-                Text(this.catalog.fetchBusy ? '拉取中…' : '拉取可用模型')
-                  .fontSize(META).fontColor(this.catalog.fetchBusy ? INK3 : this.accentColorStore)
-                  .padding({ left: 12, top: 6, bottom: 6 })
-                  .onClick((): void => { this.catalog.fetchModels(); })
-              }
-              .width('100%').padding({ left: 16, right: 16 }).margin({ top: 10 })
-              if (this.catalog.fetchedIds.length > 0) {
-                Column() {
-                  Row() {
-                    Text('可添加')
-                      .fontSize(META).fontColor(INK3).layoutWeight(1)
-                    Text('全部添加')
-                      .fontSize(META).fontColor(this.accentColorStore)
-                      .padding({ left: 12, top: 6, bottom: 6 })
-                      .onClick((): void => { this.catalog.addAllFetched(); })
-                  }
-                  .width('100%')
-                  Flex({ wrap: FlexWrap.Wrap }) {
-                    ForEach(this.catalog.fetchedIds, (id: string): void => {
-                      Text(id)
-                        .fontSize(META).fontFamily(FONT_MONO).fontColor(INK)
-                        .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-                        .backgroundColor(RAISED)
-                        .border({ width: 1, color: LINE, radius: 8 })
-                        .margin({ right: 8, top: 8 })
-                        .onClick((): void => { this.catalog.addFetchedId(id); })
-                    }, (id: string): string => id)
-                  }
-                  .width('100%')
+                }, (id: string): string => id)
+                if (this.filteredFetchedIds().length === 0) {
+                  Text('没有匹配的模型')
+                    .fontSize(META).fontColor(INK4)
+                    .width('100%').textAlign(TextAlign.Center)
+                    .padding({ top: 16, bottom: 16 })
                 }
-                .width('100%').alignItems(HorizontalAlign.Start)
-                .padding({ left: 16, right: 16, top: 4, bottom: 4 })
               }
-              Row() {
-                Blank()
-                BtnFill({ label: '保存模型', onTap: (): void => { this.edit.save(); } })
-              }
-              .width('100%').padding({ left: 16, right: 16 }).margin({ top: 10 })
+              .width('calc(100% - 32vp)')
+              .margin({ left: 16, right: 16 })
+              .backgroundColor(SURFACE)
+              .borderRadius(16)
+              .border({ width: 0.75, color: LINE })
+              .clip(true)
             }
-            .width('100%').alignItems(HorizontalAlign.Start).margin({ top: 12 })
           }
         }
         .width('100%')

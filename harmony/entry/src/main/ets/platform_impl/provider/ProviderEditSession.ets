@@ -42,6 +42,7 @@ export class ProviderEditSession {
   unsupportedAuthMsg: string = '';
   authMode: string = 'api_key';
   ioBusy: boolean = false;
+  private pendingAutoSave: boolean = false;
   private isNew: boolean = false;
   private ports: ProviderEditPorts | null = null;
   private get deps(): ProviderEditPorts { return this.ports as ProviderEditPorts; }
@@ -252,6 +253,19 @@ export class ProviderEditSession {
     }).finally((): void => {
       this.ioBusy = false;
     });
+  }
+
+  requestAutoSave(): void {
+    if (this.ioBusy) {
+      this.pendingAutoSave = true;
+      return;
+    }
+    this.save().then((): void => {
+      if (this.pendingAutoSave) {
+        this.pendingAutoSave = false;
+        this.requestAutoSave();
+      }
+    }).catch((): void => {});
   }
 
   readingModelIds(): string[] {

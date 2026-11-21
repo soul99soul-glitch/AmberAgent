@@ -71,6 +71,7 @@ struct ChatProviderDetailPage {
       currentDraft: (): ProviderCatalogDraft => ({ provider: this.edit.provider, authMode: this.edit.authMode, apiKey: this.edit.apiKey,
         baseUrl: this.edit.baseUrl, modelsText: this.edit.modelsText, vertexAI: this.edit.vertexAI }),
       setModelsText: (value: string): void => { this.edit.modelsText = value; },
+      saveModels: (): void => { this.edit.requestAutoSave(); },
       httpClient: getAppContainer().httpClient, loadGoogleModelCatalog,
     });
     const params: Record<string, string> | undefined = router.getParams() as Record<string, string> | undefined;
