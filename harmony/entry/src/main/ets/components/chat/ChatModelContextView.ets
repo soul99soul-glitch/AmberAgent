@@ -40,12 +40,16 @@ export struct ChatModelMenuOverlay {
       .width(0)
       .height(0)
       .hitTestBehavior(HitTestMode.None)
-      .bindSheet(this.session.modelMenuOpen, this.ModelPickerSheet(), {
+      .bindSheet($$this.session.modelMenuOpen, this.ModelPickerSheet(), {
         detents: [SheetSize.MEDIUM, SheetSize.LARGE],
         showClose: false,
         dragBar: true,
         backgroundColor: BG,
-        onDisappear: (): void => { this.session.closeModelMenu(); },
+        onDisappear: (): void => {
+          if (this.session.modelMenuOpen || this.session.modelMenuLoading) {
+            this.session.closeModelMenu();
+          }
+        },
       })
   }
 }

@@ -353,9 +353,7 @@ export class ChatModelContextSession {
   closeModelMenu(): void {
     this.modelMenuSeq++;
     this.modelMenuLoading = false;
-    animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
-      this.modelMenuOpen = false;
-    });
+    this.modelMenuOpen = false;
   }
 
   refreshEffectiveModelState(): void {
@@ -403,9 +401,7 @@ export class ChatModelContextSession {
         this.modelMenuCurrentProvider = currentProvider;
         this.modelMenuCurrentModel = currentModel;
         this.modelMenuLoading = false;
-        animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
-          this.modelMenuOpen = true;
-        });
+        this.modelMenuOpen = true;
       }).catch((e: Error): void => {
         if (!this.alive || seq !== this.modelMenuSeq) return;
         this.modelMenuLoading = false;
