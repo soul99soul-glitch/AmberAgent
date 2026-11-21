@@ -619,6 +619,10 @@ export const toolInvocationPolicy = (tool: AgentTool, input: JsonValue | null): 
     needsApproval = !safe;
     autoApprovable = safe || (tool.allowsAutoApproval && risk !== 'high');
     concurrencySafe = safe;
+  } else if (name === 'subagent_start' && !tool.needsApproval && !mandatoryApprovalEffective) {
+    // Local async dispatch grants only the manager's read-only profile. Keep it out of speculative execution.
+    const delivery: string | null = inputStringValue(input, 'delivery');
+    if (delivery === null || delivery === 'async') needsApproval = false;
   } else if (name === 'model_council_start') {
     if (containsExternalCliCouncilSeat(input) || allowsExternalCliCouncil(input)) {
       mutates = true;

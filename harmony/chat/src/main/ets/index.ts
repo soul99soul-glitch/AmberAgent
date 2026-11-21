@@ -71,7 +71,7 @@ export {
 export type {
   ChatStreamProvider, ConversationStore, MemoryConversationStore, ChatTurnDeps, StreamOpts,
 } from './chat/chat_turn.ts';
-export { createMemoryConversationStore, runChatTurn, runAppendUserMessage } from './chat/chat_turn.ts';
+export { createMemoryConversationStore, runChatTurn, runAppendUserMessage, runAssistantReply } from './chat/chat_turn.ts';
 export type {
   InteractiveTurnSnapshot, InteractiveTurnHooks, InteractiveTurnRunResult,
   InteractiveTurnOperation,

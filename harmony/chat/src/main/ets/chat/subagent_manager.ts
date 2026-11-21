@@ -18,7 +18,7 @@ import type {
   SessionAccessGrant, SessionAccessGrantStore,
 } from './session_grant_store.ts';
 import type {
-  SubAgentResult, SubAgentRun, SubAgentRunStatus, SubAgentTaskSpec,
+  SubAgentResult, SubAgentRun, SubAgentRunStatus, SubAgentDeliveryMode, SubAgentTaskSpec,
 } from './subagent_models.ts';
 import {
   makeSubAgentResult, makeSubAgentRun, subAgentRunStatusRunning,
@@ -228,6 +228,8 @@ const copyRunWithResult = (
 ): SubAgentRun => ({
   runId: run.runId,
   parentConversationId: run.parentConversationId,
+  deliveryMode: run.deliveryMode,
+  dispatchBatchId: run.dispatchBatchId,
   definition: run.definition,
   task: run.task,
   status: result.status,
@@ -238,7 +240,11 @@ const copyRunWithResult = (
   updatedAtMs,
 });
 
+type RunTerminalListener = (run: SubAgentRun, result: SubAgentResult) => void;
+
 export class SubAgentManager {
+  private readonly terminalListeners: Set<RunTerminalListener> = new Set<RunTerminalListener>();
+  private readonly runListeners: Set<() => void> = new Set<() => void>();
   private readonly deps: SubAgentManagerDeps;
   private readonly runs: Map<string, RuntimeRun> = new Map<string, RuntimeRun>();
   private readonly admissionMutex: AsyncMutex = new AsyncMutex();
@@ -256,14 +262,19 @@ export class SubAgentManager {
   async start(
     parentConversationId: string, input: JsonObject, parentTools: AgentTool[],
     runner: SubAgentRunner = this.deps.runner,
+    dispatchBatchId?: string,
   ): Promise<JsonObject> {
     const setting: SubAgentRuntimeSetting = this.deps.getSubAgentSetting();
     if (!setting.enabled) {
       return errorPayload('subagent_disabled', 'Subagent experimental mode is disabled.');
     }
 
+    const deliveryMode: SubAgentDeliveryMode = dispatchBatchId === undefined ? 'sync' : 'async';
+    const availableTools: AgentTool[] = deliveryMode === 'async'
+      ? parentTools.filter((tool: AgentTool): boolean => DEFAULT_DYNAMIC_READ_ONLY_TOOLS.has(tool.name))
+      : parentTools;
     const parentToolNames: Set<string> = new Set<string>();
-    parentTools.forEach((tool: AgentTool): void => { parentToolNames.add(tool.name); });
+    availableTools.forEach((tool: AgentTool): void => { parentToolNames.add(tool.name); });
     let task: SubAgentTaskSpec;
     try {
       task = subAgentParseTask(input);
@@ -303,7 +314,7 @@ export class SubAgentManager {
     // 只撤销本次 start() 新铸造的 grant;session_grant_id 带入的外部 grant
     // 所有权不在本运行,失败时不得误删
     let ownsHistoryGrant: boolean = false;
-    if (isHistoryReader(effectiveDefinition) && task.sourceSessionIds.length > 0) {
+    if (deliveryMode === 'sync' && isHistoryReader(effectiveDefinition) && task.sourceSessionIds.length > 0) {
       historyGrant = this.deps.sessionAccessGrantStore.create(
         task.sourceSessionIds,
         effectiveDefinition.outputBudgetChars * 4,
@@ -320,7 +331,7 @@ export class SubAgentManager {
       : task;
 
     const allowedTools: AgentTool[] = [];
-    parentTools.forEach((tool: AgentTool): void => {
+    availableTools.forEach((tool: AgentTool): void => {
       if (tool.name.startsWith('subagent_')) return;
       // SSH 配置写工具只留给主会话,即使白名单里写着也不下发给子代理。
       if (isSSHProfileMainSessionOnly(tool.name)) return;
@@ -338,6 +349,8 @@ export class SubAgentManager {
     const run: SubAgentRun = makeSubAgentRun({
       runId,
       parentConversationId,
+      deliveryMode,
+      dispatchBatchId,
       definition: effectiveDefinition,
       task: effectiveTask,
       status: 'running',
@@ -401,6 +414,7 @@ export class SubAgentManager {
       return errorPayload(admissionError.code, admissionError.message);
     }
 
+    this.emitRunsChanged();
     try {
       const outputExists: boolean = await this.deps.transcript.exists(transcriptPath);
       await this.deps.agentTaskStore.register(
@@ -448,6 +462,22 @@ export class SubAgentManager {
       } catch { /* 收口尽力而为 */ }
     });
     return this.runToPayload(run);
+  }
+
+  onRunTerminal(listener: RunTerminalListener): () => void {
+    this.terminalListeners.add(listener);
+    return (): void => { this.terminalListeners.delete(listener); };
+  }
+
+  onRunsChanged(listener: () => void): () => void {
+    this.runListeners.add(listener);
+    return (): void => { this.runListeners.delete(listener); };
+  }
+
+  private emitRunsChanged(): void {
+    for (const listener of this.runListeners) {
+      try { listener(); } catch { /* Observers do not own run state. */ }
+    }
   }
 
   async read(runId: string): Promise<JsonObject> {
@@ -621,6 +651,9 @@ export class SubAgentManager {
         result = makeSubAgentResult({ status: 'failed', error: errorMessage(error) });
       }
     }
+    if (run.deliveryMode === 'async' && result.status === 'approval_required') {
+      result = makeSubAgentResult({ status: 'failed', error: 'The background task required approval.' });
+    }
     await this.finish(run.runId, result, this.liveTexts.get(run.runId) ?? '');
   }
 
@@ -667,6 +700,12 @@ export class SubAgentManager {
     );
     if (next === null) return;
 
+    this.emitRunsChanged();
+    if (!isLiveRunStatus(next.status)) {
+      for (const listener of this.terminalListeners) {
+        try { listener(next, result); } catch { /* Observers do not own run state. */ }
+      }
+    }
     const status: AgentTaskStatus = statusToAgentTaskStatus(next.status);
     const summary: string = result.summary.trim().length > 0
       ? result.summary

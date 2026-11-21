@@ -55,6 +55,8 @@ const dynamicSubagentHelp = (mode: SubAgentMode): string => {
 export interface SubAgentToolsDeps {
   manager: SubAgentManager;
   runner?: SubAgentRunner;
+  dispatchBatchId?: string;
+  onAsyncDispatch?: (runId: string) => void;
   parentConversationId: string;
   // 只返回已经 profile 过的 parent base tools;public subagent_* 工具不进入 child scope
   // (manager.start 自身过滤 subagent_* 与 allowlist,本 provider 只透传 base tools)
@@ -138,7 +140,7 @@ const buildRosterPrompt = (deps: SubAgentToolsDeps): string => {
   } else {
     out += 'You can delegate bounded subtasks to specialist subagents. Each subagent runs depth-1, with its own tool allowlist (and possibly its own model). Use them when a task is complex, clearly bounded, and benefits from isolation, a different model, or parallel viewpoints. Simple linear tasks must stay in the main agent.\n';
     out += '\n';
-    out += 'To delegate: call subagent_start(subagent_id, task={objective, output_format, tools_and_sources, boundaries, context}). Run multiple in parallel by issuing back-to-back subagent_start calls before any subagent_wait. The user can watch the subagent\'s live Markdown panel; subagent_wait/read returns a compact structured result for you to synthesize.\n';
+    if (deps.dispatchBatchId === undefined) out += 'To delegate: call subagent_start(subagent_id, task={objective, output_format, tools_and_sources, boundaries, context}). Run multiple in parallel by issuing back-to-back subagent_start calls before any subagent_wait. The user can watch the subagent\'s live Markdown panel; subagent_wait/read returns a compact structured result for you to synthesize.\n';
     out += 'To dynamically create a temporary role: call subagent_start(custom_subagent={name, description, system_prompt, tool_profile}, task={...}) and omit subagent_id entirely. custom_subagent.name may be Chinese or English; if omitted, the app assigns a stable display name. Broad names are rejected outside smart dynamic mode. Do not use placeholder ids like "custom" or "dynamic". For pure creative/internal tasks, set tool_profile="none".\n';
     out += 'display_title is only the tool chip title; do not use it as the subagent name. Put a wanted role display name in custom_subagent.name.\n';
   }
@@ -179,7 +181,14 @@ const buildSystemPrompt = (deps: SubAgentToolsDeps, messages: UIMessage[]): stri
     }
   }
   const mentioned: string[] = subAgentExtractMentions(lastUserText, rosterIds);
-  return roster + buildSubAgentMentionOverrideDirective(mentioned);
+  const routing: string = deps.dispatchBatchId === undefined ? '' :
+    '\nFor small talk and simple questions, answer directly. For research, web search, and multi-step requests, '
+    + 'delegate bounded subtasks with subagent_start(delivery="async"); issue independent starts together. '
+    + 'For web research use a role with the web_read profile (search_web and scrape_web when configured). '
+    + 'Once dispatch is accepted, briefly tell the user what you sent to work in your usual voice and end this turn. '
+    + 'Never call subagent_wait or poll subagent_read for these tasks. The app will bring you back to summarize them. '
+    + 'If a start fails, do not claim it was dispatched. Explicit delivery="sync" is for work that must finish in this turn.\n';
+  return roster + buildSubAgentMentionOverrideDirective(mentioned) + routing;
 };
 
 export class SubAgentTools {
@@ -233,8 +242,15 @@ export class SubAgentTools {
     const deps: SubAgentToolsDeps = this.deps;
     return makeAgentTool({
       name: 'subagent_start',
+      needsApproval: deps.dispatchBatchId === undefined,
       description: 'Start a built-in or dynamic subagent as an isolated task. Pass exactly one of subagent_id or custom_subagent. In smart dynamic mode, use custom_subagent. Minimal dynamic roles can provide only task.objective; the app will fill safe defaults, but best results come from adding description, boundaries, and report/output instructions.',
       parameters: (): ReturnType<typeof makeInputSchemaObj> => makeInputSchemaObj({
+        delivery: {
+          type: 'string',
+          enum: ['async', 'sync'],
+          description: deps.dispatchBatchId === undefined ? 'Use sync in this context.'
+            : 'Defaults to async. Async acknowledges dispatch immediately and reports results in a later assistant reply.',
+        },
         subagent_id: stringProp('Roster subagent id. Omit this when using custom_subagent; passing both is invalid. In smart dynamic mode ordinary built-ins are disabled; use custom_subagent instead. Do not pass placeholder ids like "custom" or "dynamic". For OfficePro / terminal scenarios, call the underlying tools directly instead of dispatching a subagent.'),
         custom_subagent: {
           type: 'object',
@@ -286,13 +302,26 @@ export class SubAgentTools {
         },
       }, ['task']),
       execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+        const delivery: string | null = contentOrNull(input, 'delivery');
+        if (delivery !== null && delivery !== 'sync' && delivery !== 'async') {
+          return textPart({ status: 'failed', code: 'invalid_delivery', error: 'Use async or sync delivery.' });
+        }
+        const batchId: string | undefined = delivery === 'sync' ? undefined : deps.dispatchBatchId;
+        if (delivery === 'async' && batchId === undefined) {
+          return textPart({ status: 'failed', code: 'async_unavailable', error: 'Async delivery is unavailable in this context.' });
+        }
         const payload: JsonObject = await deps.manager.start(
           deps.parentConversationId,
           input as JsonObject,
           deps.parentToolsProvider(),
           deps.runner,
+          batchId,
         );
-        return textPart(payload);
+        const runId: JsonValue | undefined = payload['run_id'];
+        if (batchId === undefined || typeof runId !== 'string') return textPart(payload);
+        deps.onAsyncDispatch?.(runId);
+        return textPart({ status: 'dispatched', run_id: runId, batch_id: batchId,
+          subagent_name: payload['subagent_name'] });
       },
     });
   }
@@ -316,7 +345,7 @@ export class SubAgentTools {
     const deps: SubAgentToolsDeps = this.deps;
     return makeAgentTool({
       name: 'subagent_wait',
-      description: 'Wait for a subagent run to complete, up to wait_timeout_ms. Use the maximum timeout (60000) on the FIRST call; if it returns running, immediately call wait again with the same arguments — do NOT spend any reasoning between waits, and do NOT narrate "still running, let me wait again". The wait blocks efficiently in the background; thinking between waits just burns tokens and clutters the timeline.',
+      description: 'Wait for a sync subagent run only, up to wait_timeout_ms. Use the maximum timeout (60000) on the FIRST call; if it returns running, immediately call wait again with the same arguments — do NOT spend any reasoning between waits, and do NOT narrate "still running, let me wait again". The wait blocks efficiently in the background; thinking between waits just burns tokens and clutters the timeline.',
       parameters: (): ReturnType<typeof makeInputSchemaObj> => makeInputSchemaObj({
         run_id: stringProp('Subagent run id'),
         wait_timeout_ms: {
@@ -325,8 +354,13 @@ export class SubAgentTools {
         },
       }, ['run_id']),
       execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
+        const runId: string = runIdOf(input);
+        if (deps.manager.snapshot(runId)?.deliveryMode === 'async') {
+          return textPart({ status: 'dispatched', run_id: runId,
+            message: 'End your reply now. The app will deliver this result automatically.' });
+        }
         const waitMs: number = intOrNull(input, 'wait_timeout_ms') ?? 10000;
-        const payload: JsonObject = await deps.manager.wait(runIdOf(input), waitMs, signal);
+        const payload: JsonObject = await deps.manager.wait(runId, waitMs, signal);
         return textPart(payload);
       },
     });

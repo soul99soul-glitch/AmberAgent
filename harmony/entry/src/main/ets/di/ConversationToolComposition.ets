@@ -1,5 +1,5 @@
 // Builds platform capabilities for a captured run; live catalog refresh remains in ConversationRunTools.
-import type { SubAgentToolsContext, ChatRuntime } from './ChatRuntimeContracts.ets';
+import type { ChatRuntime } from './ChatRuntimeContracts.ets';
 import type { McpSettingsPort, AgentTool, AgentToolActivityStore, Assistant, ChatStreamProvider, Conversation, LocalToolOption, McpToolActivityPort, PendingUserMessage, TerminalApprovalGuard, TextGenerationParams, UIMessage, UIMessagePart, UIMessagePartImage, JsonObject, JevWebCandidate, MessageChunk, WebMountGoalCandidate, WebMountGoalDecision, WebMountGoalHostPorts, WebMountGoalRequest, WebMountObservation, AutoApprovalReview, ConversationRepository, KeyValueStore, CompactStore, SkillWorkspacePort, SessionAccessGrantStore, McpManager, SkillManager, PosixWorkspaceManager, RecipeStore, PluginStore, ModelSlotPort, WeatherPort, ToolSearchReranker, ChatEpisodeLedger } from '@amber/chat-domain';
 import { asChatStreamProvider, createClipboardTool, createConversationContextTools, createConversationHistoryTools, createConversationQueueTools, createEpisodeRecallTool, createHealthSummaryTool, createPersonalContextTools, createWeatherReadTool, createDeviceScheduleTools, createMcpManagementTools, createMcpServerTools, createMemoryTools, createRunPlanUpdateTool, createSearchTools, createSkillTools, createTerminalApprovalGuard, createProviderManagementTools, PROVIDERS_KEY, createModelSlotTool, createMcpDescribeTool, currentMessages, filterToolProfile, makeCompactPolicy, makeTextGenerationParams, patchAssistant, createWebMountGoalAdapter, createWebMountGoalTool, makeSystemMessage, makeUserMessage, toText } from '@amber/chat-domain';
 import { loadEpisodeLedger } from '../platform_impl/chat/ChatEpisodeStore.ets';
@@ -42,7 +42,7 @@ export interface ConversationToolCompositionPorts {
     getSessionGrantStore: () => SessionAccessGrantStore;
     getSkillManager: () => SkillManager;
     getSkillWorkspacePort: () => SkillWorkspacePort;
-    getSubAgentTools: (ctx: SubAgentToolsContext) => Promise<AgentTool[]>;
+    loadSubAgentTools: (ctx: DetachedConversationContext) => Promise<AgentTool[]>;
     getWorkspaceManager: () => PosixWorkspaceManager;
     mutateAssistant: (assistantId: string, mutator: (current: Assistant) => Assistant) => Promise<Assistant | null>;
     getChatCouncilTools: () => Promise<AgentTool[]>;
@@ -341,7 +341,6 @@ export const createConversationToolComposition = (ports: ConversationToolComposi
         ], rt.assistant.toolProfile).tools, ctx.conversationId);
         return { profiledTools, terminalGuard, goalAdapter: webmountEnabled ? goalAdapter : undefined };
     };
-    const loadSubAgentTools = (ctx: DetachedConversationContext): Promise<AgentTool[]> => ports.getSubAgentTools({ parentConversationId: ctx.conversationId, parentToolsProvider: (): AgentTool[] => ctx.baseTools, parentRuntime: ctx.seed.runtime, parentAgentRuntime: ctx.seed.agentRuntime });
     const createCurrentSkillTools = async (ctx: DetachedConversationContext): Promise<AgentTool[]> => {
         const rt: ChatRuntime = ctx.seed.runtime;
         const latestAssistant: Assistant | undefined = (await ports.getChatAssistants()).find((assistant: Assistant): boolean => assistant.id === rt.assistant.id);
@@ -349,5 +348,5 @@ export const createConversationToolComposition = (ports: ConversationToolComposi
     };
     const createCatalog = async (ctx: DetachedConversationContext, primitives: AgentTool[]): Promise<RunToolCatalogSnapshot> => createRunToolCatalog({ primitives, profile: ctx.seed.runtime.assistant.toolProfile, conversationId: ctx.conversationId, recipeStore: await ports.getRecipeStore(), pluginStore: await ports.getPluginStore(), reranker: ports.jevToolSearchReranker() });
     const createAutoApprovalReview = (ctx: DetachedConversationContext): AutoApprovalReview => ports.createEntryJevAutoApprovalReview(currentMessages(ctx.activeConversation()), (): UIMessage[] => currentMessages(ctx.activeConversation()));
-    return { prepareTools, loadSubAgentTools, createSkillTools: createCurrentSkillTools, createCatalog, warnIfToolAbilityMissing, createAutoApprovalReview, compressProvider: ports.compressProvider };
+    return { prepareTools, loadSubAgentTools: ports.loadSubAgentTools, createSkillTools: createCurrentSkillTools, createCatalog, warnIfToolAbilityMissing, createAutoApprovalReview, compressProvider: ports.compressProvider };
 };

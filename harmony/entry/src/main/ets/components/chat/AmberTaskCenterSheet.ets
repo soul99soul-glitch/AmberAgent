@@ -70,6 +70,7 @@ export struct AmberTaskCenterSheet {
   @State private busyAction: boolean = false;
 
   private unsubscribeRunner: (() => void) | null = null;
+  private unsubscribeSubAgents: (() => void) | null = null;
   private pollTimer: number = -1;
   private alive: boolean = false;
 
@@ -82,6 +83,17 @@ export struct AmberTaskCenterSheet {
     this.unsubscribeRunner = runner.subscribe((): void => {
       if (this.alive) this.localTasks = runner.recentTasks(20);
     });
+    const owner: (() => void) | null = this.unsubscribeRunner;
+    getSubAgentManager().then((manager: SubAgentManager): void => {
+      if (!this.alive || this.unsubscribeRunner !== owner) return;
+      const refresh = (): void => {
+        const active: SubAgentRun[] = manager.listActive();
+        this.subAgentRuns = active.concat(manager.recentRuns(24).filter(
+          (run: SubAgentRun): boolean => run.status !== 'running'));
+      };
+      this.unsubscribeSubAgents = manager.onRunsChanged(refresh);
+      refresh();
+    }).catch((): void => {});
     this.refreshAsyncSources();
     this.pollTimer = setInterval((): void => {
       this.refreshAsyncSources();
@@ -94,6 +106,8 @@ export struct AmberTaskCenterSheet {
       this.unsubscribeRunner();
       this.unsubscribeRunner = null;
     }
+    this.unsubscribeSubAgents?.();
+    this.unsubscribeSubAgents = null;
     if (this.pollTimer >= 0) {
       clearInterval(this.pollTimer);
       this.pollTimer = -1;
@@ -101,10 +115,6 @@ export struct AmberTaskCenterSheet {
   }
 
   private refreshAsyncSources(): void {
-    getSubAgentManager().then((mgr: SubAgentManager): void => {
-      if (this.alive) this.subAgentRuns = mgr.recentRuns(24);
-    }).catch((): void => {});
-
     if (this.cloudDialogue.paired) {
       loadMacGatewayConnection(getChatKvStore()).then(async (conn: MacGatewayConnection | null): Promise<void> => {
         if (conn === null || !this.alive) return;

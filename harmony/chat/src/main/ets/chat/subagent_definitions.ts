@@ -1,7 +1,7 @@
 // SubAgent 角色、默认值和 mention 解析；不依赖提示词文件或设置 IO。
 import type { ReasoningLevel } from './provider_model.ts';
 
-export const DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS: number = 2;
+export const DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS: number = 3;
 export const DEFAULT_SUB_AGENT_TIMEOUT_MS: number = 5 * 60000;
 export const DEFAULT_SUB_AGENT_MAX_TURNS: number = 4;
 export const DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS: number = 12000;
@@ -97,7 +97,7 @@ export interface SubAgentRuntimeSetting {
 }
 
 export const makeSubAgentRuntimeSetting = (): SubAgentRuntimeSetting => ({
-  enabled: false,
+  enabled: true,
   mode: 'roster',
   allowDynamicSubAgents: true,
   maxConcurrentRuns: DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS,

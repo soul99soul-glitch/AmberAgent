@@ -228,8 +228,12 @@ export class ConversationTaskRunner {
     }
   }
 
+  private readonly pendingAdmissions: Map<string, string> = new Map<string, string>();
+
   activeConversationIds(): string[] {
-    const ids: string[] = [];
+    const running: Set<string> = new Set<string>(this.pendingAdmissions.values());
+    for (const execution of this.activeExecutions.values()) running.add(execution.conversationId);
+    const ids: string[] = Array.from(running);
     for (const task of this.tasks) {
       if ((task.status === 'running' || task.status === 'queued') && ids.indexOf(task.conversationId) < 0) {
         ids.push(task.conversationId);
@@ -379,13 +383,27 @@ export class ConversationTaskRunner {
     rawText: string,
     fallbackConversation: Conversation | null = null,
   ): Promise<LocalTaskRecord> {
-    await this.ensureHydrated();
+    const taskId: string = newId();
+    this.pendingAdmissions.set(taskId, conversationId);
+    try {
+      await this.ensureHydrated();
+      await this.runService.waitForSubAgentWakeup(conversationId);
+      return await this.admitQuestion(taskId, conversationId, parts, rawText, fallbackConversation);
+    } finally {
+      this.pendingAdmissions.delete(taskId);
+      this.emit();
+    }
+  }
+
+  private async admitQuestion(
+    taskId: string, conversationId: string, parts: UIMessagePart[], rawText: string,
+    fallbackConversation: Conversation | null,
+  ): Promise<LocalTaskRecord> {
     const repo = this.runService.getStorage().repository;
     if (fallbackConversation !== null && fallbackConversation.id === conversationId) {
       const existing: Conversation | null = await repo.getById(conversationId);
       if (existing === null) await repo.save(fallbackConversation);
     }
-    const taskId: string = newId();
     const requestId: string = newId();
     const now: number = Date.now();
     const title: string = summarizeTaskTitle(rawText, parts);
@@ -898,6 +916,8 @@ export class ConversationTaskRunner {
       }
       await this.persistState();
       this.emit();
+    } finally {
+      context?.sealSubAgentBatch?.();
     }
   }
 

@@ -33,6 +33,8 @@ export interface ChatRuntime extends ChatProviderRuntime {
 }
 export interface SubAgentToolsContext {
     parentConversationId: string;
+    dispatchBatchId?: string;
+    onAsyncDispatch?: (runId: string) => void;
     parentToolsProvider: () => AgentTool[];
     parentRuntime?: ChatRuntime;
     parentAgentRuntime?: AgentRuntimeSnapshot;

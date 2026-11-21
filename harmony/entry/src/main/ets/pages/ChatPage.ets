@@ -1061,12 +1061,14 @@ struct ChatPage {
     return count;
   }
 
+  @StorageProp('runningSubAgentCount') private runningSubAgentCount: number = 0;
+
   private runningTaskBadgeCount(): number {
     const cloudOrLocal: number = this.cloudDialogue.runningTasks().length;
     const otherRunning: number = this.presentation.runningConversationIds.filter(
       (id: string): boolean => id !== (this.presentation.conversation?.id ?? ''),
     ).length;
-    return cloudOrLocal + otherRunning;
+    return cloudOrLocal + otherRunning + this.runningSubAgentCount;
   }
 
   private pendingApprovalCount(): number {

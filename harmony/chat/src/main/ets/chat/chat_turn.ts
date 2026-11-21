@@ -187,9 +187,15 @@ export const runChatTurn = async (
     return conversation;
   }
   // 1. user 消息入列 + 持久化(对齐 Android 先落 user 再生成)
-  let conv: Conversation = appendNode(conversation, makeUIMessage('user', userParts));
+  const conv: Conversation = appendNode(conversation, makeUIMessage('user', userParts));
   await deps.store.save(conv);
+  return runAssistantReply(conv, deps);
+};
 
+export const runAssistantReply = async (
+  conversation: Conversation, deps: ChatTurnDeps, internalRequest: string = '',
+): Promise<Conversation> => {
+  let conv: Conversation = conversation;
   const baseMessages: UIMessage[] = currentMessages(conv);
   // D-071a:processingStatus 透传(Android TransformerContext.processingStatus
   //   与 GenerationHandler 同一 StateFlow — OcrTransformer 状态文案经此上屏)
@@ -203,7 +209,7 @@ export const runChatTurn = async (
     ? await deps.prepareContextMessages(baseMessages)
     : baseMessages;
   const assembledBase: UIMessage[] = assembleInternalMessages({
-    messages: preparedMessages,
+    messages: internalRequest.length === 0 ? preparedMessages : preparedMessages.concat(makeUserMessage(internalRequest)),
     assistant: deps.assistant,
     agentSoul: deps.agentSoul ?? '',
     // prepareContext 内部已处理截断/替换;未提供时走原窗口
@@ -231,16 +237,19 @@ export const runChatTurn = async (
     };
 
   // 3. 生成一步(D-057 抽取出共享核心;单跑行为与 D-050 逐字节一致)
+  // A wakeup must stream into a new assistant node even when the history ends in an assistant reply.
+  const streamSeed: UIMessage[] = internalRequest.length === 0 ? baseMessages
+    : baseMessages.concat(makeUIMessage('assistant', []));
   const finalMessages: UIMessage[] = await generateAssistantOnce(
-    baseMessages, internalMessages, deps, undefined, visionFallback);
+    streamSeed, internalMessages, deps, undefined, visionFallback);
 
   // 4. 终态:assistant 节点入列 → 持久化
-  if (finalMessages.length > baseMessages.length) {
-    for (const msg of finalMessages.slice(baseMessages.length)) {
+  for (const msg of finalMessages.slice(baseMessages.length)) {
+    if (internalRequest.length === 0 || (msg.role === 'assistant' && msg.parts.length > 0)) {
       conv = appendNode(conv, msg);
     }
-    await deps.store.save(conv);
   }
+  if (conv !== conversation) await deps.store.save(conv);
   return conv;
 };
 

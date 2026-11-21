@@ -1,6 +1,6 @@
 // Composition root and caller-compatible exports. Resource state belongs to the runtime factories.
 import type { SSHProfileStore, SSHProfile, ApprovalTargetProfile } from '@amber/chat-domain';
-import type { SkillMetadata, TaskModelReference, MiniAppRecord, ChatStreamProvider, ChatTurnDeps, ToolLoopOptions, KeyValueStore, Assistant, AgentTool, SubAgentGenerationRequest, Conversation, JevSettings, JevQuestion, JevEvaluateResult, JsonObject, PluginStore, InstalledPlugin, PluginLoopAdapter, TerminalApprovalGuard } from '@amber/chat-domain';
+import type { SkillMetadata, TaskModelReference, MiniAppRecord, ChatStreamProvider, ChatTurnDeps, ToolLoopOptions, KeyValueStore, Assistant, AgentTool, SubAgentManager, SubAgentGenerationRequest, Conversation, JevSettings, JevQuestion, JevEvaluateResult, JsonObject, PluginStore, InstalledPlugin, PluginLoopAdapter, TerminalApprovalGuard } from '@amber/chat-domain';
 import { patchAssistant, loadJevSettings, AgentToolDispatcher, createTerminalApprovalGuard,
   setApprovalTargetProfiles } from '@amber/chat-domain';
 import { createConversationToolComposition } from './ConversationToolComposition.ets';
@@ -12,6 +12,7 @@ import type { ConversationRunExecution, ConversationRunToolPorts } from '../plat
 import type { PreparedConversationSeed, DetachedConversationContext } from '../platform_impl/ConversationRunService.ets';
 import { ConversationRunService } from '../platform_impl/ConversationRunService.ets';
 import { ConversationTaskRunner } from '../platform_impl/ConversationTaskRunner.ets';
+import { LocalSuperAgentOrchestrator } from '../platform_impl/LocalSuperAgentOrchestrator.ets';
 import { buildConversationToolLoop } from '../platform_impl/ConversationRunTools.ets';
 import { createEntryBase64ImageTransformer } from '../platform_impl/Base64ImageSupport.ets';
 import { createEntryDocumentReader } from '../platform_impl/DocumentSupport.ets';
@@ -251,7 +252,18 @@ export const getAgentCronManager = cron.getAgentCronManager;
 export const getAgentCronTools = cron.getAgentCronTools;
 export const isAgentCronExecutionAvailable = cron.isAgentCronExecutionAvailable;
 export const rescheduleCronTasksOnStartup = cron.rescheduleCronTasksOnStartup;
-export const getSubAgentManager = subAgents.getSubAgentManager;
+let observedSubAgentManager: SubAgentManager | null = null;
+export const getSubAgentManager = async (): Promise<SubAgentManager> => {
+    const manager: SubAgentManager = await subAgents.getSubAgentManager();
+    if (observedSubAgentManager !== manager) {
+        observedSubAgentManager = manager;
+        const publishCount = (): void =>
+            AppStorage.setOrCreate<number>('runningSubAgentCount', manager.listActive().length);
+        manager.onRunsChanged(publishCount);
+        publishCount();
+    }
+    return manager;
+};
 export const getSubAgentTools = subAgents.getSubAgentTools;
 export const getCouncilRunner = council.getCouncilRunner;
 export const prepareCouncilManager = council.prepareCouncilManager;
@@ -319,7 +331,7 @@ const createConversationExecution = (): ConversationRunExecution => {
         getSessionGrantStore: getSessionGrantStore,
         getSkillManager: getSkillManager,
         getSkillWorkspacePort: getSkillWorkspacePort,
-        getSubAgentTools: getSubAgentTools,
+        loadSubAgentTools: loadConversationSubAgentTools,
         getWorkspaceManager: getWorkspaceManager,
         mutateAssistant: mutateAssistant,
         getChatCouncilTools: getChatCouncilTools,
@@ -348,6 +360,23 @@ const createConversationExecution = (): ConversationRunExecution => {
         materializeDocumentParts, materializeConversationDocuments,
     };
 };
+let localSuperAgent: LocalSuperAgentOrchestrator | null = null;
+const loadConversationSubAgentTools = async (ctx: DetachedConversationContext): Promise<AgentTool[]> => {
+    const manager: SubAgentManager = await getSubAgentManager();
+    if (ctx.allowAsyncDispatch && localSuperAgent === null) {
+        getConversationTaskRunner(); // Registers existing detached-task admission with the run service.
+        localSuperAgent = new LocalSuperAgentOrchestrator(manager, getConversationRunService());
+    }
+    return getSubAgentTools({
+        parentConversationId: ctx.conversationId,
+        parentToolsProvider: (): AgentTool[] => ctx.baseTools,
+        parentRuntime: ctx.seed.runtime,
+        parentAgentRuntime: ctx.seed.agentRuntime,
+        dispatchBatchId: ctx.allowAsyncDispatch ? ctx.runId : undefined,
+        onAsyncDispatch: ctx.allowAsyncDispatch ? localSuperAgent?.bind(ctx) : undefined,
+    });
+};
+
 let conversationRunService: ConversationRunService | null = null;
 let conversationTaskRunner: ConversationTaskRunner | null = null;
 export const getConversationRunService = (): ConversationRunService => {

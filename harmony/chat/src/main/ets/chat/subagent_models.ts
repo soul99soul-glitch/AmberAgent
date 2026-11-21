@@ -91,9 +91,13 @@ export const makeSubAgentResult = (init: SubAgentResultInit): SubAgentResult => 
   error: init.error ?? '',
 });
 
+export type SubAgentDeliveryMode = 'sync' | 'async';
+
 export interface SubAgentRun {
   runId: string;
   parentConversationId: string;
+  deliveryMode?: SubAgentDeliveryMode;
+  dispatchBatchId?: string;
   definition: SubAgentDefinition;
   task: SubAgentTaskSpec;
   status: SubAgentRunStatus;
@@ -144,6 +148,8 @@ export const subAgentActivityPresentation = (runs: SubAgentRun[]): SubAgentActiv
 export interface SubAgentRunInit {
   runId: string;
   parentConversationId: string;
+  deliveryMode?: SubAgentDeliveryMode;
+  dispatchBatchId?: string;
   definition: SubAgentDefinition;
   task: SubAgentTaskSpec;
   status: SubAgentRunStatus;
@@ -157,6 +163,8 @@ export interface SubAgentRunInit {
 export const makeSubAgentRun = (init: SubAgentRunInit): SubAgentRun => ({
   runId: init.runId,
   parentConversationId: init.parentConversationId,
+  deliveryMode: init.deliveryMode,
+  dispatchBatchId: init.dispatchBatchId,
   definition: init.definition,
   task: init.task,
   status: init.status,

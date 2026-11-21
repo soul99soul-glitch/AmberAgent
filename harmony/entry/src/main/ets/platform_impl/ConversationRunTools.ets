@@ -17,7 +17,7 @@ export const buildConversationToolLoop = async (
   const prepared: PreparedConversationTools = await ports.prepareTools(ctx, ports.compressProvider(seed));
   const terminalGuard = prepared.terminalGuard;
   ctx.subAgentTools = [];
-  if (seed.subAgentEnabled) {
+  if (seed.subAgentEnabled && !ctx.isWakeupSynthesis) {
     try { ctx.subAgentTools = await ports.loadSubAgentTools(ctx); }
     catch (error) {
       const message: string = error instanceof Error ? error.message : String(error);

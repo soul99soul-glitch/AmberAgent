@@ -24,6 +24,7 @@ import type { Conversation, MessageNode } from './conversation.ts';
 import { currentMessages, makeMessageNode, nodeCurrentMessage, toMessageNode } from './conversation.ts';
 import type { UIMessage, UIMessagePart, UIMessagePartTool } from './message.ts';
 import { canToolResumeExecution, isToolExecuted, makeUIMessage } from './message.ts';
+import { toolOutputJson } from './tool_activity.ts';
 import { nowIso } from './ids.ts';
 import type { ChatStreamProvider, ChatTurnDeps } from './chat_turn.ts';
 import { generateAssistantOnce, runAppendUserMessage, runChatTurn } from './chat_turn.ts';
@@ -307,6 +308,7 @@ const runToolLoopCore = async (
   // 环路守护状态(本轮 run 级;签名表跨步累积)
   const executedSignatures: Map<string, number> = new Map();
   let guardStopped: boolean = false;
+  let acknowledgeAsyncDispatch: boolean = false;
   const maxSteps: number = mainClamp
     ? Math.min(Math.max(rawSteps, MIN_AGENT_TOOL_LOOP_STEPS), MAX_AGENT_TOOL_LOOP_STEPS)
     : Math.max(rawSteps, 0);
@@ -326,7 +328,7 @@ const runToolLoopCore = async (
   for (let stepIndex = 0; stepIndex < maxSteps; stepIndex++) {
     if (deps.abortSignal !== undefined && deps.abortSignal.aborted) break;
     if (guardStopped) break;
-    if (loop.refreshTools !== undefined) {
+    if (!acknowledgeAsyncDispatch && loop.refreshTools !== undefined) {
       currentTools = await loop.refreshTools();
       toolExposure.replaceTools(currentTools);
       autoApproveTools = loop.autoApproveTools ?? false;
@@ -373,7 +375,8 @@ const runToolLoopCore = async (
     toolExposure.exposeToolNames(
       pendingTools.map((t: UIMessagePartTool): string => t.toolName));
     const budgetPrompt: string = buildAgentLoopBudgetPrompt(stepIndex, maxSteps);
-    const hideTools: boolean = agentLoopShouldHideTools(stepIndex, maxSteps, hasResumableTools);
+    const hideTools: boolean = acknowledgeAsyncDispatch
+      || agentLoopShouldHideTools(stepIndex, maxSteps, hasResumableTools);
     // toolsInternal(:177-186):预算 FINAL 且无 resumable → 空;
     //   D-062 否则 toolsForStep()(懒模式 = 常驻+已暴露子集)
     const stepTools: AgentTool[] = hideTools ? [] : toolExposure.toolsForStep();
@@ -393,7 +396,7 @@ const runToolLoopCore = async (
     let toolsToProcess: UIMessagePartTool[];
 
     // 有 approved/denied 工具待处理时跳过生成(:200-201)
-    if (!hasResumableTools) {
+    if (acknowledgeAsyncDispatch || !hasResumableTools) {
       // 生成一步(每步 prepareContext,对齐 Android generateInternal 内部位置)
       // 空 parts 消息不进上下文(分支再生流式尾占位,runRegenerateAt:124-129 同构);
       //   baseMessages 保持原样供 accumulator 播种与写回下标对齐
@@ -416,6 +419,10 @@ const runToolLoopCore = async (
         extraSystemBlocks: [
           ...(deps.memorySystemBlocks !== undefined ? await deps.memorySystemBlocks() : []),
           ...(budgetPrompt.length > 0 ? [budgetPrompt] : []),
+          ...(acknowledgeAsyncDispatch ? [
+            'Briefly acknowledge the accepted background assignments in the user’s language and your usual voice. '
+            + 'Say what you handed off and that you will return with the results. Then end the reply.',
+          ] : []),
           ...(deps.extraSystemBlocks !== undefined ? await deps.extraSystemBlocks() : []),
         ],
         toolPrompt,
@@ -483,7 +490,7 @@ const runToolLoopCore = async (
       if (mergedLast !== lastBase || generated.length > 0) {
         await deps.store.save(conv);
       }
-      if (deps.abortSignal !== undefined && deps.abortSignal.aborted) break;
+      if (acknowledgeAsyncDispatch || (deps.abortSignal !== undefined && deps.abortSignal.aborted)) break;
 
       const stepMessages: UIMessage[] = currentMessages(conv);
       const newLast: UIMessage = stepMessages[stepMessages.length - 1];
@@ -651,6 +658,9 @@ const runToolLoopCore = async (
       }
     }
     if (loop.manualToolCallId !== undefined) break;
+    acknowledgeAsyncDispatch = executedPairs.some((pair: ToolBatchResultPair): boolean =>
+      pair.result.toolName === 'subagent_start' && toolOutputJson(pair.result)['status'] === 'dispatched');
+    if (acknowledgeAsyncDispatch) continue;
 
     // steer 消息步间消费(:386-390)
     const steerMessages: UIMessage[] = loop.consumeSteerMessages !== undefined

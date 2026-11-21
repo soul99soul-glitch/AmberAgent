@@ -178,6 +178,8 @@ export const createSubAgentRuntime = (ports: SubAgentRuntimePorts): SubAgentRunt
             manager,
             runner: ctx.parentRuntime === undefined ? undefined : new GenerationSubAgentRunner(buildSubAgentGenerationPort(ctx.parentRuntime, ctx.parentAgentRuntime ?? null, ctx.parentConversationId)),
             parentConversationId: ctx.parentConversationId,
+            dispatchBatchId: ctx.dispatchBatchId,
+            onAsyncDispatch: ctx.onAsyncDispatch,
             parentToolsProvider: ctx.parentToolsProvider,
             isModelCouncilEnabled: (): boolean => councilEnabled,
         });
