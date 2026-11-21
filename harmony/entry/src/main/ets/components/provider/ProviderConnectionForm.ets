@@ -41,9 +41,12 @@ export struct ProviderConnectionForm {
   @State fetchedSearch: string = '';
   @State tabProgress: number = 0;
   @State swiperWidth: number = 0;
+  @State tabBarWidth: number = 0;
+  private initialTab: number = 0;
   private swiperController: SwiperController = new SwiperController();
 
   aboutToAppear(): void {
+    this.initialTab = this.tab;
     this.tabProgress = this.tab;
   }
 
@@ -126,7 +129,7 @@ export struct ProviderConnectionForm {
         }
         .width('100%')
 
-        // 单一连续指示条：点击与左右手势滑切时同步跟手平移
+        // 单一连续指示条：点击与左右手势滑切时用数值 vp 平滑跟手平移
         Row() {
           Column()
             .width('100%')
@@ -136,10 +139,14 @@ export struct ProviderConnectionForm {
         }
         .width('50%')
         .padding({ left: 12, right: 12 })
-        .translate({ x: `${this.tabProgress * 100}%` })
+        .translate({ x: this.tabBarWidth > 0 ? this.tabProgress * (this.tabBarWidth / 2) : `${this.tabProgress * 100}%` })
         .hitTestBehavior(HitTestMode.None)
       }
       .width('100%')
+      .onAreaChange((_old: Area, area: Area): void => {
+        const w: number = Number(area.width);
+        if (Number.isFinite(w) && w > 0) this.tabBarWidth = w;
+      })
     }
     .width('100%')
     .padding({ left: 18, right: 18 })
@@ -639,10 +646,10 @@ export struct ProviderConnectionForm {
         .height('100%')
         .backgroundColor(BG)
       }
-      .index(this.tab)
+      .index(this.initialTab)
       .loop(false)
       .indicator(false)
-      .duration(260)
+      .duration(280)
       .curve(Curve.FastOutSlowIn)
       .width('100%')
       .layoutWeight(1)
