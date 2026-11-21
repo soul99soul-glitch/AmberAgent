@@ -1,9 +1,9 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { conversationHasPendingOrUnexecutedTools, currentMessages, makeTextGenerationParams,
   makeUserMessage, memoryWorkerModelReferences, patchConversation, recapEligible, runAutoTitle, runMemoryExtraction,
-  runSuggestion, toChatModel, toText, readMemoryCitationIds } from '@amber/chat-domain';
-import type { AutoTitleDeps, Conversation, ConversationStore, MemoryExtractionDeps,
-  MemoryWorkerModelResolution, MessageChunk, OpenAIChatApi, ReasoningLevel, SuggestionDeps, UIMessage } from '@amber/chat-domain';
+  buildLocalSuggestionContext, runContextAwareSuggestions, toChatModel, toText, readMemoryCitationIds } from '@amber/chat-domain';
+import type { AutoTitleDeps, BuiltSuggestionContext, ContextAwareSuggestionDeps, Conversation, ConversationStore, MemoryExtractionDeps,
+  MemoryWorkerModelResolution, MessageChunk, OpenAIChatApi, ReasoningLevel, UIMessage } from '@amber/chat-domain';
 import type { ChatProviderChoice, TaskPrompts } from '../di/ChatRuntimeContracts.ets';
 import type { DetachedConversationContext } from './ConversationRunService.ets';
 import { systemLanguage } from './AgentRuntimePrefs.ets';
@@ -87,11 +87,13 @@ const maybeAutoTitle = async (ctx: DetachedConversationContext, snapshot: Conver
 };
 
 const maybeSuggestions = async (ctx: DetachedConversationContext, snapshot: Conversation, ports: ConversationAuxiliaryPorts): Promise<void> => {
+  const suggestionCtx: BuiltSuggestionContext | null = buildLocalSuggestionContext(currentMessages(snapshot));
+  if (suggestionCtx === null) return;
   let releaseRun: () => void;
   try { releaseRun = beginConversationRun(snapshot.id); } catch { return; }
   try {
     const prompts: TaskPrompts = await ports.loadTaskPrompts();
-    const deps: SuggestionDeps = {
+    const deps: ContextAwareSuggestionDeps = {
       generateText: async (prompt: string): Promise<string> => {
         const reference = await ports.readSuggestionReference();
         const choice: ChatProviderChoice | null = await ports.resolveTaskChoice(
@@ -99,14 +101,13 @@ const maybeSuggestions = async (ctx: DetachedConversationContext, snapshot: Conv
         if (choice === null) throw new Error('no suggestion model');
         return generateAuxiliaryText(ports, choice, prompt, 'off');
       },
-      store: auxiliaryCandidateStore, locale: '简体中文', template: prompts.suggestionPrompt,
+      locale: '简体中文', template: prompts.suggestionPrompt,
     };
-    const suggested: Conversation = await runSuggestion(snapshot, deps);
-    await ctx.mutateConversation((latest: Conversation): Conversation | null => {
-      if (!sameConversationTail(snapshot, latest)) return null;
-      const patch: SuggestionsPatch = { chatSuggestions: suggested.chatSuggestions };
-      return patchConversation(latest, patch);
-    });
+    const suggestions: string[] = await runContextAwareSuggestions(suggestionCtx, deps);
+    // 预测胶囊仅内存持有，不写回会话库
+    if (sameConversationTail(snapshot, ctx.activeConversation())) {
+      ctx.publish({ suggestions });
+    }
   } catch (error) {
     hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'suggestion failed: %{public}s', (error as Error).message);
   } finally { releaseRun(); }

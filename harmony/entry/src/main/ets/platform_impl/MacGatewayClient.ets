@@ -10,7 +10,7 @@ import { util } from '@kit.ArkTS';
 import { pushService } from '@kit.PushKit';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { getChatKvStore } from '../di/AppContainer.ets';
+import type { KeyValueStore } from '@amber/chat-domain';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'MacGateway';
@@ -432,8 +432,8 @@ export class MacGatewayClient implements CloudDialogueClientLike {
   }
 }
 
-export const loadMacGatewayConnection = async (): Promise<MacGatewayConnection | null> => {
-  const raw: string | null = await getChatKvStore().get(CONNECTION_KEY);
+export const loadMacGatewayConnection = async (kv: KeyValueStore): Promise<MacGatewayConnection | null> => {
+  const raw: string | null = await kv.get(CONNECTION_KEY);
   if (raw === null || raw.length === 0) return null;
   try {
     return JSON.parse(raw) as MacGatewayConnection;
@@ -442,22 +442,22 @@ export const loadMacGatewayConnection = async (): Promise<MacGatewayConnection |
   }
 };
 
-export const forgetMacGatewayConnection = async (): Promise<void> => {
-  await getChatKvStore().delete(CONNECTION_KEY);
-  await getChatKvStore().delete(CLOUD_DIALOGUE_ENABLED_KEY);
-  await getChatKvStore().delete(CLOUD_DIALOGUE_STATE_KEY);
+export const forgetMacGatewayConnection = async (kv: KeyValueStore): Promise<void> => {
+  await kv.delete(CONNECTION_KEY);
+  await kv.delete(CLOUD_DIALOGUE_ENABLED_KEY);
+  await kv.delete(CLOUD_DIALOGUE_STATE_KEY);
 };
 
-export const loadCloudDialogueEnabled = async (): Promise<boolean> => {
-  const raw: string | null = await getChatKvStore().get(CLOUD_DIALOGUE_ENABLED_KEY);
+export const loadCloudDialogueEnabled = async (kv: KeyValueStore): Promise<boolean> => {
+  const raw: string | null = await kv.get(CLOUD_DIALOGUE_ENABLED_KEY);
   return raw === 'true';
 };
 
-export const setCloudDialogueEnabled = async (enabled: boolean): Promise<void> => {
-  await getChatKvStore().put(CLOUD_DIALOGUE_ENABLED_KEY, enabled ? 'true' : 'false');
+export const setCloudDialogueEnabled = async (enabled: boolean, kv: KeyValueStore): Promise<void> => {
+  await kv.put(CLOUD_DIALOGUE_ENABLED_KEY, enabled ? 'true' : 'false');
 };
 
-export const pairMacGateway = async (p: MacGatewayPairingPayload): Promise<MacGatewayConnection> => {
+export const pairMacGateway = async (p: MacGatewayPairingPayload, kv: KeyValueStore): Promise<MacGatewayConnection> => {
   const response: PairResponse = await new MacGatewayClient(p.addrs, p.port, p.fp, null).pair(p.s, deviceInfo.marketName);
   const connection: MacGatewayConnection = {
     gatewayId: response.gatewayId,
@@ -468,7 +468,7 @@ export const pairMacGateway = async (p: MacGatewayPairingPayload): Promise<MacGa
     deviceId: response.deviceId,
     token: response.token,
   };
-  await getChatKvStore().put(CONNECTION_KEY, JSON.stringify(connection));
+  await kv.put(CONNECTION_KEY, JSON.stringify(connection));
   return connection;
 };
 
@@ -487,8 +487,8 @@ export const uploadMacGatewayPushToken = async (c: MacGatewayConnection): Promis
 };
 
 /** 启动时补报(Push Token 可能因重装等变化);未配对或失败均静默 */
-export const syncMacGatewayPushTokenOnLaunch = (): void => {
-  loadMacGatewayConnection().then((c: MacGatewayConnection | null): Promise<void> => {
+export const syncMacGatewayPushTokenOnLaunch = (kv: KeyValueStore): void => {
+  loadMacGatewayConnection(kv).then((c: MacGatewayConnection | null): Promise<void> => {
     return c === null ? Promise.resolve() : uploadMacGatewayPushToken(c);
   }).catch((e: Error): void => {
     hilog.warn(DOMAIN, TAG, 'push token sync on launch failed: %{public}s', e.message);

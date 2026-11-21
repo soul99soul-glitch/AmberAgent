@@ -1,14 +1,14 @@
 // AgentMessageRow — chat/novel 共用的完整 agent 消息行。
 // host 通过静态 capabilities 决定可交互入口，并用具名 hostFooter slot 注入宿主尾部。
 
-import { MOTION_OVERLAY, INK, SURFACE2, USER_BG, USER_INK, ACCENT } from '../design/tokens.ets';
+import { MOTION_OVERLAY, INK, INK3, SIGNAL, STATUS_AMBER, SURFACE2, USER_BG, USER_INK, ACCENT, LINE } from '../design/tokens.ets';
 import type {
-  AskUserQuestion, MessagePartBlock, ReasoningCardState, ThinkingStep, UIMessage, UIMessagePart,
+  AskUserQuestion, FollowupReceiptInfo, MessagePartBlock, ReasoningCardState, ThinkingStep, UIMessage, UIMessagePart,
   UIMessagePartDocument, UIMessagePartReasoning, UIMessagePartTool,
 } from '@amber/chat-domain';
 import {
   ASK_USER_TOOL_NAME, buildAskUserAnswerPayload, groupMessageParts, mightContainMiniApp,
-  miniAppStatusProjection, parseAskUserQuestions, streamToolIndex,
+  miniAppStatusProjection, parseAskUserQuestions, readFollowupReceipt, streamToolIndex,
 } from '@amber/chat-domain';
 import type { ToolApprovalPartLocator, UIMessagePartMiniApp } from '@amber/chat-domain';
 import { MarkdownText } from './MarkdownText.ets';
@@ -239,6 +239,22 @@ export struct AgentMessageRow {
     this.imagePreviewUrls = urls;
     this.imagePreviewIndex = Math.max(0, urls.indexOf(url));
     this.imagePreviewOpen = true;
+  }
+
+  private followupReceipt(): FollowupReceiptInfo | null {
+    return this.message.role === 'user' ? readFollowupReceipt(this.message) : null;
+  }
+
+  private followupReceiptLabel(info: FollowupReceiptInfo): string {
+    if (info.state === 'applied') return '已融入本轮';
+    if (info.state === 'not_applied') return '未生效';
+    return '待插话 · 已排队';
+  }
+
+  private followupReceiptColor(info: FollowupReceiptInfo): string {
+    if (info.state === 'applied') return SIGNAL;
+    if (info.state === 'not_applied') return INK3;
+    return STATUS_AMBER;
   }
 
   @Builder
@@ -723,25 +739,38 @@ export struct AgentMessageRow {
       } else if (block.kind === 'content') {
         if (block.part.type === 'text') {
           if (this.message.role === 'user') {
-            Row() {
-              ChatUserBubble({
-                content: (): void => { this.UserTextContent(block.index); },
-              })
-              .constraintSize({ maxWidth: this.showUserAvatar ? '74%' : '82%' })
-              .margin({ bottom: 4 })
-              if (this.showUserAvatar) {
-                UIAvatar({
-                  name: this.userNickname,
-                  imageUrl: this.userAvatar,
-                  avatarSize: 28,
-                  accentColor: ACCENT,
+            Column({ space: 4 }) {
+              Row() {
+                ChatUserBubble({
+                  content: (): void => { this.UserTextContent(block.index); },
                 })
-                  .margin({ left: 8, bottom: 4 })
+                .constraintSize({ maxWidth: this.showUserAvatar ? '74%' : '82%' })
+                if (this.showUserAvatar) {
+                  UIAvatar({
+                    name: this.userNickname,
+                    imageUrl: this.userAvatar,
+                    avatarSize: 28,
+                    accentColor: ACCENT,
+                  })
+                    .margin({ left: 8 })
+                }
+              }
+              .width('100%')
+              .justifyContent(FlexAlign.End)
+              .alignItems(VerticalAlign.Bottom)
+              if (this.followupReceipt() !== null) {
+                Text(this.followupReceiptLabel(this.followupReceipt()!))
+                  .fontSize(10.5)
+                  .fontColor(this.followupReceiptColor(this.followupReceipt()!))
+                  .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                  .backgroundColor(SURFACE2)
+                  .borderRadius(999)
+                  .border({ width: 0.5, color: LINE })
               }
             }
             .width('100%')
-            .justifyContent(FlexAlign.End)
-            .alignItems(VerticalAlign.Bottom)
+            .alignItems(HorizontalAlign.End)
+            .margin({ bottom: 4 })
           } else if (this.isLiveMiniAppStream(this.getBlocks(), bi, block.index) ||
             this.miniAppStatusPartAt(this.getBlocks(), bi) !== null) {
             this.MiniAppCard(bi)

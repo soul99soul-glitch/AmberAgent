@@ -542,6 +542,33 @@ describe('steer 与退化路径', () => {
     const secondCall = provider.calls[1];
     assert.equal(secondCall[secondCall.length - 1].id, 'steer-1');
   });
+  it('无工具总结轮结束前也可消费新到达的 steer 追问', async () => {
+    const conv: Conversation = makeConversation('c-summary-steer', []);
+    const provider = scriptedProvider([
+      [textDelta('初步总结')],
+      [textDelta('已补充追问后的完整回答')],
+    ]);
+    let sentSummarySteer = false;
+    const steerMsg: UIMessage = {
+      id: 'steer-summary-1', role: 'user',
+      parts: [{ type: 'text', text: '顺便加一句结论', metadata: null }],
+      annotations: [], createdAt: '2026-07-28T01:00:00Z', finishedAt: null,
+      modelId: null, usage: null, translation: null,
+    };
+    const out = await runChatTurnWithTools(conv, '先总结一下', baseDeps(provider), {
+      tools: [],
+      makeProviderForStep: (): ChatStreamProvider => provider,
+      consumeSteerMessages: (): Promise<UIMessage[]> => {
+        if (sentSummarySteer) return Promise.resolve([]);
+        sentSummarySteer = true;
+        return Promise.resolve([steerMsg]);
+      },
+    });
+    const msgs = currentMessages(out);
+    assert.equal(msgs.length, 4);
+    assert.equal(msgs[2].id, 'steer-summary-1');
+    assert.equal(provider.callCount, 2);
+  });
   it('空工具集 → 退化 runChatTurn(单步,无循环)', async () => {
     const conv: Conversation = makeConversation('c1', []);
     const provider = scriptedProvider([[textDelta('hi')]]);

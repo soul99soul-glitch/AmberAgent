@@ -285,7 +285,7 @@ export default class EntryAbility extends UIAbility {
             hilog.warn(DOMAIN, TAG, 'requestEnableNotification rejected');
           });
           if (getProductKind() === 'agent') {
-            syncMacGatewayPushTokenOnLaunch();
+            syncMacGatewayPushTokenOnLaunch(getChatKvStore());
             hydrateAgentSoulOnForeground();
           }
         }

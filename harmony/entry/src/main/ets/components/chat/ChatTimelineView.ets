@@ -112,48 +112,11 @@ export struct ChatTimelineView {
 
   @Builder
   chatTimelineBottomInset(): void {
-    if (this.bottomSpacerHeight > 0 || this.presentation.suggestions.length > 0) {
+    if (this.bottomSpacerHeight > 0) {
       ListItem() {
-        Column().width('100%').height(this.bottomSpacerHeight + (this.presentation.suggestions.length > 0 ? 52 : 0))
+        Column().width('100%').height(this.bottomSpacerHeight)
       }
     }
-  }
-
-  @Builder
-  floatingSuggestions(): void {
-    Scroll() {
-      Row() {
-        ForEach(this.presentation.suggestions, (s: string): void => {
-          Text(s)
-            .fontSize(13).fontColor(this.accentColorStore)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .constraintSize({ maxWidth: '58%' })
-            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-            .backgroundColor(SURFACE2)
-            .borderRadius(999)
-            .border({ width: 1, color: accentAlpha(this.accentColorStore, 0.35) })
-            .margin({ right: 8 })
-            // Android ChatPage.kt:812-830:点击 = 填入输入框;
-            //   长按 = 直接发送(D-042);生成中 → FOLLOWUP 入队(D-048);
-            //   D-080:模型空值门(:823/:864/:880,建议文本非斜杠恒要模型)
-            .onClick((): void => { this.onDraft(s); })
-            .gesture(
-              LongPressGesture()
-                .onAction((): void => {
-                  this.onSendSuggestion(s);
-                })
-            )
-        }, (s: string, i: number): string => `sg-${i}-${s}`)
-      }
-      .padding({ left: 20, right: 20 })
-    }
-    .align(Alignment.TopStart)
-    .scrollable(ScrollDirection.Horizontal)
-    .scrollBar(BarState.Off)
-    .width('100%')
-    .height(40)
-    .position({ left: 0, bottom: this.bottomSpacerHeight + 8 })
   }
 
   build(): void {
@@ -268,10 +231,6 @@ export struct ChatTimelineView {
         .accessibilityText('回到消息顶部')
         .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 8 }))
           .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
-      }
-
-      if (this.presentation.suggestions.length > 0) {
-        this.floatingSuggestions()
       }
 
     }.width('100%').height('100%')

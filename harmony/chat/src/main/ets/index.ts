@@ -83,8 +83,18 @@ export { editMessage } from './chat/edit_message.ts';
 export { forkConversation } from './chat/fork.ts';
 export type { ForkDeps } from './chat/fork.ts';
 export { DEFAULT_TITLE_PROMPT, buildTitlePrompt, runAutoTitle } from './chat/auto_title.ts';
-export { DEFAULT_SUGGESTION_PROMPT, buildSuggestionPrompt, runSuggestion } from './chat/suggestion.ts';
-export type { SuggestionDeps } from './chat/suggestion.ts';
+export {
+  DEFAULT_SUGGESTION_PROMPT, buildSuggestionPrompt, runSuggestion,
+  SUGGESTION_CONTEXT_BUDGET, MAX_COMPOSER_SUGGESTIONS,
+  excerptSuggestionText, buildTurnBudgetedSuggestionContext,
+  buildLocalSuggestionContext, isUpfrontCloudAcknowledgement,
+  buildCloudSuggestionContext, filterSuggestionCandidates,
+  runContextAwareSuggestions,
+} from './chat/suggestion.ts';
+export type {
+  SuggestionDeps, SuggestionContextEntry, SuggestionContextOptions,
+  BuiltSuggestionContext, CloudSuggestionEventLike, ContextAwareSuggestionDeps,
+} from './chat/suggestion.ts';
 export type { AutoTitleDeps } from './chat/auto_title.ts';
 export type { RegenerateDeps } from './chat/regenerate.ts';
 
@@ -112,6 +122,13 @@ export {
   cancelPendingUserMessage, movePendingUserMessage, convertSteerToFollowup,
   preparePendingMessageForDispatch,
 } from './chat/pending_queue.ts';
+export type {
+  InboundTurnRoute, InboundTurnTriage, FollowupReceiptState, FollowupReceiptInfo,
+} from './chat/inbound_turn_triage.ts';
+export {
+  CHAT_FOLLOWUP_STATE_KEY, CHAT_FOLLOWUP_ID_KEY, CHAT_FOLLOWUP_RUN_ID_KEY,
+  triageInboundTurn, withFollowupReceiptMetadata, readFollowupReceipt,
+} from './chat/inbound_turn_triage.ts';
 
 // ===== 队列持久化(D-052,PendingMessageStore.kt 全文) =====
 export type { PendingQueueAuditEvent } from './chat/pending_queue_store.ts';

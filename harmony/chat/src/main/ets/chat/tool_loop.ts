@@ -21,7 +21,7 @@
 //     登记 PARITY_DEBT
 
 import type { Conversation, MessageNode } from './conversation.ts';
-import { currentMessages, nodeCurrentMessage, toMessageNode } from './conversation.ts';
+import { currentMessages, makeMessageNode, nodeCurrentMessage, toMessageNode } from './conversation.ts';
 import type { UIMessage, UIMessagePart, UIMessagePartTool } from './message.ts';
 import { canToolResumeExecution, isToolExecuted, makeUIMessage } from './message.ts';
 import { nowIso } from './ids.ts';
@@ -466,7 +466,31 @@ const runToolLoopCore = async (
       const tools: UIMessagePartTool[] = newLast.parts.filter((p: UIMessagePart): boolean =>
         p.type === 'tool' && !isToolExecuted(p as UIMessagePartTool)) as UIMessagePartTool[];
       if (tools.length === 0) {
-        // 无工具调用 → 结束(:281-285)
+        // 无工具调用（或总结轮）结束前检查步间追问/steer，确保总结轮也能消费追问
+        if (!(deps.abortSignal !== undefined && deps.abortSignal.aborted)
+          && loop.manualToolCallId === undefined
+          && loop.consumeSteerMessages !== undefined) {
+          const tailSteers: UIMessage[] = await loop.consumeSteerMessages();
+          if (tailSteers.length > 0) {
+            for (const m of tailSteers) {
+              const existingIdx: number = conv.messageNodes.findIndex(
+                (node): boolean => node.messages.some((msg: UIMessage): boolean => msg.id === m.id),
+              );
+              if (existingIdx >= 0) {
+                const targetNode = conv.messageNodes[existingIdx];
+                const nextNodes = conv.messageNodes.slice();
+                nextNodes[existingIdx] = makeMessageNode([m], 0, targetNode.id);
+                conv = { ...conv, messageNodes: nextNodes };
+              } else {
+                conv = appendNode(conv, m);
+              }
+            }
+            await deps.store.save(conv);
+            emitSnapshot(conv, deps, ctx);
+            continue;
+          }
+        }
+        // 无工具调用且无待消费追问 → 结束(:281-285)
         break;
       }
       recipeBatch = newLast.parts.some(
@@ -613,7 +637,17 @@ const runToolLoopCore = async (
       : [];
     if (steerMessages.length > 0) {
       for (const m of steerMessages) {
-        conv = appendNode(conv, m);
+        const existingIdx: number = conv.messageNodes.findIndex(
+          (node): boolean => node.messages.some((msg: UIMessage): boolean => msg.id === m.id),
+        );
+        if (existingIdx >= 0) {
+          const targetNode = conv.messageNodes[existingIdx];
+          const nextNodes = conv.messageNodes.slice();
+          nextNodes[existingIdx] = makeMessageNode([m], 0, targetNode.id);
+          conv = { ...conv, messageNodes: nextNodes };
+        } else {
+          conv = appendNode(conv, m);
+        }
       }
       await deps.store.save(conv);
       emitSnapshot(conv, deps, ctx);
@@ -653,8 +687,8 @@ export const runChatTurnWithTools = async (
   conversation: Conversation, userInput: string | UIMessagePart[],
   deps: ChatTurnDeps, loop: ToolLoopOptions,
 ): Promise<Conversation> => {
-  // 空工具集 → 单跑(chat_turn 行为逐字节一致)
-  if (loop.tools.length === 0) {
+  // 空工具集且未接入 steer 消费 → 单跑(chat_turn 行为逐字节一致)
+  if (loop.tools.length === 0 && loop.consumeSteerMessages === undefined) {
     return runChatTurn(conversation, userInput, deps);
   }
   // user 消息入列 + 持久化(D-051 runAppendUserMessage 同语义;

@@ -13,7 +13,10 @@ import {
 import type { Conversation } from '../main/ets/index.ts';
 import {
   DEFAULT_SUGGESTION_PROMPT, buildSuggestionPrompt, runSuggestion,
+  buildLocalSuggestionContext, buildCloudSuggestionContext,
+  filterSuggestionCandidates, runContextAwareSuggestions,
 } from '../main/ets/chat/suggestion.ts';
+import type { UIMessage } from '../main/ets/index.ts';
 import { createMemoryConversationStore } from '../main/ets/chat/chat_turn.ts';
 
 const convWith = (texts: string[], suggestions: string[] = []): Conversation => ({
@@ -116,5 +119,47 @@ describe('runSuggestion', () => {
     });
     assert.ok(seen.includes('[USER]: 推荐几本科幻小说'));
     assert.ok(seen.includes('Use English language.'));
+  });
+});
+
+describe('P1-1 context-aware composer predictions', () => {
+  it('15 步工具回合在 24,000 字预算内仍保留首条用户提问与末尾结果', () => {
+    const toolParts = Array.from({ length: 15 }, (_v, i: number) => ({
+      type: 'tool' as const,
+      toolCallId: `c-${i}`,
+      toolName: `tool_${i}`,
+      input: '{}',
+      output: [{ type: 'text' as const, text: `step-${i}-` + 'x'.repeat(1800), metadata: null }],
+      approvalState: { type: 'auto' as const },
+      metadata: null,
+    }));
+    const messages: UIMessage[] = [
+      makeUserMessage('首条核心需求：排查 Harmony 内存泄漏'),
+      { ...makeAssistantMessage('最终定位到第 15 步持有未释放句柄。'), parts: [...toolParts, { type: 'text', text: '最终定位到第 15 步持有未释放句柄。', metadata: null }] },
+    ];
+    const ctx = buildLocalSuggestionContext(messages);
+    assert.ok(ctx !== null);
+    assert.ok(ctx.content.length <= 24000);
+    assert.ok(ctx.content.includes('首条核心需求：排查 Harmony 内存泄漏'));
+    assert.ok(ctx.content.includes('最终定位到第 15 步持有未释放句柄。'));
+  });
+
+  it('云端前置 ack: 不触发上下文构建，真实回复触发并限制最多 3 条且过滤废话', async () => {
+    const events = [
+      { seq: 1, id: 'u1', kind: 'user_message', role: 'user', text: '检查测试状态', topicId: 't1', workItemId: 'w1', outcome: null },
+      { seq: 2, id: 'ack:u1', kind: 'assistant_reply', role: 'assistant', text: '收到，我来处理…', topicId: 't1', workItemId: null, outcome: null },
+      { seq: 3, id: 'r1', kind: 'assistant_reply', role: 'assistant', text: '全部 3400+ 用例已通过。', topicId: 't1', workItemId: null, outcome: null },
+    ];
+    assert.equal(buildCloudSuggestionContext(events, 'ack:u1'), null);
+    const ctx = buildCloudSuggestionContext(events, 'r1');
+    assert.ok(ctx !== null);
+    assert.equal(ctx.content.includes('收到，我来处理'), false);
+
+    const out = await runContextAwareSuggestions(ctx, {
+      locale: '简体中文',
+      generateText: async () => '1. 好\n2. 继续检查构建产物\n3. "查看具体改动文件"\n- 运行 ArkTS 静态检查\n- 第四条应被截断',
+    });
+    assert.deepEqual(out, ['继续检查构建产物', '查看具体改动文件', '运行 ArkTS 静态检查']);
+    assert.deepEqual(filterSuggestionCandidates('好的\n[NO_SUGGESTION]', 'u', 'a'), []);
   });
 });

@@ -450,3 +450,93 @@ test('ChatCloudDialogueSession forwards connected gateway and polled soulRevisio
   assert.deepEqual(observedRevisions, [7]);
   session.dispose();
 });
+
+test('P0-2: C-SOUL-V1 isolates gateways via syncedGatewayId/originGatewayId and never cross-seeds blank new gateway', async () => {
+  const kv = createMemoryKv();
+  const appStorage = createAppStorageMock();
+  const store = new domain.AgentSoulStore(kv);
+
+  let activeGateway = 'gw-A';
+  let soulByGateway = {
+    'gw-A': {
+      revision: 12,
+      updatedAtMs: 1700000012000,
+      displayName: '网关A角色',
+      tagline: '来自A',
+      soulMarkdown: '我是网关 A 的人设。',
+      isDefault: false,
+      source: 'macos_ui',
+      history: [],
+    },
+    'gw-B': {
+      revision: 2,
+      updatedAtMs: 1700000020000,
+      displayName: '网关B角色',
+      tagline: '来自B',
+      soulMarkdown: '我是网关 B 的人设。',
+      isDefault: false,
+      source: 'macos_ui',
+      history: [],
+    },
+    'gw-C': {
+      revision: 0,
+      updatedAtMs: 0,
+      displayName: 'Amber',
+      tagline: '',
+      soulMarkdown: '',
+      isDefault: true,
+      source: 'default',
+      history: [],
+    },
+  };
+  const encodeJson = (obj) => new TextEncoder().encode(JSON.stringify(obj)).buffer;
+  const { mod: gatewayMod, rcpCalls } = loadMacGatewayModule(async (req) => {
+    if (req.method === 'GET' && req.url.endsWith('/v2/soul')) {
+      return { statusCode: 200, body: encodeJson(soulByGateway[activeGateway]) };
+    }
+    if (req.method === 'PUT' && req.url.endsWith('/v2/soul')) {
+      throw new Error(`Unexpected PUT /v2/soul on gateway ${activeGateway}`);
+    }
+    throw new Error(`Unexpected request: ${req.method} ${req.url}`);
+  }, kv);
+  const syncMod = loadAgentSoulSyncModule(gatewayMod, kv, appStorage);
+  const sync = new syncMod.AgentSoulCloudSynchronizer({
+    store,
+    loadConnection: async () => ({ ...TEST_CONN, gatewayId: activeGateway }),
+    clientFactory: (c) => gatewayMod.MacGatewayClient.of(c),
+  });
+
+  // 1) Sync from Gateway A (rev=12)
+  await sync.observeRemoteSoulRevision(12, { ...TEST_CONN, gatewayId: 'gw-A' });
+  const afterA = await store.load();
+  assert.equal(afterA.displayName, '网关A角色');
+  assert.equal(afterA.localLastSyncedRevision, 12);
+  assert.equal(afterA.syncedGatewayId, 'gw-A');
+  assert.equal(afterA.originGatewayId, 'gw-A');
+
+  // 2) Unpair clears syncedGatewayId and localLastSyncedRevision while keeping originGatewayId=gw-A
+  await sync.handleGatewayUnpaired();
+  const afterUnpair = await store.load();
+  assert.equal(afterUnpair.syncedGatewayId, null);
+  assert.equal(afterUnpair.localLastSyncedRevision, 0);
+  assert.equal(afterUnpair.originGatewayId, 'gw-A');
+
+  // 3) Connect Gateway B with lower revision (rev=2 < 12): authoritative alignment applies gw-B without PUT
+  activeGateway = 'gw-B';
+  await sync.observeRemoteSoulRevision(2, { ...TEST_CONN, gatewayId: 'gw-B' });
+  const afterB = await store.load();
+  assert.equal(afterB.displayName, '网关B角色');
+  assert.equal(afterB.localLastSyncedRevision, 2);
+  assert.equal(afterB.syncedGatewayId, 'gw-B');
+  assert.equal(afterB.originGatewayId, 'gw-B');
+  assert.equal(rcpCalls.filter((c) => c.method === 'PUT').length, 0);
+
+  // 4) Switch to blank Gateway C (rev=0): MUST NOT PUT gw-B's persona into gw-C; resets to default Amber
+  activeGateway = 'gw-C';
+  await sync.syncFromCloudOnce({ ...TEST_CONN, gatewayId: 'gw-C' });
+  const afterC = await store.load();
+  assert.equal(afterC.isDefault, true);
+  assert.equal(afterC.displayName, 'Amber');
+  assert.equal(afterC.syncedGatewayId, 'gw-C');
+  assert.equal(rcpCalls.filter((c) => c.method === 'PUT').length, 0);
+});

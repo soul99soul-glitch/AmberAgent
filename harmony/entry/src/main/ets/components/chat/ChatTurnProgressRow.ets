@@ -31,18 +31,22 @@ export struct ChatTurnProgressRow {
   build(): void {
     if (this.themeEpoch >= 0 && this.headline.length > 0) {
       Row({ space: 6 }) {
-        if (this.isActive()) {
-          LoadingProgress()
-            .width(12)
-            .height(12)
-            .color(this.accentColorStore)
-        } else {
-          Column()
-            .width(6)
-            .height(6)
-            .borderRadius(999)
-            .backgroundColor(this.dotColor())
+        Stack({ alignContent: Alignment.Center }) {
+          if (this.isActive()) {
+            LoadingProgress()
+              .width(12)
+              .height(12)
+              .color(this.accentColorStore)
+          } else {
+            Column()
+              .width(6)
+              .height(6)
+              .borderRadius(999)
+              .backgroundColor(this.dotColor())
+          }
         }
+        .width(14)
+        .height(14)
 
         Text(this.headline)
           .fontSize(12)

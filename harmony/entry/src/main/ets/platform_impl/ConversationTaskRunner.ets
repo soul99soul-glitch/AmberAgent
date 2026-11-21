@@ -8,7 +8,8 @@ import {
   newId, nowIso, currentMessages, makeUIMessage, makeMessageNode, toMessageNode,
   patchConversation, applyStopGeneration, createChatKernelHost, runAgenticToolLoop,
   conversationHasPendingTools, applyUserInputRegexes, finishReasoning, finishPendingTools,
-  cancelToolByUser, toText,
+  cancelToolByUser, toText, withFollowupReceiptMetadata,
+  type FollowupReceiptState,
 } from '@amber/chat-domain';
 import { EntryAbortController } from './EntryAbortController.ets';
 import { beginConversationRun } from './ConversationRunGuard.ets';
@@ -108,8 +109,12 @@ const replaceNodeMessageById = (
   return patchConversation(conversation, { messageNodes: nextNodes, updateAt: nowIso() });
 };
 
-const updateMessageTextById = (
-  conversation: Conversation, messageId: string, nextText: string,
+const updateFollowupReceiptById = (
+  conversation: Conversation,
+  messageId: string,
+  receiptState: FollowupReceiptState,
+  followupId: string,
+  taskId: string,
 ): Conversation => {
   if (messageId.length === 0) return conversation;
   let changed: boolean = false;
@@ -118,7 +123,10 @@ const updateMessageTextById = (
     const msgs: UIMessage[] = node.messages.map((msg: UIMessage): UIMessage => {
       if (msg.id !== messageId) return msg;
       nodeChanged = true; changed = true;
-      return makeUIMessage(msg.role, [{ type: 'text', text: nextText, metadata: null }], {
+      const nextParts: UIMessagePart[] = withFollowupReceiptMetadata(
+        msg.parts, receiptState, followupId, taskId,
+      );
+      return makeUIMessage(msg.role, nextParts, {
         id: msg.id, createdAt: msg.createdAt, finishedAt: msg.finishedAt,
         modelId: msg.modelId, usage: msg.usage, annotations: msg.annotations,
       });
@@ -325,8 +333,8 @@ export class ConversationTaskRunner {
             const cancelledInputs: LocalTaskInputRecord[] = cancelledInputsByConv.get(task.conversationId) ?? [];
             for (const inp of cancelledInputs) {
               if (inp.kind === 'followup' && inp.messageId.length > 0) {
-                nextConv = updateMessageTextById(
-                  nextConv, inp.messageId, formatLocalFollowupUserText(inp.text, 'cancelled', inp.taskId));
+                nextConv = updateFollowupReceiptById(
+                  nextConv, inp.messageId, 'not_applied', inp.requestId, inp.taskId);
               }
             }
             return nextConv;
@@ -443,9 +451,13 @@ export class ConversationTaskRunner {
     const requestId: string = newId();
     const now: number = Date.now();
     const cleanText: string = text.trim();
-    const userDisplayMsg: UIMessage = makeUIMessage('user', [
-      { type: 'text', text: formatLocalFollowupUserText(cleanText, 'received', targetTaskId), metadata: null },
-    ]);
+    const baseParts: UIMessagePart[] = parts.length > 0
+      ? parts.slice()
+      : [{ type: 'text', text: cleanText, metadata: null }];
+    const userDisplayMsg: UIMessage = makeUIMessage(
+      'user',
+      withFollowupReceiptMetadata(baseParts, 'queued', requestId, targetTaskId),
+    );
     const userNode: MessageNode = toMessageNode(userDisplayMsg);
 
     await this.runService.mutateStoredConversation(conversationId, (latest: Conversation): Conversation =>
@@ -506,8 +518,7 @@ export class ConversationTaskRunner {
           }),
         );
         for (const f of cancelledFollowups) {
-          nextConv = updateMessageTextById(
-            nextConv, f.messageId, formatLocalFollowupUserText(f.text, 'cancelled', taskId));
+          nextConv = updateFollowupReceiptById(nextConv, f.messageId, 'not_applied', f.requestId, taskId);
         }
         return nextConv;
       }).catch((): null => null);
@@ -523,8 +534,7 @@ export class ConversationTaskRunner {
       await this.runService.mutateStoredConversation(conversationId, (latest: Conversation): Conversation => {
         let nextConv: Conversation = latest;
         for (const f of cancelledFollowups) {
-          nextConv = updateMessageTextById(
-            nextConv, f.messageId, formatLocalFollowupUserText(f.text, 'cancelled', taskId));
+          nextConv = updateFollowupReceiptById(nextConv, f.messageId, 'not_applied', f.requestId, taskId);
         }
         return nextConv;
       }).catch((): null => null);
@@ -660,8 +670,8 @@ export class ConversationTaskRunner {
       await this.runService.mutateStoredConversation(task.conversationId, (latest: Conversation): Conversation => {
         let nextConv: Conversation = latest;
         for (const rec of consumedRecords) {
-          nextConv = updateMessageTextById(
-            nextConv, rec.messageId, formatLocalFollowupUserText(rec.text, 'consumed', task.taskId));
+          nextConv = updateFollowupReceiptById(
+            nextConv, rec.messageId, 'applied', rec.requestId, task.taskId);
         }
         return nextConv;
       }).catch((): null => null);
@@ -838,10 +848,29 @@ export class ConversationTaskRunner {
         return;
       }
       const errMsg: string = error instanceof Error ? error.message : String(error);
+      const now: number = Date.now();
       task.status = 'failed';
       task.progressText = sanitizeSingleLineProgress(`执行失败：${errMsg}`);
-      task.updatedAt = Date.now();
+      task.updatedAt = now;
+      const failedFollowups: LocalTaskInputRecord[] = [];
+      for (const inp of this.inputs) {
+        if (inp.taskId === task.taskId && inp.state === 'received') {
+          inp.state = 'cancelled';
+          inp.updatedAt = now;
+          if (inp.kind === 'followup') failedFollowups.push(inp);
+        }
+      }
+      this.pendingFollowups.delete(task.taskId);
       await projectToStoredConversation(true, `[执行失败：${errMsg}]`).catch((): null => null);
+      if (failedFollowups.length > 0) {
+        await this.runService.mutateStoredConversation(task.conversationId, (latest: Conversation): Conversation => {
+          let nextConv: Conversation = latest;
+          for (const f of failedFollowups) {
+            nextConv = updateFollowupReceiptById(nextConv, f.messageId, 'not_applied', f.requestId, task.taskId);
+          }
+          return nextConv;
+        }).catch((): null => null);
+      }
       await this.persistState();
       this.emit();
     }
@@ -871,8 +900,7 @@ export class ConversationTaskRunner {
       let nextConv: Conversation = replaceNodeMessageById(latest, task.assistantNodeId, partialMsg);
       nextConv = applyStopGeneration(nextConv, nowIso(), task.assistantNodeId) ?? nextConv;
       for (const f of cancelledFollowups) {
-        nextConv = updateMessageTextById(
-          nextConv, f.messageId, formatLocalFollowupUserText(f.text, 'cancelled', task.taskId));
+        nextConv = updateFollowupReceiptById(nextConv, f.messageId, 'not_applied', f.requestId, task.taskId);
       }
       return nextConv;
     }).catch((): null => null);

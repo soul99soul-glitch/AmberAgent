@@ -48,6 +48,7 @@ import {
   buildTopModelMenuGroups, loadProviders, loadDisplaySetting, makeDisplaySetting, isCloseEnoughToBottom,
   FOLLOW_BOTTOM_TOLERANCE_VP, makeMiniAppSetting, loadMiniAppSetting, runInteractiveTurn, type KernelPhase,
   appendSmartUiDraft, appendSmartUiContinuation, isExplicitSmartUiContinuation,
+  buildCloudSuggestionContext, runContextAwareSuggestions,
 } from '@amber/chat-domain';
 import type { MiniAppSetting } from '@amber/chat-domain';
 import type { ConversationRecap, ConversationRecapNode, RecapState } from '@amber/chat-domain';
@@ -59,7 +60,7 @@ import type { TopModelMenuGroup, ReasoningLevelOption, ReasoningLevel } from '@a
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, ChatRuntime, getConversationRunService,
   getConversationTaskRunner,
-  getChatKvStore, getCompactStore, ChatProviderChoice, prepareProviderApi, readTaskModelReference, TASK_TITLE_MODEL_KEY, TASK_COMPRESS_MODEL_KEY,
+  getChatKvStore, getCompactStore, ChatProviderChoice, prepareProviderApi, readTaskModelReference, TASK_TITLE_MODEL_KEY, TASK_SUGGESTION_MODEL_KEY, TASK_COMPRESS_MODEL_KEY,
   resolveTaskModelReference, loadTaskPrompts, TaskPrompts, initMcpManager, getAgentTaskTools,
   getAgentCronTools, hydrateSubAgentSetting, getSubAgentManager, isModelCouncilEnabled,
 } from '../di/AppContainer.ets';
@@ -169,6 +170,7 @@ import { ChatConversationPresentation } from '../platform_impl/chat/ChatConversa
 import { ChatComposerSession } from '../platform_impl/chat/ChatComposerSession.ets';
 import type { PendingDoc, PendingChipRow } from '../platform_impl/chat/ChatComposerSession.ets';
 import { ChatCloudDialogueSession } from '../platform_impl/chat/ChatCloudDialogueSession.ets';
+import type { CloudDialogueEvent } from '../platform_impl/MacGatewayClient.ets';
 import { ChatModelContextSession } from '../platform_impl/chat/ChatModelContextSession.ets';
 import { ChatModelMenuOverlay, ChatContextMeterOverlay, ChatCompactSummaryHost } from '../components/chat/ChatModelContextView.ets';
 import { ChatRunDetailsSession } from '../platform_impl/chat/ChatRunDetailsSession.ets';
@@ -560,6 +562,10 @@ struct ChatPage {
         const res = await sealIfIdleTimeoutExceeded(conv.id, messages, Date.now(), conv.messageNodes);
         if (res.sealed !== null) this.refineSealedEpisodeAsync(conv, res.sealed, messages);
       },
+      clearSuggestions: (): void => { this.presentation.suggestions = []; },
+      requestInputFocus: (): void => {
+        try { focusControl.requestFocus('chat_composer_textarea'); } catch (_e) {}
+      },
     };
     this.composer.start(composerPorts);
     this.cloudDialogue.start({
@@ -573,6 +579,9 @@ struct ChatPage {
       taskRunner: getConversationTaskRunner,
       onDialogueConnected: (c): void => { syncAgentSoulFromCloud(c); },
       onSoulRevision: (rev, c): void => { observeGatewaySoulRevision(rev, c); },
+      onCloudSuggestionEligible: (events, replyId): void => {
+        this.refreshCloudSuggestionsAsync(events, replyId);
+      },
     });
     this.modelContext.start({
       currentConversation: (): Conversation | null => this.presentation.conversation,
@@ -946,6 +955,43 @@ struct ChatPage {
     }
     // P4:IME 键盘高度监听(aboutToDisappear 注销;attach 异步取窗,pageAlive 守卫)
     this.timeline.attachKeyboardListener();
+  }
+
+  private refreshCloudSuggestionsAsync(events: CloudDialogueEvent[], replyId: string): void {
+    const running = this.cloudDialogue.runningTasks();
+    const pendingWork: string[] = running.slice(0, 8).map((t): string =>
+      t.progressText.length > 0 ? t.progressText : `${t.title} 仍在执行中`,
+    );
+    const ctx = buildCloudSuggestionContext(events, replyId, pendingWork);
+    if (ctx === null) return;
+    Promise.all([
+      loadTaskPrompts(),
+      readTaskModelReference(TASK_SUGGESTION_MODEL_KEY).then((ref) => resolveTaskModelReference(ref)),
+    ]).then(async (res): Promise<void> => {
+      const prompts = res[0];
+      const choice = res[1];
+      if (choice === null || !this.pageAlive || !this.cloudDialogue.isActiveMode()) return;
+      const suggestions = await runContextAwareSuggestions(ctx, {
+        locale: '简体中文',
+        template: prompts.suggestionPrompt,
+        generateText: async (prompt: string): Promise<string> => {
+          const headers: Record<string, string> = {};
+          for (const h of choice.model.customHeaders) {
+            const name: string = h.name.trim();
+            if (name.length > 0) headers[name] = h.value.trim();
+          }
+          const api: OpenAIChatApi = await prepareProviderApi(choice.provider, headers);
+          const chunk = await api.generateText([makeUserMessage(prompt)], makeTextGenerationParams({
+            model: toChatModel(choice.model), reasoningLevel: 'off', customBody: choice.model.customBodies,
+          }));
+          const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
+          return msg !== null ? toText(msg) : '';
+        },
+      });
+      if (this.pageAlive && this.cloudDialogue.isActiveMode() && this.composer.inputText.trim().length === 0) {
+        this.presentation.suggestions = suggestions;
+      }
+    }).catch((): void => {});
   }
 
   // 「+」新对话: 重置为一个全新会话(替换当前页)

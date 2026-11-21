@@ -42,7 +42,7 @@ export interface ConversationRunSnapshot {
   retryStatus: string; errorMsg: string; liveActivity: SandboxActivityUiState | null;
   pendingQueue: PendingUserMessage[]; contextCompacts: ConversationCompact[];
   contextWindowTokens: number | null; compactActiveCount: number;
-  completionNotice: JevCompletionNotice | null;
+  completionNotice: JevCompletionNotice | null; suggestions: string[];
   modelLabel: string; awaitingTools: boolean; jsSandboxNeeded: boolean; historyNodeCount: number;
 }
 export interface ConversationRunHandle {
@@ -204,7 +204,7 @@ const emptySnapshot = (id: string): ConversationRunSnapshot => ({
   visualConversation: null, conversationDeleted: false,
   streamingTail: [], regenTail: null, regenNodeId: '', retryStatus: '', errorMsg: '', liveActivity: null,
   pendingQueue: [], contextCompacts: [], contextWindowTokens: null, compactActiveCount: 0,
-  completionNotice: null, modelLabel: '', awaitingTools: false, jsSandboxNeeded: false, historyNodeCount: 0,
+  completionNotice: null, suggestions: [], modelLabel: '', awaitingTools: false, jsSandboxNeeded: false, historyNodeCount: 0,
 });
 const copySnapshot = (s: ConversationRunSnapshot): ConversationRunSnapshot => ({
   conversationId: s.conversationId, runId: s.runId, phase: s.phase, sending: s.sending,
@@ -214,7 +214,7 @@ const copySnapshot = (s: ConversationRunSnapshot): ConversationRunSnapshot => ({
   pendingQueue: s.pendingQueue.slice(), contextCompacts: s.contextCompacts.slice(),
   contextWindowTokens: s.contextWindowTokens, compactActiveCount: s.compactActiveCount,
   modelLabel: s.modelLabel, awaitingTools: s.awaitingTools, jsSandboxNeeded: s.jsSandboxNeeded,
-  historyNodeCount: s.historyNodeCount, completionNotice: s.completionNotice,
+  historyNodeCount: s.historyNodeCount, completionNotice: s.completionNotice, suggestions: s.suggestions.slice(),
 });
 
 export class ConversationRunService {
@@ -525,6 +525,7 @@ export class ConversationRunService {
     session.state.conversation = null; session.state.errorMsg = ''; session.state.retryStatus = '';
     session.state.visualConversation = null; session.state.conversationDeleted = false;
     session.state.streamingTail = []; session.state.regenTail = null; session.state.regenNodeId = '';
+    session.state.suggestions = [];
     session.state.liveActivity = null; session.state.compactActiveCount = 0;
     session.state.jsSandboxNeeded = false; session.state.historyNodeCount = 0;
     this.aggregate(); this.emit(session);
@@ -544,6 +545,7 @@ export class ConversationRunService {
     if (patch.contextWindowTokens !== undefined) session.state.contextWindowTokens = patch.contextWindowTokens;
     if (patch.modelLabel !== undefined) session.state.modelLabel = patch.modelLabel;
     if (patch.jsSandboxNeeded !== undefined) session.state.jsSandboxNeeded = patch.jsSandboxNeeded;
+    if (patch.suggestions !== undefined) session.state.suggestions = patch.suggestions.slice();
     this.emit(session);
   }
   activeContextConversation(context: DetachedConversationContext): Conversation {

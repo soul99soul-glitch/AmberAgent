@@ -177,6 +177,12 @@ export class AgentSoulCloudSynchronizer {
     }
   }
 
+  async handleGatewayUnpaired(): Promise<AgentSoulState> {
+    const state: AgentSoulState = await this.deps.store.handleGatewayUnpaired();
+    this.publish(state);
+    return state;
+  }
+
   private async doSyncFromCloud(explicitConn?: MacGatewayConnection | null): Promise<AgentSoulState> {
     const local: AgentSoulState = await this.deps.store.load();
     this.publish(local);
@@ -188,9 +194,10 @@ export class AgentSoulCloudSynchronizer {
       const remoteRaw: CloudAgentSoulPayload = await client.getSoul();
       const applyRes: AgentSoulRemoteApplyResult = await this.deps.store.applyRemoteSoul(
         toRemotePayload(remoteRaw),
+        conn.gatewayId,
       );
       if (applyRes.shouldSeedRemote) {
-        // 首次连接:服务端 revision == 0 且本地已有自定义非默认人设 → 一次性上传播种
+        // 首次连接:服务端 revision == 0 且本地已有与本网关相容的非默认人设 → 一次性上传播种
         await this.pushStateToCloud(applyRes.state, 'harmony_ui', conn);
         return await this.deps.store.load();
       }
@@ -216,13 +223,18 @@ export class AgentSoulCloudSynchronizer {
   ): Promise<void> {
     if (typeof soulRevision !== 'number' || !Number.isFinite(soulRevision)) return;
     const rev: number = Math.max(0, Math.floor(soulRevision));
+    const conn: MacGatewayConnection | null = await this.resolveConnection(explicitConn);
     const local: AgentSoulState = await this.deps.store.load();
+    if (conn !== null && local.syncedGatewayId !== conn.gatewayId) {
+      await this.syncFromCloudOnce(conn);
+      return;
+    }
     if (rev > local.localLastSyncedRevision) {
-      await this.syncFromCloudOnce(explicitConn);
+      await this.syncFromCloudOnce(conn);
       return;
     }
     if (rev === 0 && !local.isDefault && local.localLastSyncedRevision === 0) {
-      await this.syncFromCloudOnce(explicitConn);
+      await this.syncFromCloudOnce(conn);
     }
   }
 
@@ -243,7 +255,10 @@ export class AgentSoulCloudSynchronizer {
     };
     try {
       const remote: CloudAgentSoulPayload = await this.deps.clientFactory(conn).putSoul(req);
-      const synced: AgentSoulState = await this.deps.store.markSyncedFromPut(toRemotePayload(remote));
+      const synced: AgentSoulState = await this.deps.store.markSyncedFromPut(
+        toRemotePayload(remote),
+        conn.gatewayId,
+      );
       this.publish(synced);
     } catch (e) {
       const err: Error = e as Error;
@@ -300,7 +315,7 @@ export const getAgentSoulSynchronizer = (): AgentSoulCloudSynchronizer => {
     singletonKvRef = kv;
     singletonSync = new AgentSoulCloudSynchronizer({
       store: new AgentSoulStore(kv),
-      loadConnection: (): Promise<MacGatewayConnection | null> => loadMacGatewayConnection(),
+      loadConnection: (): Promise<MacGatewayConnection | null> => loadMacGatewayConnection(getChatKvStore()),
       clientFactory: (c: MacGatewayConnection): SoulGatewayClientLike => MacGatewayClient.of(c),
     });
   }
@@ -319,6 +334,9 @@ export const hydrateAgentSoulOnForeground = (): void => {
 export const syncAgentSoulFromCloud = (conn?: MacGatewayConnection | null): void => {
   getAgentSoulSynchronizer().syncFromCloudOnce(conn).catch((): void => {});
 };
+
+export const handleAgentSoulGatewayUnpaired = (): Promise<AgentSoulState> =>
+  getAgentSoulSynchronizer().handleGatewayUnpaired();
 
 export const observeGatewaySoulRevision = (
   soulRevision: number | undefined,

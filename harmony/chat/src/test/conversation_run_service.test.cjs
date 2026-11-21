@@ -195,6 +195,9 @@ function loadEntry(filename, imports, storage, cache = new Map()) {
       || name === './ChatSmartUiComponentFixture.ets') {
       return loadEntry(name, imports, storage, cache);
     }
+    if (name === './SSHForegroundApproval.ets') {
+      return { assertSSHForegroundApproval: async () => {} };
+    }
     throw new Error('Unexpected Entry dependency: ' + name);
   };
   vm.runInNewContext(source, { exports, require: requireEntry, AppStorage: storage,

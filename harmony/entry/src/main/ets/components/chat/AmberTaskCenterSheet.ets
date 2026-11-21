@@ -4,7 +4,7 @@
 // 诚实展示真实来源与状态（需你处理 / 后台运行中 / 最近完成），不伪造百分比进度条，支持原位补充说明与停止。
 
 import type { SubAgentManager, SubAgentRun } from '@amber/chat-domain';
-import { getConversationTaskRunner, getSubAgentManager } from '../../di/AppContainer.ets';
+import { getChatKvStore, getConversationTaskRunner, getSubAgentManager } from '../../di/AppContainer.ets';
 import {
   ChatCloudDialogueSession, type CloudDialogueTaskRecord,
 } from '../../platform_impl/chat/ChatCloudDialogueSession.ets';
@@ -97,7 +97,7 @@ export struct AmberTaskCenterSheet {
     }).catch((): void => {});
 
     if (this.cloudDialogue.paired) {
-      loadMacGatewayConnection().then(async (conn: MacGatewayConnection | null): Promise<void> => {
+      loadMacGatewayConnection(getChatKvStore()).then(async (conn: MacGatewayConnection | null): Promise<void> => {
         if (conn === null || !this.alive) return;
         try {
           const st: MacGatewayStatus = await MacGatewayClient.of(conn).status();

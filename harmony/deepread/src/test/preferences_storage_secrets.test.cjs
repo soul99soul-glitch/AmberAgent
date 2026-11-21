@@ -452,6 +452,7 @@ test('ProviderKeyVault.write rejects oversized id (>256) or field (>64) before t
     Uint8Array,
     AppStorage: { get: () => ({ filesDir: '/stub' }) },
     require: spec => {
+      if (spec === '@amber/chat-domain') return loadCodec();
       if (spec === '@kit.CoreFileKit') {
         return { fileIo: {
           lstatSync: p => {

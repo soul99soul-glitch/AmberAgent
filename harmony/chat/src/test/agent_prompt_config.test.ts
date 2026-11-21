@@ -15,6 +15,7 @@ import type {
 } from '../main/ets/chat/agent_prompt_config.ts';
 import type { AgentTool } from '../main/ets/chat/tool.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
+import { DEFAULT_AGENT_SOUL_MARKDOWN } from '../main/ets/chat/agent_soul_prompt.ts';
 
 // ===== 内存 PromptConfigFilePort =====
 
@@ -460,4 +461,15 @@ test('tool: settings failure preserves the written Markdown and does not claim a
   assert.match(files.readText('/files/agent_prompts/subagents.md'), /saved Markdown before KV/);
   const restored = await makeRepo(files).applySubAgentMarkdownToSetting(settings.subAgent);
   assert.equal(restored.overrides.get('explorer')?.systemPrompt, 'saved Markdown before KV');
+});
+
+test('P0-1: DEFAULT_AGENT_SOUL_MARKDOWN strips cross-platform hallucinated tools and aligns with Harmony tools', () => {
+  assert.equal(DEFAULT_AGENT_SOUL_MARKDOWN.includes('icloud_'), false);
+  assert.equal(DEFAULT_AGENT_SOUL_MARKDOWN.includes('officepro_'), false);
+  assert.equal(DEFAULT_AGENT_SOUL_MARKDOWN.includes('webview_open'), false);
+  assert.equal(DEFAULT_AGENT_SOUL_MARKDOWN.includes('Android'), false);
+  assert.equal(DEFAULT_AGENT_SOUL_MARKDOWN.includes('wm_open'), true);
+  assert.equal(DEFAULT_AGENT_SOUL_MARKDOWN.includes('wm_read_page'), true);
+  assert.equal(DEFAULT_AGENT_SOUL_MARKDOWN.includes('search_web'), true);
+  assert.equal(DEFAULT_AGENT_SOUL_MARKDOWN.includes('feishu_docs_read'), true);
 });

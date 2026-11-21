@@ -6,7 +6,7 @@ import { util } from '@kit.ArkTS';
 import type { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { Conversation, UIMessage, UIMessagePart, PendingUserMessage, PendingUserMessageMode, KeyValueStore, ChatTimelineRow, ImageGuardSettings, VisionModelHealth, DeepReadOpenEvent, MentionRoleItem, JevCompletionNotice, JevCompletionFacts, JevVerificationComposerAction } from '@amber/chat-domain';
-import { currentMessages, toText, loadSearchPrefs, SearchSettings, firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend, appendSmartUiContinuation, isExplicitSmartUiContinuation, appendSmartUiDraft, jevUnverifiedChanges, jevVerificationComposerAction, pendingPreviewText } from '@amber/chat-domain';
+import { currentMessages, toText, loadSearchPrefs, SearchSettings, firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend, appendSmartUiContinuation, isExplicitSmartUiContinuation, appendSmartUiDraft, jevUnverifiedChanges, jevVerificationComposerAction, pendingPreviewText, triageInboundTurn, makeUIMessage, toMessageNode, patchConversation, nowIso } from '@amber/chat-domain';
 import type { ChatProviderChoice } from '../../di/ChatRuntimeContracts.ets';
 import type { ConversationRunService, ConversationRunCommand, ConversationRunSnapshot, ConversationEditCommand, ConversationSendCommand } from '../ConversationRunService.ets';
 import type { SmartUiContinuationCapture } from './ChatSmartUiSession.ets';
@@ -75,6 +75,8 @@ export interface ChatComposerPorts {
   abilityContext: () => common.UIAbilityContext;
   cloudDialogue?: () => ChatCloudDialogueSession | null;
   sealIdleEpisode?: (conversation: Conversation) => Promise<void>;
+  clearSuggestions?: () => void;
+  requestInputFocus?: () => void;
 }
 
 @Observed
@@ -118,7 +120,13 @@ export class ChatComposerSession {
   hide(): void { this.pageVisible = false; this.inputFocused = false; this.sendPreflightSeq++; this.sendPrechecking = false; this.flushInputDraft(); this.queueSheetOpen = false; }
   dispose(): void { this.hide(); this.pageAlive = false; this.invalidatePicker(true); }
   setInputFocused(focused: boolean): void { this.inputFocused = focused; }
-  setInputText(value: string): void { this.inputText = value; this.onInputTextDraftChange(); }
+  setInputText(value: string): void {
+    this.inputText = value;
+    if (value.trim().length > 0 && this.ports?.clearSuggestions !== undefined) {
+      this.ports.clearSuggestions();
+    }
+    this.onInputTextDraftChange();
+  }
   appendSmartUiDraft(draft: string): void { this.setInputText(appendSmartUiDraft(this.inputText, draft)); }
 
   inputDraftKey(): string {
@@ -353,6 +361,10 @@ export class ChatComposerSession {
   restorePendingMessage(id: string): void {
     const owner: string = this.conversation?.id ?? '';
     if (owner.length === 0) return;
+    if (this.pendingImages.length > 0 || this.pendingDocs.length > 0) {
+      this.errorMsg = '请先发送或移除输入框中的附件，再回填这条消息。';
+      return;
+    }
     this.deps.runService.takePending(owner, id).then((pending: PendingUserMessage | null): void => {
       if (pending === null || !this.pageAlive || this.conversation?.id !== owner) return;
       const texts: string[] = [];
@@ -362,7 +374,12 @@ export class ChatComposerSession {
         else if (part.type === 'document') this.pendingDocs = [...this.pendingDocs,
           { url: part.url, fileName: part.fileName, mime: part.mime } as PendingDoc];
       }
-      this.setInputText([this.inputText, texts.join('\n')].filter((text: string): boolean => text.length > 0).join('\n'));
+      const existingDraft: string = this.inputText.trim();
+      const restoredText: string = texts.join('\n');
+      const nextText: string = existingDraft.length > 0
+        ? [this.inputText, restoredText].filter((part: string): boolean => part.length > 0).join('\n')
+        : restoredText;
+      this.setInputText(nextText);
       this.queueSheetOpen = false;
     }).catch((error: Error): void => { if (this.pageAlive && this.conversation?.id === owner) this.errorMsg = error.message; });
   }
@@ -581,7 +598,7 @@ export class ChatComposerSession {
     if (action.send) this.send();
   }
 
-  async send(queueMode: PendingUserMessageMode = 'FOLLOWUP'): Promise<void> {
+  async send(explicitQueueMode?: PendingUserMessageMode): Promise<void> {
     if (this.materializingImages || this.sendPrechecking) return;
     const text: string = this.inputText.trim();
     if ((text.length === 0 && this.pendingImages.length === 0 && this.pendingDocs.length === 0) ||
@@ -622,14 +639,61 @@ export class ChatComposerSession {
         this.editingNodeId !== editingNodeId || this.editingMessageId !== editingMessageId ||
         !this.deps.continuationCurrent(continuation)) return;
       this.deps.dismissKeyboard();
-      if (editingNodeId.length === 0 && cloud !== null && cloud.isLocalAsyncReady()) {
+      if (this.sending && editingNodeId.length === 0) {
+        if (explicitQueueMode !== undefined) {
+          await this.enqueuePendingParts(inputParts, true, explicitQueueMode);
+        } else {
+          const triage = triageInboundTurn(sendText, acceptedImages.length > 0 || acceptedDocs.length > 0, false);
+          if (triage.route === 'stop') {
+            const snap: ConversationRunSnapshot | null = this.deps.runService.snapshot(owner);
+            const activeRunId: string = snap?.runId ?? '';
+            if (activeRunId.length > 0) {
+              this.deps.runService.cancel(owner, activeRunId);
+            }
+            const replyText: string = activeRunId.length > 0 ? '已停止当前任务。' : '任务已结束。';
+            await this.deps.runService.mutateStoredConversation(owner, (latest: Conversation): Conversation => patchConversation(latest, {
+              messageNodes: latest.messageNodes.concat([
+                toMessageNode(makeUIMessage('user', inputParts)),
+                toMessageNode(makeUIMessage('assistant', [{ type: 'text', text: replyText, metadata: null }], { finishedAt: nowIso() })),
+              ]),
+              updateAt: nowIso(),
+            }));
+          } else if (triage.route === 'status') {
+            const snap: ConversationRunSnapshot | null = this.deps.runService.snapshot(owner);
+            const stage: string = snap?.liveActivity?.title
+              || snap?.liveActivity?.toolName
+              || (snap?.phase === 'executing_tools' ? '正在执行工具' : '正在生成回复');
+            await this.deps.runService.mutateStoredConversation(owner, (latest: Conversation): Conversation => patchConversation(latest, {
+              messageNodes: latest.messageNodes.concat([
+                toMessageNode(makeUIMessage('user', inputParts)),
+                toMessageNode(makeUIMessage('assistant', [{ type: 'text', text: `当前进展：${stage}。`, metadata: null }], { finishedAt: nowIso() })),
+              ]),
+              updateAt: nowIso(),
+            }));
+          } else if (triage.route === 'independent' && cloud !== null && cloud.isLocalAsyncReady()) {
+            const sent: boolean = await cloud.submitLocalComposer(owner, inputParts, sendText);
+            if (sent && this.pageAlive && this.conversation?.id === owner) {
+              this.clearAcceptedComposer(acceptedText, acceptedImages, acceptedDocs);
+            }
+            return;
+          } else {
+            const targetMode: PendingUserMessageMode = triage.route === 'independent' ? 'FOLLOWUP' : 'STEER';
+            await this.enqueuePendingParts(inputParts, true, targetMode);
+          }
+        }
+        if (this.pageAlive && this.conversation?.id === owner) {
+          this.clearAcceptedComposer(acceptedText, acceptedImages, acceptedDocs);
+        }
+        return;
+      }
+      if (editingNodeId.length === 0 && explicitQueueMode === undefined && cloud !== null && cloud.isLocalAsyncReady()) {
         const sent: boolean = await cloud.submitLocalComposer(owner, inputParts, sendText);
         if (sent && this.pageAlive && this.conversation?.id === owner) {
           this.clearAcceptedComposer(acceptedText, acceptedImages, acceptedDocs);
         }
         return;
       }
-      if (this.sending) await this.enqueuePendingParts(inputParts, true, queueMode);
+      if (this.sending) await this.enqueuePendingParts(inputParts, true, explicitQueueMode ?? 'FOLLOWUP');
       else if (editingNodeId.length > 0) {
         if (!this.sendEdit(text)) return;
       } else if (!this.sendParts(inputParts)) return;
@@ -677,16 +741,18 @@ export class ChatComposerSession {
     this.deps.runService.clearPending(this.conversation.id).catch((error: Error): void => { this.errorMsg = error.message; });
   }
 
-  sendSuggestion(text: string): void {
-    if (this.sending) {
-      this.gateModelConfigured((_choice: ChatProviderChoice): void => {
-        this.enqueuePendingParts([{ type: 'text', text: text, metadata: null }], true)
-          .catch((error: Error): void => { this.errorMsg = error.message; });
-      });
-      return;
-    }
+  fillSuggestion(text: string): void {
     this.setInputText(text);
-    this.send();
+    if (this.ports?.clearSuggestions !== undefined) {
+      this.ports.clearSuggestions();
+    }
+    if (this.ports?.requestInputFocus !== undefined) {
+      this.ports.requestInputFocus();
+    }
+  }
+
+  sendSuggestion(text: string): void {
+    this.fillSuggestion(text);
   }
 
 }

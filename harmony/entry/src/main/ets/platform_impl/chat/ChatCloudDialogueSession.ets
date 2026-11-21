@@ -4,6 +4,7 @@ import type {
 import {
   makeUIMessage, makeMessageNode, toMessageNode,
   patchConversation, newId, nowIso,
+  isUpfrontCloudAcknowledgement, triageInboundTurn,
 } from '@amber/chat-domain';
 import {
   MacGatewayClient, MacGatewayError, describeMacGatewayError,
@@ -43,7 +44,7 @@ export interface CloudDialogueTaskRecord {
   workItemId: string;
   topicId: string;
   title: string;
-  status: 'queued' | 'running' | 'completed' | 'blocked' | 'failed' | 'cancelled' | 'interrupted';
+  status: 'queued' | 'running' | 'completed' | 'blocked' | 'failed' | 'cancelled' | 'interrupted' | 'unknown';
   progressText: string;
   stopRequested: boolean;
   resultText: string;
@@ -85,6 +86,7 @@ export interface ChatCloudDialoguePorts {
   taskRunner?: () => ConversationTaskRunner | null;
   onDialogueConnected?: (connection: MacGatewayConnection) => void;
   onSoulRevision?: (soulRevision: number, connection: MacGatewayConnection) => void;
+  onCloudSuggestionEligible?: (events: CloudDialogueEvent[], replyId: string) => void;
 }
 
 export const formatCloudInputStateBadge = (
@@ -144,6 +146,7 @@ export class ChatCloudDialogueSession {
   private ports: ChatCloudDialoguePorts | null = null;
   private connection: MacGatewayConnection | null = null;
   private seenEventIds: string[] = [];
+  private recentEvents: CloudDialogueEvent[] = [];
   private pendingRetry: CloudDialoguePendingRetry | null = null;
   private pollTimer: number = -1;
   private pollInFlight: boolean = false;
@@ -224,7 +227,9 @@ export class ChatCloudDialogueSession {
 
   runningTasks(): CloudDialogueTaskRecord[] {
     if (this.isActiveMode()) {
-      return this.tasks.filter((t: CloudDialogueTaskRecord): boolean => t.status === 'running');
+      return this.tasks.filter(
+        (t: CloudDialogueTaskRecord): boolean => t.status === 'running' || t.status === 'unknown',
+      );
     }
     const runner: ConversationTaskRunner | null = this.localRunner();
     const convId: string = this.ports?.currentConversation()?.id ?? '';
@@ -266,7 +271,8 @@ export class ChatCloudDialogueSession {
     if (this.followupTargetWorkItemId.length === 0) return null;
     const found: CloudDialogueTaskRecord | undefined = this.runningTasks().find(
       (t: CloudDialogueTaskRecord): boolean =>
-        t.workItemId === this.followupTargetWorkItemId && (t.status === 'running' || t.status === 'queued'),
+        t.workItemId === this.followupTargetWorkItemId
+        && (t.status === 'running' || t.status === 'queued' || t.status === 'unknown'),
     );
     return found ?? null;
   }
@@ -379,6 +385,7 @@ export class ChatCloudDialogueSession {
     this.boundConversationId = '';
     this.cursor = 0;
     this.seenEventIds = [];
+    this.recentEvents = [];
     this.inputs = [];
     this.tasks = [];
     this.activeProgressText = '';
@@ -401,7 +408,8 @@ export class ChatCloudDialogueSession {
 
   private shouldPollCloud(): boolean {
     return this.paired && (this.enabled ||
-      this.tasks.some((task: CloudDialogueTaskRecord): boolean => task.status === 'running' || task.status === 'queued') ||
+      this.tasks.some((task: CloudDialogueTaskRecord): boolean =>
+        task.status === 'running' || task.status === 'queued' || task.status === 'unknown') ||
       this.inputs.some((input: CloudDialogueInputRecord): boolean => input.state === 'received'));
   }
 
@@ -551,6 +559,39 @@ export class ChatCloudDialogueSession {
         this.uiTick++;
         return true;
       }
+      const activeLocal: LocalTaskRecord[] = runner.activeAndQueuedTasksForConversation(conversationId);
+      if (activeLocal.length > 0) {
+        const hasAttachments: boolean = parts.some((p: UIMessagePart): boolean => p.type !== 'text');
+        const triage = triageInboundTurn(trimmed, hasAttachments, false);
+        const focusedTask: LocalTaskRecord = activeLocal[activeLocal.length - 1];
+        if (triage.route === 'stop') {
+          const targets: LocalTaskRecord[] = triage.stopAll ? activeLocal : [focusedTask];
+          let stoppedCount: number = 0;
+          for (const item of targets) {
+            if (await runner.stopTask(conversationId, item.taskId)) stoppedCount++;
+          }
+          const replyText: string = stoppedCount === 0
+            ? '任务已结束。'
+            : (triage.stopAll ? '已停止全部任务。' : '已停止当前任务。');
+          await this.appendControlExchange(conversationId, trimmed, replyText);
+          this.uiTick++;
+          return true;
+        }
+        if (triage.route === 'status') {
+          const stage: string = focusedTask.status === 'queued'
+            ? '等待本地执行槽位'
+            : (focusedTask.progressText.length > 0 ? focusedTask.progressText : '正在处理中');
+          await this.appendControlExchange(conversationId, trimmed, `当前进展：${stage}。`);
+          this.uiTick++;
+          return true;
+        }
+        if (triage.route === 'steer') {
+          await runner.submitFollowup(conversationId, focusedTask.taskId, parts, trimmed);
+          if (this.ports.autoScrollEnabled()) this.ports.jumpToBottom();
+          this.uiTick++;
+          return true;
+        }
+      }
       const fallbackConv: Conversation | null = this.ports.currentConversation();
       await runner.submitQuestion(conversationId, parts, trimmed, fallbackConv);
       if (this.ports.autoScrollEnabled()) this.ports.jumpToBottom();
@@ -560,6 +601,25 @@ export class ChatCloudDialogueSession {
       this.ports.error((e as Error).message);
       return false;
     }
+  }
+
+  private async appendControlExchange(
+    conversationId: string,
+    userText: string,
+    assistantText: string,
+  ): Promise<void> {
+    if (this.ports === null) return;
+    await this.ports.mutateConversation(conversationId, (latest: Conversation): Conversation => {
+      const userMsg: UIMessage = makeUIMessage('user', [{ type: 'text', text: userText, metadata: null }]);
+      const assistantMsg: UIMessage = makeUIMessage('assistant', [{ type: 'text', text: assistantText, metadata: null }], {
+        finishedAt: nowIso(),
+      });
+      return patchConversation(latest, {
+        messageNodes: latest.messageNodes.concat([toMessageNode(userMsg), toMessageNode(assistantMsg)]),
+        updateAt: nowIso(),
+      });
+    });
+    if (this.ports.autoScrollEnabled()) this.ports.jumpToBottom();
   }
 
   async stopTask(workItemId: string, explicitRequestId?: string): Promise<CloudDialogueReceipt | null> {
@@ -837,6 +897,7 @@ export class ChatCloudDialogueSession {
   }
 
   private async applyEvent(ev: CloudDialogueEvent): Promise<void> {
+    this.recentEvents = [...this.recentEvents, ev].slice(-60);
     const wid: string = ev.workItemId ?? '';
     const topicId: string = ev.topicId ?? '';
     if (ev.kind === 'user_message' || ev.kind === 'followup') {
@@ -862,13 +923,13 @@ export class ChatCloudDialogueSession {
       if (wid.length > 0) {
         this.ensureTaskRecord(wid, topicId, '');
         const idx: number = this.tasks.findIndex((t: CloudDialogueTaskRecord): boolean => t.workItemId === wid);
-        if (idx >= 0 && this.tasks[idx].status === 'running') {
+        if (idx >= 0 && (this.tasks[idx].status === 'running' || this.tasks[idx].status === 'unknown')) {
           const cur: CloudDialogueTaskRecord = this.tasks[idx];
           const nextTask: CloudDialogueTaskRecord = {
             workItemId: cur.workItemId,
             topicId: topicId.length > 0 ? topicId : cur.topicId,
             title: cur.title,
-            status: cur.status,
+            status: 'running',
             progressText: progressLine.length > 0 ? progressLine : cur.progressText,
             stopRequested: cur.stopRequested,
             resultText: cur.resultText,
@@ -883,17 +944,25 @@ export class ChatCloudDialogueSession {
       return;
     }
     if (ev.kind === 'assistant_reply') {
-      await this.markTopicInputsConsumed(topicId, wid);
+      const isAck: boolean = isUpfrontCloudAcknowledgement(ev);
+      if (!isAck) {
+        await this.markTopicInputsConsumed(topicId, wid);
+      }
       const msgId: string = `cloud-reply-${ev.id}`;
       await this.appendOrUpdateConversationMessage(this.conversationIdForTask(wid, topicId), msgId, 'assistant', ev.text);
+      if (!isAck && this.ports?.onCloudSuggestionEligible !== undefined) {
+        this.ports.onCloudSuggestionEligible(this.recentEvents.slice(), ev.id);
+      }
       return;
     }
     if (ev.kind === 'task_result') {
-      const outcomeRaw: string = ev.outcome ?? 'completed';
-      let finalStatus: 'completed' | 'blocked' | 'failed' | 'cancelled' = 'completed';
-      if (outcomeRaw === 'blocked') finalStatus = 'blocked';
+      const outcomeRaw: string = typeof ev.outcome === 'string' ? ev.outcome.trim() : '';
+      let finalStatus: 'completed' | 'blocked' | 'failed' | 'cancelled' | 'unknown' = 'unknown';
+      if (outcomeRaw === 'completed') finalStatus = 'completed';
+      else if (outcomeRaw === 'blocked') finalStatus = 'blocked';
       else if (outcomeRaw === 'failed') finalStatus = 'failed';
       else if (outcomeRaw === 'cancelled') finalStatus = 'cancelled';
+      const isUnknownOutcome: boolean = finalStatus === 'unknown';
       let taskTitle: string = wid.length > 0 ? `任务 ${shortWorkItemId(wid)}` : '云任务';
       if (wid.length > 0) {
         this.ensureTaskRecord(wid, topicId, '');
@@ -906,7 +975,9 @@ export class ChatCloudDialogueSession {
             topicId: topicId.length > 0 ? topicId : cur.topicId,
             title: cur.title,
             status: finalStatus,
-            progressText: '',
+            progressText: isUnknownOutcome
+              ? (sanitizeSingleLineProgress(ev.text) || '状态未明，等待服务端确认')
+              : '',
             stopRequested: cur.stopRequested,
             resultText: ev.text,
             updatedAt: Date.now(),
@@ -915,18 +986,25 @@ export class ChatCloudDialogueSession {
           next[idx] = nextTask;
           this.tasks = next;
         }
-        if (this.followupTargetWorkItemId === wid) {
+        if (!isUnknownOutcome && this.followupTargetWorkItemId === wid) {
           this.followupTargetWorkItemId = '';
         }
       }
       this.syncActiveProgressText();
       const statusLabel: string = finalStatus === 'completed'
         ? '已完成'
-        : (finalStatus === 'cancelled' ? '已停止' : (finalStatus === 'blocked' ? '需确认' : '失败'));
+        : (finalStatus === 'cancelled'
+          ? '已停止'
+          : (finalStatus === 'blocked'
+            ? '需确认'
+            : (finalStatus === 'failed' ? '失败' : '未知状态')));
       const header: string = `[${taskTitle} · ${statusLabel}]`;
       const body: string = ev.text.trim().length > 0 ? `${header}\n${ev.text}` : header;
       const msgId: string = `cloud-result-${ev.id}`;
       await this.appendOrUpdateConversationMessage(this.conversationIdForTask(wid, topicId), msgId, 'assistant', body);
+      if (finalStatus === 'completed' && this.ports?.onCloudSuggestionEligible !== undefined) {
+        this.ports.onCloudSuggestionEligible(this.recentEvents.slice(), ev.id);
+      }
     }
   }
 

@@ -11,6 +11,7 @@ import { notificationManager } from '@kit.NotificationKit';
 import { FONT_SANS } from '../design/fonts.ets';
 import { BG, INK3, ERROR, LABEL, META, TEXT_STYLES } from '../design/tokens.ets';
 import { CenteredTitleBar, PlainSection, CardGroup, FooterNote, NavRow, ToggleRow, BtnFill, BtnGhost, PageSpacer } from '../components/PageTemplate.ets';
+import { getChatKvStore } from '../di/AppContainer.ets';
 import {
   MacGatewayClient, MacGatewayError, describeMacGatewayError, parsePairingLink, loadMacGatewayConnection,
   forgetMacGatewayConnection, pairMacGateway, uploadMacGatewayPushToken,
@@ -19,7 +20,7 @@ import {
   type MacGatewayHealth,
 } from '../platform_impl/MacGatewayClient.ets';
 import {
-  observeGatewaySoulRevision, syncAgentSoulFromCloud,
+  handleAgentSoulGatewayUnpaired, observeGatewaySoulRevision, syncAgentSoulFromCloud,
 } from '../platform_impl/AgentSoulSync.ets';
 
 const REFRESH_INTERVAL_MS: number = 10000;
@@ -44,7 +45,8 @@ struct SettingMacGatewayPage {
   private disposed: boolean = false;
 
   aboutToAppear(): void {
-    Promise.all([loadMacGatewayConnection(), loadCloudDialogueEnabled()])
+    const kv = getChatKvStore();
+    Promise.all([loadMacGatewayConnection(kv), loadCloudDialogueEnabled(kv)])
       .then((res: [MacGatewayConnection | null, boolean]): void => {
         this.connection = res[0];
         this.cloudDialogueEnabled = res[0] !== null && res[1];
@@ -54,7 +56,7 @@ struct SettingMacGatewayPage {
   }
 
   onPageShow(): void {
-    loadCloudDialogueEnabled().then((enabled: boolean): void => {
+    loadCloudDialogueEnabled(getChatKvStore()).then((enabled: boolean): void => {
       this.cloudDialogueEnabled = this.connection !== null && enabled;
     }).catch((): void => {});
     this.startPolling();
@@ -121,10 +123,11 @@ struct SettingMacGatewayPage {
   private async forget(): Promise<void> {
     this.stopPolling();
     try {
-      await forgetMacGatewayConnection();
+      await forgetMacGatewayConnection(getChatKvStore());
     } catch (_e) {
       // 本地存储删除失败也要退出已配对界面;残留记录下次打开时会因 401 再次被清理
     }
+    handleAgentSoulGatewayUnpaired().catch((): void => {});
     this.connection = null;
     this.cloudDialogueEnabled = false;
     this.status = null;
@@ -164,7 +167,7 @@ struct SettingMacGatewayPage {
     if (p === null || this.busy) return;
     this.busy = true;
     try {
-      const c: MacGatewayConnection = await pairMacGateway(p);
+      const c: MacGatewayConnection = await pairMacGateway(p, getChatKvStore());
       this.pending = null;
       this.connection = c;
       this.showNotice('', false);
@@ -226,7 +229,7 @@ struct SettingMacGatewayPage {
     if (this.connection === null) return;
     const next: boolean = !this.cloudDialogueEnabled;
     this.cloudDialogueEnabled = next;
-    setCloudDialogueEnabled(next).catch((e: Error): void => {
+    setCloudDialogueEnabled(next, getChatKvStore()).catch((e: Error): void => {
       this.cloudDialogueEnabled = !next;
       this.showNotice(describeMacGatewayError(e), true);
     });

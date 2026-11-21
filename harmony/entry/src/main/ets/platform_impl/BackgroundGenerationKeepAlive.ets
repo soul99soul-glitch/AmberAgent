@@ -28,7 +28,7 @@ const LIVE_VIEW_TYPE_CODE: number = 8;
 const PUBLISH_MIN_INTERVAL_MS: number = 1000;
 
 export interface GenerationProgressSnapshot {
-  source: 'chat' | 'novel' | 'deepread';
+  source: 'chat';
   runId: string;
   generationActive: boolean;
   receivedChars: number;
@@ -36,7 +36,6 @@ export interface GenerationProgressSnapshot {
   title?: string;
   conversationId?: string;
   topicId?: string;
-  novelWorkspaceProjectId?: string;
 }
 
 const activities: Map<string, GenerationProgressSnapshot> = new Map();
@@ -69,11 +68,7 @@ const formatBytes = (bytes: number): string => {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 };
 
-const phaseLabel = (source: string): string => {
-  if (source === 'novel') return '创作中';
-  if (source === 'deepread') return '深读中';
-  return '回复中';
-};
+const phaseLabel = (_source: string): string => '回复中';
 
 const singleActivity = (): GenerationProgressSnapshot | undefined => {
   if (activities.size !== 1) return undefined;
@@ -90,7 +85,6 @@ const buildActivityWantAgent = (activity?: GenerationProgressSnapshot): Promise<
       parameters['topicId'] = activity.topicId;
       parameters['title'] = activity.title ?? '';
     }
-    else if (activity.novelWorkspaceProjectId) parameters['novelWorkspaceProjectId'] = activity.novelWorkspaceProjectId;
   }
   const want: Want = { bundleName: getAppBundleName(), abilityName: 'EntryAbility', parameters: parameters };
   return wantAgent.getWantAgent({
@@ -107,7 +101,7 @@ const flushPublish = async (): Promise<void> => {
   const activity: GenerationProgressSnapshot | undefined = singleActivity();
   const label: string = activity === undefined ? `${count} 个任务` : phaseLabel(activity.source);
   const title: string = activity !== undefined && activity.title ? `${activity.title.substring(0, 60)} · ${label}` : `Amber · ${label}`;
-  const signature: string = `${bytes}|${count}|${title}|${activity?.title ?? ''}|${activity?.conversationId ?? ''}|${activity?.topicId ?? ''}|${activity?.novelWorkspaceProjectId ?? ''}`;
+  const signature: string = `${bytes}|${count}|${title}|${activity?.title ?? ''}|${activity?.conversationId ?? ''}|${activity?.topicId ?? ''}`;
   if (signature === lastPublishedSignature) { dirty = false; return; }
   lastPublishAt = Date.now();
   dirty = false;

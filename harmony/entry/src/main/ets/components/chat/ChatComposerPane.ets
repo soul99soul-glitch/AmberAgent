@@ -12,7 +12,7 @@ import { ChatInput } from '../ChatInput.ets';
 import { ChatPendingQueueSheet } from '../ChatPendingQueueSheet.ets';
 import { JevCompletionNoticeView } from '../JevCompletionNotice.ets';
 import { Icon } from '../ui/Icon.ets';
-import { ACCENT, BG_FADE_END, BG_FADE_START, ERROR, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, INK, INK2, INK3, META, OVERLAY, SURFACE, SURFACE2 } from '../../design/tokens.ets';
+import { ACCENT, BG_FADE_END, BG_FADE_START, ERROR, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, INK, INK2, INK3, LINE, META, OVERLAY, SURFACE, SURFACE2 } from '../../design/tokens.ets';
 
 @Component
 export struct ChatComposerPane {
@@ -102,6 +102,51 @@ export struct ChatComposerPane {
       .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 20 }))
         .animation({ duration: 200, curve: Curve.EaseOut }))
     }
+  }
+
+  private effectiveSending(): boolean {
+    return this.presentation.sending || (!this.cloudDialogue.isActiveMode() && this.cloudDialogue.runningTasks().length > 0);
+  }
+
+  private stopActiveGeneration(): void {
+    if (this.presentation.sending) {
+      this.presentation.requestStop();
+      return;
+    }
+    if (!this.cloudDialogue.isActiveMode()) {
+      const running = this.cloudDialogue.runningTasks();
+      if (running.length > 0) {
+        this.cloudDialogue.stopTask(running[running.length - 1].workItemId);
+      }
+    }
+  }
+
+  @Builder
+  private SuggestionStrip(): void {
+    Scroll() {
+      Row({ space: 8 }) {
+        ForEach(this.presentation.suggestions.slice(0, 3), (item: string): void => {
+          Text(item)
+            .fontSize(12.5)
+            .fontColor(INK2)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .constraintSize({ maxWidth: 240 })
+            .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+            .backgroundColor(SURFACE2)
+            .borderRadius(999)
+            .border({ width: 0.75, color: LINE })
+            .onClick((): void => { this.composer.fillSuggestion(item); })
+            .accessibilityText(`填入建议：${item}`)
+        }, (item: string, idx: number): string => `comp-sg-${idx}-${item}`)
+      }
+      .padding({ left: 20, right: 20 })
+    }
+    .align(Alignment.TopStart)
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
+    .width('100%')
+    .margin({ bottom: 4 })
   }
 
   build(): void {
@@ -256,10 +301,16 @@ export struct ChatComposerPane {
 
         // 点「任务」或「中心」时临时收起输入框，保持组件挂载以保留草稿不丢失
         Column() {
+          if (this.presentation.suggestions.length > 0
+            && this.composer.inputText.trim().length === 0
+            && !this.effectiveSending()
+            && this.composer.editingNodeId.length === 0) {
+            this.SuggestionStrip()
+          }
           ChatInput({
-            disabled: ((this.storageDegraded || !this.presentation.conversationLoaded) && !this.presentation.sending) || this.manualCompacting,
+            disabled: ((this.storageDegraded || !this.presentation.conversationLoaded) && !this.effectiveSending()) || this.manualCompacting,
             text: this.composer.inputText,
-            sending: this.presentation.sending,
+            sending: this.effectiveSending(),
             queueCount: this.presentation.pendingQueue.length,
             onOpenQueue: (): void => { this.composer.queueSheetOpen = true; },
             onQueueSend: (mode: string): void => { this.composer.send(mode as PendingUserMessageMode); },
@@ -273,13 +324,11 @@ export struct ChatComposerPane {
             pasteLongTextAsFile: this.presentation.displaySettings.pasteLongTextAsFile,
             pasteLongTextThreshold: this.presentation.displaySettings.pasteLongTextThreshold,
             onTextChange: (v: string): void => {
-              animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
-                this.composer.setInputText(v);
-              });
+              this.composer.setInputText(v);
             },
             onSend: (): void => { this.composer.send(); },
             onStop: (): void => {
-              this.presentation.requestStop();
+              this.stopActiveGeneration();
             },
             onSendWithoutAnswer: (): void => { this.composer.sendWithoutAnswer(); },
             onPickImage: (): void => { this.composer.pickImages(); },

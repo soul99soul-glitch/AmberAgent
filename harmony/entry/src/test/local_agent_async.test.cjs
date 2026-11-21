@@ -341,7 +341,7 @@ test('local_agent_async: same conversation长 A → 问 B → 补充 A → 停�
       const allUserText = userTexts.join('\n');
 
       // Short Question B: answers immediately without waiting for A
-      if (allUserText.includes('短问题 B')) {
+      if (allUserText.includes('短问题 B') || allUserText.includes('独立问题 B')) {
         const msg = domain.makeUIMessage('assistant', [
           { type: 'text', text: '短问题 B 的回答：1+1=2', metadata: null },
         ]);
@@ -445,8 +445,8 @@ test('local_agent_async: same conversation长 A → 问 B → 补充 A → 停�
   assert.equal(activeAfterA[0].status, 'running');
   assert.ok(!activeAfterA[0].progressText.includes('\n'), 'Progress text must be single-line');
 
-  // 2. While Task A is still running Step 1, send Question B (normal message -> independent new question)
-  composer.setInputText('短问题 B：1+1等于几？');
+  // 2. While Task A is still running Step 1, send Question B (explicit independent prefix -> concurrent task B)
+  composer.setInputText('独立问题 B：1+1等于几？');
   await composer.send();
   assert.equal(composer.inputText, '');
 
@@ -658,4 +658,139 @@ test('local_agent_async: background keep-alive reporting and honest interrupted 
     `Expected interrupted marker in assistant message, got: ${assistantText}`,
   );
   neverResolves.resolve();
+});
+
+test('P0-3: triageInboundTurn routes stop/status/independent/default-steer, in-place followup receipts, attachment-safe restore, and fillSuggestion prefill', async () => {
+  assert.deepEqual(domain.triageInboundTurn('停。'), { route: 'stop', stopAll: false });
+  assert.deepEqual(domain.triageInboundTurn('全部停下！'), { route: 'stop', stopAll: true });
+  assert.deepEqual(domain.triageInboundTurn('现在到哪了？'), { route: 'status', stopAll: false });
+  assert.deepEqual(domain.triageInboundTurn('换个话题：帮我写首诗'), { route: 'independent', stopAll: false });
+  assert.deepEqual(domain.triageInboundTurn('改成用严格模式'), { route: 'steer', stopAll: false });
+  assert.deepEqual(domain.triageInboundTurn('顺便检查一下边界条件'), { route: 'steer', stopAll: false });
+  // Ambiguous defaults to STEER
+  assert.deepEqual(domain.triageInboundTurn('只看 chat 模块'), { route: 'steer', stopAll: false });
+
+  // Attachment-safe restorePendingMessage + fillSuggestion prefill (no auto-send)
+  const ChatComposerSession = loadChatComposerSession({
+    ...domain,
+    firstImageBlockingIssueForSend: async () => null,
+  });
+  let conv = domain.makeConversation('conv-p03');
+  let clearedSuggestions = 0;
+  let focusedInput = 0;
+  let takePendingCalls = 0;
+  let submits = 0;
+  const errors = [];
+  const composer = new ChatComposerSession();
+  composer.start({
+    kvStore: { get: async () => null, put: async () => {}, delete: async () => {} },
+    runService: {
+      isBusy: () => false,
+      append: async () => {},
+      enqueue: async () => {},
+      takePending: async () => { takePendingCalls++; return null; },
+      cancelPending: async () => {},
+      resumePending: async () => {},
+      clearPending: async () => {},
+      dismissCompletion: () => {},
+      snapshot: () => null,
+    },
+    currentConversation: () => conv,
+    isSending: () => false,
+    currentQueue: () => [],
+    currentCompletionNotice: () => null,
+    setCompletionNotice: () => {},
+    error: (m) => errors.push(m),
+    resolveChoice: async () => null,
+    loadOcrSeed: async () => ({}),
+    probeOcrHealth: async () => ({}),
+    submit: () => { submits++; return true; },
+    dismissKeyboard: () => {},
+    autoScrollEnabled: () => false,
+    jumpToBottom: () => {},
+    captureContinuation: () => null,
+    continuationAvailable: () => false,
+    continuationCurrent: () => true,
+    loadMentionRoles: async () => [],
+    abilityContext: () => ({}),
+    clearSuggestions: () => { clearedSuggestions++; },
+    requestInputFocus: () => { focusedInput++; },
+  });
+
+  // Restore while pendingImages is non-empty -> blocked, preserves draft & image, zero takePending calls
+  composer.setInputText('现有草稿');
+  composer.pendingImages = ['file:///tmp/photo.png'];
+  composer.restorePendingMessage('pending-1');
+  assert.equal(takePendingCalls, 0);
+  assert.equal(composer.inputText, '现有草稿');
+  assert.deepEqual(composer.pendingImages, ['file:///tmp/photo.png']);
+  assert.match(errors.at(-1), /请先发送或移除输入框中的附件/);
+
+  // fillSuggestion prefills draft + clears suggestions + requests focus, NEVER sends
+  composer.fillSuggestion('请给出最终改动清单');
+  assert.equal(composer.inputText, '请给出最终改动清单');
+  assert.equal(clearedSuggestions > 0, true);
+  assert.equal(focusedInput, 1);
+  assert.equal(submits, 0);
+
+  // LocalTaskRunner in-place followup receipt transitions: queued -> applied / not_applied
+  const env = createRuntimeEnvironment();
+  const convMap = new Map();
+  const baseConv = domain.makeConversation('conv-p03-receipts');
+  convMap.set(baseConv.id, baseConv);
+  const kvMap = new Map();
+  const storage = {
+    kv: {
+      get: async (k) => (kvMap.has(k) ? kvMap.get(k) : null),
+      put: async (k, v) => { kvMap.set(k, String(v)); },
+      delete: async (k) => { kvMap.delete(k); },
+    },
+    repository: {
+      getById: async (id) => convMap.get(id) ?? null,
+      save: async (c) => { convMap.set(c.id, c); },
+    },
+    compactStore: { getCompacts: async () => [], deleteByConversation: async () => {} },
+    loadAssistants: async () => [domain.makeAssistant({ id: 'a1', name: 'A' })],
+  };
+  const step1Gate = deferred();
+  const step1Started = deferred();
+  const step2Started = deferred();
+  let calls = 0;
+  const execution = makeFakeExecution({
+    streamHandler: async (_ctx, _msgs, onChunk, opts) => {
+      calls++;
+      if (calls === 1) {
+        onChunk({ choices: [{ delta: domain.makeAssistantMessage('第一阶段'), message: null, finishReason: null }], usage: null });
+        step1Started.resolve();
+        await step1Gate.promise;
+        onChunk({ choices: [{ delta: domain.makeAssistantMessage('完成阶段一'), message: null, finishReason: 'stop' }], usage: null });
+        return;
+      }
+      onChunk({ choices: [{ delta: domain.makeAssistantMessage('第二阶段'), message: null, finishReason: null }], usage: null });
+      step2Started.resolve();
+      await new Promise((_res, rej) => {
+        if (opts?.signal?.aborted) rej(new Error('aborted'));
+        else opts?.signal?.addEventListener?.('abort', () => rej(new Error('aborted')));
+      });
+    },
+  });
+  const runService = new env.ConversationRunService(storage, execution);
+  const runner = new env.ConversationTaskRunner(runService, 2);
+  const task = await runner.submitQuestion(baseConv.id, [{ type: 'text', text: '长任务', metadata: null }], '长任务', baseConv);
+  await step1Started.promise;
+
+  const f1 = await runner.submitFollowup(baseConv.id, task.taskId, [{ type: 'text', text: '追问1', metadata: null }], '追问1');
+  let msg1 = domain.currentMessages(convMap.get(baseConv.id)).find((m) => m.id === f1.messageId);
+  assert.equal(domain.readFollowupReceipt(msg1)?.state, 'queued');
+
+  step1Gate.resolve();
+  await step2Started.promise;
+  msg1 = domain.currentMessages(convMap.get(baseConv.id)).find((m) => m.id === f1.messageId);
+  assert.equal(domain.readFollowupReceipt(msg1)?.state, 'applied');
+
+  const f2 = await runner.submitFollowup(baseConv.id, task.taskId, [{ type: 'text', text: '追问2', metadata: null }], '追问2');
+  await runner.stopTask(baseConv.id, task.taskId);
+  await runner.waitForTask(task.taskId);
+  const msg2 = domain.currentMessages(convMap.get(baseConv.id)).find((m) => m.id === f2.messageId);
+  assert.equal(domain.readFollowupReceipt(msg2)?.state, 'not_applied');
 });

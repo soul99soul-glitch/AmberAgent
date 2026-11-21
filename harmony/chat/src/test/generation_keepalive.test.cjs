@@ -73,10 +73,10 @@ test('UIAbility owner survives WorkScheduler progress and the last run stops wit
   const { api, calls } = keepAliveFixture();
   const uiContext = { kind: 'UIAbilityContext' };
   const extensionContext = { kind: 'WorkSchedulerExtensionContext' };
-  api.reportGenerationProgress(uiContext, snap('novel', 'job', true, 0, 0));
+  api.reportGenerationProgress(uiContext, snap('chat', 'job', true, 0, 0));
   await api.setGenerationKeepAliveBackground(uiContext, true);
-  api.reportGenerationProgress(extensionContext, snap('novel', 'job', true, 10, 30));
-  api.reportGenerationProgress(extensionContext, snap('novel', 'job', false, 10, 30));
+  api.reportGenerationProgress(extensionContext, snap('chat', 'job', true, 10, 30));
+  api.reportGenerationProgress(extensionContext, snap('chat', 'job', false, 10, 30));
   await flush();
   assert.equal(calls.startContexts[0], uiContext);
   assert.equal(calls.stopContexts[0], uiContext);
@@ -87,10 +87,10 @@ test('UIAbility owner survives WorkScheduler progress and the last run stops wit
 test('cold WorkScheduler progress does not request a UIAbility background lease', async () => {
   const { api, calls } = keepAliveFixture();
   const extensionContext = { kind: 'WorkSchedulerExtensionContext' };
-  api.reportGenerationProgress(extensionContext, snap('novel', 'cold-job', true, 10, 30));
+  api.reportGenerationProgress(extensionContext, snap('chat', 'cold-job', true, 10, 30));
   await flush();
   assert.equal(calls.starts, 0);
-  api.reportGenerationProgress(extensionContext, snap('novel', 'cold-job', false, 10, 30));
+  api.reportGenerationProgress(extensionContext, snap('chat', 'cold-job', false, 10, 30));
   await flush();
   assert.equal(calls.stops, 0);
 });
@@ -107,7 +107,7 @@ test('outgoing notification metadata and click target follow the remaining activ
   assert.equal(request.content.systemLiveView.title, '会话 A · 回复中');
   assert.equal(request.wantAgent.info.wants[0].parameters.conversationId, 'conversation-A');
   // B has no output yet: membership alone must update request metadata and aggregate click target.
-  api.reportGenerationProgress(ctx, { ...snap('deepread', 'B', true, 0, 0), topicId: 'topic-B' });
+  api.reportGenerationProgress(ctx, { ...snap('chat', 'B', true, 0, 0), topicId: 'topic-B' });
   await tick();
   request = calls.publishes.at(-1);
   assert.equal(request.content.systemLiveView.capsule.title, 'Amber · 2 个任务');
@@ -115,10 +115,10 @@ test('outgoing notification metadata and click target follow the remaining activ
   api.reportGenerationProgress(ctx, { ...chat, generationActive: false });
   await tick();
   request = calls.publishes.at(-1);
-  assert.equal(request.content.systemLiveView.capsule.title, 'Amber · 深读中');
+  assert.equal(request.content.systemLiveView.capsule.title, 'Amber · 回复中');
   assert.equal(request.wantAgent.info.wants[0].parameters.topicId, 'topic-B');
   assert.equal(calls.stops, 0);
-  api.reportGenerationProgress(ctx, snap('deepread', 'B', false, 0, 0));
+  api.reportGenerationProgress(ctx, snap('chat', 'B', false, 0, 0));
   await flush();
   assert.equal(calls.stops, 1);
   await api.disposeGenerationKeepAlive(ctx);
@@ -127,8 +127,8 @@ test('outgoing notification metadata and click target follow the remaining activ
 test('replacement activity refreshes its full title when display prefix and bytes stay unchanged', async () => {
   const { api, calls } = keepAliveFixture();
   const prefix = '完整文章标题'.repeat(20);
-  const old = { ...snap('deepread', 'topic:1', true, 0, 0), topicId: 'topic', title: `${prefix}旧标题` };
-  const replacement = { ...snap('deepread', 'topic:2', true, 0, 0), topicId: 'topic', title: `${prefix}新标题` };
+  const old = { ...snap('chat', 'topic:1', true, 0, 0), topicId: 'topic', title: `${prefix}旧标题` };
+  const replacement = { ...snap('chat', 'topic:2', true, 0, 0), topicId: 'topic', title: `${prefix}新标题` };
   api.reportGenerationProgress(ctx, old);
   await api.setGenerationKeepAliveBackground(ctx, true);
   await tick();
@@ -152,7 +152,7 @@ test('replacement activity refreshes its full title when display prefix and byte
 test('A/B activity lifecycle: shared task, per-run removal, same-ID absolute progress, silence stays silent', async () => {
   const { api, calls } = keepAliveFixture();
   api.reportGenerationProgress(ctx, snap('chat', 'A', true, 0, 0));
-  api.reportGenerationProgress(ctx, snap('novel', 'B', true, 100, 300));
+  api.reportGenerationProgress(ctx, snap('chat', 'B', true, 100, 300));
   await api.setGenerationKeepAliveBackground(ctx, true);
   assert.equal(calls.starts, 1);
   await tick();
@@ -165,7 +165,7 @@ test('A/B activity lifecycle: shared task, per-run removal, same-ID absolute pro
   assert.equal(first.content.systemLiveView.progress.maxValue, undefined);
   // 静默不增长:同样的字节量不再产生新发布
   const before = calls.publishes.length;
-  api.reportGenerationProgress(ctx, snap('novel', 'B', true, 100, 300));
+  api.reportGenerationProgress(ctx, snap('chat', 'B', true, 100, 300));
   await tick();
   assert.equal(calls.publishes.length, before);
   // A 结束不能释放 B 的任务
@@ -173,10 +173,10 @@ test('A/B activity lifecycle: shared task, per-run removal, same-ID absolute pro
   await flush();
   assert.equal(calls.stops, 0);
   // 真实增长发布同 ID 新值;B 归零才停止
-  api.reportGenerationProgress(ctx, snap('novel', 'B', true, 200, 640));
+  api.reportGenerationProgress(ctx, snap('chat', 'B', true, 200, 640));
   await tick();
   assert.equal(calls.publishes.at(-1).content.systemLiveView.progress.currentValue, 640);
-  api.reportGenerationProgress(ctx, snap('novel', 'B', false, 200, 640));
+  api.reportGenerationProgress(ctx, snap('chat', 'B', false, 200, 640));
   await flush();
   assert.equal(calls.stops, 1);
   await api.setGenerationKeepAliveBackground(ctx, false);

@@ -54,6 +54,8 @@ export interface AgentSoulState {
   source: string;
   history: AgentSoulHistoryEntry[];
   localLastSyncedRevision: number;
+  syncedGatewayId: string | null;
+  originGatewayId: string | null;
 }
 
 export interface AgentSoulUpdatePatch {
@@ -128,6 +130,8 @@ export const defaultAgentSoulState = (): AgentSoulState => ({
   source: 'default',
   history: [],
   localLastSyncedRevision: 0,
+  syncedGatewayId: null,
+  originGatewayId: null,
 });
 
 const cloneHistoryEntry = (entry: AgentSoulHistoryEntry): AgentSoulHistoryEntry => ({
@@ -149,6 +153,8 @@ export const cloneAgentSoulState = (state: AgentSoulState): AgentSoulState => ({
   source: state.source,
   history: state.history.map(cloneHistoryEntry),
   localLastSyncedRevision: state.localLastSyncedRevision,
+  syncedGatewayId: state.syncedGatewayId,
+  originGatewayId: state.originGatewayId,
 });
 
 const samePersonaContent = (
@@ -249,7 +255,15 @@ interface PersistedAgentSoulJson {
   source?: string;
   history?: AgentSoulHistoryEntry[];
   localLastSyncedRevision?: number;
+  syncedGatewayId?: string | null;
+  originGatewayId?: string | null;
 }
+
+const normalizeGatewayId = (raw: string | null | undefined): string | null => {
+  if (typeof raw !== 'string') return null;
+  const trimmed: string = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
 
 export const parseAgentSoulState = (raw: string | null): AgentSoulState => {
   if (raw === null || raw.trim().length === 0) return defaultAgentSoulState();
@@ -274,6 +288,8 @@ export const parseAgentSoulState = (raw: string | null): AgentSoulState => {
       && Number.isFinite(parsed.localLastSyncedRevision)
       ? Math.max(0, Math.floor(parsed.localLastSyncedRevision))
       : revision;
+    const syncedGatewayId: string | null = normalizeGatewayId(parsed.syncedGatewayId);
+    const originGatewayId: string | null = normalizeGatewayId(parsed.originGatewayId);
     const source: string = typeof parsed.source === 'string' && parsed.source.trim().length > 0
       ? parsed.source.trim()
       : (isDefault ? 'default' : 'harmony_ui');
@@ -287,6 +303,8 @@ export const parseAgentSoulState = (raw: string | null): AgentSoulState => {
       source,
       history: normalizeHistoryList(parsed.history),
       localLastSyncedRevision,
+      syncedGatewayId,
+      originGatewayId,
     };
   } catch (_e) {
     return defaultAgentSoulState();
@@ -361,6 +379,8 @@ export class AgentSoulStore {
       source: patch.source.trim().length > 0 ? patch.source.trim() : 'harmony_ui',
       history: nextHistory,
       localLastSyncedRevision: current.localLastSyncedRevision,
+      syncedGatewayId: current.syncedGatewayId,
+      originGatewayId: nextIsDefault ? null : current.syncedGatewayId,
     };
     const saved: AgentSoulState = await this.saveInternal(next);
     return { state: saved, changed: true };
@@ -407,6 +427,8 @@ export class AgentSoulStore {
       source: source.trim().length > 0 ? source.trim() : 'harmony_ui',
       history: nextHistory,
       localLastSyncedRevision: current.localLastSyncedRevision,
+      syncedGatewayId: current.syncedGatewayId,
+      originGatewayId: nextIsDefault ? null : current.syncedGatewayId,
     };
     const saved: AgentSoulState = await this.saveInternal(next);
     return { state: saved, changed: true };
@@ -432,24 +454,102 @@ export class AgentSoulStore {
       source: source.trim().length > 0 ? source.trim() : 'harmony_ui',
       history: nextHistory,
       localLastSyncedRevision: current.localLastSyncedRevision,
+      syncedGatewayId: current.syncedGatewayId,
+      originGatewayId: null,
     };
     const saved: AgentSoulState = await this.saveInternal(next);
     return { state: saved, changed: true };
   }
 
   /**
-   * 应用服务端 GET /v2/soul 返回的状态(C-SOUL-V1):
-   *   - 若服务端 revision == 0 且本地已有非默认自定义人设,不覆盖本地并标记 shouldSeedRemote=true;
-   *   - 否则直接应用远端状态并更新 localLastSyncedRevision = remote.revision(绝不回环触发 PUT)。
+   * 解绑当前网关时清理已同步网关归属并归零同步游标；若当前存在未标来源的非默认人设，
+   * 记录 originGatewayId，防止后续连接到空白新网关时把旧网关人设反向播种过去。
    */
-  async applyRemoteSoul(remote: RemoteAgentSoulPayload): Promise<AgentSoulRemoteApplyResult> {
+  async handleGatewayUnpaired(): Promise<AgentSoulState> {
     const current: AgentSoulState = await this.load();
+    const nextOrigin: string | null = (current.syncedGatewayId !== null && current.originGatewayId === null && !current.isDefault)
+      ? current.syncedGatewayId
+      : current.originGatewayId;
+    if (current.syncedGatewayId === null && current.localLastSyncedRevision === 0 && nextOrigin === current.originGatewayId) {
+      return current;
+    }
+    const next: AgentSoulState = {
+      ...cloneAgentSoulState(current),
+      syncedGatewayId: null,
+      originGatewayId: nextOrigin,
+      localLastSyncedRevision: 0,
+    };
+    return this.saveInternal(next);
+  }
+
+  /**
+   * 切换到新网关时重置同步游标，并标记此前人设所属的 originGatewayId。
+   */
+  async prepareForGateway(gatewayId: string | null | undefined): Promise<AgentSoulState> {
+    const targetId: string | null = normalizeGatewayId(gatewayId);
+    const current: AgentSoulState = await this.load();
+    if (targetId === null || current.syncedGatewayId === targetId) return current;
+    const nextOrigin: string | null = (current.syncedGatewayId !== null && current.originGatewayId === null && !current.isDefault)
+      ? current.syncedGatewayId
+      : current.originGatewayId;
+    const next: AgentSoulState = {
+      ...cloneAgentSoulState(current),
+      syncedGatewayId: targetId,
+      originGatewayId: nextOrigin,
+      localLastSyncedRevision: 0,
+    };
+    return this.saveInternal(next);
+  }
+
+  private canBootstrapToUninitializedGateway(state: AgentSoulState, gatewayId: string | null): boolean {
+    if (state.isDefault) return false;
+    if (state.originGatewayId !== null) {
+      return gatewayId !== null && gatewayId === state.originGatewayId;
+    }
+    return true;
+  }
+
+  /**
+   * 应用服务端 GET /v2/soul 返回的状态(C-SOUL-V1):
+   *   - 若传入 gatewayId 与当前 syncedGatewayId 不一致，先按新网关重对齐游标与 originGatewayId；
+   *   - 若服务端 revision == 0：仅当本地非默认人设源自本机（originGatewayId == null）或同一网关时才允许播种，
+   *     禁止把网关 A 下发的人设反向播种到空白新网关 B；
+   *   - 否则直接按新网关权威修订对齐（支持新网关 revision < 旧网关 revision 的降位对齐）并更新 localLastSyncedRevision。
+   */
+  async applyRemoteSoul(
+    remote: RemoteAgentSoulPayload,
+    gatewayId?: string | null,
+  ): Promise<AgentSoulRemoteApplyResult> {
+    const incomingGatewayId: string | null = normalizeGatewayId(gatewayId);
+    let current: AgentSoulState = await this.load();
+    if (incomingGatewayId !== null && current.syncedGatewayId !== incomingGatewayId) {
+      current = await this.prepareForGateway(incomingGatewayId);
+    }
+    const effectiveGatewayId: string | null = incomingGatewayId ?? current.syncedGatewayId;
     const remoteRevision: number = typeof remote.revision === 'number' && Number.isFinite(remote.revision)
       ? Math.max(0, Math.floor(remote.revision))
       : 0;
     if (remoteRevision === 0) {
-      if (!current.isDefault) {
+      if (this.canBootstrapToUninitializedGateway(current, effectiveGatewayId)) {
         return { state: current, applied: false, shouldSeedRemote: true };
+      }
+      if (!current.isDefault && current.originGatewayId !== null && current.originGatewayId !== effectiveGatewayId) {
+        const archivedHistory: AgentSoulHistoryEntry[] = pushCurrentToHistory(current.history, current);
+        const resetState: AgentSoulState = {
+          revision: 0,
+          updatedAtMs: Date.now(),
+          displayName: DEFAULT_AGENT_SOUL_NAME,
+          tagline: '',
+          soulMarkdown: '',
+          isDefault: true,
+          source: 'default',
+          history: archivedHistory,
+          localLastSyncedRevision: 0,
+          syncedGatewayId: effectiveGatewayId,
+          originGatewayId: null,
+        };
+        const savedReset: AgentSoulState = await this.saveInternal(resetState);
+        return { state: savedReset, applied: true, shouldSeedRemote: false };
       }
       return { state: current, applied: false, shouldSeedRemote: false };
     }
@@ -474,6 +574,9 @@ export class AgentSoulStore {
       current,
       { displayName, tagline, soulMarkdown },
     );
+    const nextOrigin: string | null = isDefault
+      ? null
+      : (effectiveGatewayId ?? current.originGatewayId);
     const next: AgentSoulState = {
       revision: remoteRevision,
       updatedAtMs,
@@ -484,6 +587,8 @@ export class AgentSoulStore {
       source: typeof remote.source === 'string' && remote.source.trim().length > 0 ? remote.source.trim() : 'cloud',
       history: mergedHistory,
       localLastSyncedRevision: remoteRevision,
+      syncedGatewayId: effectiveGatewayId,
+      originGatewayId: nextOrigin,
     };
     const saved: AgentSoulState = await this.saveInternal(next);
     return { state: saved, applied: true, shouldSeedRemote: false };
@@ -492,11 +597,18 @@ export class AgentSoulStore {
   /**
    * 记录本地发起 PUT /v2/soul 成功后服务端返回的新 revision 与历史。
    */
-  async markSyncedFromPut(remote: RemoteAgentSoulPayload): Promise<AgentSoulState> {
+  async markSyncedFromPut(
+    remote: RemoteAgentSoulPayload,
+    gatewayId?: string | null,
+  ): Promise<AgentSoulState> {
     const current: AgentSoulState = await this.load();
-    const remoteRevision: number = typeof remote.revision === 'number' && Number.isFinite(remote.revision)
-      ? Math.max(current.revision, Math.floor(remote.revision))
+    const effectiveGatewayId: string | null = normalizeGatewayId(gatewayId) ?? current.syncedGatewayId;
+    const rawRev: number = typeof remote.revision === 'number' && Number.isFinite(remote.revision)
+      ? Math.max(0, Math.floor(remote.revision))
       : current.revision;
+    const remoteRevision: number = (effectiveGatewayId !== null && effectiveGatewayId === current.syncedGatewayId)
+      ? Math.max(current.revision, rawRev)
+      : rawRev;
     const remoteHistory: AgentSoulHistoryEntry[] = normalizeHistoryList(remote.history);
     const mergedHistory: AgentSoulHistoryEntry[] = normalizeHistoryList(
       remoteHistory.concat(current.history),
@@ -513,6 +625,8 @@ export class AgentSoulStore {
       source: current.source,
       history: mergedHistory,
       localLastSyncedRevision: remoteRevision,
+      syncedGatewayId: effectiveGatewayId,
+      originGatewayId: current.isDefault ? null : (effectiveGatewayId ?? current.originGatewayId),
     };
     return this.saveInternal(next);
   }

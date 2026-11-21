@@ -11,10 +11,13 @@
 
 import type { Conversation } from './conversation.ts';
 import { currentMessages } from './conversation.ts';
-import type { UIMessage } from './message.ts';
+import type { UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartTool } from './message.ts';
 import { summaryAsText } from './message.ts';
 import type { ConversationStore } from './chat_turn.ts';
 import { nowIso } from './ids.ts';
+
+export const SUGGESTION_CONTEXT_BUDGET: number = 24000;
+export const MAX_COMPOSER_SUGGESTIONS: number = 3;
 
 // DEFAULT_SUGGESTION_PROMPT — core/ai-prompts/Suggestion.kt:3-21 逐字(trimIndent 后)
 export const DEFAULT_SUGGESTION_PROMPT: string = `I will provide you with some chat content in the \`<content>\` block, including conversations between the User and the AI assistant.
@@ -64,4 +67,262 @@ export const runSuggestion = async (
   const out: Conversation = { ...conv, chatSuggestions: suggestions, updateAt: nowIso() };
   await deps.store.save(out);
   return out;
+};
+
+// ===== P1-1: 按完整用户回合分配 24,000 字预算的上下文预测（对齐 iOS ChatSuggestionContext） =====
+
+export interface SuggestionContextEntry {
+  role: 'User' | 'Assistant';
+  text: string;
+}
+
+export interface SuggestionContextOptions {
+  summary?: string | null;
+  pendingWork?: string[];
+  budget?: number;
+}
+
+export interface BuiltSuggestionContext {
+  content: string;
+  latestUserText: string;
+  latestAssistantText: string;
+}
+
+export interface CloudSuggestionEventLike {
+  seq: number;
+  id: string;
+  kind: string;
+  role: string;
+  text: string;
+  topicId?: string | null;
+  workItemId?: string | null;
+  outcome?: string | null;
+}
+
+export const excerptSuggestionText = (text: string, limit: number): string => {
+  if (text.length <= limit) return text;
+  const half: number = Math.max(0, Math.floor((limit - 24) / 2));
+  return `${text.substring(0, half)}\n[content omitted]\n${text.substring(text.length - half)}`;
+};
+
+export const buildTurnBudgetedSuggestionContext = (
+  entries: SuggestionContextEntry[],
+  options: SuggestionContextOptions = {},
+): BuiltSuggestionContext => {
+  const budget: number = Math.max(128, options.budget ?? SUGGESTION_CONTEXT_BUDGET);
+  let latestUserText: string = '';
+  let latestAssistantText: string = '';
+  for (let i: number = entries.length - 1; i >= 0; i--) {
+    if (latestUserText.length === 0 && entries[i].role === 'User') latestUserText = entries[i].text;
+    if (latestAssistantText.length === 0 && entries[i].role === 'Assistant') latestAssistantText = entries[i].text;
+    if (latestUserText.length > 0 && latestAssistantText.length > 0) break;
+  }
+
+  const turns: SuggestionContextEntry[][] = [];
+  for (const entry of entries) {
+    if (entry.role === 'User' || turns.length === 0) {
+      turns.push([]);
+    }
+    turns[turns.length - 1].push(entry);
+  }
+
+  let header: string = '';
+  const summary: string = (options.summary ?? '').trim();
+  if (summary.length > 0) {
+    header += `Earlier context summary:\n${summary.substring(0, Math.min(4000, Math.floor(budget / 3)))}\n\n`;
+  }
+  const pendingWork: string[] = (options.pendingWork ?? []).filter((s: string): boolean => s.trim().length > 0);
+  if (pendingWork.length > 0) {
+    const joined: string = pendingWork.slice(0, 8).join('\n').substring(0, Math.floor(budget / 6));
+    header += `Work still in progress (do not restart it):\n${joined}\n\n`;
+  }
+
+  const selected: string[] = [];
+  let remaining: number = Math.max(0, budget - header.length);
+  for (let i: number = turns.length - 1; i >= 0; i--) {
+    const turn: SuggestionContextEntry[] = turns[i];
+    const block: string = turn.map((e: SuggestionContextEntry): string => `${e.role}: ${e.text}`).join('\n\n');
+    if (block.length + 2 > remaining) {
+      if (selected.length === 0) {
+        // 超长工具回合：保留首条用户提问与末尾最多 8 条结果
+        const essentials: SuggestionContextEntry[] = turn.length > 9
+          ? [turn[0], ...turn.slice(turn.length - 8)]
+          : turn;
+        const perEntry: number = Math.max(24, Math.floor(remaining / Math.max(1, essentials.length)) - 20);
+        selected.push(
+          essentials
+            .map((e: SuggestionContextEntry): string => `${e.role}: ${excerptSuggestionText(e.text, perEntry)}`)
+            .join('\n\n'),
+        );
+      }
+      break;
+    }
+    selected.push(block);
+    remaining -= block.length + 2;
+  }
+
+  const body: string = selected.reverse().join('\n\n');
+  const full: string = header + body;
+  return {
+    content: full.length > budget ? full.substring(0, budget) : full,
+    latestUserText,
+    latestAssistantText,
+  };
+};
+
+export const buildLocalSuggestionContext = (
+  messages: UIMessage[],
+  options: SuggestionContextOptions = {},
+): BuiltSuggestionContext | null => {
+  if (messages.length === 0) return null;
+  const last: UIMessage = messages[messages.length - 1];
+  if (last.role !== 'assistant') return null;
+
+  const reversedEntries: SuggestionContextEntry[] = [];
+  let characters: number = 0;
+  const budget: number = Math.max(128, options.budget ?? SUGGESTION_CONTEXT_BUDGET);
+
+  for (let i: number = messages.length - 1; i >= 0; i--) {
+    const message: UIMessage = messages[i];
+    if (message.role !== 'user' && message.role !== 'assistant') continue;
+    const lines: string[] = [];
+    for (const part of message.parts) {
+      if (part.type === 'text') {
+        const txt: string = (part as UIMessagePartText).text;
+        if (txt.trim().length > 0) lines.push(excerptSuggestionText(txt, 8000));
+      } else if (part.type === 'tool') {
+        const tool: UIMessagePartTool = part as UIMessagePartTool;
+        const output: string = tool.output
+          .filter((p: UIMessagePart): boolean => p.type === 'text')
+          .map((p: UIMessagePart): string => (p as UIMessagePartText).text)
+          .join('\n');
+        if (output.trim().length > 0) {
+          lines.push(`Tool result [${tool.toolName}]: ${excerptSuggestionText(output, 2000)}`);
+        } else {
+          lines.push(`Tool [${tool.toolName}]: not completed`);
+        }
+      }
+    }
+    const value: string = lines.join('\n');
+    if (value.trim().length > 0) {
+      reversedEntries.push({
+        role: message.role === 'user' ? 'User' : 'Assistant',
+        text: value,
+      });
+      characters += value.length;
+    }
+    if (characters >= budget && message.role === 'user') break;
+  }
+
+  if (reversedEntries.length === 0) return null;
+  const entries: SuggestionContextEntry[] = reversedEntries.reverse();
+  const ctx: BuiltSuggestionContext = buildTurnBudgetedSuggestionContext(entries, options);
+  if (ctx.latestAssistantText.trim().length === 0) return null;
+  return ctx;
+};
+
+export const isUpfrontCloudAcknowledgement = (ev: CloudSuggestionEventLike): boolean => {
+  if (ev.kind !== 'assistant_reply') return false;
+  if (ev.outcome !== undefined && ev.outcome !== null && ev.outcome.trim().length > 0) return false;
+  if (ev.id.startsWith('ack:') || ev.id.startsWith('ack-')) return true;
+  if (ev.workItemId !== undefined && ev.workItemId !== null && ev.workItemId.trim().length > 0) return false;
+  const trimmed: string = ev.text.trim();
+  return trimmed.startsWith('收到，我来处理')
+    || trimmed.startsWith('收到，正在处理')
+    || trimmed.startsWith('正在处理，请稍候');
+};
+
+export const buildCloudSuggestionContext = (
+  events: CloudSuggestionEventLike[],
+  replyId: string,
+  pendingWork: string[] = [],
+): BuiltSuggestionContext | null => {
+  let reply: CloudSuggestionEventLike | null = null;
+  for (let i: number = events.length - 1; i >= 0; i--) {
+    if (events[i].id === replyId) {
+      reply = events[i];
+      break;
+    }
+  }
+  if (reply === null) return null;
+  if (reply.kind !== 'assistant_reply' && reply.kind !== 'task_result') return null;
+  if (reply.outcome === 'failed' || reply.outcome === 'cancelled') return null;
+  if (reply.kind === 'task_result' && reply.outcome !== 'completed') return null;
+  if (isUpfrontCloudAcknowledgement(reply)) return null;
+  if (reply.text.trim().length === 0) return null;
+
+  const entries: SuggestionContextEntry[] = [];
+  for (const ev of events) {
+    if (ev.seq > reply.seq) continue;
+    if (ev.kind === 'user_message' || ev.kind === 'followup') {
+      entries.push({ role: 'User', text: excerptSuggestionText(ev.text, 8000) });
+    } else if (ev.kind === 'assistant_reply' || ev.kind === 'task_result') {
+      if (isUpfrontCloudAcknowledgement(ev)) continue;
+      entries.push({ role: 'Assistant', text: excerptSuggestionText(ev.text, 8000) });
+    }
+  }
+  if (entries.length === 0) return null;
+  return buildTurnBudgetedSuggestionContext(entries, { pendingWork });
+};
+
+const normalizeSuggestionForDedup = (text: string): string =>
+  text.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+
+const GENERIC_SUGGESTIONS: Set<string> = new Set([
+  '好', '好的', '继续', '继续吧', '谢谢', 'ok', 'okay', 'yes', 'goon', 'nosuggestion', 'null', 'none',
+]);
+
+const ASSISTANT_SELF_PREFIXES: string[] = [
+  'assistant:', '作为ai', '作为一个ai', '我来帮你', '我可以帮你', '以下是', 'as an ai', 'i can help you', 'here are',
+];
+
+export const filterSuggestionCandidates = (
+  raw: string,
+  latestUserText: string = '',
+  latestAssistantText: string = '',
+): string[] => {
+  if (raw.includes('```') || raw.includes('[NO_SUGGESTION]')) return [];
+  const lines: string[] = raw.split(/\r?\n/).map((line: string): string => line.trim()).filter((line: string): boolean => line.length > 0);
+  const seen: Set<string> = new Set<string>();
+  const latestUserNorm: string = normalizeSuggestionForDedup(latestUserText);
+  const latestAssistantNorm: string = normalizeSuggestionForDedup(latestAssistantText);
+  const result: string[] = [];
+
+  for (const line of lines) {
+    const cleaned: string = line
+      .replace(/^\s*(?:[-*•]|\d+[.)、])\s+/, '')
+      .replace(/^["“”「」]+|["“”「」]+$/g, '')
+      .trim();
+    if (cleaned.length === 0 || cleaned.length > 160) continue;
+    if (cleaned.includes('```') || cleaned.includes('<content>')) continue;
+    if (/[\u0000-\u001F\u007F]/.test(cleaned)) continue;
+    const lower: string = cleaned.toLowerCase();
+    if (ASSISTANT_SELF_PREFIXES.some((prefix: string): boolean => lower.startsWith(prefix))) continue;
+    const norm: string = normalizeSuggestionForDedup(cleaned);
+    if (norm.length === 0 || GENERIC_SUGGESTIONS.has(norm)) continue;
+    if (norm === latestUserNorm || norm === latestAssistantNorm) continue;
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    result.push(cleaned);
+    if (result.length >= MAX_COMPOSER_SUGGESTIONS) break;
+  }
+  return result;
+};
+
+export interface ContextAwareSuggestionDeps {
+  generateText: (prompt: string) => Promise<string>;
+  locale: string;
+  template?: string;
+}
+
+export const runContextAwareSuggestions = async (
+  context: BuiltSuggestionContext,
+  deps: ContextAwareSuggestionDeps,
+): Promise<string[]> => {
+  const template: string = deps.template ?? DEFAULT_SUGGESTION_PROMPT;
+  const prompt: string = template
+    .split('{locale}').join(deps.locale)
+    .split('{content}').join(context.content);
+  const raw: string = await deps.generateText(prompt);
+  return filterSuggestionCandidates(raw, context.latestUserText, context.latestAssistantText);
 };

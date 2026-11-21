@@ -356,7 +356,7 @@ test('Cloud mode switch disabled keeps local composer path untouched; enabled ro
   assert.equal(composer.inputText, '保持本机草稿');
 
   // 2. Enable cloud mode explicitly: sends via cloud, zero local submits
-  await gatewayMod.setCloudDialogueEnabled(true);
+  await gatewayMod.setCloudDialogueEnabled(true, kv);
   await cloudSession.refreshConfigAndStart();
   assert.equal(cloudSession.isActiveMode(), true);
 
@@ -766,9 +766,9 @@ test('Live local amberd daemon E2E: 长 A → 问 B → 补充 A → 停止 A ov
   // Pair using HarmonyOS parsePairingLink + pairMacGateway
   const payload = gatewayMod.parsePairingLink(pairLink);
   assert.ok(payload !== null, 'parsePairingLink should parse CliMainKt pair link');
-  const pairedConn = await gatewayMod.pairMacGateway(payload);
+  const pairedConn = await gatewayMod.pairMacGateway(payload, kv);
   assert.ok(pairedConn.token.length > 0, 'pairMacGateway should store bearer token');
-  await gatewayMod.setCloudDialogueEnabled(true);
+  await gatewayMod.setCloudDialogueEnabled(true, kv);
 
   let conversation = domain.makeConversation('conv-live-amberd');
   const errors = [];
@@ -847,4 +847,124 @@ test('Live local amberd daemon E2E: 长 A → 问 B → 补充 A → 停止 A ov
   assert.ok(finalTexts.some(txt => txt.includes('ANSWER_B')), 'Conversation should contain Answer B');
   assert.ok(finalTexts.some(txt => txt.includes('已停止')), 'Conversation should contain stopped Task A result');
   assert.equal(errors.length, 0, `Unexpected errors: ${errors.join('; ')}`);
+});
+
+test('P0-2: unknown task_result outcome stays non-terminal, upfront ack: does not consume inputs or trigger suggestions', async () => {
+  const kv = createMemoryKv({
+    mac_gateway_connection_v1: JSON.stringify(SAMPLE_CONNECTION),
+    mac_gateway_cloud_dialogue_enabled_v1: 'true',
+  });
+  const { mod: gatewayMod } = loadMacGatewayModule(async () => ({ statusCode: 200, body: '{}' }), kv);
+  const cloudMod = loadCloudDialogueModule(gatewayMod);
+
+  let conversation = domain.makeConversation('conv-p02-outcome');
+  const suggestionTriggers = [];
+  let eventLog = [];
+
+  const mockClient = {
+    async messages(requestId) {
+      return {
+        eventId: 'ev-u-1',
+        requestId,
+        topicId: 'topic-p02',
+        workItemIds: ['work-p02'],
+        state: 'received',
+        replayed: false,
+      };
+    },
+    async inputs() { throw new Error('unused'); },
+    async stop() { throw new Error('unused'); },
+    async receipts(requestId) {
+      return {
+        eventId: 'ev-u-1',
+        requestId,
+        topicId: 'topic-p02',
+        workItemIds: ['work-p02'],
+        state: 'received',
+        replayed: true,
+      };
+    },
+    async events(after = 0) {
+      const items = eventLog.filter(e => e.seq > after);
+      return { items, nextCursor: items.length === 0 ? after : items[items.length - 1].seq };
+    },
+  };
+
+  const session = new cloudMod.ChatCloudDialogueSession();
+  session.start({
+    kvStore: kv,
+    currentConversation: () => conversation,
+    mutateConversation: async (_id, update) => {
+      const next = update(conversation);
+      if (next !== null) conversation = next;
+      return conversation;
+    },
+    error: (msg) => { throw new Error(msg); },
+    autoScrollEnabled: () => false,
+    jumpToBottom: () => {},
+    clientFactory: () => mockClient,
+    onCloudSuggestionEligible: (_events, replyId) => {
+      suggestionTriggers.push(replyId);
+    },
+  });
+  await session.refreshConfigAndStart();
+
+  assert.equal(await session.submitComposerText('执行远程任务'), true);
+  session.toggleFollowupTarget('work-p02');
+  assert.equal(session.inputs[0].state, 'received');
+
+  // 1) Upfront ack: assistant_reply must NOT consume received input or trigger suggestions
+  eventLog.push({
+    seq: 1,
+    id: 'ack:ev-u-1',
+    kind: 'assistant_reply',
+    role: 'assistant',
+    text: '收到，我来处理…',
+    topicId: 'topic-p02',
+    workItemId: null,
+    outcome: null,
+  });
+  await session.pollOnce();
+  assert.equal(session.cursor, 1);
+  assert.equal(session.inputs[0].state, 'received');
+  assert.deepEqual(suggestionTriggers, []);
+
+  // 2) Unknown task_result outcome must NOT mark task completed or clear followup target
+  eventLog.push({
+    seq: 2,
+    id: 'result:unknown-1',
+    kind: 'task_result',
+    role: 'assistant',
+    text: '阶段状态待确认',
+    topicId: 'topic-p02',
+    workItemId: 'work-p02',
+    outcome: 'awaiting_external_probe',
+  });
+  await session.pollOnce();
+  assert.equal(session.cursor, 2);
+  assert.equal(session.runningTasks().length, 1);
+  assert.equal(session.runningTasks()[0].status, 'unknown');
+  assert.equal(session.followupTargetWorkItemId, 'work-p02');
+  const msgs = domain.currentMessages(conversation).map(m => domain.toText(m));
+  assert.equal(msgs.some(t => t.includes('已完成')), false);
+  assert.equal(msgs.some(t => t.includes('未知状态')), true);
+  assert.deepEqual(suggestionTriggers, []);
+
+  // 3) Real completed task_result consumes/completes and triggers suggestions
+  eventLog.push({
+    seq: 3,
+    id: 'result:done-1',
+    kind: 'task_result',
+    role: 'assistant',
+    text: '全部检查已完成',
+    topicId: 'topic-p02',
+    workItemId: 'work-p02',
+    outcome: 'completed',
+  });
+  await session.pollOnce();
+  assert.equal(session.cursor, 3);
+  assert.equal(session.runningTasks().length, 0);
+  assert.equal(session.followupTargetWorkItemId, '');
+  assert.deepEqual(suggestionTriggers, ['result:done-1']);
+  session.dispose();
 });

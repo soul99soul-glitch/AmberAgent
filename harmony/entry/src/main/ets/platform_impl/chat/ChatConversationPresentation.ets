@@ -150,7 +150,7 @@ export class ChatConversationPresentation {
         this.unsavedConversationSeed = null;
         this.conversation = saved; this.displayedRunConversation = saved; this.conversationLoaded = true;
         this.deps.projectConversation(previous, saved);
-        this.title = saved.title || '对话'; this.suggestions = saved.chatSuggestions;
+        this.title = saved.title || '对话'; this.suggestions = [];
       }).catch((error: Error): void => {
         if (this.pageAlive && this.pageVisible && this.runConversationId === id) this.errorMsg = error.message;
       });
@@ -211,7 +211,7 @@ export class ChatConversationPresentation {
       this.conversationLoaded = true;
       const nextTitle: string = full.title || '对话';
       if (this.title !== nextTitle) this.title = nextTitle;
-      const nextSuggestions: string[] = full.chatSuggestions;
+      const nextSuggestions: string[] = snapshot.sending ? [] : (snapshot.suggestions ?? []);
       const suggestionsChanged: boolean = this.suggestions.length !== nextSuggestions.length ||
         this.suggestions.some((value: string, index: number): boolean => value !== nextSuggestions[index]);
       if (suggestionsChanged) this.suggestions = nextSuggestions;
@@ -300,7 +300,7 @@ export class ChatConversationPresentation {
     }
     this.conversation = restored;
     this.deps.resetTimeline(restored);
-    this.suggestions = restored.chatSuggestions;
+    this.suggestions = [];
     this.title = restored.title || '对话';
     this.loadedRestoreVersion = version;
     this.conversationLoaded = true;
