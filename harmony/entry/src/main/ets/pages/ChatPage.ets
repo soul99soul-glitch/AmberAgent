@@ -96,7 +96,6 @@ import { DotText } from '../components/ui/DotMatrix.ets';
 import { markWantRoutingReady } from '../entryability/EntryAbility.ets';
 import { ChatProgressiveEdgeBlur } from '../components/chat/ChatProgressiveEdgeBlur.ets';
 import { ChatTopBarOverlay, type TopBarNoticeItem } from '../components/chat/ChatTopBarOverlay.ets';
-import { AmberPersonaMedallion } from '../components/chat/AmberPersonaMedallion.ets';
 import type { BottomDockTab } from '../components/chat/AmberBottomModeBar.ets';
 import {
   loadEpisodeLedger, subscribeEpisodeLedger, startNewEpisode, sealIfIdleTimeoutExceeded,
@@ -1546,22 +1545,10 @@ struct ChatPage {
         },
       })
 
-      // 空状态 hero：居中于消息舞台上，避开顶栏悬垂岛与底栏
+      // 空状态 hero：居中于消息舞台上，顶栏已展示形象徽章，此处不再重复渲染第二枚头像
       if (this.presentation.conversationArrivedTick >= 0 && this.presentation.conversationLoaded && this.presentation.conversation !== null
         && this.timeline.rows.length === 0 && !this.presentation.sending) {
         Column() {
-          Column() {
-            AmberPersonaMedallion({
-              medallionSize: 72,
-              displayName: this.agentSoulDisplayName,
-              isDefault: this.agentSoulIsDefault,
-              sending: false,
-              sheetOpen: this.hasOverlaySheetOpen(),
-            })
-          }
-          .margin({ bottom: 14 })
-          .onClick((): void => { this.embodimentSheetOpen = true; })
-
           Row() {
             if (this.agentSoulIsDefault || this.agentSoulDisplayName === 'Amber') {
               DotText({ text: 'AMBER', dotScale: 3.4, color: INK, glow: true })

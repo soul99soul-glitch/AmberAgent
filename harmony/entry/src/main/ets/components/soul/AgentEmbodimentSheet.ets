@@ -1,19 +1,21 @@
-// AgentEmbodimentSheet — 单层形象人设面板（对齐 iOS AgentEmbodimentHomeSheet，禁止嵌套第二张 Sheet）
+// AgentEmbodimentSheet — 单层形象人设面板（对齐 iOS AgentEmbodimentHomeSheet + AmberPersonaStudio，禁止嵌套第二张 Sheet）
 // 顶部居中标题「形象人设」+ 胶囊「完成」（形象编辑态左侧显示「‹ 人设」）
 // 居中大圆形形象徽章 + 底部叠加「更换形象 ›」胶囊 + 称呼/引语签名 + 带滑动指示器的 3-Tab 分段条
-// 下方 3 Tab：人设 Soul（卡内原位编辑灵魂设定 + 快照回溯）| 记忆 Memory | 灵感 点子
+// 形象编辑态支持：内置预设、相册静态选图、AI 生成单张、AI 生成 4×4 四态动画精灵图（带四态实时动态预览）
 
 import { common } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
+import { image } from '@kit.ImageKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import type {
-  AgentSoulHistoryEntry, AgentSoulMutationResult, AgentSoulState,
+  AgentSoulHistoryEntry, AgentSoulMutationResult, AgentSoulState, AmberPersonaMood,
   MemoryPortrait, MemoryPortraitBucketFilter, MemoryPortraitDimension,
-  MemoryPortraitItem, MemoryRecord,
+  MemoryPortraitItem, MemoryRecord, SpriteSheetLayoutSpec,
 } from '@amber/chat-domain';
 import {
   DEFAULT_AGENT_SOUL_NAME, MAX_AGENT_SOUL_NAME_CHARS, MAX_AGENT_SOUL_TAGLINE_CHARS,
-  buildMemoryPortrait, computeIsAgentSoulDefault, normalizeAgentSoulDisplayName,
+  buildMemoryPortrait, computeIsAgentSoulDefault, detectPersonaSpriteSheetLayout,
+  normalizeAgentSoulDisplayName,
 } from '@amber/chat-domain';
 import {
   ACCENT, ACCENT_INK, BG, BODY2, ERROR, HOME_GLASS_SHADOW, INK, INK2, INK3, INK4, LINE, META,
@@ -27,6 +29,7 @@ import {
   restoreAgentSoulSnapshotFromUi, saveAgentSoulAvatarPrefs,
   syncAgentSoulFromCloud, updateAgentSoulFromUi,
 } from '../../platform_impl/AgentSoulSync.ets';
+import { generatePersonaImage, imageGenToolAvailable, type PersonaImageGenResult } from '../../platform_impl/ImageGenTool.ets';
 import { getMemoryLibraryOps } from '../../platform_impl/MemoryStore.ets';
 import { Icon } from '../ui/Icon.ets';
 
@@ -40,6 +43,11 @@ interface AvatarPresetOption {
 
 interface BucketChipOption {
   key: MemoryPortraitBucketFilter;
+  label: string;
+}
+
+interface MoodPreviewOption {
+  mood: AmberPersonaMood;
   label: string;
 }
 
@@ -64,6 +72,13 @@ const BUCKET_CHIPS: BucketChipOption[] = [
   { key: 'long_term', label: '长期' },
 ];
 
+const MOOD_PREVIEW_OPTIONS: MoodPreviewOption[] = [
+  { mood: 'idle', label: '待机' },
+  { mood: 'running', label: '思考' },
+  { mood: 'needs_input', label: '等待' },
+  { mood: 'blocked', label: '异常' },
+];
+
 const formatShortTime = (ms: number): string => {
   if (ms <= 0) return '未知时间';
   const d: Date = new Date(ms);
@@ -73,6 +88,23 @@ const formatShortTime = (ms: number): string => {
   const mi: string = String(d.getMinutes()).padStart(2, '0');
   return `${mm}-${dd} ${hh}:${mi}`;
 };
+
+// 对齐 iOS AmberPersonaSpriteSheetPrompt：单次请求生成 4×4 四态动画精灵图
+const buildPersonaSpriteSheetPrompt = (stylePrompt: string): string =>
+  `Character sprite sheet for the personal AI companion: ${stylePrompt}. ` +
+  'One single image containing a strict 4x4 grid: 4 equal columns and 4 equal rows, 16 equally sized cells, ' +
+  'generous even padding inside every cell, plain flat background, no text, no labels, no grid lines, no borders. ' +
+  'The same character appears in all 16 cells with identical face, hairstyle, outfit, palette, head-to-body ratio, ' +
+  'lighting, camera distance and framing; each cell is a front-facing centered bust that stays circular-crop friendly. ' +
+  'Row order top to bottom, each row is one 4-frame loop: ' +
+  'Row 1 idle: calm looking ahead, half blink, eyes closed breathing, eyes open with a small gaze drift. ' +
+  'Row 2 running: focused leaning forward, glancing left while reviewing, glancing right while reviewing, a small determined nod. ' +
+  'Row 3 needs input: head raised looking at the viewer, slight head tilt, a light wave, expectant attentive gaze. ' +
+  'Row 4 blocked: a brief startled freeze, sighing softly, hand on chin thinking, cheering up with head lifted.';
+
+const buildSinglePortraitPrompt = (stylePrompt: string): string =>
+  `Personal AI companion avatar portrait: ${stylePrompt}. ` +
+  'Centered circular-crop friendly bust composition, expressive eyes, warm editorial illustration quality, clean plain background, no text.';
 
 @Component
 export struct AgentEmbodimentSheet {
@@ -87,8 +119,13 @@ export struct AgentEmbodimentSheet {
   @State private activeTab: EmbodimentSheetTab = 'soul';
   @State private editingAvatar: boolean = false;
   @State private editingSoul: boolean = false;
-  @State private showAdvancedAvatarUrl: boolean = false;
+  @State private showStylePrompt: boolean = false;
+  @State private avatarPreviewMood: AmberPersonaMood = 'idle';
   @State private pickingAvatar: boolean = false;
+  @State private generatingAvatar: boolean = false;
+  @State private generatingHint: string = '';
+  @State private imageGenConfigured: boolean = false;
+  @State private stylePrompt: string = '';
   @State private loaded: boolean = false;
   @State private saving: boolean = false;
   @State private dirty: boolean = false;
@@ -112,6 +149,8 @@ export struct AgentEmbodimentSheet {
   private tabX: number[] = [0, 96, 192];
   private tabW: number[] = [96, 96, 96];
   private tabMeasured: boolean[] = [false, false, false];
+  private mounted: boolean = false;
+  private generationToken: number = 0;
 
   @State private memoryLoading: boolean = false;
   @State private memoryRecords: MemoryRecord[] = [];
@@ -124,18 +163,27 @@ export struct AgentEmbodimentSheet {
   onOpenMemoryTopics: () => void = (): void => {};
 
   aboutToAppear(): void {
+    this.mounted = true;
     this.draftPreset = this.avatarPresetStore;
     this.draftAvatarUri = this.avatarUriStore;
     this.draftAvatarSprite = this.avatarSpriteStore;
     this.hydrateSoul(true);
     loadAgentSoulAvatarPrefs().then((prefs): void => {
-      if (this.editingAvatar) return;
+      if (!this.mounted || this.editingAvatar) return;
       this.draftPreset = prefs.preset;
       this.draftAvatarUri = prefs.customUri;
       this.draftAvatarSprite = prefs.spriteSheet;
     }).catch((): void => {});
+    imageGenToolAvailable().then((available: boolean): void => {
+      if (this.mounted) this.imageGenConfigured = available;
+    }).catch((): void => {});
     syncAgentSoulFromCloud();
     this.refreshMemoryPortrait();
+  }
+
+  aboutToDisappear(): void {
+    this.mounted = false;
+    this.generationToken++;
   }
 
   onSoulStoreChanged(): void {
@@ -186,6 +234,7 @@ export struct AgentEmbodimentSheet {
 
   private hydrateSoul(overwriteDrafts: boolean): void {
     loadAgentSoulState(true).then((state: AgentSoulState): void => {
+      if (!this.mounted) return;
       this.isDefault = state.isDefault;
       this.revision = state.revision;
       this.source = state.source;
@@ -198,7 +247,7 @@ export struct AgentEmbodimentSheet {
       }
       this.loaded = true;
     }).catch((): void => {
-      this.loaded = true;
+      if (this.mounted) this.loaded = true;
     });
   }
 
@@ -206,14 +255,15 @@ export struct AgentEmbodimentSheet {
     this.memoryLoading = true;
     getMemoryLibraryOps().getAllRecords()
       .then((records: MemoryRecord[]): void => {
+        if (!this.mounted) return;
         this.memoryRecords = records;
         this.portrait = buildMemoryPortrait(records, { bucket: this.memoryBucket });
       })
       .catch((): void => {
-        this.portrait = buildMemoryPortrait([]);
+        if (this.mounted) this.portrait = buildMemoryPortrait([]);
       })
       .finally((): void => {
-        this.memoryLoading = false;
+        if (this.mounted) this.memoryLoading = false;
       });
   }
 
@@ -241,16 +291,34 @@ export struct AgentEmbodimentSheet {
     return '“温和克制的全能效率搭档”';
   }
 
+  private resolvedGenerationStylePrompt(): string {
+    const custom: string = this.stylePrompt.trim();
+    if (custom.length > 0) return custom;
+    const parts: string[] = [];
+    const name: string = this.previewName();
+    if (name.length > 0) parts.push(name);
+    const tagline: string = this.draftTagline.trim();
+    if (tagline.length > 0) parts.push(tagline);
+    if (parts.length > 0) return `${parts.join('，')}，温暖精致的插画风人物形象`;
+    return '温暖精致的插画风私人助手形象，柔和光线，干净浅色背景';
+  }
+
+  private soulOriginLabel(): string {
+    if (this.source === 'cloud') return '已与云端保持同步';
+    if (this.previewIsDefault()) return '当前使用默认人设';
+    return '已保存为当前形象设定';
+  }
+
   private setAvatarEditing(next: boolean): void {
     if (this.editingAvatar === next) return;
     const apply = (): void => {
       this.editingAvatar = next;
       this.notice = '';
+      this.avatarPreviewMood = 'idle';
       if (next) {
         this.draftPreset = this.avatarPresetStore;
         this.draftAvatarUri = this.avatarUriStore;
         this.draftAvatarSprite = this.avatarSpriteStore;
-        this.showAdvancedAvatarUrl = this.draftAvatarUri.startsWith('http://') || this.draftAvatarUri.startsWith('https://');
       }
     };
     if (this.reduceMotion) apply();
@@ -277,24 +345,25 @@ export struct AgentEmbodimentSheet {
   }
 
   private pickAvatarFromGallery(): void {
-    if (this.pickingAvatar) return;
+    if (this.pickingAvatar || this.generatingAvatar) return;
     this.pickingAvatar = true;
     const options: photoAccessHelper.PhotoSelectOptions = new photoAccessHelper.PhotoSelectOptions();
     options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
     options.maxSelectNumber = 1;
     const picker: photoAccessHelper.PhotoViewPicker = new photoAccessHelper.PhotoViewPicker();
     picker.select(options).then((result: photoAccessHelper.PhotoSelectResult): void => {
-      if (result.photoUris.length === 0) return;
+      if (!this.mounted || result.photoUris.length === 0) return;
       const copiedUri: string = this.copyPhotoToSandbox(result.photoUris[0]);
       if (copiedUri.length > 0) {
+        // 普通相册照片始终按单张静态头像处理，绝不盲切 4×4 网格
         this.draftAvatarUri = copiedUri;
         this.draftAvatarSprite = false;
-        this.setFeedback('已选中相册图片，点击「保存形象」生效', false);
+        this.setFeedback('已选中静态照片，可直接保存，或点「生成 4×4 动图」基于它生成动画形象', false);
       }
     }).catch((): void => {
       // 用户取消选择不视为错误
     }).finally((): void => {
-      this.pickingAvatar = false;
+      if (this.mounted) this.pickingAvatar = false;
     });
   }
 
@@ -316,39 +385,105 @@ export struct AgentEmbodimentSheet {
     }
   }
 
+  private async readImageDimensions(filePath: string): Promise<SpriteSheetLayoutSpec> {
+    const src: image.ImageSource = image.createImageSource(filePath);
+    try {
+      const info: image.ImageInfo = await src.getImageInfo();
+      return detectPersonaSpriteSheetLayout(info.size.width, info.size.height);
+    } finally {
+      try { await src.release(); } catch (_e) {}
+    }
+  }
+
+  private runAiAvatarGeneration(asSpriteSheet: boolean): void {
+    if (this.generatingAvatar) return;
+    this.generatingAvatar = true;
+    this.generatingHint = asSpriteSheet ? '正在生成 4×4 四态动画形象…' : '正在生成静态形象…';
+    this.setFeedback('', false);
+    const token: number = ++this.generationToken;
+    const style: string = this.resolvedGenerationStylePrompt();
+    const prompt: string = asSpriteSheet
+      ? buildPersonaSpriteSheetPrompt(style)
+      : buildSinglePortraitPrompt(style);
+    // 若用户已选静态参考图（非已有精灵图），自动带入作为图生图参考保持角色一致
+    const refUri: string | undefined = (!this.draftAvatarSprite && this.draftAvatarUri.trim().length > 0)
+      ? this.draftAvatarUri.trim()
+      : undefined;
+
+    generatePersonaImage(prompt, refUri)
+      .then(async (res: PersonaImageGenResult): Promise<void> => {
+        if (!this.mounted || token !== this.generationToken) return;
+        if (asSpriteSheet) {
+          const spec: SpriteSheetLayoutSpec = await this.readImageDimensions(res.filePath);
+          if (!this.mounted || token !== this.generationToken) return;
+          if (spec.kind !== 'quad4x4') {
+            this.setFeedback('生成图未满足 4×4 网格比例，原有形象已保留，可重试。', true);
+            return;
+          }
+          this.draftAvatarUri = res.fileUri;
+          this.draftAvatarSprite = true;
+          this.avatarPreviewMood = 'idle';
+          this.setFeedback('4×4 动画形象已生成，可在上方切换情绪预览并保存', false);
+        } else {
+          this.draftAvatarUri = res.fileUri;
+          this.draftAvatarSprite = false;
+          this.setFeedback('静态形象已生成，点击「保存形象」生效', false);
+        }
+      })
+      .catch((err: Error): void => {
+        if (!this.mounted || token !== this.generationToken) return;
+        this.setFeedback(err.message, true);
+      })
+      .finally((): void => {
+        if (this.mounted && token === this.generationToken) {
+          this.generatingAvatar = false;
+          this.generatingHint = '';
+        }
+      });
+  }
+
+  private cancelAiGeneration(): void {
+    this.generationToken++;
+    this.generatingAvatar = false;
+    this.generatingHint = '';
+    this.setFeedback('已取消本次形象生成', false);
+  }
+
   private saveAvatarSettings(): void {
-    if (this.saving) return;
+    if (this.saving || this.generatingAvatar) return;
     this.saving = true;
     this.setFeedback('', false);
     saveAgentSoulAvatarPrefs(this.draftPreset, this.draftAvatarUri, this.draftAvatarSprite)
       .then((): void => {
+        if (!this.mounted) return;
         this.setAvatarEditing(false);
         this.setFeedback('形象外观已更新', false);
       })
       .catch((err: Error): void => {
-        this.setFeedback(`保存失败：${err.message}`, true);
+        if (this.mounted) this.setFeedback(`保存失败：${err.message}`, true);
       })
       .finally((): void => {
-        this.saving = false;
+        if (this.mounted) this.saving = false;
       });
   }
 
   private resetAvatarSettings(): void {
-    if (this.saving) return;
+    if (this.saving || this.generatingAvatar) return;
     this.saving = true;
     this.setFeedback('', false);
     saveAgentSoulAvatarPrefs('muse', '', false)
       .then((): void => {
+        if (!this.mounted) return;
         this.draftPreset = 'muse';
         this.draftAvatarUri = '';
         this.draftAvatarSprite = false;
         this.setFeedback('已恢复默认灵狐形象', false);
       })
       .catch((err: Error): void => {
-        this.setFeedback(`恢复失败：${err.message}`, true);
+        if (this.mounted) this.setFeedback(`恢复失败：${err.message}`, true);
       })
       .finally((): void => {
-        this.saving = false;
+        if (this.mounted) this.saving = false;
       });
   }
 
@@ -358,6 +493,7 @@ export struct AgentEmbodimentSheet {
     this.setFeedback('', false);
     updateAgentSoulFromUi(this.draftName, this.draftTagline, this.draftMarkdown)
       .then((res: AgentSoulMutationResult): void => {
+        if (!this.mounted) return;
         this.isDefault = res.state.isDefault;
         this.revision = res.state.revision;
         this.source = res.state.source;
@@ -370,10 +506,10 @@ export struct AgentEmbodimentSheet {
         this.setFeedback('灵魂设定已保存', false);
       })
       .catch((err: Error): void => {
-        this.setFeedback(`保存失败：${err.message}`, true);
+        if (this.mounted) this.setFeedback(`保存失败：${err.message}`, true);
       })
       .finally((): void => {
-        this.saving = false;
+        if (this.mounted) this.saving = false;
       });
   }
 
@@ -383,6 +519,7 @@ export struct AgentEmbodimentSheet {
     this.setFeedback('', false);
     resetAgentSoulFromUi()
       .then((res: AgentSoulMutationResult): void => {
+        if (!this.mounted) return;
         this.isDefault = res.state.isDefault;
         this.revision = res.state.revision;
         this.source = res.state.source;
@@ -395,10 +532,10 @@ export struct AgentEmbodimentSheet {
         this.setFeedback('已恢复默认 Amber 性格设定', false);
       })
       .catch((err: Error): void => {
-        this.setFeedback(`恢复失败：${err.message}`, true);
+        if (this.mounted) this.setFeedback(`恢复失败：${err.message}`, true);
       })
       .finally((): void => {
-        this.saving = false;
+        if (this.mounted) this.saving = false;
       });
   }
 
@@ -408,6 +545,7 @@ export struct AgentEmbodimentSheet {
     this.setFeedback('', false);
     restoreAgentSoulSnapshotFromUi(entry.id)
       .then((res: AgentSoulMutationResult): void => {
+        if (!this.mounted) return;
         this.isDefault = res.state.isDefault;
         this.revision = res.state.revision;
         this.source = res.state.source;
@@ -419,10 +557,10 @@ export struct AgentEmbodimentSheet {
         this.setFeedback(`已切回「${res.state.displayName}」`, false);
       })
       .catch((err: Error): void => {
-        this.setFeedback(`切回失败：${err.message}`, true);
+        if (this.mounted) this.setFeedback(`切回失败：${err.message}`, true);
       })
       .finally((): void => {
-        this.saving = false;
+        if (this.mounted) this.saving = false;
       });
   }
 
@@ -483,10 +621,11 @@ export struct AgentEmbodimentSheet {
             displayName: this.previewName(),
             isDefault: this.previewIsDefault(),
             sending: false,
+            mood: this.editingAvatar ? this.avatarPreviewMood : 'idle',
             customAvatarUri: this.editingAvatar ? this.draftAvatarUri : this.avatarUriStore,
             previewPreset: this.editingAvatar ? this.draftPreset : '',
             previewSpriteSheet: this.editingAvatar ? this.draftAvatarSprite : this.avatarSpriteStore,
-            sheetOpen: true,
+            sheetOpen: false,
           })
         }
         .onClick((): void => { this.setAvatarEditing(true); })
@@ -512,6 +651,26 @@ export struct AgentEmbodimentSheet {
         }
       }
       .padding({ bottom: this.editingAvatar ? 2 : 8 })
+
+      // 形象编辑态且为动图或内置动画形象时，允许切换 4 种情绪实时预览动画效果
+      if (this.editingAvatar && (this.draftAvatarSprite || this.draftAvatarUri.trim().length === 0)) {
+        Row({ space: 6 }) {
+          ForEach(MOOD_PREVIEW_OPTIONS, (opt: MoodPreviewOption): void => {
+            Text(opt.label)
+              .fontSize(11.5)
+              .fontWeight(this.avatarPreviewMood === opt.mood ? FontWeight.Medium : FontWeight.Normal)
+              .fontColor(this.avatarPreviewMood === opt.mood ? this.accentColorStore : INK3)
+              .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+              .borderRadius(999)
+              .backgroundColor(this.avatarPreviewMood === opt.mood ? accentSoftBg(this.accentColorStore) : SURFACE)
+              .border({
+                width: 0.75,
+                color: this.avatarPreviewMood === opt.mood ? accentEdge(this.accentColorStore) : LINE,
+              })
+              .onClick((): void => { this.avatarPreviewMood = opt.mood; })
+          }, (opt: MoodPreviewOption): string => opt.mood)
+        }
+      }
 
       Column({ space: 4 }) {
         Text(this.previewName())
@@ -595,6 +754,168 @@ export struct AgentEmbodimentSheet {
   @Builder
   private AvatarEditorContent(): void {
     Column({ space: 14 }) {
+      // 1. 相册静态照片 + AI 生成（对齐 iOS AmberPersonaStudioContent）
+      Column({ space: 12 }) {
+        Text('自定义与 AI 生成')
+          .fontSize(13.5)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(INK)
+          .width('100%')
+
+        Row({ space: 10 }) {
+          Row({ space: 6 }) {
+            Icon({ name: 'image', iconSize: 16, color: ACCENT_INK })
+            Text(this.pickingAvatar ? '打开相册中…' : '相册选图')
+              .fontSize(13.5)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(ACCENT_INK)
+          }
+          .layoutWeight(1)
+          .height(42)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .borderRadius(12)
+          .backgroundColor(this.accentColorStore)
+          .opacity(this.generatingAvatar ? 0.55 : 1)
+          .onClick((): void => { this.pickAvatarFromGallery(); })
+
+          if (this.draftAvatarUri.trim().length > 0) {
+            Row() {
+              Text('清除图片')
+                .fontSize(13)
+                .fontColor(INK2)
+            }
+            .height(42)
+            .padding({ left: 14, right: 14 })
+            .borderRadius(12)
+            .backgroundColor(BG)
+            .border({ width: 0.75, color: LINE })
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .onClick((): void => {
+              this.draftAvatarUri = '';
+              this.draftAvatarSprite = false;
+            })
+          }
+        }
+        .width('100%')
+
+        if (this.generatingAvatar) {
+          Row({ space: 10 }) {
+            LoadingProgress()
+              .width(18)
+              .height(18)
+              .color(this.accentColorStore)
+            Column({ space: 2 }) {
+              Text(this.generatingHint.length > 0 ? this.generatingHint : '正在生成形象…')
+                .fontSize(12.5)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(INK)
+              Text('生成完成后会自动在上方预览，确认后点击保存即可')
+                .fontSize(11)
+                .fontColor(INK3)
+            }
+            .alignItems(HorizontalAlign.Start)
+            .layoutWeight(1)
+
+            Text('取消')
+              .fontSize(12)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(ERROR)
+              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+              .borderRadius(999)
+              .backgroundColor(BG)
+              .onClick((): void => { this.cancelAiGeneration(); })
+          }
+          .width('100%')
+          .padding(12)
+          .borderRadius(12)
+          .backgroundColor(BG)
+          .border({ width: 0.75, color: LINE })
+          .alignItems(VerticalAlign.Center)
+        } else {
+          Row({ space: 10 }) {
+            Row({ space: 5 }) {
+              Icon({ name: 'spark', iconSize: 14, color: this.accentColorStore })
+              Text('生成多帧动图')
+                .fontSize(13)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.accentColorStore)
+            }
+            .layoutWeight(1)
+            .height(38)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .borderRadius(11)
+            .backgroundColor(accentSoftBg(this.accentColorStore))
+            .border({ width: 0.75, color: accentEdge(this.accentColorStore) })
+            .onClick((): void => { this.runAiAvatarGeneration(true); })
+
+            Row({ space: 5 }) {
+              Icon({ name: 'spark', iconSize: 14, color: INK2 })
+              Text('AI 生成单张')
+                .fontSize(13)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(INK2)
+            }
+            .layoutWeight(1)
+            .height(38)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .borderRadius(11)
+            .backgroundColor(BG)
+            .border({ width: 0.75, color: LINE })
+            .onClick((): void => { this.runAiAvatarGeneration(false); })
+          }
+          .width('100%')
+        }
+
+        Row({ space: 8 }) {
+          Text(this.imageGenConfigured
+            ? (this.draftAvatarUri.trim().length > 0 && !this.draftAvatarSprite
+              ? '点「生成多帧动图」会基于当前照片自动生成四态动画'
+              : 'AI 生图会结合下方描述词生成形象')
+            : '未配置生图模型时，可直接从相册选静态照片')
+            .fontSize(11.5)
+            .fontColor(INK3)
+            .layoutWeight(1)
+
+          Row({ space: 3 }) {
+            Text(this.showStylePrompt ? '收起描述' : '生成描述词')
+              .fontSize(11.5)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(INK2)
+            Icon({ name: 'chevron_down', iconSize: 11, color: INK3 })
+              .rotate({ angle: this.showStylePrompt ? 180 : 0 })
+          }
+          .onClick((): void => {
+            animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
+              this.showStylePrompt = !this.showStylePrompt;
+            });
+          })
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        if (this.showStylePrompt) {
+          TextArea({ text: this.stylePrompt, placeholder: '描述期望的外貌、画风或服饰（留空按当前人设自动生成）' })
+            .height(72)
+            .fontSize(13)
+            .fontColor(INK)
+            .backgroundColor(BG)
+            .borderRadius(10)
+            .border({ width: 0.75, color: LINE })
+            .padding(10)
+            .onChange((v: string): void => { this.stylePrompt = v; })
+        }
+      }
+      .width('100%')
+      .padding(14)
+      .borderRadius(18)
+      .backgroundColor(SURFACE)
+      .border({ width: 0.75, color: LINE })
+
+      // 2. 内置预设网格
       Column({ space: 10 }) {
         Text('内置形象预设')
           .fontSize(13.5)
@@ -622,105 +943,6 @@ export struct AgentEmbodimentSheet {
       .backgroundColor(SURFACE)
       .border({ width: 0.75, color: LINE })
 
-      Column({ space: 10 }) {
-        Text('自定义图片')
-          .fontSize(13.5)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(INK)
-          .width('100%')
-
-        Row({ space: 10 }) {
-          Row({ space: 6 }) {
-            Icon({ name: 'image', iconSize: 16, color: this.accentColorStore })
-            Text(this.pickingAvatar ? '打开相册中…' : '从相册选择图片')
-              .fontSize(13.5)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.accentColorStore)
-          }
-          .layoutWeight(1)
-          .height(42)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(VerticalAlign.Center)
-          .borderRadius(12)
-          .backgroundColor(accentSoftBg(this.accentColorStore))
-          .border({ width: 0.75, color: accentEdge(this.accentColorStore) })
-          .onClick((): void => { this.pickAvatarFromGallery(); })
-
-          if (this.draftAvatarUri.trim().length > 0) {
-            Text('清除图片')
-              .fontSize(13)
-              .fontColor(INK2)
-              .height(42)
-              .padding({ left: 14, right: 14 })
-              .borderRadius(12)
-              .backgroundColor(SURFACE2)
-              .textAlign(TextAlign.Center)
-              .onClick((): void => {
-                this.draftAvatarUri = '';
-                this.draftAvatarSprite = false;
-              })
-          }
-        }
-        .width('100%')
-
-        if (this.draftAvatarUri.trim().length > 0) {
-          Row() {
-            Column({ space: 2 }) {
-              Text('按 4×4 动画图集解析')
-                .fontSize(13)
-                .fontColor(INK)
-              Text('四行情绪 × 四帧动态关键帧')
-                .fontSize(11)
-                .fontColor(INK3)
-            }
-            .alignItems(HorizontalAlign.Start)
-            .layoutWeight(1)
-            Toggle({ type: ToggleType.Switch, isOn: this.draftAvatarSprite })
-              .selectedColor(this.accentColorStore)
-              .onChange((enabled: boolean): void => { this.draftAvatarSprite = enabled; })
-          }
-          .width('100%')
-          .padding({ top: 4 })
-        }
-
-        Divider().color(LINE).strokeWidth(0.5)
-
-        Row() {
-          Text('高级：使用图片链接')
-            .fontSize(12.5)
-            .fontColor(INK3)
-            .layoutWeight(1)
-          Icon({ name: 'chevron_down', iconSize: 13, color: INK3 })
-            .rotate({ angle: this.showAdvancedAvatarUrl ? 180 : 0 })
-        }
-        .width('100%')
-        .padding({ top: 2, bottom: 2 })
-        .onClick((): void => {
-          animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
-            this.showAdvancedAvatarUrl = !this.showAdvancedAvatarUrl;
-          });
-        })
-
-        if (this.showAdvancedAvatarUrl) {
-          TextInput({ text: this.draftAvatarUri, placeholder: 'https:// 或本地图片路径' })
-            .fontSize(13)
-            .fontColor(INK)
-            .backgroundColor(BG)
-            .borderRadius(10)
-            .border({ width: 0.75, color: LINE })
-            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-            .onChange((v: string): void => {
-              if (v !== this.draftAvatarUri) this.draftAvatarSprite = false;
-              this.draftAvatarUri = v;
-            })
-        }
-      }
-      .width('100%')
-      .padding(14)
-      .borderRadius(18)
-      .backgroundColor(SURFACE)
-      .border({ width: 0.75, color: LINE })
-
       Row({ space: 10 }) {
         Row() {
           Text(this.saving ? '保存中…' : '保存形象')
@@ -734,7 +956,7 @@ export struct AgentEmbodimentSheet {
         .backgroundColor(this.accentColorStore)
         .justifyContent(FlexAlign.Center)
         .alignItems(VerticalAlign.Center)
-        .opacity(this.saving ? 0.6 : 1)
+        .opacity(this.saving || this.generatingAvatar ? 0.55 : 1)
         .onClick((): void => { this.saveAvatarSettings(); })
 
         Row() {
@@ -749,7 +971,7 @@ export struct AgentEmbodimentSheet {
         .border({ width: 0.75, color: LINE })
         .justifyContent(FlexAlign.Center)
         .alignItems(VerticalAlign.Center)
-        .opacity(this.saving ? 0.6 : 1)
+        .opacity(this.saving || this.generatingAvatar ? 0.55 : 1)
         .onClick((): void => { this.resetAvatarSettings(); })
       }
       .width('100%')
@@ -861,7 +1083,7 @@ export struct AgentEmbodimentSheet {
               .padding({ left: 12, right: 12, top: 9, bottom: 9 })
               .onChange((v: string): void => { this.draftTagline = v; this.dirty = true; })
 
-            Text('Soul 性格设定（Markdown）').fontSize(12).fontColor(INK3).width('100%')
+            Text('性格与表达设定').fontSize(12).fontColor(INK3).width('100%')
             TextArea({ text: this.draftMarkdown, placeholder: '写下性格、口吻、表达原则和记忆习惯…' })
               .height(116)
               .fontSize(13.5)
@@ -923,7 +1145,7 @@ export struct AgentEmbodimentSheet {
               .fontColor(INK2)
               .width('100%')
           }
-          Text(`同步来源：${this.source || 'default'} · 跨端双向同步`)
+          Text(this.soulOriginLabel())
             .fontSize(META)
             .fontColor(INK4)
             .width('100%')

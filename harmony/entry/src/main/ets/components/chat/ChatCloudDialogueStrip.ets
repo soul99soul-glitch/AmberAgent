@@ -1,85 +1,72 @@
 import {
-  ACCENT, BG, ERROR, INK, INK2, INK3, LINE, META, SIGNAL, STATUS_AMBER, SURFACE2,
+  ACCENT, BG, ERROR, INK, INK2, LINE, META, STATUS_AMBER, SURFACE, SURFACE2, accentEdge, accentSoftBg,
 } from '../../design/tokens.ets';
-import { FONT_MONO, FONT_SANS } from '../../design/fonts.ets';
+import { FONT_SANS } from '../../design/fonts.ets';
 import {
   ChatCloudDialogueSession,
-  formatCloudInputStateBadge,
-  shortWorkItemId,
-  type CloudDialogueInputRecord,
   type CloudDialogueTaskRecord,
 } from '../../platform_impl/chat/ChatCloudDialogueSession.ets';
 
+// 仅在有真实运行中后台任务或显式指定补充目标时展示简洁状态行；
+// 绝不向用户暴露内部调度模式名或队列回执状态码（如「本地异步执行」「已消费 [consumed]」）。
 @Component
 export struct ChatCloudDialogueStrip {
   @ObjectLink session: ChatCloudDialogueSession;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
 
-  private inputBadgeColor(state: string): string {
-    if (state === 'received') return STATUS_AMBER;
-    if (state === 'consumed') return SIGNAL;
-    return ERROR;
+  private shouldRender(): boolean {
+    if (this.session.uiTick < 0) return false;
+    return this.session.runningTasks().length > 0 || this.session.followupTargetTask() !== null;
   }
 
   build(): void {
-    if (this.session.uiTick >= 0 && this.session.isStripVisible()) {
+    if (this.shouldRender()) {
       Column({ space: 6 }) {
-        // 顶部状态与当前输入路由提示（普通新问题 vs 指定任务补充）
-        Row({ space: 6 }) {
-          Text(this.session.modeHeaderLabel())
-            .fontSize(11)
-            .fontFamily(FONT_MONO)
-            .fontColor(this.accentColorStore)
-          if (this.session.followupTargetTask() !== null) {
-            Text(`补充目标：${this.session.followupTargetTask()?.title ?? ''}`)
-              .fontSize(11)
+        if (this.session.followupTargetTask() !== null) {
+          Row({ space: 8 }) {
+            Text(`补充说明：${this.session.followupTargetTask()?.title ?? ''}`)
+              .fontSize(12)
               .fontFamily(FONT_SANS)
               .fontColor(INK)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .layoutWeight(1)
-            Text('切回新提问')
-              .fontSize(11)
+            Text('取消')
+              .fontSize(11.5)
               .fontFamily(FONT_SANS)
+              .fontWeight(FontWeight.Medium)
               .fontColor(this.accentColorStore)
               .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-              .backgroundColor(SURFACE2)
-              .borderRadius(10)
+              .backgroundColor(accentSoftBg(this.accentColorStore))
+              .borderRadius(999)
               .onClick((): void => {
                 this.session.clearFollowupTarget();
               })
-          } else {
-            Text(this.session.runningTasks().length > 0
-              ? '输入框可直接提新问题，或点任务「补充」追问'
-              : (this.session.isActiveMode() ? '输入框消息将发往云端执行' : '输入框可直接发送新提问'))
-              .fontSize(11)
-              .fontFamily(FONT_SANS)
-              .fontColor(INK3)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .layoutWeight(1)
           }
+          .width('100%')
+          .padding({ left: 12, right: 10, top: 6, bottom: 6 })
+          .backgroundColor(SURFACE)
+          .borderRadius(12)
+          .border({ width: 0.75, color: accentEdge(this.accentColorStore) })
         }
-        .width('100%')
 
-        // 运行中/排队中任务单行进度条（原地刷新同一处单行进度，不生成每工具卡片）
         ForEach(this.session.runningTasks(), (task: CloudDialogueTaskRecord): void => {
           Row({ space: 8 }) {
             if (task.status === 'queued') {
               Text('排队')
-                .fontSize(10)
-                .fontFamily(FONT_MONO)
+                .fontSize(10.5)
+                .fontFamily(FONT_SANS)
                 .fontColor(STATUS_AMBER)
-                .padding({ left: 5, right: 5, top: 2, bottom: 2 })
+                .padding({ left: 6, right: 6, top: 2, bottom: 2 })
                 .backgroundColor(BG)
-                .borderRadius(6)
+                .borderRadius(999)
             } else {
               LoadingProgress()
                 .width(13)
                 .height(13)
                 .color(this.accentColorStore)
             }
-            Text(`${task.title} · ${task.progressText.length > 0 ? task.progressText : '执行中…'}`)
+            Text(`${task.title}${task.progressText.length > 0 ? ` · ${task.progressText}` : ''}`)
               .fontSize(META)
               .fontFamily(FONT_SANS)
               .fontColor(INK2)
@@ -91,9 +78,9 @@ export struct ChatCloudDialogueStrip {
               .fontFamily(FONT_SANS)
               .fontColor(this.session.followupTargetWorkItemId === task.workItemId ? BG : this.accentColorStore)
               .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-              .backgroundColor(this.session.followupTargetWorkItemId === task.workItemId ? this.accentColorStore : BG)
-              .borderRadius(10)
-              .border({ width: 0.5, color: this.accentColorStore })
+              .backgroundColor(this.session.followupTargetWorkItemId === task.workItemId ? this.accentColorStore : SURFACE)
+              .borderRadius(999)
+              .border({ width: 0.5, color: accentEdge(this.accentColorStore) })
               .onClick((): void => {
                 this.session.toggleFollowupTarget(task.workItemId);
               })
@@ -102,52 +89,24 @@ export struct ChatCloudDialogueStrip {
               .fontFamily(FONT_SANS)
               .fontColor(ERROR)
               .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-              .backgroundColor(BG)
-              .borderRadius(10)
-              .border({ width: 0.5, color: ERROR })
+              .backgroundColor(SURFACE)
+              .borderRadius(999)
+              .border({ width: 0.5, color: LINE })
               .enabled(!task.stopRequested)
               .onClick((): void => {
                 this.session.stopTask(task.workItemId);
               })
           }
           .width('100%')
-          .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+          .padding({ left: 12, right: 10, top: 6, bottom: 6 })
           .backgroundColor(SURFACE2)
           .borderRadius(12)
+          .border({ width: 0.5, color: LINE })
         }, (task: CloudDialogueTaskRecord): string =>
           `${task.workItemId}-${task.status}-${task.stopRequested}-${task.progressText}-${this.session.followupTargetWorkItemId}`)
-
-        // 最近输入回执状态区分展示（received / consumed / cancelled）
-        if (this.session.recentInputs().length > 0) {
-          Scroll() {
-            Row({ space: 6 }) {
-              ForEach(this.session.recentInputs(), (item: CloudDialogueInputRecord): void => {
-                Text(formatCloudInputStateBadge(
-                  item.kind,
-                  item.state,
-                  shortWorkItemId(item.workItemId),
-                  !this.session.isActiveMode(),
-                ))
-                  .fontSize(10.5)
-                  .fontFamily(FONT_MONO)
-                  .fontColor(this.inputBadgeColor(item.state))
-                  .maxLines(1)
-                  .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-                  .backgroundColor(SURFACE2)
-                  .borderRadius(8)
-              }, (item: CloudDialogueInputRecord): string =>
-                `${item.requestId}-${item.state}-${item.workItemId}-${item.updatedAt}`)
-            }
-          }
-          .scrollable(ScrollDirection.Horizontal)
-          .scrollBar(BarState.Off)
-          .width('100%')
-        }
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: 6, bottom: 6 })
-      .backgroundColor(BG)
-      .border({ width: { top: 0.5 }, color: LINE })
+      .padding({ left: 20, right: 20, top: 4, bottom: 6 })
     }
   }
 }

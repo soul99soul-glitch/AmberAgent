@@ -262,6 +262,63 @@ const saveImagesForConversation = async (
   return urls;
 };
 
+export interface PersonaImageGenResult {
+  fileUri: string;
+  filePath: string;
+}
+
+const readLocalEditSource = (uri: string): EditSourceImage | null => {
+  const trimmed: string = uri.trim();
+  if (trimmed.length === 0) return null;
+  const path: string = trimmed.startsWith('file://') ? trimmed.substring('file://'.length) : trimmed;
+  if (!path.startsWith('/')) return null;
+  try {
+    const stat: fileIo.Stat = fileIo.statSync(path);
+    if (stat.size <= 0 || stat.size > IMAGE_EDIT_MAX_SOURCE_BYTES) return null;
+    const buf: ArrayBuffer = new ArrayBuffer(stat.size);
+    const f: fileIo.File = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+    try {
+      fileIo.readSync(f.fd, buf);
+    } finally {
+      fileIo.closeSync(f.fd);
+    }
+    const lower: string = path.toLowerCase();
+    const mime: string = lower.endsWith('.png') ? 'image/png'
+      : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    const ext: string = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+    return { bytes: new Uint8Array(buf), mime, name: `source.${ext}` };
+  } catch (_e) {
+    return null;
+  }
+};
+
+// 形象面板专用：复用已配置的 image_generation 生图模型，生成静态形象或 4×4 四态精灵图并落盘校验尺寸。
+export const generatePersonaImage = async (
+  prompt: string,
+  sourceImageUri?: string,
+): Promise<PersonaImageGenResult> => {
+  const choice: ChatProviderChoice | null = await resolveImageGenChoice();
+  if (choice === null) {
+    throw new Error('请先在「设置 → 任务模型 → 图像生成」中配置生图模型，或直接从相册选图。');
+  }
+  const source: EditSourceImage | null = sourceImageUri !== undefined ? readLocalEditSource(sourceImageUri) : null;
+  const items: GeneratedItem[] = source !== null
+    ? await requestImagesEdit(choice, prompt, '1024x1024', 1, source)
+    : await requestImagesCreate(choice, prompt, '1024x1024', 1);
+  if (items.length === 0) {
+    throw new Error('生图未返回有效图像，原有形象已保留。');
+  }
+  const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
+  const destPath: string = `${ctx.filesDir}/agent_avatar_gen_${Date.now()}.png`;
+  const out: fileIo.File = fileIo.openSync(destPath, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
+  try {
+    fileIo.writeSync(out.fd, items[0].bytes.buffer as ArrayBuffer);
+  } finally {
+    fileIo.closeSync(out.fd);
+  }
+  return { fileUri: `file://${destPath}`, filePath: destPath };
+};
+
 export interface ImageGenToolDeps {
   conversationId: string;
   // edit 源图解析:用户最近一条带图消息(ChatPage 注入);null = 无可用源
