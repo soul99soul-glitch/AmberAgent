@@ -417,6 +417,7 @@ struct ChatPage {
         if (this.pageAlive && this.pageVisible) this.cursorOn = !this.cursorOn;
       }, 525);
     }
+    this.timeline.enableKeyboardAvoidance();
     this.timeline.attachKeyboardListener();
     // D-070 补:从搜索设置页返回后重载偏好,否则继续用旧工具组/旧开关
     this.composer.refreshSearchSettings();
@@ -649,7 +650,12 @@ struct ChatPage {
         this.timeline.detachKeyboardListener(); this.timeline.imeKeyboardHeightVp = 0;
         try { inputMethod.getController().stopInputSession().catch((_e: Error): void => {}); } catch (_e) {}
       },
-      resumeIME: (): void => { if (this.pageVisible) this.timeline.attachKeyboardListener(); },
+      resumeIME: (): void => {
+        if (this.pageVisible) {
+          this.timeline.enableKeyboardAvoidance();
+          this.timeline.attachKeyboardListener();
+        }
+      },
       onNavigate: (target: string, id: string): void => {
         if (target === 'newChat') { this.newChat(); return; }
         if (target === 'conversation') { router.replaceUrl({ url: 'pages/ChatPage', params: { conversationId: id } }); return; }
@@ -980,7 +986,8 @@ struct ChatPage {
         }
       });
     }
-    // P4:IME 键盘高度监听(aboutToDisappear 注销;attach 异步取窗,pageAlive 守卫)
+    // P4:IME 键盘避让(RESIZE) + 高度监听(aboutToDisappear 注销)
+    this.timeline.enableKeyboardAvoidance();
     this.timeline.attachKeyboardListener();
   }
 
@@ -1642,7 +1649,9 @@ struct ChatPage {
         ChatComposerPane({
           composer: this.composer, presentation: this.presentation, cloudDialogue: this.cloudDialogue,
           modelContext: this.modelContext,
-          navBarHeight: this.navBarHeight, storageDegraded: this.storageDegraded,
+          navBarHeight: this.navBarHeight,
+          keyboardVisible: this.timeline.imeKeyboardHeightVp > 0,
+          storageDegraded: this.storageDegraded,
           manualCompacting: this.modelContext.manualCompacting, retryStatus: this.runDetails.retryStatus,
           activeTab: this.bottomDockTab,
           attentionTaskCount: this.attentionTaskBadgeCount(),

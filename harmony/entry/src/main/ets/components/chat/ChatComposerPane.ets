@@ -23,6 +23,7 @@ export struct ChatComposerPane {
   @StorageProp('themeEpoch') themeEpoch: number = 0;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop navBarHeight: number = 0;
+  @Prop keyboardVisible: boolean = false;
   @Prop storageDegraded: boolean = false;
   @Prop retryStatus: string = '';
   @Prop manualCompacting: boolean = false;
@@ -413,6 +414,7 @@ export struct ChatComposerPane {
           cloudDialogue: this.cloudDialogue,
           modelContext: this.modelContext,
           inputFocused: this.composer.inputFocused,
+          hasDraftText: this.composer.inputText.trim().length > 0,
           activeTab: this.activeTab,
           attentionTaskCount: this.attentionTaskCount,
           runningTaskCount: this.runningTaskCount,
@@ -421,7 +423,7 @@ export struct ChatComposerPane {
         })
       }
       .width('100%')
-      .padding({ top: 14, bottom: this.navBarHeight + 10 })
+      .padding({ top: 14, bottom: this.keyboardVisible ? 8 : this.navBarHeight + 10 })
       .linearGradient({
         direction: GradientDirection.Bottom,
         colors: [[BG_FADE_START, 0], [BG_FADE_END, 0.14], [BG_FADE_END, 1]],

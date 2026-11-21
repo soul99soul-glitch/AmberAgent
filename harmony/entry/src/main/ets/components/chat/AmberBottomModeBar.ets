@@ -24,6 +24,7 @@ export struct AmberBottomModeBar {
   @StorageProp('appBackgrounded') appBackgrounded: boolean = false;
   @StorageProp('reduceMotion') reduceMotion: boolean = false;
   @Prop inputFocused: boolean = false;
+  @Prop hasDraftText: boolean = false;
   @Prop @Watch('onActiveTabChange') activeTab: BottomDockTab = 'chat';
   @Prop attentionTaskCount: number = 0;
   @Prop runningTaskCount: number = 0;
@@ -314,7 +315,7 @@ export struct AmberBottomModeBar {
 
   build(): void {
     Column() {
-      if (this.inputFocused || this.modelContext.modelMenuOpen || this.modelContext.contextMeterOpen) {
+      if (this.inputFocused || this.hasDraftText || this.modelContext.modelMenuOpen || this.modelContext.contextMeterOpen) {
         this.FocusedComposerBar()
       } else {
         this.RestingSwitcherRow()
