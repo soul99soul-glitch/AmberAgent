@@ -40,7 +40,12 @@ export let WARNING_BG: string = '#FFF8E1';
 export let WARNING_FG: string = '#A64500';
 export let INFO_BG: string = '#E8F0FE';
 export let INFO_FG: string = '#114BA3';
-export const ACCENT_OPTIONS: string[] = ['#B8623A', '#5E9C6E', '#4F86D6', '#9277C4', '#C2607A'];
+// 前 5 位索引保持不变（NativeSmartUiInputs 依赖 [3]=紫藤、[4]=玫红），后接 iOS 官方策展强调色
+export const ACCENT_OPTIONS: string[] = [
+  '#B8623A', '#5E9C6E', '#4F86D6', '#9277C4', '#C2607A',
+  '#AE3528', '#C96442', '#B9863A', '#234B8C', '#1E6B4E',
+  '#6B8CAD', '#0075DE', '#222226',
+];
 
 // ── 十六进制颜色工具(主题包导入/导出共用;接受 #RRGGBB / 0xRRGGBB / 裸 RRGGBB) ──
 // 与 Android ThemeDesignKt.themeRgb 同规则:不带 alpha,正好 6 位 hex

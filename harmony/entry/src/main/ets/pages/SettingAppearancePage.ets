@@ -5,7 +5,7 @@
 //   Android 旧 token 包(schemaVersion=1,字体/布局 token 一并落 DisplaySetting)、鸿蒙原生;
 //   导出统一发跨平台 v1(带鸿蒙扩展段,iOS/Android 可导入,鸿蒙无损回读)。
 import {
-  BG, INK, INK3, ACCENT, ACCENT_OPTIONS, setAccentColor, ERROR, TEXT_STYLES,
+  BG, INK, INK3, ACCENT, ACCENT_OPTIONS, setAccentColor, accentInkFor, ERROR, TEXT_STYLES,
   SURFACE, LINE, LINE2, OVERLAY, MOTION_OVERLAY, lineHeightForSize,
 } from '../design/tokens.ets';
 import { FONT_SANS_MEDIUM } from '../design/fonts.ets';
@@ -14,7 +14,7 @@ import { CenteredTitleBar, PlainSection, PageSpacer, Seg, CardGroup, CardToggleR
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { applyWindowTheme } from '../entryability/EntryAbility.ets';
 import {
-  ThemePack, themePackStore, applyThemePack, parseThemePackJson,
+  ThemePack, themePackStore, applyThemePack, resolveThemeDark, parseThemePackJson,
   isAmoledBlack, setAmoledBlack, canvasGradientColors, currentCanvasGradientAngle,
 } from '../design/theme_packs.ets';
 import { DesignCanvasLayer } from '../design/DesignCanvasLayer.ets';
@@ -154,7 +154,7 @@ struct SettingAppearancePage {
 
   private applyPack(pack: ThemePack): void {
     themePackStore.select(getChatKvStore(), pack).catch((): void => {});
-    const dark: boolean = this.resolvedDark();
+    const dark: boolean = resolveThemeDark(pack, this.resolvedDark());
     applyThemePack(pack, dark);
     applyWindowTheme(dark);
     this.selectedPackId = pack.id;
@@ -386,7 +386,7 @@ struct SettingAppearancePage {
           Stack() {
             Column().width(18).height(18).borderRadius(9)
               .backgroundColor(pack.accent)
-            Icon({ name: 'check', iconSize: 11, color: '#FFFFFF' })
+            Icon({ name: 'check', iconSize: 11, color: pack.accentInk ?? accentInkFor(pack.accent) })
           }
           .width(18).height(18)
         } else if (!pack.builtin) {
@@ -543,7 +543,7 @@ struct SettingAppearancePage {
             .padding({ left: 16, right: 16 })
 
             PlainSection({ label: '强调色' })
-            Row() {
+            Flex({ wrap: FlexWrap.Wrap, alignItems: ItemAlign.Center }) {
               ForEach(ACCENT_OPTIONS, (color: string, idx: number): void => {
                 Stack({ alignContent: Alignment.Center }) {
                   Column()
@@ -560,12 +560,12 @@ struct SettingAppearancePage {
                   }
                 }
                 .width(44).height(44)
-                .margin({ right: idx < ACCENT_OPTIONS.length - 1 ? 12 : 0 })
+                .margin({ right: 12, bottom: 10 })
                 .onClick((): void => { this.setAccent(color); })
               }, (color: string, idx: number): string => `swatch-${idx}-${color}`)
             }
             .width('100%')
-            .padding({ left: 16, right: 16, top: 10, bottom: 4 })
+            .padding({ left: 16, right: 4, top: 10, bottom: 4 })
             PageSpacer()
           }
           .width('100%')
