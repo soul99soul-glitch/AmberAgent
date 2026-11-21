@@ -306,6 +306,7 @@ struct ProfilePage {
       chatThemeChoice: this.setting.chatThemeChoice,
       amberBaseFamily: this.setting.amberBaseFamily,
       accentColor: this.setting.accentColor,
+      paragraphBubbleMode: this.setting.paragraphBubbleMode,
       userNickname: name,
       userAvatar: this.setting.userAvatar,
     });
@@ -406,6 +407,7 @@ struct ProfilePage {
       chatThemeChoice: this.setting.chatThemeChoice,
       amberBaseFamily: this.setting.amberBaseFamily,
       accentColor: this.setting.accentColor,
+      paragraphBubbleMode: this.setting.paragraphBubbleMode,
       userNickname: this.setting.userNickname,
       userAvatar: path,
     });

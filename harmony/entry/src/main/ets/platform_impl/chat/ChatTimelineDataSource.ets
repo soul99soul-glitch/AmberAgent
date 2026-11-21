@@ -21,12 +21,19 @@ export class ChatTimelineItem {
   episodeReason: string = 'manual_new_topic';
   isAssistantContinuation: boolean = false;
   turnRole: AssistantTurnRole = 'none';
+  isTurnTail: boolean = false;
   turnHeadline: string = '';
   turnStatusKind: string = 'completed';
   turnStepCount: number = 0;
   turnHasError: boolean = false;
   turnTools: UIMessagePartTool[] = [];
   turnReasoning: string[] = [];
+  tailTurnHeadline: string = '';
+  tailTurnStatusKind: string = 'completed';
+  tailTurnStepCount: number = 0;
+  tailTurnHasError: boolean = false;
+  tailTurnTools: UIMessagePartTool[] = [];
+  tailTurnReasoning: string[] = [];
   standaloneToolIds: string[] = [];
   isNewEntrance: boolean = false;
   readonly viewState: MessageRowViewState;
@@ -70,6 +77,8 @@ export class ChatTimelineItem {
       this.isAssistantContinuation = proj.isAssistantContinuation;
     }
     if (this.turnRole !== proj.turnRole) this.turnRole = proj.turnRole;
+    const nextIsTail: boolean = proj.isTurnTail === true;
+    if (this.isTurnTail !== nextIsTail) this.isTurnTail = nextIsTail;
     const summary: TurnProgressSummary | null = proj.turnProgress;
     const nextHeadline: string = summary !== null && summary.showSingleLineStatus ? summary.headline : '';
     const nextKind: string = summary !== null ? summary.statusKind : 'completed';
@@ -88,6 +97,25 @@ export class ChatTimelineItem {
     if (this.turnReasoning.length !== nextReasoning.length ||
       nextReasoning.some((item: string, i: number): boolean => item !== this.turnReasoning[i])) {
       this.turnReasoning = nextReasoning;
+    }
+    const tailSummary: TurnProgressSummary | null = proj.tailTurnProgress ?? null;
+    const nextTailHeadline: string = tailSummary !== null && tailSummary.showSingleLineStatus ? tailSummary.headline : '';
+    const nextTailKind: string = tailSummary !== null ? tailSummary.statusKind : 'completed';
+    const nextTailSteps: number = tailSummary !== null ? tailSummary.stepCount : 0;
+    const nextTailErr: boolean = tailSummary !== null ? tailSummary.hasError : false;
+    const nextTailTools: UIMessagePartTool[] = tailSummary !== null ? tailSummary.allTools : [];
+    const nextTailReasoning: string[] = tailSummary !== null ? tailSummary.reasoning : [];
+    if (this.tailTurnHeadline !== nextTailHeadline) this.tailTurnHeadline = nextTailHeadline;
+    if (this.tailTurnStatusKind !== nextTailKind) this.tailTurnStatusKind = nextTailKind;
+    if (this.tailTurnStepCount !== nextTailSteps) this.tailTurnStepCount = nextTailSteps;
+    if (this.tailTurnHasError !== nextTailErr) this.tailTurnHasError = nextTailErr;
+    if (this.tailTurnTools.length !== nextTailTools.length ||
+      nextTailTools.some((t: UIMessagePartTool, i: number): boolean => t !== this.tailTurnTools[i])) {
+      this.tailTurnTools = nextTailTools;
+    }
+    if (this.tailTurnReasoning.length !== nextTailReasoning.length ||
+      nextTailReasoning.some((item: string, i: number): boolean => item !== this.tailTurnReasoning[i])) {
+      this.tailTurnReasoning = nextTailReasoning;
     }
     if (this.standaloneToolIds.length !== proj.standaloneToolIds.length ||
       proj.standaloneToolIds.some((id: string, i: number): boolean => id !== this.standaloneToolIds[i])) {

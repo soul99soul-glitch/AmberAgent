@@ -100,6 +100,7 @@ struct SettingDisplayPage {
     // ArkTS 禁止对象 spread(arkts-no-spread)→ 手动合并
     const next: DisplaySetting = makeDisplaySetting({
       showAssistantBubble: patch.showAssistantBubble ?? this.setting.showAssistantBubble,
+      paragraphBubbleMode: patch.paragraphBubbleMode ?? this.setting.paragraphBubbleMode,
       showModelIcon: patch.showModelIcon ?? this.setting.showModelIcon,
       showModelName: patch.showModelName ?? this.setting.showModelName,
       showUserAvatar: patch.showUserAvatar ?? this.setting.showUserAvatar,
@@ -225,6 +226,11 @@ struct SettingDisplayPage {
       label: '助手气泡', desc: '为助手消息显示气泡背景',
       checked: this.setting.showAssistantBubble,
       onToggle: (): void => { this.update({ showAssistantBubble: !this.setting.showAssistantBubble }); },
+    })
+    CardToggleRow({
+      label: '整段气泡回复', desc: '逐段完成后以气泡呈现（非逐字流式），并将实时状态固定在回复下方',
+      checked: this.setting.paragraphBubbleMode,
+      onToggle: (): void => { this.update({ paragraphBubbleMode: !this.setting.paragraphBubbleMode }); },
     })
     CardToggleRow({
       label: '显示模型名', desc: '在消息头部显示模型名称',

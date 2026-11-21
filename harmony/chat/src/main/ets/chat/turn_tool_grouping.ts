@@ -28,9 +28,60 @@ export interface TurnProgressSummary {
 export interface MessageTurnProjection {
   isAssistantContinuation: boolean;
   turnRole: AssistantTurnRole;
+  isTurnTail?: boolean;
   turnProgress: TurnProgressSummary | null;
+  tailTurnProgress?: TurnProgressSummary | null;
   standaloneToolIds: string[];
 }
+
+// 整段气泡模式切分器：按代码块（``` / ~~~）外的空行切出已完成段落；
+// 流式进行中（streaming=true）暂存未闭合尾段，直到遇到空行或回复结束再整段呈现。
+export const splitCompletedParagraphs = (text: string, streaming: boolean): string[] => {
+  const normalized: string = text.replace(/\r\n/g, '\n');
+  if (normalized.trim().length === 0) return [];
+  const lines: string[] = normalized.split('\n');
+  const paragraphs: string[] = [];
+  let current: string[] = [];
+  let fenceChar: string = '';
+  let fenceLen: number = 0;
+
+  for (let i: number = 0; i < lines.length; i++) {
+    const line: string = lines[i];
+    const trimmed: string = line.trim();
+    if (fenceChar.length === 0) {
+      if (trimmed.length === 0) {
+        if (current.length > 0) {
+          const chunk: string = current.join('\n').trim();
+          if (chunk.length > 0) paragraphs.push(chunk);
+          current = [];
+        }
+        continue;
+      }
+      const fenceMatch: RegExpMatchArray | null = trimmed.match(/^(`{3,}|~{3,})/);
+      if (fenceMatch !== null) {
+        fenceChar = fenceMatch[1][0];
+        fenceLen = fenceMatch[1].length;
+      }
+      current.push(line);
+    } else {
+      current.push(line);
+      if (trimmed.startsWith(fenceChar)) {
+        let count: number = 0;
+        while (count < trimmed.length && trimmed[count] === fenceChar) count++;
+        if (count >= fenceLen && trimmed.slice(count).trim().length === 0) {
+          fenceChar = '';
+          fenceLen = 0;
+        }
+      }
+    }
+  }
+
+  if (!streaming && current.length > 0) {
+    const tail: string = current.join('\n').trim();
+    if (tail.length > 0) paragraphs.push(tail);
+  }
+  return paragraphs;
+};
 
 const SUBAGENT_OR_COUNCIL_TOOLS: ReadonlySet<string> = new Set<string>([
   'subagent_start', 'subagent_wait', 'subagent_read', 'subagent_cancel',
@@ -305,7 +356,10 @@ export const projectAssistantTurns = (
   while (i < messages.length) {
     const msg: UIMessage = messages[i];
     if (msg.role !== 'assistant') {
-      result.push({ isAssistantContinuation: false, turnRole: 'none', turnProgress: null, standaloneToolIds: [] });
+      result.push({
+        isAssistantContinuation: false, turnRole: 'none', isTurnTail: false,
+        turnProgress: null, tailTurnProgress: null, standaloneToolIds: [],
+      });
       i++;
       continue;
     }
@@ -325,6 +379,7 @@ export const projectAssistantTurns = (
     const summary: TurnProgressSummary | null = summarizeAssistantTurn(turnMsgs, isStreamingTurn, standaloneToolIds);
     for (let k: number = 0; k < turnMsgs.length; k++) {
       const isHead: boolean = k === 0;
+      const isTail: boolean = k === turnMsgs.length - 1;
       const visible: string[] = [];
       for (const part of turnMsgs[k].parts) {
         if (part.type === 'tool' && standaloneToolIds.has(part.toolCallId)) visible.push(part.toolCallId);
@@ -332,7 +387,9 @@ export const projectAssistantTurns = (
       result.push({
         isAssistantContinuation: !isHead,
         turnRole: isHead ? 'head' : 'member',
+        isTurnTail: isTail,
         turnProgress: isHead ? summary : null,
+        tailTurnProgress: isTail ? summary : null,
         standaloneToolIds: visible,
       });
     }

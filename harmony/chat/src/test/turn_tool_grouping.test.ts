@@ -4,6 +4,7 @@ import type { UIMessage, UIMessagePartTool, UIMessagePartReasoning } from '../ma
 import {
   projectAssistantTurns,
   consecutiveTurnToolFailures,
+  splitCompletedParagraphs,
 } from '../main/ets/chat/turn_tool_grouping.ts';
 
 const textMsg = (
@@ -153,4 +154,41 @@ test('single-line turn status stays alive in plain human Chinese until final rep
   const finished: UIMessage = textMsg('a1', 'assistant', '这几年高分游戏有…', [doneSearch]);
   const [, p4] = projectAssistantTurns([u1, finished], new Set());
   assert.equal(p4.turnProgress?.statusKind, 'completed');
+  assert.equal(p4.isTurnTail, true);
+  assert.equal(p4.tailTurnProgress?.statusKind, 'completed');
+});
+
+test('splitCompletedParagraphs buffers incomplete trailing paragraphs while streaming and preserves code fences', () => {
+  assert.deepEqual(splitCompletedParagraphs('第一段还没写完', true), []);
+  assert.deepEqual(splitCompletedParagraphs('第一段还没写完', false), ['第一段还没写完']);
+  assert.deepEqual(
+    splitCompletedParagraphs('第一段写完了。\n\n第二段正在写', true),
+    ['第一段写完了。'],
+  );
+  assert.deepEqual(
+    splitCompletedParagraphs('第一段。\n\n```ts\nconst a = 1;\n\nconst b = 2;\n```', true),
+    ['第一段。'],
+  );
+  assert.deepEqual(
+    splitCompletedParagraphs('第一段。\n\n```ts\nconst a = 1;\n\nconst b = 2;\n```\n\n第三段进行中', true),
+    ['第一段。', '```ts\nconst a = 1;\n\nconst b = 2;\n```'],
+  );
+  assert.deepEqual(
+    splitCompletedParagraphs('第一段。\n\n```ts\nconst a = 1;\n\nconst b = 2;\n```\n\n第三段完成。', false),
+    ['第一段。', '```ts\nconst a = 1;\n\nconst b = 2;\n```', '第三段完成。'],
+  );
+});
+
+test('multi-message assistant turn exposes tailTurnProgress on the last message for bottom status anchoring', () => {
+  const u1 = textMsg('u1', 'user', '查一下');
+  const a1 = textMsg('a1', 'assistant', '先看看。', [toolPart('t1', 'search_web', { ok: true })]);
+  const a2: UIMessage = { ...textMsg('a2', 'assistant', '正在写第二段'), finishedAt: null };
+  const [, p1, p2] = projectAssistantTurns([u1, a1, a2], new Set(['a2']));
+  assert.equal(p1.turnRole, 'head');
+  assert.equal(p1.isTurnTail, false);
+  assert.equal(p1.tailTurnProgress, null);
+  assert.equal(p2.turnRole, 'member');
+  assert.equal(p2.isTurnTail, true);
+  assert.equal(p2.tailTurnProgress?.statusKind, 'writing');
+  assert.equal(p2.tailTurnProgress?.headline, '正在回复');
 });

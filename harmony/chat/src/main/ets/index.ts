@@ -1470,6 +1470,7 @@ export { EPISODE_RECALL_TOOL_NAME, createEpisodeRecallTool } from './chat/builti
 export type { EpisodeRecallToolDeps } from './chat/builtin_episode_recall_tool.ts';
 export {
   consecutiveTurnToolFailures, projectAssistantTurns, humanToolActivityPhrase,
+  splitCompletedParagraphs,
 } from './chat/turn_tool_grouping.ts';
 export type {
   AssistantTurnRole, TurnProgressStatusKind, TurnProgressSummary, MessageTurnProjection,

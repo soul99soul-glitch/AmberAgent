@@ -7,6 +7,8 @@
 
 export interface DisplaySetting {
   showAssistantBubble: boolean;
+  // 整段气泡回复模式：逐段完成后以气泡呈现（非逐字流式），且单行状态固定在下方
+  paragraphBubbleMode: boolean;
   showModelIcon: boolean;
   showModelName: boolean;
   showUserAvatar: boolean;
@@ -46,6 +48,7 @@ export const DISPLAY_SETTING_KEY: string = 'display_setting';
 
 export const makeDisplaySetting = (opts: Partial<DisplaySetting> = {}): DisplaySetting => ({
   showAssistantBubble: opts.showAssistantBubble ?? false,
+  paragraphBubbleMode: opts.paragraphBubbleMode ?? false,
   showModelIcon: opts.showModelIcon ?? true,
   showModelName: opts.showModelName ?? true,
   // 默认 false:1:1 原型用户消息无抬头,开关为 opt-in(Android showUserAvatar 对齐)

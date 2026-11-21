@@ -1,14 +1,14 @@
 // AgentMessageRow — chat/novel 共用的完整 agent 消息行。
 // host 通过静态 capabilities 决定可交互入口，并用具名 hostFooter slot 注入宿主尾部。
 
-import { MOTION_OVERLAY, INK, INK3, SIGNAL, STATUS_AMBER, SURFACE2, USER_BG, USER_INK, ACCENT, LINE } from '../design/tokens.ets';
+import { MOTION_OVERLAY, INK, INK3, SIGNAL, STATUS_AMBER, SURFACE, SURFACE2, USER_BG, USER_INK, ACCENT, LINE } from '../design/tokens.ets';
 import type {
   AskUserQuestion, FollowupReceiptInfo, MessagePartBlock, ReasoningCardState, ThinkingStep, UIMessage, UIMessagePart,
   UIMessagePartDocument, UIMessagePartReasoning, UIMessagePartTool,
 } from '@amber/chat-domain';
 import {
   ASK_USER_TOOL_NAME, buildAskUserAnswerPayload, groupMessageParts, mightContainMiniApp,
-  miniAppStatusProjection, parseAskUserQuestions, readFollowupReceipt, streamToolIndex,
+  miniAppStatusProjection, parseAskUserQuestions, readFollowupReceipt, splitCompletedParagraphs, streamToolIndex,
 } from '@amber/chat-domain';
 import type { ToolApprovalPartLocator, UIMessagePartMiniApp, ToolOutcomeResolution } from '@amber/chat-domain';
 import { MarkdownText } from './MarkdownText.ets';
@@ -106,6 +106,70 @@ export const NO_AGENT_MESSAGE_ROW_CAPABILITIES: AgentMessageRowHostCapabilities 
 };
 
 @Component
+struct ParagraphBubbleCard {
+  @StorageProp('themeEpoch') themeEpoch: number = 0;
+  @StorageProp('reduceMotion') reduceMotion: boolean = false;
+  viewState: MessageRowViewState | null = null;
+  @Prop content: string = '';
+  @Prop fontSize: number = 15;
+  @Prop chatFontFamily: string = 'DEFAULT';
+  @Prop enableLatexRendering: boolean = true;
+  @Prop codeBlockAutoCollapse: boolean = false;
+  @Prop showLineNumbers: boolean = false;
+  @Prop streamKey: string = '';
+  @Prop animateReveal: boolean = false;
+  onVisibleGrow: () => void = (): void => {};
+
+  @State private revealOpacity: number = 1;
+  @State private revealOffsetY: number = 0;
+
+  aboutToAppear(): void {
+    if (this.animateReveal && !this.reduceMotion) {
+      this.revealOpacity = 0;
+      this.revealOffsetY = 8;
+    } else {
+      this.revealOpacity = 1;
+      this.revealOffsetY = 0;
+    }
+  }
+
+  build(): void {
+    Column() {
+      MarkdownText({
+        viewState: this.viewState,
+        content: this.content,
+        fontSize: this.fontSize,
+        fontColor: INK,
+        fillWidth: false,
+        streaming: false,
+        chatFontFamily: this.chatFontFamily,
+        enableLatexRendering: this.enableLatexRendering,
+        codeBlockAutoCollapse: this.codeBlockAutoCollapse,
+        showLineNumbers: this.showLineNumbers,
+        streamKey: this.streamKey,
+        onVisibleGrow: (): void => { this.onVisibleGrow(); },
+      })
+    }
+    .enabled(this.themeEpoch >= 0)
+    .alignItems(HorizontalAlign.Start)
+    .constraintSize({ maxWidth: '92%' })
+    .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+    .backgroundColor(SURFACE)
+    .border({ width: 0.75, color: LINE })
+    .borderRadius(18)
+    .opacity(this.revealOpacity)
+    .translate({ y: this.revealOffsetY })
+    .onAppear((): void => {
+      if (!this.animateReveal || this.reduceMotion) return;
+      this.getUIContext().animateTo({ duration: 260, curve: Curve.EaseOut }, (): void => {
+        this.revealOpacity = 1;
+        this.revealOffsetY = 0;
+      });
+    })
+  }
+}
+
+@Component
 export struct AgentMessageRow {
   @StorageProp('themeEpoch') themeEpoch: number = 0; // 主题重建订阅(勿删):epoch 递增即重读令牌
   @StorageProp('darkMode') darkMode: boolean = false;
@@ -126,6 +190,7 @@ export struct AgentMessageRow {
   @Prop showThinkingContent: boolean = true;
   // F16:显示设置消费(默认值 == 当前渲染行为,不改变既有外观)
   @Prop showAssistantBubble: boolean = false;
+  @Prop paragraphBubbleMode: boolean = false;
   @Prop showModelName: boolean = true;
   @Prop showModelIcon: boolean = false;
   // D0-4:用户头像(DisplaySetting.showUserAvatar;默认 false = 1:1 原型无抬头)
@@ -222,12 +287,18 @@ export struct AgentMessageRow {
   @Prop animateEntrance: boolean = true;
   @Prop isAssistantContinuation: boolean = false;
   @Prop turnRole: string = 'none';
+  @Prop isTurnTail: boolean = false;
   @Prop standaloneToolIds: string[] = [];
   @Prop turnHeadline: string = '';
   @Prop turnStatusKind: string = 'completed';
   @Prop turnStepCount: number = 0;
   @Prop turnHasError: boolean = false;
+  @Prop tailTurnHeadline: string = '';
+  @Prop tailTurnStatusKind: string = 'completed';
+  @Prop tailTurnStepCount: number = 0;
+  @Prop tailTurnHasError: boolean = false;
   onOpenTurnDetails: () => void = (): void => {};
+  onOpenTailTurnDetails: () => void = (): void => {};
   @State enterOpacity: number = 0;
   @State enterY: number = 6;
   @State imagePreviewOpen: boolean = false;
@@ -660,6 +731,105 @@ export struct AgentMessageRow {
     })
   }
 
+  private visibleParagraphsForBlock(bi: number, partIndex: number): string[] {
+    const raw: string = this.contentTextAt(partIndex);
+    const activeTail: boolean = this.streaming && this.isLastTextBlock(this.getBlocks(), bi);
+    return splitCompletedParagraphs(raw, activeTail);
+  }
+
+  private hasEmbeddedWidgetSyntax(partIndex: number): boolean {
+    if (!this.enableGenerativeWidgets) return false;
+    const raw: string = this.contentTextAt(partIndex);
+    return raw.includes('```widget') || raw.includes('```svg') || raw.includes('```html') ||
+      raw.includes('<amber-widget') || raw.includes('```amber-');
+  }
+
+  @Builder
+  private ParagraphBubbleTextBlock(bi: number, partIndex: number): void {
+    if (this.hasEmbeddedWidgetSyntax(partIndex)) {
+      if (!(this.streaming && this.isLastTextBlock(this.getBlocks(), bi))) {
+        Column() {
+          WidgetMessageContent({
+            viewState: this.viewState,
+            content: this.contentTextAt(partIndex),
+            assets: this.responseAssets(), messageStreaming: false,
+            declaredContentIds: this.responseDeclaredIds(),
+            smartUiSourcePrefix: JSON.stringify([this.smartUiConversationId, this.message.id, partIndex]),
+            smartUiNodeId: this.smartUiNodeId,
+            smartUiStateAccessor: this.smartUiStateAccessor,
+            smartUiStateRevision: this.smartUiStateRevision,
+            smartUiProjections: this.smartUiProjections,
+            smartUiValuesFor: (sourceKey: string): SmartUiStateValue[] => this.smartUiValuesFor(sourceKey),
+            onArtifactValidation: (start: number, id: string, snapshot: string, ok: boolean, error: string): void => {
+              this.validatedArtifact(partIndex, start, id, snapshot, ok, error);
+            },
+            fontSize: this.bodyFontSize(),
+            fontColor: INK,
+            streaming: false,
+            chatFontFamily: this.chatFontFamily,
+            enableLatexRendering: this.enableLatexRendering,
+            codeBlockAutoCollapse: this.codeBlockAutoCollapse,
+            showLineNumbers: this.showLineNumbers,
+            streamKey: `${this.streamKeyTag}${this.message.id}#${partIndex}`,
+            onVisibleGrow: (): void => { this.onTextGrow(); },
+            onAction: (prompt: string): void => { this.onWidgetAction(prompt); },
+            onSmartUiStateChange: (sourceKey: string, stateId: string, value: SmartUiScalar): void => {
+              this.onSmartUiStateChange(sourceKey, stateId, value);
+            },
+            onSmartUiDraft: (nodeId: string, sourceKey: string): void => { this.onSmartUiDraft(nodeId, sourceKey); },
+            onSmartUiAssetView: (ref: string, sourceStart: number): void => {
+              this.onSmartUiAssetView(this.message.id, partIndex, ref, sourceStart);
+            },
+            onSmartUiSourceReplaced: (sourcePrefix: string): void => {
+              this.onSmartUiSourceReplaced(sourcePrefix);
+            },
+            onSmartUiDocument: (sourceKey: string, document: SmartUiDocument, streaming: boolean,
+              sourceStart: number, blockId: string, complete: boolean): void => {
+              this.onSmartUiDocument(sourceKey, document, streaming, {
+                conversationId: this.smartUiConversationId,
+                nodeId: this.smartUiNodeId,
+                messageId: this.message.id,
+                blockId,
+                blockIndex: partIndex,
+                sourceStart,
+              }, complete);
+            },
+            onSmartUiAssetArea: (ref: string, sourceStart: number, area: Area): void => {
+              this.onSmartUiAssetArea(partIndex, ref, sourceStart, area);
+            },
+          })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .constraintSize({ maxWidth: '94%' })
+        .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+        .backgroundColor(SURFACE)
+        .border({ width: 0.75, color: LINE })
+        .borderRadius(18)
+        .margin({ bottom: 8 })
+      }
+    } else if (this.visibleParagraphsForBlock(bi, partIndex).length > 0) {
+      Column({ space: 8 }) {
+        ForEach(this.visibleParagraphsForBlock(bi, partIndex), (para: string, pi: number): void => {
+          ParagraphBubbleCard({
+            viewState: this.viewState,
+            content: para,
+            fontSize: this.bodyFontSize(),
+            chatFontFamily: this.chatFontFamily,
+            enableLatexRendering: this.enableLatexRendering,
+            codeBlockAutoCollapse: this.codeBlockAutoCollapse,
+            showLineNumbers: this.showLineNumbers,
+            streamKey: `${this.streamKeyTag}${this.message.id}#${partIndex}#p${pi}`,
+            animateReveal: this.streaming || this.sawStream || this.animateEntrance,
+            onVisibleGrow: (): void => { this.onTextGrow(); },
+          })
+        }, (_para: string, pi: number): string => `${this.message.id}-${partIndex}-p-${pi}`)
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .margin({ bottom: 4 })
+    }
+  }
+
   @Builder
   private MessageBlocks(): void {
     ForEach(this.getBlocks(), (block: MessagePartBlock, bi: number): void => {
@@ -781,6 +951,8 @@ export struct AgentMessageRow {
           } else if (this.isLiveMiniAppStream(this.getBlocks(), bi, block.index) ||
             this.miniAppStatusPartAt(this.getBlocks(), bi) !== null) {
             this.MiniAppCard(bi)
+          } else if (this.paragraphBubbleMode) {
+            this.ParagraphBubbleTextBlock(bi, block.index)
           } else {
             Column() {
               if (this.enableGenerativeWidgets) {
@@ -943,7 +1115,7 @@ export struct AgentMessageRow {
         showModelIcon: this.showModelIcon,
         isAssistantContinuation: this.isAssistantContinuation,
       })
-      if (this.turnRole === 'head' && this.turnHeadline.length > 0) {
+      if (!this.paragraphBubbleMode && this.turnRole === 'head' && this.turnHeadline.length > 0) {
         ChatTurnProgressRow({
           statusKind: this.turnStatusKind,
           headline: this.turnHeadline,
@@ -955,6 +1127,16 @@ export struct AgentMessageRow {
       }
       this.hostHeader()
       this.MessageContent()
+      if (this.paragraphBubbleMode && this.isTurnTail && this.tailTurnHeadline.length > 0) {
+        ChatTurnProgressRow({
+          statusKind: this.tailTurnStatusKind,
+          headline: this.tailTurnHeadline,
+          stepCount: this.tailTurnStepCount,
+          hasError: this.tailTurnHasError,
+          streaming: this.streaming,
+          onOpenDetails: (): void => { this.onOpenTailTurnDetails(); },
+        })
+      }
       ChatMessageActionFooter({
         annotations: this.message.annotations,
         mode: resolveActionFooterMode(
