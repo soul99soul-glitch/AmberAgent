@@ -35,15 +35,33 @@ export interface MessageTurnProjection {
 }
 
 // 整段气泡模式切分器：按代码块（``` / ~~~）外的空行切出已完成段落；
-// 流式进行中（streaming=true）暂存未闭合尾段，直到遇到空行或回复结束再整段呈现。
+// 流式进行中（streaming=true）暂存未闭合尾段，直到遇到空行或回复结束再整段呈现；
+// 独立的 Markdown 标题行（如 `## 小结`）自动挂到下一段正文/列表一起输出，避免拆出孤立标题气泡。
+const isStandaloneMarkdownHeading = (chunk: string): boolean =>
+  !chunk.includes('\n') && /^#{1,6}\s+\S/.test(chunk);
+
 export const splitCompletedParagraphs = (text: string, streaming: boolean): string[] => {
   const normalized: string = text.replace(/\r\n/g, '\n');
   if (normalized.trim().length === 0) return [];
   const lines: string[] = normalized.split('\n');
   const paragraphs: string[] = [];
+  const pendingHeadings: string[] = [];
   let current: string[] = [];
   let fenceChar: string = '';
   let fenceLen: number = 0;
+
+  const pushChunk = (chunk: string, allowHoldHeading: boolean): void => {
+    if (allowHoldHeading && isStandaloneMarkdownHeading(chunk)) {
+      pendingHeadings.push(chunk);
+      return;
+    }
+    if (pendingHeadings.length > 0) {
+      paragraphs.push(`${pendingHeadings.join('\n\n')}\n\n${chunk}`);
+      pendingHeadings.length = 0;
+    } else {
+      paragraphs.push(chunk);
+    }
+  };
 
   for (let i: number = 0; i < lines.length; i++) {
     const line: string = lines[i];
@@ -52,7 +70,7 @@ export const splitCompletedParagraphs = (text: string, streaming: boolean): stri
       if (trimmed.length === 0) {
         if (current.length > 0) {
           const chunk: string = current.join('\n').trim();
-          if (chunk.length > 0) paragraphs.push(chunk);
+          if (chunk.length > 0) pushChunk(chunk, true);
           current = [];
         }
         continue;
@@ -76,9 +94,14 @@ export const splitCompletedParagraphs = (text: string, streaming: boolean): stri
     }
   }
 
-  if (!streaming && current.length > 0) {
-    const tail: string = current.join('\n').trim();
-    if (tail.length > 0) paragraphs.push(tail);
+  if (!streaming) {
+    if (current.length > 0) {
+      const tail: string = current.join('\n').trim();
+      if (tail.length > 0) pushChunk(tail, false);
+    }
+    if (pendingHeadings.length > 0) {
+      paragraphs.push(pendingHeadings.join('\n\n'));
+    }
   }
   return paragraphs;
 };

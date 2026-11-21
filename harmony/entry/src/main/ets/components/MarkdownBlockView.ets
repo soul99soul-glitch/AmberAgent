@@ -234,12 +234,19 @@ export struct MarkdownBlockView {
   }
 
   private headingSize(level: number): number {
-    if (level <= 1) return 22;
-    if (level === 2) return 20;
-    if (level === 3) return 18;
-    if (level === 4) return 16;
-    if (level === 5) return 15;
-    return 14;
+    if (this.readingMode) {
+      if (level <= 1) return 22;
+      if (level === 2) return 20;
+      if (level === 3) return 18;
+      if (level === 4) return 16;
+      if (level === 5) return 15;
+      return 14;
+    }
+    // 聊天气泡内收敛标题字号，避免 ## / ### 出现文章级巨型大字
+    if (level <= 1) return this.fontSize + 3;
+    if (level === 2) return this.fontSize + 2;
+    if (level === 3) return this.fontSize + 1;
+    return this.fontSize;
   }
 
   private tokenColor(type: string): string {
@@ -412,7 +419,7 @@ export struct MarkdownBlockView {
         lineHeight: lineHeightForSize(this.headingSize(params.block.level)), align: TextAlign.Start, fillWidth: true })
     }
     .width('100%').alignItems(HorizontalAlign.Start)
-    .margin({ top: this.readingMode ? (params.block.level <= 2 ? 22 : 14) : (params.block.level <= 2 ? 12 : 8),
+    .margin({ top: this.readingMode ? (params.block.level <= 2 ? 22 : 14) : (params.block.level <= 2 ? 6 : 4),
       bottom: this.readingMode ? 8 : 4 })
   }
 

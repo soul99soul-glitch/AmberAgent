@@ -462,16 +462,26 @@ export struct ProviderConnectionForm {
                         if (m.type === 'image') {
                           Chip({ text: '生图' })
                         }
-                        Text('参数')
-                          .fontSize(META).fontWeight(FontWeight.Medium)
-                          .fontFamily(FONT_MONO_MEDIUM).fontColor(this.accentColorStore)
-                          .padding({ left: 8, right: 8, top: 6, bottom: 6 })
-                          .onClick((): void => { this.onOpenModelParameters(m.id); })
-                        Row() {
-                          Icon({ name: 'close', iconSize: 12, color: INK3 })
+                        Row({ space: 4 }) {
+                          Icon({ name: 'gear', iconSize: 13, color: INK2 })
+                          Text('设置')
+                            .fontSize(12).fontWeight(FontWeight.Medium)
+                            .fontColor(INK2)
                         }
-                        .width(30).height(30).borderRadius(15)
-                        .backgroundColor(SURFACE2)
+                        .height(30)
+                        .padding({ left: 9, right: 10 })
+                        .borderRadius(8)
+                        .backgroundColor(BG)
+                        .border({ width: 0.75, color: LINE })
+                        .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+                        .accessibilityText(`设置模型 ${m.modelId}`)
+                        .onClick((): void => { this.onOpenModelParameters(m.id); })
+                        Row() {
+                          Icon({ name: 'close', iconSize: 11.5, color: INK3 })
+                        }
+                        .width(30).height(30).borderRadius(8)
+                        .backgroundColor(BG)
+                        .border({ width: 0.75, color: LINE })
                         .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
                         .accessibilityText(`移除模型 ${m.modelId}`)
                         .onClick((): void => { this.catalog.removeModelId(m.modelId); })
@@ -550,15 +560,17 @@ export struct ProviderConnectionForm {
                         .fontSize(14).fontFamily(FONT_MONO).fontColor(INK)
                         .layoutWeight(1)
                         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                      Row({ space: 3 }) {
+                      Row({ space: 4 }) {
                         Icon({ name: 'plus', iconSize: 11, color: this.accentColorStore })
                         Text('添加')
-                          .fontSize(12.5).fontWeight(FontWeight.Medium).fontColor(this.accentColorStore)
+                          .fontSize(12).fontWeight(FontWeight.Medium).fontColor(this.accentColorStore)
                       }
-                      .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-                      .backgroundColor(SURFACE2)
-                      .borderRadius(999)
+                      .height(30)
+                      .padding({ left: 9, right: 10 })
+                      .backgroundColor(BG)
+                      .borderRadius(8)
                       .border({ width: 0.75, color: LINE })
+                      .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
                     }
                     .width('100%').constraintSize({ minHeight: 48 })
                     .padding({ left: 16, right: 14, top: 10, bottom: 10 })

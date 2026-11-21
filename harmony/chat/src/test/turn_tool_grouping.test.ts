@@ -177,6 +177,15 @@ test('splitCompletedParagraphs buffers incomplete trailing paragraphs while stre
     splitCompletedParagraphs('第一段。\n\n```ts\nconst a = 1;\n\nconst b = 2;\n```\n\n第三段完成。', false),
     ['第一段。', '```ts\nconst a = 1;\n\nconst b = 2;\n```', '第三段完成。'],
   );
+  // 独立 Markdown 标题自动与后继列表/段落合并，不拆成孤立大标题气泡
+  assert.deepEqual(
+    splitCompletedParagraphs('## 赵大哥多嘴两句\n\n1. 第一条\n2. 第二条\n\n收尾一句。', false),
+    ['## 赵大哥多嘴两句\n\n1. 第一条\n2. 第二条', '收尾一句。'],
+  );
+  assert.deepEqual(
+    splitCompletedParagraphs('## 赵大哥多嘴两句\n\n1. 正在写', true),
+    [],
+  );
 });
 
 test('multi-message assistant turn exposes tailTurnProgress on the last message for bottom status anchoring', () => {
