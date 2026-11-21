@@ -155,7 +155,8 @@ export class ChatTimelineDataSource implements IDataSource {
   sync(rows: ChatTimelineRow[], streamingTail: UIMessage[], regenTail: UIMessage | null,
     regenNodeId: string, compactCount: (messageId: string) => number,
     episodeLedger?: ChatEpisodeLedger | null,
-    projectTurns?: (messages: UIMessage[], streamingIds: ReadonlySet<string>, boundaryIds: ReadonlySet<string>) => MessageTurnProjection[]): void {
+    projectTurns?: (messages: UIMessage[], streamingIds: ReadonlySet<string>, boundaryIds: ReadonlySet<string>) => MessageTurnProjection[],
+    activeStreamingMessageIds?: ReadonlySet<string>): void {
     const hadItems: boolean = this.items.length > 0;
     const episodesByAfterId: Map<string, ChatEpisodeRecord[]> = new Map<string, ChatEpisodeRecord[]>();
     const boundaryIds: Set<string> = new Set<string>();
@@ -170,15 +171,20 @@ export class ChatTimelineDataSource implements IDataSource {
 
     const next: ChatTimelineItem[] = [];
     const positions: Map<string, number> = new Map<string, number>();
+    const streamingIds: Set<string> = new Set<string>();
     for (let index: number = 0; index < rows.length; index++) {
       const row: ChatTimelineRow = rows[index];
       const regenerating: boolean = regenTail !== null && row.nodeId === regenNodeId;
       const message: UIMessage = regenerating ? regenTail as UIMessage : row.message;
+      const isUnfinished: boolean = message.finishedAt === null || message.finishedAt === undefined || message.finishedAt.length === 0;
+      const rowStreaming: boolean = regenerating ||
+        (activeStreamingMessageIds !== undefined && activeStreamingMessageIds.has(message.id) && isUnfinished);
+      if (rowStreaming) streamingIds.add(message.id);
       const count: number = compactCount(row.message.id);
       positions.set(message.id, next.length);
       const msgKey: string = `message:${message.id}`;
       const isTailNew: boolean = hadItems && index === rows.length - 1 && !this.byKey.has(msgKey);
-      next.push(this.itemFor(msgKey, 'message', row, message, regenerating, count, index, isTailNew));
+      next.push(this.itemFor(msgKey, 'message', row, message, rowStreaming, count, index, isTailNew));
       if (count > 0) {
         next.push(this.itemFor(`compact:${row.message.id}`, 'compact', row,
           row.message, false, count, index));
@@ -192,7 +198,6 @@ export class ChatTimelineDataSource implements IDataSource {
         }
       }
     }
-    const streamingIds: Set<string> = new Set<string>();
     if (regenTail !== null) streamingIds.add(regenTail.id);
     for (let index: number = 0; index < streamingTail.length; index++) {
       const message: UIMessage = streamingTail[index];

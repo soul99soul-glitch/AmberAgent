@@ -3,6 +3,7 @@
 // - 聚合常规只读工具与思考状态为头部唯一单行 TurnProgressSummary
 // - 严格豁免：待审批（pending）、ask_user、媒体/MiniApp/文档产物、未恢复失败工具
 
+import type { JsonObject, JsonValue } from './json.ts';
 import type { UIMessage, UIMessagePart, UIMessagePartTool, UIMessagePartReasoning } from './message.ts';
 import { toolInputAsJson } from './message.ts';
 import { toolInputDisplayTitle, toolStaticLabel } from './tool_display.ts';
@@ -84,18 +85,121 @@ export const consecutiveTurnToolFailures = (messages: UIMessage[]): number => {
   return count;
 };
 
-const toolDisplayPhrase = (part: UIMessagePartTool): string => {
+const extractShortStringArg = (input: JsonObject | null, keys: string[], maxChars: number = 14): string => {
+  if (input === null) return '';
+  for (const key of keys) {
+    const raw: JsonValue | undefined = input[key];
+    if (typeof raw !== 'string') continue;
+    const compact: string = raw.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (compact.length === 0) continue;
+    const chars: string[] = Array.from(compact);
+    return chars.length <= maxChars ? compact : `${chars.slice(0, maxChars - 1).join('')}…`;
+  }
+  return '';
+};
+
+const looksMechanicalToolLabel = (text: string): boolean => {
+  const trimmed: string = text.trim();
+  if (trimmed.length === 0) return true;
+  if (/^[a-z0-9_.:/-]+$/i.test(trimmed)) return true;
+  return trimmed.includes('调用工具') || trimmed.includes('执行工具') || trimmed.includes('MCP 工具');
+};
+
+const humanToolNameFallback = (toolName: string, inputObj: JsonObject | null): string => {
+  const lower: string = toolName.trim().toLowerCase();
+  if (lower === 'search_web' || lower === 'web_search' || lower === 'tavily_search' ||
+    lower === 'exa_search' || lower === 'bocha_search' || lower === 'brave_search' ||
+    lower === 'google_search' || lower === 'bing_search' || lower === 'duckduckgo_search' ||
+    (lower.includes('search') && lower.includes('web'))) {
+    const q: string = extractShortStringArg(inputObj, ['query', 'q', 'keyword', 'keywords', 'search_query']);
+    return q.length > 0 ? `正在搜索「${q}」` : '正在上网查资料';
+  }
+  if (lower === 'scrape_web' || lower === 'web_scrape' || lower === 'fetch_url' ||
+    lower === 'web_fetch' || lower === 'read_url' || lower === 'url_read' || lower === 'http_get') {
+    return '正在阅读网页内容';
+  }
+  if (lower === 'wm_clear_session') return '正在清理网页登录状态';
+  if (lower === 'wm_act') return '正在操作网页';
+  if (lower.startsWith('wm_') || lower.startsWith('browser_')) return '正在查看网页';
+  if (lower.startsWith('subagent_')) return '正在后台核查资料';
+  if (lower.startsWith('model_council_')) return '正在多角度分析';
+  if (lower === 'episode_recall' || lower === 'memory_search' || lower === 'memory_query' ||
+    lower === 'memory_read' || lower === 'memory_get' || lower === 'memory_list' ||
+    lower === 'memory_recent' || lower === 'memory_briefing') {
+    return '正在回忆之前聊过的内容';
+  }
+  if (lower === 'memory_write' || lower === 'memory_save' || lower === 'memory_update' ||
+    lower === 'memory_remember' || lower === 'memory_patch_page' || lower === 'memory_write_page') {
+    return '正在记下重要信息';
+  }
+  if (lower === 'file_read' || lower === 'read_file' || lower === 'read_slices' ||
+    lower === 'document_read' || lower === 'pdf_read') {
+    return '正在查看文件内容';
+  }
+  if (lower === 'file_search' || lower === 'file_list' || lower === 'glob' ||
+    lower === 'grep' || lower === 'batch_search' || lower === 'search_files') {
+    return '正在查找相关文件';
+  }
+  if (lower === 'file_write' || lower === 'write_file' || lower === 'file_edit' ||
+    lower === 'edit_file' || lower === 'apply_edits') {
+    return '正在整理文档内容';
+  }
+  if (lower === 'weather_read' || lower === 'get_weather' || lower.startsWith('weather_')) {
+    const city: string = extractShortStringArg(inputObj, ['city', 'location', 'place'], 8);
+    return city.length > 0 ? `正在查${city}天气` : '正在查天气';
+  }
+  if (lower === 'calendar_events_list') return '正在查看日程';
+  if (lower.startsWith('calendar_')) return '正在整理日程';
+  if (lower === 'reminders_list') return '正在查看提醒事项';
+  if (lower.startsWith('reminder')) return '正在整理提醒事项';
+  if (lower === 'alarms_list') return '正在查看闹钟';
+  if (lower.startsWith('alarm')) return '正在设置闹钟';
+  if (lower.startsWith('notification_')) return '正在安排提醒通知';
+  if (lower === 'contacts_pick') return '正在查看联系人';
+  if (lower === 'photos_pick') return '正在查看照片';
+  if (lower === 'image_generate' || lower === 'generate_image' || lower === 'image_gen' || lower === 'draw_image') {
+    return '正在绘制图片';
+  }
+  if (lower === 'python_execute' || lower === 'code_execute' || lower === 'run_python' || lower.startsWith('sandbox_')) {
+    return '正在运行计算';
+  }
+  if (lower === 'terminal_execute' || lower === 'shell_execute' || lower.startsWith('ssh_')) {
+    return '正在处理设备任务';
+  }
+  if (lower === 'agent_soul_get') return '正在查看形象设定';
+  if (lower === 'agent_soul_update') return '正在更新形象设定';
+  if (lower.startsWith('agent_task_') || lower.startsWith('task_') || lower.startsWith('cron_')) {
+    return '正在安排任务';
+  }
+  if (lower.startsWith('mini_app_') || lower.startsWith('widget_')) return '正在准备小工具';
+  return '';
+};
+
+export const humanToolActivityPhrase = (part: UIMessagePartTool): string => {
   try {
     const inputObj = toolInputAsJson(part);
     const customTitle: string | null = toolInputDisplayTitle(inputObj);
-    if (customTitle !== null && customTitle.length > 0) return customTitle;
+    if (customTitle !== null && !looksMechanicalToolLabel(customTitle)) return customTitle;
+    const mapped: string = humanToolNameFallback(part.toolName, inputObj);
+    if (mapped.length > 0) return mapped;
     const staticLabel: string | null = toolStaticLabel(part.toolName, inputObj);
-    if (staticLabel !== null && staticLabel.length > 0) return staticLabel;
+    if (staticLabel !== null && !looksMechanicalToolLabel(staticLabel)) {
+      return staticLabel.startsWith('正在') ? staticLabel : `正在${staticLabel}`;
+    }
   } catch (_e) {
+    const mapped: string = humanToolNameFallback(part.toolName, null);
+    if (mapped.length > 0) return mapped;
     const fallback: string | null = toolStaticLabel(part.toolName);
-    if (fallback !== null && fallback.length > 0) return fallback;
+    if (fallback !== null && !looksMechanicalToolLabel(fallback)) {
+      return fallback.startsWith('正在') ? fallback : `正在${fallback}`;
+    }
   }
-  return part.toolName;
+  return '正在查资料';
+};
+
+const humanToolErrorHeadline = (part: UIMessagePartTool): string => {
+  const phrase: string = humanToolActivityPhrase(part).replace(/^正在/, '').replace(/…$/, '').trim();
+  return phrase.length > 0 ? `${phrase}时遇到问题` : '处理请求时遇到问题';
 };
 
 const hasVisibleTextContent = (msg: UIMessage): boolean => {
@@ -154,25 +258,23 @@ const summarizeAssistantTurn = (
 
   if (activeTool !== null) {
     statusKind = 'tool';
-    headline = `${toolDisplayPhrase(activeTool)}…`;
+    const phrase: string = humanToolActivityPhrase(activeTool);
+    headline = phrase.endsWith('…') ? phrase : `${phrase}…`;
   } else if (isStreamingTurn && activeReasoning && !hasOutputText) {
     statusKind = 'thinking';
-    headline = '正在思考…';
+    headline = '正在思考';
   } else if (isStreamingTurn && hasOutputText) {
     statusKind = 'writing';
-    headline = allTools.length > 0 ? `已参考 ${allTools.length} 步结果，正在组织回复…` : '正在组织回复…';
+    headline = '正在回复';
   } else if (isStreamingTurn) {
     statusKind = 'thinking';
-    headline = '正在处理…';
+    headline = allTools.length > 0 ? '正在整理查到的内容' : '正在思考';
   } else if (lastFailure !== null) {
     statusKind = 'error';
-    headline = `${toolDisplayPhrase(lastFailure)} · 存在未恢复错误`;
+    headline = humanToolErrorHeadline(lastFailure);
   } else if (allTools.length > 0) {
     statusKind = 'completed';
-    const lastPhrase: string = lastTool !== null ? toolDisplayPhrase(lastTool) : '';
-    headline = allTools.length === 1 && lastPhrase.length > 0
-      ? `已完成 · ${lastPhrase}`
-      : `已完成 ${allTools.length} 个步骤`;
+    headline = '已完成';
   } else if (reasoningCount > 0) {
     statusKind = 'completed';
     headline = '已完成思考';

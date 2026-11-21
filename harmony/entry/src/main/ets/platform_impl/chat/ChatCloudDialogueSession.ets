@@ -84,6 +84,7 @@ export interface ChatCloudDialoguePorts {
   jumpToBottom: () => void;
   clientFactory?: (connection: MacGatewayConnection) => CloudDialogueClientLike;
   taskRunner?: () => ConversationTaskRunner | null;
+  onLocalTasksChanged?: () => void;
   onDialogueConnected?: (connection: MacGatewayConnection) => void;
   onSoulRevision?: (soulRevision: number, connection: MacGatewayConnection) => void;
   onCloudSuggestionEligible?: (events: CloudDialogueEvent[], replyId: string, conversationId: string) => void;
@@ -193,7 +194,10 @@ export class ChatCloudDialogueSession {
     if (runner === null) return;
     runner.ensureHydrated().catch((): void => {});
     this.unsubLocalRunner = runner.subscribe((): void => {
-      if (this.pageAlive) this.uiTick++;
+      if (this.pageAlive) {
+        this.uiTick++;
+        this.ports?.onLocalTasksChanged?.();
+      }
     });
   }
 

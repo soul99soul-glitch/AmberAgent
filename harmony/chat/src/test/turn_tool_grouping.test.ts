@@ -93,3 +93,64 @@ test('turn projection keeps pending approvals, media and failures without a late
   assert.equal(head.turnProgress?.hasError, true);
   assert.equal(consecutiveTurnToolFailures([first, second]), 2);
 });
+
+test('single-line turn status stays alive in plain human Chinese until final reply completes', () => {
+  const u1 = textMsg('u1', 'user', '帮我查高分游戏');
+
+  // 1) 刚发送、尚未吐字时：保持正在思考，不出现空白
+  const emptyLive: UIMessage = { ...textMsg('a1', 'assistant', ''), finishedAt: null };
+  const [_, p0] = projectAssistantTurns([u1, emptyLive], new Set(['a1']));
+  assert.equal(p0.turnProgress?.statusKind, 'thinking');
+  assert.equal(p0.turnProgress?.headline, '正在思考');
+
+  // 2) 调用 search_web / 未知工具时：只展示人话动作，不泄露原始工具名
+  const searchPart: UIMessagePartTool = {
+    type: 'tool',
+    toolCallId: 's1',
+    toolName: 'search_web',
+    input: JSON.stringify({ query: 'mc高分游戏' }),
+    output: [],
+    approvalState: { type: 'auto' },
+    metadata: null,
+  };
+  const searching: UIMessage = { ...textMsg('a1', 'assistant', '', [searchPart]), finishedAt: null };
+  const [, p1] = projectAssistantTurns([u1, searching], new Set(['a1']));
+  assert.equal(p1.turnProgress?.statusKind, 'tool');
+  assert.equal(p1.turnProgress?.headline, '正在搜索「mc高分游戏」…');
+
+  const unknownTool: UIMessagePartTool = {
+    type: 'tool',
+    toolCallId: 'u-tool',
+    toolName: 'mcp_internal_fetch_v2',
+    input: '{}',
+    output: [],
+    approvalState: { type: 'auto' },
+    metadata: null,
+  };
+  const queryingUnknown: UIMessage = { ...textMsg('a1', 'assistant', '', [unknownTool]), finishedAt: null };
+  const [, pUnknown] = projectAssistantTurns([u1, queryingUnknown], new Set(['a1']));
+  assert.equal(pUnknown.turnProgress?.statusKind, 'tool');
+  assert.equal(pUnknown.turnProgress?.headline, '正在查资料…');
+  assert.equal(pUnknown.turnProgress?.headline.includes('mcp_internal'), false);
+
+  // 3) 工具已完成但正文尚未吐出时：单行状态不得消失，保持「正在整理查到的内容」
+  const doneSearch: UIMessagePartTool = {
+    ...searchPart,
+    output: [{ type: 'text', text: '{"ok":true}', metadata: null }],
+  };
+  const digesting: UIMessage = { ...textMsg('a1', 'assistant', '', [doneSearch]), finishedAt: null };
+  const [, p2] = projectAssistantTurns([u1, digesting], new Set(['a1']));
+  assert.equal(p2.turnProgress?.statusKind, 'thinking');
+  assert.equal(p2.turnProgress?.headline, '正在整理查到的内容');
+
+  // 4) 正在流式输出最终回复时：单行状态仍保持「正在回复」直到完成
+  const writing: UIMessage = { ...textMsg('a1', 'assistant', '这几年高分游戏有…', [doneSearch]), finishedAt: null };
+  const [, p3] = projectAssistantTurns([u1, writing], new Set(['a1']));
+  assert.equal(p3.turnProgress?.statusKind, 'writing');
+  assert.equal(p3.turnProgress?.headline, '正在回复');
+
+  // 5) 最终回复完成后：状态收敛为 completed
+  const finished: UIMessage = textMsg('a1', 'assistant', '这几年高分游戏有…', [doneSearch]);
+  const [, p4] = projectAssistantTurns([u1, finished], new Set());
+  assert.equal(p4.turnProgress?.statusKind, 'completed');
+});

@@ -26,6 +26,7 @@ export interface ChatTimelineCallbacks {
   activeArtifactInteraction: () => string;
   compactBoundaryCount: (messageId: string) => number;
   episodeLedger?: () => ChatEpisodeLedger | null;
+  activeStreamingMessageIds?: () => ReadonlySet<string>;
 }
 
 interface TimelinePrependAnchor {
@@ -105,10 +106,13 @@ export class ChatTimelineSession {
     const ledger: ChatEpisodeLedger | null = this.episodeLedgerProvider !== null
       ? this.episodeLedgerProvider()
       : (this.callbacks?.episodeLedger !== undefined ? this.callbacks.episodeLedger() : null);
+    const activeStreamingIds: ReadonlySet<string> | undefined = this.activeStreamingIdsProvider !== null
+      ? this.activeStreamingIdsProvider()
+      : (this.callbacks?.activeStreamingMessageIds !== undefined ? this.callbacks.activeStreamingMessageIds() : undefined);
     this.dataSource.sync(this.rows, this.streamingTail, this.regenTail,
       this.callbacks?.currentRegenNodeId?.() ?? '',
       (messageId: string): number => this.compactBoundaryCount(messageId),
-      ledger, projectAssistantTurns);
+      ledger, projectAssistantTurns, activeStreamingIds);
   }
 
   private loaderItemCount(): number {
@@ -167,8 +171,12 @@ export class ChatTimelineSession {
   private repository: ConversationRepository | null = null;
   private callbacks: ChatTimelineCallbacks | null = null;
   private episodeLedgerProvider: (() => ChatEpisodeLedger | null) | null = null;
+  private activeStreamingIdsProvider: (() => ReadonlySet<string>) | null = null;
   setEpisodeLedgerProvider(provider: () => ChatEpisodeLedger | null): void {
     this.episodeLedgerProvider = provider;
+  }
+  setActiveStreamingMessageIdsProvider(provider: () => ReadonlySet<string>): void {
+    this.activeStreamingIdsProvider = provider;
   }
   start(context: UIContext, repository: ConversationRepository, callbacks: ChatTimelineCallbacks): void {
     this.uiContext = context;

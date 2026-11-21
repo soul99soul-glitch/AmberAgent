@@ -34,7 +34,6 @@ export struct AmberBottomModeBar {
   private tabW: number[] = [48, 48, 48];
   private measuredTabs: boolean[] = [false, false, false];
   onSelectTab: (tab: BottomDockTab) => void = (_tab: BottomDockTab): void => {};
-  onNewTopic: () => void = (): void => {};
   onOpenGatewaySettings: () => void = (): void => {};
 
   private tabIndexOf(tab: BottomDockTab): number {
@@ -265,27 +264,8 @@ export struct AmberBottomModeBar {
 
       Blank()
 
-      // 右：[ ✦ 新话题 ] + [ 💭 思考强度 ] + [ 上下文环 ]
+      // 右：[ 💭 思考强度 ] + [ 上下文环 ]（对齐 iOS FocusedComposerBar，不含新话题按钮）
       Row({ space: 6 }) {
-        Row({ space: 3 }) {
-          Icon({ name: 'spark', iconSize: 12, color: this.accentColorStore })
-          Text('新话题')
-            .fontSize(12)
-            .fontFamily(FONT_SANS)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.accentColorStore)
-        }
-        .height(34)
-        .padding({ left: 10, right: 10 })
-        .borderRadius(999)
-        .backgroundColor(accentSoftBg(this.accentColorStore))
-        .border({ width: 0.75, color: accentEdge(this.accentColorStore) })
-        .alignItems(VerticalAlign.Center)
-        .onClick((): void => {
-          this.onNewTopic();
-        })
-        .accessibilityText('新话题分段')
-
         if (this.modelContext.reasoningLevels.length > 0) {
           Row({ space: 3 }) {
             Icon({ name: 'brain', iconSize: 12, color: INK2 })

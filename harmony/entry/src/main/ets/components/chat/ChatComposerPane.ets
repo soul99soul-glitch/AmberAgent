@@ -37,7 +37,6 @@ export struct ChatComposerPane {
   onCompact: () => void = (): void => {};
   onRetryStorage: () => void = (): void => {};
   onSelectTab: (tab: BottomDockTab) => void = (_tab: BottomDockTab): void => {};
-  onNewTopic: () => void = (): void => {};
   onOpenGatewaySettings: () => void = (): void => {};
   onOpenTasksSettings: () => void = (): void => {};
   onOpenHubsPlaceholder: () => void = (): void => {};
@@ -418,7 +417,6 @@ export struct ChatComposerPane {
           attentionTaskCount: this.attentionTaskCount,
           runningTaskCount: this.runningTaskCount,
           onSelectTab: (tab: BottomDockTab): void => { this.onSelectTab(tab); },
-          onNewTopic: (): void => { this.onNewTopic(); },
           onOpenGatewaySettings: (): void => { this.onOpenGatewaySettings(); },
         })
       }

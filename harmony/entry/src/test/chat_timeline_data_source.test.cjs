@@ -152,3 +152,25 @@ test('a tail message already present in history updates the same item instead of
   assert.strictEqual(source.getData(0).row.message, current.message);
   assert.equal(source.dataIndexForNode(''), -1);
 });
+
+test('activeStreamingMessageIds marks unfinished local-task history rows as streaming until finishedAt is set', () => {
+  const source = productionSource();
+  const userRow = row('u-node', { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi', metadata: null }], finishedAt: '2026-11-21T00:00:00Z' });
+  const liveAssistant = { id: 'a1', role: 'assistant', parts: [], finishedAt: null };
+  const liveRow = row('a-node', liveAssistant);
+  const seenStreamingSets = [];
+  const captureTurns = (msgs, streamingIds) => {
+    seenStreamingSets.push(Array.from(streamingIds));
+    return msgs.map(() => ({ isAssistantContinuation: false, turnRole: 'head', turnProgress: null, standaloneToolIds: [] }));
+  };
+
+  source.sync([userRow, liveRow], [], null, '', noCompact, null, captureTurns, new Set(['a1']));
+  assert.equal(source.getData(1).streaming, true);
+  assert.deepEqual(seenStreamingSets[0], ['a1']);
+
+  const doneAssistant = { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'done', metadata: null }], finishedAt: '2026-11-21T00:00:05Z' };
+  const doneRow = row('a-node', doneAssistant);
+  source.sync([userRow, doneRow], [], null, '', noCompact, null, captureTurns, new Set(['a1']));
+  assert.equal(source.getData(1).streaming, false);
+  assert.deepEqual(seenStreamingSets[1], []);
+});

@@ -589,6 +589,7 @@ struct ChatPage {
       autoScrollEnabled: (): boolean => this.timeline.enableAutoScroll,
       jumpToBottom: (): void => { this.timeline.jumpToBottom(); },
       taskRunner: getConversationTaskRunner,
+      onLocalTasksChanged: (): void => { this.timeline.syncDataSource(); },
       onDialogueConnected: (c): void => { syncAgentSoulFromCloud(c); },
       onSoulRevision: (rev, c): void => { observeGatewaySoulRevision(rev, c); },
       onCloudSuggestionEligible: (events, replyId, conversationId): void => {
@@ -700,6 +701,17 @@ struct ChatPage {
       compactBoundaryCount: (id: string): number => this.modelContext.compactBoundaryCount(id),
     };
     this.timeline.start(this.getUIContext(), getChatRepository(), timelinePorts);
+    this.timeline.setActiveStreamingMessageIdsProvider((): ReadonlySet<string> => {
+      const ids: Set<string> = new Set<string>();
+      const convId: string = this.presentation.conversation?.id ?? '';
+      if (convId.length > 0) {
+        const active = getConversationTaskRunner().activeAndQueuedTasksForConversation(convId);
+        for (const t of active) {
+          if (t.assistantMessageId.length > 0) ids.add(t.assistantMessageId);
+        }
+      }
+      return ids;
+    });
     this.timeline.setEpisodeLedgerProvider((): ChatEpisodeLedger | null => {
       const conv: Conversation | null = this.presentation.conversation;
       const convId: string = conv?.id ?? '';
@@ -1638,7 +1650,6 @@ struct ChatPage {
           onCompact: (): void => { this.modelContext.compactCurrentConversation(); },
           onRetryStorage: (): void => { getChatRepository().list().catch((error: Error): void => { this.presentation.errorMsg = error.message; }); },
           onSelectTab: (tab: BottomDockTab): void => { this.selectBottomDockTab(tab); },
-          onNewTopic: (): void => { this.startNewTopicAction(); },
           onOpenGatewaySettings: (): void => { router.pushUrl({ url: 'pages/SettingMacGatewayPage' }); },
           onOpenTasksSettings: (): void => { router.pushUrl({ url: 'pages/SettingCronTasksPage' }); },
           onOpenHubsPlaceholder: (): void => { router.pushUrl({ url: 'pages/MiniAppListPage' }); },

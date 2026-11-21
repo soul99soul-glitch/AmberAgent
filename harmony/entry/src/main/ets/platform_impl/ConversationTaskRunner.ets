@@ -9,7 +9,7 @@ import {
   patchConversation, applyStopGeneration, createChatKernelHost, runAgenticToolLoop,
   conversationHasPendingTools, applyUserInputRegexes, finishReasoning, finishPendingTools,
   cancelToolByUser, toText, withFollowupReceiptMetadata,
-  markInterruptedSideEffectToolsUnknown,
+  markInterruptedSideEffectToolsUnknown, humanToolActivityPhrase,
   type FollowupReceiptState,
 } from '@amber/chat-domain';
 import { EntryAbortController } from './EntryAbortController.ets';
@@ -143,7 +143,10 @@ const combineTaskGeneratedAssistantMessage = (
   const assistantMessages: UIMessage[] = generatedMessages.filter(
     (msg: UIMessage): boolean => msg.role === 'assistant');
   if (assistantMessages.length === 0) {
-    return makeUIMessage('assistant', [{ type: 'text', text: fallbackText, metadata: null }], {
+    const emptyParts: UIMessagePart[] = fallbackText.length > 0
+      ? [{ type: 'text', text: fallbackText, metadata: null }]
+      : [];
+    return makeUIMessage('assistant', emptyParts, {
       id: assistantMessageId, finishedAt: finished ? nowIso() : null,
     });
   }
@@ -152,9 +155,12 @@ const combineTaskGeneratedAssistantMessage = (
     for (const part of msg.parts) combinedParts.push(part);
   }
   const lastMsg: UIMessage = assistantMessages[assistantMessages.length - 1];
+  const fallbackParts: UIMessagePart[] = fallbackText.length > 0
+    ? [{ type: 'text', text: fallbackText, metadata: null }]
+    : [];
   const base: UIMessage = makeUIMessage(
     'assistant',
-    combinedParts.length > 0 ? combinedParts : [{ type: 'text', text: fallbackText, metadata: null }],
+    combinedParts.length > 0 ? combinedParts : fallbackParts,
     {
       id: assistantMessageId, createdAt: assistantMessages[0].createdAt,
       finishedAt: finished ? (lastMsg.finishedAt ?? nowIso()) : null,
@@ -166,25 +172,24 @@ const combineTaskGeneratedAssistantMessage = (
 
 const summarizeStreamingProgress = (generatedMessages: UIMessage[]): string => {
   const assistants: UIMessage[] = generatedMessages.filter((m: UIMessage): boolean => m.role === 'assistant');
-  if (assistants.length === 0) return '正在思考…';
+  if (assistants.length === 0) return '正在思考';
   const last: UIMessage = assistants[assistants.length - 1];
   for (let i: number = last.parts.length - 1; i >= 0; i--) {
     const part: UIMessagePart = last.parts[i];
     if (part.type === 'tool') {
       const toolPart: UIMessagePartTool = part as UIMessagePartTool;
-      if (toolPart.output.length === 0) return sanitizeSingleLineProgress(`正在调用工具 ${toolPart.toolName}…`);
+      if (toolPart.output.length === 0) {
+        return sanitizeSingleLineProgress(humanToolActivityPhrase(toolPart));
+      }
     }
   }
   const textContent: string = toText(last).trim();
-  if (textContent.length > 0) return sanitizeSingleLineProgress(`正在生成（${textContent.length} 字）：${textContent}`);
+  if (textContent.length > 0) return '正在回复';
   for (let i: number = last.parts.length - 1; i >= 0; i--) {
     const part: UIMessagePart = last.parts[i];
-    if (part.type === 'reasoning') {
-      const preview: string = (part as UIMessagePartReasoning).reasoning.trim();
-      return preview.length > 0 ? sanitizeSingleLineProgress(`正在思考：${preview}`) : '正在深度思考…';
-    }
+    if (part.type === 'reasoning') return '正在思考';
   }
-  return '正在生成回复…';
+  return '正在思考';
 };
 
 export class ConversationTaskRunner {
@@ -320,8 +325,10 @@ export class ConversationTaskRunner {
               const cur: UIMessage = node.messages[node.selectIndex];
               const existingText: string = toText(cur).trim();
               const interruptedNote: string = '[任务因应用退出已中断]';
-              const placeholderOnly: boolean = cur.parts.length === 1 && cur.parts[0].type === 'text' &&
-                (existingText.length === 0 || existingText.startsWith('[正在'));
+              const placeholderOnly: boolean = cur.parts.length === 0 || (
+                cur.parts.length === 1 && cur.parts[0].type === 'text' &&
+                (existingText.length === 0 || existingText.startsWith('[正在'))
+              );
               const nextMsg: UIMessage = placeholderOnly
                 ? makeUIMessage('assistant', [{ type: 'text', text: interruptedNote, metadata: null }], {
                   id: cur.id, createdAt: cur.createdAt, finishedAt: nowIso(),
@@ -409,14 +416,11 @@ export class ConversationTaskRunner {
     const title: string = summarizeTaskTitle(rawText, parts);
     const willQueue: boolean = this.runningTaskCount() >= this.maxConcurrentTasks;
     const initialStatus: LocalTaskStatus = willQueue ? 'queued' : 'running';
-    const initialProgress: string = willQueue ? '排队等待并发槽位 [queued]' : '正在准备上下文…';
-    const placeholderText: string = willQueue ? '[正在排队等待执行…]' : '[正在思考…]';
+    const initialProgress: string = willQueue ? '排队等待并发槽位 [queued]' : '正在思考';
 
     const userMsg: UIMessage = makeUIMessage('user', parts);
     const userNode: MessageNode = toMessageNode(userMsg);
-    const assistantMsg: UIMessage = makeUIMessage('assistant', [
-      { type: 'text', text: placeholderText, metadata: null },
-    ]);
+    const assistantMsg: UIMessage = makeUIMessage('assistant', []);
     const assistantNode: MessageNode = toMessageNode(assistantMsg);
 
     this.registerTaskPromise(taskId);
@@ -760,7 +764,7 @@ export class ConversationTaskRunner {
             task.updatedAt = Date.now();
             this.emit();
           }
-          await projectToStoredConversation(false, '[正在思考…]');
+          await projectToStoredConversation(false, '');
         },
         activeConversation: (): Conversation => workingConversation as Conversation,
         mutateConversation: (update: (latest: Conversation) => Conversation | null): Promise<Conversation | null> =>
@@ -782,11 +786,10 @@ export class ConversationTaskRunner {
 
       active.unsubscribeActivity = context.activityStore.subscribe((activity: SandboxActivityUiState | null): void => {
         if (activity === null || task.stopRequested) return;
-        const label: string = activity.title.trim().length > 0 ? activity.title.trim() : activity.toolName.trim();
-        const detail: string = activity.outputTail.trim().length > 0
-          ? activity.outputTail.trim() : activity.inputPreview.trim();
+        const rawTitle: string = activity.title.trim();
+        const isReadableTitle: boolean = rawTitle.length > 0 && !/^[a-z0-9_.:/-]+$/i.test(rawTitle);
         task.progressText = sanitizeSingleLineProgress(
-          detail.length > 0 ? `正在执行 ${label}：${detail}` : `正在执行 ${label}…`);
+          isReadableTitle ? (rawTitle.startsWith('正在') ? rawTitle : `正在${rawTitle}`) : '正在查资料');
         task.updatedAt = Date.now();
         this.emit();
       });
@@ -801,7 +804,7 @@ export class ConversationTaskRunner {
         const now: number = Date.now();
         if (now - lastStreamWriteAt >= STREAM_WRITE_THROTTLE_MS) {
           lastStreamWriteAt = now;
-          projectToStoredConversation(false, '[正在思考…]').catch((): null => null);
+          projectToStoredConversation(false, '').catch((): null => null);
         }
       };
       deps.onRawFlushSnapshot = (messages: UIMessage[]): void => {
