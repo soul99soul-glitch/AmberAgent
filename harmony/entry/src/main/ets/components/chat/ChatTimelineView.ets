@@ -74,13 +74,11 @@ export struct ChatTimelineView {
   aboutToDisappear(): void { this.previewScrollChanged(false); }
   aboutToAppear(): void {
     this.syncSpacerState();
-    this.timeline.syncDataSource();
+    this.timeline.scheduleDataSourceSync();
   }
-  private syncTimelineItems(): void { this.timeline.syncDataSource(); }
+  private syncTimelineItems(): void { this.timeline.scheduleDataSourceSync(); }
   private syncSpacerState(): void {
-    this.timeline.hasTopSpacer = this.topSpacerHeight > 0;
-    this.timeline.hasBottomSpacer = this.bottomSpacerHeight > 0;
-    this.timeline.bottomSpacerHeight = this.bottomSpacerHeight;
+    this.timeline.setSpacerMetrics(this.topSpacerHeight, this.bottomSpacerHeight);
   }
 
   @Builder

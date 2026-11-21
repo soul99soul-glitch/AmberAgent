@@ -482,7 +482,7 @@ struct ChatPage {
     if (this.runDetails.denyDialogOpen) { this.runDetails.dismissDenyDialog(); return true; }
     if (this.modelContext.modelMenuOpen || this.modelContext.modelMenuLoading) { this.modelContext.closeModelMenu(); return true; }
     if (this.modelContext.contextMeterOpen) { this.modelContext.contextMeterOpen = false; return true; }
-    if (this.bottomDockTab !== 'chat') { this.bottomDockTab = 'chat'; return true; }
+    if (this.bottomDockTab !== 'chat') { this.selectBottomDockTab('chat'); return true; }
     if (this.drawer.drawerOpen) { this.drawer.closeDrawer(); return true; }
     return false;
   }
@@ -654,8 +654,13 @@ struct ChatPage {
         if (target === 'newChat') { this.newChat(); return; }
         if (target === 'conversation') { router.replaceUrl({ url: 'pages/ChatPage', params: { conversationId: id } }); return; }
         if (target === 'deletedCurrent') { router.replaceUrl({ url: 'pages/ChatPage' }); return; }
-        if (target === 'tasks') { this.bottomDockTab = 'tasks'; return; }
-        if (target === 'persona') { this.embodimentSheetOpen = true; return; }
+        if (target === 'tasks') { this.selectBottomDockTab('tasks'); return; }
+        if (target === 'persona') {
+          setTimeout((): void => {
+            if (this.pageAlive) this.embodimentSheetOpen = true;
+          }, 180);
+          return;
+        }
         const url: string = target === 'history' ? 'pages/HistoryPage'
           : target === 'council' ? 'pages/CouncilPage'
           : target === 'webmount' ? 'pages/SettingExperimentalWebMountPage'
@@ -1200,13 +1205,21 @@ struct ChatPage {
     return notices;
   }
 
+  private selectBottomDockTab(tab: BottomDockTab): void {
+    if (this.bottomDockTab === tab) return;
+    const reduced: boolean = AppStorage.get<boolean>('reduceMotion') === true;
+    animateTo({ duration: reduced ? 140 : 240, curve: Curve.FastOutSlowIn }, (): void => {
+      this.bottomDockTab = tab;
+    });
+  }
+
   private openTopBarNotice(notice: TopBarNoticeItem): void {
     const currentId: string = this.presentation.conversation?.id ?? '';
     if (notice.conversationId.length > 0 && notice.conversationId !== currentId) {
       router.replaceUrl({ url: 'pages/ChatPage', params: { conversationId: notice.conversationId } });
       return;
     }
-    this.bottomDockTab = 'tasks';
+    this.selectBottomDockTab('tasks');
   }
 
   private clearTopBarNotices(): void {
@@ -1413,7 +1426,7 @@ struct ChatPage {
     AgentEmbodimentSheet({
       onClose: (): void => { this.embodimentSheetOpen = false; },
       onPickStarter: (prompt: string): void => {
-        this.bottomDockTab = 'chat';
+        this.selectBottomDockTab('chat');
         this.composer.setInputText(prompt);
       },
       onOpenMemoryRecords: (): void => { router.pushUrl({ url: 'pages/MemoryRecordsPage' }); },
@@ -1447,6 +1460,9 @@ struct ChatPage {
       .hitTestBehavior(HitTestMode.None)
       .bindSheet(this.embodimentSheetOpen, this.EmbodimentSheet(), {
         height: SheetSize.LARGE,
+        showClose: false,
+        dragBar: true,
+        backgroundColor: BG,
         onDisappear: (): void => { this.embodimentSheetOpen = false; },
       })
 
@@ -1635,7 +1651,7 @@ struct ChatPage {
           hasUnrecoveredError: this.consecutiveErrorCount() >= 4,
           onCompact: (): void => { this.modelContext.compactCurrentConversation(); },
           onRetryStorage: (): void => { getChatRepository().list().catch((error: Error): void => { this.presentation.errorMsg = error.message; }); },
-          onSelectTab: (tab: BottomDockTab): void => { this.bottomDockTab = tab; },
+          onSelectTab: (tab: BottomDockTab): void => { this.selectBottomDockTab(tab); },
           onNewTopic: (): void => { this.startNewTopicAction(); },
           onOpenGatewaySettings: (): void => { router.pushUrl({ url: 'pages/SettingMacGatewayPage' }); },
           onOpenTasksSettings: (): void => { router.pushUrl({ url: 'pages/SettingCronTasksPage' }); },

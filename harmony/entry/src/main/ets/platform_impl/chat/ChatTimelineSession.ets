@@ -43,19 +43,36 @@ interface ScrollNavigationTimer {
   handle: number;
 }
 
+interface TimelineSpacerMetrics {
+  hasTopSpacer: boolean;
+  hasBottomSpacer: boolean;
+  bottomSpacerHeight: number;
+}
+
+interface TimelineSyncBox {
+  conversationId: string;
+  pending: boolean;
+  dataSource: ChatTimelineDataSource | null;
+}
+
 @Observed
 export class ChatTimelineSession {
   rows: MsgRow[] = [];
-  private lazyDataSource: ChatTimelineDataSource | null = null;
-  private dataSourceSyncPending: boolean = false;
-  private dataSourceConversationId: string = '';
+  private readonly syncBox: TimelineSyncBox = { conversationId: '', pending: false, dataSource: null };
+  private readonly spacerMetrics: TimelineSpacerMetrics = {
+    hasTopSpacer: false,
+    hasBottomSpacer: false,
+    bottomSpacerHeight: 0,
+  };
   private pendingOlderPage: PendingOlderTimelinePage | null = null;
   private prependLayoutCallback: (() => void) | null = null;
   private userScrollInProgress: boolean = false;
 
   get dataSource(): ChatTimelineDataSource {
-    if (this.lazyDataSource === null) this.lazyDataSource = new ChatTimelineDataSource();
-    return this.lazyDataSource;
+    if (this.syncBox.dataSource === null) {
+      this.syncBox.dataSource = new ChatTimelineDataSource();
+    }
+    return this.syncBox.dataSource;
   }
 
   setRows(rows: MsgRow[]): void {
@@ -63,13 +80,13 @@ export class ChatTimelineSession {
     this.scheduleDataSourceSync();
   }
 
-  private scheduleDataSourceSync(): void {
-    if (this.dataSourceSyncPending) return;
-    this.dataSourceSyncPending = true;
+  scheduleDataSourceSync(): void {
+    if (this.syncBox.pending) return;
+    this.syncBox.pending = true;
     // A final snapshot can replace the live tail and history in the same turn.
     // Reconcile after both assignments so its stable message slot never leaves.
     Promise.resolve().then((): void => {
-      this.dataSourceSyncPending = false;
+      this.syncBox.pending = false;
       if (this.pageAlive) this.syncDataSource();
     });
   }
@@ -77,13 +94,13 @@ export class ChatTimelineSession {
   syncDataSource(): void {
     const conversationId: string = this.conversation?.id ?? '';
     if (conversationId.length > 0) {
-      if (this.dataSourceConversationId.length > 0 && this.dataSourceConversationId !== conversationId) {
+      if (this.syncBox.conversationId.length > 0 && this.syncBox.conversationId !== conversationId) {
         this.cancelPrependRestore();
         if (this.pendingOlderPage !== null) this.prefetching = false;
         this.pendingOlderPage = null;
         this.dataSource.clear();
       }
-      this.dataSourceConversationId = conversationId;
+      this.syncBox.conversationId = conversationId;
     }
     const ledger: ChatEpisodeLedger | null = this.episodeLedgerProvider !== null
       ? this.episodeLedgerProvider()
@@ -95,12 +112,18 @@ export class ChatTimelineSession {
   }
 
   private loaderItemCount(): number {
-    return (this.hasTopSpacer ? 1 : 0) + (this.timelineLoadState.fullyLoaded ? 0 : 1);
+    return (this.spacerMetrics.hasTopSpacer ? 1 : 0) + (this.timelineLoadState.fullyLoaded ? 0 : 1);
   }
 
-  hasTopSpacer: boolean = false;
-  hasBottomSpacer: boolean = false;
-  bottomSpacerHeight: number = 0;
+  setSpacerMetrics(topHeight: number, bottomHeight: number): void {
+    this.spacerMetrics.hasTopSpacer = topHeight > 0;
+    this.spacerMetrics.hasBottomSpacer = bottomHeight > 0;
+    this.spacerMetrics.bottomSpacerHeight = bottomHeight;
+  }
+
+  get hasTopSpacer(): boolean { return this.spacerMetrics.hasTopSpacer; }
+  get hasBottomSpacer(): boolean { return this.spacerMetrics.hasBottomSpacer; }
+  get bottomSpacerHeight(): number { return this.spacerMetrics.bottomSpacerHeight; }
 
   listIndexForRow(rowIndex: number): number {
     const dataIndex: number = this.dataSource.dataIndexForRow(rowIndex);
@@ -156,7 +179,7 @@ export class ChatTimelineSession {
   }
   show(): void { this.pageVisible = true; }
   hide(): void { this.pageVisible = false; this.userScrollInProgress = false; this.applyPendingOlderPage(); this.cancelPrependRestore(); this.hideScrollNavigation(); this.nativeFollow?.cancel(); this.detachKeyboardListener(); this.restoreKeyboardAvoidance(); this.imeKeyboardHeightVp = 0; }
-  dispose(): void { this.hide(); this.pageAlive = false; this.initialScrollScheduleToken++; this.imeProgrammaticScrollToken++; this.lazyDataSource?.clear(); }
+  dispose(): void { this.hide(); this.pageAlive = false; this.initialScrollScheduleToken++; this.imeProgrammaticScrollToken++; this.syncBox.dataSource?.clear(); }
   getUIContext(): UIContext { return this.uiContext as UIContext; }
   get conversation(): Conversation | null { return this.callbacks?.currentConversation() ?? null; }
   get streamingTail(): UIMessage[] { return this.callbacks?.currentStreamingTail() ?? []; }

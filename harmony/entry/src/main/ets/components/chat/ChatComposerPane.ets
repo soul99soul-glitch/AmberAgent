@@ -12,7 +12,7 @@ import { ChatInput } from '../ChatInput.ets';
 import { ChatPendingQueueSheet } from '../ChatPendingQueueSheet.ets';
 import { JevCompletionNoticeView } from '../JevCompletionNotice.ets';
 import { Icon } from '../ui/Icon.ets';
-import { ACCENT, BG_FADE_END, BG_FADE_START, ERROR, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, INK, INK2, INK3, LINE, META, OVERLAY, SURFACE, SURFACE2 } from '../../design/tokens.ets';
+import { ACCENT, BG, BG_FADE_END, BG_FADE_START, ERROR, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, INK, INK2, INK3, LINE, META, OVERLAY, SURFACE, SURFACE2 } from '../../design/tokens.ets';
 
 @Component
 export struct ChatComposerPane {
@@ -59,48 +59,112 @@ export struct ChatComposerPane {
       },
     })
   }
+  @StorageProp('reduceMotion') reduceMotion: boolean = false;
+  @State private panelDragOffsetY: number = 0;
+
   @Builder
   InlineDockPanel(): void {
-    if (this.activeTab === 'tasks') {
+    if (this.activeTab !== 'chat') {
       Column() {
-        AmberTaskCenterSheet({
-          cloudDialogue: this.cloudDialogue,
-          currentConversationId: this.presentation.conversation?.id ?? '',
-          pendingApprovalCount: this.pendingApprovalCount,
-          consecutiveErrorCount: this.consecutiveErrorCount,
-          hasUnrecoveredError: this.hasUnrecoveredError,
-          onBackToChat: (): void => { this.onSelectTab('chat'); },
-          onOpenTasksSettings: (): void => { this.onOpenTasksSettings(); },
-          onOpenGatewaySettings: (): void => { this.onOpenGatewaySettings(); },
-          onJumpToConversation: (id: string): void => {
-            this.onSelectTab('chat');
-            this.onOpenConversation(id);
-          },
-          onFocusApproval: (): void => { this.onFocusApproval(); },
-          onStatusMessage: (msg: string): void => { this.presentation.errorMsg = msg; },
-        })
+        // 顶部拖拽握把：支持下拉跟手收起回「对话」
+        Row() {
+          Column()
+            .width(36)
+            .height(4)
+            .borderRadius(999)
+            .backgroundColor(LINE)
+        }
+        .width('100%')
+        .height(22)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .gesture(
+          PanGesture({ direction: PanDirection.Vertical, distance: 6 })
+            .onActionUpdate((event: GestureEvent): void => {
+              this.panelDragOffsetY = Math.max(0, event.offsetY);
+            })
+            .onActionEnd((event: GestureEvent): void => {
+              const shouldDismiss: boolean = this.panelDragOffsetY > 64 || event.velocityY > 420;
+              animateTo({ duration: this.reduceMotion ? 130 : 220, curve: Curve.FastOutSlowIn }, (): void => {
+                this.panelDragOffsetY = 0;
+                if (shouldDismiss) this.onSelectTab('chat');
+              });
+            }),
+        )
+
+        // 统一高度外壳内，任务（左）与中心（右）方向性平滑切换，避免外框跳塌
+        Stack({ alignContent: Alignment.Top }) {
+          if (this.activeTab === 'tasks') {
+            Column() {
+              AmberTaskCenterSheet({
+                cloudDialogue: this.cloudDialogue,
+                currentConversationId: this.presentation.conversation?.id ?? '',
+                pendingApprovalCount: this.pendingApprovalCount,
+                consecutiveErrorCount: this.consecutiveErrorCount,
+                hasUnrecoveredError: this.hasUnrecoveredError,
+                onBackToChat: (): void => { this.onSelectTab('chat'); },
+                onOpenTasksSettings: (): void => { this.onOpenTasksSettings(); },
+                onOpenGatewaySettings: (): void => { this.onOpenGatewaySettings(); },
+                onJumpToConversation: (id: string): void => {
+                  this.onSelectTab('chat');
+                  this.onOpenConversation(id);
+                },
+                onFocusApproval: (): void => { this.onFocusApproval(); },
+                onStatusMessage: (msg: string): void => { this.presentation.errorMsg = msg; },
+              })
+            }
+            .width('100%')
+            .height('100%')
+            .transition(
+              this.reduceMotion
+                ? TransitionEffect.OPACITY.animation({ duration: 140, curve: Curve.EaseOut })
+                : TransitionEffect.OPACITY.combine(TransitionEffect.translate({ x: -24 }))
+                    .animation({ duration: 220, curve: Curve.FastOutSlowIn }),
+            )
+          } else {
+            Column() {
+              AmberHubsSheet({
+                currentConversationId: this.presentation.conversation?.id ?? '',
+                onBackToChat: (): void => { this.onSelectTab('chat'); },
+                onOpenConversation: (id: string): void => {
+                  this.onSelectTab('chat');
+                  this.onOpenConversation(id);
+                },
+                onStartWithInstruction: (hubId: string, instruction: string, title: string): void => {
+                  this.onStartWithHubInstruction(hubId, instruction, title);
+                },
+                onOpenMiniApps: (): void => { this.onOpenHubsPlaceholder(); },
+              })
+            }
+            .width('100%')
+            .height('100%')
+            .transition(
+              this.reduceMotion
+                ? TransitionEffect.OPACITY.animation({ duration: 140, curve: Curve.EaseOut })
+                : TransitionEffect.OPACITY.combine(TransitionEffect.translate({ x: 24 }))
+                    .animation({ duration: 220, curve: Curve.FastOutSlowIn }),
+            )
+          }
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .clip(true)
       }
       .width('100%')
-      .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 20 }))
-        .animation({ duration: 200, curve: Curve.EaseOut }))
-    } else if (this.activeTab === 'hubs') {
-      Column() {
-        AmberHubsSheet({
-          currentConversationId: this.presentation.conversation?.id ?? '',
-          onBackToChat: (): void => { this.onSelectTab('chat'); },
-          onOpenConversation: (id: string): void => {
-            this.onSelectTab('chat');
-            this.onOpenConversation(id);
-          },
-          onStartWithInstruction: (hubId: string, instruction: string, title: string): void => {
-            this.onStartWithHubInstruction(hubId, instruction, title);
-          },
-          onOpenMiniApps: (): void => { this.onOpenHubsPlaceholder(); },
-        })
-      }
-      .width('100%')
-      .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 20 }))
-        .animation({ duration: 200, curve: Curve.EaseOut }))
+      .height(430)
+      .borderRadius({ topLeft: 26, topRight: 26, bottomLeft: 0, bottomRight: 0 })
+      .backgroundColor(BG)
+      .border({ width: { top: 0.75, left: 0.5, right: 0.5, bottom: 0 }, color: HOME_GLASS_EDGE })
+      .shadow({ radius: 18, color: HOME_GLASS_SHADOW, offsetY: -4 })
+      .margin({ bottom: 8 })
+      .translate({ y: this.panelDragOffsetY })
+      .clip(true)
+      .transition(
+        this.reduceMotion
+          ? TransitionEffect.OPACITY.animation({ duration: 140, curve: Curve.EaseOut })
+          : TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 42 }))
+              .animation({ duration: 240, curve: Curve.FastOutSlowIn }),
+      )
     }
   }
 
@@ -343,6 +407,7 @@ export struct ChatComposerPane {
           })
         }
         .width('100%')
+        .opacity(this.activeTab === 'chat' ? 1 : 0)
         .visibility(this.activeTab === 'chat' ? Visibility.Visible : Visibility.None)
 
         AmberBottomModeBar({

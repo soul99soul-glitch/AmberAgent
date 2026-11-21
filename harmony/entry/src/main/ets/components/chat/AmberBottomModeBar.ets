@@ -3,7 +3,7 @@
 // - 聚焦态：150ms 淡变切为写作元控制栏（[ 模型名 ] + [ ✦ 新话题 | 💭 思考强度 | 上下文环 ]）
 
 import {
-  ACCENT, ACCENT_INK, BG_GLASS, ERROR, HOME_GLASS_EDGE, INK, INK2, INK3, LINE,
+  ACCENT, ACCENT_INK, BG_GLASS, ERROR, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, INK, INK2, INK3, LINE,
   STATUS_AMBER, SURFACE, SURFACE2, accentEdge, accentSoftBg,
 } from '../../design/tokens.ets';
 import { FONT_MONO, FONT_SANS } from '../../design/fonts.ets';
@@ -21,13 +21,85 @@ export struct AmberBottomModeBar {
   @StorageProp('themeEpoch') themeEpoch: number = 0;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @StorageProp('appBackgrounded') appBackgrounded: boolean = false;
+  @StorageProp('reduceMotion') reduceMotion: boolean = false;
   @Prop inputFocused: boolean = false;
-  @Prop activeTab: BottomDockTab = 'chat';
+  @Prop @Watch('onActiveTabChange') activeTab: BottomDockTab = 'chat';
   @Prop attentionTaskCount: number = 0;
   @Prop runningTaskCount: number = 0;
+  @State private indicatorX: number = 0;
+  @State private indicatorW: number = 48;
+  @State private indicatorReady: boolean = false;
+  private tabX: number[] = [0, 50, 100];
+  private tabW: number[] = [48, 48, 48];
+  private measuredTabs: boolean[] = [false, false, false];
   onSelectTab: (tab: BottomDockTab) => void = (_tab: BottomDockTab): void => {};
   onNewTopic: () => void = (): void => {};
   onOpenGatewaySettings: () => void = (): void => {};
+
+  private tabIndexOf(tab: BottomDockTab): number {
+    if (tab === 'tasks') return 1;
+    if (tab === 'hubs') return 2;
+    return 0;
+  }
+
+  private tabForIndex(index: number): BottomDockTab {
+    if (index === 1) return 'tasks';
+    if (index === 2) return 'hubs';
+    return 'chat';
+  }
+
+  private onActiveTabChange(): void {
+    const idx: number = this.tabIndexOf(this.activeTab);
+    if (!this.measuredTabs[idx]) return;
+    const nextX: number = this.tabX[idx];
+    const nextW: number = this.tabW[idx];
+    if (!this.indicatorReady) {
+      this.indicatorX = nextX;
+      this.indicatorW = nextW;
+      this.indicatorReady = true;
+      return;
+    }
+    animateTo({ duration: this.reduceMotion ? 130 : 240, curve: Curve.FastOutSlowIn }, (): void => {
+      this.indicatorX = nextX;
+      this.indicatorW = nextW;
+    });
+  }
+
+  private recordTabArea(tab: BottomDockTab, area: Area): void {
+    const idx: number = this.tabIndexOf(tab);
+    const x: number = Number(area.position.x);
+    const w: number = Number(area.width);
+    if (!Number.isFinite(x) || !Number.isFinite(w) || w <= 0) return;
+    this.tabX[idx] = x;
+    this.tabW[idx] = w;
+    this.measuredTabs[idx] = true;
+    if (this.activeTab === tab) {
+      if (!this.indicatorReady) {
+        this.indicatorX = x;
+        this.indicatorW = w;
+        this.indicatorReady = true;
+      } else if (Math.abs(this.indicatorX - x) > 0.5 || Math.abs(this.indicatorW - w) > 0.5) {
+        animateTo({ duration: this.reduceMotion ? 120 : 200, curve: Curve.FastOutSlowIn }, (): void => {
+          this.indicatorX = x;
+          this.indicatorW = w;
+        });
+      }
+    }
+  }
+
+  private resolveTabByLocalX(localX: number): BottomDockTab {
+    let bestIdx: number = 0;
+    let bestDist: number = Number.MAX_VALUE;
+    for (let i: number = 0; i < 3; i++) {
+      const center: number = this.tabX[i] + this.tabW[i] * 0.5;
+      const dist: number = Math.abs(localX - center);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+    return this.tabForIndex(bestIdx);
+  }
 
   private totalTaskBadge(): number {
     return this.attentionTaskCount + this.runningTaskCount;
@@ -86,15 +158,14 @@ export struct AmberBottomModeBar {
       }
     }
     .height(30)
-    .padding({ left: 11, right: 11 })
+    .padding({ left: 12, right: 12 })
     .borderRadius(999)
-    .backgroundColor(this.activeTab === tab ? SURFACE : Color.Transparent)
-    .border({
-      width: this.activeTab === tab ? 0.5 : 0,
-      color: this.activeTab === tab ? HOME_GLASS_EDGE : Color.Transparent,
-    })
+    .backgroundColor(this.indicatorReady ? Color.Transparent : (this.activeTab === tab ? SURFACE : Color.Transparent))
     .alignItems(VerticalAlign.Center)
     .justifyContent(FlexAlign.Center)
+    .onAreaChange((_old: Area, area: Area): void => {
+      this.recordTabArea(tab, area);
+    })
     .onClick((): void => {
       if (tab !== 'chat' && this.activeTab === tab) {
         this.onSelectTab('chat');
@@ -107,11 +178,26 @@ export struct AmberBottomModeBar {
   @Builder
   RestingSwitcherRow(): void {
     Row({ space: 8 }) {
-      // 左侧 3 段胶囊：[ 对话 | 任务 [N] | 中心 ]
-      Row({ space: 2 }) {
-        this.TabChip('chat', '对话', 0, false)
-        this.TabChip('tasks', '任务', this.totalTaskBadge(), this.attentionTaskCount > 0)
-        this.TabChip('hubs', '中心', 0, false)
+      // 左侧 3 段共享滑块胶囊：[ 对话 | 任务 [N] | 中心 ]（支持点按与水平轻扫）
+      Stack({ alignContent: Alignment.Start }) {
+        if (this.indicatorReady) {
+          Column()
+            .width(this.indicatorW)
+            .height(30)
+            .borderRadius(999)
+            .backgroundColor(SURFACE)
+            .border({ width: 0.6, color: HOME_GLASS_EDGE })
+            .shadow({ radius: 6, color: HOME_GLASS_SHADOW, offsetY: 1 })
+            .translate({ x: this.indicatorX })
+            .hitTestBehavior(HitTestMode.None)
+        }
+
+        Row({ space: 2 }) {
+          this.TabChip('chat', '对话', 0, false)
+          this.TabChip('tasks', '任务', this.totalTaskBadge(), this.attentionTaskCount > 0)
+          this.TabChip('hubs', '中心', 0, false)
+        }
+        .alignItems(VerticalAlign.Center)
       }
       .height(36)
       .padding({ left: 3, right: 3 })
@@ -122,7 +208,15 @@ export struct AmberBottomModeBar {
         { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.6 },
       )
       .border({ width: 0.75, color: HOME_GLASS_EDGE })
-      .alignItems(VerticalAlign.Center)
+      .gesture(
+        PanGesture({ direction: PanDirection.Horizontal, distance: 10 })
+          .onActionUpdate((event: GestureEvent): void => {
+            if (event.fingerList.length === 0) return;
+            const localX: number = event.fingerList[0].localX - 3;
+            const target: BottomDockTab = this.resolveTabByLocalX(localX);
+            if (target !== this.activeTab) this.onSelectTab(target);
+          }),
+      )
 
       Blank()
 

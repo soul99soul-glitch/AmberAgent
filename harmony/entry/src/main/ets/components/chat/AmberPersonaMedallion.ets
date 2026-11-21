@@ -89,12 +89,14 @@ export struct AmberPersonaMedallion {
 
   private presetIconName(): string {
     const p: string = this.effectivePreset();
-    if (p === 'star' || p === 'crystal') return 'ph_star';
+    if (p === 'fox') return 'ph_cat';
+    if (p === 'crystal') return 'ph_snowflake';
+    if (p === 'star') return 'ph_star';
     if (p === 'rocket') return 'ph_rocket';
     if (p === 'yinyang') return 'ph_yinYang';
     if (p === 'alien') return 'ph_alien';
     if (p === 'ghost') return 'ph_ghost';
-    return 'ph_maskHappy';
+    return 'spark';
   }
 
   private isFrozen(): boolean {

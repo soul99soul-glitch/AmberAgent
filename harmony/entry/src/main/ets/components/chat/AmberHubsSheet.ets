@@ -8,7 +8,7 @@ import {
   detectSmartHubCluster, loadAmberHubs, toggleConversationInHub, updateAmberHubInstruction,
 } from '../../platform_impl/chat/AmberHubStore.ets';
 import {
-  ACCENT, ERROR, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, INK, INK2, INK3, INK4,
+  ACCENT, ERROR, INK, INK2, INK3, INK4,
   LINE, SURFACE, SURFACE2, accentEdge, accentSoftBg,
 } from '../../design/tokens.ets';
 
@@ -326,16 +326,12 @@ export struct AmberHubsSheet {
           }
           .width('100%')
         }
-        .constraintSize({ maxHeight: 310 })
+        .layoutWeight(1)
         .scrollBar(BarState.Off)
       }
     }
     .width('100%')
-    .padding(16)
-    .borderRadius(28)
-    .backgroundColor(SURFACE)
-    .border({ width: 0.75, color: HOME_GLASS_EDGE })
-    .shadow({ radius: 16, color: HOME_GLASS_SHADOW, offsetY: 4 })
-    .margin({ left: 16, right: 16, bottom: 8 })
+    .height('100%')
+    .padding({ left: 16, right: 16, top: 4, bottom: 10 })
   }
 }

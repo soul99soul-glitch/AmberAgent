@@ -1,7 +1,11 @@
-// AgentEmbodimentSheet — 单层具身面板（禁止嵌套第二张 Sheet）
-// 顶部：72vp 形象圆章 + 名称/签名/状态 + 原地展开编辑（名称/签名/Soul/头像预设与自定义/最近 8 条历史快照回溯）
-// 下方 3 Tab：人设 Soul | 记忆 Memory（三维记忆画像 + 分桶过滤 + 直达全部记忆/主题）| 灵感 点子（基于记忆生成起手句）
+// AgentEmbodimentSheet — 单层形象人设面板（对齐 iOS AgentEmbodimentHomeSheet，禁止嵌套第二张 Sheet）
+// 顶部居中标题「形象人设」+ 胶囊「完成」（形象编辑态左侧显示「‹ 人设」）
+// 居中大圆形形象徽章 + 底部叠加「更换形象 ›」胶囊 + 称呼/引语签名 + 带滑动指示器的 3-Tab 分段条
+// 下方 3 Tab：人设 Soul（卡内原位编辑灵魂设定 + 快照回溯）| 记忆 Memory | 灵感 点子
 
+import { common } from '@kit.AbilityKit';
+import { fileIo } from '@kit.CoreFileKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import type {
   AgentSoulHistoryEntry, AgentSoulMutationResult, AgentSoulState,
   MemoryPortrait, MemoryPortraitBucketFilter, MemoryPortraitDimension,
@@ -12,7 +16,7 @@ import {
   buildMemoryPortrait, computeIsAgentSoulDefault, normalizeAgentSoulDisplayName,
 } from '@amber/chat-domain';
 import {
-  ACCENT, BG, BODY, BODY2, ERROR, INK, INK2, INK3, INK4, LINE, META, RADIUS,
+  ACCENT, ACCENT_INK, BG, BODY2, ERROR, HOME_GLASS_SHADOW, INK, INK2, INK3, INK4, LINE, META,
   SUCCESS_FG, SURFACE, SURFACE2, accentEdge, accentSoftBg,
 } from '../../design/tokens.ets';
 import { AmberPersonaMedallion } from '../chat/AmberPersonaMedallion.ets';
@@ -39,11 +43,14 @@ interface BucketChipOption {
   label: string;
 }
 
-const AVATAR_PRESETS: AvatarPresetOption[] = [
-  { id: 'muse', label: '缪斯', iconName: 'ph_maskHappy' },
-  { id: 'fox', label: '灵狐', iconName: 'ph_maskHappy' },
-  { id: 'crystal', label: '琥珀晶', iconName: 'ph_star' },
+const AVATAR_PRESET_ROW_1: AvatarPresetOption[] = [
+  { id: 'muse', label: '缪斯', iconName: 'spark' },
+  { id: 'fox', label: '灵狐', iconName: 'ph_cat' },
+  { id: 'crystal', label: '琥珀晶', iconName: 'ph_snowflake' },
   { id: 'star', label: '星芒', iconName: 'ph_star' },
+];
+
+const AVATAR_PRESET_ROW_2: AvatarPresetOption[] = [
   { id: 'rocket', label: '探索', iconName: 'ph_rocket' },
   { id: 'yinyang', label: '平衡', iconName: 'ph_yinYang' },
   { id: 'alien', label: '星际', iconName: 'ph_alien' },
@@ -78,7 +85,10 @@ export struct AgentEmbodimentSheet {
   @StorageProp(APP_STORAGE_SOUL_AVATAR_SPRITE) avatarSpriteStore: boolean = false;
 
   @State private activeTab: EmbodimentSheetTab = 'soul';
-  @State private editing: boolean = false;
+  @State private editingAvatar: boolean = false;
+  @State private editingSoul: boolean = false;
+  @State private showAdvancedAvatarUrl: boolean = false;
+  @State private pickingAvatar: boolean = false;
   @State private loaded: boolean = false;
   @State private saving: boolean = false;
   @State private dirty: boolean = false;
@@ -96,6 +106,13 @@ export struct AgentEmbodimentSheet {
   @State private draftAvatarUri: string = '';
   @State private draftAvatarSprite: boolean = false;
 
+  @State private tabIndicatorX: number = 0;
+  @State private tabIndicatorW: number = 96;
+  @State private tabIndicatorReady: boolean = false;
+  private tabX: number[] = [0, 96, 192];
+  private tabW: number[] = [96, 96, 96];
+  private tabMeasured: boolean[] = [false, false, false];
+
   @State private memoryLoading: boolean = false;
   @State private memoryRecords: MemoryRecord[] = [];
   @State private memoryBucket: MemoryPortraitBucketFilter = 'all';
@@ -112,7 +129,7 @@ export struct AgentEmbodimentSheet {
     this.draftAvatarSprite = this.avatarSpriteStore;
     this.hydrateSoul(true);
     loadAgentSoulAvatarPrefs().then((prefs): void => {
-      if (this.editing) return;
+      if (this.editingAvatar) return;
       this.draftPreset = prefs.preset;
       this.draftAvatarUri = prefs.customUri;
       this.draftAvatarSprite = prefs.spriteSheet;
@@ -124,6 +141,46 @@ export struct AgentEmbodimentSheet {
   onSoulStoreChanged(): void {
     if (!this.saving) {
       this.hydrateSoul(!this.dirty);
+    }
+  }
+
+  private tabIndexOf(tab: EmbodimentSheetTab): number {
+    if (tab === 'memory') return 1;
+    if (tab === 'ideas') return 2;
+    return 0;
+  }
+
+  private selectTab(tab: EmbodimentSheetTab): void {
+    if (this.activeTab === tab) return;
+    const idx: number = this.tabIndexOf(tab);
+    const apply = (): void => {
+      this.activeTab = tab;
+      if (this.tabMeasured[idx]) {
+        this.tabIndicatorX = this.tabX[idx];
+        this.tabIndicatorW = this.tabW[idx];
+        this.tabIndicatorReady = true;
+      }
+    };
+    animateTo({ duration: this.reduceMotion ? 130 : 230, curve: Curve.FastOutSlowIn }, apply);
+  }
+
+  private recordTabArea(tab: EmbodimentSheetTab, area: Area): void {
+    const idx: number = this.tabIndexOf(tab);
+    const x: number = Number(area.position.x);
+    const w: number = Number(area.width);
+    if (!Number.isFinite(x) || !Number.isFinite(w) || w <= 0) return;
+    this.tabX[idx] = x;
+    this.tabW[idx] = w;
+    this.tabMeasured[idx] = true;
+    if (this.activeTab === tab) {
+      if (!this.tabIndicatorReady) {
+        this.tabIndicatorX = x;
+        this.tabIndicatorW = w;
+        this.tabIndicatorReady = true;
+      } else if (Math.abs(this.tabIndicatorX - x) > 0.5 || Math.abs(this.tabIndicatorW - w) > 0.5) {
+        this.tabIndicatorX = x;
+        this.tabIndicatorW = w;
+      }
     }
   }
 
@@ -173,19 +230,45 @@ export struct AgentEmbodimentSheet {
     return computeIsAgentSoulDefault(this.draftName, this.draftTagline, this.draftMarkdown);
   }
 
-  private toggleEditor(): void {
+  private resolvedSignatureText(): string {
+    const trimmed: string = this.draftTagline.trim();
+    if (trimmed.length > 0) {
+      if ((trimmed.startsWith('“') && trimmed.endsWith('”')) || (trimmed.startsWith('"') && trimmed.endsWith('"'))) {
+        return trimmed;
+      }
+      return `“${trimmed}”`;
+    }
+    return '“温和克制的全能效率搭档”';
+  }
+
+  private setAvatarEditing(next: boolean): void {
+    if (this.editingAvatar === next) return;
     const apply = (): void => {
-      this.editing = !this.editing;
-      if (!this.editing) {
-        this.dirty = false;
-        this.hydrateSoul(true);
+      this.editingAvatar = next;
+      this.notice = '';
+      if (next) {
         this.draftPreset = this.avatarPresetStore;
         this.draftAvatarUri = this.avatarUriStore;
         this.draftAvatarSprite = this.avatarSpriteStore;
+        this.showAdvancedAvatarUrl = this.draftAvatarUri.startsWith('http://') || this.draftAvatarUri.startsWith('https://');
       }
     };
     if (this.reduceMotion) apply();
-    else animateTo({ duration: 200, curve: Curve.EaseOut }, apply);
+    else animateTo({ duration: 220, curve: Curve.FastOutSlowIn }, apply);
+  }
+
+  private setSoulEditing(next: boolean): void {
+    if (this.editingSoul === next) return;
+    const apply = (): void => {
+      this.editingSoul = next;
+      this.notice = '';
+      if (!next) {
+        this.dirty = false;
+        this.hydrateSoul(true);
+      }
+    };
+    if (this.reduceMotion) apply();
+    else animateTo({ duration: 200, curve: Curve.FastOutSlowIn }, apply);
   }
 
   private setFeedback(msg: string, isError: boolean): void {
@@ -193,26 +276,54 @@ export struct AgentEmbodimentSheet {
     this.noticeIsError = isError;
   }
 
-  private savePersona(): void {
+  private pickAvatarFromGallery(): void {
+    if (this.pickingAvatar) return;
+    this.pickingAvatar = true;
+    const options: photoAccessHelper.PhotoSelectOptions = new photoAccessHelper.PhotoSelectOptions();
+    options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+    options.maxSelectNumber = 1;
+    const picker: photoAccessHelper.PhotoViewPicker = new photoAccessHelper.PhotoViewPicker();
+    picker.select(options).then((result: photoAccessHelper.PhotoSelectResult): void => {
+      if (result.photoUris.length === 0) return;
+      const copiedUri: string = this.copyPhotoToSandbox(result.photoUris[0]);
+      if (copiedUri.length > 0) {
+        this.draftAvatarUri = copiedUri;
+        this.draftAvatarSprite = false;
+        this.setFeedback('已选中相册图片，点击「保存形象」生效', false);
+      }
+    }).catch((): void => {
+      // 用户取消选择不视为错误
+    }).finally((): void => {
+      this.pickingAvatar = false;
+    });
+  }
+
+  private copyPhotoToSandbox(uri: string): string {
+    try {
+      const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+      const destPath: string = `${ctx.filesDir}/agent_avatar_${Date.now()}.jpg`;
+      const src: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+      try {
+        fileIo.copyFileSync(src.fd, destPath);
+      } finally {
+        fileIo.closeSync(src.fd);
+      }
+      return `file://${destPath}`;
+    } catch (e) {
+      const err: Error = e as Error;
+      this.setFeedback(`读取图片失败：${err.message}`, true);
+      return '';
+    }
+  }
+
+  private saveAvatarSettings(): void {
     if (this.saving) return;
     this.saving = true;
     this.setFeedback('', false);
-    Promise.all([
-      updateAgentSoulFromUi(this.draftName, this.draftTagline, this.draftMarkdown),
-      saveAgentSoulAvatarPrefs(this.draftPreset, this.draftAvatarUri, this.draftAvatarSprite),
-    ])
-      .then((results): void => {
-        const res: AgentSoulMutationResult = results[0];
-        this.isDefault = res.state.isDefault;
-        this.revision = res.state.revision;
-        this.source = res.state.source;
-        this.history = res.state.history;
-        this.draftName = res.state.displayName;
-        this.draftTagline = res.state.tagline;
-        this.draftMarkdown = res.state.soulMarkdown;
-        this.dirty = false;
-        this.editing = false;
-        this.setFeedback('形象与头像设置已保存', false);
+    saveAgentSoulAvatarPrefs(this.draftPreset, this.draftAvatarUri, this.draftAvatarSprite)
+      .then((): void => {
+        this.setAvatarEditing(false);
+        this.setFeedback('形象外观已更新', false);
       })
       .catch((err: Error): void => {
         this.setFeedback(`保存失败：${err.message}`, true);
@@ -222,16 +333,31 @@ export struct AgentEmbodimentSheet {
       });
   }
 
-  private resetDefault(): void {
+  private resetAvatarSettings(): void {
     if (this.saving) return;
     this.saving = true;
     this.setFeedback('', false);
-    Promise.all([
-      resetAgentSoulFromUi(),
-      saveAgentSoulAvatarPrefs('muse', ''),
-    ])
-      .then((results): void => {
-        const res: AgentSoulMutationResult = results[0];
+    saveAgentSoulAvatarPrefs('muse', '', false)
+      .then((): void => {
+        this.draftPreset = 'muse';
+        this.draftAvatarUri = '';
+        this.draftAvatarSprite = false;
+        this.setFeedback('已恢复默认灵狐形象', false);
+      })
+      .catch((err: Error): void => {
+        this.setFeedback(`恢复失败：${err.message}`, true);
+      })
+      .finally((): void => {
+        this.saving = false;
+      });
+  }
+
+  private saveSoulSettings(): void {
+    if (this.saving) return;
+    this.saving = true;
+    this.setFeedback('', false);
+    updateAgentSoulFromUi(this.draftName, this.draftTagline, this.draftMarkdown)
+      .then((res: AgentSoulMutationResult): void => {
         this.isDefault = res.state.isDefault;
         this.revision = res.state.revision;
         this.source = res.state.source;
@@ -239,11 +365,34 @@ export struct AgentEmbodimentSheet {
         this.draftName = res.state.displayName;
         this.draftTagline = res.state.tagline;
         this.draftMarkdown = res.state.soulMarkdown;
-        this.draftPreset = 'muse';
-        this.draftAvatarUri = '';
-        this.draftAvatarSprite = false;
         this.dirty = false;
-        this.setFeedback('已恢复默认 Amber 形象', false);
+        this.setSoulEditing(false);
+        this.setFeedback('灵魂设定已保存', false);
+      })
+      .catch((err: Error): void => {
+        this.setFeedback(`保存失败：${err.message}`, true);
+      })
+      .finally((): void => {
+        this.saving = false;
+      });
+  }
+
+  private resetSoulDefault(): void {
+    if (this.saving) return;
+    this.saving = true;
+    this.setFeedback('', false);
+    resetAgentSoulFromUi()
+      .then((res: AgentSoulMutationResult): void => {
+        this.isDefault = res.state.isDefault;
+        this.revision = res.state.revision;
+        this.source = res.state.source;
+        this.history = res.state.history;
+        this.draftName = res.state.displayName;
+        this.draftTagline = res.state.tagline;
+        this.draftMarkdown = res.state.soulMarkdown;
+        this.dirty = false;
+        this.setSoulEditing(false);
+        this.setFeedback('已恢复默认 Amber 性格设定', false);
       })
       .catch((err: Error): void => {
         this.setFeedback(`恢复失败：${err.message}`, true);
@@ -278,191 +427,362 @@ export struct AgentEmbodimentSheet {
   }
 
   @Builder
-  private HeroCard(): void {
-    Column({ space: 12 }) {
-      Row({ space: 14 }) {
-        AmberPersonaMedallion({
-          medallionSize: 64,
-          displayName: this.previewName(),
-          isDefault: this.previewIsDefault(),
-          sending: false,
-          customAvatarUri: this.editing ? this.draftAvatarUri : this.avatarUriStore,
-          previewPreset: this.editing ? this.draftPreset : '',
-          previewSpriteSheet: this.draftAvatarSprite,
-          sheetOpen: true,
-        })
-        Column({ space: 4 }) {
-          Row({ space: 8 }) {
-            Text(this.previewName())
-              .fontSize(19)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(INK)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .layoutWeight(1)
-            Text(this.previewIsDefault() ? '默认' : `v${this.revision}`)
-              .fontSize(11)
-              .fontColor(this.previewIsDefault() ? INK3 : this.accentColorStore)
-              .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-              .borderRadius(999)
-              .backgroundColor(this.previewIsDefault() ? SURFACE2 : accentSoftBg(this.accentColorStore))
+  private TopNavigationBar(): void {
+    Stack({ alignContent: Alignment.Center }) {
+      Text('形象人设')
+        .fontSize(17)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(INK)
+
+      Row() {
+        if (this.editingAvatar) {
+          Row({ space: 3 }) {
+            Icon({ name: 'chevron_left', iconSize: 12, color: INK2 })
+            Text('人设')
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(INK2)
           }
-          .width('100%')
-
-          Text(this.draftTagline.trim().length > 0 ? this.draftTagline.trim() : '你的私人 Agent 伙伴')
-            .fontSize(13)
-            .fontColor(INK3)
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .width('100%')
+          .height(34)
+          .padding({ left: 10, right: 12 })
+          .borderRadius(999)
+          .backgroundColor(SURFACE)
+          .border({ width: 0.75, color: LINE })
+          .alignItems(VerticalAlign.Center)
+          .onClick((): void => { this.setAvatarEditing(false); })
         }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
 
-        Text(this.editing ? '收起编辑' : '编辑形象')
-          .fontSize(12.5)
+        Blank()
+
+        Text('完成')
+          .fontSize(13.5)
           .fontWeight(FontWeight.Medium)
           .fontColor(this.accentColorStore)
-          .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+          .height(34)
+          .padding({ left: 16, right: 16 })
           .borderRadius(999)
-          .backgroundColor(accentSoftBg(this.accentColorStore))
-          .onClick((): void => { this.toggleEditor(); })
+          .backgroundColor(SURFACE)
+          .border({ width: 0.75, color: accentEdge(this.accentColorStore) })
+          .textAlign(TextAlign.Center)
+          .onClick((): void => { this.onClose(); })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
+    }
+    .width('100%')
+    .height(40)
+  }
+
+  @Builder
+  private PersonaHeroHeader(): void {
+    Column({ space: 10 }) {
+      Stack({ alignContent: Alignment.Bottom }) {
+        Column() {
+          AmberPersonaMedallion({
+            medallionSize: this.editingAvatar ? 92 : 104,
+            displayName: this.previewName(),
+            isDefault: this.previewIsDefault(),
+            sending: false,
+            customAvatarUri: this.editingAvatar ? this.draftAvatarUri : this.avatarUriStore,
+            previewPreset: this.editingAvatar ? this.draftPreset : '',
+            previewSpriteSheet: this.editingAvatar ? this.draftAvatarSprite : this.avatarSpriteStore,
+            sheetOpen: true,
+          })
+        }
+        .onClick((): void => { this.setAvatarEditing(true); })
+
+        if (!this.editingAvatar) {
+          Row({ space: 4 }) {
+            Icon({ name: 'image', iconSize: 11, color: INK2 })
+            Text('更换形象')
+              .fontSize(11.5)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(INK)
+            Icon({ name: 'chevron_right', iconSize: 10, color: INK3 })
+          }
+          .height(26)
+          .padding({ left: 10, right: 9 })
+          .borderRadius(999)
+          .backgroundColor(SURFACE)
+          .border({ width: 0.75, color: LINE })
+          .shadow({ radius: 8, color: HOME_GLASS_SHADOW, offsetY: 2 })
+          .alignItems(VerticalAlign.Center)
+          .translate({ y: 6 })
+          .onClick((): void => { this.setAvatarEditing(true); })
+        }
+      }
+      .padding({ bottom: this.editingAvatar ? 2 : 8 })
+
+      Column({ space: 4 }) {
+        Text(this.previewName())
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(INK)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        Text(this.resolvedSignatureText())
+          .fontSize(13)
+          .fontColor(INK2)
+          .textAlign(TextAlign.Center)
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .padding({ left: 16, right: 16 })
+      }
+      .alignItems(HorizontalAlign.Center)
+      .width('100%')
 
       if (this.notice.length > 0) {
         Text(this.notice)
           .fontSize(12)
           .fontColor(this.noticeIsError ? ERROR : SUCCESS_FG)
+          .textAlign(TextAlign.Center)
           .width('100%')
       }
 
-      if (this.editing) {
-        Column({ space: 10 }) {
-          Text('头像样式').fontSize(12).fontColor(INK3).width('100%')
-          Scroll() {
-            Row({ space: 8 }) {
-              ForEach(AVATAR_PRESETS, (opt: AvatarPresetOption): void => {
-                Row({ space: 5 }) {
-                  Icon({
-                    name: opt.iconName,
-                    iconSize: 15,
-                    color: this.draftPreset === opt.id ? this.accentColorStore : INK2,
-                  })
-                  Text(opt.label)
-                    .fontSize(12.5)
-                    .fontColor(this.draftPreset === opt.id ? this.accentColorStore : INK2)
-                }
-                .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-                .borderRadius(999)
-                .backgroundColor(this.draftPreset === opt.id ? accentSoftBg(this.accentColorStore) : SURFACE2)
-                .border({
-                  width: 1,
-                  color: this.draftPreset === opt.id ? accentEdge(this.accentColorStore) : 'transparent',
-                })
-                .onClick((): void => {
-                  this.draftPreset = opt.id;
-                })
-              }, (opt: AvatarPresetOption): string => opt.id)
-            }
-          }
-          .scrollable(ScrollDirection.Horizontal)
-          .scrollBar(BarState.Off)
+      if (!this.editingAvatar) {
+        this.TabBar()
+      }
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Center)
+    .padding({ top: 4, bottom: 2 })
+  }
+
+  @Builder
+  private PresetGridCell(opt: AvatarPresetOption): void {
+    Column({ space: 6 }) {
+      Stack({ alignContent: Alignment.Center }) {
+        Icon({
+          name: opt.iconName,
+          iconSize: 18,
+          color: this.draftPreset === opt.id && this.draftAvatarUri.trim().length === 0 ? this.accentColorStore : INK2,
+        })
+      }
+      .width(36)
+      .height(36)
+      .borderRadius(999)
+      .backgroundColor(
+        this.draftPreset === opt.id && this.draftAvatarUri.trim().length === 0
+          ? accentSoftBg(this.accentColorStore)
+          : SURFACE2,
+      )
+
+      Text(opt.label)
+        .fontSize(12)
+        .fontWeight(this.draftPreset === opt.id && this.draftAvatarUri.trim().length === 0 ? FontWeight.Medium : FontWeight.Normal)
+        .fontColor(this.draftPreset === opt.id && this.draftAvatarUri.trim().length === 0 ? this.accentColorStore : INK2)
+        .maxLines(1)
+    }
+    .layoutWeight(1)
+    .padding({ top: 10, bottom: 10 })
+    .borderRadius(14)
+    .backgroundColor(SURFACE)
+    .border({
+      width: this.draftPreset === opt.id && this.draftAvatarUri.trim().length === 0 ? 1.25 : 0.75,
+      color: this.draftPreset === opt.id && this.draftAvatarUri.trim().length === 0
+        ? accentEdge(this.accentColorStore)
+        : LINE,
+    })
+    .alignItems(HorizontalAlign.Center)
+    .onClick((): void => {
+      this.draftPreset = opt.id;
+      this.draftAvatarUri = '';
+      this.draftAvatarSprite = false;
+    })
+  }
+
+  @Builder
+  private AvatarEditorContent(): void {
+    Column({ space: 14 }) {
+      Column({ space: 10 }) {
+        Text('内置形象预设')
+          .fontSize(13.5)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(INK)
           .width('100%')
 
-          Text('自定义头像 URI（可选，留空用上方几何预设）').fontSize(12).fontColor(INK3).width('100%')
-          TextInput({ text: this.draftAvatarUri, placeholder: 'file:// 或 https:// 图片地址' })
+        Row({ space: 8 }) {
+          ForEach(AVATAR_PRESET_ROW_1, (opt: AvatarPresetOption): void => {
+            this.PresetGridCell(opt)
+          }, (opt: AvatarPresetOption): string => opt.id)
+        }
+        .width('100%')
+
+        Row({ space: 8 }) {
+          ForEach(AVATAR_PRESET_ROW_2, (opt: AvatarPresetOption): void => {
+            this.PresetGridCell(opt)
+          }, (opt: AvatarPresetOption): string => opt.id)
+        }
+        .width('100%')
+      }
+      .width('100%')
+      .padding(14)
+      .borderRadius(18)
+      .backgroundColor(SURFACE)
+      .border({ width: 0.75, color: LINE })
+
+      Column({ space: 10 }) {
+        Text('自定义图片')
+          .fontSize(13.5)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(INK)
+          .width('100%')
+
+        Row({ space: 10 }) {
+          Row({ space: 6 }) {
+            Icon({ name: 'image', iconSize: 16, color: this.accentColorStore })
+            Text(this.pickingAvatar ? '打开相册中…' : '从相册选择图片')
+              .fontSize(13.5)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.accentColorStore)
+          }
+          .layoutWeight(1)
+          .height(42)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .borderRadius(12)
+          .backgroundColor(accentSoftBg(this.accentColorStore))
+          .border({ width: 0.75, color: accentEdge(this.accentColorStore) })
+          .onClick((): void => { this.pickAvatarFromGallery(); })
+
+          if (this.draftAvatarUri.trim().length > 0) {
+            Text('清除图片')
+              .fontSize(13)
+              .fontColor(INK2)
+              .height(42)
+              .padding({ left: 14, right: 14 })
+              .borderRadius(12)
+              .backgroundColor(SURFACE2)
+              .textAlign(TextAlign.Center)
+              .onClick((): void => {
+                this.draftAvatarUri = '';
+                this.draftAvatarSprite = false;
+              })
+          }
+        }
+        .width('100%')
+
+        if (this.draftAvatarUri.trim().length > 0) {
+          Row() {
+            Column({ space: 2 }) {
+              Text('按 4×4 动画图集解析')
+                .fontSize(13)
+                .fontColor(INK)
+              Text('四行情绪 × 四帧动态关键帧')
+                .fontSize(11)
+                .fontColor(INK3)
+            }
+            .alignItems(HorizontalAlign.Start)
+            .layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.draftAvatarSprite })
+              .selectedColor(this.accentColorStore)
+              .onChange((enabled: boolean): void => { this.draftAvatarSprite = enabled; })
+          }
+          .width('100%')
+          .padding({ top: 4 })
+        }
+
+        Divider().color(LINE).strokeWidth(0.5)
+
+        Row() {
+          Text('高级：使用图片链接')
+            .fontSize(12.5)
+            .fontColor(INK3)
+            .layoutWeight(1)
+          Icon({ name: 'chevron_down', iconSize: 13, color: INK3 })
+            .rotate({ angle: this.showAdvancedAvatarUrl ? 180 : 0 })
+        }
+        .width('100%')
+        .padding({ top: 2, bottom: 2 })
+        .onClick((): void => {
+          animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
+            this.showAdvancedAvatarUrl = !this.showAdvancedAvatarUrl;
+          });
+        })
+
+        if (this.showAdvancedAvatarUrl) {
+          TextInput({ text: this.draftAvatarUri, placeholder: 'https:// 或本地图片路径' })
             .fontSize(13)
             .fontColor(INK)
-            .backgroundColor(SURFACE2)
+            .backgroundColor(BG)
             .borderRadius(10)
+            .border({ width: 0.75, color: LINE })
             .padding({ left: 12, right: 12, top: 8, bottom: 8 })
             .onChange((v: string): void => {
               if (v !== this.draftAvatarUri) this.draftAvatarSprite = false;
               this.draftAvatarUri = v;
             })
-          if (this.draftAvatarUri.trim().length > 0) {
-            Row() {
-              Text('头像为 4×4 动画图集').fontSize(13.5).fontColor(INK).layoutWeight(1)
-              Toggle({ type: ToggleType.Switch, isOn: this.draftAvatarSprite })
-                .onChange((enabled: boolean): void => { this.draftAvatarSprite = enabled; })
-            }
-            .width('100%')
-          }
-
-          Text(`称呼（最多 ${MAX_AGENT_SOUL_NAME_CHARS} 字）`).fontSize(12).fontColor(INK3).width('100%')
-          TextInput({ text: this.draftName, placeholder: DEFAULT_AGENT_SOUL_NAME })
-            .maxLength(MAX_AGENT_SOUL_NAME_CHARS)
-            .fontSize(14)
-            .fontColor(INK)
-            .backgroundColor(SURFACE2)
-            .borderRadius(10)
-            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-            .onChange((v: string): void => { this.draftName = v; this.dirty = true; })
-
-          Text(`一句话签名（最多 ${MAX_AGENT_SOUL_TAGLINE_CHARS} 字）`).fontSize(12).fontColor(INK3).width('100%')
-          TextInput({ text: this.draftTagline, placeholder: '一句话描述你的角色定位' })
-            .maxLength(MAX_AGENT_SOUL_TAGLINE_CHARS)
-            .fontSize(14)
-            .fontColor(INK)
-            .backgroundColor(SURFACE2)
-            .borderRadius(10)
-            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-            .onChange((v: string): void => { this.draftTagline = v; this.dirty = true; })
-
-          Text('Soul 性格设定（Markdown）').fontSize(12).fontColor(INK3).width('100%')
-          TextArea({ text: this.draftMarkdown, placeholder: '写下性格、口吻、表达原则和记忆习惯…' })
-            .height(110)
-            .fontSize(13.5)
-            .fontColor(INK)
-            .backgroundColor(SURFACE2)
-            .borderRadius(12)
-            .padding(10)
-            .onChange((v: string): void => { this.draftMarkdown = v; this.dirty = true; })
-
-          Row({ space: 10 }) {
-            Button(this.saving ? '保存中…' : '保存修改')
-              .layoutWeight(1)
-              .height(38)
-              .fontSize(13.5)
-              .fontWeight(FontWeight.Medium)
-              .backgroundColor(this.accentColorStore)
-              .fontColor('#FFFFFF')
-              .enabled(!this.saving)
-              .onClick((): void => { this.savePersona(); })
-
-            Button('恢复默认')
-              .height(38)
-              .fontSize(13)
-              .backgroundColor(SURFACE2)
-              .fontColor(INK2)
-              .enabled(!this.saving)
-              .onClick((): void => { this.resetDefault(); })
-          }
-          .width('100%')
         }
-        .width('100%')
-        .padding({ top: 8 })
       }
+      .width('100%')
+      .padding(14)
+      .borderRadius(18)
+      .backgroundColor(SURFACE)
+      .border({ width: 0.75, color: LINE })
+
+      Row({ space: 10 }) {
+        Row() {
+          Text(this.saving ? '保存中…' : '保存形象')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(ACCENT_INK)
+        }
+        .layoutWeight(1)
+        .height(42)
+        .borderRadius(14)
+        .backgroundColor(this.accentColorStore)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .opacity(this.saving ? 0.6 : 1)
+        .onClick((): void => { this.saveAvatarSettings(); })
+
+        Row() {
+          Text('恢复默认')
+            .fontSize(13.5)
+            .fontColor(INK2)
+        }
+        .height(42)
+        .padding({ left: 16, right: 16 })
+        .borderRadius(14)
+        .backgroundColor(SURFACE)
+        .border({ width: 0.75, color: LINE })
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .opacity(this.saving ? 0.6 : 1)
+        .onClick((): void => { this.resetAvatarSettings(); })
+      }
+      .width('100%')
     }
     .width('100%')
-    .padding(16)
-    .borderRadius(20)
-    .backgroundColor(SURFACE)
-    .border({ width: 0.75, color: LINE })
   }
 
   @Builder
   private TabBar(): void {
-    Row({ space: 6 }) {
-      this.TabChip('soul', '人设 Soul')
-      this.TabChip('memory', '记忆 Memory')
-      this.TabChip('ideas', '灵感 点子')
+    Stack({ alignContent: Alignment.Start }) {
+      if (this.tabIndicatorReady) {
+        Column()
+          .width(this.tabIndicatorW)
+          .height(34)
+          .borderRadius(999)
+          .backgroundColor(SURFACE)
+          .shadow({ radius: 6, color: HOME_GLASS_SHADOW, offsetY: 1 })
+          .translate({ x: this.tabIndicatorX })
+          .hitTestBehavior(HitTestMode.None)
+      }
+
+      Row({ space: 0 }) {
+        this.TabChip('soul', '人设 Soul')
+        this.TabChip('memory', '记忆 Memory')
+        this.TabChip('ideas', '灵感 点子')
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
-    .padding(4)
-    .borderRadius(14)
+    .height(38)
+    .padding(2)
+    .borderRadius(999)
     .backgroundColor(SURFACE2)
   }
 
@@ -470,56 +790,156 @@ export struct AgentEmbodimentSheet {
   private TabChip(tab: EmbodimentSheetTab, label: string): void {
     Text(label)
       .layoutWeight(1)
+      .height(34)
       .textAlign(TextAlign.Center)
       .fontSize(13)
-      .fontWeight(this.activeTab === tab ? FontWeight.Bold : FontWeight.Medium)
-      .fontColor(this.activeTab === tab ? INK : INK3)
-      .padding({ top: 8, bottom: 8 })
-      .borderRadius(10)
-      .backgroundColor(this.activeTab === tab ? SURFACE : 'transparent')
-      .onClick((): void => { this.activeTab = tab; })
+      .fontWeight(this.activeTab === tab ? FontWeight.Medium : FontWeight.Normal)
+      .fontColor(this.activeTab === tab ? INK : INK2)
+      .borderRadius(999)
+      .backgroundColor(this.tabIndicatorReady ? Color.Transparent : (this.activeTab === tab ? SURFACE : Color.Transparent))
+      .onAreaChange((_old: Area, area: Area): void => {
+        this.recordTabArea(tab, area);
+      })
+      .onClick((): void => { this.selectTab(tab); })
   }
 
   @Builder
   private SoulTabContent(): void {
     Column({ space: 12 }) {
-      Column({ space: 6 }) {
-        Text('当前灵魂设定')
-          .fontSize(13)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(INK)
-          .width('100%')
-        if (!this.loaded) {
-          Text('正在读取形象设置…').fontSize(13).fontColor(INK3).width('100%')
-        } else if (this.draftMarkdown.trim().length > 0) {
-          Text(this.draftMarkdown.trim())
-            .fontSize(13.5)
-            .lineHeight(21)
-            .fontColor(INK2)
-            .width('100%')
-        } else {
-          Text('当前使用默认 Amber 性格设定；点击右上角「编辑形象」或直接在聊天里让它自我塑造。')
-            .fontSize(13)
-            .lineHeight(20)
-            .fontColor(INK3)
-            .width('100%')
+      Column({ space: 10 }) {
+        Row({ space: 8 }) {
+          Text('灵魂设定')
+            .fontSize(14.5)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(INK)
+
+          Text(this.previewIsDefault() ? '默认' : `v${this.revision}`)
+            .fontSize(11)
+            .fontColor(this.previewIsDefault() ? INK3 : this.accentColorStore)
+            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+            .borderRadius(999)
+            .backgroundColor(this.previewIsDefault() ? SURFACE2 : accentSoftBg(this.accentColorStore))
+
+          Blank()
+
+          Row({ space: 4 }) {
+            if (!this.editingSoul) {
+              Icon({ name: 'edit', iconSize: 12.5, color: this.accentColorStore })
+            }
+            Text(this.editingSoul ? '取消' : '编辑')
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.editingSoul ? INK2 : this.accentColorStore)
+          }
+          .padding({ left: 8, right: 4, top: 4, bottom: 4 })
+          .onClick((): void => { this.setSoulEditing(!this.editingSoul); })
         }
-        Text(`同步来源：${this.source || 'default'} · 跨端 C-SOUL-V1 双向同步`)
-          .fontSize(META)
-          .fontColor(INK4)
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        if (this.editingSoul) {
+          Column({ space: 10 }) {
+            Text(`称呼（最多 ${MAX_AGENT_SOUL_NAME_CHARS} 字）`).fontSize(12).fontColor(INK3).width('100%')
+            TextInput({ text: this.draftName, placeholder: DEFAULT_AGENT_SOUL_NAME })
+              .maxLength(MAX_AGENT_SOUL_NAME_CHARS)
+              .fontSize(14)
+              .fontColor(INK)
+              .backgroundColor(BG)
+              .borderRadius(12)
+              .border({ width: 0.75, color: LINE })
+              .padding({ left: 12, right: 12, top: 9, bottom: 9 })
+              .onChange((v: string): void => { this.draftName = v; this.dirty = true; })
+
+            Text(`一句话签名（最多 ${MAX_AGENT_SOUL_TAGLINE_CHARS} 字）`).fontSize(12).fontColor(INK3).width('100%')
+            TextInput({ text: this.draftTagline, placeholder: '一句话描述你的角色定位' })
+              .maxLength(MAX_AGENT_SOUL_TAGLINE_CHARS)
+              .fontSize(14)
+              .fontColor(INK)
+              .backgroundColor(BG)
+              .borderRadius(12)
+              .border({ width: 0.75, color: LINE })
+              .padding({ left: 12, right: 12, top: 9, bottom: 9 })
+              .onChange((v: string): void => { this.draftTagline = v; this.dirty = true; })
+
+            Text('Soul 性格设定（Markdown）').fontSize(12).fontColor(INK3).width('100%')
+            TextArea({ text: this.draftMarkdown, placeholder: '写下性格、口吻、表达原则和记忆习惯…' })
+              .height(116)
+              .fontSize(13.5)
+              .fontColor(INK)
+              .backgroundColor(BG)
+              .borderRadius(12)
+              .border({ width: 0.75, color: LINE })
+              .padding(10)
+              .onChange((v: string): void => { this.draftMarkdown = v; this.dirty = true; })
+
+            Row({ space: 10 }) {
+              Row() {
+                Text(this.saving ? '保存中…' : '保存设定')
+                  .fontSize(13.5)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(ACCENT_INK)
+              }
+              .layoutWeight(1)
+              .height(40)
+              .borderRadius(12)
+              .backgroundColor(this.accentColorStore)
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .opacity(this.saving ? 0.6 : 1)
+              .onClick((): void => { this.saveSoulSettings(); })
+
+              Row() {
+                Text('恢复默认')
+                  .fontSize(13)
+                  .fontColor(INK2)
+              }
+              .height(40)
+              .padding({ left: 14, right: 14 })
+              .borderRadius(12)
+              .backgroundColor(BG)
+              .border({ width: 0.75, color: LINE })
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .opacity(this.saving ? 0.6 : 1)
+              .onClick((): void => { this.resetSoulDefault(); })
+            }
+            .width('100%')
+            .padding({ top: 2 })
+          }
           .width('100%')
-          .padding({ top: 4 })
+        } else {
+          if (!this.loaded) {
+            Text('正在读取形象设置…').fontSize(13).fontColor(INK3).width('100%')
+          } else if (this.draftMarkdown.trim().length > 0) {
+            Text(this.draftMarkdown.trim())
+              .fontSize(13.5)
+              .lineHeight(21)
+              .fontColor(INK)
+              .width('100%')
+          } else {
+            Text('还没有专门设定。可以在主对话直接说「你给自己写个人设」，或点右上角编辑。')
+              .fontSize(13.5)
+              .lineHeight(21)
+              .fontColor(INK2)
+              .width('100%')
+          }
+          Text(`同步来源：${this.source || 'default'} · 跨端双向同步`)
+            .fontSize(META)
+            .fontColor(INK4)
+            .width('100%')
+            .padding({ top: 2 })
+        }
       }
       .width('100%')
-      .padding(14)
-      .borderRadius(16)
+      .padding(16)
+      .borderRadius(18)
       .backgroundColor(SURFACE)
       .border({ width: 0.75, color: LINE })
 
       if (this.history.length > 0) {
         Column({ space: 8 }) {
           Text(`最近人设快照（${this.history.length}/8）`)
-            .fontSize(13)
+            .fontSize(13.5)
             .fontWeight(FontWeight.Bold)
             .fontColor(INK)
             .width('100%')
@@ -543,6 +963,7 @@ export struct AgentEmbodimentSheet {
 
               Text('切回')
                 .fontSize(12)
+                .fontWeight(FontWeight.Medium)
                 .fontColor(this.accentColorStore)
                 .padding({ left: 10, right: 10, top: 5, bottom: 5 })
                 .borderRadius(999)
@@ -550,14 +971,14 @@ export struct AgentEmbodimentSheet {
                 .onClick((): void => { this.restoreSnapshot(entry); })
             }
             .width('100%')
-            .padding(10)
+            .padding({ left: 12, right: 12, top: 10, bottom: 10 })
             .borderRadius(12)
-            .backgroundColor(SURFACE2)
+            .backgroundColor(BG)
           }, (entry: AgentSoulHistoryEntry): string => `${entry.id}-${entry.updatedAtMs}`)
         }
         .width('100%')
-        .padding(14)
-        .borderRadius(16)
+        .padding(16)
+        .borderRadius(18)
         .backgroundColor(SURFACE)
         .border({ width: 0.75, color: LINE })
       }
@@ -637,8 +1058,8 @@ export struct AgentEmbodimentSheet {
             }
           }
           .width('100%')
-          .padding(14)
-          .borderRadius(16)
+          .padding(16)
+          .borderRadius(18)
           .backgroundColor(SURFACE)
           .border({ width: 0.75, color: LINE })
         }, (dim: MemoryPortraitDimension): string => `${dim.key}-${this.memoryBucket}-${dim.items.length}`)
@@ -651,7 +1072,7 @@ export struct AgentEmbodimentSheet {
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor(this.accentColorStore)
-          .padding({ top: 10, bottom: 10 })
+          .padding({ top: 11, bottom: 11 })
           .borderRadius(14)
           .backgroundColor(SURFACE)
           .border({ width: 0.75, color: LINE })
@@ -666,7 +1087,7 @@ export struct AgentEmbodimentSheet {
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor(this.accentColorStore)
-          .padding({ top: 10, bottom: 10 })
+          .padding({ top: 11, bottom: 11 })
           .borderRadius(14)
           .backgroundColor(SURFACE)
           .border({ width: 0.75, color: LINE })
@@ -698,11 +1119,12 @@ export struct AgentEmbodimentSheet {
             .layoutWeight(1)
           Text('填入')
             .fontSize(12)
+            .fontWeight(FontWeight.Medium)
             .fontColor(this.accentColorStore)
         }
         .width('100%')
-        .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-        .borderRadius(16)
+        .padding({ left: 14, right: 14, top: 13, bottom: 13 })
+        .borderRadius(18)
         .backgroundColor(SURFACE)
         .border({ width: 0.75, color: LINE })
         .onClick((): void => {
@@ -715,27 +1137,16 @@ export struct AgentEmbodimentSheet {
   }
 
   build(): void {
-    Column({ space: 12 }) {
-      Row() {
-        Text('具身与记忆')
-          .fontSize(17)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(INK)
-        Blank()
-        Text('完成')
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.accentColorStore)
-          .padding({ left: 10, right: 4, top: 4, bottom: 4 })
-          .onClick((): void => { this.onClose(); })
-      }
-      .width('100%')
+    Column({ space: 10 }) {
+      this.TopNavigationBar()
 
       Scroll() {
-        Column({ space: 12 }) {
-          this.HeroCard()
-          this.TabBar()
-          if (this.activeTab === 'soul') {
+        Column({ space: 14 }) {
+          this.PersonaHeroHeader()
+
+          if (this.editingAvatar) {
+            this.AvatarEditorContent()
+          } else if (this.activeTab === 'soul') {
             this.SoulTabContent()
           } else if (this.activeTab === 'memory') {
             this.MemoryTabContent()
@@ -744,14 +1155,15 @@ export struct AgentEmbodimentSheet {
           }
         }
         .width('100%')
-        .padding({ bottom: 24 })
+        .padding({ bottom: 28 })
       }
       .layoutWeight(1)
       .scrollBar(BarState.Off)
     }
+    .opacity(this.themeEpoch >= 0 ? 1 : 1)
     .width('100%')
     .height('100%')
-    .padding({ left: 16, right: 16, top: 14 })
+    .padding({ left: 18, right: 18, top: 10 })
     .backgroundColor(BG)
   }
 }
