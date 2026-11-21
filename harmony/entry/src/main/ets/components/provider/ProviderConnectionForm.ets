@@ -3,7 +3,7 @@
 import type { ProviderModel } from '@amber/chat-domain';
 import { providerSlug, providerAuthLabel } from '../../di/ProviderDefaults.ets';
 import {
-  ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, BODY, BODY2, META, MONO_SMALL, LABEL, ERROR, RADIUS, TEXT_STYLES, lineHeightForSize, MOTION_OVERLAY
+  ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, BODY, BODY2, META, MONO_SMALL, LABEL, ERROR, RADIUS, TEXT_STYLES, lineHeightForSize
 } from '../../design/tokens.ets';
 import { FlatTextField } from '../ui/FlatTextField.ets';
 import { Icon } from '../ui/Icon.ets';
@@ -39,6 +39,18 @@ export struct ProviderConnectionForm {
   @State manualAddOpen: boolean = false;
   @State manualModelInput: string = '';
   @State fetchedSearch: string = '';
+  @State tabProgress: number = 0;
+  @State swiperWidth: number = 0;
+  private swiperController: SwiperController = new SwiperController();
+
+  aboutToAppear(): void {
+    this.tabProgress = this.tab;
+  }
+
+  private switchTab(target: number): void {
+    if (target === this.tab) return;
+    this.swiperController.changeIndex(target, true);
+  }
 
   private filteredFetchedIds(): string[] {
     const q: string = this.fetchedSearch.trim().toLowerCase();
@@ -79,44 +91,55 @@ export struct ProviderConnectionForm {
 
   @Builder
   tabHeader() {
-    Row() {
-      Column() {
-        Text('配置')
-          .fontSize(TEXT_STYLES.body.size)
-          .fontWeight(this.tab === 0 ? 600 : TEXT_STYLES.body.weight)
-          .lineHeight(TEXT_STYLES.body.lineHeight)
-          .fontFamily(TEXT_STYLES.body.family)
-          .letterSpacing(1.3)
-          .fontColor(this.tab === 0 ? INK : INK3)
-        Column()
-          .width('100%').height(2).borderRadius(1)
-          .backgroundColor(this.tab === 0 ? this.accentColorStore : Color.Transparent)
-          .margin({ top: 6 })
-      }
-      .layoutWeight(1)
-      .padding({ left: 12, right: 12 })
-      .onClick((): void => {
-        animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => { this.tab = 0; });
-      })
+    Column() {
+      Stack({ alignContent: Alignment.BottomStart }) {
+        Row() {
+          Column() {
+            Text('配置')
+              .fontSize(TEXT_STYLES.body.size)
+              .fontWeight(this.tab === 0 ? 600 : TEXT_STYLES.body.weight)
+              .lineHeight(TEXT_STYLES.body.lineHeight)
+              .fontFamily(TEXT_STYLES.body.family)
+              .letterSpacing(1.3)
+              .fontColor(this.tab === 0 ? INK : INK3)
+          }
+          .layoutWeight(1)
+          .padding({ top: 4, bottom: 10 })
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .onClick((): void => { this.switchTab(0); })
 
-      Column() {
-        Text('模型')
-          .fontSize(TEXT_STYLES.body.size)
-          .fontWeight(this.tab === 1 ? 600 : TEXT_STYLES.body.weight)
-          .lineHeight(TEXT_STYLES.body.lineHeight)
-          .fontFamily(TEXT_STYLES.body.family)
-          .letterSpacing(1.3)
-          .fontColor(this.tab === 1 ? INK : INK3)
-        Column()
-          .width('100%').height(2).borderRadius(1)
-          .backgroundColor(this.tab === 1 ? this.accentColorStore : Color.Transparent)
-          .margin({ top: 6 })
+          Column() {
+            Text('模型')
+              .fontSize(TEXT_STYLES.body.size)
+              .fontWeight(this.tab === 1 ? 600 : TEXT_STYLES.body.weight)
+              .lineHeight(TEXT_STYLES.body.lineHeight)
+              .fontFamily(TEXT_STYLES.body.family)
+              .letterSpacing(1.3)
+              .fontColor(this.tab === 1 ? INK : INK3)
+          }
+          .layoutWeight(1)
+          .padding({ top: 4, bottom: 10 })
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .onClick((): void => { this.switchTab(1); })
+        }
+        .width('100%')
+
+        // 单一连续指示条：点击与左右手势滑切时同步跟手平移
+        Row() {
+          Column()
+            .width('100%')
+            .height(2)
+            .borderRadius(1)
+            .backgroundColor(this.accentColorStore)
+        }
+        .width('50%')
+        .padding({ left: 12, right: 12 })
+        .translate({ x: `${this.tabProgress * 100}%` })
+        .hitTestBehavior(HitTestMode.None)
       }
-      .layoutWeight(1)
-      .padding({ left: 12, right: 12 })
-      .onClick((): void => {
-        animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => { this.tab = 1; });
-      })
+      .width('100%')
     }
     .width('100%')
     .padding({ left: 18, right: 18 })
@@ -181,9 +204,9 @@ export struct ProviderConnectionForm {
 
       this.tabHeader()
 
-      Scroll() {
-        Column() {
-          if (this.tab === 0) {
+      Swiper(this.swiperController) {
+        Scroll() {
+          Column() {
             SectionHeader({ label: '认证与端点' })
             ToggleRow({
               label: '启用', checked: this.edit.providerEnabled, isLast: false,
@@ -370,7 +393,17 @@ export struct ProviderConnectionForm {
             .width('100%')
             .alignItems(VerticalAlign.Center)
             .padding({ left: 16, right: 16 })
-          } else {
+          }
+          .width('100%')
+          .padding({ bottom: 40 })
+        }
+        .align(Alignment.TopStart)
+        .width('100%')
+        .height('100%')
+        .backgroundColor(BG)
+
+        Scroll() {
+          Column() {
             // 顶部快捷操作栏：自动获取 + 手动添加（即点即存，告别逗号文本编辑与底部二次保存）
             Row({ space: 10 }) {
               Row({ space: 6 }) {
@@ -598,13 +631,41 @@ export struct ProviderConnectionForm {
               .clip(true)
             }
           }
+          .width('100%')
+          .padding({ bottom: 40 })
         }
+        .align(Alignment.TopStart)
         .width('100%')
-        .padding({ bottom: 40 })
+        .height('100%')
+        .backgroundColor(BG)
       }
-      .align(Alignment.TopStart)
+      .index(this.tab)
+      .loop(false)
+      .indicator(false)
+      .duration(260)
+      .curve(Curve.FastOutSlowIn)
+      .width('100%')
       .layoutWeight(1)
-      .backgroundColor(BG)
+      .onAreaChange((_old: Area, area: Area): void => {
+        const w: number = Number(area.width);
+        if (Number.isFinite(w) && w > 0) this.swiperWidth = w;
+      })
+      .onGestureSwipe((index: number, extraInfo: SwiperAnimationEvent): void => {
+        if (this.swiperWidth <= 0) return;
+        const delta: number = -extraInfo.currentOffset / this.swiperWidth;
+        const clamped: number = Math.max(0, Math.min(1, index + delta));
+        this.tabProgress = clamped;
+      })
+      .onAnimationStart((_index: number, targetIndex: number): void => {
+        this.tab = targetIndex;
+        this.getUIContext().animateTo({ duration: 240, curve: Curve.FastOutSlowIn }, (): void => {
+          this.tabProgress = targetIndex;
+        });
+      })
+      .onChange((index: number): void => {
+        this.tab = index;
+        this.tabProgress = index;
+      })
     }
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
