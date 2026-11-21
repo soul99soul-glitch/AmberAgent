@@ -26,7 +26,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,5 +40,7 @@ jobs:
         run: |
           npm ci --prefix harmony/chat
           npm ci --prefix harmony/deepread
+      - name: Build the CPython host addon for integration tests
+        run: harmony/native/python/scripts/build-host-addon.sh
       - name: Run Harmony domain and Entry tests
         run: npm run test:harmony

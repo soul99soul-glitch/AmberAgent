@@ -6,6 +6,10 @@ export PATH
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 mode=${1:-ohos}
 case "$mode" in host|ohos) ;; *) echo 'Usage: build-deps.sh [host|ohos]' >&2; exit 2 ;; esac
+# CPython chooses its build executable suffix based on filesystem case sensitivity.
+host_python() {
+  printf 'python%s\n' "$(sed -n 's/^BUILDEXE=[[:blank:]]*//p' "$root/build/host/Makefile")"
+}
 mkdir -p "$root/build/sources" "$root/build/$mode/Modules"
 if [ ! -f "$root/build/Python-3.14.7.tar.xz" ]; then
   curl -fL https://www.python.org/ftp/python/3.14.7/Python-3.14.7.tar.xz -o "$root/build/Python-3.14.7.tar.xz.part"
@@ -53,15 +57,15 @@ if [ ! -f "$root/build/$mode/Makefile" ] || [ ! -f "$root/build/$mode/pyconfig.h
     # Configure uses musl classification; all compilation/linking uses OHOS API12, never a Linux compiler.
     (cd "$root/build/ohos" && "$source/configure" \
       --build="$($source/config.guess)" --host=aarch64-unknown-linux-musl \
-      --with-build-python="$root/build/host/python.exe" --prefix="$root/build/ohos/install" \
+      --with-build-python="$root/build/host/$(host_python)" --prefix="$root/build/ohos/install" \
       --disable-shared --without-ensurepip --disable-test-modules --without-c-locale-coercion --disable-ipv6 \
       CC="$root/scripts/ohos-clang.sh" AR="$sdk/llvm/bin/llvm-ar" RANLIB="$sdk/llvm/bin/llvm-ranlib" \
       CFLAGS='-O2 -fPIC' ac_cv_file__dev_ptmx=no ac_cv_file__dev_ptc=no)
   fi
 fi
 (cd "$root/build/$mode" && make -j "${AMBER_PYTHON_BUILD_JOBS:-4}" libpython3.14.a)
-if [ "$mode" = host ]; then (cd "$root/build/host" && make -j "${AMBER_PYTHON_BUILD_JOBS:-4}" python.exe); fi
+if [ "$mode" = host ]; then (cd "$root/build/host" && make -j "${AMBER_PYTHON_BUILD_JOBS:-4}" "$(host_python)"); fi
 mkdir -p "$root/build/$mode/install/lib" "$root/build/$mode/install/include/python3.14"
 cp "$root/build/$mode/libpython3.14.a" "$root/build/$mode/install/lib/"
-cp -R "$source/Include/" "$root/build/$mode/install/include/python3.14/"
+cp -R "$source/Include/." "$root/build/$mode/install/include/python3.14/"
 cp "$root/build/$mode/pyconfig.h" "$root/build/$mode/install/include/python3.14/"
