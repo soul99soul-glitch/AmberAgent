@@ -2,7 +2,7 @@
 // 严格直连现有 ChatCloudDialogueSession（不新建并行状态机）。
 
 import {
-  ACCENT, BG_GLASS, HOME_GLASS_EDGE, INK, INK2, INK3, LINE, SURFACE2, accentEdge, accentSoftBg,
+  ACCENT, BG_GLASS, HOME_GLASS_EDGE, INK, INK2, INK3, LINE, SURFACE, SURFACE2, accentEdge, accentSoftBg,
 } from '../../design/tokens.ets';
 import { FONT_SANS } from '../../design/fonts.ets';
 import { ChatCloudDialogueSession } from '../../platform_impl/chat/ChatCloudDialogueSession.ets';
