@@ -204,28 +204,53 @@ export class ChatComposerSession {
     this.setInputText('');
   }
 
+  private safeFileNameFromUri(uri: string): string {
+    const raw: string = uri.substring(uri.lastIndexOf('/') + 1).split('?')[0];
+    if (raw.length === 0) return 'file';
+    try {
+      return decodeURIComponent(raw) || raw;
+    } catch (_e) {
+      return raw;
+    }
+  }
+
   pickImages(): void {
     if (this.materializingImages) return;
     const token: number = ++this.pickerToken;
     const options: photoAccessHelper.PhotoSelectOptions = new photoAccessHelper.PhotoSelectOptions();
     options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
     options.maxSelectNumber = 3;
-    const picker: photoAccessHelper.PhotoViewPicker = new photoAccessHelper.PhotoViewPicker();
-    picker.select(options).then(async (result: photoAccessHelper.PhotoSelectResult): Promise<void> => {
+    const photoPicker: photoAccessHelper.PhotoViewPicker = new photoAccessHelper.PhotoViewPicker();
+    photoPicker.select(options).then(async (result: photoAccessHelper.PhotoSelectResult): Promise<void> => {
       if (token !== this.pickerToken) return;
       const uris: string[] = result.photoUris;
+      if (uris.length === 0) return;
       this.materializingImages = true;
       try {
         const dataUrls: string[] = [];
         let failed: number = 0;
+        let firstReason: string = '';
         for (const uri of uris) {
           if (token !== this.pickerToken) return;
-          try { dataUrls.push(await compressImageAsDataUrl(uri)); }
-          catch (_e) { failed++; }
+          try {
+            dataUrls.push(await compressImageAsDataUrl(uri));
+          } catch (e) {
+            failed++;
+            const reason: string = e instanceof Error ? e.message : String(e);
+            if (firstReason.length === 0) firstReason = reason;
+            hilog.warn(0x0001, 'ChatPage', `图片读取失败(${this.safeFileNameFromUri(uri)}): ${reason}`);
+          }
         }
         if (token === this.pickerToken) {
-          this.pendingImages = [...this.pendingImages, ...dataUrls];
-          if (failed > 0) this.errorMsg = `${failed} 张图片读取失败，其他图片已添加`;
+          if (dataUrls.length > 0) {
+            this.pendingImages = [...this.pendingImages, ...dataUrls];
+          }
+          if (failed > 0) {
+            const detail: string = firstReason.length > 0 ? `（${firstReason}）` : '';
+            this.errorMsg = dataUrls.length > 0
+              ? `${failed} 张图片读取失败${detail}，其余 ${dataUrls.length} 张已添加`
+              : `图片读取失败${detail}`;
+          }
         }
       } catch (e) {
         if (token === this.pickerToken) {
@@ -289,10 +314,15 @@ export class ChatComposerSession {
   }
 
   async pickFiles(): Promise<void> {
+    if (this.materializingImages) return;
     const token: number = ++this.pickerToken;
     let uris: string[];
     try {
-      const docPicker = new picker.DocumentViewPicker();
+      const ctx: common.UIAbilityContext | undefined =
+        this.deps.abilityContext !== undefined ? this.deps.abilityContext() : undefined;
+      const docPicker: picker.DocumentViewPicker = ctx !== undefined
+        ? new picker.DocumentViewPicker(ctx)
+        : new picker.DocumentViewPicker();
       const options: picker.DocumentSelectOptions =
         new picker.DocumentSelectOptions();
       options.maxSelectNumber = 3;
@@ -301,23 +331,38 @@ export class ChatComposerSession {
       // 选择器取消，不影响当前附件和错误提示。
       return;
     }
-    if (token !== this.pickerToken) return;
+    if (token !== this.pickerToken || uris.length === 0) return;
+    this.materializingImages = true;
     const failures: string[] = [];
-    for (const uri of uris) {
-      let fileName: string = 'file';
-      try {
-        const raw: string = uri.substring(uri.lastIndexOf('/') + 1);
-        fileName = decodeURIComponent(raw.split('?')[0]) || 'file';
-        const bytes: Uint8Array = readUriBytes(uri);
-        const b64: string = new util.Base64Helper().encodeToStringSync(bytes);
-        const mime: string = mimeByName(fileName);
-        this.pendingDocs = [...this.pendingDocs,
-          { url: `data:${mime};base64,${b64}`, fileName: fileName, mime: mime } as PendingDoc];
-      } catch (error) {
-        failures.push(`${fileName}：${error instanceof Error ? error.message : String(error)}`);
+    try {
+      for (const uri of uris) {
+        if (token !== this.pickerToken) return;
+        let fileName: string = 'file';
+        try {
+          fileName = this.safeFileNameFromUri(uri);
+          const mime: string = mimeByName(fileName);
+          if (mime.startsWith('image/')) {
+            const dataUrl: string = await compressImageAsDataUrl(uri);
+            if (token !== this.pickerToken) return;
+            this.pendingImages = [...this.pendingImages, dataUrl];
+            continue;
+          }
+          const bytes: Uint8Array = readUriBytes(uri);
+          const b64: string = new util.Base64Helper().encodeToStringSync(bytes);
+          this.pendingDocs = [...this.pendingDocs,
+            { url: `data:${mime};base64,${b64}`, fileName: fileName, mime: mime } as PendingDoc];
+        } catch (error) {
+          const reason: string = error instanceof Error ? error.message : String(error);
+          hilog.warn(0x0001, 'ChatPage', `文件读取失败(${fileName}): ${reason}`);
+          failures.push(`${fileName}：${reason}`);
+        }
       }
+      if (token === this.pickerToken && failures.length > 0) {
+        this.errorMsg = `文件读取失败：${failures.join('；')}`;
+      }
+    } finally {
+      if (token === this.pickerToken) this.materializingImages = false;
     }
-    if (failures.length > 0) this.errorMsg = `文件读取失败：${failures.join('；')}`;
   }
 
   attachPastedText(text: string): void {

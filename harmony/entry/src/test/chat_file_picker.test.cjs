@@ -84,3 +84,51 @@ test('a stale picker callback cannot append documents or replace a current error
   assert.deepEqual(f.page.pendingDocs, []);
   assert.equal(f.state.errorMsg, 'new composer');
 });
+
+test('percent sign in filename, chunked virtual stream (stat.size === 0), and partial readSync succeed cleanly', async () => {
+  const closed = [];
+  const virtualPayload = Buffer.from('hello-virtual-stream-100%');
+  const partialPayload = Buffer.from('partial-read-content');
+  const fileIo = {
+    OpenMode: { READ_ONLY: 1 },
+    openSync: uri => ({ fd: uri }),
+    statSync: uri => ({ size: uri.includes('virtual') ? 0 : partialPayload.length }),
+    readSync: (uri, buffer, opts) => {
+      const src = uri.includes('virtual') ? virtualPayload : partialPayload;
+      const off = opts?.offset ?? 0;
+      if (off >= src.length) return 0;
+      // 模拟鸿蒙真实 readSync 语义：按文件 offset 读取并写入目标 buffer[0..take]
+      const take = Math.min(5, src.length - off, opts?.length ?? buffer.byteLength);
+      new Uint8Array(buffer, 0, take).set(src.subarray(off, off + take));
+      return take;
+    },
+    closeSync: file => closed.push(file.fd),
+  };
+  const util = { Base64Helper: class { encodeToStringSync(bytes) { return Buffer.from(bytes).toString('base64'); } } };
+  const io = {};
+  new Function('exports', 'require', ioSource)(io, name => {
+    if (name === '@kit.CoreFileKit') return { fileIo };
+    if (name === '@kit.ArkTS') return { util };
+    throw new Error(`Unexpected attachment IO dependency: ${name}`);
+  });
+  const Composer = loadChatComposerSession({}, {
+    picker: {
+      DocumentViewPicker: class {
+        select() { return Promise.resolve(['file:///docs/报告100%_virtual.txt', 'file:///docs/part.txt']); }
+      },
+      DocumentSelectOptions: class {},
+    },
+    util,
+    attachmentIO: io,
+  });
+  const errors = [];
+  const page = new Composer();
+  page.start({ error: msg => errors.push(msg), abilityContext: () => ({}) });
+  await page.pickFiles();
+  assert.deepEqual(errors, []);
+  assert.equal(page.pendingDocs.length, 2);
+  assert.equal(page.pendingDocs[0].fileName, '报告100%_virtual.txt');
+  assert.equal(Buffer.from(page.pendingDocs[0].url.split(',')[1], 'base64').toString('utf8'), 'hello-virtual-stream-100%');
+  assert.equal(Buffer.from(page.pendingDocs[1].url.split(',')[1], 'base64').toString('utf8'), 'partial-read-content');
+  assert.equal(closed.length, 2);
+});
