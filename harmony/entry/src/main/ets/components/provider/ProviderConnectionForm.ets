@@ -665,13 +665,16 @@ export struct ProviderConnectionForm {
       })
       .onAnimationStart((_index: number, targetIndex: number): void => {
         this.tab = targetIndex;
-        this.getUIContext().animateTo({ duration: 240, curve: Curve.FastOutSlowIn }, (): void => {
+        this.getUIContext().animateTo({ duration: 280, curve: Curve.FastOutSlowIn }, (): void => {
           this.tabProgress = targetIndex;
         });
       })
-      .onChange((index: number): void => {
+      .onAnimationEnd((index: number): void => {
         this.tab = index;
         this.tabProgress = index;
+      })
+      .onChange((index: number): void => {
+        this.tab = index;
       })
     }
     .width('100%').height('100%').backgroundColor(BG)
