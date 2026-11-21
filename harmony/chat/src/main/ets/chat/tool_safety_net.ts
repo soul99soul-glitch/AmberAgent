@@ -9,7 +9,7 @@ import type { JsonObject, JsonValue } from './json.ts';
 import type { UIMessage, UIMessagePart, UIMessagePartTool } from './message.ts';
 import type { ToolApprovalPartLocator } from './tool_approval.ts';
 import type { WorkspaceFsPort } from './workspace.ts';
-import { normalizeWorkspacePath } from './workspace.ts';
+import { assertWorkspacePathHasNoLinks, normalizeWorkspacePath } from './workspace.ts';
 
 export const WORKSPACE_UNDO_MAX_BYTES: number = 5 * 1024 * 1024;
 export const WORKSPACE_UNDO_MAX_PER_PATH: number = 3;
@@ -17,26 +17,26 @@ export const WORKSPACE_UNDO_TTL_MS: number = 24 * 60 * 60 * 1000;
 export const DIFF_PREVIEW_MAX_LINES: number = 40;
 export const DIFF_PREVIEW_MAX_CHARS: number = 4000;
 
+export const TOOL_SIDE_EFFECT_STARTED_KEY: string = 'amber_side_effect_started';
 export const TOOL_OUTCOME_METADATA_KEY: string = 'amber_tool_outcome';
 export type ToolOutcomeState = 'outcome_unknown' | 'reconciled_applied' | 'reconciled_not_applied' | 'recheck_requested';
 export type ToolOutcomeResolution = 'not_applied' | 'applied' | 'recheck_requested';
 
 const SIDE_EFFECT_TOOL_SET: Set<string> = new Set<string>([
   'file_write', 'file_edit', 'file_move', 'file_delete', 'workspace_file_delete', 'artifact_delete',
-  'memory_write', 'memory_delete', 'memory_tool',
+  'memory_write', 'memory_delete',
   'ssh_exec', 'ssh_profile_create', 'ssh_profile_update', 'ssh_profile_delete', 'ssh_host_trust',
-  'mosh_exec', 'python_exec', 'terminal_exec',
+  'mosh_exec', 'python_exec', 'python_execute', 'terminal_exec', 'terminal_execute', 'terminal_job_start',
+  'terminal_session_start', 'terminal_session_exec', 'terminal_mosh_session_start', 'terminal_mosh_session_exec',
   'calendar_event_create', 'calendar_event_update', 'calendar_event_delete',
   'reminder_create', 'reminder_update', 'reminder_delete', 'reminder_complete',
   'notification_schedule', 'notification_cancel',
-  'wm_act', 'cron_create', 'cron_update', 'cron_delete', 'skill_import',
-  'feishu_docs_write', 'external_file_write', 'external_file_delete',
+  'cron_create', 'cron_update', 'cron_delete', 'skill_import',
+  'feishu_docs_write', 'feishu_docs_create', 'feishu_docs_append', 'external_file_write', 'external_file_delete',
 ]);
 
 export const isSideEffectToolName = (toolName: string): boolean => {
-  if (SIDE_EFFECT_TOOL_SET.has(toolName)) return true;
-  if (toolName.startsWith('mcp__')) return true;
-  return false;
+  return SIDE_EFFECT_TOOL_SET.has(toolName);
 };
 
 // ===== 1. Diff 预览生成 =====
@@ -301,8 +301,6 @@ export interface WorkspaceUndoStoreDeps {
 export class WorkspaceUndoStore {
   private readonly port: WorkspaceFsPort;
   private readonly rootAbs: string;
-  private readonly undoDirAbs: string;
-  private readonly indexPathAbs: string;
   private readonly sha256Hex: (bytes: Uint8Array) => string;
   private readonly nowMs: () => number;
   private readonly makeId: () => string;
@@ -310,26 +308,47 @@ export class WorkspaceUndoStore {
   constructor(deps: WorkspaceUndoStoreDeps) {
     this.port = deps.port;
     this.rootAbs = deps.rootAbs.replace(/\/+$/, '');
-    this.undoDirAbs = `${this.rootAbs}/.undo`;
-    this.indexPathAbs = `${this.undoDirAbs}/index.json`;
     this.sha256Hex = deps.sha256Hex;
     this.nowMs = deps.nowMs ?? ((): number => Date.now());
     this.makeId = deps.makeId ?? ((): string => `undo-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
   }
 
   private absForWorkspacePath(normalized: string): string {
+    assertWorkspacePathHasNoLinks(this.port, this.rootAbs, normalized);
     return normalized === '.' ? this.rootAbs : `${this.rootAbs}/${normalized}`;
   }
 
+  private undoPath(name: string): string {
+    return this.absForWorkspacePath(`.undo/${name}`);
+  }
+
   private ensureUndoDir(): void {
-    this.port.mkdirs(this.undoDirAbs);
+    this.port.mkdirs(this.absForWorkspacePath('.undo'));
+  }
+
+  private validStoredSnapshot(snapshot: WorkspaceUndoSnapshot): boolean {
+    try {
+      if (typeof snapshot.id !== 'string' || !/^[A-Za-z0-9_-]+$/.test(snapshot.id) ||
+        snapshot.workspacePath === '.' || normalizeWorkspacePath(snapshot.workspacePath) !== snapshot.workspacePath ||
+        (snapshot.payloadFileName !== null && snapshot.payloadFileName !== `${snapshot.id}.bin`)) return false;
+      if (snapshot.operation === 'move') {
+        const previous: string | undefined = snapshot.previousPath;
+        return previous !== undefined && previous !== '.' && previous !== snapshot.workspacePath &&
+          normalizeWorkspacePath(previous) === previous;
+      }
+      return (snapshot.operation === 'write' || snapshot.operation === 'edit') && snapshot.previousPath === undefined;
+    } catch (_e) {
+      return false;
+    }
   }
 
   private loadSnapshots(): WorkspaceUndoSnapshot[] {
-    if (!this.port.isFile(this.indexPathAbs)) return [];
     try {
-      const parsed: Object = JSON.parse(this.port.readText(this.indexPathAbs)) as Object;
-      return Array.isArray(parsed) ? (parsed as WorkspaceUndoSnapshot[]) : [];
+      const index: string = this.undoPath('index.json');
+      if (!this.port.isFile(index)) return [];
+      const parsed: Object = JSON.parse(this.port.readText(index)) as Object;
+      return Array.isArray(parsed) ? (parsed as WorkspaceUndoSnapshot[]).filter(
+        (snapshot: WorkspaceUndoSnapshot): boolean => this.validStoredSnapshot(snapshot)) : [];
     } catch (_e) {
       return [];
     }
@@ -337,7 +356,9 @@ export class WorkspaceUndoStore {
 
   private saveSnapshots(snapshots: WorkspaceUndoSnapshot[]): void {
     this.ensureUndoDir();
-    this.port.writeText(this.indexPathAbs, JSON.stringify(snapshots, null, 2), false);
+    const temp: string = this.undoPath('index.json.tmp');
+    this.port.writeText(temp, JSON.stringify(snapshots, null, 2), false);
+    this.port.rename(temp, this.undoPath('index.json'));
   }
 
   private pruneExpiredInternal(snapshots: WorkspaceUndoSnapshot[], now: number): WorkspaceUndoSnapshot[] {
@@ -345,7 +366,7 @@ export class WorkspaceUndoStore {
     for (const s of snapshots) {
       if (now - s.createdAtMs > WORKSPACE_UNDO_TTL_MS) {
         if (s.payloadFileName !== null) {
-          this.port.deleteRecursively(`${this.undoDirAbs}/${s.payloadFileName}`);
+          this.port.deleteRecursively(this.undoPath(s.payloadFileName));
         }
       } else {
         kept.push(s);
@@ -365,7 +386,7 @@ export class WorkspaceUndoStore {
       const evicted: WorkspaceUndoSnapshot = next[evictIdx];
       next.splice(evictIdx, 1);
       if (evicted.payloadFileName !== null) {
-        this.port.deleteRecursively(`${this.undoDirAbs}/${evicted.payloadFileName}`);
+        this.port.deleteRecursively(this.undoPath(evicted.payloadFileName));
       }
       indices = [];
       for (let i: number = 0; i < next.length; i++) {
@@ -398,101 +419,112 @@ export class WorkspaceUndoStore {
     operation: WorkspaceUndoOperation,
     rawPreviousPath?: string,
   ): WorkspaceUndoPreState | null {
-    const targetPath: string = normalizeWorkspacePath(rawTargetPath);
-    const previousPath: string | undefined = rawPreviousPath !== undefined
-      ? normalizeWorkspacePath(rawPreviousPath) : undefined;
-    if (targetPath === '.undo' || targetPath.startsWith('.undo/')) return null;
+    try {
+      const targetPath: string = normalizeWorkspacePath(rawTargetPath);
+      const previousPath: string | undefined = rawPreviousPath !== undefined
+        ? normalizeWorkspacePath(rawPreviousPath) : undefined;
 
-    if (operation === 'move' && previousPath !== undefined) {
-      const srcAbs: string = this.absForWorkspacePath(previousPath);
-      if (!this.port.isFile(srcAbs)) return null;
-      const bytes: Uint8Array = this.port.readBytes(srcAbs);
+      if (operation === 'move' && previousPath !== undefined) {
+        const srcAbs: string = this.absForWorkspacePath(previousPath);
+        if (!this.port.isFile(srcAbs) || this.port.fileSize(srcAbs) > WORKSPACE_UNDO_MAX_BYTES) return null;
+        const bytes: Uint8Array = this.port.readBytes(srcAbs);
+        if (bytes.length > WORKSPACE_UNDO_MAX_BYTES) return null;
+        return {
+          targetPath,
+          previousPath,
+          operation,
+          existedBefore: true,
+          previousBytes: bytes,
+          previousSha256: this.sha256Hex(bytes),
+        };
+      }
+
+      const targetAbs: string = this.absForWorkspacePath(targetPath);
+      if (!this.port.isFile(targetAbs)) {
+        return {
+          targetPath,
+          operation,
+          existedBefore: false,
+          previousBytes: null,
+          previousSha256: null,
+        };
+      }
+      const size: number = this.port.fileSize(targetAbs);
+      if (size > WORKSPACE_UNDO_MAX_BYTES) {
+        return {
+          targetPath,
+          operation,
+          existedBefore: true,
+          previousBytes: null,
+          previousSha256: null,
+        };
+      }
+      const bytes: Uint8Array = this.port.readBytes(targetAbs);
+      if (bytes.length > WORKSPACE_UNDO_MAX_BYTES) return null;
       return {
         targetPath,
-        previousPath,
         operation,
         existedBefore: true,
-        previousBytes: bytes.length <= WORKSPACE_UNDO_MAX_BYTES ? bytes : null,
+        previousBytes: bytes,
         previousSha256: this.sha256Hex(bytes),
       };
+    } catch (_e) {
+      return null;
     }
-
-    const targetAbs: string = this.absForWorkspacePath(targetPath);
-    if (!this.port.isFile(targetAbs)) {
-      return {
-        targetPath,
-        operation,
-        existedBefore: false,
-        previousBytes: null,
-        previousSha256: null,
-      };
-    }
-    const size: number = this.port.fileSize(targetAbs);
-    if (size > WORKSPACE_UNDO_MAX_BYTES) {
-      return {
-        targetPath,
-        operation,
-        existedBefore: true,
-        previousBytes: null,
-        previousSha256: null,
-      };
-    }
-    const bytes: Uint8Array = this.port.readBytes(targetAbs);
-    return {
-      targetPath,
-      operation,
-      existedBefore: true,
-      previousBytes: bytes,
-      previousSha256: this.sha256Hex(bytes),
-    };
   }
 
   commitSnapshot(pre: WorkspaceUndoPreState | null): WorkspaceUndoSnapshot | null {
     if (pre === null) return null;
-    const now: number = this.nowMs();
-    let snapshots: WorkspaceUndoSnapshot[] = this.pruneExpiredInternal(this.loadSnapshots(), now);
+    try {
+      const now: number = this.nowMs();
+      let snapshots: WorkspaceUndoSnapshot[] = this.pruneExpiredInternal(this.loadSnapshots(), now);
 
-    const targetAbs: string = this.absForWorkspacePath(pre.targetPath);
-    if (!this.port.isFile(targetAbs)) return null;
-    const afterSize: number = this.port.fileSize(targetAbs);
-    if (afterSize > WORKSPACE_UNDO_MAX_BYTES) {
+      const targetAbs: string = this.absForWorkspacePath(pre.targetPath);
+      if (!this.port.isFile(targetAbs)) return null;
+      const afterSize: number = this.port.fileSize(targetAbs);
+      if (afterSize > WORKSPACE_UNDO_MAX_BYTES) {
+        this.saveSnapshots(snapshots);
+        return null;
+      }
+      if (pre.existedBefore && pre.previousBytes === null) {
+        // 前置文件超过 5 MiB 上限，跳过快照落盘
+        this.saveSnapshots(snapshots);
+        return null;
+      }
+
+      const afterBytes: Uint8Array = this.port.readBytes(targetAbs);
+      if (afterBytes.length > WORKSPACE_UNDO_MAX_BYTES) return null;
+      const id: string = this.makeId();
+      if (!/^[A-Za-z0-9_-]+$/.test(id)) return null;
+      let payloadFileName: string | null = null;
+      let payloadBytes: number = 0;
+
+      if (pre.operation !== 'move' && pre.existedBefore && pre.previousBytes !== null) {
+        this.ensureUndoDir();
+        payloadFileName = `${id}.bin`;
+        this.port.writeBytes(this.undoPath(payloadFileName), pre.previousBytes, false);
+        payloadBytes = pre.previousBytes.length;
+      }
+
+      const snapshot: WorkspaceUndoSnapshot = {
+        id,
+        workspacePath: pre.targetPath,
+        previousPath: pre.previousPath,
+        operation: pre.operation,
+        existedBefore: pre.existedBefore,
+        previousSha256: pre.previousSha256,
+        afterSha256: this.sha256Hex(afterBytes),
+        payloadFileName,
+        payloadBytes,
+        createdAtMs: now,
+      };
+      snapshots.push(snapshot);
+      snapshots = this.enforcePerPathLimit(pre.targetPath, snapshots);
       this.saveSnapshots(snapshots);
+      return snapshot;
+    } catch (_e) {
       return null;
     }
-    if (pre.existedBefore && pre.previousBytes === null) {
-      // 前置文件超过 5 MiB 上限，跳过快照落盘
-      this.saveSnapshots(snapshots);
-      return null;
-    }
-
-    const afterBytes: Uint8Array = this.port.readBytes(targetAbs);
-    const id: string = this.makeId();
-    let payloadFileName: string | null = null;
-    let payloadBytes: number = 0;
-
-    if (pre.operation !== 'move' && pre.existedBefore && pre.previousBytes !== null) {
-      this.ensureUndoDir();
-      payloadFileName = `${id}.bin`;
-      this.port.writeBytes(`${this.undoDirAbs}/${payloadFileName}`, pre.previousBytes, false);
-      payloadBytes = pre.previousBytes.length;
-    }
-
-    const snapshot: WorkspaceUndoSnapshot = {
-      id,
-      workspacePath: pre.targetPath,
-      previousPath: pre.previousPath,
-      operation: pre.operation,
-      existedBefore: pre.existedBefore,
-      previousSha256: pre.previousSha256,
-      afterSha256: this.sha256Hex(afterBytes),
-      payloadFileName,
-      payloadBytes,
-      createdAtMs: now,
-    };
-    snapshots.push(snapshot);
-    snapshots = this.enforcePerPathLimit(pre.targetPath, snapshots);
-    this.saveSnapshots(snapshots);
-    return snapshot;
   }
 
   undoLastChange(rawPath: string, expectedSnapshotId?: string): WorkspaceUndoResult {
@@ -531,7 +563,13 @@ export class WorkspaceUndoStore {
       return { ok: false, conflict: true, path: `/workspace/${snapshot.workspacePath}`, error: '目标文件已不存在，拒绝撤销' };
     }
 
+    if (this.port.fileSize(targetAbs) > WORKSPACE_UNDO_MAX_BYTES) {
+      return { ok: false, conflict: true, path: `/workspace/${targetPath}`, error: '目标文件已超过撤销大小上限' };
+    }
     const currentBytes: Uint8Array = this.port.readBytes(targetAbs);
+    if (currentBytes.length > WORKSPACE_UNDO_MAX_BYTES) {
+      return { ok: false, conflict: true, path: `/workspace/${targetPath}`, error: '目标文件已超过撤销大小上限' };
+    }
     const actualSha: string = this.sha256Hex(currentBytes);
     if (actualSha !== snapshot.afterSha256) {
       this.saveSnapshots(snapshots);
@@ -560,20 +598,20 @@ export class WorkspaceUndoStore {
       if (parentIdx > 0) this.port.mkdirs(srcAbs.slice(0, parentIdx));
       this.port.rename(targetAbs, srcAbs);
     } else if (snapshot.existedBefore) {
-      if (snapshot.payloadFileName === null || !this.port.isFile(`${this.undoDirAbs}/${snapshot.payloadFileName}`)) {
+      if (snapshot.payloadFileName === null || !this.port.isFile(this.undoPath(snapshot.payloadFileName))) {
         return { ok: false, conflict: true, path: `/workspace/${snapshot.workspacePath}`, error: '快照载荷已丢失' };
       }
-      const prevBytes: Uint8Array = this.port.readBytes(`${this.undoDirAbs}/${snapshot.payloadFileName}`);
+      const prevBytes: Uint8Array = this.port.readBytes(this.undoPath(snapshot.payloadFileName));
       if (snapshot.previousSha256 !== null && this.sha256Hex(prevBytes) !== snapshot.previousSha256) {
         return { ok: false, conflict: true, path: `/workspace/${snapshot.workspacePath}`, error: '快照载荷完整性校验失败' };
       }
       this.port.writeBytes(targetAbs, prevBytes, false);
-    } else {
-      this.port.deleteRecursively(targetAbs);
+    } else if (!this.port.deleteRecursively(targetAbs)) {
+      return { ok: false, path: `/workspace/${targetPath}`, error: '无法删除本次新建的文件' };
     }
 
     if (snapshot.payloadFileName !== null) {
-      this.port.deleteRecursively(`${this.undoDirAbs}/${snapshot.payloadFileName}`);
+      this.port.deleteRecursively(this.undoPath(snapshot.payloadFileName));
     }
     snapshots.splice(matchIndex, 1);
     this.saveSnapshots(snapshots);
@@ -613,6 +651,10 @@ export const OUTCOME_UNKNOWN_OUTPUT_JSON: string =
 
 export const OUTCOME_UNKNOWN_REASON: string = '操作结果未知，禁止自动重放';
 
+export const withSideEffectStarted = (tool: UIMessagePartTool): UIMessagePartTool => ({
+  ...tool, metadata: { ...(tool.metadata ?? {}), [TOOL_SIDE_EFFECT_STARTED_KEY]: true },
+});
+
 export const readToolOutcomeState = (part: UIMessagePartTool): ToolOutcomeState | null => {
   const val: JsonValue | undefined = part.metadata?.[TOOL_OUTCOME_METADATA_KEY];
   if (val === 'outcome_unknown' || val === 'reconciled_applied' || val === 'reconciled_not_applied' || val === 'recheck_requested') {
@@ -625,13 +667,18 @@ export const readToolOutcomeState = (part: UIMessagePartTool): ToolOutcomeState 
  * 中断恢复收口：对已获批（approved）且无终态输出的副作用工具，严禁自动重放或伪造失败，
  * 标记为 `outcome_unknown` 交由用户三态核对（未生效 / 核查当前状态 / 已生效）。
  */
-export const markInterruptedSideEffectToolsUnknown = (message: UIMessage): { message: UIMessage; changed: boolean } => {
+export const markInterruptedSideEffectToolsUnknown = (
+  message: UIMessage, includeLegacyApproved: boolean = true,
+): { message: UIMessage; changed: boolean } => {
   let changed: boolean = false;
   const nextParts: UIMessagePart[] = message.parts.map((part: UIMessagePart): UIMessagePart => {
     if (part.type !== 'tool') return part;
     const tool: UIMessagePartTool = part;
     if (tool.output.length > 0) return part;
-    if (tool.approvalState.type !== 'approved' || !isSideEffectToolName(tool.toolName)) return part;
+    const started: boolean = tool.metadata?.[TOOL_SIDE_EFFECT_STARTED_KEY] === true;
+    const legacyApproved: boolean = includeLegacyApproved && tool.approvalState.type === 'approved' &&
+      isSideEffectToolName(tool.toolName);
+    if (!started && !legacyApproved) return part;
     changed = true;
     return {
       type: 'tool',
@@ -661,6 +708,22 @@ export const markInterruptedSideEffectToolsUnknown = (message: UIMessage): { mes
       translation: message.translation,
     },
   };
+};
+
+export const recoverInterruptedSideEffectTools = (
+  conversation: Conversation, includeLegacyApproved: boolean = true,
+): Conversation => {
+  let changed: boolean = false;
+  const nodes: MessageNode[] = conversation.messageNodes.map((node: MessageNode): MessageNode => {
+    const current: UIMessage = node.messages[node.selectIndex];
+    const result = markInterruptedSideEffectToolsUnknown(current, includeLegacyApproved);
+    if (!result.changed) return node;
+    changed = true;
+    const messages: UIMessage[] = node.messages.slice();
+    messages[node.selectIndex] = result.message;
+    return { ...node, messages };
+  });
+  return changed ? patchConversation(conversation, { messageNodes: nodes }) : conversation;
 };
 
 export const applyToolOutcomeResolutionToConversation = (

@@ -310,15 +310,12 @@ export class MacGatewayClient implements CloudDialogueClientLike {
       const parsed: MacGatewayStatus = JSON.parse(text) as MacGatewayStatus;
       if (Array.isArray(parsed.sessions)) {
         parsed.sessions = parsed.sessions.map((s: MacGatewaySession): MacGatewaySession => {
-          const normalized = normalizePendingApproval(s.pendingApproval);
-          if (normalized !== null) {
-            return {
-              key: s.key, agent: s.agent, subject: s.subject, origin: s.origin,
-              host: s.host, state: s.state, waitReason: s.waitReason, abnormal: s.abnormal,
-              monitored: s.monitored, updatedAt: s.updatedAt, pendingApproval: normalized,
-            };
-          }
-          return s;
+          return {
+            key: s.key, agent: s.agent, subject: s.subject, origin: s.origin,
+            host: s.host, state: s.state, waitReason: s.waitReason, abnormal: s.abnormal,
+            monitored: s.monitored, updatedAt: s.updatedAt,
+            pendingApproval: normalizePendingApproval(s.pendingApproval) ?? undefined,
+          };
         });
       }
       return parsed;
@@ -411,6 +408,7 @@ export class MacGatewayClient implements CloudDialogueClientLike {
     toolCallId: string,
     allow: boolean,
     trustContext: MacDecisionTrustContext,
+    canSendTrusted?: () => Promise<boolean>,
   ): Promise<void> {
     const body: Record<string, string | boolean> = {
       'sessionKey': sessionKey,
@@ -418,7 +416,10 @@ export class MacGatewayClient implements CloudDialogueClientLike {
       'allow': allow,
     };
     const trustHeaders: Record<string, string> = buildMacDecisionTrustHeaders(trustContext);
-    await this.send('POST', '/v1/amber/decision', JSON.stringify(body), trustHeaders);
+    if (trustHeaders['x-amber-biometric-verified'] === 'true' && canSendTrusted === undefined) {
+      throw new MacGatewayError('invalid', '可信审批需要当前配对和前台认证');
+    }
+    await this.send('POST', '/v1/amber/decision', JSON.stringify(body), trustHeaders, canSendTrusted);
   }
 
   async fetchCloudConfiguration(): Promise<CloudConfigViewDto> {
@@ -461,6 +462,7 @@ export class MacGatewayClient implements CloudDialogueClientLike {
     path: string,
     body: string | undefined,
     extraHeaders?: Record<string, string>,
+    canSend?: () => Promise<boolean>,
   ): Promise<string> {
     const headers: rcp.RequestHeaders = { 'content-type': 'application/json' };
     if (this.token !== null) headers['authorization'] = `Bearer ${this.token}`;
@@ -478,6 +480,9 @@ export class MacGatewayClient implements CloudDialogueClientLike {
     };
     let sawPinMismatch: boolean = false;
     for (const address of this.ordered()) {
+      if (canSend !== undefined && !await canSend()) {
+        throw new MacGatewayError('invalid', '前台或配对状态已变更，已取消发送批准');
+      }
       const host: string = address.indexOf(':') >= 0 ? `[${address}]` : address;
       const session: rcp.Session = rcp.createSession();
       let response: rcp.Response;
@@ -586,7 +591,7 @@ export const applyCloudConfigurationWithJwe = async (
   try {
     return await sealAndPost();
   } catch (e) {
-    if (e instanceof MacGatewayError && e.errorCode === 'envelope_expired') {
+    if (e instanceof MacGatewayError && e.statusCode === 410 && e.errorCode === 'envelope_expired') {
       return await sealAndPost();
     }
     throw e instanceof Error ? e : new Error(String(e));

@@ -123,6 +123,13 @@ const deleteRecursivelySync = (path: string): boolean => {
 
 export const createEntryWorkspaceFsPort = (): WorkspaceFsPort => ({
   exists: existsSync,
+  isSymbolicLink: (abs: string): boolean => {
+    try {
+      return fileIo.lstatSync(abs).isSymbolicLink();
+    } catch (_e) {
+      return false;
+    }
+  },
   isDirectory: isDirectorySync,
   isFile: (abs: string): boolean => {
     try {

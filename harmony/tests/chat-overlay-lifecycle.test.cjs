@@ -68,16 +68,18 @@ function productionOwner(filename, name, dependencies = {}, globals = {}) {
 }
 const makeChat = productionClass('pages/ChatPage.ets', [
   'onBackPress', 'onPageHide', 'aboutToDisappear', 'syncStreamingFrameRate', 'stopGreetTimer',
+  'clearComposerSuggestions', 'resetTopBarMood',
 ]);
 function chat({ loadProviders = () => Promise.resolve([]), resolveChoice = () => Promise.resolve(null),
   getManager = () => Promise.reject(new Error('unexpected manager request')) } = {}) {
   const page = makeChat({
     AppStorage: { get: () => undefined, setOrCreate: () => {} },
     clearInterval, clearTimeout,
-    getConversationRunService: () => ({ discardNewConversation() {} }),
+    getConversationRunService: () => ({ discardNewConversation() {}, clearSuggestions() {} }),
   });
   Object.assign(page, {
     pageAlive: true, pageVisible: true, appBackgrounded: false, greetTimer: -1, cursorTimer: -1,
+    moodTimer: -1, moodStabilizer: { reset() {} },
   });
   const logger = { hilog: { warn() {} } };
   const domain = { loadProviders, buildTopModelMenuGroups: () => [], makeDisplaySetting: () => ({}),

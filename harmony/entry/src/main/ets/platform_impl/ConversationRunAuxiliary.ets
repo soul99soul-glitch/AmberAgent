@@ -31,7 +31,6 @@ export interface ConversationAuxiliaryPorts {
 const HILOG_DOMAIN: number = 0x0000;
 const HILOG_TAG: string = 'AmberChat';
 interface TitlePatch { title: string; }
-interface SuggestionsPatch { chatSuggestions: string[]; }
 interface ErrorPatch { errorMsg: string; }
 
 // The domain returns a candidate. Only the session mutation persists auxiliary fields.
@@ -89,6 +88,8 @@ const maybeAutoTitle = async (ctx: DetachedConversationContext, snapshot: Conver
 const maybeSuggestions = async (ctx: DetachedConversationContext, snapshot: Conversation, ports: ConversationAuxiliaryPorts): Promise<void> => {
   const suggestionCtx: BuiltSuggestionContext | null = buildLocalSuggestionContext(currentMessages(snapshot));
   if (suggestionCtx === null) return;
+  const suggestionEpoch: number = ctx.beginSuggestions();
+  if (suggestionEpoch < 0) return;
   let releaseRun: () => void;
   try { releaseRun = beginConversationRun(snapshot.id); } catch { return; }
   try {
@@ -104,10 +105,11 @@ const maybeSuggestions = async (ctx: DetachedConversationContext, snapshot: Conv
       locale: '简体中文', template: prompts.suggestionPrompt,
     };
     const suggestions: string[] = await runContextAwareSuggestions(suggestionCtx, deps);
-    // 预测胶囊仅内存持有，不写回会话库
-    if (sameConversationTail(snapshot, ctx.activeConversation())) {
-      ctx.publish({ suggestions });
-    }
+    // 独立任务的运行副本和时间线节点 ID 不同，以持久时间线判断本次回复是否仍在尾部。
+    await ctx.mutateConversation((latest: Conversation): Conversation | null => {
+      if (sameConversationTail(snapshot, latest)) ctx.publishSuggestions(suggestionEpoch, suggestions);
+      return null;
+    });
   } catch (error) {
     hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'suggestion failed: %{public}s', (error as Error).message);
   } finally { releaseRun(); }

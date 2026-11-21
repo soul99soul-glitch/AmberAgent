@@ -355,7 +355,7 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     hilog.info(DOMAIN, TAG, 'onForeground — 回前台续跑');
     AppStorage.setOrCreate<boolean>('appBackgrounded', false);
-    if (getProductKind() === 'deepread' || getProductKind() === 'novel') this.motionPreferences.refresh();
+    this.motionPreferences.refresh();
     if (getProductKind() === 'agent') {
       getMemoryTopicCoordinator().foreground();
       hydrateAgentSoulOnForeground();

@@ -27,6 +27,10 @@ import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { SecretToolInputRestore } from './tool_input_vault.ts';
 import { captureSecretToolInput, clearSecretToolPart, restoreSecretToolInput } from './tool_input_vault.ts';
 
+type BeforeSideEffect = (original: UIMessagePartTool, checked: UIMessagePartTool) => Promise<void>;
+
+import { isSideEffectToolName } from './tool_safety_net.ts';
+
 const textPart = (text: string): UIMessagePartText => ({ type: 'text', text, metadata: null });
 
 // ===== ToolFailure(ToolFailure.kt 全文) =====
@@ -292,6 +296,7 @@ export class AgentToolDispatcher {
     prefetchedTools: Map<string, UIMessagePartTool> = new Map<string, UIMessagePartTool>(),
     retrySetting: GenerationRetrySetting = makeGenerationRetrySetting({ enabled: false }),
     signal: AbortSignalLike | undefined = undefined,
+    beforeSideEffect?: BeforeSideEffect,
   ): Promise<ToolBatchResultPair[]> {
     const isAborted = (): boolean => signal !== undefined && signal.aborted;
     const reusedPairs: ToolBatchResultPair[] = [];
@@ -319,7 +324,7 @@ export class AgentToolDispatcher {
           return await this.execute(
             tool, toolDefinitions.get(tool.toolName) ?? null,
             autoApproveTools, autoApproveHighRiskTools, autoApprovedToolNames,
-            invocationContext, retrySetting, signal);
+            invocationContext, retrySetting, signal, beforeSideEffect);
         } catch (e) {
           // abort 打断重试等待:丢弃该工具(保持未执行,留给停止收口),不外抛
           if (isAbortError(e) && isAborted()) return null;
@@ -391,6 +396,7 @@ export class AgentToolDispatcher {
     invocationContext: ToolInvocationContext = 'normal',
     retrySetting: GenerationRetrySetting = makeGenerationRetrySetting({ enabled: false }),
     signal: AbortSignalLike | undefined = undefined,
+    beforeSideEffect?: BeforeSideEffect,
   ): Promise<UIMessagePartTool | null> {
     if (signal !== undefined && signal.aborted) return null;
     const decision: PermissionDecision = await this.resolveReviewedDecision(
@@ -431,7 +437,8 @@ export class AgentToolDispatcher {
       };
     }
     if (decision.action === 'ask') return { ...tracedTool, approvalState: { type: 'pending' } };
-    return this.executeWithHooks(tracedTool, toolDef, decision, invocationContext, retrySetting, signal);
+    return this.executeWithHooks(tracedTool, toolDef, decision, invocationContext, retrySetting, signal,
+      beforeSideEffect !== undefined ? (checked: UIMessagePartTool): Promise<void> => beforeSideEffect(tool, checked) : undefined);
   }
 
   // executeWithHooks(:187-239)
@@ -442,6 +449,7 @@ export class AgentToolDispatcher {
     invocationContext: ToolInvocationContext,
     retrySetting: GenerationRetrySetting,
     signal: AbortSignalLike | undefined = undefined,
+    beforeSideEffect?: (checked: UIMessagePartTool) => Promise<void>,
   ): Promise<UIMessagePartTool> {
     // Direct dispatch/resume must use the same safe input boundary as generation and storage.
     tool = { ...tool, input: captureSecretToolInput(tool.toolName, tool.toolCallId, tool.input).input };
@@ -486,6 +494,15 @@ export class AgentToolDispatcher {
         ? Object.keys(args as JsonObject).join(',')
         : '';
       this.log(`execute: ${resolved.name} argKeys=${argKeys}`);
+      // Council seats persist their own scoped STARTED record in the before hook.
+      if (invocationContext !== 'model_council' && beforeSideEffect !== undefined &&
+        (decision.trace.policy?.mutates === true || isSideEffectToolName(resolved.name))) {
+        try {
+          await beforeSideEffect(tool);
+        } catch (_e) {
+          throw new ToolInvocationBarrierError('无法保存工具执行检查点，操作未启动');
+        }
+      }
       const executed: UIMessagePartTool = await this.executeResolvedToolWithRetry(
         tool, resolved, retrySetting,
         (): Promise<UIMessagePart[]> => resolved.execute(args, signal), signal);

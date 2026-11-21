@@ -49,6 +49,8 @@ import { AgentToolDispatcher as DefaultDispatcher, defaultToolInvocationHooks } 
 import { buildAgentLoopBudgetPrompt, agentLoopShouldHideTools } from './agent_loop_budget.ts';
 import { captureSecretToolInput, clearSecretToolInput, clearSecretToolPart } from './tool_input_vault.ts';
 
+import { recoverInterruptedSideEffectTools, withSideEffectStarted } from './tool_safety_net.ts';
+
 // ===== 环路守护(Android DefaultRunKernel duplicate_tool_call 对齐) =====
 // 签名 = toolName+args JSON;出现次数:1 执行,2 跳过(structured reminder,
 // 结果复用),≥3 停止本轮循环(写回 skipped 输出后 break,terminal 不伪装完成)。
@@ -274,11 +276,33 @@ const emitSnapshot = (conv: Conversation, deps: ChatTurnDeps, ctx: TransformerCo
 // ===== 主循环(:161-391) =====
 // mainClamp=true preserves the main-agent 16..8192 clamp. Subagent
 // invocation context selects the same core with the exact requested step budget.
+const mergeSteerMessages = (conv: Conversation, messages: UIMessage[]): Conversation => {
+  for (const m of messages) {
+    const existingIdx: number = conv.messageNodes.findIndex(
+      (node): boolean => node.messages.some((msg: UIMessage): boolean => msg.id === m.id),
+    );
+    if (existingIdx >= 0) {
+      const targetNode = conv.messageNodes[existingIdx];
+      const nextNodes = conv.messageNodes.slice();
+      nextNodes[existingIdx] = makeMessageNode([m], 0, targetNode.id);
+      conv = { ...conv, messageNodes: nextNodes };
+    } else {
+      conv = appendNode(conv, m);
+    }
+  }
+  return conv;
+};
+
 const runToolLoopCore = async (
   conversation: Conversation, deps: ChatTurnDeps, loop: ToolLoopOptions,
   mainClamp: boolean,
 ): Promise<Conversation> => {
   let conv: Conversation = conversation;
+  const recovered: Conversation = recoverInterruptedSideEffectTools(conv, false);
+  if (recovered !== conv) {
+    conv = recovered;
+    await deps.store.save(conv);
+  }
   const rawSteps: number = loop.maxSteps ?? DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS;
   // 环路守护状态(本轮 run 级;签名表跨步累积)
   const executedSignatures: Map<string, number> = new Map();
@@ -472,19 +496,7 @@ const runToolLoopCore = async (
           && loop.consumeSteerMessages !== undefined) {
           const tailSteers: UIMessage[] = await loop.consumeSteerMessages();
           if (tailSteers.length > 0) {
-            for (const m of tailSteers) {
-              const existingIdx: number = conv.messageNodes.findIndex(
-                (node): boolean => node.messages.some((msg: UIMessage): boolean => msg.id === m.id),
-              );
-              if (existingIdx >= 0) {
-                const targetNode = conv.messageNodes[existingIdx];
-                const nextNodes = conv.messageNodes.slice();
-                nextNodes[existingIdx] = makeMessageNode([m], 0, targetNode.id);
-                conv = { ...conv, messageNodes: nextNodes };
-              } else {
-                conv = appendNode(conv, m);
-              }
-            }
+            conv = mergeSteerMessages(conv, tailSteers);
             await deps.store.save(conv);
             emitSnapshot(conv, deps, ctx);
             continue;
@@ -581,6 +593,7 @@ const runToolLoopCore = async (
     // abort 到达后不再执行任何工具副作用；未执行工具留给页面 stop 收口。
     if (deps.abortSignal !== undefined && deps.abortSignal.aborted) break;
     let executedPairs: ToolBatchResultPair[];
+    const startedTools: Map<UIMessagePartTool, UIMessagePartTool> = new Map<UIMessagePartTool, UIMessagePartTool>();
     if (recipeBatch) {
       const batch = await executeRecipeBatch(toolsToProcess, {
         adapter: recipeAdapter, pluginAdapter, goalAdapter, tools: currentTools, dispatcher,
@@ -604,7 +617,14 @@ const runToolLoopCore = async (
     executedPairs = await dispatcher.executeBatchPairs(
       toolsToProcess, stepDefsMap,
       autoApproveTools, autoApproveHighRiskTools, autoApprovedToolNames,
-      invocationContext, prefetchedTools, toolRetry, deps.abortSignal);
+      invocationContext, prefetchedTools, toolRetry, deps.abortSignal,
+      async (original: UIMessagePartTool, checked: UIMessagePartTool): Promise<void> => {
+        const started: UIMessagePartTool = withSideEffectStarted(checked);
+        startedTools.set(original, started);
+        conv = rewriteLastMessageTools(conv, [{ input: original, result: started }]);
+        await deps.store.save(conv);
+        emitSnapshot(conv, deps, ctx);
+      });
     }
     if (executedPairs.length === 0) {
       // 全部 pending 无结果(:360-363)
@@ -616,7 +636,8 @@ const runToolLoopCore = async (
 
     // 写回同一 assistant 消息(:366-373;按输入 part 身份定位)
     if (!recipeBatch) {
-      conv = rewriteLastMessageTools(conv, executedPairs);
+      conv = rewriteLastMessageTools(conv, executedPairs.map((pair: ToolBatchResultPair): ToolBatchResultPair =>
+        ({ input: startedTools.get(pair.input) ?? pair.input, result: pair.result })));
       await deps.store.save(conv);
       emitSnapshot(conv, deps, ctx);
     }
@@ -636,19 +657,7 @@ const runToolLoopCore = async (
       ? await loop.consumeSteerMessages()
       : [];
     if (steerMessages.length > 0) {
-      for (const m of steerMessages) {
-        const existingIdx: number = conv.messageNodes.findIndex(
-          (node): boolean => node.messages.some((msg: UIMessage): boolean => msg.id === m.id),
-        );
-        if (existingIdx >= 0) {
-          const targetNode = conv.messageNodes[existingIdx];
-          const nextNodes = conv.messageNodes.slice();
-          nextNodes[existingIdx] = makeMessageNode([m], 0, targetNode.id);
-          conv = { ...conv, messageNodes: nextNodes };
-        } else {
-          conv = appendNode(conv, m);
-        }
-      }
+      conv = mergeSteerMessages(conv, steerMessages);
       await deps.store.save(conv);
       emitSnapshot(conv, deps, ctx);
     }

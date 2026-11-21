@@ -13,7 +13,7 @@ import { BG, INK3, ERROR, LABEL, META, TEXT_STYLES } from '../design/tokens.ets'
 import { CenteredTitleBar, PlainSection, CardGroup, FooterNote, NavRow, ToggleRow, BtnFill, BtnGhost, PageSpacer } from '../components/PageTemplate.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import type {
-  CloudConfigViewDto, ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude,
+  CloudConfigViewDto, CloudConfigViewModelDto, CloudConfigCredentialsPatch, ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude,
 } from '@amber/chat-domain';
 import {
   loadProviders, newId, normalizedCloudModelBaseUrl, isValidCloudModelBaseUrl,
@@ -61,6 +61,7 @@ struct SettingMacGatewayPage {
   @State cloudConfigUnsupported: boolean = false;
   @State cloudConfigLoading: boolean = false;
   @State cloudImporting: boolean = false;
+  @State private cloudModelDraft: string = '';
   @State importKeyChanged: boolean = false;
   @State localImportOptions: LocalCloudImportOption[] = [];
   @State notice: string = '';
@@ -153,10 +154,11 @@ struct SettingMacGatewayPage {
     } catch (_e) {
       // 本地存储删除失败也要退出已配对界面;残留记录下次打开时会因 401 再次被清理
     }
-    handleAgentSoulGatewayUnpaired().catch((): void => {});
+    await handleAgentSoulGatewayUnpaired(this.connection?.gatewayId).catch((): void => {});
     this.connection = null;
     this.cloudDialogueEnabled = false;
     this.cloudConfig = null;
+    this.cloudModelDraft = '';
     this.cloudConfigUnsupported = false;
     this.importKeyChanged = false;
     this.status = null;
@@ -224,13 +226,28 @@ struct SettingMacGatewayPage {
     }
   }
 
-  private async importLocalOptionToCloud(opt: LocalCloudImportOption): Promise<void> {
+  private importLocalOptionToCloud(opt: LocalCloudImportOption): void {
+    this.applyCloudModel({
+      provider: opt.providerKind, modelId: opt.modelId, baseUrl: opt.baseUrl,
+    }, { modelApiKey: { action: 'replace', value: opt.apiKey } }, `已加密导入 ${opt.label}`);
+  }
+
+  private changeCloudModelId(): void {
+    const current: CloudConfigViewModelDto | undefined = this.cloudConfig?.model;
+    const modelId: string = this.cloudModelDraft.trim();
+    if (current === undefined || modelId.length === 0 || modelId === current.modelId) return;
+    this.applyCloudModel({ provider: current.provider, baseUrl: current.baseUrl, modelId }, undefined, '已切换云端模型');
+  }
+
+  private async applyCloudModel(
+    model: CloudConfigViewModelDto, credentials: CloudConfigCredentialsPatch | undefined, success: string,
+  ): Promise<void> {
     const c: MacGatewayConnection | null = this.connection;
     const cfg: CloudConfigViewDto | null = this.cloudConfig;
     if (c === null || this.cloudImporting) return;
     if (cfg === null) {
       await this.refreshCloudConfig();
-      this.showNotice(this.cloudConfig === null ? '无法读取云端配置版本，请稍后重试' : '云端配置已刷新，请再次点击导入', true);
+      this.showNotice(this.cloudConfig === null ? '无法读取云端配置版本，请稍后重试' : '云端配置已刷新，请再次操作', true);
       return;
     }
     this.cloudImporting = true;
@@ -241,26 +258,21 @@ struct SettingMacGatewayPage {
         c,
         newId(),
         cfg.revision,
-        {
-          model: {
-            provider: opt.providerKind,
-            modelId: opt.modelId,
-            baseUrl: opt.baseUrl,
-          },
-        },
-        {
-          modelApiKey: { action: 'replace', value: opt.apiKey },
-        },
+        { model },
+        credentials,
         createHarmonyCloudConfigCryptoPort(),
       );
+      if (this.connection !== c || this.disposed) return;
+      this.cloudModelDraft = '';
       this.showNotice(
         receipt.replayed
           ? '云端已应用过该配置（重复请求已合并）'
-          : `已加密导入 ${opt.label}（v${receipt.currentRevision}），新任务生效`,
+          : `${success}（v${receipt.currentRevision}），新任务生效`,
         false,
       );
       await this.refreshCloudConfig();
     } catch (e) {
+      if (this.connection !== c || this.disposed) return;
       const err: Error = e as Error;
       if (err instanceof MacGatewayError && err.errorCode === 'import_key_changed') {
         this.importKeyChanged = true;
@@ -584,6 +596,18 @@ struct SettingMacGatewayPage {
         desc: `v${this.cloudConfig.revision} · Key ${this.cloudConfig.credentials.modelApiKey.configured ? '已配置' : '未配置'} · 搜索 ${this.cloudConfig.search.sources.join('/') || '默认'}`,
         showChevron: false,
       })
+      if (this.cloudConfig.model.provider === 'openai' || this.cloudConfig.model.provider === 'claude') {
+        Row({ space: 10 }) {
+          TextInput({ text: this.cloudModelDraft, placeholder: '新模型 ID' })
+            .layoutWeight(1)
+            .onChange((value: string): void => { this.cloudModelDraft = value; })
+          Button('切换模型')
+            .enabled(!this.cloudImporting && this.cloudModelDraft.trim().length > 0 &&
+              this.cloudModelDraft.trim() !== this.cloudConfig?.model.modelId)
+            .onClick((): void => { this.changeCloudModelId(); })
+        }
+        .padding({ left: 14, right: 14, bottom: 8 })
+      }
       if (this.importKeyChanged) {
         NavRow({
           label: '重新信任导入公钥',

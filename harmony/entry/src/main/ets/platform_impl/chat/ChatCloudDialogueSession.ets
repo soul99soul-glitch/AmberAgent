@@ -86,7 +86,7 @@ export interface ChatCloudDialoguePorts {
   taskRunner?: () => ConversationTaskRunner | null;
   onDialogueConnected?: (connection: MacGatewayConnection) => void;
   onSoulRevision?: (soulRevision: number, connection: MacGatewayConnection) => void;
-  onCloudSuggestionEligible?: (events: CloudDialogueEvent[], replyId: string) => void;
+  onCloudSuggestionEligible?: (events: CloudDialogueEvent[], replyId: string, conversationId: string) => void;
 }
 
 export const formatCloudInputStateBadge = (
@@ -563,7 +563,8 @@ export class ChatCloudDialogueSession {
       if (activeLocal.length > 0) {
         const hasAttachments: boolean = parts.some((p: UIMessagePart): boolean => p.type !== 'text');
         const triage = triageInboundTurn(trimmed, hasAttachments, false);
-        const focusedTask: LocalTaskRecord = activeLocal[activeLocal.length - 1];
+        const active: LocalTaskRecord[] = activeLocal.filter((task: LocalTaskRecord): boolean => task.status === 'running');
+        const focusedTask: LocalTaskRecord = active[active.length - 1] ?? activeLocal[activeLocal.length - 1];
         if (triage.route === 'stop') {
           const targets: LocalTaskRecord[] = triage.stopAll ? activeLocal : [focusedTask];
           let stoppedCount: number = 0;
@@ -896,6 +897,13 @@ export class ChatCloudDialogueSession {
     }
   }
 
+  private emitSuggestionEvent(event: CloudDialogueEvent, owner: string): void {
+    if (owner.length === 0 || this.ports?.currentConversation()?.id !== owner) return;
+    const history: CloudDialogueEvent[] = this.recentEvents.filter((item: CloudDialogueEvent): boolean =>
+      this.conversationIdForTask(item.workItemId ?? '', item.topicId ?? '') === owner);
+    this.ports?.onCloudSuggestionEligible?.(history, event.id, owner);
+  }
+
   private async applyEvent(ev: CloudDialogueEvent): Promise<void> {
     this.recentEvents = [...this.recentEvents, ev].slice(-60);
     const wid: string = ev.workItemId ?? '';
@@ -949,10 +957,9 @@ export class ChatCloudDialogueSession {
         await this.markTopicInputsConsumed(topicId, wid);
       }
       const msgId: string = `cloud-reply-${ev.id}`;
-      await this.appendOrUpdateConversationMessage(this.conversationIdForTask(wid, topicId), msgId, 'assistant', ev.text);
-      if (!isAck && this.ports?.onCloudSuggestionEligible !== undefined) {
-        this.ports.onCloudSuggestionEligible(this.recentEvents.slice(), ev.id);
-      }
+      const owner: string = this.conversationIdForTask(wid, topicId);
+      await this.appendOrUpdateConversationMessage(owner, msgId, 'assistant', ev.text);
+      if (!isAck) this.emitSuggestionEvent(ev, owner);
       return;
     }
     if (ev.kind === 'task_result') {
@@ -1001,10 +1008,9 @@ export class ChatCloudDialogueSession {
       const header: string = `[${taskTitle} · ${statusLabel}]`;
       const body: string = ev.text.trim().length > 0 ? `${header}\n${ev.text}` : header;
       const msgId: string = `cloud-result-${ev.id}`;
-      await this.appendOrUpdateConversationMessage(this.conversationIdForTask(wid, topicId), msgId, 'assistant', body);
-      if (finalStatus === 'completed' && this.ports?.onCloudSuggestionEligible !== undefined) {
-        this.ports.onCloudSuggestionEligible(this.recentEvents.slice(), ev.id);
-      }
+      const owner: string = this.conversationIdForTask(wid, topicId);
+      await this.appendOrUpdateConversationMessage(owner, msgId, 'assistant', body);
+      if (finalStatus === 'completed') this.emitSuggestionEvent(ev, owner);
     }
   }
 

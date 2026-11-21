@@ -1510,7 +1510,7 @@ export {
   OUTCOME_UNKNOWN_OUTPUT_JSON, OUTCOME_UNKNOWN_REASON,
   isSideEffectToolName, buildUnifiedLineDiff, buildWorkspaceDiffPreview,
   buildMemoryDiffPreview, WorkspaceUndoStore, extractUndoReceiptFromToolPart,
-  readToolOutcomeState, markInterruptedSideEffectToolsUnknown,
+  readToolOutcomeState, markInterruptedSideEffectToolsUnknown, recoverInterruptedSideEffectTools,
   applyToolOutcomeResolutionToConversation, utf8BytesForUndoSha,
 } from './chat/tool_safety_net.ts';
 export type {

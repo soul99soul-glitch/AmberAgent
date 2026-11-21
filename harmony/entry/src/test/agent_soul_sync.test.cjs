@@ -541,3 +541,89 @@ test('P0-2: C-SOUL-V1 isolates gateways via syncedGatewayId/originGatewayId and 
   assert.equal(afterC.syncedGatewayId, 'gw-C');
   assert.equal(rcpCalls.filter((c) => c.method === 'PUT').length, 0);
 });
+
+test('legacy synchronized persona survives a blank gateway without seeding, and uses the true remote cursor', async () => {
+  const key = 'agent_soul_store_v1';
+  const kv = createMemoryKv({
+    [key]: JSON.stringify({
+      revision: 17, localLastSyncedRevision: 12, updatedAtMs: 1,
+      displayName: '旧角色', soulMarkdown: '旧存档内容', source: 'macos_ui', isDefault: false,
+    }),
+  });
+  const store = new domain.AgentSoulStore(kv);
+  const reply = await store.applyRemoteSoul({ revision: 0 }, 'blank-gateway');
+  assert.equal(reply.shouldSeedRemote, false);
+  assert.equal(reply.state.displayName, '旧角色');
+  assert.equal(reply.state.localLastSyncedRevision, 12);
+  const reconciled = await store.applyRemoteSoul({
+    revision: 2, displayName: '新角色', soulMarkdown: '云端内容',
+  }, 'active-gateway');
+  assert.equal(reconciled.state.localLastSyncedRevision, 2);
+  assert.equal(reconciled.state.history.some((item) => item.displayName === '旧角色'), true);
+  await store.updateLocal({ displayName: '本机修改 1', source: 'harmony_ui' });
+  await store.updateLocal({ displayName: '本机修改 2', source: 'harmony_ui' });
+  const ack = await store.markSyncedFromPut({ revision: 3 }, 'active-gateway');
+  assert.equal(ack.localLastSyncedRevision, 3);
+});
+
+test('trusted decision revalidates before each address and never leaks headers on notification', async () => {
+  const tuple = { ...TEST_CONN, addrs: ['primary.example.test', 'secondary.example.test'] };
+  const kv = createMemoryKv();
+  let failTransport = true;
+  const { mod, rcpCalls } = loadMacGatewayModule(async () => {
+    if (failTransport) throw new Error('mock network failure');
+    return { statusCode: 200, body: new TextEncoder().encode('{}').buffer };
+  }, kv);
+  const client = mod.MacGatewayClient.of(tuple);
+  const trusted = { surface: 'app', trustedForeground: true, biometricVerified: true, gatewayIdMatches: true };
+  let checks = 0;
+  await assert.rejects(client.decide('session', 'call', true, trusted, async () => ++checks === 1), /前台或配对状态已变更/);
+  assert.equal(checks, 2);
+  assert.equal(rcpCalls.length, 1);
+  assert.equal(rcpCalls[0].headers['x-amber-biometric-verified'], 'true');
+  failTransport = false;
+  await client.decide('session', 'call', false, { ...trusted, surface: 'notification' });
+  assert.equal(rcpCalls[1].headers['x-amber-surface'], 'notification');
+  assert.equal(rcpCalls[1].headers['x-amber-trusted-foreground'], undefined);
+  assert.equal(rcpCalls[1].headers['x-amber-biometric-verified'], undefined);
+});
+
+test('JWE 410 re-seals once with the same request ID and unpair clears the stored kid', async () => {
+  const crypto = require('node:crypto');
+  const kv = createMemoryKv({ mac_gateway_connection_v1: JSON.stringify(TEST_CONN) });
+  const { publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = publicKey.export({ format: 'jwk' });
+  const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest();
+  const kid = domain.computeRsaJwkThumbprint(jwk.e, jwk.n, sha256);
+  const publicKeyDto = {
+    kid, publicJwk: jwk, gatewayId: TEST_CONN.gatewayId, deviceId: TEST_CONN.deviceId, serverTime: 1700000000,
+    publicKeySpkiDerBase64: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
+  };
+  const envelopeCalls = [], sealedPayloads = [];
+  const encode = (body) => new TextEncoder().encode(JSON.stringify(body)).buffer;
+  const { mod } = loadMacGatewayModule(async (req) => {
+    if (req.method === 'GET') return { statusCode: 200, body: encode(publicKeyDto) };
+    envelopeCalls.push(JSON.parse(req.body).jwe);
+    return { statusCode: 410, body: encode({ error: 'envelope_expired' }) };
+  }, kv);
+  const port = {
+    sha256, randomBytes: crypto.randomBytes, rsaOaepSha256Encrypt: async () => new Uint8Array(256),
+    aes256GcmEncrypt: (plaintext) => {
+      sealedPayloads.push(JSON.parse(Buffer.from(plaintext).toString('utf8')));
+      return { ciphertext: new Uint8Array(8), tag: new Uint8Array(16) };
+    },
+  };
+  const patch = { model: { provider: 'openai', modelId: 'model-test', baseUrl: '' } };
+  await assert.rejects(mod.applyCloudConfigurationWithJwe(kv, TEST_CONN, 'same-id', 7, patch, undefined, port),
+    error => error.statusCode === 410 && error.errorCode === 'envelope_expired');
+  assert.equal(envelopeCalls.length, 2);
+  assert.notEqual(envelopeCalls[0], envelopeCalls[1]);
+  assert.deepEqual(sealedPayloads.map(p => p.requestId), ['same-id', 'same-id']);
+  assert.deepEqual(sealedPayloads.map(p => p.configuration), [patch, patch]);
+  assert.ok(sealedPayloads.every(p => p.credentials === undefined && p.expectedRevision === 7));
+  const pinnedKey = `mac_gateway_cloud_import_kid_v1:${TEST_CONN.gatewayId}`;
+  assert.equal(await kv.get(pinnedKey), kid);
+  await mod.forgetMacGatewayConnection(kv);
+  assert.equal(await kv.get(pinnedKey), null);
+  assert.equal(await mod.loadMacGatewayConnection(kv), null);
+});

@@ -86,8 +86,9 @@ export const normalizeWorkspacePath = (path: string): string => {
   const parts: string[] = relative.split('/')
     .filter((seg: string): boolean => seg.trim().length > 0 && seg !== '.');
   parts.forEach((seg: string): void => {
-    if (seg === '..') throw new Error(`Path traversal is not allowed: ${path}`);
+    if (seg === '..' || seg.includes('\0')) throw new Error(`Path traversal is not allowed: ${path}`);
   });
+  if (parts[0] === '.undo') throw new Error('The .undo directory is reserved');
   const joined: string = parts.join('/');
   return joined.length === 0 ? '.' : joined;
 };
@@ -106,6 +107,7 @@ export interface WorkspaceFsEntry {
 export interface WorkspaceFsPort {
   // 绝对路径(根内)操作;相对 → 绝对由 PosixWorkspaceManager 拼接
   exists(abs: string): boolean;
+  isSymbolicLink?(abs: string): boolean;
   isDirectory(abs: string): boolean;
   isFile(abs: string): boolean;
   // 目录列举(未排序;排序在域层);目录不存在 → 抛由调用侧前置检查
@@ -123,6 +125,15 @@ export interface WorkspaceFsPort {
   copyFile(fromAbs: string, toAbs: string): void;
   deleteRecursively(abs: string): boolean;
 }
+
+export const assertWorkspacePathHasNoLinks = (port: WorkspaceFsPort, root: string, relative: string): void => {
+  if (port.isSymbolicLink === undefined || relative === '.') return;
+  let path: string = root;
+  for (const segment of relative.split('/')) {
+    path = `${path}/${segment}`;
+    if (port.isSymbolicLink(path)) throw new Error('Workspace paths cannot follow symbolic links');
+  }
+};
 
 // ===== PosixWorkspaceManager(WorkspaceManager.kt 读写照逻辑;SAF → 端口) =====
 
@@ -152,7 +163,9 @@ export class PosixWorkspaceManager {
       throw new Error(`Not a directory: ${relativePath}`);
     }
     const normalized: string = normalizeWorkspacePath(relativePath);
-    const entries: WorkspaceFsEntry[] = this.deps.port.listNames(dir);
+    const entries: WorkspaceFsEntry[] = this.deps.port.listNames(dir)
+      .filter((entry: WorkspaceFsEntry): boolean => (normalized !== '.' || entry.name !== '.undo') &&
+        this.deps.port.isSymbolicLink?.(`${dir}/${entry.name}`) !== true);
     const mapped: WorkspaceEntry[] = entries.map((e: WorkspaceFsEntry): WorkspaceEntry => ({
       path: joinWorkspacePath(normalized, e.name),
       name: e.name,
@@ -172,6 +185,10 @@ export class PosixWorkspaceManager {
 
   // :61-66
   async readText(relativePath: string): Promise<string> {
+    return this.readTextSync(relativePath);
+  }
+
+  private readTextSync(relativePath: string): string {
     const file: string = this.requireDocument(relativePath);
     if (!this.deps.port.isFile(file)) {
       throw new Error(`Not a file: ${relativePath}`);
@@ -210,12 +227,12 @@ export class PosixWorkspaceManager {
     return this.writeTextInternal(relativePath, content, append, false);
   }
 
-  private async writeTextInternal(
+  private writeTextInternal(
     relativePath: string,
     content: string,
     append: boolean,
     skipUndo: boolean,
-  ): Promise<WorkspaceEntry> {
+  ): WorkspaceEntry {
     const normalized: string = this.requireFilePath(relativePath);
     const undo: WorkspaceUndoStore | undefined = !skipUndo ? this.deps.undoStore : undefined;
     const pre: WorkspaceUndoPreState | null = undo !== undefined ? undo.capturePreState(normalized, 'write') : null;
@@ -258,7 +275,7 @@ export class PosixWorkspaceManager {
     relativePath: string, oldText: string, newText: string, replaceAll: boolean,
   ): Promise<WorkspaceEditResult> {
     if (oldText.length === 0) throw new Error('old_text must not be empty');
-    const current: string = await this.readText(relativePath);
+    const current: string = this.readTextSync(relativePath);
     let count: number;
     if (replaceAll) {
       count = current.split(oldText).length - 1;
@@ -275,7 +292,7 @@ export class PosixWorkspaceManager {
     const updated: string = replaceAll
       ? current.split(oldText).join(newText)
       : current.slice(0, firstIdx) + newText + current.slice(firstIdx + oldText.length);
-    await this.writeTextInternal(relativePath, updated, false, true);
+    this.writeTextInternal(relativePath, updated, false, true);
     const snapshot = undo !== undefined ? undo.commitSnapshot(pre) : null;
     const res: WorkspaceEditResult = {
       path: normalized,
@@ -289,6 +306,7 @@ export class PosixWorkspaceManager {
   async move(sourcePath: string, targetPath: string): Promise<WorkspaceEntry> {
     const sourceNormalized: string = normalizeWorkspacePath(sourcePath);
     const targetNormalized: string = normalizeWorkspacePath(targetPath);
+    if (sourceNormalized === '.') throw new Error('The workspace root cannot be moved');
     if (sourceNormalized === targetNormalized) {
       throw new Error(`Source and target are the same path: ${sourceNormalized}`);
     }
@@ -340,7 +358,10 @@ export class PosixWorkspaceManager {
       if (results.length >= maxResults) return;
       if (this.deps.port.isDirectory(abs)) {
         this.deps.port.listNames(abs).forEach((child: WorkspaceFsEntry): void => {
-          visit(`${abs}/${child.name}`, joinWorkspacePath(path, child.name));
+          if ((path !== '.' || child.name !== '.undo') &&
+            this.deps.port.isSymbolicLink?.(`${abs}/${child.name}`) !== true) {
+            visit(`${abs}/${child.name}`, joinWorkspacePath(path, child.name));
+          }
         });
         return;
       }
@@ -370,6 +391,7 @@ export class PosixWorkspaceManager {
   // ===== 内部(WorkspaceManager.kt:368-445;DocumentFile → abs 路径串) =====
 
   private abs(normalized: string): string {
+    assertWorkspacePathHasNoLinks(this.deps.port, this.deps.rootAbs, normalized);
     return normalized === '.' ? this.deps.rootAbs : `${this.deps.rootAbs}/${normalized}`;
   }
 
@@ -393,6 +415,7 @@ export class PosixWorkspaceManager {
   private findDocument(relativePath: string): string | null {
     const normalized: string = normalizeWorkspacePath(relativePath);
     const root: string = this.requireRoot();
+    assertWorkspacePathHasNoLinks(this.deps.port, root, normalized);
     if (normalized === '.') return root;
     const segments: string[] = normalized.split('/')
       .filter((seg: string): boolean => seg.trim().length > 0);
@@ -417,6 +440,7 @@ export class PosixWorkspaceManager {
   // :406-416 — 逐段 findFile ?: createDirectory
   private requireOrCreateParent(relativePath: string): string {
     const normalized: string = normalizeWorkspacePath(relativePath);
+    assertWorkspacePathHasNoLinks(this.deps.port, this.deps.rootAbs, normalized);
     const parentPath: string = substringBeforeLast(normalized, '/', '.');
     if (parentPath === '.' || parentPath === normalized) return this.requireRoot();
     const root: string = this.requireRoot();

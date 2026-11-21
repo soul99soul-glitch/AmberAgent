@@ -4,8 +4,7 @@
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import screenLock from '@ohos.screenLock';
 import userAuth from '@ohos.userIAM.userAuth';
-import { BusinessError } from '@kit.BasicServicesKit';
-import type { CloudConfigCryptoPort, GcmEncryptedResult, MacDecisionTrustContext } from '@amber/chat-domain';
+import type { CloudConfigCryptoPort, GcmEncryptedResult } from '@amber/chat-domain';
 
 const GCM_ALG: string = 'AES256|GCM|NoPadding';
 const GCM_TAG_LEN: number = 16;
@@ -70,7 +69,6 @@ const requestSystemUserAuth = (reason: string): Promise<boolean> =>
     for (const candidate of [
       userAuth.UserAuthType.FACE,
       userAuth.UserAuthType.FINGERPRINT,
-      userAuth.UserAuthType.PIN,
     ]) {
       try {
         userAuth.getAvailableStatus(candidate, userAuth.AuthTrustLevel.ATL2);
@@ -108,55 +106,32 @@ const requestSystemUserAuth = (reason: string): Promise<boolean> =>
         try { instance.off('result'); } catch (_e) {}
         resolve(ok);
       };
-      instance.on('result', {
-        onResult(result: userAuth.UserAuthResult): void {
-          finish(result.result === userAuth.UserAuthResultCode.SUCCESS);
-        },
-      });
-      instance.start();
-    } catch (e) {
-      const err: BusinessError = e as BusinessError;
-      if (err.code !== undefined) resolve(false);
-      else resolve(false);
+      try {
+        instance.on('result', {
+          onResult(result: userAuth.UserAuthResult): void {
+            finish(result.result === userAuth.UserAuthResultCode.SUCCESS &&
+              (result.authType === userAuth.UserAuthType.FACE || result.authType === userAuth.UserAuthType.FINGERPRINT));
+          },
+        });
+        instance.start();
+      } catch (_e) {
+        finish(false);
+      }
+    } catch (_e) {
+      resolve(false);
     }
   });
 
-/**
- * 校验应用位于解锁后的前台且通过系统生物识别/锁屏密码认证，并绑定配对的 gatewayId。
- * 任一门禁不满足均严格 fail-closed，绝不降级放行受信头。
- */
-export const authenticateForMacDecision = async (
-  reason: string,
-  gatewayIdMatches: boolean,
-): Promise<MacDecisionTrustContext> => {
-  if (!gatewayIdMatches || AppStorage.get<boolean>('appBackgrounded') === true) {
-    return {
-      surface: 'app',
-      trustedForeground: false,
-      biometricVerified: false,
-      gatewayIdMatches,
-    };
-  }
-  let locked: boolean = true;
+export const isMacDecisionUnlockedForeground = async (): Promise<boolean> => {
+  if (AppStorage.get<boolean>('appBackgrounded') !== false) return false;
   try {
-    locked = await screenLock.isScreenLocked();
+    return !await screenLock.isScreenLocked() && AppStorage.get<boolean>('appBackgrounded') === false;
   } catch (_e) {
-    locked = true;
+    return false;
   }
-  if (locked || AppStorage.get<boolean>('appBackgrounded') === true) {
-    return {
-      surface: 'app',
-      trustedForeground: false,
-      biometricVerified: false,
-      gatewayIdMatches,
-    };
-  }
-  const verified: boolean = await requestSystemUserAuth(reason);
-  const stillForeground: boolean = AppStorage.get<boolean>('appBackgrounded') !== true;
-  return {
-    surface: 'app',
-    trustedForeground: stillForeground && !locked,
-    biometricVerified: verified && stillForeground,
-    gatewayIdMatches,
-  };
+};
+
+export const authenticateForMacDecision = async (reason: string): Promise<boolean> => {
+  if (!await isMacDecisionUnlockedForeground()) return false;
+  return await requestSystemUserAuth(reason);
 };

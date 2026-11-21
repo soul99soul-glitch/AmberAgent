@@ -465,11 +465,14 @@ export class AgentSoulStore {
    * 解绑当前网关时清理已同步网关归属并归零同步游标；若当前存在未标来源的非默认人设，
    * 记录 originGatewayId，防止后续连接到空白新网关时把旧网关人设反向播种过去。
    */
-  async handleGatewayUnpaired(): Promise<AgentSoulState> {
+  async handleGatewayUnpaired(previousGatewayId?: string): Promise<AgentSoulState> {
     const current: AgentSoulState = await this.load();
-    const nextOrigin: string | null = (current.syncedGatewayId !== null && current.originGatewayId === null && !current.isDefault)
-      ? current.syncedGatewayId
-      : current.originGatewayId;
+    const previous: string | null = current.syncedGatewayId ??
+      (current.localLastSyncedRevision > 0 ? normalizeGatewayId(previousGatewayId) : null);
+    if (previous === null && current.localLastSyncedRevision > 0 && !current.isDefault) {
+      return current; // Unbound legacy content remains ineligible for automatic seeding.
+    }
+    const nextOrigin: string | null = !current.isDefault ? (current.originGatewayId ?? previous) : null;
     if (current.syncedGatewayId === null && current.localLastSyncedRevision === 0 && nextOrigin === current.originGatewayId) {
       return current;
     }
@@ -522,13 +525,18 @@ export class AgentSoulStore {
   ): Promise<AgentSoulRemoteApplyResult> {
     const incomingGatewayId: string | null = normalizeGatewayId(gatewayId);
     let current: AgentSoulState = await this.load();
+    const remoteRevision: number = typeof remote.revision === 'number' && Number.isFinite(remote.revision)
+      ? Math.max(0, Math.floor(remote.revision))
+      : 0;
+    // A positive unbound cursor proves this persona has already synced.
+    // A blank reply cannot establish which pairing originally owned it.
+    if (remoteRevision === 0 && current.syncedGatewayId === null && current.localLastSyncedRevision > 0) {
+      return { state: current, applied: false, shouldSeedRemote: false };
+    }
     if (incomingGatewayId !== null && current.syncedGatewayId !== incomingGatewayId) {
       current = await this.prepareForGateway(incomingGatewayId);
     }
     const effectiveGatewayId: string | null = incomingGatewayId ?? current.syncedGatewayId;
-    const remoteRevision: number = typeof remote.revision === 'number' && Number.isFinite(remote.revision)
-      ? Math.max(0, Math.floor(remote.revision))
-      : 0;
     if (remoteRevision === 0) {
       if (this.canBootstrapToUninitializedGateway(current, effectiveGatewayId)) {
         return { state: current, applied: false, shouldSeedRemote: true };
@@ -624,7 +632,7 @@ export class AgentSoulStore {
       isDefault: current.isDefault,
       source: current.source,
       history: mergedHistory,
-      localLastSyncedRevision: remoteRevision,
+      localLastSyncedRevision: rawRev,
       syncedGatewayId: effectiveGatewayId,
       originGatewayId: current.isDefault ? null : (effectiveGatewayId ?? current.originGatewayId),
     };

@@ -316,7 +316,9 @@ export class ConversationTaskRunner {
               const cur: UIMessage = node.messages[node.selectIndex];
               const existingText: string = toText(cur).trim();
               const interruptedNote: string = '[任务因应用退出已中断]';
-              const nextMsg: UIMessage = existingText.length === 0 || existingText.startsWith('[正在')
+              const placeholderOnly: boolean = cur.parts.length === 1 && cur.parts[0].type === 'text' &&
+                (existingText.length === 0 || existingText.startsWith('[正在'));
+              const nextMsg: UIMessage = placeholderOnly
                 ? makeUIMessage('assistant', [{ type: 'text', text: interruptedNote, metadata: null }], {
                   id: cur.id, createdAt: cur.createdAt, finishedAt: nowIso(),
                 })
@@ -461,24 +463,28 @@ export class ConversationTaskRunner {
     );
     const userNode: MessageNode = toMessageNode(userDisplayMsg);
 
-    await this.runService.mutateStoredConversation(conversationId, (latest: Conversation): Conversation =>
-      patchConversation(latest, {
-        messageNodes: latest.messageNodes.concat([userNode]),
-        updateAt: nowIso(),
-      }));
+    const stored: Conversation | null = await this.runService.mutateStoredConversation(
+      conversationId, (latest: Conversation): Conversation =>
+        patchConversation(latest, { messageNodes: latest.messageNodes.concat([userNode]), updateAt: nowIso() }));
+    if (stored === null) throw new Error('会话已不存在，无法追加补充说明');
 
     const inputRecord: LocalTaskInputRecord = {
       requestId, taskId: targetTaskId, conversationId,
       kind: 'followup', text: cleanText, state: 'received',
       messageId: userDisplayMsg.id, updatedAt: now,
     };
-    const queue: PendingFollowupPayload[] = this.pendingFollowups.get(targetTaskId) ?? [];
-    queue.push({ requestId, parts: parts.slice(), text: cleanText });
-    this.pendingFollowups.set(targetTaskId, queue);
-
-    task.progressText = sanitizeSingleLineProgress('已收到补充说明，将在下一推理边界消费…');
-    task.updatedAt = now;
     this.inputs.push(inputRecord);
+    if (task.stopRequested || (task.status !== 'running' && task.status !== 'queued')) {
+      inputRecord.state = 'cancelled';
+      await this.runService.mutateStoredConversation(conversationId, (latest: Conversation): Conversation =>
+        updateFollowupReceiptById(latest, inputRecord.messageId, 'not_applied', requestId, targetTaskId));
+    } else {
+      const queue: PendingFollowupPayload[] = this.pendingFollowups.get(targetTaskId) ?? [];
+      queue.push({ requestId, parts: baseParts, text: cleanText });
+      this.pendingFollowups.set(targetTaskId, queue);
+      task.progressText = sanitizeSingleLineProgress('已收到补充说明，将在下一推理边界消费…');
+      task.updatedAt = now;
+    }
     await this.persistState();
     this.emit();
     return inputRecord;
@@ -653,38 +659,36 @@ export class ConversationTaskRunner {
     if (payloads.length === 0) return [];
     this.pendingFollowups.delete(task.taskId);
 
-    const now: number = Date.now();
+    const acceptedMessages: UIMessage[] = [];
     const consumedRecords: LocalTaskInputRecord[] = [];
+    const execution = this.runService.getExecution();
     for (const payload of payloads) {
       const rec: LocalTaskInputRecord | undefined = this.inputs.find(
-        (i: LocalTaskInputRecord): boolean => i.requestId === payload.requestId);
-      if (rec !== undefined && rec.state === 'received') {
-        rec.state = 'consumed';
-        rec.updatedAt = now;
-        consumedRecords.push(rec);
-      }
+        (input: LocalTaskInputRecord): boolean => input.requestId === payload.requestId && input.state === 'received');
+      if (rec === undefined) continue;
+      const transformed: UIMessagePart[] = await execution.materializeDocumentParts(
+        applyUserInputRegexes(payload.parts, context.seed.runtime.assistant.regexes));
+      acceptedMessages.push(makeUIMessage('user', transformed, { id: rec.messageId }));
+      consumedRecords.push(rec);
+    }
+    if (task.stopRequested || context.signal.aborted || consumedRecords.length === 0) return [];
+    const now: number = Date.now();
+    const stored: Conversation | null = await this.runService.mutateStoredConversation(
+      task.conversationId, (latest: Conversation): Conversation | null => {
+        if (task.stopRequested || context.signal.aborted) return null;
+        let next: Conversation = latest;
+        for (const rec of consumedRecords) {
+          next = updateFollowupReceiptById(next, rec.messageId, 'applied', rec.requestId, task.taskId);
+        }
+        return next;
+      });
+    if (stored === null || task.stopRequested || context.signal.aborted) return [];
+    for (const rec of consumedRecords) {
+      rec.state = 'consumed';
+      rec.updatedAt = now;
     }
     task.progressText = sanitizeSingleLineProgress('已消费补充说明，继续推理…');
     task.updatedAt = now;
-
-    if (consumedRecords.length > 0) {
-      await this.runService.mutateStoredConversation(task.conversationId, (latest: Conversation): Conversation => {
-        let nextConv: Conversation = latest;
-        for (const rec of consumedRecords) {
-          nextConv = updateFollowupReceiptById(
-            nextConv, rec.messageId, 'applied', rec.requestId, task.taskId);
-        }
-        return nextConv;
-      }).catch((): null => null);
-    }
-
-    const acceptedMessages: UIMessage[] = [];
-    const execution = this.runService.getExecution();
-    for (const payload of payloads) {
-      const transformed: UIMessagePart[] = await execution.materializeDocumentParts(
-        applyUserInputRegexes(payload.parts, context.seed.runtime.assistant.regexes));
-      acceptedMessages.push(makeUIMessage('user', transformed));
-    }
     await this.persistState();
     this.emit();
     return acceptedMessages;
@@ -829,9 +833,29 @@ export class ConversationTaskRunner {
       }
 
       const finalStored: Conversation | null = await projectToStoredConversation(true, '[已完成]');
+      if (active.controller.signal.aborted || task.stopRequested) {
+        await this.finalizeStoppedTask(task, latestGeneratedMessages);
+        return;
+      }
       const finalAssistant: UIMessage = combineTaskGeneratedAssistantMessage(
         task.assistantMessageId, latestGeneratedMessages, '[已完成]', true);
       task.status = 'completed';
+      const unconsumed: LocalTaskInputRecord[] = this.inputs.filter(
+        (input: LocalTaskInputRecord): boolean => input.taskId === task.taskId &&
+          input.kind === 'followup' && input.state === 'received');
+      if (unconsumed.length > 0) {
+        await this.runService.mutateStoredConversation(task.conversationId, (latest: Conversation): Conversation => {
+          let next: Conversation = latest;
+          for (const input of unconsumed) {
+            next = updateFollowupReceiptById(next, input.messageId, 'not_applied', input.requestId, task.taskId);
+          }
+          return next;
+        });
+        for (const input of unconsumed) {
+          input.state = 'cancelled';
+          input.updatedAt = Date.now();
+        }
+      }
       task.resultText = toText(finalAssistant).trim();
       task.progressText = sanitizeSingleLineProgress(
         task.resultText.length > 0 ? `已完成：${task.resultText}` : '已完成');

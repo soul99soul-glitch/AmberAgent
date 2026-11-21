@@ -140,6 +140,10 @@ export class DetachedConversationContext {
     if (this.hooks !== null) { this.hooks.publish(patch); return; }
     this.service.publishContext(this, patch);
   }
+  beginSuggestions(): number { return this.service.beginSuggestions(this.conversationId); }
+  publishSuggestions(epoch: number, suggestions: string[]): void {
+    this.service.publishSuggestions(this.conversationId, epoch, suggestions);
+  }
   pending(): PendingUserMessage[] { return this.service.pending(this.conversationId); }
   consumeSteer(): Promise<UIMessage[]> {
     return this.hooks !== null ? this.hooks.consumeSteer() : this.service.consumeSteer(this);
@@ -175,6 +179,7 @@ interface ConversationSession {
   record: ActiveRun | null;
   completionController: EntryAbortController | null;
   completionSourceFingerprint: string;
+  suggestionEpoch: number;
   latest: Conversation | null;
   newConversation: Conversation | null;
   state: ConversationRunSnapshot;
@@ -238,12 +243,13 @@ export class ConversationRunService {
   private readonly sessions: Map<string, ConversationSession> = new Map<string, ConversationSession>();
   private runningListeners: Array<(ids: string[]) => void> = [];
   private generating: boolean = false;
+  private nextSuggestionEpoch: number = 0;
 
   private session(id: string): ConversationSession {
     const previous: ConversationSession | undefined = this.sessions.get(id);
     if (previous !== undefined) return previous;
     const created: ConversationSession = {
-      id: id, record: null, completionController: null, completionSourceFingerprint: '', latest: null, newConversation: null, state: emptySnapshot(id), queue: [], queueLoaded: false,
+      id: id, record: null, completionController: null, completionSourceFingerprint: '', suggestionEpoch: 0, latest: null, newConversation: null, state: emptySnapshot(id), queue: [], queueLoaded: false,
       queueTail: Promise.resolve(), writeTail: Promise.resolve(), pendingWrites: 0, pendingQueueWrites: 0,
       drainActive: false, appendActive: false, listeners: [], navigation: [],
     };
@@ -321,6 +327,29 @@ export class ConversationRunService {
     if (session.record?.context !== null && session.record?.context !== undefined) {
       session.record.context.conversation = conversation;
     }
+    this.emit(session);
+  }
+
+  clearSuggestions(conversationId: string): void {
+    const session: ConversationSession | undefined = this.sessions.get(conversationId);
+    if (session === undefined) return;
+    session.suggestionEpoch = ++this.nextSuggestionEpoch;
+    if (session.state.suggestions.length === 0) return;
+    session.state.suggestions = [];
+    this.emit(session);
+  }
+
+  beginSuggestions(conversationId: string): number {
+    const session: ConversationSession | undefined = this.sessions.get(conversationId);
+    if (session === undefined || session.listeners.length === 0) return -1;
+    session.suggestionEpoch = ++this.nextSuggestionEpoch;
+    return session.suggestionEpoch;
+  }
+
+  publishSuggestions(conversationId: string, epoch: number, suggestions: string[]): void {
+    const session: ConversationSession | undefined = this.sessions.get(conversationId);
+    if (session === undefined || session.listeners.length === 0 || session.suggestionEpoch !== epoch) return;
+    session.state.suggestions = suggestions.slice();
     this.emit(session);
   }
 
@@ -525,6 +554,7 @@ export class ConversationRunService {
     session.state.conversation = null; session.state.errorMsg = ''; session.state.retryStatus = '';
     session.state.visualConversation = null; session.state.conversationDeleted = false;
     session.state.streamingTail = []; session.state.regenTail = null; session.state.regenNodeId = '';
+    session.suggestionEpoch = ++this.nextSuggestionEpoch;
     session.state.suggestions = [];
     session.state.liveActivity = null; session.state.compactActiveCount = 0;
     session.state.jsSandboxNeeded = false; session.state.historyNodeCount = 0;
@@ -1049,7 +1079,8 @@ export class ConversationRunService {
       this.emit(session);
     });
   }
-  takePending(conversationId: string, messageId: string): Promise<PendingUserMessage | null> {
+  takePending(conversationId: string, messageId: string,
+    accept?: (pending: PendingUserMessage) => boolean): Promise<PendingUserMessage | null> {
     const session: ConversationSession = this.session(conversationId);
     return this.queueOperation(session, async (): Promise<PendingUserMessage | null> => {
       const message: PendingUserMessage | undefined = session.queue.find((item): boolean => item.id === messageId);
@@ -1061,6 +1092,11 @@ export class ConversationRunService {
           event: 'cancel', messageId: messageId, detail: 'restore_to_input',
         });
       } catch (error) { session.queue = previous; throw error instanceof Error ? error : new Error(String(error)); }
+      if (accept !== undefined && !accept(message)) {
+        session.queue = previous;
+        await persistPendingQueue(this.storage.kv, session.id, previous);
+        return null;
+      }
       this.emit(session);
       return message;
     });

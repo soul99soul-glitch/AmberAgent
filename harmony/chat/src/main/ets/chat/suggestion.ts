@@ -224,12 +224,7 @@ export const buildLocalSuggestionContext = (
 export const isUpfrontCloudAcknowledgement = (ev: CloudSuggestionEventLike): boolean => {
   if (ev.kind !== 'assistant_reply') return false;
   if (ev.outcome !== undefined && ev.outcome !== null && ev.outcome.trim().length > 0) return false;
-  if (ev.id.startsWith('ack:') || ev.id.startsWith('ack-')) return true;
-  if (ev.workItemId !== undefined && ev.workItemId !== null && ev.workItemId.trim().length > 0) return false;
-  const trimmed: string = ev.text.trim();
-  return trimmed.startsWith('收到，我来处理')
-    || trimmed.startsWith('收到，正在处理')
-    || trimmed.startsWith('正在处理，请稍候');
+  return ev.id.startsWith('ack:') || ev.id.startsWith('ack-');
 };
 
 export const buildCloudSuggestionContext = (
@@ -246,7 +241,7 @@ export const buildCloudSuggestionContext = (
   }
   if (reply === null) return null;
   if (reply.kind !== 'assistant_reply' && reply.kind !== 'task_result') return null;
-  if (reply.outcome === 'failed' || reply.outcome === 'cancelled') return null;
+  if (reply.outcome && reply.outcome !== 'completed') return null;
   if (reply.kind === 'task_result' && reply.outcome !== 'completed') return null;
   if (isUpfrontCloudAcknowledgement(reply)) return null;
   if (reply.text.trim().length === 0) return null;

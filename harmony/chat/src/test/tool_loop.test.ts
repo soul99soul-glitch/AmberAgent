@@ -23,6 +23,7 @@ import type { JsonValue } from '../main/ets/chat/json.ts';
 import { createTimeTool } from '../main/ets/chat/builtin_time_tool.ts';
 import { createToolRegistry } from '../main/ets/chat/tool_registry.ts';
 import { createToolSearchTool } from '../main/ets/chat/builtin_introspection_tools.ts';
+import { readToolOutcomeState, TOOL_SIDE_EFFECT_STARTED_KEY } from '../main/ets/chat/tool_safety_net.ts';
 import { jevUnverifiedChanges } from '../main/ets/chat/jev_completion.ts';
 
 // ===== 构造助手 =====
@@ -786,4 +787,49 @@ describe('SpeculativeToolRunner 接线', () => {
     });
     assert.equal(calls, 1);
   });
+});
+
+it('persists authorization to invoke a side effect before dispatch and resumes it without replay', async () => {
+  const first = scriptedProvider([[toolDelta('write-once', 'file_write', '{"path":"a.txt"}')]]);
+  const store = createMemoryConversationStore();
+  let checkpoint: Conversation | undefined;
+  let executions = 0;
+  const write = makeAgentTool({
+    name: 'file_write', description: 'test write', needsApproval: true,
+    execute: async () => {
+      executions++;
+      assert.ok(checkpoint, 'the write cannot reach the executor before durable intent');
+      return [{ type: 'text', text: 'saved', metadata: null }];
+    },
+  });
+  const deps = baseDeps(first, {
+    ...store,
+    save: async (conversation: Conversation) => {
+      const messages = currentMessages(conversation);
+      const part = toolPartOf(messages[messages.length - 1], 'write-once');
+      if (part?.metadata?.[TOOL_SIDE_EFFECT_STARTED_KEY] === true && part.output.length === 0) {
+        checkpoint = conversation;
+      }
+      await store.save(conversation);
+    },
+  });
+  const initial = makeConversation('checkpoint-write', [toMessageNode(makeUserMessage('write'))]);
+  const pending = await runAgenticToolLoop(initial, deps, loopOf(first, [write]));
+  const node = pending.messageNodes[pending.messageNodes.length - 1];
+  const msg = node.messages[node.selectIndex];
+  const approved = { ...pending, messageNodes: pending.messageNodes.slice(0, -1).concat({
+    ...node, messages: [{ ...msg, parts: msg.parts.map((part): UIMessagePart =>
+      part.type === 'tool' ? { ...part, approvalState: { type: 'approved' } } : part) }],
+  }) };
+  const next = scriptedProvider([[textDelta('done')]]);
+  const result = await runAgenticToolLoop(approved, { ...deps, provider: next }, loopOf(next, [write]));
+  assert.equal(executions, 1);
+  const terminal = toolPartOf(currentMessages(result)[1], 'write-once');
+  assert.equal(readToolOutcomeState(terminal), null);
+  assert.equal(terminal.output.length, 1);
+
+  assert.ok(checkpoint);
+  const recovered = await runAgenticToolLoop(checkpoint, baseDeps(next), loopOf(next, [write]));
+  assert.equal(executions, 1);
+  assert.equal(readToolOutcomeState(toolPartOf(currentMessages(recovered)[1], 'write-once')), 'outcome_unknown');
 });

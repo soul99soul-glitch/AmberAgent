@@ -20,8 +20,9 @@ import {
 } from '../../design/tokens.ets';
 import { Icon } from '../ui/Icon.ets';
 
-export const APP_STORAGE_SOUL_AVATAR_URI: string = 'agentSoulAvatarUri';
-export const APP_STORAGE_SOUL_AVATAR_PRESET: string = 'agentSoulAvatarPreset';
+import {
+  APP_STORAGE_SOUL_AVATAR_PRESET, APP_STORAGE_SOUL_AVATAR_URI, APP_STORAGE_SOUL_AVATAR_SPRITE,
+} from '../../platform_impl/AgentSoulSync.ets';
 
 const SPRITE_MODES: AmberPersonaMood[] = ['idle', 'running', 'needs_input', 'blocked'];
 
@@ -32,7 +33,8 @@ export struct AmberPersonaMedallion {
   @StorageProp('appBackgrounded') @Watch('onAnimationGateChanged') appBackgrounded: boolean = false;
   @StorageProp('reduceMotion') @Watch('onAnimationGateChanged') reduceMotion: boolean = false;
   @StorageProp(APP_STORAGE_SOUL_AVATAR_URI) @Watch('onAvatarUriChanged') avatarUriStore: string = '';
-  @StorageProp(APP_STORAGE_SOUL_AVATAR_PRESET) @Watch('redrawCanvas') avatarPresetStore: string = 'muse';
+  @StorageProp(APP_STORAGE_SOUL_AVATAR_SPRITE) @Watch('onAvatarUriChanged') avatarSpriteStore: boolean = false;
+  @StorageProp(APP_STORAGE_SOUL_AVATAR_PRESET) @Watch('onAnimationGateChanged') avatarPresetStore: string = 'muse';
   @Prop medallionSize: number = 76;
   @Prop displayName: string = 'Amber';
   @Prop isDefault: boolean = true;
@@ -40,7 +42,8 @@ export struct AmberPersonaMedallion {
   @Prop @Watch('onMoodChanged') mood: AmberPersonaMood = 'idle';
   @Prop @Watch('onAnimationGateChanged') sheetOpen: boolean = false;
   @Prop @Watch('onAvatarUriChanged') customAvatarUri: string = '';
-  @Prop @Watch('redrawCanvas') previewPreset: string = '';
+  @Prop @Watch('onAvatarUriChanged') previewPreset: string = '';
+  @Prop @Watch('onAvatarUriChanged') previewSpriteSheet: boolean = false;
 
   @State private pulseScale: number = 1.0;
   @State private pulseOpacity: number = 0.35;
@@ -57,10 +60,10 @@ export struct AmberPersonaMedallion {
   private canvasSettings: RenderingContextSettings = new RenderingContextSettings(true);
   private canvasCtx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.canvasSettings);
   private canvasReady: boolean = false;
+  private mounted: boolean = false;
 
   private effectiveMood(): AmberPersonaMood {
-    if (this.mood !== 'idle') return this.mood;
-    return this.sending ? 'running' : 'idle';
+    return this.mood;
   }
 
   private effectivePreset(): string {
@@ -99,7 +102,7 @@ export struct AmberPersonaMedallion {
   }
 
   private needsFrameLoop(): boolean {
-    if (this.isFrozen()) return false;
+    if (!this.mounted || this.isFrozen()) return false;
     if (this.usesBuiltInCanvas()) return true;
     if (this.spriteReady && this.spritePixelMaps.length >= 16) return true;
     const m: AmberPersonaMood = this.effectiveMood();
@@ -160,6 +163,7 @@ export struct AmberPersonaMedallion {
 
   onAnimationGateChanged(): void {
     this.syncAnimationTimer();
+    this.redrawCanvas();
   }
 
   onMoodChanged(): void {
@@ -173,11 +177,14 @@ export struct AmberPersonaMedallion {
   }
 
   aboutToAppear(): void {
+    this.mounted = true;
     this.reloadSpriteSheetAsync();
     this.syncAnimationTimer();
   }
 
   aboutToDisappear(): void {
+    this.mounted = false;
+    this.canvasReady = false;
     this.stopTimer();
     this.spriteGeneration += 1;
     this.releaseSpriteFrames();
@@ -185,7 +192,7 @@ export struct AmberPersonaMedallion {
 
   private releaseSpriteFrames(): void {
     for (const pm of this.spritePixelMaps) {
-      try { pm.release(); } catch (_e) {}
+      try { pm.release().catch((): void => {}); } catch (_e) {}
     }
     this.spritePixelMaps = [];
     this.spriteReady = false;
@@ -223,12 +230,15 @@ export struct AmberPersonaMedallion {
   }
 
   private reloadSpriteSheetAsync(): void {
-    const uri: string = this.activeAvatarUri();
+    if (!this.mounted) return;
+    const sprite: boolean = this.previewPreset.length > 0 ? this.previewSpriteSheet : this.avatarSpriteStore;
+    const uri: string = sprite ? this.activeAvatarUri() : '';
     if (uri.length === 0) {
-      if (this.spritePixelMaps.length > 0) this.releaseSpriteFrames();
+      this.spriteGeneration++;
+      this.releaseSpriteFrames();
       return;
     }
-    if (uri === this.loadedSpriteUri && this.spriteReady) return;
+    if (uri === this.loadedSpriteUri) return;
     const gen: number = ++this.spriteGeneration;
     this.releaseSpriteFrames();
     this.loadedSpriteUri = uri;
@@ -239,16 +249,14 @@ export struct AmberPersonaMedallion {
     const source: image.ImageSource | null = await this.decodeImageSource(uri);
     if (source === null) return;
     const frames: image.PixelMap[] = [];
+    let installed: boolean = false;
     try {
       const info: image.ImageInfo = await source.getImageInfo();
       const spec: SpriteSheetLayoutSpec = detectPersonaSpriteSheetLayout(info.size.width, info.size.height);
       if (spec.kind !== 'quad4x4' || gen !== this.spriteGeneration) return;
       for (const moodKey of SPRITE_MODES) {
         for (let f: number = 0; f < 4; f++) {
-          if (gen !== this.spriteGeneration) {
-            for (const pm of frames) { try { pm.release(); } catch (_e) {} }
-            return;
-          }
+          if (gen !== this.spriteGeneration) return;
           const region: SpriteSheetRegion = spriteSheetRegionForMoodFrame(spec, moodKey, f);
           const pm: image.PixelMap = await source.createPixelMap({
             desiredRegion: {
@@ -260,14 +268,17 @@ export struct AmberPersonaMedallion {
           frames.push(pm);
         }
       }
-      if (gen !== this.spriteGeneration) {
-        for (const pm of frames) { try { pm.release(); } catch (_e) {} }
-        return;
-      }
+      if (gen !== this.spriteGeneration) return;
       this.spritePixelMaps = frames;
+      installed = true;
       this.spriteReady = true;
       this.syncAnimationTimer();
     } finally {
+      if (!installed) {
+        for (const pm of frames) {
+          try { await pm.release(); } catch (_e) {}
+        }
+      }
       try { await source.release(); } catch (_e) {}
     }
   }

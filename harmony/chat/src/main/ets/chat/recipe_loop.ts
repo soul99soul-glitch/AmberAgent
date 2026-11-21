@@ -7,6 +7,7 @@ import type { ToolInvocationContext, PermissionDecision } from './tool_permissio
 import type { GenerationRetrySetting } from './generation_retry.ts';
 import { permissionDecisionTraceToJson } from './tool_permission.ts';
 import { makeGenerationRetrySetting } from './generation_retry.ts';
+import { withSideEffectStarted } from './tool_safety_net.ts';
 import { captureSecretToolInput } from './tool_input_vault.ts';
 import type { RecipeLoopAdapter, RecipeExecutionPort } from './recipes/runner.ts';
 import type { PluginLoopAdapter } from './plugins/ports.ts';
@@ -106,7 +107,9 @@ export const executeRecipeBatch = async (
       } else {
         const result = await options.dispatcher.execute(current, tool,
           options.autoApproveTools, options.autoApproveHighRiskTools, options.autoApprovedToolNames,
-          options.invocationContext, options.toolRetry, options.signal);
+          options.invocationContext, options.toolRetry, options.signal,
+          (_previous: UIMessagePartTool, checked: UIMessagePartTool): Promise<void> =>
+            save(withSideEffectStarted(checked)));
         if (result !== null) await save(result);
       }
     }

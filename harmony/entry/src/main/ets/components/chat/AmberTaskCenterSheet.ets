@@ -13,7 +13,7 @@ import {
   MacGatewayClient, loadMacGatewayConnection, describeMacGatewayError,
   type MacGatewayConnection, type MacGatewaySession, type MacGatewayStatus,
 } from '../../platform_impl/MacGatewayClient.ets';
-import { authenticateForMacDecision } from '../../platform_impl/MacGatewayTrustAuth.ets';
+import { authenticateForMacDecision, isMacDecisionUnlockedForeground } from '../../platform_impl/MacGatewayTrustAuth.ets';
 import {
   ACCENT, ERROR, HOME_GLASS_EDGE, HOME_GLASS_SHADOW, INK, INK2, INK3, INK4,
   LINE, SUCCESS_FG, SURFACE, SURFACE2, WARNING_FG, accentSoftBg,
@@ -34,7 +34,13 @@ export interface UnifiedTaskCardItem {
   stopRequested: boolean;
   updatedAt: number;
   macPendingApproval?: MacGatewayPendingApproval;
+  macApprovalConnection?: MacGatewayConnection;
 }
+
+const sameApprovalPairing = (current: MacGatewayConnection | null, source: MacGatewayConnection): boolean =>
+  current !== null && source.gatewayId.length > 0 &&
+  current.gatewayId === source.gatewayId && current.deviceId === source.deviceId &&
+  current.fingerprint === source.fingerprint && current.token === source.token;
 
 @Component
 export struct AmberTaskCenterSheet {
@@ -56,6 +62,7 @@ export struct AmberTaskCenterSheet {
   @State private localTasks: LocalTaskRecord[] = [];
   @State private subAgentRuns: SubAgentRun[] = [];
   @State private macSessions: MacGatewaySession[] = [];
+  private macSessionsConnection: MacGatewayConnection | undefined = undefined;
   @State private followupItemId: string = '';
   @State private followupChannel: string = '';
   @State private followupConvId: string = '';
@@ -104,6 +111,7 @@ export struct AmberTaskCenterSheet {
         try {
           const st: MacGatewayStatus = await MacGatewayClient.of(conn).status();
           if (this.alive && Array.isArray(st.sessions)) {
+            this.macSessionsConnection = conn;
             this.macSessions = st.sessions;
           }
         } catch (_e) {
@@ -111,6 +119,7 @@ export struct AmberTaskCenterSheet {
         }
       }).catch((): void => {});
     } else {
+      this.macSessionsConnection = undefined;
       this.macSessions = [];
     }
   }
@@ -155,7 +164,7 @@ export struct AmberTaskCenterSheet {
       const uid: string = `cloud:${t.workItemId}`;
       if (seenIds.has(uid)) continue;
       seenIds.add(uid);
-      const isActive: boolean = t.status === 'running' || t.status === 'queued';
+      const isActive: boolean = t.status === 'running' || t.status === 'queued' || t.status === 'unknown';
       const needsAttention: boolean = t.status === 'failed' || t.status === 'blocked' || t.status === 'interrupted';
       const bucket: TaskCenterBucket = needsAttention ? 'attention' : isActive ? 'running' : 'recent';
       items.push({
@@ -199,6 +208,7 @@ export struct AmberTaskCenterSheet {
         stopRequested: false,
         updatedAt: s.updatedAt,
         macPendingApproval: s.pendingApproval,
+        macApprovalConnection: this.macSessionsConnection,
       });
     }
 
@@ -277,32 +287,35 @@ export struct AmberTaskCenterSheet {
       this.onStatusMessage('高风险操作请在 Mac 端确认，手机端仅支持拒绝');
       return;
     }
+    const approvalConnection: MacGatewayConnection | undefined = item.macApprovalConnection;
+    if (approvalConnection === undefined) return;
     this.busyAction = true;
-    loadMacGatewayConnection(getChatKvStore()).then(async (conn: MacGatewayConnection | null): Promise<void> => {
-      if (conn === null) {
-        this.onStatusMessage('未连接 Mac Gateway');
+    (async (): Promise<void> => {
+      const conn: MacGatewayConnection | null = await loadMacGatewayConnection(getChatKvStore());
+      if (!this.alive || conn === null || !sameApprovalPairing(conn, approvalConnection)) {
+        this.onStatusMessage('配对已变更，请刷新待审批列表');
         return;
       }
-      const gatewayMatches: boolean = conn.gatewayId.length > 0 && this.cloudDialogue.paired;
-      let trustContext: MacDecisionTrustContext;
       if (allow) {
-        trustContext = await authenticateForMacDecision(`批准 Mac 执行 ${pending.tool}`, gatewayMatches);
-        if (!trustContext.biometricVerified || !trustContext.trustedForeground) {
-          this.onStatusMessage('前台锁屏/生物身份验证未通过，已取消发送批准');
+        const verified: boolean = await authenticateForMacDecision(`批准 Mac 执行 ${pending.tool}`);
+        if (!verified) {
+          this.onStatusMessage('前台生物识别未通过，已取消发送批准');
           return;
         }
-      } else {
-        trustContext = {
-          surface: 'app',
-          trustedForeground: false,
-          biometricVerified: false,
-          gatewayIdMatches: gatewayMatches,
-        };
       }
-      await MacGatewayClient.of(conn).decide(item.id, pending.toolCallId, allow, trustContext);
+      const trustContext: MacDecisionTrustContext = {
+        surface: 'app', trustedForeground: allow, biometricVerified: allow, gatewayIdMatches: true,
+      };
+      const canSendTrusted = async (): Promise<boolean> => {
+        const current: MacGatewayConnection | null = await loadMacGatewayConnection(getChatKvStore());
+        return sameApprovalPairing(current, approvalConnection) &&
+          await isMacDecisionUnlockedForeground() && this.alive;
+      };
+      await MacGatewayClient.of(conn).decide(item.id, pending.toolCallId, allow, trustContext,
+        allow ? canSendTrusted : undefined);
       this.onStatusMessage(allow ? `已批准 ${pending.tool}` : `已拒绝 ${pending.tool}`);
       this.refreshAsyncSources();
-    }).catch((err: Error): void => {
+    })().catch((err: Error): void => {
       this.onStatusMessage(describeMacGatewayError(err));
     }).finally((): void => {
       if (this.alive) this.busyAction = false;

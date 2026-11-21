@@ -39,7 +39,7 @@ import {
   selectMessageBranch, deleteMessage, editMessage, buildChatTimelineRows, messageSignature, forkConversation, patchConversation,
   runAutoTitle, makeUserMessage, toText, messageCopyText, makeTextGenerationParams, pendingPreviewText, convertSteerToFollowup,
   invalidateCompacts, copyValidCompactsToConversation, ContextCompactionFailedError, recoverInterruptedRecipes,
-  recoverInterruptedPlugins, recoverInterruptedWebMountGoals, estimateConversationInputTokens, formatNumberInt,
+  recoverInterruptedPlugins, recoverInterruptedSideEffectTools, recoverInterruptedWebMountGoals, estimateConversationInputTokens, formatNumberInt,
   formatContextTokens, nativeTokenizerForModel, loadSearchPrefs, SearchSettings, toolInputDisplayTitle, toolStaticLabel, toolInputAsJson,
   buildMentionRoleItems, MentionRoleItem, ConversationSummary, toChatModel,
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
@@ -261,7 +261,7 @@ struct ChatPage {
   private cursorTimer: number = -1;
   private pageAlive: boolean = false;
   // 页面被子路由覆盖时仍存活；IME 和异步 UI 刷新必须遵守可见性。
-  private pageVisible: boolean = false;
+  @State private pageVisible: boolean = false;
   private hasShownOnce: boolean = false;
   @State greetName: string = '';
   @State cursorOn: boolean = true;
@@ -339,6 +339,8 @@ struct ChatPage {
 
   private syncStreamingFrameRate(): void {
     this.presentation.setAppBackgrounded(this.appBackgrounded);
+    if (this.appBackgrounded) this.resetTopBarMood();
+    else this.syncTopBarMood();
   }
   // D-072:agent_runtime 快照(transform 调用时读 = Android settingsFlow.value 语义)
   private agentRuntime: AgentRuntimeSnapshot = defaultAgentRuntimeSnapshot();
@@ -348,13 +350,11 @@ struct ChatPage {
   private miniAppSetting: MiniAppSetting = makeMiniAppSetting();
   // 页面退订可见状态；运行服务继续持有会话，离页不取消正在生成的内容。
   aboutToDisappear(): void {
+    this.clearComposerSuggestions();
     AppStorage.setOrCreate<string>('activeArtifactInteraction', '');
     this.pageAlive = false;
     this.pageVisible = false;
-    if (this.moodTimer !== -1) {
-      clearTimeout(this.moodTimer);
-      this.moodTimer = -1;
-    }
+    this.resetTopBarMood();
     this.presentation.dispose();
     this.composer.dispose();
     this.cloudDialogue.dispose();
@@ -454,8 +454,10 @@ struct ChatPage {
   }
 
   onPageHide(): void {
+    this.clearComposerSuggestions();
     AppStorage.setOrCreate<string>('activeArtifactInteraction', '');
     this.pageVisible = false;
+    this.resetTopBarMood();
     this.homePaneVisible = false;
     this.presentation.hide();
     this.composer.hide();
@@ -573,7 +575,7 @@ struct ChatPage {
         const res = await sealIfIdleTimeoutExceeded(conv.id, messages, Date.now(), conv.messageNodes);
         if (res.sealed !== null) this.refineSealedEpisodeAsync(conv, res.sealed, messages);
       },
-      clearSuggestions: (): void => { this.presentation.suggestions = []; },
+      clearSuggestions: (): void => { this.clearComposerSuggestions(); },
       requestInputFocus: (): void => {
         try { focusControl.requestFocus('chat_composer_textarea'); } catch (_e) {}
       },
@@ -590,8 +592,8 @@ struct ChatPage {
       taskRunner: getConversationTaskRunner,
       onDialogueConnected: (c): void => { syncAgentSoulFromCloud(c); },
       onSoulRevision: (rev, c): void => { observeGatewaySoulRevision(rev, c); },
-      onCloudSuggestionEligible: (events, replyId): void => {
-        this.refreshCloudSuggestionsAsync(events, replyId);
+      onCloudSuggestionEligible: (events, replyId, conversationId): void => {
+        this.refreshCloudSuggestionsAsync(events, replyId, conversationId);
       },
     });
     this.modelContext.start({
@@ -854,9 +856,9 @@ struct ChatPage {
           }
           if (!hasActiveConversationRuns([full.id])) {
             try {
-              const recovered: Conversation = recoverInterruptedPlugins(
+              const recovered: Conversation = recoverInterruptedSideEffectTools(recoverInterruptedPlugins(
                 recoverInterruptedWebMountGoals(recoverInterruptedRecipes(full)),
-                createNativePluginJsTransport().hasSession);
+                createNativePluginJsTransport().hasSession));
               if (recovered !== full) {
                 const release: () => void = beginConversationRestore([full.id]);
                 try { await getChatRepository().save(recovered); } finally { release(); }
@@ -880,7 +882,6 @@ struct ChatPage {
               this.timeline.timelineLoadState, 0, full.messageNodes.length, full.messageNodes.length);
           }
           this.presentation.title = full.title.length > 0 ? full.title : '对话';
-          this.presentation.suggestions = full.chatSuggestions;
           this.modelContext.refreshContextCompacts();
           // Phase 5:首屏定位使用全量会话解析绝对节点索引，再让窗口层按需前插。
           // 这样 nodeId/initialMessageIndex 指向尾窗之外的旧消息时不会误滚到底部。
@@ -941,7 +942,6 @@ struct ChatPage {
         this.timeline.setRows(buildRows(this.presentation.conversation, this.timeline.rows));
         this.timeline.timelineLoadState = applyTailWindow(
           this.timeline.timelineLoadState, 0, this.timeline.rows.length, this.timeline.rows.length);
-        this.presentation.suggestions = this.presentation.conversation.chatSuggestions;
         // Phase 1:新会话首帧滚底(无目标)
         this.timeline.applyInitialScroll(-1);
         // 消费首页传入的 initialText(首页输入框发送);无则显示空状态 hero(不自动发送)
@@ -968,13 +968,25 @@ struct ChatPage {
     this.timeline.attachKeyboardListener();
   }
 
-  private refreshCloudSuggestionsAsync(events: CloudDialogueEvent[], replyId: string): void {
-    const running = this.cloudDialogue.runningTasks();
+  private clearComposerSuggestions(): void {
+    const owner: string = this.presentation.conversation?.id ?? '';
+    if (owner.length > 0) getConversationRunService().clearSuggestions(owner);
+    this.presentation.suggestions = [];
+  }
+
+  private refreshCloudSuggestionsAsync(events: CloudDialogueEvent[], replyId: string, owner: string): void {
+    if (!this.pageVisible || this.presentation.conversation?.id !== owner ||
+      this.composer.inputText.trim().length > 0) return;
+    const running = this.cloudDialogue.runningTasks().filter((task): boolean =>
+      this.cloudDialogue.conversationIdForTask(task.workItemId, task.topicId) === owner);
     const pendingWork: string[] = running.slice(0, 8).map((t): string =>
       t.progressText.length > 0 ? t.progressText : `${t.title} 仍在执行中`,
     );
     const ctx = buildCloudSuggestionContext(events, replyId, pendingWork);
     if (ctx === null) return;
+    const service = getConversationRunService();
+    const epoch: number = service.beginSuggestions(owner);
+    if (epoch < 0) return;
     Promise.all([
       loadTaskPrompts(),
       readTaskModelReference(TASK_SUGGESTION_MODEL_KEY).then((ref) => resolveTaskModelReference(ref)),
@@ -999,9 +1011,8 @@ struct ChatPage {
           return msg !== null ? toText(msg) : '';
         },
       });
-      if (this.pageAlive && this.cloudDialogue.isActiveMode() && this.composer.inputText.trim().length === 0) {
-        this.presentation.suggestions = suggestions;
-      }
+      if (this.pageVisible && this.cloudDialogue.isActiveMode() && this.presentation.conversation?.id === owner &&
+        this.composer.inputText.trim().length === 0) service.publishSuggestions(owner, epoch, suggestions);
     }).catch((): void => {});
   }
 
@@ -1069,15 +1080,15 @@ struct ChatPage {
   }
 
   private hasOverlaySheetOpen(): boolean {
-    return this.embodimentSheetOpen
+    return !this.pageVisible || this.embodimentSheetOpen
       || this.turnStepsSheetOpen
       || this.presentation.recapOpen
-      || this.modelContext.modelMenuOpen
-      || this.drawer.drawerOpen
+      || this.modelContext.modelMenuOpen || this.modelContext.compactSummaryOpen
+      || this.drawer.drawerOpen || this.composer.queueSheetOpen
       || this.messageActions.workspacePanelOpen
-      || this.messageActions.exportSheetOpen
-      || this.artifacts.artifactShelfOpen
-      || this.runDetails.denyDialogOpen;
+      || this.messageActions.exportSheetOpen || this.messageActions.copySheetOpen || this.messageActions.actionsSheetOpen
+      || this.artifacts.artifactShelfOpen || this.artifacts.documentPreviewOpen || this.artifacts.artifactDiffOpen
+      || this.runDetails.denyDialogOpen || this.runDetails.councilSheetOpen || this.runDetails.subAgentSheetOpen;
   }
 
   private resetTopBarMood(): void {
@@ -1089,17 +1100,45 @@ struct ChatPage {
     this.topBarMood = 'idle';
   }
 
+  private hasCurrentTurnActivity(): boolean {
+    if (this.presentation.sending) return true;
+    if (!this.cloudDialogue.isActiveMode()) return this.cloudDialogue.runningTasks().length > 0;
+    const owner: string = this.presentation.conversation?.id ?? '';
+    return owner.length > 0 && this.cloudDialogue.runningTasks().some((task): boolean =>
+      this.cloudDialogue.conversationIdForTask(task.workItemId, task.topicId) === owner);
+  }
+
+  private scrollToActiveTail(): void {
+    const conversation: Conversation | null = this.presentation.conversation;
+    if (conversation !== null && !this.presentation.sending && !this.cloudDialogue.isActiveMode()) {
+      const active = getConversationTaskRunner().activeAndQueuedTasksForConversation(conversation.id)
+        .filter((task): boolean => task.status === 'running');
+      if (active.length > 0) {
+        const nodeId: string = active[active.length - 1].assistantNodeId;
+        const index: number = conversation.messageNodes.findIndex((node: MessageNode): boolean => node.id === nodeId);
+        if (index >= 0) {
+          this.timeline.positionToTargetNode(nodeId, index);
+          return;
+        }
+      }
+    }
+    this.timeline.jumpToBottom();
+  }
+
   private syncTopBarMood(): void {
-    if (!this.pageAlive) return;
+    if (!this.pageAlive || !this.pageVisible || this.appBackgrounded) return;
     if (this.moodTimer !== -1) {
       clearTimeout(this.moodTimer);
       this.moodTimer = -1;
     }
-    const hasBlocked: boolean = this.presentation.errorMsg.trim().length > 0
-      || this.consecutiveErrorCount() >= 4
-      || this.cloudDialogue.tasks.some((t): boolean => t.status === 'failed' || t.status === 'blocked');
+    const owner: string = this.presentation.conversation?.id ?? '';
+    const hasBlocked: boolean = this.presentation.errorMsg.trim().length > 0 || this.consecutiveErrorCount() >= 4 ||
+      (this.cloudDialogue.isActiveMode() && owner.length > 0 && this.cloudDialogue.tasks.some((task): boolean =>
+        (task.status === 'failed' || task.status === 'blocked') &&
+        this.dismissedNoticeIds.indexOf(`cloud:${task.workItemId}`) < 0 &&
+        this.cloudDialogue.conversationIdForTask(task.workItemId, task.topicId) === owner));
     const awaiting: boolean = this.pendingApprovalCount() > 0;
-    const running: boolean = this.presentation.sending || this.cloudDialogue.runningTasks().length > 0;
+    const running: boolean = this.hasCurrentTurnActivity();
     const res = this.moodStabilizer.update({
       running,
       awaitingApproval: awaiting,
@@ -1501,6 +1540,7 @@ struct ChatPage {
               displayName: this.agentSoulDisplayName,
               isDefault: this.agentSoulIsDefault,
               sending: false,
+              sheetOpen: this.hasOverlaySheetOpen(),
             })
           }
           .margin({ bottom: 14 })
@@ -1549,7 +1589,7 @@ struct ChatPage {
         episodeTitle: this.episodeHeaderTitle,
         editingTitle: this.presentation.editingTitle,
         titleInput: this.presentation.titleInput,
-        sending: this.presentation.sending || this.cloudDialogue.runningTasks().length > 0,
+        sending: this.hasCurrentTurnActivity(),
         mood: this.topBarMood,
         sheetOpen: this.hasOverlaySheetOpen(),
         recapLoading: this.presentation.recapState.loading,
@@ -1563,7 +1603,7 @@ struct ChatPage {
         onOpenRecap: (): void => {
           if (!this.presentation.editingTitle) this.presentation.openRecap();
         },
-        onScrollToActiveTail: (): void => { this.timeline.jumpToBottom(); },
+        onScrollToActiveTail: (): void => { this.scrollToActiveTail(); },
         onStopGeneration: (): void => { this.presentation.requestStop(); },
         onTitleInputChange: (v: string): void => { this.presentation.titleInput = v; },
         onSaveTitle: (): void => { this.presentation.saveTitle(); },

@@ -133,6 +133,55 @@ test('P1-3: .undo/ snapshots support rollback, reject SHA-256 external tampering
   assert.equal(undoStore.listSnapshots().length, 0);
 });
 
+test('undo storage failures preserve the write and a refused deletion preserves its receipt', async () => {
+  const { port } = makeMemPort();
+  const undoStore = new WorkspaceUndoStore({
+    port, rootAbs: '/ws',
+    sha256Hex: (out) => crypto.createHash('sha256').update(out).digest('hex'),
+  });
+  const mgr = new PosixWorkspaceManager({ port, rootAbs: '/ws', undoStore });
+  const mkdirs = port.mkdirs;
+  port.mkdirs = (path) => {
+    if (path === '/ws/.undo') throw new Error('undo directory unavailable');
+    mkdirs(path);
+  };
+  assert.equal((await mgr.writeText('a.txt', 'saved')).undoSnapshotId, undefined);
+  assert.equal(await mgr.readText('a.txt'), 'saved');
+
+  port.mkdirs = mkdirs;
+  const created = await mgr.writeText('b.txt', 'new file');
+  const deletePath = port.deleteRecursively;
+  port.deleteRecursively = (path) => path === '/ws/b.txt' ? false : deletePath(path);
+  assert.equal(undoStore.undoLastChange('b.txt', created.undoSnapshotId).ok, false);
+  assert.equal(undoStore.listSnapshots('b.txt')[0].id, created.undoSnapshotId);
+  assert.equal(await mgr.readText('b.txt'), 'new file');
+  await assert.rejects(mgr.readText('/workspace/.undo/index.json'), /reserved/);
+});
+
+test('overlapping edits keep each undo hash and a move restores to its original path', async () => {
+  const { port } = makeMemPort();
+  const undoStore = new WorkspaceUndoStore({
+    port, rootAbs: '/ws',
+    sha256Hex: (out) => crypto.createHash('sha256').update(out).digest('hex'),
+  });
+  const mgr = new PosixWorkspaceManager({ port, rootAbs: '/ws', undoStore });
+  await mgr.writeText('a.txt', 'A+B');
+  const [first, second] = await Promise.all([
+    mgr.editText('a.txt', 'A', '1', false),
+    mgr.editText('a.txt', 'B', '2', false),
+  ]);
+  assert.equal(await mgr.readText('a.txt'), '1+2');
+  assert.equal(undoStore.undoLastChange('a.txt', second.undoSnapshotId).ok, true);
+  assert.equal(await mgr.readText('a.txt'), '1+B');
+  assert.equal(undoStore.undoLastChange('a.txt', first.undoSnapshotId).ok, true);
+  assert.equal(await mgr.readText('a.txt'), 'A+B');
+  const moved = await mgr.move('a.txt', 'archive/a.txt');
+  assert.ok(moved.undoSnapshotId);
+  assert.equal(undoStore.undoLastChange('archive/a.txt', moved.undoSnapshotId).ok, true);
+  assert.equal(await mgr.readText('a.txt'), 'A+B');
+  assert.equal(port.exists('/ws/archive/a.txt'), false);
+});
+
 test('P1-3: interrupted side-effect tool becomes outcome_unknown and supports 3-state reconciliation', () => {
   const runningToolMsg = makeUIMessage('assistant', [
     {

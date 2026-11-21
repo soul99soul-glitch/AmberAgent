@@ -365,8 +365,12 @@ export class ChatComposerSession {
       this.errorMsg = '请先发送或移除输入框中的附件，再回填这条消息。';
       return;
     }
-    this.deps.runService.takePending(owner, id).then((pending: PendingUserMessage | null): void => {
-      if (pending === null || !this.pageAlive || this.conversation?.id !== owner) return;
+    this.deps.runService.takePending(owner, id, (pending: PendingUserMessage): boolean => {
+      if (!this.pageAlive || !this.pageVisible || this.conversation?.id !== owner) return false;
+      if (this.pendingImages.length > 0 || this.pendingDocs.length > 0) {
+        this.errorMsg = '请先发送或移除输入框中的附件，再回填这条消息。';
+        return false;
+      }
       const texts: string[] = [];
       for (const part of pending.parts) {
         if (part.type === 'text') texts.push(part.text);
@@ -381,6 +385,7 @@ export class ChatComposerSession {
         : restoredText;
       this.setInputText(nextText);
       this.queueSheetOpen = false;
+      return true;
     }).catch((error: Error): void => { if (this.pageAlive && this.conversation?.id === owner) this.errorMsg = error.message; });
   }
 
@@ -431,6 +436,7 @@ export class ChatComposerSession {
     if (cloud?.switchingMode) return;
     const wasCloud: boolean = cloud?.isActiveMode() ?? false;
     const followupId: string = cloud?.followupTargetWorkItemId ?? '';
+    this.ports?.clearSuggestions?.();
     this.sendPrechecking = true;
     const sequence: number = ++this.sendPreflightSeq;
     try {
@@ -626,6 +632,9 @@ export class ChatComposerSession {
     if (cloud?.switchingMode) return;
     const wasCloud: boolean = cloud?.isActiveMode() ?? false;
     const followupId: string = cloud?.followupTargetWorkItemId ?? '';
+    const hadLocalWork: boolean = !wasCloud && (this.sending || (cloud?.runningTasks().length ?? 0) > 0);
+    const triage = triageInboundTurn(sendText, acceptedImages.length > 0 || acceptedDocs.length > 0, false);
+    this.ports?.clearSuggestions?.();
     this.sendPrechecking = true;
     const sequence: number = ++this.sendPreflightSeq;
     try {
@@ -638,12 +647,16 @@ export class ChatComposerSession {
       if (!await this.prepareLocalEpisode(owner, sequence, cloud, wasCloud, followupId, editingNodeId) ||
         this.editingNodeId !== editingNodeId || this.editingMessageId !== editingMessageId ||
         !this.deps.continuationCurrent(continuation)) return;
+      if (hadLocalWork && explicitQueueMode === undefined && editingNodeId.length === 0 &&
+        !this.sending && (cloud?.runningTasks().length ?? 0) === 0 && triage.route !== 'independent') {
+        this.errorMsg = '之前的任务已结束，输入已保留。';
+        return;
+      }
       this.deps.dismissKeyboard();
       if (this.sending && editingNodeId.length === 0) {
         if (explicitQueueMode !== undefined) {
           await this.enqueuePendingParts(inputParts, true, explicitQueueMode);
         } else {
-          const triage = triageInboundTurn(sendText, acceptedImages.length > 0 || acceptedDocs.length > 0, false);
           if (triage.route === 'stop') {
             const snap: ConversationRunSnapshot | null = this.deps.runService.snapshot(owner);
             const activeRunId: string = snap?.runId ?? '';

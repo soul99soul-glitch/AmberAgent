@@ -376,6 +376,8 @@ test('manual compact excludes runs/restores and pending restore atomically takes
   await assert.rejects(service.compact('A'), /生成或压缩/);
   await service.enqueue('A', domain.makeUserMessage('restore me').parts, true);
   const queued = service.pending('A')[0];
+  assert.equal(await service.takePending('A', queued.id, () => false), null);
+  assert.equal(service.pending('A')[0].id, queued.id);
   const taken = await service.takePending('A', queued.id);
   assert.equal(taken.id, queued.id);
   assert.equal(await service.takePending('A', queued.id), null);
@@ -669,5 +671,19 @@ test('a truly pending completion result from the previous run is aborted and can
   assert.equal(f.service.snapshot('A').runId, second.runId); assert.equal(f.service.snapshot('A').completionNotice, null);
   const next = await f.providerFor('A').next(1); next.emit('second response'); next.finish(); await second.done;
   assert.equal(f.service.snapshot('A').completionNotice, null);
+  off();
+});
+
+test('composer suggestions stay in memory and stale epochs cannot repopulate them', async () => {
+  const { service } = await serviceFixture(['A']);
+  const off = service.subscribe('A', () => {});
+  const stale = service.beginSuggestions('A');
+  service.clearSuggestions('A');
+  service.publishSuggestions('A', stale, ['stale']);
+  assert.deepEqual(Array.from(service.snapshot('A').suggestions), []);
+  const current = service.beginSuggestions('A');
+  service.publishSuggestions('A', current, ['current']);
+  assert.deepEqual(Array.from(service.snapshot('A').suggestions), ['current']);
+  service.clearSuggestions('A');
   off();
 });

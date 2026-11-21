@@ -17,7 +17,7 @@ import {
 } from '../../design/tokens.ets';
 import { AmberPersonaMedallion } from '../chat/AmberPersonaMedallion.ets';
 import {
-  APP_STORAGE_SOUL_AVATAR_PRESET, APP_STORAGE_SOUL_AVATAR_URI,
+  APP_STORAGE_SOUL_AVATAR_PRESET, APP_STORAGE_SOUL_AVATAR_URI, APP_STORAGE_SOUL_AVATAR_SPRITE,
   APP_STORAGE_SOUL_REVISION,
   loadAgentSoulAvatarPrefs, loadAgentSoulState, resetAgentSoulFromUi,
   restoreAgentSoulSnapshotFromUi, saveAgentSoulAvatarPrefs,
@@ -75,6 +75,7 @@ export struct AgentEmbodimentSheet {
   @StorageProp(APP_STORAGE_SOUL_REVISION) @Watch('onSoulStoreChanged') soulRevisionTick: number = 0;
   @StorageProp(APP_STORAGE_SOUL_AVATAR_PRESET) avatarPresetStore: string = 'muse';
   @StorageProp(APP_STORAGE_SOUL_AVATAR_URI) avatarUriStore: string = '';
+  @StorageProp(APP_STORAGE_SOUL_AVATAR_SPRITE) avatarSpriteStore: boolean = false;
 
   @State private activeTab: EmbodimentSheetTab = 'soul';
   @State private editing: boolean = false;
@@ -93,6 +94,7 @@ export struct AgentEmbodimentSheet {
   @State private draftMarkdown: string = '';
   @State private draftPreset: string = 'muse';
   @State private draftAvatarUri: string = '';
+  @State private draftAvatarSprite: boolean = false;
 
   @State private memoryLoading: boolean = false;
   @State private memoryRecords: MemoryRecord[] = [];
@@ -107,11 +109,13 @@ export struct AgentEmbodimentSheet {
   aboutToAppear(): void {
     this.draftPreset = this.avatarPresetStore;
     this.draftAvatarUri = this.avatarUriStore;
+    this.draftAvatarSprite = this.avatarSpriteStore;
     this.hydrateSoul(true);
     loadAgentSoulAvatarPrefs().then((prefs): void => {
       if (this.editing) return;
       this.draftPreset = prefs.preset;
       this.draftAvatarUri = prefs.customUri;
+      this.draftAvatarSprite = prefs.spriteSheet;
     }).catch((): void => {});
     syncAgentSoulFromCloud();
     this.refreshMemoryPortrait();
@@ -177,6 +181,7 @@ export struct AgentEmbodimentSheet {
         this.hydrateSoul(true);
         this.draftPreset = this.avatarPresetStore;
         this.draftAvatarUri = this.avatarUriStore;
+        this.draftAvatarSprite = this.avatarSpriteStore;
       }
     };
     if (this.reduceMotion) apply();
@@ -194,7 +199,7 @@ export struct AgentEmbodimentSheet {
     this.setFeedback('', false);
     Promise.all([
       updateAgentSoulFromUi(this.draftName, this.draftTagline, this.draftMarkdown),
-      saveAgentSoulAvatarPrefs(this.draftPreset, this.draftAvatarUri),
+      saveAgentSoulAvatarPrefs(this.draftPreset, this.draftAvatarUri, this.draftAvatarSprite),
     ])
       .then((results): void => {
         const res: AgentSoulMutationResult = results[0];
@@ -236,6 +241,7 @@ export struct AgentEmbodimentSheet {
         this.draftMarkdown = res.state.soulMarkdown;
         this.draftPreset = 'muse';
         this.draftAvatarUri = '';
+        this.draftAvatarSprite = false;
         this.dirty = false;
         this.setFeedback('已恢复默认 Amber 形象', false);
       })
@@ -282,6 +288,8 @@ export struct AgentEmbodimentSheet {
           sending: false,
           customAvatarUri: this.editing ? this.draftAvatarUri : this.avatarUriStore,
           previewPreset: this.editing ? this.draftPreset : '',
+          previewSpriteSheet: this.draftAvatarSprite,
+          sheetOpen: true,
         })
         Column({ space: 4 }) {
           Row({ space: 8 }) {
@@ -370,7 +378,18 @@ export struct AgentEmbodimentSheet {
             .backgroundColor(SURFACE2)
             .borderRadius(10)
             .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-            .onChange((v: string): void => { this.draftAvatarUri = v; })
+            .onChange((v: string): void => {
+              if (v !== this.draftAvatarUri) this.draftAvatarSprite = false;
+              this.draftAvatarUri = v;
+            })
+          if (this.draftAvatarUri.trim().length > 0) {
+            Row() {
+              Text('头像为 4×4 动画图集').fontSize(13.5).fontColor(INK).layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: this.draftAvatarSprite })
+                .onChange((enabled: boolean): void => { this.draftAvatarSprite = enabled; })
+            }
+            .width('100%')
+          }
 
           Text(`称呼（最多 ${MAX_AGENT_SOUL_NAME_CHARS} 字）`).fontSize(12).fontColor(INK3).width('100%')
           TextInput({ text: this.draftName, placeholder: DEFAULT_AGENT_SOUL_NAME })

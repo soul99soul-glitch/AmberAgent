@@ -163,3 +163,11 @@ describe('P1-1 context-aware composer predictions', () => {
     assert.deepEqual(filterSuggestionCandidates('好的\n[NO_SUGGESTION]', 'u', 'a'), []);
   });
 });
+
+it('an ordinary cloud reply may begin with acknowledgement wording', () => {
+  const history = [
+    { id: 'input:x', kind: 'user_message', seq: 1, text: '请回复一句指定文案' },
+    { id: 'reply:x', kind: 'assistant_reply', seq: 2, text: '收到，我来处理这份报价。' },
+  ];
+  assert.ok(buildCloudSuggestionContext(history, 'reply:x'));
+});
