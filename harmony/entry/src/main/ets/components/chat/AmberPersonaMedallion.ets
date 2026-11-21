@@ -134,8 +134,12 @@ export struct AmberPersonaMedallion {
       this.stopTimer();
       this.frameStep = 0;
       this.frameIndex = 0;
-      this.pulseScale = 1.0;
-      this.pulseOpacity = 0.25;
+      const resetPulse = (): void => {
+        this.pulseScale = 1.0;
+        this.pulseOpacity = 0.22;
+      };
+      if (this.reduceMotion || this.appBackgrounded) resetPulse();
+      else animateTo({ duration: 280, curve: Curve.EaseInOut }, resetPulse);
       this.redrawCanvas();
       return;
     }
@@ -154,11 +158,17 @@ export struct AmberPersonaMedallion {
       const m: AmberPersonaMood = this.effectiveMood();
       if (m === 'running' || m === 'needs_input') {
         this.pulsePhase = !this.pulsePhase;
-        this.pulseScale = this.pulsePhase ? 1.07 : 0.99;
-        this.pulseOpacity = this.pulsePhase ? 0.62 : 0.28;
-      } else {
-        this.pulseScale = 1.0;
-        this.pulseOpacity = 0.25;
+        const nextScale: number = this.pulsePhase ? 1.045 : 0.995;
+        const nextOpacity: number = this.pulsePhase ? 0.42 : 0.16;
+        animateTo({ duration: PERSONA_FRAME_INTERVAL_MS, curve: Curve.EaseInOut }, (): void => {
+          this.pulseScale = nextScale;
+          this.pulseOpacity = nextOpacity;
+        });
+      } else if (this.pulseScale !== 1.0 || this.pulseOpacity !== 0.22) {
+        animateTo({ duration: 280, curve: Curve.EaseInOut }, (): void => {
+          this.pulseScale = 1.0;
+          this.pulseOpacity = 0.22;
+        });
       }
     }, PERSONA_FRAME_INTERVAL_MS);
   }
@@ -429,10 +439,11 @@ export struct AmberPersonaMedallion {
           .width(this.medallionSize + 8)
           .height(this.medallionSize + 8)
           .borderRadius(999)
-          .border({ width: 1.5, color: accentEdge(this.haloTint()) })
+          .border({ width: 1.25, color: accentEdge(this.haloTint()) })
           .backgroundColor(accentSoftBg(this.haloTint()))
           .scale({ x: this.pulseScale, y: this.pulseScale })
           .opacity(this.pulseOpacity)
+          .transition(TransitionEffect.OPACITY.animation({ duration: 260, curve: Curve.EaseInOut }))
       }
 
       Stack({ alignContent: Alignment.Center }) {

@@ -59,7 +59,7 @@ export struct ChatTopBarOverlay {
 
   private capsuleDisplayText(): string {
     if (this.activityLabel.trim().length > 0) return this.activityLabel.trim();
-    if (this.sending) return '正在思考与生成…';
+    if (this.sending) return '正在思考';
     if (this.recapLoading) return '正在整理对话回顾…';
     if (this.episodeTitle.trim().length > 0) return this.episodeTitle.trim();
     return this.title.trim().length > 0 ? this.title.trim() : '新对话';
@@ -288,10 +288,10 @@ export struct ChatTopBarOverlay {
                 .fontColor(INK)
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .flexShrink(1)
+                .constraintSize({ maxWidth: 210 })
             }
             .height(32)
-            .constraintSize({ minWidth: 96, maxWidth: 268 })
+            .constraintSize({ minWidth: 88, maxWidth: 268 })
             .padding({ left: 12, right: 14 })
             .borderRadius(999)
             .backgroundColor(this.appBackgrounded ? BG_GLASS : SURFACE)
