@@ -414,6 +414,7 @@ export struct ChatInput {
     .width('100%')
     .bindSheet(this.fullScreenOpen, this.FullScreenEditor(), {
       height: SheetSize.LARGE,
+      showClose: false,
       onDisappear: (): void => { this.fullScreenOpen = false; },
     })
   }

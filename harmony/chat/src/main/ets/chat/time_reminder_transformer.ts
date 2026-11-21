@@ -63,6 +63,66 @@ export const applyTimeReminder = (
   return result;
 };
 
+export interface CurrentTimeTurnDeps extends TimeReminderFormatters {
+  enabled: () => boolean;
+  now?: () => number;
+  formatTimezone?: (epochMs: number) => string;
+}
+
+export const localTimezoneLabel = (epochMs: number = Date.now()): string => {
+  const d: Date = new Date(epochMs);
+  const offsetEastMinutes: number = -d.getTimezoneOffset();
+  const sign: string = offsetEastMinutes >= 0 ? '+' : '-';
+  const abs: number = Math.abs(offsetEastMinutes);
+  const utcOffset: string = offsetEastMinutes === 0
+    ? 'UTC'
+    : `UTC${sign}${pad(Math.trunc(abs / 60), 2)}:${pad(abs % 60, 2)}`;
+  let tzName: string = '';
+  try {
+    tzName = Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
+  } catch {
+    tzName = '';
+  }
+  return tzName.length > 0 ? `${tzName}, ${utcOffset}` : utcOffset;
+};
+
+export const applyCurrentTimePerTurn = (
+  messages: UIMessage[],
+  fmt: TimeReminderFormatters,
+  nowMs: number = Date.now(),
+  timezone: string = '',
+): UIMessage[] => {
+  if (messages.length === 0) return messages;
+  const tzPart: string = timezone.trim().length > 0 ? ` (${timezone.trim()})` : '';
+  const reminder: UIMessage = makeUserMessage(
+    `<current_time>Current local time: ${fmt.formatDayOfWeek(nowMs)}, ` +
+    `${fmt.formatLocalDateTime(nowMs)}${tzPart}</current_time>`,
+  );
+  let lastUserIndex: number = -1;
+  for (let i: number = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') {
+      lastUserIndex = i;
+      break;
+    }
+  }
+  const result: UIMessage[] = messages.slice();
+  if (lastUserIndex >= 0) {
+    result.splice(lastUserIndex, 0, reminder);
+  } else {
+    result.push(reminder);
+  }
+  return result;
+};
+
+export const createCurrentTimePerTurnTransformer = (deps: CurrentTimeTurnDeps): MessageTransformer => ({
+  transform: (_ctx: TransformerContext, messages: UIMessage[]): UIMessage[] => {
+    if (!deps.enabled()) return messages;
+    const nowMs: number = deps.now !== undefined ? deps.now() : Date.now();
+    const tz: string = deps.formatTimezone !== undefined ? deps.formatTimezone(nowMs) : '';
+    return applyCurrentTimePerTurn(messages, deps, nowMs, tz);
+  },
+});
+
 // transform(:22-28):gate 关闭 → 原引用返回
 export const createTimeReminderTransformer = (deps: TimeReminderDeps): MessageTransformer => ({
   transform: (ctx: TransformerContext, messages: UIMessage[]): UIMessage[] => {

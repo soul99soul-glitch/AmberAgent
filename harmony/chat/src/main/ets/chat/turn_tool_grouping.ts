@@ -107,6 +107,7 @@ const looksMechanicalToolLabel = (text: string): boolean => {
 
 const humanToolNameFallback = (toolName: string, inputObj: JsonObject | null): string => {
   const lower: string = toolName.trim().toLowerCase();
+  if (lower === 'get_time_info') return '正在查看当前时间';
   if (lower === 'search_web' || lower === 'web_search' || lower === 'tavily_search' ||
     lower === 'exa_search' || lower === 'bocha_search' || lower === 'brave_search' ||
     lower === 'google_search' || lower === 'bing_search' || lower === 'duckduckgo_search' ||

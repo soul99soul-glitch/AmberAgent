@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import {
   applyTimeReminder,
   createTimeReminderTransformer,
+  applyCurrentTimePerTurn,
+  createCurrentTimePerTurnTransformer,
   TIME_GAP_THRESHOLD_SECONDS,
   javaLocalDateTimeString,
   DAY_OF_WEEK_FULL_EN,
@@ -84,4 +86,40 @@ test('gate 开启走完整 transform:返回新数组注入', () => {
     msgAt('b', '2026-07-28T05:00:00Z'),
   ]) as UIMessage[];
   assert.equal(out.length, 3);
+});
+
+test('每轮注入当前时间：开启时在最后一条 user 消息前注入，关闭时原引用返回', () => {
+  const fixedNow = Date.parse('2026-11-21T12:20:00Z');
+  const firstTurn = [msgAt('现在几点', '2026-11-21T12:20:00Z')];
+  const off = createCurrentTimePerTurnTransformer({
+    enabled: (): boolean => false,
+    ...fmt,
+    now: (): number => fixedNow,
+    formatTimezone: (): string => 'Asia/Shanghai, UTC+08:00',
+  });
+  assert.strictEqual(off.transform!(ctx, firstTurn), firstTurn);
+
+  const on = createCurrentTimePerTurnTransformer({
+    enabled: (): boolean => true,
+    ...fmt,
+    now: (): number => fixedNow,
+    formatTimezone: (): string => 'Asia/Shanghai, UTC+08:00',
+  });
+  const out1 = on.transform!(ctx, firstTurn) as UIMessage[];
+  assert.equal(out1.length, 2);
+  assert.equal(toText(out1[0]).includes('<current_time>Current local time:'), true);
+  assert.equal(toText(out1[0]).includes('Asia/Shanghai, UTC+08:00'), true);
+  assert.equal(toText(out1[1]), '现在几点');
+
+  const multiTurn: UIMessage[] = [
+    msgAt('上一轮问题', '2026-11-21T12:18:00Z'),
+    { ...msgAt('上一轮回答', '2026-11-21T12:18:10Z'), role: 'assistant' },
+    msgAt('现在几点了', '2026-11-21T12:20:00Z'),
+  ];
+  const out2 = applyCurrentTimePerTurn(multiTurn, fmt, fixedNow, 'UTC+08:00');
+  assert.equal(out2.length, 4);
+  assert.equal(toText(out2[0]), '上一轮问题');
+  assert.equal(toText(out2[1]), '上一轮回答');
+  assert.equal(toText(out2[2]).startsWith('<current_time>'), true);
+  assert.equal(toText(out2[3]), '现在几点了');
 });

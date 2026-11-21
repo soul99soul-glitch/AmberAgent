@@ -21,7 +21,8 @@ export interface AssistantLocalPrimitivesDeps {
 export const createAssistantLocalPrimitives = (deps: AssistantLocalPrimitivesDeps): AgentTool[] => {
   const tools: AgentTool[] = [];
   const options: LocalToolOption[] = deps.assistant.localTools;
-  if (options.indexOf('time_info') >= 0) tools.push(createTimeTool());
+  // 本地时钟工具零权限只读，始终开放，避免旧助手配置缺失 time_info 导致无法查询时间
+  tools.push(createTimeTool());
   // Preserve ChatPage's terminalGuard availability gate for both SSH and Mosh.
   if (options.indexOf('terminal') >= 0 && deps.terminalRuntime !== null && deps.sshProfiles !== null) {
     tools.push(...createTerminalTools({ runtime: deps.terminalRuntime, profiles: deps.sshProfiles,

@@ -1465,6 +1465,9 @@ struct ChatPage {
       .hitTestBehavior(HitTestMode.None)
       .bindSheet(this.turnStepsSheetOpen, this.TurnStepsSheet(), {
         height: SheetSize.MEDIUM,
+        showClose: false,
+        dragBar: true,
+        backgroundColor: BG,
         onDisappear: (): void => { this.turnStepsSheetOpen = false; },
       })
 

@@ -124,6 +124,11 @@ struct SettingSandboxPage {
 
   // ── 执行参数/生成稳定性(原「运行与显示」页并入;运行环境 = 执行设置统一入口) ──
 
+  private setInjectCurrentTimePerTurn(checked: boolean): void {
+    updateAgentRuntimeExecution(getChatKvStore(), { injectCurrentTimePerTurn: checked })
+      .then((s: AgentRuntimeSnapshot): void => { this.applySnap(s); });
+  }
+
   private setPreviewMode(mode: AgentOperationPreviewMode): void {
     updateAgentRuntimeExecution(getChatKvStore(), { operationPreviewMode: mode })
       .then((s: AgentRuntimeSnapshot): void => { this.applySnap(s); });
@@ -295,6 +300,12 @@ struct SettingSandboxPage {
   @Builder
   ExecutionCard(): void {
     if (this.snapVersion >= 0 && this.snap !== null) {
+      CardToggleRow({
+        label: '每轮注入当前时间',
+        desc: '每轮对话自动附带本机日期、时间与时区；关闭后仍可通过时间工具按需查询。',
+        checked: this.snap.injectCurrentTimePerTurn,
+        onToggle: (): void => { this.setInjectCurrentTimePerTurn(!this.snap!.injectCurrentTimePerTurn); },
+      })
       this.SegRow('操作预览', '控制输入框上方的 Agent 实时操作预览显示方式。',
         PREVIEW_MODE_LABELS, PREVIEW_MODE_OPTIONS.indexOf(this.snap.operationPreviewMode),
         (idx: number): void => { this.setPreviewMode(PREVIEW_MODE_OPTIONS[idx]); })

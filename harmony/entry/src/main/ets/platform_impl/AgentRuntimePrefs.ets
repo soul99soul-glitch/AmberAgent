@@ -59,6 +59,8 @@ export type AgentOperationPreviewMode = 'always' | 'auto' | 'hidden';
 
 export interface AgentRuntimeSnapshot {
   enableTimeReminder: boolean;
+  // 每轮对话自动附带本机当前时间（默认开启，可在「设置 → 运行环境 → 执行参数」关闭）
+  injectCurrentTimePerTurn: boolean;
   // D-122:PreferencesStore.kt:158(默认 ALWAYS;ChatPage.kt:516-522 时间线门消费)
   operationPreviewMode: AgentOperationPreviewMode;
   // D-077b:PreferencesStore.kt:155 默认 true(GenerationHandler.kt:736 消费)
@@ -150,6 +152,7 @@ interface AgentRuntimeJson {
   speculativeToolExecution?: SpeculativeToolExecutionJson;
   contextCompaction?: ContextCompactionJson;
   enableTimeReminder?: boolean;
+  injectCurrentTimePerTurn?: boolean;
   enableRecentChatsReference?: boolean;
   enableCoreMemory?: boolean;
   enableShortTermMemory?: boolean;
@@ -180,6 +183,7 @@ const defaultMemoryRecall = (): MemoryRecallSetting => ({
 
 export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
   enableTimeReminder: false,
+  injectCurrentTimePerTurn: true,
   enableRecentChatsReference: true,
   enableCoreMemory: true,
   enableShortTermMemory: true,
@@ -288,6 +292,7 @@ export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<Agent
     const parsed: AgentRuntimeJson = JSON.parse(raw) as AgentRuntimeJson;
     return {
       enableTimeReminder: parsed.enableTimeReminder === true,
+      injectCurrentTimePerTurn: parsed.injectCurrentTimePerTurn !== false,
       // 默认 true:仅显式 false 才关(PreferencesStore.kt:155)
       enableRecentChatsReference: parsed.enableRecentChatsReference !== false,
       // 默认 true:仅显式 false 才关(PreferencesStore.kt:152-154)
@@ -583,6 +588,7 @@ export interface AgentRuntimeExecutionPatch {
   retryMaxRetries?: number;
   // D-122:SettingAgentExecutionPage.kt:79-90(operationPreviewMode = mode)
   operationPreviewMode?: AgentOperationPreviewMode;
+  injectCurrentTimePerTurn?: boolean;
 }
 
 export const updateAgentRuntimeExecution = (
@@ -603,6 +609,9 @@ export const updateAgentRuntimeExecution = (
   }
   if (patch.operationPreviewMode !== undefined) {
     root.operationPreviewMode = patch.operationPreviewMode;
+  }
+  if (patch.injectCurrentTimePerTurn !== undefined) {
+    root.injectCurrentTimePerTurn = patch.injectCurrentTimePerTurn;
   }
   if (patch.retryEnabled !== undefined || patch.retryMaxRetries !== undefined) {
     const retry: GenerationRetryJson = root.generationRetry ?? {};

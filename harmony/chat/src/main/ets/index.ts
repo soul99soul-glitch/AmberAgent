@@ -905,11 +905,12 @@ export type {
 // ===== D-072:时间提醒注入(TimeReminderTransformer.kt 全文) =====
 export {
   TIME_GAP_THRESHOLD_SECONDS, applyTimeReminder, createTimeReminderTransformer,
+  applyCurrentTimePerTurn, createCurrentTimePerTurnTransformer, localTimezoneLabel,
   formatGap, javaLocalDateTimeString, dayOfWeekFullName,
   DAY_OF_WEEK_FULL_EN, DAY_OF_WEEK_FULL_ZH,
 } from './chat/time_reminder_transformer.ts';
 export type {
-  TimeReminderDeps, TimeReminderFormatters,
+  TimeReminderDeps, TimeReminderFormatters, CurrentTimeTurnDeps,
 } from './chat/time_reminder_transformer.ts';
 
 // ===== D-073:占位符替换(PlaceholderTransformer.kt 全文) =====

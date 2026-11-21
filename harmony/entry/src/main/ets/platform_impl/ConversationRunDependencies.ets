@@ -16,7 +16,8 @@ import {
   buildRecentChatsPrompt, conversationWithMessagesAsNodes, createDocumentTransformer,
   createMiniAppOutputTransformer, createMiniAppPromptTransformer,
   createPlaceholderTransformer, createTemplateTransformer, createReasoningLevelMetadataTransformer,
-  createTimeReminderTransformer, currentMessages, dayOfWeekFullName, estimateContextWindow,
+  createTimeReminderTransformer, createCurrentTimePerTurnTransformer, localTimezoneLabel,
+  currentMessages, dayOfWeekFullName, estimateContextWindow,
   javaLocalDateTimeString, loadDisplaySetting, loadMiniAppSetting, loadSearchPrefs,
   makeCompactPolicy, makeGenerationRetrySetting, makeSubAgentRuntimeSetting,
   makeTextGenerationParams, prepareContext, RECENT_CHATS_PROMPT_LIMIT,
@@ -171,6 +172,12 @@ const inputTransformers = (ctx: DetachedConversationContext, ports: Conversation
       enabled: (): boolean => seed.agentRuntime.enableTimeReminder,
       formatDayOfWeek: (ms: number): string => dayOfWeekFullName(systemLanguage(), ms),
       formatLocalDateTime: javaLocalDateTimeString,
+    }),
+    createCurrentTimePerTurnTransformer({
+      enabled: (): boolean => seed.agentRuntime.injectCurrentTimePerTurn,
+      formatDayOfWeek: (ms: number): string => dayOfWeekFullName(systemLanguage(), ms),
+      formatLocalDateTime: javaLocalDateTimeString,
+      formatTimezone: (ms: number): string => localTimezoneLabel(ms),
     }),
     createMiniAppPromptTransformer({
       enabled: (): boolean => seed.miniAppSetting.enabled,

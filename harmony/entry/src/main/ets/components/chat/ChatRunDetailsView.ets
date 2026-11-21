@@ -165,6 +165,8 @@ export struct ChatRunDetailsView {
       Column() {}.width(0).height(0).hitTestBehavior(HitTestMode.None)
         .bindSheet(this.session.sandboxSheetOpen, this.sandboxSheet(this.timeline(this.session.snapshotVersion)), {
           height: SheetSize.LARGE,
+          showClose: false,
+          dragBar: true,
           onDisappear: (): void => { this.session.closeSandboxSheet(); },
         })
       Column() {}.width(0).height(0).hitTestBehavior(HitTestMode.None)
