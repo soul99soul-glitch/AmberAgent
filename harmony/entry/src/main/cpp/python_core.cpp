@@ -1,5 +1,6 @@
-#include "python_core.h"
+// CPython selects feature-test macros before any system header.
 #include <Python.h>
+#include "python_core.h"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
