@@ -172,6 +172,37 @@ internal fun ChatPageComposerHost(
                             }
                         }
                     },
+                    onRecheckOutcomeUnknown = { workItemId ->
+                        if (isCloudActive) {
+                            scope.launch {
+                                runCatching { macGatewayRepository.recheckCloudOutcomeUnknown(workItemId) }
+                                    .onFailure { error ->
+                                        toaster.show(error.message ?: "Recheck failed", type = ToastType.Error)
+                                    }
+                            }
+                        }
+                    },
+                    onRetryOutcomeUnknown = { workItemId ->
+                        if (isCloudActive) {
+                            scope.launch {
+                                runCatching {
+                                    macGatewayRepository.retryCloudOutcomeUnknown(
+                                        conversationId = conversation.id.toString(),
+                                        workItemId = workItemId,
+                                    )
+                                }.onFailure { error ->
+                                    toaster.show(error.message ?: "Retry failed", type = ToastType.Error)
+                                }
+                            }
+                        }
+                    },
+                    onAbandonOutcomeUnknown = { workItemId ->
+                        if (isCloudActive) {
+                            scope.launch {
+                                macGatewayRepository.abandonCloudOutcomeUnknown(workItemId)
+                            }
+                        }
+                    },
                 )
                 if (subAgentDockEverShown || subAgentDockHasTasks) {
                     SubAgentStatusDock(

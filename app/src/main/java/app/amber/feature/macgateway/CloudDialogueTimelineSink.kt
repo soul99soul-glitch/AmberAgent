@@ -35,6 +35,9 @@ interface CloudDialogueTimelineSink {
         text: String,
         eventId: String,
         topicId: String,
+        sourceRefs: List<String> = emptyList(),
+        sourcePaths: List<String> = emptyList(),
+        outcomeUnknown: Boolean = false,
     )
 
     object NoOp : CloudDialogueTimelineSink {
@@ -48,6 +51,9 @@ interface CloudDialogueTimelineSink {
             text: String,
             eventId: String,
             topicId: String,
+            sourceRefs: List<String>,
+            sourcePaths: List<String>,
+            outcomeUnknown: Boolean,
         ) = Unit
     }
 }
@@ -97,6 +103,9 @@ class ConversationStoreCloudDialogueSink(
         text: String,
         eventId: String,
         topicId: String,
+        sourceRefs: List<String>,
+        sourcePaths: List<String>,
+        outcomeUnknown: Boolean,
     ) {
         val uuid = runCatching { Uuid.parse(conversationId) }.getOrNull() ?: return
         val formatted = formatTaskResultMarkdown(
@@ -104,6 +113,9 @@ class ConversationStoreCloudDialogueSink(
             taskTitle = taskTitle,
             outcome = outcome,
             text = text,
+            sourceRefs = sourceRefs,
+            sourcePaths = sourcePaths,
+            outcomeUnknown = outcomeUnknown,
         )
         val node = UIMessage(
             role = MessageRole.ASSISTANT,
@@ -121,14 +133,35 @@ class ConversationStoreCloudDialogueSink(
             taskTitle: String?,
             outcome: String?,
             text: String,
+            sourceRefs: List<String> = emptyList(),
+            sourcePaths: List<String> = emptyList(),
+            outcomeUnknown: Boolean = false,
         ): String {
             val label = taskTitle?.takeIf { it.isNotBlank() && it != workItemId } ?: workItemId
-            val normalizedOutcome = outcome?.takeIf { it.isNotBlank() } ?: "completed"
+            val normalizedOutcome = when {
+                outcomeUnknown -> "outcome_unknown"
+                !outcome.isNullOrBlank() -> outcome
+                else -> "completed"
+            }
             val body = text.trim()
-            return if (body.isNotEmpty()) {
-                "**[$label · $normalizedOutcome]**\n\n$body"
-            } else {
-                "**[$label · $normalizedOutcome]**"
+            val sources = (sourceRefs + sourcePaths)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+            return buildString {
+                append("**[").append(label).append(" · ").append(normalizedOutcome).append("]**")
+                if (outcomeUnknown) {
+                    append("\n\n> 执行结果未知（outcomeUnknown），可在下方选择重查、重试或放弃。")
+                }
+                if (body.isNotEmpty()) {
+                    append("\n\n").append(body)
+                }
+                if (sources.isNotEmpty()) {
+                    append("\n\n来源：")
+                    sources.forEach { source ->
+                        append("\n- `").append(source).append("`")
+                    }
+                }
             }
         }
     }

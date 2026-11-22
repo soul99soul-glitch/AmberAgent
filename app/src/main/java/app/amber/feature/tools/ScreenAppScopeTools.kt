@@ -115,6 +115,7 @@ internal class ScreenAppScopeTools(
         },
         needsApproval = true,
         allowsAutoApproval = false,
+        mandatoryApproval = true,
         execute = { input ->
             check(!operations.isStopped(runId)) {
                 "Screen control was ended by screen_stop for this run; the allow-list is frozen."

@@ -3717,7 +3717,13 @@
   <string name="mac_gateway_error_generic">실패: %1$s</string>
   <string name="mac_gateway_approval_approve">승인</string>
   <string name="mac_gateway_approval_deny">거부</string>
-  <string name="mac_gateway_approval_high_risk_hint">고위험 작업은 Mac에서 승인하세요</string>
+  <string name="mac_gateway_approval_high_risk_hint">Mac에서 승인하세요</string>
+  <string name="mac_gateway_approval_diff_preview">변경 미리보기 (읽기 전용)</string>
+  <string name="mac_gateway_cloud_receipt_stop_too_late">중지 지연 (stop_too_late)</string>
+  <string name="mac_gateway_cloud_outcome_unknown_hint">결과 불명 — 복구 작업 선택</string>
+  <string name="mac_gateway_cloud_action_recheck">재조회</string>
+  <string name="mac_gateway_cloud_action_retry">재시도</string>
+  <string name="mac_gateway_cloud_action_abandon">포기</string>
   <string name="mac_gateway_cloud_dialogue_section">클라우드 메인 대화</string>
   <string name="mac_gateway_cloud_dialogue_title">클라우드 메인 대화</string>
   <string name="mac_gateway_cloud_dialogue_desc">켜면 메인 대화 메시지를 페어링된 클라우드로 비동기 전송합니다. 끄면 로컬 채팅이 그대로 유지됩니다.</string>

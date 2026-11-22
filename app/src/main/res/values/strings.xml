@@ -3812,7 +3812,13 @@ My task:</string>
   <string name="mac_gateway_error_generic">Failed: %1$s</string>
   <string name="mac_gateway_approval_approve">Approve</string>
   <string name="mac_gateway_approval_deny">Deny</string>
-  <string name="mac_gateway_approval_high_risk_hint">High-risk action — approve on Mac</string>
+  <string name="mac_gateway_approval_high_risk_hint">Please approve on Mac</string>
+  <string name="mac_gateway_approval_diff_preview">Diff Preview (Read-only)</string>
+  <string name="mac_gateway_cloud_receipt_stop_too_late">Stop too late</string>
+  <string name="mac_gateway_cloud_outcome_unknown_hint">Outcome unknown — choose recovery</string>
+  <string name="mac_gateway_cloud_action_recheck">Recheck</string>
+  <string name="mac_gateway_cloud_action_retry">Retry</string>
+  <string name="mac_gateway_cloud_action_abandon">Abandon</string>
   <string name="mac_gateway_cloud_dialogue_section">Cloud Main Dialogue</string>
   <string name="mac_gateway_cloud_dialogue_title">Cloud Main Dialogue</string>
   <string name="mac_gateway_cloud_dialogue_desc">Route main chat messages to the paired cloud asynchronously. When off, local chat runs on this device unchanged.</string>

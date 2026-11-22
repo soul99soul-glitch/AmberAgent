@@ -295,6 +295,9 @@ class MacGatewayClientTest {
                 text: String,
                 eventId: String,
                 topicId: String,
+                sourceRefs: List<String>,
+                sourcePaths: List<String>,
+                outcomeUnknown: Boolean,
             ) {
                 timeline += RecordedEntry(
                     conversationId,

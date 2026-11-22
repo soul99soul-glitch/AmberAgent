@@ -335,6 +335,32 @@ class MacGatewayRepository(
         cloudCoordinator.pollOnce()
     }
 
+    suspend fun recheckCloudOutcomeUnknown(workItemId: String) {
+        ready.await()
+        cloudCoordinator.recheckOutcomeUnknownTask(workItemId)
+    }
+
+    suspend fun retryCloudOutcomeUnknown(
+        conversationId: String,
+        workItemId: String,
+        requestId: String = Uuid.random().toString(),
+    ): CloudDialogueSubmission {
+        ready.await()
+        val sub = cloudCoordinator.retryOutcomeUnknownTask(
+            conversationId = conversationId,
+            workItemId = workItemId,
+            requestId = requestId,
+        )
+        reconcileCloudPolling()
+        appScope.launch { cloudCoordinator.pollOnce() }
+        return sub
+    }
+
+    suspend fun abandonCloudOutcomeUnknown(workItemId: String) {
+        ready.await()
+        cloudCoordinator.abandonOutcomeUnknownTask(workItemId)
+    }
+
     /** Never throws; the outcome is reflected in [state]. A revoked device is forgotten locally. */
     suspend fun refresh() {
         val client = activeClient() ?: return
@@ -382,21 +408,67 @@ class MacGatewayRepository(
         toolCallId: String,
         allow: Boolean,
         highRisk: Boolean = false,
+        requiresLocalApproval: Boolean = false,
+        riskLevel: String? = null,
     ) {
         val sessionApproval = _state.value.status?.sessions
             ?.firstOrNull { it.key == sessionKey && it.pendingApproval?.toolCallId == toolCallId }
             ?.pendingApproval
         val effectiveHighRisk = highRisk || sessionApproval?.highRisk == true
-        if (effectiveHighRisk && allow) {
-            throw MacGatewayException.Server("high-risk actions must be approved on Mac")
+        val effectiveRiskLevel = riskLevel ?: sessionApproval?.riskLevel
+        val effectiveLocalOnly = requiresLocalApproval ||
+            sessionApproval?.effectiveRequiresLocalApproval == true ||
+            effectiveHighRisk ||
+            effectiveRiskLevel.equals("L3", ignoreCase = true)
+        if (effectiveLocalOnly && allow) {
+            throw MacGatewayException.Forbidden(
+                code = "high-risk actions must be approved on Mac",
+                requiresLocalApproval = true,
+                riskLevel = effectiveRiskLevel ?: if (effectiveHighRisk) "L3" else null,
+                targetDevice = sessionApproval?.targetDevice,
+                targetSummary = sessionApproval?.targetSummary,
+                diffPreview = sessionApproval?.diffPreview,
+            )
         }
         val client = activeClient() ?: return
-        client.decide(
-            sessionKey = sessionKey,
-            toolCallId = toolCallId,
-            allow = allow,
-            highRisk = effectiveHighRisk,
-        )
+        try {
+            client.decide(
+                sessionKey = sessionKey,
+                toolCallId = toolCallId,
+                allow = allow,
+                highRisk = effectiveHighRisk,
+                requiresLocalApproval = effectiveLocalOnly,
+                riskLevel = effectiveRiskLevel,
+                targetDevice = sessionApproval?.targetDevice,
+                targetSummary = sessionApproval?.targetSummary,
+                diffPreview = sessionApproval?.diffPreview,
+            )
+        } catch (forbidden: MacGatewayException.Forbidden) {
+            // Server refused remote approval (403): lock this approval card to read-only local approval.
+            _state.update { current ->
+                current.copy(
+                    status = current.status?.copy(
+                        sessions = current.status.sessions.map { session ->
+                            val pending = session.pendingApproval
+                            if (session.key == sessionKey && pending?.toolCallId == toolCallId) {
+                                session.copy(
+                                    pendingApproval = pending.copy(
+                                        requiresLocalApproval = true,
+                                        riskLevel = forbidden.riskLevel ?: pending.riskLevel,
+                                        targetDevice = forbidden.targetDevice ?: pending.targetDevice,
+                                        targetSummary = forbidden.targetSummary ?: pending.targetSummary,
+                                        diffPreview = forbidden.diffPreview ?: pending.diffPreview,
+                                    ),
+                                )
+                            } else {
+                                session
+                            }
+                        },
+                    ),
+                )
+            }
+            throw forbidden
+        }
         _state.update { current ->
             current.copy(
                 status = current.status?.copy(

@@ -26,10 +26,12 @@ import app.amber.core.agent.runtime.ToolLifecycleEvent
 import app.amber.feature.runtime.toAgentToolFailurePayload
 import app.amber.core.ai.GenerationFailureClassifier
 import app.amber.core.ai.GenerationRetrySetting
+import app.amber.core.automation.AmberAccessibilityService
 import app.amber.feature.tools.ToolEffectClass
 import app.amber.feature.tools.ToolRisk
 import app.amber.feature.tools.effectClass
 import app.amber.feature.tools.invocationPolicy
+import app.amber.feature.tools.isAccessibilityL3ActionTool
 
 private const val TAG = "AgentToolDispatcher"
 
@@ -84,8 +86,21 @@ class AgentToolDispatcher(
     private val hooks: List<ToolInvocationHook> = emptyList(),
     private val sshApprovalTargetGuard: SshApprovalTargetGuard? = null,
 ) {
-    suspend fun captureApprovalTarget(tool: UIMessagePart.Tool): UIMessagePart.Tool =
-        sshApprovalTargetGuard?.capture(tool) ?: tool
+    suspend fun captureApprovalTarget(tool: UIMessagePart.Tool): UIMessagePart.Tool {
+        val sshCaptured = sshApprovalTargetGuard?.capture(tool) ?: tool
+        if (!isAccessibilityL3ActionTool(sshCaptured.toolName)) return sshCaptured
+        val activePackage = AmberAccessibilityService.getActiveService()
+            ?.activePackageName()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return sshCaptured
+        val merged = LinkedHashMap<String, kotlinx.serialization.json.JsonElement>()
+        sshCaptured.metadata?.forEach { (key, value) -> merged[key] = value }
+        if ("accessibility_target_app" !in merged) {
+            merged["accessibility_target_app"] = kotlinx.serialization.json.JsonPrimitive(activePackage)
+        }
+        return sshCaptured.copy(metadata = kotlinx.serialization.json.JsonObject(merged))
+    }
 
     fun resolveDecision(
         toolDef: Tool?,

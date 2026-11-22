@@ -3717,7 +3717,13 @@
   <string name="mac_gateway_error_generic">Ошибка: %1$s</string>
   <string name="mac_gateway_approval_approve">Одобрить</string>
   <string name="mac_gateway_approval_deny">Отклонить</string>
-  <string name="mac_gateway_approval_high_risk_hint">Действие высокого риска — одобрите на Mac</string>
+  <string name="mac_gateway_approval_high_risk_hint">Одобрите на Mac</string>
+  <string name="mac_gateway_approval_diff_preview">Предпросмотр изменений (только чтение)</string>
+  <string name="mac_gateway_cloud_receipt_stop_too_late">Остановка опоздала (stop_too_late)</string>
+  <string name="mac_gateway_cloud_outcome_unknown_hint">Результат неизвестен — выберите действие</string>
+  <string name="mac_gateway_cloud_action_recheck">Проверить</string>
+  <string name="mac_gateway_cloud_action_retry">Повторить</string>
+  <string name="mac_gateway_cloud_action_abandon">Отказаться</string>
   <string name="mac_gateway_cloud_dialogue_section">Облачный основной диалог</string>
   <string name="mac_gateway_cloud_dialogue_title">Облачный основной диалог</string>
   <string name="mac_gateway_cloud_dialogue_desc">При включении сообщения основного чата отправляются в сопряжённое облако асинхронно. При выключении локальный чат работает без изменений.</string>

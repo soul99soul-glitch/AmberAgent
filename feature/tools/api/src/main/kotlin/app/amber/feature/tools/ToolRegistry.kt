@@ -30,6 +30,53 @@ val EXTERNAL_CLI_COUNCIL_RUNNER_TYPES: Set<String> = setOf(
     "kimi_cli",
 )
 
+/**
+ * Accessibility cross-app / external mutating actions.
+ *
+ * Until a delegation ledger accumulates sufficient approval history, every step in this set
+ * defaults to L3 risk (`ToolRisk.High` + `mandatoryApproval` + `alwaysAsk`) and must be
+ * explicitly confirmed by the user before execution.
+ */
+val ACCESSIBILITY_L3_ACTION_TOOLS: Set<String> = setOf(
+    "screen_click",
+    "screen_long_click",
+    "screen_swipe",
+    "screen_input_text",
+    "screen_tap_text",
+    "screen_back",
+    "screen_home",
+    "screen_open_app",
+    "screen_open_url",
+    "screen_scroll_until",
+    "screen_collect_list",
+    "screen_run_goal",
+    "screen_run_flow",
+    "screen_add_app",
+)
+
+/** Read-only screen observation and stop tools; remain L1 and never trigger L3 step confirmation. */
+val ACCESSIBILITY_L1_READ_TOOLS: Set<String> = setOf(
+    "screen_read_ui",
+    "screen_find_text",
+    "screen_wait_for_text",
+    "screen_status",
+    "screen_apps",
+    "screen_stop",
+    "screen_screenshot",
+)
+
+fun isAccessibilityL3ActionTool(name: String): Boolean = name in ACCESSIBILITY_L3_ACTION_TOOLS
+
+fun isAccessibilityL1ReadTool(name: String): Boolean = name in ACCESSIBILITY_L1_READ_TOOLS
+
+fun toolRiskLevel(toolName: String, risk: ToolRisk): String = when {
+    toolName in ACCESSIBILITY_L3_ACTION_TOOLS -> "L3"
+    toolName in ACCESSIBILITY_L1_READ_TOOLS -> "L1"
+    risk == ToolRisk.High -> "L3"
+    risk == ToolRisk.Sensitive -> "L2"
+    else -> "L1"
+}
+
 data class ToolMetadata(
     val name: String,
     val category: String,
@@ -39,6 +86,7 @@ data class ToolMetadata(
     val autoApprovable: Boolean,
     val outputBudgetChars: Int,
     val risk: ToolRisk,
+    val riskLevel: String = toolRiskLevel(name, risk),
     val mandatoryApproval: Boolean = false,
     val effectClass: ToolEffectClass = ToolEffectClass.READ_ONLY,
     val supportsReconcile: Boolean = false,
@@ -76,6 +124,7 @@ data class ToolInvocationPolicy(
     val concurrencySafe: Boolean,
     val outputBudgetChars: Int,
     val risk: ToolRisk,
+    val riskLevel: String = toolRiskLevel(name, risk),
     val parallelGroup: String? = null,
     val requiresForegroundAppPackage: String? = null,
     val speculativeEligible: Boolean = false,
@@ -129,7 +178,7 @@ class ToolRegistry private constructor(
             val riskProfile = riskProfile()
             val risk = riskProfile.risk
             val mandatoryApprovalEffective = mandatoryApproval ||
-                name == "screen_run_goal" || name == "screen_run_flow"
+                name in ACCESSIBILITY_L3_ACTION_TOOLS
             val effectiveNeedsApproval = mandatoryApprovalEffective || needsApproval || mutates || risk == ToolRisk.High
             val effectiveAutoApproval = !mandatoryApprovalEffective &&
                 allowsAutoApproval &&
@@ -148,6 +197,7 @@ class ToolRegistry private constructor(
                 autoApprovable = effectiveAutoApproval,
                 outputBudgetChars = outputBudgetChars(),
                 risk = risk,
+                riskLevel = toolRiskLevel(name, risk),
                 mandatoryApproval = mandatoryApprovalEffective,
                 effectClass = effectClass(),
                 supportsReconcile = supportsReconcile(),
@@ -266,7 +316,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
     var risk = baseRisk
     var riskExplicit = baseRiskProfile.explicit
     var mandatoryApprovalEffective = mandatoryApproval ||
-        name == "screen_run_goal" || name == "screen_run_flow"
+        name in ACCESSIBILITY_L3_ACTION_TOOLS
     var needsApproval = mandatoryApprovalEffective || needsApproval || baseMutates || baseRisk == ToolRisk.High
     var autoApprovable = !mandatoryApprovalEffective && allowsAutoApproval && baseRisk != ToolRisk.High
     var concurrencySafe = concurrencySafe()
@@ -604,6 +654,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
         concurrencySafe = concurrencySafe,
         outputBudgetChars = outputBudgetChars(),
         risk = risk,
+        riskLevel = toolRiskLevel(name, risk),
         parallelGroup = parallelGroup,
         requiresForegroundAppPackage = foregroundRequirement,
         speculativeEligible = speculativeBlockReason == null,
@@ -732,7 +783,7 @@ private fun Tool.riskProfile(): RiskProfile = when {
     name == "memory_tool" -> RiskProfile(ToolRisk.High, explicit = true)
     name == "mcp_call_tool" -> RiskProfile(ToolRisk.Sensitive, explicit = true)
     name == "wm_eval" || name == "wm_zcode_ask" ||
-        name == "screen_run_goal" || name == "screen_run_flow" ->
+        name in ACCESSIBILITY_L3_ACTION_TOOLS ->
         RiskProfile(ToolRisk.High, explicit = true)
     // Provider config writers rewrite persisted credentials / endpoints /
     // model slots — High risk so plain auto-approval can never silently run
@@ -756,9 +807,10 @@ private fun Tool.riskProfile(): RiskProfile = when {
     else -> RiskProfile(ToolRisk.Normal, explicit = false)
 }
 
-private fun Tool.alwaysAsk(input: JsonElement?): Boolean = when (name) {
-    "sms_send", "contacts_write" -> true
-    "call_phone" -> input.booleanValue("direct_call")
+private fun Tool.alwaysAsk(input: JsonElement?): Boolean = when {
+    name in ACCESSIBILITY_L3_ACTION_TOOLS -> true
+    name == "sms_send" || name == "contacts_write" -> true
+    name == "call_phone" -> input.booleanValue("direct_call")
     else -> false
 }
 

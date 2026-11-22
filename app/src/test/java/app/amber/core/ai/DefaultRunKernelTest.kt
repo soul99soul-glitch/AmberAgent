@@ -1165,13 +1165,13 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
                 listOf(UIMessagePart.Text("swiped"))
             },
         )
-        // 长任务常态：连续多步以相同参数滑动，每次调用后屏幕状态已变化。
+        // 长任务常态：连续多步以相同参数滑动，每步经用户 L3 显式确认后均可正常执行。
         val engine = FakeRoundEngine(
             listOf(
-                { toolCallAssistant("call_1", "screen_swipe") },
-                { toolCallAssistant("call_2", "screen_swipe") },
-                { toolCallAssistant("call_3", "screen_swipe") },
-                { toolCallAssistant("call_4", "screen_swipe") },
+                { toolCallAssistant("call_1", "screen_swipe", approvalState = ToolApprovalState.Approved) },
+                { toolCallAssistant("call_2", "screen_swipe", approvalState = ToolApprovalState.Approved) },
+                { toolCallAssistant("call_3", "screen_swipe", approvalState = ToolApprovalState.Approved) },
+                { toolCallAssistant("call_4", "screen_swipe", approvalState = ToolApprovalState.Approved) },
                 { textAssistant("完成") },
             ),
         )
@@ -1182,7 +1182,6 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
                 messages = listOf(UIMessage.user("一直滑到底")),
                 tools = listOf(swipe),
                 terminals = terminals,
-                // Authorize the action so this test reaches the duplicate-call guard.
                 autoApproveHighRiskTools = true,
             ),
         ).toList()
@@ -1211,8 +1210,18 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
                     UIMessage(
                         role = MessageRole.ASSISTANT,
                         parts = listOf(
-                            UIMessagePart.Tool(toolCallId = "call_1", toolName = "screen_click", input = "{}"),
-                            UIMessagePart.Tool(toolCallId = "call_2", toolName = "screen_click", input = "{}"),
+                            UIMessagePart.Tool(
+                                toolCallId = "call_1",
+                                toolName = "screen_click",
+                                input = "{}",
+                                approvalState = ToolApprovalState.Approved,
+                            ),
+                            UIMessagePart.Tool(
+                                toolCallId = "call_2",
+                                toolName = "screen_click",
+                                input = "{}",
+                                approvalState = ToolApprovalState.Approved,
+                            ),
                         ),
                     )
                 },
@@ -1233,6 +1242,40 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
 
         assertEquals("only the first in-batch emission executed", 1, executions.get())
         assertTrue("a skipped twin is not a stop and not a park", terminals.isEmpty())
+    }
+
+    @Test
+    fun `unapproved screen automation action parks for L3 confirmation even with high-risk auto-approve`() = runTest {
+        val executions = AtomicInteger(0)
+        val click = Tool(
+            name = "screen_click",
+            description = "click the screen",
+            needsApproval = true,
+            allowsAutoApproval = false,
+            execute = {
+                executions.incrementAndGet()
+                listOf(UIMessagePart.Text("clicked"))
+            },
+        )
+        val engine = FakeRoundEngine(
+            listOf(
+                { toolCallAssistant("call_1", "screen_click") },
+            ),
+        )
+        val terminals = mutableListOf<GenerationTerminal>()
+
+        val chunks = kernel(engine).run(
+            session(
+                messages = listOf(UIMessage.user("帮我点一下")),
+                tools = listOf(click),
+                terminals = terminals,
+                autoApproveHighRiskTools = true,
+            ),
+        ).toList()
+
+        assertEquals("must not execute before explicit L3 confirmation", 0, executions.get())
+        val parkedTool = lastMessages(chunks).last().getTools().single()
+        assertEquals(ToolApprovalState.Pending, parkedTool.approvalState)
     }
 
     @Test

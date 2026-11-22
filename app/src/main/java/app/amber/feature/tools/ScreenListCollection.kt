@@ -44,6 +44,7 @@ internal class ScreenListCollection(private val operations: ScreenOperationOwner
         },
         needsApproval = true,
         allowsAutoApproval = false,
+        mandatoryApproval = true,
         execute = { input ->
             operations.trackScreenTool("screen_collect_list", "读取列表", input) {
                 val containerLabel = input.requiredString("container")

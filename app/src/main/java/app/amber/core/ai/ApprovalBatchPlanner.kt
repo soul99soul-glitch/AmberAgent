@@ -8,6 +8,7 @@ import app.amber.core.jev.JevAutoApprovalGate
 import app.amber.feature.runtime.PermissionDecision
 import app.amber.feature.runtime.PermissionDecisionAction
 import app.amber.feature.runtime.ToolInvocationContext
+import app.amber.feature.tools.isAccessibilityL3ActionTool
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -55,8 +56,8 @@ internal class ApprovalBatchPlanner(
                 initialPendingToolCallIds.isNotEmpty() &&
                 waitingTools.isNotEmpty() &&
                 waitingTools.all { it.toolCallId in initialPendingToolCallIds } &&
-                // Jev 复核收紧的调用只能由用户决定，不随高风险开关释放。
-                waitingTools.none { jevTightened(it) }
+                // Jev 复核收紧或默认 L3 无障碍代操作只能由用户逐步确认，不随高风险开关释放。
+                waitingTools.none { jevTightened(it) || isAccessibilityL3ActionTool(it.toolName) }
         val autoToolsToRecheck = buildList {
             if (pendingTools.isNotEmpty()) addAll(deferredAutoTools)
             if (canReleaseAllWaitingToolsWithHighRisk) {

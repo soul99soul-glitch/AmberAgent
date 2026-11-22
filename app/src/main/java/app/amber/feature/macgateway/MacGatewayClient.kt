@@ -104,7 +104,17 @@ data class MacGatewayStatus(
         val tool: String,
         val detail: String? = null,
         val highRisk: Boolean = false,
-    )
+        val riskLevel: String? = null,
+        val targetDevice: String? = null,
+        val targetSummary: String? = null,
+        val diffPreview: String? = null,
+        val requiresLocalApproval: Boolean? = null,
+    ) {
+        val effectiveRequiresLocalApproval: Boolean
+            get() = requiresLocalApproval == true ||
+                highRisk ||
+                riskLevel.equals("L3", ignoreCase = true)
+    }
 
     @Serializable
     data class Session(
@@ -121,6 +131,7 @@ data class MacGatewayStatus(
         val updatedAt: Double = 0.0,
         val summary: String? = null,
         val pendingApproval: PendingApproval? = null,
+        val conversationId: String? = null,
     )
 }
 
@@ -166,7 +177,15 @@ sealed class MacGatewayException(message: String) : Exception(message) {
     class Unauthorized : MacGatewayException("unauthorized")
     class NotFound(val code: String) : MacGatewayException(code)
     class Conflict(val code: String) : MacGatewayException(code)
-    class Server(message: String) : MacGatewayException(message)
+    open class Server(message: String) : MacGatewayException(message)
+    class Forbidden(
+        val code: String,
+        val requiresLocalApproval: Boolean = false,
+        val riskLevel: String? = null,
+        val targetDevice: String? = null,
+        val targetSummary: String? = null,
+        val diffPreview: String? = null,
+    ) : Server(code)
     class InvalidResponse : MacGatewayException("invalid response")
 }
 
@@ -229,9 +248,24 @@ class MacGatewayClient(
         toolCallId: String,
         allow: Boolean,
         highRisk: Boolean = false,
+        requiresLocalApproval: Boolean = false,
+        riskLevel: String? = null,
+        targetDevice: String? = null,
+        targetSummary: String? = null,
+        diffPreview: String? = null,
     ) {
-        if (highRisk && allow) {
-            throw MacGatewayException.Server("high-risk actions must be approved on Mac")
+        val localApprovalOnly = highRisk ||
+            requiresLocalApproval ||
+            riskLevel.equals("L3", ignoreCase = true)
+        if (localApprovalOnly && allow) {
+            throw MacGatewayException.Forbidden(
+                code = "high-risk actions must be approved on Mac",
+                requiresLocalApproval = true,
+                riskLevel = riskLevel ?: if (highRisk) "L3" else null,
+                targetDevice = targetDevice,
+                targetSummary = targetSummary,
+                diffPreview = diffPreview,
+            )
         }
         send(
             "POST",
@@ -253,67 +287,116 @@ class MacGatewayClient(
     }
 
     /** `POST /v2/dialogue/messages` — submit a new main-dialogue message to the paired cloud Router. */
-    suspend fun messages(requestId: String, text: String): CloudDialogueReceipt {
+    suspend fun messages(
+        requestId: String,
+        text: String,
+        conversationId: String? = null,
+    ): CloudDialogueReceipt {
         CloudDialogueContract.requireValidRequestId(requestId)
         CloudDialogueContract.requireValidText(text)
+        val normalizedConversationId = CloudDialogueContract.normalizeConversationId(conversationId)
+        val payload = buildMap<String, Any> {
+            put("requestId", requestId)
+            put("text", text)
+            normalizedConversationId?.let { put("conversationId", it) }
+        }
         return decode(
             send(
                 method = "POST",
                 segments = listOf("v2", "dialogue", "messages"),
-                body = mapOf("requestId" to requestId, "text" to text),
+                body = payload,
+                headers = dialogueHeaders(normalizedConversationId),
             ),
         )
     }
 
     /** `POST /v2/work-items/{id}/inputs` — append a followup input to a specific non-terminal task. */
-    suspend fun inputs(workItemId: String, requestId: String, text: String): CloudDialogueReceipt {
+    suspend fun inputs(
+        workItemId: String,
+        requestId: String,
+        text: String,
+        conversationId: String? = null,
+    ): CloudDialogueReceipt {
         require(workItemId.isNotBlank()) { "workItemId must not be blank" }
         CloudDialogueContract.requireValidRequestId(requestId)
         CloudDialogueContract.requireValidText(text)
+        val normalizedConversationId = CloudDialogueContract.normalizeConversationId(conversationId)
+        val payload = buildMap<String, Any> {
+            put("requestId", requestId)
+            put("text", text)
+            normalizedConversationId?.let { put("conversationId", it) }
+        }
         return decode(
             send(
                 method = "POST",
                 segments = listOf("v2", "work-items", workItemId, "inputs"),
-                body = mapOf("requestId" to requestId, "text" to text),
+                body = payload,
+                headers = dialogueHeaders(normalizedConversationId),
             ),
         )
     }
 
     /** `POST /v2/work-items/{id}/stop` — physically stop and settle a running task. */
-    suspend fun stop(workItemId: String, requestId: String): CloudDialogueReceipt {
+    suspend fun stop(
+        workItemId: String,
+        requestId: String,
+        conversationId: String? = null,
+    ): CloudDialogueReceipt {
         require(workItemId.isNotBlank()) { "workItemId must not be blank" }
         CloudDialogueContract.requireValidRequestId(requestId)
+        val normalizedConversationId = CloudDialogueContract.normalizeConversationId(conversationId)
+        val payload = buildMap<String, Any> {
+            put("requestId", requestId)
+            normalizedConversationId?.let { put("conversationId", it) }
+        }
         return decode(
             send(
                 method = "POST",
                 segments = listOf("v2", "work-items", workItemId, "stop"),
-                body = mapOf("requestId" to requestId),
+                body = payload,
+                headers = dialogueHeaders(normalizedConversationId),
             ),
         )
     }
 
     /** `GET /v2/dialogue/receipts/{requestId}` — query receipt state (`received`/`consumed`/`cancelled`) and `workItemIds`. */
-    suspend fun receipts(requestId: String): CloudDialogueReceipt {
+    suspend fun receipts(
+        requestId: String,
+        conversationId: String? = null,
+    ): CloudDialogueReceipt {
         CloudDialogueContract.requireValidRequestId(requestId)
+        val normalizedConversationId = CloudDialogueContract.normalizeConversationId(conversationId)
         return decode(
             send(
                 method = "GET",
                 segments = listOf("v2", "dialogue", "receipts", requestId),
+                headers = dialogueHeaders(normalizedConversationId),
             ),
         )
     }
 
     /** `GET /v2/dialogue/events?after={after}&limit={limit}` — poll incremental dialogue timeline events. */
-    suspend fun events(after: Long = 0L, limit: Int = 100): CloudDialogueEventsPage {
+    suspend fun events(
+        after: Long = 0L,
+        limit: Int = 100,
+        conversationId: String? = null,
+    ): CloudDialogueEventsPage {
         require(after >= 0L) { "after cursor must be non-negative" }
         val clampedLimit = limit.coerceIn(1, 100)
+        val normalizedConversationId = CloudDialogueContract.normalizeConversationId(conversationId)
         return decode(
             send(
                 method = "GET",
                 segments = listOf("v2", "dialogue", "events"),
                 queryParameters = mapOf("after" to after.toString(), "limit" to clampedLimit.toString()),
+                headers = dialogueHeaders(normalizedConversationId),
             ),
         )
+    }
+
+    private fun dialogueHeaders(conversationId: String?): Map<String, String> = buildMap {
+        put(CloudDialogueContract.VERSION_HEADER, CloudDialogueContract.VERSION)
+        conversationId?.let { put(CloudDialogueContract.CONVERSATION_HEADER, it) }
     }
 
     /** `GET /v2/soul` — fetch authoritative cross-platform Agent Soul state (`C-SOUL-V1`). */
@@ -350,6 +433,7 @@ class MacGatewayClient(
         segments: List<String>,
         body: Map<String, Any>? = null,
         queryParameters: Map<String, String> = emptyMap(),
+        headers: Map<String, String> = emptyMap(),
     ): String =
         withContext(Dispatchers.IO) {
             val requestBody = body?.let { map ->
@@ -372,7 +456,10 @@ class MacGatewayClient(
                     .build()
                 val request = Request.Builder().url(url)
                     .method(method, requestBody ?: if (method == "POST" || method == "PUT") ByteArray(0).toRequestBody() else null)
-                    .apply { token?.let { header("Authorization", "Bearer $it") } }
+                    .apply {
+                        token?.let { header("Authorization", "Bearer $it") }
+                        headers.forEach { (key, value) -> header(key, value) }
+                    }
                     .build()
                 val (code, text) = try {
                     http.newCall(request).execute().use { it.code to it.body.string() }
@@ -381,14 +468,22 @@ class MacGatewayClient(
                     continue
                 }
                 preferredAddress = address
-                val errorMessage = if (code !in 200..299) {
-                    runCatching {
-                        MacGatewayJson.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.content
-                    }.getOrNull()
+                val errorJson = if (code !in 200..299) {
+                    runCatching { MacGatewayJson.parseToJsonElement(text).jsonObject }.getOrNull()
                 } else null
+                val errorMessage = errorJson?.get("error")?.jsonPrimitive?.content
                 when {
                     code in 200..299 -> return@withContext text
                     code == 401 -> throw MacGatewayException.Unauthorized()
+                    code == 403 -> throw MacGatewayException.Forbidden(
+                        code = errorMessage ?: "HTTP 403",
+                        requiresLocalApproval = errorJson?.get("requiresLocalApproval")?.jsonPrimitive?.content?.toBooleanStrictOrNull()
+                            ?: (errorMessage == "local_approval_required"),
+                        riskLevel = errorJson?.get("riskLevel")?.jsonPrimitive?.content,
+                        targetDevice = errorJson?.get("targetDevice")?.jsonPrimitive?.content,
+                        targetSummary = errorJson?.get("targetSummary")?.jsonPrimitive?.content,
+                        diffPreview = errorJson?.get("diffPreview")?.jsonPrimitive?.content,
+                    )
                     code == 404 -> throw MacGatewayException.NotFound(errorMessage ?: "HTTP 404")
                     code == 409 -> throw MacGatewayException.Conflict(errorMessage ?: "HTTP 409")
                     else -> throw MacGatewayException.Server(errorMessage ?: "HTTP $code")

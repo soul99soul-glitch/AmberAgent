@@ -264,6 +264,8 @@ fun SettingExperimentalMacGatewayPage(
                                         toolCallId = approval.toolCallId,
                                         allow = allow,
                                         highRisk = approval.highRisk,
+                                        requiresLocalApproval = approval.effectiveRequiresLocalApproval,
+                                        riskLevel = approval.riskLevel,
                                     )
                                 }
                             },
@@ -440,23 +442,36 @@ private fun PendingApprovalCard(
     onDecision: (MacGatewayStatus.Session, MacGatewayStatus.PendingApproval, Boolean) -> Unit,
 ) {
     val workspace = workspaceColors()
+    val localApprovalOnly = approval.effectiveRequiresLocalApproval
+    val headerMeta = listOfNotNull(
+        approval.riskLevel?.takeIf { it.isNotBlank() },
+        approval.targetDevice?.takeIf { it.isNotBlank() },
+        approval.tool.takeIf { it.isNotBlank() },
+        approval.targetSummary?.takeIf { it.isNotBlank() } ?: approval.detail?.takeIf { it.isNotBlank() },
+    ).joinToString(" · ")
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            text = listOfNotNull(approval.tool.takeIf { it.isNotBlank() }, approval.detail?.takeIf { it.isNotBlank() })
-                .joinToString(" · "),
+            text = headerMeta,
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             color = workspace.ink,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
-        if (approval.highRisk) {
+        approval.diffPreview?.takeIf { it.isNotBlank() }?.let { diff ->
+            StackedValueRow(
+                label = stringResource(R.string.mac_gateway_approval_diff_preview),
+                value = diff,
+                monospace = true,
+            )
+        }
+        if (localApprovalOnly) {
             ExperimentNote(stringResource(R.string.mac_gateway_approval_high_risk_hint))
         }
         ExperimentActionRow {
-            if (!approval.highRisk) {
+            if (!localApprovalOnly) {
                 ExperimentActionButton(
                     text = stringResource(R.string.mac_gateway_approval_approve),
                     enabled = !busy,
@@ -547,6 +562,11 @@ private fun Throwable.describe(context: Context): String = when (this) {
     is MacGatewayException.Unreachable -> context.getString(R.string.mac_gateway_error_unreachable)
     is MacGatewayException.CertificateMismatch -> context.getString(R.string.mac_gateway_error_certificate)
     is MacGatewayException.Unauthorized -> context.getString(R.string.mac_gateway_error_unauthorized)
+    is MacGatewayException.Forbidden -> if (requiresLocalApproval) {
+        context.getString(R.string.mac_gateway_approval_high_risk_hint)
+    } else {
+        code
+    }
     is MacGatewayException.InvalidResponse -> context.getString(R.string.mac_gateway_error_invalid_response)
     is MacGatewayException.Server -> message.orEmpty()
     else -> context.getString(R.string.mac_gateway_error_generic, message ?: javaClass.simpleName)

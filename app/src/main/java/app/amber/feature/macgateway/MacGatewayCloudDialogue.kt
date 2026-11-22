@@ -10,12 +10,19 @@ import kotlinx.serialization.Serializable
  * - `text` (for `messages` / `inputs`): non-blank, length `1..24000`
  */
 object CloudDialogueContract {
+    const val VERSION_HEADER = "X-Amber-Dialogue-Version"
+    const val VERSION = "1"
+    const val CONVERSATION_HEADER = "X-Amber-Conversation-Id"
     private val REQUEST_ID_REGEX = Regex("^[A-Za-z0-9._:-]{1,128}$")
     const val MAX_TEXT_LENGTH = 24_000
+    const val MAX_CONVERSATION_ID_LENGTH = 128
 
     fun isValidRequestId(requestId: String): Boolean = REQUEST_ID_REGEX.matches(requestId)
 
     fun isValidText(text: String): Boolean = text.isNotBlank() && text.length <= MAX_TEXT_LENGTH
+
+    fun normalizeConversationId(conversationId: String?): String? =
+        conversationId?.trim()?.takeIf { it.isNotEmpty() && it.length <= MAX_CONVERSATION_ID_LENGTH }
 
     fun requireValidRequestId(requestId: String) {
         if (!isValidRequestId(requestId)) {
@@ -43,31 +50,54 @@ data class CloudDialogueReceipt(
     /** `"received"`, `"consumed"`, or `"cancelled"`. */
     val state: String,
     val replayed: Boolean = false,
+    val soulRevision: Long? = null,
+    val conversationId: String? = null,
+    val causedByInputId: String? = null,
+    val causedByRequestId: String? = null,
+    val parentRunId: String? = null,
+    val executorKind: String? = null,
+    val executorId: String? = null,
+    val epoch: Long? = null,
+    val observedSeq: Long? = null,
+    val ledgerId: String? = null,
+    val outcomeUnknown: Boolean = false,
+    val schemaVersion: Int? = null,
 )
 
 /**
  * Incremental timeline item returned by `GET /v2/dialogue/events?after={seq}&limit={limit}`.
  *
- * `kind` is one of:
- * - `user_message`
- * - `followup`
- * - `stop_requested`
- * - `assistant_reply`
- * - `input_consumed`
- * - `input_cancelled`
- * - `process_event`
- * - `task_result`
+ * Unknown `kind` values are safely skipped while advancing the monotonic cursor so future
+ * Contract v1 extensions never stall polling.
  */
 @Serializable
 data class CloudDialogueEvent(
     val seq: Long = 0L,
     val id: String,
     val kind: String,
-    val role: String,
-    val text: String,
-    val topicId: String,
+    val role: String = "system",
+    val text: String = "",
+    val topicId: String = "",
     val workItemId: String? = null,
     val outcome: String? = null,
+    val conversationId: String? = null,
+    val causedByInputId: String? = null,
+    val causedByRequestId: String? = null,
+    val parentRunId: String? = null,
+    val executorKind: String? = null,
+    val executorId: String? = null,
+    val epoch: Long? = null,
+    val observedSeq: Long? = null,
+    val ledgerId: String? = null,
+    val outcomeUnknown: Boolean = false,
+    val schemaVersion: Int? = null,
+    val riskLevel: String? = null,
+    val targetDevice: String? = null,
+    val targetSummary: String? = null,
+    val diffPreview: String? = null,
+    val requiresLocalApproval: Boolean? = null,
+    val sourceRefs: List<String>? = null,
+    val sourcePaths: List<String>? = null,
 )
 
 @Serializable
@@ -76,6 +106,7 @@ data class CloudDialogueEventsPage(
     val nextCursor: Long = 0L,
     /** Optional top-level monotonic revision for cross-platform Agent Soul (`C-SOUL-V1`). */
     val soulRevision: Long? = null,
+    val schemaVersion: Int? = null,
 )
 
 @Serializable
@@ -120,6 +151,9 @@ data class CloudDialogueSubmission(
     val replayed: Boolean = false,
     val localEchoed: Boolean = false,
     val receiptSyncedAfterConsumed: Boolean = false,
+    val stopTooLate: Boolean = false,
+    val statusNote: String? = null,
+    val outcomeUnknown: Boolean = false,
     val createdAtMs: Long = System.currentTimeMillis(),
     val updatedAtMs: Long = System.currentTimeMillis(),
     val error: String? = null,
@@ -143,6 +177,15 @@ data class CloudTaskSession(
     /** `"completed"`, `"blocked"`, `"failed"`, or `"cancelled"` when `active == false`. */
     val outcome: String? = null,
     val resultText: String? = null,
+    val outcomeUnknown: Boolean = false,
+    val outcomeUnknownAbandoned: Boolean = false,
+    val stopTooLateNotice: String? = null,
+    val sourceRefs: List<String> = emptyList(),
+    val sourcePaths: List<String> = emptyList(),
+    val parentRunId: String? = null,
+    val executorKind: String? = null,
+    val executorId: String? = null,
+    val epoch: Long? = null,
     val updatedAtMs: Long = System.currentTimeMillis(),
 )
 
@@ -175,6 +218,9 @@ data class CloudDialogueUiState(
 
     fun submissionsForConversation(conversationId: String): List<CloudDialogueSubmission> =
         submissions.filter { it.conversationId == conversationId }
+
+    fun outcomeUnknownTasksForConversation(conversationId: String): List<CloudTaskSession> =
+        tasks.filter { it.conversationId == conversationId && it.outcomeUnknown && !it.outcomeUnknownAbandoned }
 
     fun resolvedFollowupTarget(conversationId: String): CloudTaskSession? {
         val targetId = selectedFollowupWorkItemId ?: return null
@@ -303,19 +349,26 @@ class CloudDialogueCoordinator(
         }
 
         return try {
-            val receipt = client.messages(requestId = initialSubmission.requestId, text = initialSubmission.text)
+            val receipt = client.messages(
+                requestId = initialSubmission.requestId,
+                text = initialSubmission.text,
+                conversationId = conversationId,
+            )
             val updated = mutex.withLock {
                 localEchoedEventIds.add(receipt.eventId)
-                topicToConversation[receipt.topicId] = conversationId
+                val resolvedConversation = receipt.conversationId?.takeIf { it.isNotBlank() } ?: conversationId
+                topicToConversation[receipt.topicId] = resolvedConversation
                 val disposition = CloudInputDisposition.fromWire(receipt.state)
                 val synced = disposition != CloudInputDisposition.RECEIVED && receipt.workItemIds.isNotEmpty()
                 val next = (submissionsByRequestId[requestId] ?: initialSubmission).copy(
                     eventId = receipt.eventId,
                     topicId = receipt.topicId,
+                    conversationId = resolvedConversation,
                     workItemIds = receipt.workItemIds,
                     state = disposition,
                     replayed = receipt.replayed,
                     receiptSyncedAfterConsumed = synced,
+                    outcomeUnknown = receipt.outcomeUnknown,
                     updatedAtMs = System.currentTimeMillis(),
                     error = null,
                 )
@@ -323,8 +376,13 @@ class CloudDialogueCoordinator(
                 registerWorkItemsLocked(
                     workItemIds = receipt.workItemIds,
                     topicId = receipt.topicId,
-                    conversationId = conversationId,
+                    conversationId = resolvedConversation,
                     titleHint = initialSubmission.text,
+                    parentRunId = receipt.parentRunId,
+                    executorKind = receipt.executorKind,
+                    executorId = receipt.executorId,
+                    epoch = receipt.epoch,
+                    outcomeUnknown = receipt.outcomeUnknown,
                 )
                 lastError = null
                 persistLocked()
@@ -384,18 +442,23 @@ class CloudDialogueCoordinator(
                 workItemId = workItemId,
                 requestId = initialSubmission.requestId,
                 text = initialSubmission.text,
+                conversationId = initialSubmission.conversationId,
             )
             mutex.withLock {
                 localEchoedEventIds.add(receipt.eventId)
-                topicToConversation.putIfAbsent(receipt.topicId, initialSubmission.conversationId)
+                val resolvedConversation = receipt.conversationId?.takeIf { it.isNotBlank() }
+                    ?: initialSubmission.conversationId
+                topicToConversation.putIfAbsent(receipt.topicId, resolvedConversation)
                 val disposition = CloudInputDisposition.fromWire(receipt.state)
                 val next = (submissionsByRequestId[requestId] ?: initialSubmission).copy(
                     eventId = receipt.eventId,
                     topicId = receipt.topicId,
+                    conversationId = resolvedConversation,
                     workItemIds = receipt.workItemIds.ifEmpty { listOf(workItemId) },
                     state = disposition,
                     replayed = receipt.replayed,
                     receiptSyncedAfterConsumed = disposition != CloudInputDisposition.RECEIVED,
+                    outcomeUnknown = receipt.outcomeUnknown,
                     updatedAtMs = System.currentTimeMillis(),
                     error = null,
                 )
@@ -403,8 +466,13 @@ class CloudDialogueCoordinator(
                 registerWorkItemsLocked(
                     workItemIds = next.workItemIds,
                     topicId = receipt.topicId,
-                    conversationId = initialSubmission.conversationId,
+                    conversationId = resolvedConversation,
                     titleHint = tasksById[workItemId]?.title ?: initialSubmission.text,
+                    parentRunId = receipt.parentRunId,
+                    executorKind = receipt.executorKind,
+                    executorId = receipt.executorId,
+                    epoch = receipt.epoch,
+                    outcomeUnknown = receipt.outcomeUnknown,
                 )
                 lastError = null
                 persistLocked()
@@ -452,7 +520,11 @@ class CloudDialogueCoordinator(
         }
 
         return try {
-            val receipt = client.stop(workItemId = workItemId, requestId = initialSubmission.requestId)
+            val receipt = client.stop(
+                workItemId = workItemId,
+                requestId = initialSubmission.requestId,
+                conversationId = initialSubmission.conversationId.takeIf { it.isNotBlank() },
+            )
             mutex.withLock {
                 localEchoedEventIds.add(receipt.eventId)
                 val disposition = CloudInputDisposition.fromWire(receipt.state)
@@ -463,6 +535,7 @@ class CloudDialogueCoordinator(
                     state = disposition,
                     replayed = receipt.replayed,
                     receiptSyncedAfterConsumed = true,
+                    outcomeUnknown = receipt.outcomeUnknown,
                     updatedAtMs = System.currentTimeMillis(),
                     error = null,
                 )
@@ -485,23 +558,104 @@ class CloudDialogueCoordinator(
      * 2. Polls `GET /v2/dialogue/receipts/{requestId}` for submissions awaiting disposition or
      *    Router `workItemIds` resolution.
      */
+    suspend fun recheckOutcomeUnknownTask(workItemId: String) {
+        val client = clientProvider() ?: return
+        val relatedSubmissions = mutex.withLock {
+            submissionsByRequestId.values.filter {
+                it.targetWorkItemId == workItemId || workItemId in it.workItemIds
+            }.map { it.requestId to it.conversationId }
+        }
+        for ((reqId, convId) in relatedSubmissions) {
+            val receipt = runCatching {
+                client.receipts(reqId, conversationId = convId.takeIf { it.isNotBlank() })
+            }.getOrNull() ?: continue
+            mutex.withLock {
+                val existingTask = tasksById[workItemId]
+                if (existingTask != null && !receipt.outcomeUnknown && receipt.state != "received") {
+                    tasksById[workItemId] = existingTask.copy(
+                        outcomeUnknown = false,
+                        updatedAtMs = System.currentTimeMillis(),
+                    )
+                    persistLocked()
+                    publishLocked()
+                }
+            }
+        }
+        pollOnce()
+    }
+
+    suspend fun retryOutcomeUnknownTask(
+        conversationId: String,
+        workItemId: String,
+        requestId: String,
+    ): CloudDialogueSubmission {
+        val promptText = mutex.withLock {
+            val task = tasksById[workItemId]
+            val originalText = submissionsByRequestId.values
+                .firstOrNull {
+                    it.kind == CloudSubmissionKind.MESSAGE &&
+                        (workItemId in it.workItemIds || (task != null && it.topicId == task.topicId))
+                }
+                ?.text
+                ?.takeIf { it.isNotBlank() }
+                ?: task?.title?.takeIf { it.isNotBlank() }
+                ?: workItemId
+            if (task != null) {
+                tasksById[workItemId] = task.copy(
+                    outcomeUnknown = false,
+                    outcomeUnknownAbandoned = true,
+                    active = false,
+                    updatedAtMs = System.currentTimeMillis(),
+                )
+                persistLocked()
+                publishLocked()
+            }
+            originalText
+        }
+        return sendMessage(
+            conversationId = conversationId,
+            text = promptText,
+            requestId = requestId,
+        )
+    }
+
+    suspend fun abandonOutcomeUnknownTask(workItemId: String) = mutex.withLock {
+        val existing = tasksById[workItemId] ?: return@withLock
+        tasksById[workItemId] = existing.copy(
+            active = false,
+            outcomeUnknown = false,
+            outcomeUnknownAbandoned = true,
+            outcome = existing.outcome ?: "abandoned",
+            updatedAtMs = System.currentTimeMillis(),
+        )
+        persistLocked()
+        publishLocked()
+    }
+
     suspend fun pollOnce() {
         val client = clientProvider() ?: return
-        val currentCursor = mutex.withLock { cursor }
+        val (currentCursor, boundConversationId) = mutex.withLock { cursor to activeConversationId }
         try {
-            val page = client.events(after = currentCursor, limit = 100)
+            val page = client.events(
+                after = currentCursor,
+                limit = 100,
+                conversationId = boundConversationId,
+            )
             page.soulRevision?.let { rev ->
                 runCatching { onSoulRevision(rev) }
             }
             mutex.withLock {
                 var dirty = false
-                for (event in page.items.sortedBy { it.seq }) {
+                val sortedItems = page.items.sortedBy { it.seq }
+                for (event in sortedItems) {
                     if (!seenEventIds.add(event.id)) continue
                     dirty = true
                     applyEventLocked(event)
                 }
-                if (page.items.isNotEmpty() && page.nextCursor > cursor) {
-                    cursor = page.nextCursor
+                val maxItemSeq = sortedItems.maxOfOrNull { it.seq } ?: 0L
+                val nextCursor = maxOf(page.nextCursor, maxItemSeq)
+                if (page.items.isNotEmpty() && nextCursor > cursor) {
+                    cursor = nextCursor
                     dirty = true
                 }
                 if (dirty) {
@@ -511,7 +665,7 @@ class CloudDialogueCoordinator(
                 }
             }
 
-            val pendingReceiptIds = mutex.withLock {
+            val pendingReceiptRequests = mutex.withLock {
                 submissionsByRequestId.values
                     .filter { sub ->
                         sub.eventId != null && (
@@ -519,24 +673,32 @@ class CloudDialogueCoordinator(
                                 (sub.kind == CloudSubmissionKind.MESSAGE && !sub.receiptSyncedAfterConsumed)
                             )
                     }
-                    .map { it.requestId }
+                    .map { it.requestId to it.conversationId }
             }
             var receiptsUpdated = false
-            for (reqId in pendingReceiptIds) {
-                val receipt = runCatching { client.receipts(reqId) }.getOrNull() ?: continue
+            for ((reqId, subConversationId) in pendingReceiptRequests) {
+                val receipt = runCatching {
+                    client.receipts(
+                        requestId = reqId,
+                        conversationId = subConversationId.takeIf { it.isNotBlank() } ?: boundConversationId,
+                    )
+                }.getOrNull() ?: continue
                 mutex.withLock {
                     val existing = submissionsByRequestId[reqId] ?: return@withLock
                     val disposition = CloudInputDisposition.fromWire(receipt.state)
                     val synced = disposition != CloudInputDisposition.RECEIVED
                     val mergedWorkIds = if (receipt.workItemIds.isNotEmpty()) receipt.workItemIds else existing.workItemIds
+                    val resolvedConversation = receipt.conversationId?.takeIf { it.isNotBlank() } ?: existing.conversationId
                     val next = existing.copy(
                         eventId = receipt.eventId,
                         topicId = receipt.topicId,
+                        conversationId = resolvedConversation,
                         workItemIds = mergedWorkIds,
                         state = disposition,
                         replayed = receipt.replayed,
                         receiptSyncedAfterConsumed = synced,
-                        updatedAtMs = if (existing.state != disposition || existing.workItemIds != mergedWorkIds) {
+                        outcomeUnknown = receipt.outcomeUnknown || existing.outcomeUnknown,
+                        updatedAtMs = if (existing.state != disposition || existing.workItemIds != mergedWorkIds || existing.outcomeUnknown != (receipt.outcomeUnknown || existing.outcomeUnknown)) {
                             System.currentTimeMillis()
                         } else {
                             existing.updatedAtMs
@@ -551,8 +713,13 @@ class CloudDialogueCoordinator(
                         registerWorkItemsLocked(
                             workItemIds = mergedWorkIds,
                             topicId = receipt.topicId,
-                            conversationId = existing.conversationId,
+                            conversationId = resolvedConversation,
                             titleHint = existing.text,
+                            parentRunId = receipt.parentRunId,
+                            executorKind = receipt.executorKind,
+                            executorId = receipt.executorId,
+                            epoch = receipt.epoch,
+                            outcomeUnknown = receipt.outcomeUnknown,
                         )
                         if (tasksById != before) receiptsUpdated = true
                     }
@@ -575,7 +742,11 @@ class CloudDialogueCoordinator(
     }
 
     private suspend fun applyEventLocked(event: CloudDialogueEvent) {
-        val resolvedConvId = resolveConversationIdLocked(event.topicId, event.workItemId)
+        val resolvedConvId = resolveConversationIdLocked(
+            conversationId = event.conversationId,
+            topicId = event.topicId,
+            workItemId = event.workItemId,
+        )
         if (resolvedConvId != null && event.topicId.isNotBlank()) {
             topicToConversation.putIfAbsent(event.topicId, resolvedConvId)
         }
@@ -583,9 +754,14 @@ class CloudDialogueCoordinator(
 
         when (event.kind) {
             "user_message", "followup" -> {
-                val matchedSub = submissionsByRequestId.values.firstOrNull { it.eventId == event.id }
+                val matchedSub = submissionsByRequestId.values.firstOrNull {
+                    it.eventId == event.id ||
+                        (!event.causedByRequestId.isNullOrBlank() && it.requestId == event.causedByRequestId)
+                }
                 if (matchedSub != null) {
-                    topicToConversation[event.topicId] = matchedSub.conversationId
+                    if (event.topicId.isNotBlank()) {
+                        topicToConversation[event.topicId] = matchedSub.conversationId
+                    }
                 } else if (event.id !in localEchoedEventIds && resolvedConvId != null && event.text.isNotBlank()) {
                     localEchoedEventIds.add(event.id)
                     timelineSink.appendUserMessage(resolvedConvId, event.text, event.id)
@@ -598,20 +774,55 @@ class CloudDialogueCoordinator(
                 if (current != null && current.active) {
                     tasksById[workId] = current.copy(
                         progressText = event.text.ifBlank { current.progressText },
+                        parentRunId = event.parentRunId ?: current.parentRunId,
+                        executorKind = event.executorKind ?: current.executorKind,
+                        executorId = event.executorId ?: current.executorId,
+                        epoch = event.epoch ?: current.epoch,
                         updatedAtMs = now,
                     )
                 }
             }
 
-            "assistant_reply" -> {
-                if (event.id.startsWith("reply:")) {
-                    val sourceInputId = event.id.removePrefix("reply:").substringBeforeLast(':')
-                    updateSubmissionByEventIdLocked(sourceInputId) { sub ->
-                        sub.copy(
-                            state = CloudInputDisposition.CONSUMED,
+            "stop_too_late" -> {
+                val notice = event.text.ifBlank { "任务已完成，停止请求到达过晚" }
+                updateSubmissionByCausalKeysLocked(
+                    event = event,
+                    legacyPrefix = "stop_too_late:",
+                ) { sub ->
+                    sub.copy(
+                        state = CloudInputDisposition.CANCELLED,
+                        stopTooLate = true,
+                        statusNote = notice,
+                        receiptSyncedAfterConsumed = true,
+                        updatedAtMs = now,
+                    )
+                }
+                val workId = event.workItemId
+                if (!workId.isNullOrBlank()) {
+                    val existing = tasksById[workId]
+                    if (existing != null) {
+                        tasksById[workId] = existing.copy(
+                            stopTooLateNotice = notice,
+                            parentRunId = event.parentRunId ?: existing.parentRunId,
+                            executorKind = event.executorKind ?: existing.executorKind,
+                            executorId = event.executorId ?: existing.executorId,
+                            epoch = event.epoch ?: existing.epoch,
                             updatedAtMs = now,
                         )
                     }
+                }
+            }
+
+            "assistant_reply" -> {
+                updateSubmissionByCausalKeysLocked(
+                    event = event,
+                    legacyPrefix = "reply:",
+                    stripSuffixAfterLastColon = true,
+                ) { sub ->
+                    sub.copy(
+                        state = CloudInputDisposition.CONSUMED,
+                        updatedAtMs = now,
+                    )
                 }
                 if (resolvedConvId != null && event.text.isNotBlank()) {
                     timelineSink.appendAssistantReply(
@@ -639,14 +850,20 @@ class CloudDialogueCoordinator(
                     )).copy(
                         progressText = event.text,
                         processEventCount = (existing?.processEventCount ?: 0) + 1,
+                        parentRunId = event.parentRunId ?: existing?.parentRunId,
+                        executorKind = event.executorKind ?: existing?.executorKind,
+                        executorId = event.executorId ?: existing?.executorId,
+                        epoch = event.epoch ?: existing?.epoch,
                         updatedAtMs = now,
                     )
                 }
             }
 
             "input_consumed" -> {
-                val sourceInputId = event.id.removePrefix("consumed:")
-                updateSubmissionByEventIdLocked(sourceInputId) { sub ->
+                updateSubmissionByCausalKeysLocked(
+                    event = event,
+                    legacyPrefix = "consumed:",
+                ) { sub ->
                     sub.copy(
                         state = CloudInputDisposition.CONSUMED,
                         receiptSyncedAfterConsumed = true,
@@ -659,6 +876,10 @@ class CloudDialogueCoordinator(
                     if (existing != null && existing.active) {
                         tasksById[workId] = existing.copy(
                             progressText = event.text.ifBlank { existing.progressText },
+                            parentRunId = event.parentRunId ?: existing.parentRunId,
+                            executorKind = event.executorKind ?: existing.executorKind,
+                            executorId = event.executorId ?: existing.executorId,
+                            epoch = event.epoch ?: existing.epoch,
                             updatedAtMs = now,
                         )
                     }
@@ -666,8 +887,10 @@ class CloudDialogueCoordinator(
             }
 
             "input_cancelled" -> {
-                val sourceInputId = event.id.removePrefix("cancelled:")
-                updateSubmissionByEventIdLocked(sourceInputId) { sub ->
+                updateSubmissionByCausalKeysLocked(
+                    event = event,
+                    legacyPrefix = "cancelled:",
+                ) { sub ->
                     sub.copy(
                         state = CloudInputDisposition.CANCELLED,
                         receiptSyncedAfterConsumed = true,
@@ -679,9 +902,13 @@ class CloudDialogueCoordinator(
             "task_result" -> {
                 val workId = event.workItemId ?: event.topicId
                 val existing = tasksById[workId]
-                val convId = existing?.conversationId ?: resolvedConvId
+                val convId = existing?.conversationId?.takeIf { it.isNotBlank() } ?: resolvedConvId
                 val title = existing?.title ?: titleForTopicLocked(event.topicId, workId)
-                val outcome = event.outcome ?: "completed"
+                val outcome = event.outcome ?: if (event.outcomeUnknown) "outcome_unknown" else "completed"
+                val mergedRefs = (existing?.sourceRefs.orEmpty() + event.sourceRefs.orEmpty())
+                    .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                val mergedPaths = (existing?.sourcePaths.orEmpty() + event.sourcePaths.orEmpty())
+                    .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
                 if (workId.isNotBlank()) {
                     tasksById[workId] = (existing ?: CloudTaskSession(
                         workItemId = workId,
@@ -693,6 +920,14 @@ class CloudDialogueCoordinator(
                         outcome = outcome,
                         resultText = event.text,
                         progressText = null,
+                        outcomeUnknown = event.outcomeUnknown,
+                        outcomeUnknownAbandoned = if (event.outcomeUnknown) false else (existing?.outcomeUnknownAbandoned ?: false),
+                        sourceRefs = mergedRefs,
+                        sourcePaths = mergedPaths,
+                        parentRunId = event.parentRunId ?: existing?.parentRunId,
+                        executorKind = event.executorKind ?: existing?.executorKind,
+                        executorId = event.executorId ?: existing?.executorId,
+                        epoch = event.epoch ?: existing?.epoch,
                         updatedAtMs = now,
                     )
                     if (selectedFollowupWorkItemId == workId) {
@@ -722,13 +957,26 @@ class CloudDialogueCoordinator(
                         text = event.text,
                         eventId = event.id,
                         topicId = event.topicId,
+                        sourceRefs = mergedRefs,
+                        sourcePaths = mergedPaths,
+                        outcomeUnknown = event.outcomeUnknown,
                     )
                 }
+            }
+
+            else -> {
+                // Unknown Contract v1 event kinds (including future extensions) are safely skipped
+                // so the seen-set and cursor still advance without stalling polling.
             }
         }
     }
 
-    private fun resolveConversationIdLocked(topicId: String, workItemId: String?): String? {
+    private fun resolveConversationIdLocked(
+        conversationId: String?,
+        topicId: String,
+        workItemId: String?,
+    ): String? {
+        conversationId?.takeIf { it.isNotBlank() }?.let { return it }
         if (topicId.isNotBlank()) {
             topicToConversation[topicId]?.let { return it }
             submissionsByRequestId.values.firstOrNull { it.topicId == topicId }?.conversationId?.let { return it }
@@ -754,6 +1002,11 @@ class CloudDialogueCoordinator(
         topicId: String,
         conversationId: String,
         titleHint: String,
+        parentRunId: String? = null,
+        executorKind: String? = null,
+        executorId: String? = null,
+        epoch: Long? = null,
+        outcomeUnknown: Boolean = false,
     ) {
         val now = System.currentTimeMillis()
         workItemIds.forEach { workId ->
@@ -765,20 +1018,58 @@ class CloudDialogueCoordinator(
                     topicId = topicId,
                     conversationId = conversationId,
                     title = normalizedTitle(titleHint, workId),
-                    active = true,
+                    active = !outcomeUnknown,
+                    outcomeUnknown = outcomeUnknown,
+                    parentRunId = parentRunId,
+                    executorKind = executorKind,
+                    executorId = executorId,
+                    epoch = epoch,
                     updatedAtMs = now,
                 )
-            } else if (existing.conversationId.isBlank() && conversationId.isNotBlank()) {
-                tasksById[workId] = existing.copy(conversationId = conversationId)
+            } else {
+                tasksById[workId] = existing.copy(
+                    conversationId = existing.conversationId.ifBlank { conversationId },
+                    parentRunId = parentRunId ?: existing.parentRunId,
+                    executorKind = executorKind ?: existing.executorKind,
+                    executorId = executorId ?: existing.executorId,
+                    epoch = epoch ?: existing.epoch,
+                    outcomeUnknown = outcomeUnknown || existing.outcomeUnknown,
+                )
             }
         }
     }
 
-    private fun updateSubmissionByEventIdLocked(
-        eventId: String,
+    /**
+     * Resolves the submission caused by [event] using Contract v1 causal precedence:
+     * 1. `causedByInputId` matching `submission.eventId`
+     * 2. `causedByRequestId` matching `submission.requestId`
+     * 3. Legacy prefix fallback on `event.id` (`consumed:<id>`, `cancelled:<id>`, `stop_too_late:<id>`, `reply:<id>:...`)
+     */
+    private fun updateSubmissionByCausalKeysLocked(
+        event: CloudDialogueEvent,
+        legacyPrefix: String,
+        stripSuffixAfterLastColon: Boolean = false,
         transform: (CloudDialogueSubmission) -> CloudDialogueSubmission,
     ) {
-        val match = submissionsByRequestId.values.firstOrNull { it.eventId == eventId } ?: return
+        val byInputId = event.causedByInputId
+            ?.takeIf { it.isNotBlank() }
+            ?.let { inputId -> submissionsByRequestId.values.firstOrNull { it.eventId == inputId } }
+        val byRequestId = if (byInputId == null) {
+            event.causedByRequestId
+                ?.takeIf { it.isNotBlank() }
+                ?.let { reqId -> submissionsByRequestId[reqId] }
+        } else {
+            null
+        }
+        val byLegacyPrefix = if (byInputId == null && byRequestId == null && event.id.startsWith(legacyPrefix)) {
+            val raw = event.id.removePrefix(legacyPrefix)
+            val sourceInputId = if (stripSuffixAfterLastColon) raw.substringBeforeLast(':') else raw
+            sourceInputId.takeIf { it.isNotBlank() }
+                ?.let { inputId -> submissionsByRequestId.values.firstOrNull { it.eventId == inputId } }
+        } else {
+            null
+        }
+        val match = byInputId ?: byRequestId ?: byLegacyPrefix ?: return
         submissionsByRequestId[match.requestId] = transform(match)
     }
 

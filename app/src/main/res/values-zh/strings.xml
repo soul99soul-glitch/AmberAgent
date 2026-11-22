@@ -3808,7 +3808,13 @@
   <string name="mac_gateway_error_generic">操作失败：%1$s</string>
   <string name="mac_gateway_approval_approve">批准</string>
   <string name="mac_gateway_approval_deny">拒绝</string>
-  <string name="mac_gateway_approval_high_risk_hint">高风险操作请回 Mac 批准</string>
+  <string name="mac_gateway_approval_high_risk_hint">请在 Mac 上批准</string>
+  <string name="mac_gateway_approval_diff_preview">只读差异预览</string>
+  <string name="mac_gateway_cloud_receipt_stop_too_late">停止过晚 (stop_too_late)</string>
+  <string name="mac_gateway_cloud_outcome_unknown_hint">执行结果未知，请选择处理方式</string>
+  <string name="mac_gateway_cloud_action_recheck">重查</string>
+  <string name="mac_gateway_cloud_action_retry">重试</string>
+  <string name="mac_gateway_cloud_action_abandon">放弃</string>
   <string name="mac_gateway_cloud_dialogue_section">云主对话</string>
   <string name="mac_gateway_cloud_dialogue_title">云主对话</string>
   <string name="mac_gateway_cloud_dialogue_desc">开启后主对话消息交给已配对的云端异步执行；未开启时本地聊天行为完全不变。</string>

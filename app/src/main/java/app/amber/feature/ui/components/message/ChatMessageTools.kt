@@ -139,6 +139,13 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 tool = tool,
                 arguments = arguments,
             )
+            val (a11yNotice, a11yExtraContent) = rememberAccessibilityApprovalState(
+                tool = tool,
+                arguments = arguments,
+            )
+            val combinedNotice = listOfNotNull(a11yNotice, jevApprovalNotice(tool))
+                .takeIf { it.isNotEmpty() }
+                ?.joinToString("\n")
             ChatToolApprovalCard(
                 title = title,
                 toolName = tool.toolName,
@@ -153,8 +160,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 onApprove = { onToolApproval?.invoke(tool.toolCallId, true, "") },
                 actionsEnabled = onToolApproval != null,
                 approveEnabled = sshCanApprove,
-                notice = jevApprovalNotice(tool),
-                extraContent = sshExtraContent,
+                notice = combinedNotice,
+                extraContent = sshExtraContent ?: a11yExtraContent,
             )
         } else {
             AgentToolCallCapsule(

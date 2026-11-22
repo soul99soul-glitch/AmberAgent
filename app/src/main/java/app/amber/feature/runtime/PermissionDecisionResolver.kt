@@ -16,6 +16,7 @@ import app.amber.feature.tools.capability
 import app.amber.feature.tools.invocationPolicy
 import app.amber.feature.tools.Capability
 import app.amber.feature.tools.CapabilityPolicy
+import app.amber.feature.tools.isAccessibilityL3ActionTool
 import app.amber.core.ai.tools.TOOL_THEME_PACK_IMPORT
 import app.amber.core.utils.JsonInstant
 import app.amber.agent.R
@@ -64,6 +65,7 @@ data class PermissionDecisionTrace(
             put("policy", buildJsonObject {
                 put("category", policy.category)
                 put("risk", policy.risk.name.lowercase())
+                put("risk_level", policy.riskLevel)
                 put("mutates", policy.mutates)
                 put("needs_approval", policy.needsApproval)
                 put("auto_approvable", policy.autoApprovable)
@@ -213,6 +215,7 @@ class PermissionDecisionResolver(
         capabilityPermissions: CapabilityPermissionState? = null,
         permissionContext: CapabilityPermissionContext? = null,
         strings: PermissionDecisionStrings? = null,
+        accessibilityDelegationGranted: Boolean = false,
     ): PermissionDecision {
         val localized = strings
             ?: appContext?.let(PermissionDecisionStrings::from)
@@ -327,6 +330,18 @@ class PermissionDecisionResolver(
                 }
                 policy = adjustment.adjusted
             }
+        }
+        // Default L3 step-by-step confirmation guard for Android accessibility cross-app write
+        // actions: until a delegation ledger accumulates sufficient approval history, never
+        // silently skip explicit user confirmation (even under auto-approve or high-risk switches).
+        // Read-only screen observations (L1) are excluded and flow through unchanged.
+        if (isAccessibilityL3ActionTool(tool.toolName) && !accessibilityDelegationGranted) {
+            return decision(
+                PermissionDecisionAction.ASK,
+                "无障碍跨应用代操作默认按 L3 高风险逐步确认，每步执行前需您明确批准。",
+                "accessibility_l3_guard",
+                policy,
+            )
         }
         // This switch is itself explicit consent for unattended execution;
         // it must not silently depend on the separate regular-tool switch.

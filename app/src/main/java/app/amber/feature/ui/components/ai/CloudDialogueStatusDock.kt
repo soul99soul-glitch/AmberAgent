@@ -44,16 +44,21 @@ internal fun CloudDialogueStatusDock(
     uiState: CloudDialogueUiState,
     onSelectFollowupTarget: (String?) -> Unit,
     onStopTask: (String) -> Unit,
+    onRecheckOutcomeUnknown: (String) -> Unit = {},
+    onRetryOutcomeUnknown: (String) -> Unit = {},
+    onAbandonOutcomeUnknown: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val activeTasks = uiState.activeTasksForConversation(conversationId)
+    val unknownTasks = uiState.outcomeUnknownTasksForConversation(conversationId)
     val recentInputs = uiState.submissionsForConversation(conversationId)
         .filter {
             it.kind == CloudSubmissionKind.FOLLOWUP ||
+                it.stopTooLate ||
                 (cloudActive && it.kind == CloudSubmissionKind.MESSAGE)
         }
         .take(3)
-    if (!cloudActive && activeTasks.isEmpty() && recentInputs.isEmpty()) return
+    if (!cloudActive && activeTasks.isEmpty() && unknownTasks.isEmpty() && recentInputs.isEmpty()) return
 
     val workspace = workspaceColors()
     val targetTask = uiState.resolvedFollowupTarget(conversationId)
@@ -112,6 +117,15 @@ internal fun CloudDialogueStatusDock(
                         onSelectFollowupTarget(next)
                     },
                     onStop = { onStopTask(task.workItemId) },
+                )
+            }
+
+            unknownTasks.forEach { task ->
+                CloudOutcomeUnknownRow(
+                    task = task,
+                    onRecheck = { onRecheckOutcomeUnknown(task.workItemId) },
+                    onRetry = { onRetryOutcomeUnknown(task.workItemId) },
+                    onAbandon = { onAbandonOutcomeUnknown(task.workItemId) },
                 )
             }
 
@@ -202,19 +216,117 @@ private fun CloudActiveTaskRow(
 }
 
 @Composable
+private fun CloudOutcomeUnknownRow(
+    task: CloudTaskSession,
+    onRecheck: () -> Unit,
+    onRetry: () -> Unit,
+    onAbandon: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val sources = (task.sourceRefs + task.sourcePaths)
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "${task.title} · ${stringResource(R.string.mac_gateway_cloud_outcome_unknown_hint)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (sources.isNotEmpty()) {
+            Text(
+                text = sources.joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                color = workspace.faint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CloudRecoveryChip(
+                label = stringResource(R.string.mac_gateway_cloud_action_recheck),
+                primary = true,
+                onClick = onRecheck,
+            )
+            CloudRecoveryChip(
+                label = stringResource(R.string.mac_gateway_cloud_action_retry),
+                primary = false,
+                onClick = onRetry,
+            )
+            CloudRecoveryChip(
+                label = stringResource(R.string.mac_gateway_cloud_action_abandon),
+                danger = true,
+                onClick = onAbandon,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CloudRecoveryChip(
+    label: String,
+    primary: Boolean = false,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val container = when {
+        danger -> MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
+        primary -> MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+        else -> workspace.paper
+    }
+    val border = when {
+        danger -> MaterialTheme.colorScheme.error.copy(alpha = 0.4f)
+        primary -> MaterialTheme.colorScheme.primary
+        else -> workspace.hairline
+    }
+    val textColor = when {
+        danger -> MaterialTheme.colorScheme.error
+        primary -> MaterialTheme.colorScheme.primary
+        else -> workspace.ink
+    }
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = container,
+        border = BorderStroke(1.dp, border),
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = textColor,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    }
+}
+
+@Composable
 private fun CloudSubmissionReceiptRow(
     submission: CloudDialogueSubmission,
 ) {
     val workspace = workspaceColors()
-    val badgeText = when (submission.state) {
-        CloudInputDisposition.RECEIVED -> stringResource(R.string.mac_gateway_cloud_receipt_received)
-        CloudInputDisposition.CONSUMED -> stringResource(R.string.mac_gateway_cloud_receipt_consumed)
-        CloudInputDisposition.CANCELLED -> stringResource(R.string.mac_gateway_cloud_receipt_cancelled)
+    val badgeText = when {
+        submission.stopTooLate -> stringResource(R.string.mac_gateway_cloud_receipt_stop_too_late)
+        submission.state == CloudInputDisposition.RECEIVED -> stringResource(R.string.mac_gateway_cloud_receipt_received)
+        submission.state == CloudInputDisposition.CONSUMED -> stringResource(R.string.mac_gateway_cloud_receipt_consumed)
+        else -> stringResource(R.string.mac_gateway_cloud_receipt_cancelled)
     }
-    val badgeColor = when (submission.state) {
-        CloudInputDisposition.RECEIVED -> workspace.muted
-        CloudInputDisposition.CONSUMED -> MaterialTheme.colorScheme.primary
-        CloudInputDisposition.CANCELLED -> MaterialTheme.colorScheme.error
+    val badgeColor = when {
+        submission.stopTooLate -> MaterialTheme.colorScheme.error
+        submission.state == CloudInputDisposition.RECEIVED -> workspace.muted
+        submission.state == CloudInputDisposition.CONSUMED -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.error
     }
 
     Row(
@@ -223,7 +335,8 @@ private fun CloudSubmissionReceiptRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = submission.text.lineSequence().firstOrNull().orEmpty(),
+            text = submission.statusNote?.takeIf { submission.stopTooLate && it.isNotBlank() }
+                ?: submission.text.lineSequence().firstOrNull().orEmpty(),
             style = MaterialTheme.typography.labelSmall,
             color = workspace.faint,
             maxLines = 1,

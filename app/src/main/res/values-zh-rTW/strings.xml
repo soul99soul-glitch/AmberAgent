@@ -3744,7 +3744,13 @@
   <string name="mac_gateway_error_generic">操作失敗：%1$s</string>
   <string name="mac_gateway_approval_approve">批准</string>
   <string name="mac_gateway_approval_deny">拒絕</string>
-  <string name="mac_gateway_approval_high_risk_hint">高風險操作請回 Mac 批准</string>
+  <string name="mac_gateway_approval_high_risk_hint">請在 Mac 上批准</string>
+  <string name="mac_gateway_approval_diff_preview">唯讀差異預覽</string>
+  <string name="mac_gateway_cloud_receipt_stop_too_late">停止過晚 (stop_too_late)</string>
+  <string name="mac_gateway_cloud_outcome_unknown_hint">執行結果未知，請選擇處理方式</string>
+  <string name="mac_gateway_cloud_action_recheck">重查</string>
+  <string name="mac_gateway_cloud_action_retry">重試</string>
+  <string name="mac_gateway_cloud_action_abandon">放棄</string>
   <string name="mac_gateway_cloud_dialogue_section">雲主對話</string>
   <string name="mac_gateway_cloud_dialogue_title">雲主對話</string>
   <string name="mac_gateway_cloud_dialogue_desc">開啟後主對話訊息交給已配對的雲端非同步執行；未開啟時本機聊天行為完全不變。</string>
