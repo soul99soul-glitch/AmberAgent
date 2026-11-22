@@ -1,5 +1,7 @@
 package app.amber.ai.provider.providers.openai
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
@@ -24,12 +26,15 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.HttpURLConnection
+import java.net.Socket
 import java.net.URL
 import java.net.URLEncoder
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.Signature
+import java.security.interfaces.ECPublicKey
 import java.security.interfaces.RSAPublicKey
+import java.security.spec.ECGenParameterSpec
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -53,7 +58,7 @@ class OpenAIChatGptSiwcOAuthTest {
     private fun generateRsaKeyPair(): KeyPair =
         KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
 
-    private fun rsaJwkJson(kid: String, publicKey: RSAPublicKey): String {
+    private fun rsaJwkJson(kid: String, publicKey: RSAPublicKey, alg: String = "RS256"): String {
         val n = publicKey.modulus.toByteArray().let { if (it.size > 1 && it[0] == 0.toByte()) it.copyOfRange(1, it.size) else it }
         val e = publicKey.publicExponent.toByteArray().let { if (it.size > 1 && it[0] == 0.toByte()) it.copyOfRange(1, it.size) else it }
         return buildJsonObject {
@@ -61,7 +66,7 @@ class OpenAIChatGptSiwcOAuthTest {
                 add(buildJsonObject {
                     put("kty", "RSA")
                     put("use", "sig")
-                    put("alg", "RS256")
+                    put("alg", alg)
                     put("kid", kid)
                     put("n", base64UrlEncode(n))
                     put("e", base64UrlEncode(e))
@@ -79,10 +84,11 @@ class OpenAIChatGptSiwcOAuthTest {
         nonce: String,
         email: String? = "user@example.com",
         expSeconds: Long = System.currentTimeMillis() / 1000L + 3600L,
+        alg: String = "RS256",
     ): String {
         val header = base64UrlEncode(
             buildJsonObject {
-                put("alg", "RS256")
+                put("alg", alg)
                 put("typ", "JWT")
                 put("kid", kid)
             }.toString().toByteArray(Charsets.UTF_8)
@@ -98,7 +104,8 @@ class OpenAIChatGptSiwcOAuthTest {
             }.toString().toByteArray(Charsets.UTF_8)
         )
         val signingInput = "$header.$payload"
-        val sig = Signature.getInstance("SHA256withRSA").run {
+        val signatureAlgorithm = if (alg == "ES256") "SHA256withECDSAinP1363Format" else "SHA${alg.removePrefix("RS")}withRSA"
+        val sig = Signature.getInstance(signatureAlgorithm).run {
             initSign(keyPair.private)
             update(signingInput.toByteArray(Charsets.US_ASCII))
             sign()
@@ -226,9 +233,11 @@ class OpenAIChatGptSiwcOAuthTest {
         val client = OpenAIChatGptSiwcOAuthClient(http, store)
         val providerId = Uuid.random()
 
+        val browserClosed = CompletableDeferred<Unit>()
         val tokens = withTimeout(10_000) {
             client.authorize(
                 providerId = providerId,
+                browserClosed = browserClosed,
                 openBrowser = { authUrlString ->
                     val authUrl = authUrlString.toHttpUrl()
                     val redirectUri = authUrl.queryParameter("redirect_uri")!!
@@ -243,6 +252,8 @@ class OpenAIChatGptSiwcOAuthTest {
                     // Fire non-callback /favicon.ico first (must be ignored), then actual callback
                     launch(Dispatchers.IO) {
                         val base = redirectUri.substringBefore("/auth/callback")
+                        // A browser can discard a speculative connection without sending a request.
+                        Socket("127.0.0.1", URL(redirectUri).port).close()
                         (URL("$base/favicon.ico").openConnection() as HttpURLConnection).run {
                             assertEquals(404, responseCode)
                             disconnect()
@@ -252,6 +263,7 @@ class OpenAIChatGptSiwcOAuthTest {
                             assertEquals(200, responseCode)
                             val html = inputStream.bufferedReader().readText()
                             assertTrue(html.contains("Sign-in received"))
+                            browserClosed.complete(Unit)
                             disconnect()
                         }
                     }
@@ -277,6 +289,53 @@ class OpenAIChatGptSiwcOAuthTest {
 
         store.markWelcomeShown(providerId)
         assertTrue(store.get(providerId)!!.welcomeShown)
+    }
+
+    @Test
+    fun browserBackCancelsPendingCallbackWhileAnUnansweredTabTimesOut() = runBlocking {
+        val client = OpenAIChatGptSiwcOAuthClient(OkHttpClient(), OpenAIChatGptSiwcAuthStore(InMemorySiwcStore()))
+        val providerId = Uuid.random()
+        val browserClosed = CompletableDeferred<Unit>()
+        withTimeout(3_000) {
+            val closed = runCatching {
+                client.authorize(providerId, openBrowser = { browserClosed.complete(Unit) }, browserClosed = browserClosed)
+            }.exceptionOrNull()
+            assertTrue(closed is CancellationException)
+            val timeout = runCatching {
+                client.authorize(providerId, openBrowser = {}, timeoutMillis = 100)
+            }.exceptionOrNull()
+            assertTrue(timeout?.message.orEmpty().contains("timed out"))
+        }
+    }
+
+    @Test
+    fun discoveredIssuerAndSigningKeyAlgorithmMustMatchTheVerifiedRegistration() = runBlocking {
+        val rsa = generateRsaKeyPair()
+        val ec = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        val point = (ec.public as ECPublicKey).w
+        val ecKeys = """{"keys":[{"kid":"ec","kty":"EC","crv":"P-256","alg":"ES256","x":"${base64UrlEncode(point.affineX.toByteArray())}","y":"${base64UrlEncode(point.affineY.toByteArray())}"}]}"""
+        var metadataIssuer = OPENAI_CHATGPT_SIWC_ISSUER
+        var keys = ecKeys
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val body = if (request.url.toString() == OPENAI_CHATGPT_SIWC_OIDC_CONFIG_URL) {
+                """{"issuer":"$metadataIssuer","jwks_uri":"$OPENAI_CHATGPT_SIWC_DEFAULT_JWKS_URL"}"""
+            } else keys
+            jsonResponse(request, 200, body)
+        }.build()
+        suspend fun verify(token: String) = OpenAIChatGptSiwcIdTokenValidator(http).validate(token, "client", "nonce")
+        val ecToken = signIdToken(ec, "ec", aud = "client", sub = "user", nonce = "nonce", alg = "ES256")
+        assertEquals("user", verify(ecToken).subject)
+        metadataIssuer = "https://other.example"
+        assertTrue(runCatching { verify(ecToken) }.isFailure)
+        metadataIssuer = OPENAI_CHATGPT_SIWC_ISSUER
+        for (alg in listOf("RS384", "RS512")) {
+            val token = signIdToken(rsa, "rsa", aud = "client", sub = "user", nonce = "nonce", alg = alg)
+            keys = rsaJwkJson("rsa", rsa.public as RSAPublicKey, alg)
+            assertEquals("user", verify(token).subject)
+            keys = rsaJwkJson("rsa", rsa.public as RSAPublicKey, "RS256")
+            assertTrue(runCatching { verify(token) }.isFailure)
+        }
     }
 
     @Test
@@ -325,7 +384,7 @@ class OpenAIChatGptSiwcOAuthTest {
     }
 
     @Test
-    fun authorizeRejectsMissingDirectUsageScope() = runBlocking {
+    fun missingDirectUsageScopeRetainsVerifiedRegistrationButCannotCallModels() = runBlocking {
         val keyPair = generateRsaKeyPair()
         val kid = "k-scope"
         val capturedNonce = AtomicReferenceCompat<String>()
@@ -351,31 +410,33 @@ class OpenAIChatGptSiwcOAuthTest {
         val client = OpenAIChatGptSiwcOAuthClient(http, store)
         val providerId = Uuid.random()
 
-        val failure = runCatching {
-            withTimeout(10_000) {
-                client.authorize(providerId, openBrowser = { authUrlString ->
-                    val url = authUrlString.toHttpUrl()
-                    capturedNonce.value = url.queryParameter("nonce")!!
-                    val redirectUri = url.queryParameter("redirect_uri")!!
-                    val state = url.queryParameter("state")!!
-                    launch(Dispatchers.IO) {
-                        val cb = "$redirectUri?code=c1&state=${URLEncoder.encode(state, "UTF-8")}&client_id=oaiapp_scope"
-                        (URL(cb).openConnection() as HttpURLConnection).run { responseCode; disconnect() }
-                    }
-                })
-            }
-        }.exceptionOrNull()
-
-        assertNotNull(failure)
-        assertTrue(failure!!.message!!.contains(OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE))
-        assertNull(store.get(providerId))
+        withTimeout(10_000) {
+            client.authorize(providerId, openBrowser = { authUrlString ->
+                val url = authUrlString.toHttpUrl()
+                capturedNonce.value = url.queryParameter("nonce")!!
+                val redirectUri = url.queryParameter("redirect_uri")!!
+                val state = url.queryParameter("state")!!
+                launch(Dispatchers.IO) {
+                    val cb = "$redirectUri?code=c1&state=${URLEncoder.encode(state, "UTF-8")}&client_id=oaiapp_scope"
+                    (URL(cb).openConnection() as HttpURLConnection).run { responseCode; disconnect() }
+                }
+            })
+        }
+        val record = store.getRecord(providerId)!!
+        assertEquals("oaiapp_scope", record.clientId)
+        assertEquals("sub_1", record.subject)
+        assertFalse(record.isUsable())
+        val failure = runCatching { client.listModels(providerId) }.exceptionOrNull()
+        assertTrue(failure?.message.orEmpty().contains(OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE))
     }
 
     @Test
     fun refreshRotatesTokenClearsOnInvalidGrantAndPreservesClientIdOnSignOut() = runBlocking {
         val forms = CopyOnWriteArrayList<Map<String, String>>()
         val revoked = CopyOnWriteArrayList<Map<String, String>>()
-        var failWithInvalidGrant = false
+        val store = OpenAIChatGptSiwcAuthStore(InMemorySiwcStore())
+        val providerId = Uuid.random()
+        var refreshError: String? = null
         val http = OkHttpClient.Builder().addInterceptor { chain ->
             val request = chain.request()
             when (request.url.encodedPath) {
@@ -385,9 +446,11 @@ class OpenAIChatGptSiwcOAuthTest {
                 )
                 "/api/accounts/oauth/token" -> {
                     forms += readFormParams(request)
-                    if (failWithInvalidGrant) {
-                        jsonResponse(request, 400, """{"error":"invalid_grant","error_description":"revoked"}""")
+                    val error = refreshError
+                    if (error != null) {
+                        jsonResponse(request, 400, error)
                     } else {
+                        store.markWelcomeShown(providerId)
                         jsonResponse(
                             request,
                             200,
@@ -403,9 +466,7 @@ class OpenAIChatGptSiwcOAuthTest {
             }
         }.build()
 
-        val store = OpenAIChatGptSiwcAuthStore(InMemorySiwcStore())
         val hostId = store.getOrCreateHostId()
-        val providerId = Uuid.random()
         store.save(
             providerId,
             OpenAIChatGptSiwcTokens(
@@ -418,7 +479,6 @@ class OpenAIChatGptSiwcOAuthTest {
                 refreshToken = "rt-old",
                 expiresAtMillis = 0L,
                 scopes = listOf(OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE),
-                welcomeShown = true,
             ),
         )
         val client = OpenAIChatGptSiwcOAuthClient(http, store)
@@ -427,6 +487,7 @@ class OpenAIChatGptSiwcOAuthTest {
         val access = client.getValidAccessToken(providerId)
         assertEquals("at-rotated", access)
         assertEquals("rt-rotated", store.get(providerId)!!.refreshToken)
+        assertTrue(store.get(providerId)!!.welcomeShown)
         assertEquals("oaiapp_keep", forms.single()["client_id"])
         assertEquals(OPENAI_CHATGPT_SIWC_API_BASE_URL, forms.single()["resource"])
         assertNull("Refresh must omit scope to retain grant", forms.single()["scope"])
@@ -444,35 +505,59 @@ class OpenAIChatGptSiwcOAuthTest {
         assertEquals(hostId, store.getOrCreateHostId())
 
         // Invalid grant clears tokens while keeping issued client_id
-        store.save(
-            providerId,
-            retained.copy(
-                accessToken = "at-2",
-                refreshToken = "rt-2",
-                expiresAtMillis = 0L,
-                scopes = listOf(OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE),
-            ),
-        )
-        failWithInvalidGrant = true
-        val refreshErr = runCatching { client.refresh(providerId) }.exceptionOrNull()
-        assertNotNull(refreshErr)
-        assertTrue(refreshErr!!.message!!.contains("invalid_grant"))
-        assertNull(store.get(providerId))
-        assertEquals("oaiapp_keep", store.getRecord(providerId)!!.clientId)
+        for (error in listOf("""{"error":"invalid_grant"}""", """{"error":{"code":"invalid_grant","message":"revoked"}}""")) {
+            store.save(providerId, retained.copy(accessToken = "at-2", refreshToken = "rt-2", scopes = listOf(OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE)))
+            refreshError = error
+            val refreshErr = runCatching { client.refresh(providerId) }.exceptionOrNull()
+            assertTrue(refreshErr?.message.orEmpty().contains("invalid_grant"))
+            assertNull(store.get(providerId))
+            assertEquals("oaiapp_keep", store.getRecord(providerId)!!.clientId)
+        }
+    }
+
+    @Test
+    fun refreshThatLosesPlanScopePersistsRotationAndStopsUsingTheOldGrant() = runBlocking {
+        val store = OpenAIChatGptSiwcAuthStore(InMemorySiwcStore())
+        val providerId = Uuid.random()
+        store.save(providerId, OpenAIChatGptSiwcTokens(
+            clientId = "issued", extAgentHostId = store.getOrCreateHostId(), accessToken = "old",
+            refreshToken = "old-refresh", scopes = listOf(OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE),
+        ))
+        var requests = 0
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            requests++
+            jsonResponse(chain.request(), 200, """{"access_token":"new","refresh_token":"rotated","scope":"openid","expires_in":3600}""")
+        }.build()
+        val client = OpenAIChatGptSiwcOAuthClient(http, store)
+        assertTrue(runCatching { client.getValidAccessToken(providerId) }.isFailure)
+        assertEquals("rotated", store.get(providerId)!!.refreshToken)
+        assertFalse(store.get(providerId)!!.isUsable())
+        assertTrue(runCatching { client.getValidAccessToken(providerId) }.isFailure)
+        assertEquals(1, requests)
     }
 
     @Test
     fun lateRefreshCannotResurrectSessionAfterLogout() = runBlocking {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
+        val revoked = CopyOnWriteArrayList<String?>()
         val http = OkHttpClient.Builder().addInterceptor { chain ->
-            entered.countDown()
-            release.await(3, TimeUnit.SECONDS)
-            jsonResponse(
-                chain.request(),
-                200,
-                """{"access_token":"zombie-at","refresh_token":"zombie-rt","expires_in":3600,"scope":"$OPENAI_CHATGPT_SIWC_SCOPE"}""",
-            )
+            val request = chain.request()
+            when (request.url.encodedPath) {
+                "/api/accounts/oauth/token" -> {
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                    jsonResponse(request, 200, """{"access_token":"late","refresh_token":"rotated","scope":"$OPENAI_CHATGPT_SIWC_SCOPE"}""")
+                }
+                "/.well-known/openid-configuration" -> jsonResponse(
+                    request, 200, """{"issuer":"$OPENAI_CHATGPT_SIWC_ISSUER","revocation_endpoint":"$OPENAI_CHATGPT_SIWC_ISSUER/revoke"}""",
+                )
+                "/revoke" -> {
+                    revoked += readFormParams(request)["token"]
+                    jsonResponse(request, 200, "")
+                }
+                else -> error("Unexpected request: ${request.url.encodedPath}")
+            }
         }.build()
 
         val store = OpenAIChatGptSiwcAuthStore(InMemorySiwcStore())
@@ -489,15 +574,21 @@ class OpenAIChatGptSiwcOAuthTest {
             ),
         )
         val client = OpenAIChatGptSiwcOAuthClient(http, store)
+        val secondProvider = Uuid.random()
+        val secondSession = store.get(providerId)!!.copy(clientId = "second", refreshToken = "second-refresh")
+        store.save(secondProvider, secondSession)
         val deferred = async(Dispatchers.Default) { runCatching { client.refresh(providerId) } }
         try {
             assertTrue(entered.await(2, TimeUnit.SECONDS))
-            client.logout(providerId)
+            assertFalse("Revoking the old token cannot confirm revocation of a concurrent rotation", client.signOut(providerId))
+            assertEquals(listOf("rt-1"), revoked.toList())
+            assertNull(store.get(providerId))
         } finally {
             release.countDown()
         }
-        withTimeout(2_000) { deferred.await() }
+        assertTrue(withTimeout(2_000) { deferred.await() }.isFailure)
         assertNull(store.get(providerId))
+        assertEquals(secondSession, store.get(secondProvider))
     }
 
     @Test

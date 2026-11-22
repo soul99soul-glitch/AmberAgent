@@ -742,6 +742,8 @@
   <string name="setting_provider_page_codex_oauth_logged_out">Codex OAuth signed out</string>
   <string name="setting_provider_page_siwc_not_signed_in">Use your ChatGPT plan without an API key</string>
   <string name="setting_provider_page_siwc_using_plan">Using ChatGPT plan</string>
+  <string name="setting_provider_page_siwc_plan_disabled">Signed in · plan usage off</string>
+  <string name="setting_provider_page_siwc_enable_plan">Enable ChatGPT plan usage</string>
   <string name="setting_provider_page_siwc_continue_with_chatgpt">Continue with ChatGPT</string>
   <string name="setting_provider_page_siwc_manage_usage">Manage usage</string>
   <string name="setting_provider_page_siwc_fetch_models">Fetch Models</string>

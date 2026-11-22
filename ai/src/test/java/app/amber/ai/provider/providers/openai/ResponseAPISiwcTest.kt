@@ -4,6 +4,7 @@ import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.BuiltInTools
 import app.amber.ai.provider.CustomBody
+import app.amber.ai.provider.CustomHeader
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.OpenAIAuthMode
@@ -119,6 +120,14 @@ class ResponseAPISiwcTest {
                     add(buildJsonObject { put("type", "mcp") })
                     add(buildJsonObject { put("type", "tool_search") })
                     add(buildJsonObject { put("type", "programmatic_tool_calling") })
+                    add(buildJsonObject {
+                        put("type", "namespace")
+                        put("name", "calendar")
+                        put("description", "Calendar tools")
+                        put("tools", buildJsonArray {
+                            add(buildJsonObject { put("type", "custom"); put("name", "agenda") })
+                        })
+                    })
                 }
             ),
             CustomBody(
@@ -133,6 +142,13 @@ class ResponseAPISiwcTest {
                         put("type", "message")
                         put("role", "user")
                         put("content", "Hello")
+                    })
+                    add(buildJsonObject {
+                        put("type", "additional_tools")
+                        put("tools", buildJsonArray {
+                            add(buildJsonObject { put("type", "function"); put("name", "local") })
+                            add(buildJsonObject { put("type", "file_search") })
+                        })
                     })
                 }
             ),
@@ -172,8 +188,10 @@ class ResponseAPISiwcTest {
         assertEquals("developer", inputItems[0].jsonObject["role"]?.jsonPrimitive?.contentOrNull)
 
         val tools = body["tools"]?.jsonArray ?: error("tools missing")
-        assertEquals(listOf("function"), tools.map { it.jsonObject["type"]?.jsonPrimitive?.contentOrNull })
-        assertEquals("lookup_weather", tools.single().jsonObject["name"]?.jsonPrimitive?.contentOrNull)
+        assertEquals(listOf("function", "namespace"), tools.map { it.jsonObject["type"]?.jsonPrimitive?.contentOrNull })
+        assertEquals("lookup_weather", tools.first().jsonObject["name"]?.jsonPrimitive?.contentOrNull)
+        assertEquals("agenda", tools.last().jsonObject.getValue("tools").jsonArray.single().jsonObject["name"]?.jsonPrimitive?.content)
+        assertEquals("local", inputItems.last().jsonObject.getValue("tools").jsonArray.single().jsonObject["name"]?.jsonPrimitive?.content)
     }
 
     @Test
@@ -208,6 +226,27 @@ class ResponseAPISiwcTest {
     }
 
     @Test
+    fun onlyCompletedPayloadFinishesSiwcButCodexCanReturnIncomplete() = runBlocking {
+        val incomplete = """{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[]}}"""
+        val completed = """{"type":"response.completed","response":{"id":"r1","status":"completed","output":[]}}"""
+        suspend fun collect(body: String, mode: OpenAIAuthMode = OpenAIAuthMode.CHATGPT_SIWC) =
+            ResponseAPI(
+                OkHttpClient.Builder().addInterceptor { chain ->
+                    Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                        .code(200).message("OK").body(body.toResponseBody("text/event-stream".toMediaType())).build()
+                }.build(),
+                bearerResolver = { _, _ -> "test" },
+            ).streamText(siwcSetting().copy(authMode = mode), emptyList(), TextGenerationParams(model = Model(modelId = "test"))).toList()
+
+        val partial = "event: response.incomplete\ndata: $incomplete\n\n"
+        assertTrue(collect(partial, OpenAIAuthMode.CODEX_OAUTH).isNotEmpty())
+        assertTrue(runCatching { collect(partial) }.exceptionOrNull()?.message.orEmpty().contains("max_output_tokens"))
+        assertTrue(collect("data: $completed\n\n").isNotEmpty())
+        assertTrue(runCatching { collect("event: response.completed\n\n") }.isFailure)
+        assertTrue(runCatching { collect("data: [DONE]\n\n") }.isFailure)
+    }
+
+    @Test
     fun openAIProviderForcesPublicResponsesEndpointWithStreamTrueAndStoreFalseForSiwc() = runBlocking {
         val requests = CopyOnWriteArrayList<Request>()
         val requestBodies = CopyOnWriteArrayList<String>()
@@ -216,12 +255,19 @@ class ResponseAPISiwcTest {
             "event: response.completed\n" +
             """data: {"type":"response.completed","response":{"id":"resp_siwc","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"Hello from SIWC"}]}]}}""" + "\n\n"
 
+        var quotaReached = false
         val http = OkHttpClient.Builder().addInterceptor { chain ->
             val req = chain.request()
             requests += req
             val buf = Buffer()
             req.body?.writeTo(buf)
             requestBodies += buf.readUtf8()
+            if (quotaReached) {
+                val error = """{"error":{"code":"subscription_sharing_usage_limit_exceeded","message":"Weekly app limit"}}"""
+                return@addInterceptor Response.Builder().request(req).protocol(Protocol.HTTP_1_1)
+                    .code(429).message("Too Many Requests").header("x-request-id", "quota-test")
+                    .body(error.toResponseBody("application/json".toMediaType())).build()
+            }
             Response.Builder()
                 .request(req)
                 .protocol(Protocol.HTTP_1_1)
@@ -259,13 +305,18 @@ class ResponseAPISiwcTest {
             provider.complete(
                 providerSetting = setting,
                 messages = listOf(UIMessage.system("Be concise"), UIMessage.user("Hi")),
-                params = TextGenerationParams(model = Model(modelId = "gpt-5.4"), temperature = 0.8f, maxTokens = 512),
+                params = TextGenerationParams(
+                    model = Model(modelId = "gpt-5.4"),
+                    temperature = 0.8f,
+                    maxTokens = 512,
+                    customHeaders = listOf(CustomHeader("Authorization", "Bearer previous-mode")),
+                ),
             )
         }
 
         assertEquals(1, requests.size)
         assertEquals("https://api.openai.com/v1/responses", requests.single().url.toString())
-        assertEquals("Bearer siwc-live-token", requests.single().header("Authorization"))
+        assertEquals(listOf("Bearer siwc-live-token"), requests.single().headers("Authorization"))
         val sentJson = app.amber.ai.util.json.parseToJsonElement(requestBodies.single()).jsonObject
         assertEquals(true, sentJson["stream"]?.jsonPrimitive?.boolean)
         assertEquals(false, sentJson["store"]?.jsonPrimitive?.boolean)
@@ -277,5 +328,16 @@ class ResponseAPISiwcTest {
             ?.joinToString("") { it.text }
         assertEquals("Hello from SIWC", text)
         assertFalse(provider.supportsImageEdit(setting))
+
+        quotaReached = true
+        val failure = runCatching {
+            provider.complete(setting, listOf(UIMessage.user("Hi")), TextGenerationParams(model = Model(modelId = "gpt-5.4")))
+        }.exceptionOrNull()
+        assertTrue(failure is HttpException)
+        for (detail in listOf("429", "quota-test", "subscription_sharing_usage_limit_exceeded", OPENAI_CHATGPT_SIWC_USAGE_URL)) {
+            assertTrue(failure?.message.orEmpty().contains(detail))
+        }
+        assertEquals(2, requests.size)
+        assertTrue(store.get(setting.id)!!.isUsable())
     }
 }

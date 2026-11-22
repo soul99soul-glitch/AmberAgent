@@ -6,6 +6,8 @@ import app.amber.ai.provider.providers.OAuthTokenSecureStore
 import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.util.json
 import app.amber.common.http.await
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
@@ -53,7 +55,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
-import kotlin.math.max
+import kotlin.coroutines.resumeWithException
 import kotlin.uuid.Uuid
 
 const val OPENAI_CHATGPT_SIWC_ISSUER = "https://auth.openai.com"
@@ -90,6 +92,9 @@ private val SIWC_TERMINAL_REFRESH_ERROR_CODES = setOf(
     "refresh_token_reused",
 )
 
+private val siwcSessionLocks = ConcurrentHashMap<Uuid, Any>()
+private fun sessionLock(providerId: Uuid): Any = siwcSessionLocks.getOrPut(providerId) { Any() }
+
 @Serializable
 data class OpenAIChatGptSiwcTokens(
     val clientId: String,
@@ -107,11 +112,15 @@ data class OpenAIChatGptSiwcTokens(
         get() = scopes.contains(OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE)
 
     val isSignedIn: Boolean
-        get() = accessToken.isNotBlank() && hasDirectUsageScope
+        get() = accessToken.isNotBlank()
 
     fun isUsable(nowMillis: Long = System.currentTimeMillis()): Boolean =
         hasDirectUsageScope &&
             (refreshToken.isNotBlank() || (accessToken.isNotBlank() && expiresAtMillis > nowMillis))
+
+    internal fun requireDirectUsageScope() = require(hasDirectUsageScope) {
+        "ChatGPT plan usage permission ($OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE) is not enabled. Re-authorize in provider settings."
+    }
 }
 
 internal interface SiwcKeyValueStore {
@@ -166,8 +175,8 @@ class OpenAIChatGptSiwcAuthStore internal constructor(
         backing.put(providerId.toString(), json.encodeToString(tokens))
     }
 
-    fun markWelcomeShown(providerId: Uuid) {
-        val existing = getRecord(providerId) ?: return
+    fun markWelcomeShown(providerId: Uuid): Unit = synchronized(sessionLock(providerId)) {
+        val existing = get(providerId) ?: return@synchronized
         if (!existing.welcomeShown) {
             save(providerId, existing.copy(welcomeShown = true))
         }
@@ -245,9 +254,7 @@ internal class SiwcLoopbackCallbackServer(
                     activeSocket.set(client)
                     if (!continuation.isActive || serverSocket.isClosed) {
                         runCatching { client.close() }
-                        if (continuation.isActive) {
-                            continuation.resume(SiwcCallbackResult(error = "server_closed", errorDescription = "Callback listener closed."))
-                        }
+                        if (continuation.isActive) continuation.cancel()
                         return@suspendCancellableCoroutine
                     }
 
@@ -263,14 +270,10 @@ internal class SiwcLoopbackCallbackServer(
                     }
                 }
             } catch (error: Exception) {
+                val closed = serverSocket.isClosed
                 close()
                 if (continuation.isActive) {
-                    continuation.resume(
-                        SiwcCallbackResult(
-                            error = "loopback_accept_failed",
-                            errorDescription = error.message ?: "Callback listener failed.",
-                        )
-                    )
+                    if (closed) continuation.cancel() else continuation.resumeWithException(error)
                 }
             }
         }
@@ -298,13 +301,13 @@ internal class SiwcLoopbackCallbackServer(
         } catch (error: SocketTimeoutException) {
             HandledCallback(
                 result = SiwcCallbackResult(error = "loopback_timeout", errorDescription = error.message),
-                terminal = true,
+                terminal = false,
                 statusCode = 400,
             )
         } catch (error: Exception) {
             HandledCallback(
                 result = SiwcCallbackResult(error = "invalid_request", errorDescription = error.message),
-                terminal = true,
+                terminal = false,
                 statusCode = 400,
             )
         }
@@ -317,7 +320,7 @@ internal class SiwcLoopbackCallbackServer(
         if (parts.size != 3 || parts[0].isBlank() || parts[1].isBlank() || !parts[2].startsWith("HTTP/")) {
             return HandledCallback(
                 result = SiwcCallbackResult(error = "invalid_request", errorDescription = "Malformed HTTP request."),
-                terminal = true,
+                terminal = false,
                 statusCode = 400,
             )
         }
@@ -491,17 +494,22 @@ internal class OpenAIChatGptSiwcIdTokenValidator(
                     if (!resp.isSuccessful) error("OIDC discovery failed: HTTP ${resp.code}")
                     val obj = json.parseToJsonElement(resp.body.string()).jsonObject
                     SiwcOidcMetadata(
-                        issuer = obj["issuer"]?.jsonPrimitive?.contentOrNull?.trimEnd('/') ?: expectedIssuer,
+                        issuer = obj["issuer"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                         jwksUri = obj["jwks_uri"]?.jsonPrimitive?.contentOrNull ?: defaultJwksUrl,
                         revocationEndpoint = obj["revocation_endpoint"]?.jsonPrimitive?.contentOrNull,
                     )
                 }
-            }.getOrElse {
-                SiwcOidcMetadata(
+            }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                return@withLock SiwcOidcMetadata(
                     issuer = expectedIssuer,
                     jwksUri = defaultJwksUrl,
                     revocationEndpoint = null,
                 )
+            }
+            require(fetched.issuer == expectedIssuer) { "ChatGPT OIDC discovery issuer mismatch." }
+            require(fetched.jwksUri.toHttpUrl().isHttps && fetched.revocationEndpoint?.toHttpUrl()?.isHttps != false) {
+                "ChatGPT OIDC endpoints must use HTTPS."
             }
             cachedMetadata = fetched
             fetched
@@ -533,18 +541,19 @@ internal class OpenAIChatGptSiwcIdTokenValidator(
             signatureBytes = signatureBytes,
         )
 
-        val issuer = payload["iss"]?.jsonPrimitive?.contentOrNull?.trimEnd('/')
-        require(issuer == expectedIssuer.trimEnd('/')) {
+        val issuer = payload["iss"]?.jsonPrimitive?.contentOrNull
+        require(issuer == expectedIssuer) {
             "ChatGPT ID token issuer mismatch: expected $expectedIssuer, got $issuer."
         }
 
         val audElement = payload["aud"] ?: error("ChatGPT ID token is missing aud claim.")
         val audMatches = when (audElement) {
             is JsonPrimitive -> audElement.contentOrNull == expectedClientId
-            is JsonArray -> audElement.any { (it as? JsonPrimitive)?.contentOrNull == expectedClientId }
+            is JsonArray -> audElement.isNotEmpty() && audElement.all { (it as? JsonPrimitive)?.contentOrNull == expectedClientId }
             else -> false
         }
-        require(audMatches) {
+        val authorizedParty = payload["azp"]?.jsonPrimitive?.contentOrNull
+        require(audMatches && (authorizedParty == null || authorizedParty == expectedClientId)) {
             "ChatGPT ID token audience does not match issued client_id."
         }
 
@@ -631,6 +640,8 @@ internal class OpenAIChatGptSiwcIdTokenValidator(
     ): Boolean {
         val jwkUse = jwk["use"]?.jsonPrimitive?.contentOrNull
         if (jwkUse != null && jwkUse != "sig") return false
+        val jwkAlgorithm = jwk["alg"]?.jsonPrimitive?.contentOrNull
+        if (jwkAlgorithm != null && jwkAlgorithm != alg) return false
         val kty = jwk["kty"]?.jsonPrimitive?.contentOrNull ?: return false
         return when {
             kty == "RSA" && alg in setOf("RS256", "RS384", "RS512") -> {
@@ -732,20 +743,16 @@ class OpenAIChatGptSiwcOAuthClient internal constructor(
     private companion object {
         val refreshMutexes = ConcurrentHashMap<String, Mutex>()
         val generations = ConcurrentHashMap<String, Long>()
-        val generationLocks = ConcurrentHashMap<String, Any>()
     }
 
     private fun refreshMutex(providerId: Uuid): Mutex =
         refreshMutexes.getOrPut(providerId.toString()) { Mutex() }
 
-    private fun generationLock(providerId: Uuid): Any =
-        generationLocks.getOrPut(providerId.toString()) { Any() }
-
-    private fun generation(providerId: Uuid): Long = synchronized(generationLock(providerId)) {
+    private fun generation(providerId: Uuid): Long = synchronized(sessionLock(providerId)) {
         generations[providerId.toString()] ?: 0L
     }
 
-    private fun beginAuthorization(providerId: Uuid): Long = synchronized(generationLock(providerId)) {
+    private fun beginAuthorization(providerId: Uuid): Long = synchronized(sessionLock(providerId)) {
         val next = (generations[providerId.toString()] ?: 0L) + 1L
         generations[providerId.toString()] = next
         next
@@ -756,15 +763,20 @@ class OpenAIChatGptSiwcOAuthClient internal constructor(
         expectedGeneration: Long,
         tokens: OpenAIChatGptSiwcTokens,
         advanceGeneration: Boolean = false,
-    ): Boolean = synchronized(generationLock(providerId)) {
-        if ((generations[providerId.toString()] ?: 0L) != expectedGeneration) return@synchronized false
-        authStore.save(providerId, tokens)
+    ): OpenAIChatGptSiwcTokens = synchronized(sessionLock(providerId)) {
+        if ((generations[providerId.toString()] ?: 0L) != expectedGeneration) staleSession()
+        // A welcome acknowledgement may have arrived while OAuth was on the network.
+        val existing = authStore.getRecord(providerId)
+        val saved = if (existing?.clientId == tokens.clientId && existing.welcomeShown) {
+            tokens.copy(welcomeShown = true)
+        } else tokens
+        authStore.save(providerId, saved)
         if (advanceGeneration) generations[providerId.toString()] = expectedGeneration + 1L
-        true
+        saved
     }
 
     private fun clearCredentialsIfCurrent(providerId: Uuid, expectedGeneration: Long): Boolean =
-        synchronized(generationLock(providerId)) {
+        synchronized(sessionLock(providerId)) {
             if ((generations[providerId.toString()] ?: 0L) != expectedGeneration) return@synchronized false
             authStore.clearCredentials(providerId)
             true
@@ -777,20 +789,23 @@ class OpenAIChatGptSiwcOAuthClient internal constructor(
 
     fun getRecord(providerId: Uuid): OpenAIChatGptSiwcTokens? = authStore.getRecord(providerId)
 
-    fun logout(providerId: Uuid) = synchronized(generationLock(providerId)) {
+    fun logout(providerId: Uuid) = synchronized(sessionLock(providerId)) {
         val key = providerId.toString()
         generations[key] = (generations[key] ?: 0L) + 1L
         authStore.clearCredentials(providerId)
     }
 
     /**
-     * Best-effort remote refresh-token revocation via OIDC `revocation_endpoint`, then clears
-     * local credentials while retaining the issued `client_id` and device `ext_agent_host_id`.
-     * Returns `true` if remote revocation succeeded (or no refresh token existed).
+     * Stop local use immediately, then attempt to revoke the captured refresh token.
+     * A concurrent rotation makes remote revocation uncertain even if the old token returns 200.
      */
     suspend fun signOut(providerId: Uuid): Boolean {
-        val existing = authStore.get(providerId)
-        logout(providerId)
+        val (existing, refreshInProgress) = synchronized(sessionLock(providerId)) {
+            val tokens = authStore.get(providerId)
+            val rotating = refreshMutex(providerId).isLocked
+            logout(providerId)
+            tokens to rotating
+        }
         val refreshToken = existing?.refreshToken?.takeIf { it.isNotBlank() } ?: return true
         val issuedClientId = existing.clientId.takeIf {
             it.isNotBlank() && it != OPENAI_CHATGPT_SIWC_DYNAMIC_CLIENT_ID
@@ -807,7 +822,7 @@ class OpenAIChatGptSiwcOAuthClient internal constructor(
             val response = client.newCall(
                 Request.Builder().url(revocationEndpoint).post(body).build()
             ).await()
-            response.use { it.isSuccessful }
+            response.use { it.isSuccessful && !refreshInProgress }
         }.getOrDefault(false)
     }
 
@@ -853,15 +868,16 @@ class OpenAIChatGptSiwcOAuthClient internal constructor(
 
     suspend fun authorize(
         providerId: Uuid,
-        openBrowser: (String) -> Unit,
+        openBrowser: suspend (String) -> Unit,
         forceConsent: Boolean = false,
         timeoutMillis: Long = SIWC_AUTH_TIMEOUT_MS,
+        browserClosed: Deferred<Unit>? = null,
     ): OpenAIChatGptSiwcTokens {
+        val loginGeneration = beginAuthorization(providerId)
         val hostId = authStore.getOrCreateHostId()
         val existingRecord = authStore.getRecord(providerId)
         val expectedClientId = existingRecord?.clientId
             ?.takeIf { it.isNotBlank() && it != OPENAI_CHATGPT_SIWC_DYNAMIC_CLIENT_ID }
-        val loginGeneration = beginAuthorization(providerId)
 
         return SiwcLoopbackCallbackServer().use { server ->
             val state = randomBase64Url(24)
@@ -878,10 +894,14 @@ class OpenAIChatGptSiwcOAuthClient internal constructor(
                 forceConsent = forceConsent,
             )
 
-            openBrowser(authUrl)
-
-            val callback = withTimeoutOrNull(timeoutMillis) { server.awaitCallback() }
-                ?: error("Sign in with ChatGPT timed out. Please try again.")
+            val onBrowserClose = browserClosed?.invokeOnCompletion { server.close() }
+            val callback = try {
+                openBrowser(authUrl)
+                withTimeoutOrNull(timeoutMillis) { server.awaitCallback() }
+                    ?: error("Sign in with ChatGPT timed out. Please try again.")
+            } finally {
+                onBrowserClose?.dispose()
+            }
 
             require(callback.state == state) {
                 "Sign in with ChatGPT state mismatch. Please try again."
@@ -918,11 +938,6 @@ class OpenAIChatGptSiwcOAuthClient internal constructor(
             )
 
             val grantedScopes = parseGrantedScopes(tokenResponse.scope)
-            require(grantedScopes.contains(OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE)) {
-                "ChatGPT plan usage permission ($OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE) was not granted. Please approve ChatGPT plan access and try again."
-            }
-
-            val welcomeShown = existingRecord?.takeIf { it.clientId == resolvedClientId }?.welcomeShown ?: false
             val tokens = OpenAIChatGptSiwcTokens(
                 clientId = resolvedClientId,
                 extAgentHostId = hostId,
@@ -933,23 +948,18 @@ class OpenAIChatGptSiwcOAuthClient internal constructor(
                 refreshToken = tokenResponse.refreshToken.orEmpty(),
                 expiresAtMillis = computeExpiresAtMillis(tokenResponse.expiresIn),
                 scopes = grantedScopes,
-                welcomeShown = welcomeShown,
             )
-            if (!saveIfCurrent(providerId, loginGeneration, tokens, advanceGeneration = true)) {
-                staleSession()
-            }
-            tokens
+            saveIfCurrent(providerId, loginGeneration, tokens, advanceGeneration = true)
         }
     }
 
     suspend fun getValidAccessToken(providerId: Uuid, forceRefresh: Boolean = false): String {
         val current = authStore.get(providerId)
             ?: error("Sign in with ChatGPT is not signed in. Open provider settings and select Continue with ChatGPT.")
-        require(current.hasDirectUsageScope) {
-            "ChatGPT plan usage permission ($OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE) is not enabled. Re-authorize in provider settings."
-        }
+        current.requireDirectUsageScope()
         val now = clockMillis()
-        if (!forceRefresh && current.accessToken.isNotBlank() && current.expiresAtMillis - now > SIWC_REFRESH_SKEW_MS) {
+        val minimumLifetime = if (current.refreshToken.isBlank()) 0L else SIWC_REFRESH_SKEW_MS
+        if (!forceRefresh && current.accessToken.isNotBlank() && current.expiresAtMillis - now > minimumLifetime) {
             return current.accessToken
         }
         return refresh(providerId, force = forceRefresh).accessToken
@@ -960,6 +970,7 @@ class OpenAIChatGptSiwcOAuthClient internal constructor(
             val generationAtStart = generation(providerId)
             val current = authStore.get(providerId)
                 ?: error("Sign in with ChatGPT is not signed in. Please sign in again.")
+            current.requireDirectUsageScope()
             if (!force && current.accessToken.isNotBlank() && current.expiresAtMillis - clockMillis() > SIWC_REFRESH_SKEW_MS) {
                 return@withLock current
             }
@@ -995,22 +1006,16 @@ class OpenAIChatGptSiwcOAuthClient internal constructor(
             }
 
             val parsed = parseTokenResponse(body)
-            val updatedScopes = parseGrantedScopes(parsed.scope).ifEmpty { current.scopes }
-            require(updatedScopes.contains(OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE)) {
-                "Refreshed ChatGPT session no longer grants $OPENAI_CHATGPT_SIWC_DIRECT_USAGE_SCOPE. Please sign in again."
-            }
-
+            // Keep the original, verified ID token as the login hint.
             val updated = current.copy(
                 accessToken = parsed.accessToken,
                 refreshToken = parsed.refreshToken?.takeIf { it.isNotBlank() } ?: current.refreshToken,
-                idToken = parsed.idToken?.takeIf { it.isNotBlank() } ?: current.idToken,
                 expiresAtMillis = computeExpiresAtMillis(parsed.expiresIn),
-                scopes = updatedScopes,
+                scopes = parsed.scope?.let(::parseGrantedScopes) ?: current.scopes,
             )
-            if (!saveIfCurrent(providerId, generationAtStart, updated)) {
-                staleSession()
-            }
-            updated
+            val saved = saveIfCurrent(providerId, generationAtStart, updated)
+            saved.requireDirectUsageScope()
+            saved
         }
 
     suspend fun listModels(providerId: Uuid): List<Model> = withContext(Dispatchers.IO) {
@@ -1101,8 +1106,8 @@ class OpenAIChatGptSiwcOAuthClient internal constructor(
     }
 
     private fun computeExpiresAtMillis(expiresInSeconds: Long?): Long {
-        val lifetimeMillis = if (expiresInSeconds != null && expiresInSeconds > 0L) {
-            max(expiresInSeconds * 1000L, SIWC_REFRESH_SKEW_MS + 10_000L)
+        val lifetimeMillis = if (expiresInSeconds != null) {
+            expiresInSeconds.coerceAtLeast(0L) * 1000L
         } else {
             SIWC_FALLBACK_TOKEN_LIFETIME_MS
         }
@@ -1124,8 +1129,8 @@ class OpenAIChatGptSiwcOAuthClient internal constructor(
  * uses `slug` as `modelId` (sent on inference requests) and `display_name` as `displayName`.
  */
 internal fun parseSiwcModelsResponse(raw: String): List<Model> {
-    val root = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull() ?: return emptyList()
-    val modelsArray = root["models"]?.jsonArray ?: return emptyList()
+    val root = json.parseToJsonElement(raw).jsonObject
+    val modelsArray = root["models"] as? JsonArray ?: error("ChatGPT model catalog is missing the models array.")
     return modelsArray.mapNotNull { element ->
         val obj = element as? JsonObject ?: return@mapNotNull null
         val visibility = obj["visibility"]?.jsonPrimitive?.contentOrNull
@@ -1154,8 +1159,8 @@ private fun parseGrantedScopes(scope: String?): List<String> =
 
 private fun extractOAuthErrorCode(raw: String): String? = runCatching {
     val obj = json.parseToJsonElement(raw).jsonObject
-    obj["error"]?.jsonPrimitive?.contentOrNull
-        ?: obj["error"]?.jsonObject?.get("code")?.jsonPrimitive?.contentOrNull
+    (obj["error"] as? JsonPrimitive)?.contentOrNull
+        ?: (obj["error"] as? JsonObject)?.get("code")?.jsonPrimitive?.contentOrNull
         ?: obj["code"]?.jsonPrimitive?.contentOrNull
 }.getOrNull()
 

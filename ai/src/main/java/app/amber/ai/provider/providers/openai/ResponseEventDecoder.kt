@@ -589,7 +589,10 @@ internal fun parseOpenAIResponseError(errorElement: kotlinx.serialization.json.J
                 append(" Review your account at $OPENAI_CHATGPT_SIWC_USAGE_URL")
             }
         )
-        else -> errorElement.parseErrorDetail()
+        else -> if (code?.startsWith("subscription_sharing_") == true) {
+            val param = nested?.get("param")?.jsonPrimitiveOrNull?.contentOrNull
+            HttpException(listOfNotNull(code, param, detailMessage).joinToString(": "))
+        } else errorElement.parseErrorDetail()
     }
 }
 

@@ -40,7 +40,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -106,6 +105,7 @@ internal fun SettingProviderModelPage(
     onEdit: (ProviderSetting) -> Unit,
     fetchedCandidates: ProviderModelCandidates? = null,
     modelListRefreshKey: Int = 0,
+    onRefetch: () -> Unit,
     currentModelId: Uuid? = null,
     onSetCurrent: (Model) -> Unit = {},
     onRestoreModel: ((Model, Int) -> Unit)? = null,
@@ -116,6 +116,7 @@ internal fun SettingProviderModelPage(
         onUpdateProvider = onEdit,
         fetchedCandidates = fetchedCandidates,
         modelListRefreshKey = modelListRefreshKey,
+        onRefetch = onRefetch,
         currentModelId = currentModelId,
         onSetCurrent = onSetCurrent,
     )
@@ -128,6 +129,7 @@ private fun ModelList(
     onUpdateProvider: (ProviderSetting) -> Unit,
     fetchedCandidates: ProviderModelCandidates?,
     modelListRefreshKey: Int,
+    onRefetch: () -> Unit,
     currentModelId: Uuid?,
     onSetCurrent: (Model) -> Unit,
 ) {
@@ -136,13 +138,11 @@ private fun ModelList(
     val externalCandidates = fetchedCandidates
         ?.takeIf { it.requestKey == requestKey }
         ?.models
-    var fetchAttempt by remember(requestKey) { mutableIntStateOf(0) }
     val autoFetchState by produceState<ModelListLoadState>(
         ModelListLoadState.Loading,
         requestKey,
         externalCandidates != null,
         modelListRefreshKey,
-        fetchAttempt,
     ) {
         // Reset before every provider/configuration change and explicit retry so
         // an old catalog cannot look current while the new request is pending.
@@ -152,15 +152,13 @@ private fun ModelList(
             return@produceState
         }
         try {
-            value = ModelListLoadState.Loaded(
-                if (providerSetting is ProviderSetting.OpenAI) {
-                    providerCatalog.listModels(providerSetting)
-                } else {
-                    providerCatalog.text(providerSetting).listModels(providerSetting)
-                }
-                    .sortedBy { it.modelId }
-                    .toList()
-            )
+            val models = if (providerSetting is ProviderSetting.OpenAI) {
+                providerCatalog.listModels(providerSetting)
+            } else {
+                providerCatalog.text(providerSetting).listModels(providerSetting)
+            }
+            val keepServerOrder = providerSetting is ProviderSetting.OpenAI && providerSetting.authMode == OpenAIAuthMode.CHATGPT_SIWC
+            value = ModelListLoadState.Loaded(if (keepServerOrder) models else models.sortedBy { it.modelId })
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -277,7 +275,7 @@ private fun ModelList(
                             text = stringResource(R.string.provider_model_fetch_available),
                             imageVector = Lucide.RefreshCw,
                             onClick = {
-                                if (loadState is ModelListLoadState.Failed) fetchAttempt += 1
+                                if (loadState is ModelListLoadState.Failed) onRefetch()
                                 showPicker = true
                             },
                             modifier = Modifier
@@ -338,7 +336,7 @@ private fun ModelList(
                             R.string.setting_provider_page_models_fetch_failed,
                             loadState.message,
                         ),
-                        onRetry = { fetchAttempt += 1 },
+                        onRetry = onRefetch,
                     )
                 }
                 is ModelListLoadState.Loaded -> Unit
@@ -370,7 +368,7 @@ private fun ModelList(
                 blankState.open(Model())
             },
             onDismiss = { showPicker = false },
-            onRefetch = { fetchAttempt += 1 },
+            onRefetch = onRefetch,
         )
     }
 
@@ -788,7 +786,9 @@ internal fun ModelPickerSheet(
                                 verticalArrangement = Arrangement.spacedBy(2.dp),
                             ) {
                                 Text(
-                                    text = model.modelId,
+                                    text = if (parentProvider is ProviderSetting.OpenAI && parentProvider.authMode == OpenAIAuthMode.CHATGPT_SIWC) {
+                                        model.displayName.ifBlank { model.modelId }
+                                    } else model.modelId,
                                     style = type.meta.copy(
                                         fontSize = 13.5.sp,
                                         fontWeight = FontWeight.SemiBold,

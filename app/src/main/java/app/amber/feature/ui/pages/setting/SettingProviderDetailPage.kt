@@ -88,6 +88,10 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     val shareSheetState = rememberShareSheetState()
     var fetchedCandidates by remember(provider.id) { mutableStateOf<ProviderModelCandidates?>(null) }
     var modelListRefreshKey by remember(provider.id) { mutableIntStateOf(0) }
+    fun invalidateModelCandidates() {
+        fetchedCandidates = null
+        modelListRefreshKey += 1
+    }
     // Config-tab draft, hoisted here so switching pager tabs (which disposes the
     // config page) keeps unsaved key/baseUrl/name edits. Keyed on provider.id, not
     // the provider instance, so models-tab writes don't reset the draft.
@@ -293,10 +297,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                             )
                         },
                         onModelsFetched = { fetchedCandidates = it },
-                        onModelCandidatesInvalidated = {
-                            fetchedCandidates = null
-                            modelListRefreshKey += 1
-                        },
+                        onModelCandidatesInvalidated = ::invalidateModelCandidates,
                         onDelete = {
                             onDelete()
                         },
@@ -312,6 +313,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                         onEdit = onEdit,
                         fetchedCandidates = fetchedCandidates,
                         modelListRefreshKey = modelListRefreshKey,
+                        onRefetch = ::invalidateModelCandidates,
                         currentModelId = settings.chatModelId,
                         // Undo re-inserts into the stored provider atomically, so it cannot
                         // roll back config edits committed after the delete.

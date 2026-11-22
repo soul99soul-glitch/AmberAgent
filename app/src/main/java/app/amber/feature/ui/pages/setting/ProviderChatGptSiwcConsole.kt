@@ -1,5 +1,8 @@
 package app.amber.feature.ui.pages.setting
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -46,6 +50,7 @@ import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -73,34 +78,37 @@ internal fun ChatGptSiwcConsole(
     var siwcTokens by remember(provider.id, authStore) { mutableStateOf<OpenAIChatGptSiwcTokens?>(null) }
     var tokensLoaded by remember(provider.id, authStore) { mutableStateOf(false) }
     val tokenReadGeneration = remember(provider.id, authStore) { mutableStateOf(0) }
+    suspend fun reloadTokens() {
+        val requestGeneration = ++tokenReadGeneration.value
+        val cached = withContext(Dispatchers.IO) { authStore.get(provider.id) }
+        if (tokenReadGeneration.value == requestGeneration) {
+            siwcTokens = cached
+            tokensLoaded = true
+        }
+    }
     LaunchedEffect(provider.id, authStore, lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            val requestGeneration = tokenReadGeneration.value + 1
-            tokenReadGeneration.value = requestGeneration
-            val cached = withContext(Dispatchers.IO) { authStore.get(provider.id) }
-            if (tokenReadGeneration.value == requestGeneration) {
-                siwcTokens = cached
-                tokensLoaded = true
-            }
+            reloadTokens()
         }
     }
 
     var busy by remember(provider.id) { mutableStateOf(false) }
     var oauthGeneration by remember(provider.id) { mutableStateOf(0) }
-    var showWelcomeDialog by remember(provider.id) { mutableStateOf(false) }
+    var browserClosed by remember(provider.id) { mutableStateOf<CompletableDeferred<Unit>?>(null) }
+    val browser = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        browserClosed?.complete(Unit)
+    }
     val latestProvider by rememberUpdatedState(provider)
     val latestOnCommit by rememberUpdatedState(onCommit)
     val latestOnModelsFetched by rememberUpdatedState(onModelsFetched)
     val latestOnModelCandidatesInvalidated by rememberUpdatedState(onModelCandidatesInvalidated)
 
     fun dismissWelcome(openUsage: Boolean) {
-        showWelcomeDialog = false
         scope.launch {
             withContext(Dispatchers.IO) { authStore.markWelcomeShown(provider.id) }
+            tokenReadGeneration.value += 1
             siwcTokens = siwcTokens?.copy(welcomeShown = true)
-        }
-        if (openUsage) {
-            context.openUrl(OPENAI_CHATGPT_SIWC_USAGE_URL)
+            if (openUsage) context.openUrl(OPENAI_CHATGPT_SIWC_USAGE_URL)
         }
     }
 
@@ -111,24 +119,35 @@ internal fun ChatGptSiwcConsole(
         val loginGeneration = oauthGeneration
         latestOnModelCandidatesInvalidated()
         busy = true
+        val tabClosed = CompletableDeferred<Unit>()
+        browserClosed = tabClosed
+        val needsConsent = siwcTokens?.hasDirectUsageScope == false
         try {
-            val tokens = oauthClient.authorize(
-                providerId = provider.id,
-                openBrowser = { url -> context.openUrl(url) },
-            )
+            val tokens = withContext(Dispatchers.IO) {
+                oauthClient.authorize(
+                    providerId = provider.id,
+                    forceConsent = needsConsent,
+                    browserClosed = tabClosed,
+                    openBrowser = { url ->
+                        withContext(Dispatchers.Main.immediate) {
+                            browser.launch(CustomTabsIntent.Builder().setShowTitle(true).build().intent.setData(url.toUri()))
+                        }
+                    },
+                )
+            }
             if (loginGeneration != oauthGeneration) return
             tokenReadGeneration.value += 1
             siwcTokens = tokens
-            if (!tokens.welcomeShown) {
-                showWelcomeDialog = true
-            }
+            if (!tokens.hasDirectUsageScope) return
 
             val readyProvider = latestProvider.chatGptSiwcReadyCopy()
             val fetchedModels = runCatching {
                 providerCatalog.text(readyProvider).listModels(readyProvider)
             }.getOrElse { error ->
                 if (error is CancellationException) throw error
-                emptyList()
+                reloadTokens()
+                toaster.show(context.getString(R.string.setting_provider_page_siwc_models_failed, error.message), type = ToastType.Error)
+                return
             }
             if (loginGeneration != oauthGeneration) return
             val currentProvider = latestProvider
@@ -177,6 +196,7 @@ internal fun ChatGptSiwcConsole(
                 type = ToastType.Error,
             )
         } finally {
+            browserClosed = null
             busy = false
         }
     }
@@ -196,7 +216,8 @@ internal fun ChatGptSiwcConsole(
         }
     }
 
-    val signedIn = siwcTokens?.isSignedIn == true
+    val planReady = siwcTokens?.isUsable() == true
+    val needsConsent = siwcTokens?.hasDirectUsageScope == false
 
     ProviderLabeledField("API Base URL") {
         ProviderTextField(
@@ -207,15 +228,15 @@ internal fun ChatGptSiwcConsole(
         )
     }
 
-    if (signedIn) {
+    if (planReady || needsConsent) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ProviderStatusChip(
-                text = stringResource(R.string.setting_provider_page_siwc_using_plan),
-                tone = ProviderTone.Ok,
+                text = stringResource(if (needsConsent) R.string.setting_provider_page_siwc_plan_disabled else R.string.setting_provider_page_siwc_using_plan),
+                tone = if (needsConsent) ProviderTone.Neutral else ProviderTone.Ok,
             )
             siwcTokens?.email?.takeIf { it.isNotBlank() }?.let { email ->
                 Text(
@@ -232,9 +253,9 @@ internal fun ChatGptSiwcConsole(
         ProviderMonoNote(stringResource(R.string.setting_provider_page_siwc_not_signed_in))
     }
 
-    if (!signedIn) {
+    if (!planReady) {
         ProviderCommandButton(
-            text = stringResource(R.string.setting_provider_page_siwc_continue_with_chatgpt),
+            text = stringResource(if (needsConsent) R.string.setting_provider_page_siwc_enable_plan else R.string.setting_provider_page_siwc_continue_with_chatgpt),
             accent = true,
             enabled = tokensLoaded && !busy,
             onClick = { scope.launch { runSiwcLogin() } },
@@ -304,6 +325,7 @@ internal fun ChatGptSiwcConsole(
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (e: Exception) {
+                                reloadTokens()
                                 toaster.show(
                                     context.getString(
                                         R.string.setting_provider_page_siwc_models_failed,
@@ -320,20 +342,22 @@ internal fun ChatGptSiwcConsole(
                 modifier = Modifier.weight(1f),
             )
         }
+    }
+    if (siwcTokens?.isSignedIn == true) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ProviderCommandButton(
                 text = stringResource(R.string.setting_provider_page_siwc_refresh),
-                enabled = tokensLoaded && !busy,
+                enabled = planReady && !siwcTokens?.refreshToken.isNullOrBlank() && !busy,
                 onClick = {
                     if (!busy) {
                         scope.launch {
                             tokenReadGeneration.value += 1
                             busy = true
                             try {
-                                val refreshed = oauthClient.refresh(provider.id)
+                                val refreshed = withContext(Dispatchers.IO) { oauthClient.refresh(provider.id) }
                                 tokenReadGeneration.value += 1
                                 siwcTokens = refreshed
                                 toaster.show(
@@ -343,6 +367,7 @@ internal fun ChatGptSiwcConsole(
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (e: Exception) {
+                                reloadTokens()
                                 toaster.show(
                                     context.getString(
                                         R.string.setting_provider_page_siwc_refresh_failed,
@@ -372,8 +397,8 @@ internal fun ChatGptSiwcConsole(
                                 val revokedRemotely = withContext(Dispatchers.IO) {
                                     oauthClient.signOut(provider.id)
                                 }
+                                tokenReadGeneration.value += 1
                                 siwcTokens = null
-                                showWelcomeDialog = false
                                 toaster.show(
                                     context.getString(
                                         if (revokedRemotely) {
@@ -397,7 +422,7 @@ internal fun ChatGptSiwcConsole(
         }
     }
 
-    if (showWelcomeDialog) {
+    if (planReady && siwcTokens?.welcomeShown == false) {
         ChatGptSiwcWelcomeDialog(
             onDismiss = { dismissWelcome(openUsage = false) },
             onManageUsage = { dismissWelcome(openUsage = true) },

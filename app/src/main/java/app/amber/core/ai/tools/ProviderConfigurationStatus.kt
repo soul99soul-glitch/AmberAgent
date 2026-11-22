@@ -76,7 +76,10 @@ internal fun siwcAuthStatus(
     if (tokens == null) {
         return ManagedProviderAuthStatus(AUTH_STATUS_NOT_SIGNED_IN, usable = false)
     }
-    if (!tokens.hasDirectUsageScope || tokens.accessToken.isBlank()) {
+    if (!tokens.hasDirectUsageScope) {
+        return ManagedProviderAuthStatus("scope_missing", usable = false)
+    }
+    if (tokens.accessToken.isBlank()) {
         return ManagedProviderAuthStatus(AUTH_STATUS_TOKEN_MISSING, usable = false)
     }
     if (tokens.expiresAtMillis <= nowMillis) {

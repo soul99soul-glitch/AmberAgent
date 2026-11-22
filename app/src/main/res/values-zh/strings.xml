@@ -1012,6 +1012,8 @@
   <string name="setting_provider_page_codex_oauth_logged_out">Codex OAuth 已退出登录</string>
   <string name="setting_provider_page_siwc_not_signed_in">免 API Key，直接使用你的 ChatGPT 套餐额度</string>
   <string name="setting_provider_page_siwc_using_plan">Using ChatGPT plan</string>
+  <string name="setting_provider_page_siwc_plan_disabled">已登录，套餐用量授权未开启</string>
+  <string name="setting_provider_page_siwc_enable_plan">授权使用 ChatGPT 套餐</string>
   <string name="setting_provider_page_siwc_continue_with_chatgpt">Continue with ChatGPT</string>
   <string name="setting_provider_page_siwc_manage_usage">Manage usage</string>
   <string name="setting_provider_page_siwc_fetch_models">刷新模型</string>

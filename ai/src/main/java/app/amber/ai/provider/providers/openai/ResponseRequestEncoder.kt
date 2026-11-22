@@ -157,36 +157,42 @@ internal object ResponseRequestEncoder {
         sanitized["store"] = JsonPrimitive(false)
         sanitized["stream"] = JsonPrimitive(true)
 
-        // Ensure no `{type: "message", role: "system"}` item leaks into `input` (convert to developer).
-        val inputArray = sanitized["input"] as? JsonArray
-        if (inputArray != null) {
-            sanitized["input"] = JsonArray(
-                inputArray.map { item ->
-                    val obj = item as? JsonObject ?: return@map item
-                    val role = obj["role"]?.jsonPrimitiveOrNull?.contentOrNull
-                    if (role.equals("system", ignoreCase = true)) {
-                        JsonObject(obj.toMutableMap().apply { put("role", JsonPrimitive("developer")) })
-                    } else {
-                        item
-                    }
+        val input = sanitized["input"]
+        if (input is JsonArray) {
+            sanitized["input"] = JsonArray(input.mapNotNull { item ->
+                var obj = item as? JsonObject ?: return@mapNotNull item
+                if (obj["role"]?.jsonPrimitiveOrNull?.contentOrNull.equals("system", ignoreCase = true)) {
+                    obj = JsonObject(obj + ("role" to JsonPrimitive("developer")))
                 }
-            )
+                if (obj["type"]?.jsonPrimitiveOrNull?.contentOrNull == "additional_tools") {
+                    obj.withSiwcTools().takeIf { "tools" in it }
+                } else obj
+            })
+        } else if (input is JsonPrimitive && input.isString) {
+            sanitized["input"] = buildJsonArray {
+                add(buildJsonObject { put("role", "user"); put("content", input) })
+            }
         }
+        return JsonObject(sanitized).withSiwcTools()
+    }
 
-        // Filter out unsupported hosted tools while retaining custom function tools (and web_search).
-        val toolsArray = sanitized["tools"] as? JsonArray
-        if (toolsArray != null) {
-            val allowedTools = toolsArray.filter { toolElement ->
-                val type = (toolElement as? JsonObject)?.get("type")?.jsonPrimitiveOrNull?.contentOrNull
-                type != null && type in SIWC_ALLOWED_TOOL_TYPES
-            }
-            if (allowedTools.isEmpty()) {
-                sanitized.remove("tools")
-            } else {
-                sanitized["tools"] = JsonArray(allowedTools)
+    private fun JsonObject.withSiwcTools(): JsonObject {
+        val tools = this["tools"] as? JsonArray ?: return this
+        val allowed = tools.mapNotNull { element ->
+            val tool = element as? JsonObject ?: return@mapNotNull null
+            when (tool["type"]?.jsonPrimitiveOrNull?.contentOrNull) {
+                in SIWC_ALLOWED_TOOL_TYPES -> tool
+                "namespace" -> {
+                    val children = (tool["tools"] as? JsonArray).orEmpty().filter { child ->
+                        val type = (child as? JsonObject)?.get("type")?.jsonPrimitiveOrNull?.contentOrNull
+                        type == "function" || type == "custom"
+                    }
+                    if (children.isEmpty()) null else JsonObject(tool + ("tools" to JsonArray(children)))
+                }
+                else -> null
             }
         }
-        return JsonObject(sanitized)
+        return if (allowed.isEmpty()) JsonObject(this - "tools") else JsonObject(this + ("tools" to JsonArray(allowed)))
     }
 
     private fun JsonObject.withoutSamplingParamsIfNeeded(model: Model): JsonObject {

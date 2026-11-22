@@ -2,6 +2,7 @@ package app.amber.ai.provider.providers.openai
 
 import android.util.Log
 import app.amber.ai.provider.CustomHeader
+import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.ResponseCursor
 import app.amber.ai.provider.ResponseResumeStore
@@ -11,6 +12,7 @@ import app.amber.ai.provider.providers.StreamProtocol
 import app.amber.ai.provider.providers.StreamTerminationGuard
 import app.amber.ai.ui.MessageChunk
 import app.amber.ai.ui.UIMessage
+import app.amber.ai.util.HttpException
 import app.amber.ai.util.configureReferHeaders
 import app.amber.ai.util.configureOpenCodeSessionHeader
 import app.amber.ai.util.json
@@ -146,6 +148,7 @@ internal class ResponseEventTransport(
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<MessageChunk> = flow {
+        val isSiwc = providerSetting.authMode == OpenAIAuthMode.CHATGPT_SIWC
         val requestBody = ResponseRequestEncoder.buildRequestBody(
             providerSetting = providerSetting,
             messages = messages,
@@ -155,6 +158,7 @@ internal class ResponseEventTransport(
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/responses")
             .headers(params.customHeaders.toHeaders())
+            .apply { if (isSiwc) removeHeader("Authorization") }
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("Authorization", "Bearer ${bearerResolver(providerSetting, false)}")
             .addHeader("Accept", "text/event-stream")
@@ -174,12 +178,15 @@ internal class ResponseEventTransport(
                 response = awaitResponse(client.newCall(retryRequest))
             }
             if (!response.isSuccessful) {
-                val bodyText = response.body.stringSafe().orEmpty()
+                val bodyText = response.use { it.body.string() }
                 val parsedSubscriptionError = runCatching {
                     val element = Json.parseToJsonElement(bodyText)
                     if (isSubscriptionSharingErrorCode(element)) parseOpenAIResponseError(element) else null
                 }.getOrNull()
-                if (parsedSubscriptionError != null) throw parsedSubscriptionError
+                if (parsedSubscriptionError != null) {
+                    val requestId = response.header("x-request-id")?.let { " (request $it)" }.orEmpty()
+                    throw HttpException("HTTP ${response.code}$requestId: ${parsedSubscriptionError.message}")
+                }
                 throw Exception("Failed to get response: ${response.code} $bodyText")
             }
 
@@ -193,13 +200,19 @@ internal class ResponseEventTransport(
                     if (dataLines.isEmpty()) return null
                     val data = dataLines.joinToString("\n")
                     dataLines.clear()
-                    terminationGuard.observe(eventType, data)
-                    if (data == "[DONE]") {
-                        terminationGuard.cleanEofCause()?.let { throw it }
-                        return null
+                    val event = if (data == "[DONE]") null else Json.parseToJsonElement(data).jsonObjectOrNull
+                    if (isSiwc) {
+                        // For SIWC only the decoded Responses event can finish the request.
+                        eventType = event?.get("type")?.jsonPrimitiveOrNull?.contentOrNull
+                        if (eventType == "response.incomplete") {
+                            val reason = event?.get("response")?.jsonObjectOrNull?.get("incomplete_details")
+                                ?.jsonObjectOrNull?.get("reason")?.jsonPrimitiveOrNull?.contentOrNull
+                            throw HttpException("ChatGPT response incomplete: ${reason ?: "unknown reason"}")
+                        }
                     }
-                    val eventJson = Json.parseToJsonElement(data).jsonObjectOrNull ?: return null
-                    return ResponseEventDecoder.parseResponseDelta(eventJson)
+                    terminationGuard.observe(eventType, data)
+                    if (data == "[DONE]") terminationGuard.cleanEofCause()?.let { throw it }
+                    return event?.let(ResponseEventDecoder::parseResponseDelta)
                 }
 
                 while (!source.exhausted()) {
@@ -207,14 +220,12 @@ internal class ResponseEventTransport(
                     when {
                         line.isEmpty() -> {
                             drainEvent()?.let { emit(it) }
-                            if (eventType == "response.completed" || eventType == "response.incomplete") {
-                                return@use
-                            }
+                            if (eventType == "response.completed" || eventType == "response.incomplete") return@use
                             eventType = null
                         }
 
                         line.startsWith("event:") -> {
-                            eventType = line.removePrefix("event:").trim()
+                            if (!isSiwc) eventType = line.removePrefix("event:").trim()
                         }
 
                         line.startsWith("data:") -> {
