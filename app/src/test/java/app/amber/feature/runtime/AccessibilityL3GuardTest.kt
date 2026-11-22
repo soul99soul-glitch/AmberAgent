@@ -266,5 +266,37 @@ class AccessibilityL3GuardTest {
             arguments = Json.parseToJsonElement("{}"),
         )
         assertNull(readSummary)
+
+        // screen_open_url shows only host, never userinfo/path/query tokens.
+        val urlCall = toolCall(
+            name = "screen_open_url",
+            input = """{"url":"https://user:secret@pay.example.com/checkout?token=abc123&next=/ok"}""",
+        )
+        val urlSummary = AccessibilityApprovalSummaryFormatter.format(
+            tool = urlCall,
+            arguments = Json.parseToJsonElement(urlCall.input),
+        )!!
+        assertTrue(urlSummary.operationSummary.contains("pay.example.com"))
+        assertFalse(urlSummary.operationSummary.contains("secret"))
+        assertFalse(urlSummary.operationSummary.contains("checkout"))
+        assertFalse(urlSummary.operationSummary.contains("abc123"))
+
+        // Malformed URL with spaces still recovers only host without leaking query.
+        assertEquals(
+            "docs.example.org",
+            AccessibilityApprovalSummaryFormatter.extractUrlHostForDisplay("https://docs.example.org/private?q=hello world"),
+        )
+
+        // screen_run_flow type counts raw character length without exposing input text.
+        val flowCall = toolCall(
+            name = "screen_run_flow",
+            input = """{"package_name":"com.example.chat","steps":[{"operation":"type","target":"输入框","text":" 1234 "}]}""",
+        )
+        val flowSummary = AccessibilityApprovalSummaryFormatter.format(
+            tool = flowCall,
+            arguments = Json.parseToJsonElement(flowCall.input),
+        )!!
+        assertTrue(flowSummary.operationSummary.contains("6 个字符"))
+        assertFalse(flowSummary.operationSummary.contains("1234"))
     }
 }

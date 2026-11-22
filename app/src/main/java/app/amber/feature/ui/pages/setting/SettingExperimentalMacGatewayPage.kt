@@ -13,18 +13,25 @@ import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,6 +64,7 @@ import app.amber.feature.ui.components.ui.permission.rememberPermissionState
 import app.amber.feature.ui.components.ui.workspaceColors
 import com.composables.icons.lucide.Laptop
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ShieldAlert
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -239,7 +247,7 @@ fun SettingExperimentalMacGatewayPage(
                                         enablePush()
                                     }
                                 }
-                                ExperimentActionButton(stringResource(R.string.mac_gateway_unpair), enabled = !busy) {
+                                ExperimentActionButton(stringResource(R.string.mac_gateway_unpair), enabled = !busy, danger = true) {
                                     confirmsUnpair = true
                                 }
                             }
@@ -267,18 +275,36 @@ fun SettingExperimentalMacGatewayPage(
                                 }
                             },
                             onDecision = { session, approval, allow ->
+                                notice = null
                                 perform {
-                                    repository.decide(
-                                        sessionKey = session.key,
-                                        toolCallId = approval.toolCallId,
-                                        allow = allow,
-                                        highRisk = approval.highRisk,
-                                        requiresLocalApproval = approval.effectiveRequiresLocalApproval,
-                                        riskLevel = approval.riskLevel,
-                                        verifyForeground = activity?.let { host ->
-                                            { host.verifyGatewayApproval(approval.tool) }
-                                        },
-                                    )
+                                    var biometricCancelled = false
+                                    try {
+                                        repository.decide(
+                                            sessionKey = session.key,
+                                            toolCallId = approval.toolCallId,
+                                            allow = allow,
+                                            highRisk = approval.highRisk,
+                                            requiresLocalApproval = approval.effectiveRequiresLocalApproval,
+                                            riskLevel = approval.riskLevel,
+                                            verifyForeground = activity?.let { host ->
+                                                {
+                                                    val verified = host.verifyGatewayApproval(approval)
+                                                    if (!verified) biometricCancelled = true
+                                                    verified
+                                                }
+                                            },
+                                        )
+                                        notice = null
+                                    } catch (forbidden: MacGatewayException.Forbidden) {
+                                        if (!forbidden.requiresLocalApproval && biometricCancelled) {
+                                            notice = Notice(
+                                                context.getString(R.string.mac_gateway_approval_biometric_cancelled),
+                                                error = false,
+                                            )
+                                        } else {
+                                            throw forbidden
+                                        }
+                                    }
                                 }
                             },
                         )
@@ -454,50 +480,170 @@ private fun PendingApprovalCard(
     onDecision: (MacGatewayStatus.Session, MacGatewayStatus.PendingApproval, Boolean) -> Unit,
 ) {
     val workspace = workspaceColors()
+    val scheme = MaterialTheme.colorScheme
     val localApprovalOnly = approval.effectiveRequiresLocalApproval
-    val headerMeta = listOfNotNull(
-        approval.riskLevel?.takeIf { it.isNotBlank() },
+    val isL2Biometric = !localApprovalOnly && approval.riskLevel.equals("L2", ignoreCase = true)
+    val riskTag = approval.riskLevel?.takeIf { it.isNotBlank() }
+        ?: if (localApprovalOnly) "L3" else null
+    val deviceAndTool = listOfNotNull(
         approval.targetDevice?.takeIf { it.isNotBlank() },
         approval.tool.takeIf { it.isNotBlank() },
-        approval.targetSummary?.takeIf { it.isNotBlank() } ?: approval.detail?.takeIf { it.isNotBlank() },
     ).joinToString(" · ")
-    Column(
+    val detailSummary = approval.targetSummary?.takeIf { it.isNotBlank() }
+        ?: approval.detail?.takeIf { it.isNotBlank() }
+
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = if (localApprovalOnly) scheme.errorContainer.copy(alpha = 0.45f) else workspace.row,
+        contentColor = workspace.ink,
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (localApprovalOnly) scheme.error.copy(alpha = 0.45f) else workspace.hairline,
+        ),
     ) {
-        Text(
-            text = headerMeta,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            color = workspace.ink,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-        )
-        approval.diffPreview?.takeIf { it.isNotBlank() }?.let { diff ->
-            StackedValueRow(
-                label = stringResource(R.string.mac_gateway_approval_diff_preview),
-                value = diff,
-                monospace = true,
-            )
-        }
-        if (localApprovalOnly) {
-            ExperimentNote(stringResource(R.string.mac_gateway_approval_high_risk_hint))
-        }
-        ExperimentActionRow {
-            if (!localApprovalOnly) {
-                ExperimentActionButton(
-                    text = stringResource(R.string.mac_gateway_approval_approve),
-                    enabled = !busy,
-                    primary = true,
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (localApprovalOnly) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = scheme.errorContainer,
+                    contentColor = scheme.onErrorContainer,
+                    border = BorderStroke(1.dp, scheme.error.copy(alpha = 0.4f)),
                 ) {
-                    onDecision(session, approval, true)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Icon(
+                            imageVector = Lucide.ShieldAlert,
+                            contentDescription = null,
+                            tint = scheme.onErrorContainer,
+                            modifier = Modifier
+                                .padding(top = 1.dp)
+                                .size(15.dp),
+                        )
+                        Text(
+                            text = stringResource(R.string.mac_gateway_approval_high_risk_hint),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = scheme.onErrorContainer,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
-            ExperimentActionButton(
-                text = stringResource(R.string.mac_gateway_approval_deny),
-                enabled = !busy,
-                primary = false,
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                onDecision(session, approval, false)
+                if (riskTag != null) {
+                    val (badgeBg, badgeFg) = when {
+                        localApprovalOnly -> scheme.errorContainer to scheme.onErrorContainer
+                        isL2Biometric -> scheme.primaryContainer to scheme.onPrimaryContainer
+                        else -> workspace.paper to workspace.muted
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = badgeBg,
+                        contentColor = badgeFg,
+                    ) {
+                        Text(
+                            text = riskTag,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            color = badgeFg,
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+                if (deviceAndTool.isNotBlank()) {
+                    Text(
+                        text = deviceAndTool,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Medium,
+                        ),
+                        color = workspace.ink,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (detailSummary != null) {
+                Text(
+                    text = detailSummary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = workspace.muted,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (isL2Biometric) {
+                Text(
+                    text = stringResource(R.string.mac_gateway_approval_biometric_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = workspace.muted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            approval.diffPreview?.takeIf { it.isNotBlank() }?.let { diff ->
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.mac_gateway_approval_diff_preview),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = workspace.muted,
+                    )
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = workspace.paper,
+                        border = BorderStroke(1.dp, workspace.hairline),
+                    ) {
+                        Text(
+                            text = diff,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = workspace.ink,
+                            maxLines = 8,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+            ExperimentActionRow {
+                ExperimentActionButton(
+                    text = stringResource(R.string.mac_gateway_approval_deny),
+                    enabled = !busy,
+                    primary = false,
+                    danger = localApprovalOnly,
+                ) {
+                    onDecision(session, approval, false)
+                }
+                if (!localApprovalOnly) {
+                    ExperimentActionButton(
+                        text = stringResource(R.string.mac_gateway_approval_approve),
+                        enabled = !busy,
+                        primary = true,
+                    ) {
+                        onDecision(session, approval, true)
+                    }
+                }
             }
         }
     }
@@ -565,11 +711,15 @@ private fun relativeTime(secondsSince1970: Double): String {
     return DateUtils.getRelativeTimeSpanString(then, now, DateUtils.MINUTE_IN_MILLIS).toString()
 }
 
-private suspend fun FragmentActivity.verifyGatewayApproval(tool: String): Boolean {
+private suspend fun FragmentActivity.verifyGatewayApproval(approval: MacGatewayStatus.PendingApproval): Boolean {
     val keyguard = getSystemService(KeyguardManager::class.java)
     fun isUnlockedForeground() = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
         keyguard != null && !keyguard.isDeviceLocked && !keyguard.isKeyguardLocked
     if (!isUnlockedForeground()) return false
+    val subtitle = listOfNotNull(
+        approval.riskLevel?.takeIf { it.isNotBlank() },
+        approval.tool.takeIf { it.isNotBlank() }?.take(48),
+    ).joinToString(" · ").ifBlank { getString(R.string.mac_gateway_approval_biometric_hint) }
     return suspendCancellableCoroutine { continuation ->
         val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
@@ -586,7 +736,7 @@ private suspend fun FragmentActivity.verifyGatewayApproval(tool: String): Boolea
         continuation.invokeOnCancellation { prompt.cancelAuthentication() }
         prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
             .setTitle(getString(R.string.mac_gateway_approval_approve))
-            .setSubtitle(tool)
+            .setSubtitle(subtitle)
             .setNegativeButtonText(getString(R.string.cancel))
             .build())
     }

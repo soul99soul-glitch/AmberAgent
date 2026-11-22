@@ -3810,6 +3810,9 @@
   <string name="mac_gateway_approval_deny">拒绝</string>
   <string name="mac_gateway_approval_high_risk_hint">请在 Mac 上批准</string>
   <string name="mac_gateway_approval_diff_preview">只读差异预览</string>
+  <string name="mac_gateway_approval_biometric_hint">批准前需通过生物识别验证</string>
+  <string name="mac_gateway_approval_biometric_cancelled">已取消生物识别验证，该审批仍处于待处理状态。</string>
+  <string name="screen_receipt_reason_approved_target_changed">批准后前台应用已切换或无法识别，已拦截本次跨应用操作，请重新发起确认。</string>
   <string name="mac_gateway_cloud_receipt_stop_too_late">停止过晚 (stop_too_late)</string>
   <string name="mac_gateway_cloud_outcome_unknown_hint">执行结果未知，请选择处理方式</string>
   <string name="mac_gateway_cloud_action_recheck">重查</string>

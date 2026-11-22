@@ -303,6 +303,7 @@ internal fun ExperimentActionButton(
     enabled: Boolean,
     primary: Boolean = false,
     compact: Boolean = false,
+    danger: Boolean = false,
     onClick: () -> Unit,
 ) {
     val workspace = workspaceColors()
@@ -311,11 +312,13 @@ internal fun ExperimentActionButton(
     // primary 按钮用 colorScheme.primary (随应用主题色解析), 不硬编码 workspace.blue.
     val container = when {
         !enabled -> workspace.row
+        danger -> scheme.errorContainer
         primary -> scheme.primary
         else -> workspace.row
     }
     val contentColor = when {
         !enabled -> workspace.faint
+        danger -> scheme.onErrorContainer
         primary -> scheme.onPrimary
         else -> workspace.ink
     }
@@ -325,20 +328,24 @@ internal fun ExperimentActionButton(
             .pressable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .height(if (compact) 26.dp else 28.dp)
-                .clip(CircleShape)
-                .background(container)
-                .padding(horizontal = 12.dp),
-            contentAlignment = Alignment.Center,
+        Surface(
+            modifier = Modifier.height(if (compact) 26.dp else 28.dp),
+            shape = CircleShape,
+            color = container,
+            contentColor = contentColor,
+            border = if (danger && enabled) BorderStroke(1.dp, scheme.error.copy(alpha = 0.4f)) else null,
         ) {
-            Text(
-                text = text,
-                style = type.tinyTag,
-                color = contentColor,
-                maxLines = 1,
-            )
+            Box(
+                modifier = Modifier.padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = text,
+                    style = type.tinyTag,
+                    color = contentColor,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
@@ -402,10 +409,13 @@ internal fun ExperimentNote(
 ) {
     val workspace = workspaceColors()
     val type = LocalAmberType.current
+    val scheme = MaterialTheme.colorScheme
     Surface(
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        color = if (error) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f) else workspace.row,
-        contentColor = if (error) MaterialTheme.colorScheme.error else workspace.muted,
+        color = if (error) scheme.errorContainer else workspace.row,
+        contentColor = if (error) scheme.onErrorContainer else workspace.muted,
+        border = if (error) BorderStroke(1.dp, scheme.error.copy(alpha = 0.35f)) else null,
     ) {
         Text(
             text = text,

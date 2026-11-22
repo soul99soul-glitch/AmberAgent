@@ -16,10 +16,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ShieldAlert
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,14 +60,20 @@ internal fun ChatToolApprovalCard(
     approveEnabled: Boolean = actionsEnabled,
     /** 状态行下方的补充说明（如 Jev 复核暂停了自动批准的原因）。 */
     notice: String? = null,
+    /** 置顶高风险警示横幅（如无障碍 L3 跨应用代操作），始终位于卡片顶部不被长详情挤出。 */
+    riskBanner: String? = null,
+    /** 高风险审批态：抬升卡片警示边框并克制批准按钮权重，降低误触风险。 */
+    highRisk: Boolean = false,
     extraContent: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
+    val scheme = MaterialTheme.colorScheme
     val components = LocalThemeDesign.current?.components
     val cardShape = RoundedCornerShape(components?.cardRadius?.toFloat()?.dp ?: 20.dp)
     val borderWidth = components?.borderWidth?.toFloat()?.dp ?: 1.dp
+    val cardBorderColor = if (highRisk) scheme.error.copy(alpha = 0.45f) else tokens.line
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -73,12 +82,46 @@ internal fun ChatToolApprovalCard(
         contentColor = tokens.ink,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
-        border = borderWidth.takeIf { it > 0.dp }?.let { BorderStroke(it, tokens.line) },
+        border = borderWidth.takeIf { it > 0.dp }?.let { BorderStroke(it, cardBorderColor) },
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
+            if (!riskBanner.isNullOrBlank()) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    color = scheme.errorContainer,
+                    contentColor = scheme.onErrorContainer,
+                    border = BorderStroke(1.dp, scheme.error.copy(alpha = 0.35f)),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            imageVector = Lucide.ShieldAlert,
+                            contentDescription = null,
+                            tint = scheme.onErrorContainer,
+                            modifier = Modifier
+                                .padding(top = 1.dp)
+                                .size(16.dp),
+                        )
+                        Text(
+                            text = riskBanner,
+                            style = type.secondary.copy(fontWeight = FontWeight.SemiBold),
+                            color = scheme.onErrorContainer,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Top,
@@ -169,7 +212,7 @@ internal fun ChatToolApprovalCard(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (highRisk) 12.dp else 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 OutlinedButton(
@@ -179,7 +222,10 @@ internal fun ChatToolApprovalCard(
                         .weight(1f)
                         .heightIn(min = 48.dp),
                     shape = CircleShape,
-                    border = BorderStroke(1.dp, tokens.line),
+                    border = BorderStroke(
+                        width = if (highRisk) 1.5.dp else 1.dp,
+                        color = if (highRisk) tokens.line2 else tokens.line,
+                    ),
                     contentPadding = PaddingValues(horizontal = 12.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = tokens.surface,
@@ -188,28 +234,55 @@ internal fun ChatToolApprovalCard(
                 ) {
                     Text(
                         text = denyLabel,
+                        fontWeight = if (highRisk) FontWeight.SemiBold else FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (approveEnabled) Button(
-                    onClick = onApprove,
-                    enabled = actionsEnabled && approveEnabled,
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp),
-                    shape = CircleShape,
-                    contentPadding = PaddingValues(horizontal = 12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = tokens.accent,
-                        contentColor = tokens.accentInk,
-                    ),
-                ) {
-                    Text(
-                        text = approveLabel,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                if (approveEnabled) {
+                    if (highRisk) {
+                        OutlinedButton(
+                            onClick = onApprove,
+                            enabled = actionsEnabled && approveEnabled,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp),
+                            shape = CircleShape,
+                            border = BorderStroke(1.dp, scheme.error.copy(alpha = 0.55f)),
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = scheme.errorContainer,
+                                contentColor = scheme.onErrorContainer,
+                            ),
+                        ) {
+                            Text(
+                                text = approveLabel,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    } else {
+                        Button(
+                            onClick = onApprove,
+                            enabled = actionsEnabled && approveEnabled,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp),
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = tokens.accent,
+                                contentColor = tokens.accentInk,
+                            ),
+                        ) {
+                            Text(
+                                text = approveLabel,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
         }

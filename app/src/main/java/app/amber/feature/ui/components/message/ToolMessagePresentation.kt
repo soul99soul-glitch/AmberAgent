@@ -515,24 +515,34 @@ internal fun toolDisplayTitle(
     )
     "screen_open_url" -> toolActivityTitleWithDetail(
         R.string.tool_activity_screen_open_url,
-        arguments.getStringContent("url")?.compactToolPreview(22),
+        arguments.getStringContent("url")
+            ?.let(app.amber.feature.runtime.AccessibilityApprovalSummaryFormatter::extractUrlHostForDisplay)
+            ?.compactToolPreview(28),
     )
     "screen_read_ui" -> stringResource(R.string.chat_message_tool_screen_read_ui)
     "screen_find_text" -> toolActivityTitleWithDetail(
         R.string.tool_activity_screen_find_text,
-        arguments.getStringContent("text")?.compactToolPreview(18),
+        arguments.getStringContent("text")
+            ?.let(app.amber.core.automation.SensitiveScreenTextClassifier::redactForDisplay)
+            ?.compactToolPreview(18),
     )
     "screen_tap_text" -> toolActivityTitleWithDetail(
         R.string.tool_activity_screen_tap_text,
-        arguments.getStringContent("text")?.compactToolPreview(18),
+        arguments.getStringContent("text")
+            ?.let(app.amber.core.automation.SensitiveScreenTextClassifier::redactForDisplay)
+            ?.compactToolPreview(18),
     )
     "screen_wait_for_text" -> toolActivityTitleWithDetail(
         R.string.tool_activity_screen_wait_for_text,
-        arguments.getStringContent("text")?.compactToolPreview(18),
+        arguments.getStringContent("text")
+            ?.let(app.amber.core.automation.SensitiveScreenTextClassifier::redactForDisplay)
+            ?.compactToolPreview(18),
     )
     "screen_scroll_until" -> toolActivityTitleWithDetail(
         R.string.tool_activity_screen_scroll_until,
-        arguments.getStringContent("text")?.compactToolPreview(18),
+        arguments.getStringContent("text")
+            ?.let(app.amber.core.automation.SensitiveScreenTextClassifier::redactForDisplay)
+            ?.compactToolPreview(18),
     )
     "screen_run_goal" -> toolActivityTitleWithDetail(
         R.string.tool_activity_screen_run_goal,

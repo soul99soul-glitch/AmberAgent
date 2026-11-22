@@ -147,9 +147,6 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 tool = tool,
                 arguments = arguments,
             )
-            val combinedNotice = listOfNotNull(a11yNotice, jevApprovalNotice(tool))
-                .takeIf { it.isNotEmpty() }
-                ?.joinToString("\n")
             ChatToolApprovalCard(
                 title = title,
                 toolName = tool.toolName,
@@ -164,7 +161,9 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                 onApprove = { onToolApproval?.invoke(tool.toolCallId, true, "") },
                 actionsEnabled = onToolApproval != null,
                 approveEnabled = sshCanApprove,
-                notice = combinedNotice,
+                notice = jevApprovalNotice(tool),
+                riskBanner = a11yNotice,
+                highRisk = a11yNotice != null,
                 extraContent = sshExtraContent ?: a11yExtraContent,
             )
         } else {
@@ -397,7 +396,16 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
 
     if (showResult) {
         val previewArguments = if (isPending && tool.requiresIndividualScreenApproval()) {
-            val summary = AccessibilityApprovalSummaryFormatter.format(tool, arguments)
+            val summary = AccessibilityApprovalSummaryFormatter.format(
+                tool = tool,
+                arguments = arguments,
+                resolveAppLabel = { pkg ->
+                    runCatching {
+                        val info = context.packageManager.getApplicationInfo(pkg, 0)
+                        context.packageManager.getApplicationLabel(info).toString()
+                    }.getOrNull()
+                },
+            )
             buildJsonObject {
                 put("风险级别", "L3")
                 summary?.let {

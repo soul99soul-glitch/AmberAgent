@@ -169,7 +169,9 @@ object ScreenToolReceiptParser {
                 !obj.string("error").isNullOrBlank() -> "failed"
                 else -> "ok"
             }
-        val rawReason = obj.string("reason") ?: obj.string("error")
+        val rawReason = obj.string("reason")
+            ?: obj.string("code")?.takeIf { it == "approvedTargetChanged" }
+            ?: obj.string("error")
         val goal = obj.string("goal") ?: argsObj?.string("goal")
         val packageName = obj.string("package_name")
             ?: obj.string("package")
@@ -509,6 +511,9 @@ object ScreenToolReceiptParser {
             "fresh_snapshot_unavailable", "takeover_snapshot_not_refreshed" ->
                 reasons += context?.getString(R.string.screen_receipt_reason_fresh_snapshot_unavailable)
                     ?: "接管后未能重新读取到最新画面，已保持暂停；请回到目标应用后再次点击「继续自动操作」。"
+            "approvedTargetChanged" ->
+                reasons += context?.getString(R.string.screen_receipt_reason_approved_target_changed)
+                    ?: "批准后前台应用已切换或无法识别，已拦截本次跨应用操作，请重新发起确认。"
             "foreground_package_changed" ->
                 reasons += context?.getString(R.string.screen_receipt_reason_foreground_package_changed)
                     ?: "当前前台应用已切换（如弹出系统权限框或跳转到其他应用），为保护隐私已暂停跨应用操作。"
@@ -665,6 +670,27 @@ object ScreenToolReceiptParser {
 }
 
 @OptIn(ExperimentalLayoutApi::class)
+private data class ScreenReceiptSemanticPalette(
+    val verified: Color,
+    val warning: Color,
+    val danger: Color,
+)
+
+private fun screenReceiptSemanticPalette(isDark: Boolean): ScreenReceiptSemanticPalette =
+    if (isDark) {
+        ScreenReceiptSemanticPalette(
+            verified = Color(0xFF6FCF85),
+            warning = Color(0xFFE5B363),
+            danger = Color(0xFFFF8F86),
+        )
+    } else {
+        ScreenReceiptSemanticPalette(
+            verified = Color(0xFF1F7A38),
+            warning = Color(0xFF9A5B13),
+            danger = Color(0xFFB3261E),
+        )
+    }
+
 @Composable
 internal fun ScreenToolReceiptInlineSummary(
     receipt: ScreenToolReceiptModel,
@@ -672,12 +698,13 @@ internal fun ScreenToolReceiptInlineSummary(
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalAmberTokens.current
+    val palette = screenReceiptSemanticPalette(tokens.isDark)
     val tierColor = when (receipt.tier) {
-        ScreenReceiptTier.VERIFIED_COMPLETED -> Color(0xFF2EA043)
-        ScreenReceiptTier.HELD_FOR_USER -> Color(0xFFD9822B)
-        ScreenReceiptTier.PARTIAL_OR_HANDBACK -> Color(0xFFD9822B)
-        ScreenReceiptTier.OUTCOME_UNKNOWN -> tokens.ink3
-        ScreenReceiptTier.FAILED_OR_BLOCKED -> Color(0xFFD94848)
+        ScreenReceiptTier.VERIFIED_COMPLETED -> palette.verified
+        ScreenReceiptTier.HELD_FOR_USER -> palette.warning
+        ScreenReceiptTier.PARTIAL_OR_HANDBACK -> palette.warning
+        ScreenReceiptTier.OUTCOME_UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+        ScreenReceiptTier.FAILED_OR_BLOCKED -> palette.danger
     }
     val tierBadgeText = when (receipt.tier) {
         ScreenReceiptTier.VERIFIED_COMPLETED -> stringResource(R.string.screen_receipt_tier_badge_verified)
@@ -756,8 +783,8 @@ internal fun ScreenToolReceiptInlineSummary(
                     val firstHeld = receipt.heldSensitiveActions.first().label
                     ReceiptMetricChip(
                         text = stringResource(R.string.screen_receipt_chip_held_action, firstHeld),
-                        color = Color(0xFFD9822B),
-                        background = Color(0xFFD9822B).copy(alpha = 0.12f),
+                        color = palette.warning,
+                        background = palette.warning.copy(alpha = 0.14f),
                     )
                 }
 
@@ -769,8 +796,8 @@ internal fun ScreenToolReceiptInlineSummary(
                             ocr.isAccessibilityOnly -> "无障碍扩展元数据 ${ocr.blockCount} 处（非位图 OCR）"
                             else -> "OCR 无可用结果"
                         },
-                        color = if (ocr.isBitmapOcr) tokens.ink3 else Color(0xFFD9822B),
-                        background = if (ocr.isBitmapOcr) tokens.surface2 else Color(0xFFD9822B).copy(alpha = 0.12f),
+                        color = if (ocr.isBitmapOcr) tokens.ink3 else palette.warning,
+                        background = if (ocr.isBitmapOcr) tokens.surface2 else palette.warning.copy(alpha = 0.14f),
                     )
                 }
 
@@ -853,16 +880,17 @@ internal fun ScreenToolReceiptDetailSheetContent(
     receipt: ScreenToolReceiptModel,
 ) {
     val tokens = LocalAmberTokens.current
+    val palette = screenReceiptSemanticPalette(tokens.isDark)
     val density = LocalDensity.current
     val isLargeFont = density.fontScale >= 1.3f
     var showRawJson by remember { mutableStateOf(false) }
 
     val tierColor = when (receipt.tier) {
-        ScreenReceiptTier.VERIFIED_COMPLETED -> Color(0xFF2EA043)
-        ScreenReceiptTier.HELD_FOR_USER -> Color(0xFFD9822B)
-        ScreenReceiptTier.PARTIAL_OR_HANDBACK -> Color(0xFFD9822B)
-        ScreenReceiptTier.OUTCOME_UNKNOWN -> tokens.ink3
-        ScreenReceiptTier.FAILED_OR_BLOCKED -> Color(0xFFD94848)
+        ScreenReceiptTier.VERIFIED_COMPLETED -> palette.verified
+        ScreenReceiptTier.HELD_FOR_USER -> palette.warning
+        ScreenReceiptTier.PARTIAL_OR_HANDBACK -> palette.warning
+        ScreenReceiptTier.OUTCOME_UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+        ScreenReceiptTier.FAILED_OR_BLOCKED -> palette.danger
     }
     val tierTitle = when (receipt.tier) {
         ScreenReceiptTier.VERIFIED_COMPLETED -> stringResource(R.string.screen_receipt_tier_title_verified)
@@ -960,14 +988,14 @@ internal fun ScreenToolReceiptDetailSheetContent(
             if (receipt.heldSensitiveActions.isNotEmpty()) {
                 ReceiptSectionCard(
                     title = stringResource(R.string.screen_receipt_section_held_actions),
-                    accentColor = Color(0xFFD9822B),
+                    accentColor = palette.warning,
                 ) {
                     receipt.heldSensitiveActions.forEach { item ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFFD9822B).copy(alpha = 0.08f))
+                                .background(palette.warning.copy(alpha = 0.10f))
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.Top,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -975,7 +1003,7 @@ internal fun ScreenToolReceiptDetailSheetContent(
                             Icon(
                                 imageVector = Lucide.ShieldAlert,
                                 contentDescription = null,
-                                tint = Color(0xFFD9822B),
+                                tint = palette.warning,
                                 modifier = Modifier
                                     .padding(top = 2.dp)
                                     .size(15.dp),
@@ -1050,7 +1078,7 @@ internal fun ScreenToolReceiptDetailSheetContent(
             if (receipt.executedSteps.isNotEmpty()) {
                 ReceiptSectionCard(
                     title = "${stringResource(R.string.screen_receipt_section_executed_steps)} (${receipt.executedSteps.size})",
-                    accentColor = Color(0xFF2EA043),
+                    accentColor = palette.verified,
                 ) {
                     receipt.executedSteps.forEach { step ->
                         Row(
@@ -1100,7 +1128,7 @@ internal fun ScreenToolReceiptDetailSheetContent(
                             }
                             ReceiptMetricChip(
                                 text = step.status,
-                                color = if (step.dispatched) Color(0xFF2EA043) else tokens.ink3,
+                                color = if (step.dispatched) palette.verified else tokens.ink3,
                                 background = tokens.surface,
                             )
                         }
@@ -1154,8 +1182,8 @@ internal fun ScreenToolReceiptDetailSheetContent(
                         if (!ocr.diagnostics.isNullOrBlank()) {
                             ReceiptMetricChip(
                                 text = "诊断: ${ocr.diagnostics}",
-                                color = Color(0xFFD9822B),
-                                background = Color(0xFFD9822B).copy(alpha = 0.12f),
+                                color = palette.warning,
+                                background = palette.warning.copy(alpha = 0.14f),
                             )
                         }
                     }

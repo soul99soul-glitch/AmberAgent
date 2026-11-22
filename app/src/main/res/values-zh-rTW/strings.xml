@@ -3746,6 +3746,9 @@
   <string name="mac_gateway_approval_deny">拒絕</string>
   <string name="mac_gateway_approval_high_risk_hint">請在 Mac 上批准</string>
   <string name="mac_gateway_approval_diff_preview">唯讀差異預覽</string>
+  <string name="mac_gateway_approval_biometric_hint">核准前需通過生物辨識驗證</string>
+  <string name="mac_gateway_approval_biometric_cancelled">已取消生物辨識驗證，該核准仍處於待處理狀態。</string>
+  <string name="screen_receipt_reason_approved_target_changed">核准後前景應用已切換或無法識別，已攔截本次跨應用操作，請重新發起確認。</string>
   <string name="mac_gateway_cloud_receipt_stop_too_late">停止過晚 (stop_too_late)</string>
   <string name="mac_gateway_cloud_outcome_unknown_hint">執行結果未知，請選擇處理方式</string>
   <string name="mac_gateway_cloud_action_recheck">重查</string>

@@ -3719,6 +3719,9 @@
   <string name="mac_gateway_approval_deny">拒否</string>
   <string name="mac_gateway_approval_high_risk_hint">Mac で承認してください</string>
   <string name="mac_gateway_approval_diff_preview">差分プレビュー（読み取り専用）</string>
+  <string name="mac_gateway_approval_biometric_hint">承認前に生体認証が必要です</string>
+  <string name="mac_gateway_approval_biometric_cancelled">生体認証がキャンセルされました。承認は保留のままです。</string>
+  <string name="screen_receipt_reason_approved_target_changed">承認後に前面アプリが切り替わったか識別できないため、安全のため操作を中止しました。</string>
   <string name="mac_gateway_cloud_receipt_stop_too_late">停止遅延 (stop_too_late)</string>
   <string name="mac_gateway_cloud_outcome_unknown_hint">結果不明 — 復旧操作を選択</string>
   <string name="mac_gateway_cloud_action_recheck">再確認</string>

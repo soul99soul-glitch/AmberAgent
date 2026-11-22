@@ -3814,6 +3814,9 @@ My task:</string>
   <string name="mac_gateway_approval_deny">Deny</string>
   <string name="mac_gateway_approval_high_risk_hint">Please approve on Mac</string>
   <string name="mac_gateway_approval_diff_preview">Diff Preview (Read-only)</string>
+  <string name="mac_gateway_approval_biometric_hint">Biometric verification required before approving</string>
+  <string name="mac_gateway_approval_biometric_cancelled">Biometric verification cancelled; approval remains pending.</string>
+  <string name="screen_receipt_reason_approved_target_changed">Foreground app changed after approval; cross-app action was blocked for safety.</string>
   <string name="mac_gateway_cloud_receipt_stop_too_late">Stop too late</string>
   <string name="mac_gateway_cloud_outcome_unknown_hint">Outcome unknown — choose recovery</string>
   <string name="mac_gateway_cloud_action_recheck">Recheck</string>

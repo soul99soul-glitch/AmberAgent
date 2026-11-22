@@ -484,4 +484,20 @@ class ScreenToolReceiptPresentationTest {
         assertFalse(ocr.isAccessibilityOnly)
         assertEquals("mlkit_text_recognition_chinese", ocr.recognizer)
     }
+
+    @Test
+    fun `approvedTargetChanged maps to localized foreground-switched rejection feedback`() {
+        val content = parseJson(
+            """{"status":"failed","code":"approvedTargetChanged","error":"Foreground app changed or could not be identified. Issue a fresh call.","recoverable":true}""",
+        )
+        val receipt = ScreenToolReceiptParser.parse(
+            toolName = "screen_click",
+            arguments = parseJson("""{"x":100,"y":200}"""),
+            content = content,
+        )
+        requireNotNull(receipt)
+        assertEquals(ScreenReceiptTier.FAILED_OR_BLOCKED, receipt.tier)
+        assertTrue(receipt.unmetReasons.any { it.contains("前台应用已切换") })
+        assertFalse(receipt.unmetReasons.any { it.contains("Issue a fresh call") })
+    }
 }

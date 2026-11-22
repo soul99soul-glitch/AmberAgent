@@ -3719,6 +3719,9 @@
   <string name="mac_gateway_approval_deny">Отклонить</string>
   <string name="mac_gateway_approval_high_risk_hint">Одобрите на Mac</string>
   <string name="mac_gateway_approval_diff_preview">Предпросмотр изменений (только чтение)</string>
+  <string name="mac_gateway_approval_biometric_hint">Перед одобрением потребуется биометрическая проверка</string>
+  <string name="mac_gateway_approval_biometric_cancelled">Биометрическая проверка отменена; запрос остаётся в ожидании.</string>
+  <string name="screen_receipt_reason_approved_target_changed">После одобрения активное приложение изменилось или не распознано; действие заблокировано ради безопасности.</string>
   <string name="mac_gateway_cloud_receipt_stop_too_late">Остановка опоздала (stop_too_late)</string>
   <string name="mac_gateway_cloud_outcome_unknown_hint">Результат неизвестен — выберите действие</string>
   <string name="mac_gateway_cloud_action_recheck">Проверить</string>

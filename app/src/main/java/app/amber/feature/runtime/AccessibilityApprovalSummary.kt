@@ -115,7 +115,7 @@ object AccessibilityApprovalSummaryFormatter {
             "启动应用 $pkg"
         }
         "screen_open_url" -> {
-            val host = args?.stringField("url")?.let { runCatching { URI(it).host }.getOrNull() }
+            val host = args?.stringField("url")?.let(::extractUrlHostForDisplay)
             host?.let { "打开来自 $it 的链接" } ?: "打开外部链接"
         }
         "screen_scroll_until" -> {
@@ -135,7 +135,7 @@ object AccessibilityApprovalSummaryFormatter {
             val target = step?.stringField("target")?.truncatePreview(24).orEmpty()
             when (step?.stringField("operation")) {
                 "click" -> "点击「$target」"
-                "type" -> "向「$target」写入文本（${step.stringField("text")?.length ?: 0} 个字符）"
+                "type" -> "向「$target」写入文本（${(step["text"] as? JsonPrimitive)?.contentOrNull?.length ?: 0} 个字符）"
                 else -> "每次审批仅支持一个明确操作"
             }
         }
@@ -149,6 +149,16 @@ object AccessibilityApprovalSummaryFormatter {
             "将 $pkg 加入无障碍允许列表"
         }
         else -> "执行外部无障碍操作"
+    }
+
+    fun extractUrlHostForDisplay(rawUrl: String): String? {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isEmpty()) return null
+        val direct = runCatching { URI(trimmed).host }.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+        if (direct != null) return direct
+        // Strip query/fragment/whitespace only to recover host for malformed URLs without ever leaking path/query.
+        val authorityCandidate = trimmed.substringBefore('?').substringBefore('#').substringBefore(' ')
+        return runCatching { URI(authorityCandidate).host }.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     private fun JsonObject.stringField(key: String): String? =
