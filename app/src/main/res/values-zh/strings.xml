@@ -939,8 +939,8 @@
   <!-- TODO: setting_provider_page_add_codex_oauth 在 template-picker 重构后已无引用；保留一次发版作缓冲，下版本删除。 -->
   <string name="setting_provider_page_add_provider_override">添加提供商重写</string>
   <string name="setting_provider_page_template_section_oauth">一键登录账号</string>
-  <string name="setting_provider_page_template_oauth_siwc_title">ChatGPT 套餐登录（SIWC）</string>
-  <string name="setting_provider_page_template_oauth_siwc_subtitle">官方 Sign in with ChatGPT · 免 API Key</string>
+  <string name="setting_provider_page_template_oauth_siwc_title">用 ChatGPT 套餐登录</string>
+  <string name="setting_provider_page_template_oauth_siwc_subtitle">免 API Key · 官方套餐通道</string>
   <string name="setting_provider_page_template_oauth_codex_title">用 ChatGPT 登录（Codex）</string>
   <string name="setting_provider_page_template_oauth_codex_subtitle">免 API Key · Codex 通道</string>
   <string name="setting_provider_page_template_oauth_gemini_title">用 Google 登录</string>

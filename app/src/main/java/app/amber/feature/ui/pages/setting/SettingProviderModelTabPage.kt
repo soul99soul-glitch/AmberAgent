@@ -300,6 +300,8 @@ private fun ModelList(
                             ProviderModelRow(
                                 model = item,
                                 isCurrent = item.type == ModelType.CHAT && item.id == currentModelId,
+                                preferDisplayName = providerSetting is ProviderSetting.OpenAI &&
+                                    providerSetting.authMode == OpenAIAuthMode.CHATGPT_SIWC,
                                 onSetCurrent = { onSetCurrent(item) },
                                 onDelete = { deleteWithUndo(item) },
                                 onOpenEditor = { editState.open(item.copy()) },
@@ -369,6 +371,7 @@ private fun ModelList(
             },
             onDismiss = { showPicker = false },
             onRefetch = onRefetch,
+            isLoading = loadState is ModelListLoadState.Loading,
         )
     }
 
@@ -517,6 +520,7 @@ internal fun ProviderModelRow(
     model: Model,
     modifier: Modifier = Modifier,
     isCurrent: Boolean,
+    preferDisplayName: Boolean = false,
     onSetCurrent: () -> Unit,
     onDelete: () -> Unit,
     onOpenEditor: () -> Unit,
@@ -566,9 +570,10 @@ internal fun ProviderModelRow(
         val type = LocalAmberType.current
         var menuOpen by remember { mutableStateOf(false) }
         // Opaque surface so the moving foreground covers the delete zone.
+        val rowTitle = if (preferDisplayName) model.displayName.ifBlank { model.modelId } else model.modelId
         ProviderListRow(
-            title = model.modelId,
-            titleMono = true,
+            title = rowTitle,
+            titleMono = !preferDisplayName,
             minHeight = 66.dp,
             onClick = onOpenEditor,
             modifier = Modifier.background(t.surface),
@@ -656,6 +661,7 @@ internal fun ModelPickerSheet(
     onCreateBlank: () -> Unit,
     onDismiss: () -> Unit,
     onRefetch: (() -> Unit)? = null,
+    isLoading: Boolean = false,
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
@@ -692,13 +698,11 @@ internal fun ModelPickerSheet(
                 title = stringResource(R.string.setting_provider_page_add_model),
                 trailing = if (onRefetch != null) {
                     {
-                        ProviderStatusChip(
+                        ProviderGhostButton(
                             text = stringResource(R.string.provider_model_refetch),
-                            tone = ProviderTone.Accent,
-                            icon = Lucide.RefreshCw,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .pressable(onClick = onRefetch),
+                            imageVector = Lucide.RefreshCw,
+                            enabled = !isLoading,
+                            onClick = onRefetch,
                         )
                     }
                 } else {
@@ -751,7 +755,10 @@ internal fun ModelPickerSheet(
                 if (filteredModels.isEmpty()) {
                     item("no_matches") {
                         Text(
-                            text = stringResource(R.string.model_list_no_matches),
+                            text = stringResource(
+                                if (isLoading) R.string.setting_provider_page_models_fetching
+                                else R.string.model_list_no_matches,
+                            ),
                             style = type.secondary,
                             color = t.ink3,
                             textAlign = TextAlign.Center,
@@ -785,14 +792,23 @@ internal fun ModelPickerSheet(
                                 modifier = Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(2.dp),
                             ) {
+                                val isSiwc = parentProvider is ProviderSetting.OpenAI &&
+                                    parentProvider.authMode == OpenAIAuthMode.CHATGPT_SIWC
                                 Text(
-                                    text = if (parentProvider is ProviderSetting.OpenAI && parentProvider.authMode == OpenAIAuthMode.CHATGPT_SIWC) {
+                                    text = if (isSiwc) {
                                         model.displayName.ifBlank { model.modelId }
                                     } else model.modelId,
-                                    style = type.meta.copy(
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                    ),
+                                    style = if (isSiwc) {
+                                        type.body.copy(
+                                            fontSize = 14.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    } else {
+                                        type.meta.copy(
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    },
                                     color = if (on) t.accent else t.ink,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,

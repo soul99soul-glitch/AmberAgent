@@ -403,6 +403,7 @@ internal fun ProviderStatusChip(
             },
             color = fg,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -1017,20 +1018,31 @@ internal fun ProviderGhostButton(
     modifier: Modifier = Modifier,
     imageVector: ImageVector? = null,
     accent: Boolean = true,
+    enabled: Boolean = true,
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
+    val bg = when {
+        !enabled -> t.surface2
+        accent -> t.accent.copy(alpha = 0.10f)
+        else -> t.surface2
+    }
+    val fg = when {
+        !enabled -> t.ink4
+        accent -> t.accent
+        else -> t.ink2
+    }
     Box(
         modifier = modifier
             .heightIn(min = 48.dp)
-            .pressable(onClick = onClick),
+            .pressable(onClick = onClick, enabled = enabled),
         contentAlignment = Alignment.Center,
     ) {
         Row(
             modifier = Modifier
                 .height(34.dp)
                 .clip(CircleShape)
-                .background(if (accent) t.accent.copy(alpha = 0.10f) else t.surface2)
+                .background(bg)
                 .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1039,15 +1051,16 @@ internal fun ProviderGhostButton(
                 Icon(
                     imageVector = imageVector,
                     contentDescription = null,
-                    tint = if (accent) t.accent else t.ink2,
+                    tint = fg,
                     modifier = Modifier.size(14.dp),
                 )
             }
             Text(
                 text = text,
                 style = type.secondary.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                color = if (accent) t.accent else t.ink2,
+                color = fg,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -1068,6 +1081,7 @@ internal fun ProviderSheetHeader(
             .heightIn(min = 48.dp)
             .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             text = title,

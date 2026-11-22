@@ -669,8 +669,8 @@
   <string name="setting_provider_page_add_provider_override">Add Provider Override</string>
   <!-- Picker OAuth quick-start section: permanently visible so OAuth is discoverable on first run. -->
   <string name="setting_provider_page_template_section_oauth">Sign in with account</string>
-  <string name="setting_provider_page_template_oauth_siwc_title">Sign in with ChatGPT (Official)</string>
-  <string name="setting_provider_page_template_oauth_siwc_subtitle">Use your ChatGPT plan — official SIWC</string>
+  <string name="setting_provider_page_template_oauth_siwc_title">Sign in with ChatGPT</string>
+  <string name="setting_provider_page_template_oauth_siwc_subtitle">No API key — ChatGPT plan</string>
   <string name="setting_provider_page_template_oauth_codex_title">Sign in with ChatGPT (Codex)</string>
   <string name="setting_provider_page_template_oauth_codex_subtitle">No API key — Codex backend</string>
   <string name="setting_provider_page_template_oauth_gemini_title">Sign in with Google</string>

@@ -17,13 +17,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
@@ -229,14 +228,13 @@ internal fun ChatGptSiwcConsole(
     }
 
     if (planReady || needsConsent) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             ProviderStatusChip(
                 text = stringResource(if (needsConsent) R.string.setting_provider_page_siwc_plan_disabled else R.string.setting_provider_page_siwc_using_plan),
-                tone = if (needsConsent) ProviderTone.Neutral else ProviderTone.Ok,
+                tone = if (needsConsent) ProviderTone.Warn else ProviderTone.Ok,
             )
             siwcTokens?.email?.takeIf { it.isNotBlank() }?.let { email ->
                 Text(
@@ -245,7 +243,6 @@ internal fun ChatGptSiwcConsole(
                     color = t.ink2,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
                 )
             }
         }
@@ -268,13 +265,13 @@ internal fun ChatGptSiwcConsole(
         ) {
             ProviderCommandButton(
                 text = stringResource(R.string.setting_provider_page_siwc_manage_usage),
-                accent = true,
                 enabled = tokensLoaded && !busy,
                 onClick = { context.openUrl(OPENAI_CHATGPT_SIWC_USAGE_URL) },
                 modifier = Modifier.weight(1f),
             )
             ProviderCommandButton(
                 text = stringResource(R.string.setting_provider_page_siwc_fetch_models),
+                plain = true,
                 enabled = tokensLoaded && !busy,
                 onClick = {
                     if (!busy) {
@@ -344,80 +341,93 @@ internal fun ChatGptSiwcConsole(
         }
     }
     if (siwcTokens?.isSignedIn == true) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            ProviderCommandButton(
-                text = stringResource(R.string.setting_provider_page_siwc_refresh),
-                enabled = planReady && !siwcTokens?.refreshToken.isNullOrBlank() && !busy,
-                onClick = {
-                    if (!busy) {
-                        scope.launch {
-                            tokenReadGeneration.value += 1
-                            busy = true
-                            try {
-                                val refreshed = withContext(Dispatchers.IO) { oauthClient.refresh(provider.id) }
+        val onSignOut: () -> Unit = {
+            if (!busy) {
+                scope.launch {
+                    tokenReadGeneration.value += 1
+                    oauthGeneration += 1
+                    latestOnModelCandidatesInvalidated()
+                    busy = true
+                    try {
+                        val revokedRemotely = withContext(Dispatchers.IO) {
+                            oauthClient.signOut(provider.id)
+                        }
+                        tokenReadGeneration.value += 1
+                        siwcTokens = null
+                        toaster.show(
+                            context.getString(
+                                if (revokedRemotely) {
+                                    R.string.setting_provider_page_siwc_logged_out
+                                } else {
+                                    R.string.setting_provider_page_siwc_logged_out_local_only
+                                }
+                            ),
+                            type = if (revokedRemotely) ToastType.Success else ToastType.Info,
+                        )
+                    } catch (error: CancellationException) {
+                        throw error
+                    } finally {
+                        busy = false
+                    }
+                }
+            }
+        }
+        if (planReady) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ProviderCommandButton(
+                    text = stringResource(R.string.setting_provider_page_siwc_refresh),
+                    plain = true,
+                    enabled = !siwcTokens?.refreshToken.isNullOrBlank() && !busy,
+                    onClick = {
+                        if (!busy) {
+                            scope.launch {
                                 tokenReadGeneration.value += 1
-                                siwcTokens = refreshed
-                                toaster.show(
-                                    context.getString(R.string.setting_provider_page_siwc_refresh_success),
-                                    type = ToastType.Success,
-                                )
-                            } catch (error: CancellationException) {
-                                throw error
-                            } catch (e: Exception) {
-                                reloadTokens()
-                                toaster.show(
-                                    context.getString(
-                                        R.string.setting_provider_page_siwc_refresh_failed,
-                                        e.message ?: e.toString(),
-                                    ),
-                                    type = ToastType.Error,
-                                )
-                            } finally {
-                                busy = false
+                                busy = true
+                                try {
+                                    val refreshed = withContext(Dispatchers.IO) { oauthClient.refresh(provider.id) }
+                                    tokenReadGeneration.value += 1
+                                    siwcTokens = refreshed
+                                    toaster.show(
+                                        context.getString(R.string.setting_provider_page_siwc_refresh_success),
+                                        type = ToastType.Success,
+                                    )
+                                } catch (error: CancellationException) {
+                                    throw error
+                                } catch (e: Exception) {
+                                    reloadTokens()
+                                    toaster.show(
+                                        context.getString(
+                                            R.string.setting_provider_page_siwc_refresh_failed,
+                                            e.message ?: e.toString(),
+                                        ),
+                                        type = ToastType.Error,
+                                    )
+                                } finally {
+                                    busy = false
+                                }
                             }
                         }
-                    }
-                },
-                modifier = Modifier.weight(1f),
-            )
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                ProviderCommandButton(
+                    text = stringResource(R.string.setting_provider_page_siwc_logout),
+                    danger = true,
+                    enabled = tokensLoaded && !busy,
+                    onClick = onSignOut,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        } else {
             ProviderCommandButton(
                 text = stringResource(R.string.setting_provider_page_siwc_logout),
+                danger = true,
                 enabled = tokensLoaded && !busy,
-                onClick = {
-                    if (!busy) {
-                        scope.launch {
-                            tokenReadGeneration.value += 1
-                            oauthGeneration += 1
-                            latestOnModelCandidatesInvalidated()
-                            busy = true
-                            try {
-                                val revokedRemotely = withContext(Dispatchers.IO) {
-                                    oauthClient.signOut(provider.id)
-                                }
-                                tokenReadGeneration.value += 1
-                                siwcTokens = null
-                                toaster.show(
-                                    context.getString(
-                                        if (revokedRemotely) {
-                                            R.string.setting_provider_page_siwc_logged_out
-                                        } else {
-                                            R.string.setting_provider_page_siwc_logged_out_local_only
-                                        }
-                                    ),
-                                    type = if (revokedRemotely) ToastType.Success else ToastType.Info,
-                                )
-                            } catch (error: CancellationException) {
-                                throw error
-                            } finally {
-                                busy = false
-                            }
-                        }
-                    }
-                },
-                modifier = Modifier.weight(1f),
+                onClick = onSignOut,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }
@@ -438,40 +448,38 @@ private fun ChatGptSiwcWelcomeDialog(
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
     Dialog(onDismissRequest = onDismiss) {
-        ProviderCard(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp),
-        ) {
+        ProviderCard(modifier = Modifier.fillMaxWidth()) {
             Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
                     text = stringResource(R.string.setting_provider_page_siwc_welcome_title),
-                    style = type.body.copy(fontWeight = FontWeight.Bold),
+                    style = type.sessionTitle,
                     color = t.ink,
                 )
                 Text(
                     text = stringResource(R.string.setting_provider_page_siwc_welcome_body),
-                    style = type.secondary,
-                    color = t.ink3,
+                    style = type.body.copy(fontSize = 13.5.sp, lineHeight = 20.sp),
+                    color = t.ink2,
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ProviderCommandButton(
-                        text = stringResource(R.string.setting_provider_page_siwc_manage_usage),
-                        onClick = onManageUsage,
-                        plain = true,
-                        modifier = Modifier.weight(1f),
-                    )
                     ProviderCommandButton(
                         text = stringResource(R.string.setting_provider_page_siwc_welcome_got_it),
                         onClick = onDismiss,
                         accent = true,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    ProviderCommandButton(
+                        text = stringResource(R.string.setting_provider_page_siwc_manage_usage),
+                        onClick = onManageUsage,
+                        plain = true,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
