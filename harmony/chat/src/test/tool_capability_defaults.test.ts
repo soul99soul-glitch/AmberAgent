@@ -18,13 +18,13 @@ test('new chat models default to function tools; image and embedding models do n
   }
 });
 
-test('legacy saved chat models with empty abilities gain tools and send their discovery schemas', () => {
+test('legacy saved chat models with empty abilities gain registry defaults and send tool discovery schemas', () => {
   const provider = parseProviderSetting(JSON.stringify({ type: 'openai', models: [
     { id: 'flash', modelId: 'mimo-v2.6-flash', type: 'CHAT', abilities: [] },
     { id: 'pro', modelId: 'mimo-v2.6-pro', type: 'CHAT', abilities: ['REASONING'] },
     { id: 'image', modelId: 'image', type: 'IMAGE', abilities: [] },
   ] }));
-  assert.deepEqual(provider.models[0].abilities, ['tool']);
+  assert.deepEqual(provider.models[0].abilities, ['tool', 'reasoning']);
   assert.deepEqual(provider.models[1].abilities, ['reasoning', 'tool']);
   assert.deepEqual(provider.models[2].abilities, []);
   const model = toChatModel(provider.models[0]);
@@ -37,14 +37,16 @@ test('legacy saved chat models with empty abilities gain tools and send their di
   assert.ok(buildToolSystemPrompt([search], model, []).includes('Tool discovery:'));
 });
 
-test('explicitly disabling tools survives repeated saves and reloads', () => {
+test('explicitly disabling tools or both capabilities survives repeated saves and reloads', () => {
   let provider = makeProviderSettingOpenAIVariant({ models: [
     makeProviderModel({ modelId: 'mimo-v2.6-flash', abilities: [] }),
     makeProviderModel({ modelId: 'mimo-v2.6-pro', abilities: ['reasoning'] }),
+    makeProviderModel({ modelId: 'mimo-v2.6-pro', abilities: ['tool'] }),
   ] });
   for (let i = 0; i < 3; i++) {
     provider = parseProviderSetting(serializeProviderSetting(provider)) as typeof provider;
     assert.deepEqual(provider.models[0].abilities, []);
     assert.deepEqual(provider.models[1].abilities, ['reasoning']);
+    assert.deepEqual(provider.models[2].abilities, ['tool']);
   }
 });

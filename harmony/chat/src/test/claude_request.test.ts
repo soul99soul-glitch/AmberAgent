@@ -135,7 +135,7 @@ test('system cache_control:EPHEMERAL 标记的最后一个 part 打 cache;DISABL
 });
 
 test('thinking:OFF→disabled;AUTO→adaptive+summarized;显式档→output_config.effort;无 reasoning 能力→无 thinking 键', () => {
-  const reasoningModel = makeChatModel({ modelId: 'claude-opus-4-7', abilities: ['reasoning'] });
+  const reasoningModel = makeChatModel({ modelId: 'claude-opus-4-7' });
 
   const off = buildClaudeMessageRequest({
     messages: [makeUserMessage('x')],
@@ -162,7 +162,7 @@ test('thinking:OFF→disabled;AUTO→adaptive+summarized;显式档→output_conf
 
   const plain = buildClaudeMessageRequest({
     messages: [makeUserMessage('x')],
-    params: baseParams({ reasoningLevel: 'high' }), // model 无 abilities
+    params: baseParams({ model: makeChatModel({ modelId: 'claude-opus-4-7', abilities: ['tool'] }), reasoningLevel: 'high' }),
     setting: baseSetting(), stream: false,
   });
   assert.equal('thinking' in plain, false);
