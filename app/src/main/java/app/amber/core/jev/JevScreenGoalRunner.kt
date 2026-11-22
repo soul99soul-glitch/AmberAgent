@@ -58,6 +58,7 @@ class JevScreenGoalRunner(
         maxSteps: Int = 15,
         maxDurationMs: Long = 180_000,
         dryRun: Boolean = false,
+        proposeNextAction: Boolean = false,
         hostPackageName: String = DEFAULT_HOST_PACKAGE_NAME,
         autoReturnToHost: Boolean? = null,
         returnToHostLauncher: (suspend (String) -> Boolean)? = null,
@@ -126,6 +127,7 @@ class JevScreenGoalRunner(
                 // A takeover that lands during final verification must keep the target app in front.
                 sessionState?.isPausedOrPausing == true -> "takeover_paused_keep_foreground"
                 dryRun -> "dry_run"
+                proposeNextAction -> "step_approval_required"
                 !allowHostReturn -> "verification_only_keep_foreground"
                 isTargetHost -> "target_is_host"
                 !shouldAutoReturn -> "disabled_by_setting"
@@ -474,6 +476,15 @@ class JevScreenGoalRunner(
                             controller = controller,
                         )
                         return@withTimeoutOrNull finish("needs_user_action", "action_not_read_only")
+                    }
+                    if (proposeNextAction) {
+                        val node = snapshot.nodes.firstOrNull { it.ref == candidate.action.ref }
+                        steps += buildJsonObject {
+                            put("action", candidate.action.kind.name.lowercase())
+                            put("target", SensitiveScreenTextClassifier.redactForDisplay(node?.label.orEmpty()))
+                            put("dispatched", false)
+                        }
+                        return@withTimeoutOrNull finish("handback", "step_approval_required")
                     }
                     val receipt = withContext(mainDispatcher) {
                         currentCoroutineContext().ensureActive()

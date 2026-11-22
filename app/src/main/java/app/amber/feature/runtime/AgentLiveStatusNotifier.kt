@@ -27,7 +27,6 @@ import app.amber.core.utils.cancelNotification
 import app.amber.core.utils.sendNotification
 import app.amber.feature.tools.ToolRisk
 import app.amber.feature.tools.invocationPolicy
-import app.amber.feature.tools.isAccessibilityL3ActionTool
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
@@ -873,7 +872,7 @@ class AgentLiveStatusNotifier(
          * notification shade / lock screen may only deny them.
          */
         fun requiresInAppApprovalOnly(tool: UIMessagePart.Tool): Boolean {
-            if (isAccessibilityL3ActionTool(tool.toolName)) {
+            if (tool.requiresIndividualScreenApproval()) {
                 return true
             }
             if (tool.metadata?.containsKey(JevAutoApprovalGate.METADATA_KEY) == true) {

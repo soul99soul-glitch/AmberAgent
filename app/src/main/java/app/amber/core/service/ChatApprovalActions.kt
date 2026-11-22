@@ -20,6 +20,7 @@ import app.amber.feature.runtime.RunTerminalStore
 import app.amber.feature.runtime.ToolEffectLedger
 import app.amber.feature.runtime.argsDigest
 import app.amber.core.utils.withSettledCredentialArgumentsRedacted
+import app.amber.feature.runtime.requiresIndividualScreenApproval
 import app.amber.feature.tools.capabilityForTool
 import java.time.Instant
 import java.util.Locale
@@ -64,6 +65,7 @@ internal data class IdleToolBlockerDecision(
     val changed: Boolean,
     val shouldResume: Boolean,
     val blockingToolNames: List<String>,
+    val awaitingIndividualApproval: Boolean = false,
 ) {
     companion object {
         val Unchanged = IdleToolBlockerDecision(false, false, emptyList())
@@ -183,7 +185,7 @@ class ChatApprovalActions(
         if (
             pendingTools.isEmpty() ||
             pendingTools.any { tool ->
-                tool.toolName == ASK_USER_TOOL_NAME ||
+                tool.toolName == ASK_USER_TOOL_NAME || tool.requiresIndividualScreenApproval() ||
                     // Jev 复核收紧的调用只能由用户逐个决定。
                     tool.metadata?.containsKey(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) == true ||
                     tool.metadata?.containsKey(app.amber.core.jev.JevApprovalTriage.METADATA_KEY) == true ||
@@ -202,6 +204,7 @@ class ChatApprovalActions(
             val messages = node.messages.map { message ->
                 val parts = message.parts.map { part ->
                     if (part !is UIMessagePart.Tool || !part.isPending || part.toolName == "ask_user" ||
+                        part.requiresIndividualScreenApproval() ||
                         // Jev 复核收紧的调用不随开关批量批准，只能由用户在卡片上决定。
                         part.metadata?.containsKey(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) == true ||
                         part.metadata?.containsKey(app.amber.core.jev.JevApprovalTriage.METADATA_KEY) == true
@@ -392,6 +395,12 @@ class ChatApprovalActions(
             copy = PendingUserMessageDisplayCopy.from(context),
         )
         val explicitApproval = message.isToolApprovalContinuation()
+        if (explicitApproval && blockingTools.any { it.isPending && it.requiresIndividualScreenApproval() }) {
+            return IdleToolBlockerDecision(
+                changed = false, shouldResume = false, blockingToolNames = blockingTools.map { it.toolName },
+                awaitingIndividualApproval = true,
+            )
+        }
         val hasAskUserAnswer = userAnswer.isNotBlank() &&
             blockingTools.any { it.isPending && it.toolName == ASK_USER_TOOL_NAME }
         val shouldResume = explicitApproval || hasAskUserAnswer

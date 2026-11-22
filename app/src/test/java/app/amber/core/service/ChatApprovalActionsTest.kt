@@ -161,7 +161,7 @@ class ChatApprovalActionsTest : DurableRuntimeTestBase() {
         val triage = tool("triage", "terminal_execute").copy(metadata = buildJsonObject {
             put(app.amber.core.jev.JevApprovalTriage.METADATA_KEY, true)
         })
-        val conversation = Conversation.ofId(Uuid.random()).copy(messageNodes = listOf(assistantTools(ordinary, ask, jev, triage)))
+        val conversation = Conversation.ofId(Uuid.random()).copy(messageNodes = listOf(assistantTools(ordinary, ask, jev, triage, tool("screen", "screen_click"))))
         fixture.repo.insertConversation(conversation)
 
         val decision = fixture.actions.approvePendingAutoApprovableTools(conversation.id)!!
@@ -172,6 +172,13 @@ class ChatApprovalActionsTest : DurableRuntimeTestBase() {
         assertTrue(persisted[1].isPending)
         assertTrue(persisted[2].isPending)
         assertTrue(persisted[3].isPending)
+        assertTrue(persisted[4].isPending)
+        val continuation = fixture.actions.resolveIdleToolBlockerBeforeDispatch(
+            conversation.id, PendingUserMessage("next", listOf(UIMessagePart.Text("继续"))),
+        )
+        assertTrue(continuation.awaitingIndividualApproval)
+        assertFalse(continuation.shouldResume)
+        assertTrue(fixture.repo.getConversationById(conversation.id)!!.currentMessages.last().getTools()[4].isPending)
         assertNull(fixture.actions.approvePendingAutoApprovableTools(conversation.id))
         assertNull(fixture.store.session(conversation.id).getJob())
     }

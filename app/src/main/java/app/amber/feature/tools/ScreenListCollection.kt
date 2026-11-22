@@ -36,7 +36,7 @@ internal class ScreenListCollection(private val operations: ScreenOperationOwner
                         put("enum", buildJsonArray { add("up"); add("down") })
                         put("description", "Finger movement direction.")
                     })
-                    put("max_swipes", screenIntegerProp("Swipe budget 0..8. Defaults to 3; 0 reads the current screen only."))
+                    put("max_swipes", screenIntegerProp("Swipe budget 0..1. Defaults to 1; 0 reads the current screen only."))
                     put("max_items", screenIntegerProp("Item cap 1..200. Defaults to 50."))
                 },
                 required = listOf("container", "direction"),
@@ -49,7 +49,7 @@ internal class ScreenListCollection(private val operations: ScreenOperationOwner
             operations.trackScreenTool("screen_collect_list", "读取列表", input) {
                 val containerLabel = input.requiredString("container")
                 val direction = input.string("direction") ?: "down"
-                val maxSwipes = (input.int("max_swipes") ?: 3).coerceIn(0, MAX_COLLECT_SWIPES)
+                val maxSwipes = (input.int("max_swipes") ?: 1).coerceIn(0, MAX_COLLECT_SWIPES)
                 val maxItems = (input.int("max_items") ?: 50).coerceIn(1, 200)
                 val service = requireScreenAccessibility()
                 val deadline = System.currentTimeMillis() + COLLECT_BUDGET_MS
@@ -131,7 +131,7 @@ internal class ScreenListCollection(private val operations: ScreenOperationOwner
     )
 }
 
-private const val MAX_COLLECT_SWIPES = 8
+private const val MAX_COLLECT_SWIPES = 1
 private const val COLLECT_BUDGET_MS = 60_000L
 
 /** 一次滑动后等界面稳定的时间；稳定不等于业务成功，仅用于下一屏观察。 */

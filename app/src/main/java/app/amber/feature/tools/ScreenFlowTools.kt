@@ -1,6 +1,5 @@
 package app.amber.feature.tools
 
-import kotlinx.coroutines.delay
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -23,8 +22,8 @@ internal class ScreenFlowTools(
 ) {
     fun screenRunFlowTool(runId: String?) = Tool(
         name = "screen_run_flow",
-        description = "Run 1-12 fixed, already-decided steps in the authorized app without asking the " +
-            "judgment service at each step. Use it for known navigation, search, or filling a draft " +
+        description = "Run one fixed, already-decided step in the authorized app. Split longer flows into individually approved calls. The " +
+            "step needs no judgment service. Use it for known navigation, search, or filling a draft " +
             "supplied by the user. Every step re-reads a fresh observation and re-locates the target " +
             "by exact text; refs and coordinates are never stored between steps. A step is dispatched " +
             "at most once. Any ambiguity, missing target, app switch, or unmet acceptance condition " +
@@ -38,7 +37,7 @@ internal class ScreenFlowTools(
                     put("steps", buildJsonObject {
                         put("type", "array")
                         put("minItems", 1)
-                        put("maxItems", 12)
+                        put("maxItems", 1)
                         put("description", "Ordered steps; each one is dispatched once, in order.")
                         put("items", buildJsonObject {
                             put("type", "object")
@@ -228,8 +227,6 @@ internal class ScreenFlowTools(
                         handback = if (verdict.ambiguous) "verification_ambiguous" else "verification_${verdict.detail}"
                         break
                     }
-                    // 下一步从新观察开始：给界面一点稳定时间，避免读到过渡态。
-                    delay(FLOW_STEP_SETTLE_MS)
                 }
                 val remaining = steps.size - executed.size
                 textJson {
@@ -257,10 +254,8 @@ internal class ScreenFlowTools(
         settingsStore?.settingsFlow?.value?.agentRuntime?.screenAutomation?.allowedPackages.orEmpty()
 }
 
-private const val MAX_FLOW_STEPS = 12
+private const val MAX_FLOW_STEPS = 1
 private const val FLOW_BUDGET_MS = 60_000L
-/** 固定流程两步之间的稳定时间。 */
-private const val FLOW_STEP_SETTLE_MS = 250L
 
 /**
  * 固定流程不得点击/输入的目标。与 JevScreenGoalRunner 的候选排除同一个红线，

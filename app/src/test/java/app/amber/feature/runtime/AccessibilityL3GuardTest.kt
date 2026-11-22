@@ -11,7 +11,6 @@ import app.amber.feature.tools.ToolRisk
 import app.amber.feature.tools.invocationPolicy
 import app.amber.feature.tools.isAccessibilityL1ReadTool
 import app.amber.feature.tools.isAccessibilityL3ActionTool
-import app.amber.feature.ui.components.message.AccessibilityApprovalSummaryFormatter
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
@@ -197,6 +196,27 @@ class AccessibilityL3GuardTest {
     }
 
     @Test
+    fun foregroundChangeRejectsApprovedGestureBeforeExecution() = kotlinx.coroutines.test.runTest {
+        var foreground: String? = "target.app"
+        val dispatcher = AgentToolDispatcher(Json, resolver, activeScreenPackage = { foreground })
+        val call = dispatcher.captureApprovalTarget(toolCall("screen_click", approvalState = ToolApprovalState.Approved))
+        var executions = 0
+        val definition = Tool(name = "screen_click", description = "test", execute = {
+            executions++
+            emptyList()
+        })
+        suspend fun execute() = dispatcher.execute(call, definition, autoApproveTools = false)
+        foreground = "different.app"
+        assertTrue(execute()!!.output.filterIsInstance<UIMessagePart.Text>().single().text.contains("approvedTargetChanged"))
+        foreground = null
+        execute()
+        assertEquals(0, executions)
+        foreground = "target.app"
+        execute()
+        assertEquals(1, executions)
+    }
+
+    @Test
     fun approvalSummaryClearlyShowsTargetAppActionTypeAndOperationSummary() {
         val clickCall = toolCall(
             name = "screen_click",
@@ -221,17 +241,24 @@ class AccessibilityL3GuardTest {
         val inputCall = toolCall(
             name = "screen_input_text",
             input = """{"text":"帮我查订单"}""",
+            metadata = buildJsonObject { put(AccessibilityApprovalSummaryFormatter.METADATA_TARGET_APP_KEY, "com.tencent.mm") },
         )
         val inputSummary = AccessibilityApprovalSummaryFormatter.format(
             tool = inputCall,
             arguments = Json.parseToJsonElement(inputCall.input),
-            activePackageFallback = "com.tencent.mm",
             resolveAppLabel = { "微信" },
         )
         assertNotNull(inputSummary)
         assertEquals("微信 (com.tencent.mm)", inputSummary!!.targetApp)
         assertTrue(inputSummary.actionType.contains("输入文字"))
-        assertTrue(inputSummary.operationSummary.contains("帮我查订单"))
+        assertTrue(inputSummary.operationSummary.contains("5 个字符"))
+        assertFalse(inputSummary.operationSummary.contains("帮我查订单"))
+
+        val typedCode = AccessibilityApprovalSummaryFormatter.format(
+            tool = inputCall,
+            arguments = Json.parseToJsonElement("""{"text":"235913"}"""),
+        )!!
+        assertFalse(typedCode.operationSummary.contains("235913"))
 
         // Read-only L1 screen tool produces no L3 summary card.
         val readSummary = AccessibilityApprovalSummaryFormatter.format(

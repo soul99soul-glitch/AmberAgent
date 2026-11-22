@@ -149,6 +149,7 @@ class DialogueContractV1Test {
                   "workItemId": "w-1",
                   "conversationId": "conv-1",
                   "causedByInputId": "in-f1",
+                  "causedByRequestId": "req-f2",
                   "executorKind": "cloud_worker",
                   "executorId": "worker-1",
                   "parentRunId": "run-parent-1",
@@ -216,10 +217,14 @@ class DialogueContractV1Test {
             val (code, payload) = when {
                 exchange.requestMethod == "POST" && exchange.requestURI.path == "/v2/dialogue/messages" -> {
                     val reqId = json.parseToJsonElement(body).jsonObject["requestId"]!!.jsonPrimitive.content
-                    if (reqId == "req-retry-1") retryRequests += body
+                    if (reqId == "req-retry-1" && retryRequests.add(body) && retryRequests.size == 1) {
+                        exchange.sendResponseHeaders(503, -1)
+                        exchange.close()
+                        return@createContext
+                    }
                     val eventId = if (reqId == "req-retry-1") "in-retry-1" else "in-msg-1"
                     val workId = if (reqId == "req-retry-1") "w-2" else "w-1"
-                    202 to """{"eventId":"$eventId","requestId":"$reqId","topicId":"t-1","workItemIds":["$workId"],"state":"received","conversationId":"conv-1"}"""
+                    202 to """{"eventId":"$eventId","requestId":"$reqId","topicId":"t-1","workItemIds":["$workId"],"state":"received","outcomeUnknown":${workId == "w-2"},"conversationId":"conv-1"}"""
                 }
                 exchange.requestMethod == "POST" && exchange.requestURI.path == "/v2/work-items/w-1/inputs" -> {
                     val reqId = json.parseToJsonElement(body).jsonObject["requestId"]!!.jsonPrimitive.content
@@ -255,17 +260,16 @@ class DialogueContractV1Test {
                 scheme = "http",
             )
             var latestState = CloudDialogueUiState()
-            val coordinator = CloudDialogueCoordinator(
+            var persisted: String? = null
+            val connection = MacGatewayConnection("gw-1", "Mac", listOf("127.0.0.1"), server.address.port, "fp", "dev-1")
+            fun newCoordinator() = CloudDialogueCoordinator(
                 clientProvider = { client },
                 timelineSink = sink,
-                persistState = {},
+                persistState = { persisted = json.encodeToString(CloudDialoguePersistedState.serializer(), it) },
                 onStateChanged = { latestState = it },
             )
-            coordinator.restore(
-                enabled = true,
-                connection = MacGatewayConnection("gw-1", "Mac", listOf("127.0.0.1"), server.address.port, "fp", "dev-1"),
-                persisted = null,
-            )
+            var coordinator = newCoordinator()
+            coordinator.restore(enabled = true, connection = connection, persisted = null)
             coordinator.bindActiveConversation("conv-1")
             coordinator.sendMessage("conv-1", "部署检查", "req-msg-1")
             coordinator.sendFollowup("conv-1", "w-1", "补充1", "req-f1")
@@ -319,15 +323,58 @@ class DialogueContractV1Test {
             assertTrue(markdown.contains("pr#108"))
             assertTrue(markdown.contains("app/src/main/Foo.kt"))
 
-            // Recovery action 1: retry clears old unknown task and re-submits prompt.
-            coordinator.retryOutcomeUnknownTask("conv-1", "w-1", "req-retry-1")
-            assertTrue(latestState.outcomeUnknownTasksForConversation("conv-1").isEmpty())
-            assertEquals(1, retryRequests.size)
-            assertEquals("部署检查", json.parseToJsonElement(retryRequests.single()).jsonObject["text"]?.jsonPrimitive?.content)
+            coordinator.recheckOutcomeUnknownTask("w-1")
+            assertTrue(latestState.tasks.single { it.workItemId == "w-1" }.outcomeUnknown)
+            assertTrue(runCatching {
+                coordinator.retryOutcomeUnknownTask("conv-1", "w-1", "req-retry-1")
+            }.isFailure)
+            assertEquals(1, latestState.outcomeUnknownTasksForConversation("conv-1").size)
+
+            // A late POST reply to the original follow-up must preserve the event's terminal state.
+            assertEquals(CloudInputDisposition.CANCELLED,
+                coordinator.sendFollowup("conv-1", "w-1", "补充2", "req-f2").state)
+
+            // Recreate from the stored JSON between attempts, as after process death.
+            coordinator = newCoordinator()
+            coordinator.restore(true, connection, json.decodeFromString(CloudDialoguePersistedState.serializer(), checkNotNull(persisted)))
+            val restored = latestState.outcomeUnknownTasksForConversation("conv-1").single()
+            assertEquals(task.sourceRefs, restored.sourceRefs)
+            assertEquals(task.sourcePaths, restored.sourcePaths)
+            assertEquals("req-retry-1", restored.retryRequestId)
+            coordinator.retryOutcomeUnknownTask("conv-1", "w-1", "req-second-tap")
+            assertEquals(listOf("w-2"), latestState.outcomeUnknownTasksForConversation("conv-1").map { it.workItemId })
+            assertEquals(2, retryRequests.size)
+            assertEquals(retryRequests.first(), retryRequests.last())
+            assertEquals("部署检查", json.parseToJsonElement(retryRequests.last()).jsonObject["text"]?.jsonPrimitive?.content)
 
             // Recovery action 2: abandon clears unknown banner without sending network requests.
             coordinator.abandonOutcomeUnknownTask("w-2")
             assertTrue(latestState.tasks.first { it.workItemId == "w-2" }.outcomeUnknownAbandoned)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun remoteL2ChallengeRetriesOnlyAfterForegroundVerification() = runBlocking {
+        val proofs = CopyOnWriteArrayList<List<String?>>()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/v1/amber/decision") { exchange ->
+            val headers = exchange.requestHeaders
+            val proof = listOf(headers.getFirst("X-Amber-Trusted-Foreground"), headers.getFirst("X-Amber-Biometric-Verified"))
+            proofs.add(proof)
+            val verified = proof == listOf("true", "true")
+            val bytes = (if (verified) "{}" else """{"error":"verify","requiresLocalApproval":false,"riskLevel":"L2"}""").toByteArray()
+            exchange.sendResponseHeaders(if (verified) 200 else 403, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val client = MacGatewayClient(listOf("127.0.0.1"), server.address.port, "unused", "token", scheme = "http")
+            val cancelled = runCatching { client.decide("s", "c", true, verifyForeground = { false }) }
+            assertTrue(cancelled.exceptionOrNull() is MacGatewayException.Forbidden)
+            client.decide("s", "c", true, verifyForeground = { true })
+            assertEquals(listOf(listOf(null, null), listOf(null, null), listOf("true", "true")), proofs.toList())
         } finally {
             server.stop(0)
         }

@@ -20,6 +20,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.After
@@ -503,6 +504,19 @@ class JevScreenGoalRunnerTest {
         assertEquals("no_progress", result["reason"]!!.jsonPrimitive.content)
         assertEquals(2, controller.actions.size)
         assertEquals(4, transport.calls)
+    }
+
+    @Test
+    fun proposedScreenStepReturnsWithoutDispatchOrHostSwitch() = runTest {
+        val controller = FakeAccessibilityController(snapshot("initial"))
+        val transport = ScriptedTransport(actionStepAnswers(answer("a0")))
+        val result = runner(runtime(transport) { settings(JevMode.ACTIVE) }, testScheduler).run(
+            controller, "com.example.target", "goal", emptyList(), "screen-step", proposeNextAction = true,
+        )
+        assertEquals("step_approval_required", result["reason"]?.jsonPrimitive?.content)
+        assertEquals("false", result.getValue("steps").jsonArray.single().jsonObject.getValue("dispatched").jsonPrimitive.content)
+        assertTrue(controller.actions.isEmpty())
+        assertTrue(controller.hostReturns.isEmpty())
     }
 
     @Test

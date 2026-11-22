@@ -176,6 +176,9 @@ internal fun ChatPageComposerHost(
                         if (isCloudActive) {
                             scope.launch {
                                 runCatching { macGatewayRepository.recheckCloudOutcomeUnknown(workItemId) }
+                                    .onSuccess { settled ->
+                                        if (!settled) toaster.show(context.getString(app.amber.agent.R.string.mac_gateway_cloud_outcome_unknown_hint))
+                                    }
                                     .onFailure { error ->
                                         toaster.show(error.message ?: "Recheck failed", type = ToastType.Error)
                                     }

@@ -335,9 +335,9 @@ class MacGatewayRepository(
         cloudCoordinator.pollOnce()
     }
 
-    suspend fun recheckCloudOutcomeUnknown(workItemId: String) {
+    suspend fun recheckCloudOutcomeUnknown(workItemId: String): Boolean {
         ready.await()
-        cloudCoordinator.recheckOutcomeUnknownTask(workItemId)
+        return cloudCoordinator.recheckOutcomeUnknownTask(workItemId)
     }
 
     suspend fun retryCloudOutcomeUnknown(
@@ -410,6 +410,7 @@ class MacGatewayRepository(
         highRisk: Boolean = false,
         requiresLocalApproval: Boolean = false,
         riskLevel: String? = null,
+        verifyForeground: (suspend () -> Boolean)? = null,
     ) {
         val sessionApproval = _state.value.status?.sessions
             ?.firstOrNull { it.key == sessionKey && it.pendingApproval?.toolCallId == toolCallId }
@@ -436,6 +437,7 @@ class MacGatewayRepository(
                 sessionKey = sessionKey,
                 toolCallId = toolCallId,
                 allow = allow,
+                verifyForeground = verifyForeground,
                 highRisk = effectiveHighRisk,
                 requiresLocalApproval = effectiveLocalOnly,
                 riskLevel = effectiveRiskLevel,
@@ -444,7 +446,8 @@ class MacGatewayRepository(
                 diffPreview = sessionApproval?.diffPreview,
             )
         } catch (forbidden: MacGatewayException.Forbidden) {
-            // Server refused remote approval (403): lock this approval card to read-only local approval.
+            // A foreground challenge leaves the remote approval available.
+            if (!forbidden.requiresLocalApproval && !forbidden.riskLevel.equals("L3", ignoreCase = true)) throw forbidden
             _state.update { current ->
                 current.copy(
                     status = current.status?.copy(

@@ -10,6 +10,8 @@ import app.amber.agent.data.files.CasTestFixtures
 import app.amber.core.agent.runtime.AgentEventPayload
 import app.amber.core.agent.runtime.AgentEventWriter
 import app.amber.core.agent.runtime.ToolLifecycleEvent
+import app.amber.feature.runtime.AccessibilityApprovalSummaryFormatter
+import app.amber.feature.runtime.AgentLiveStatusNotifier
 import app.amber.feature.runtime.AgentToolDispatcher
 import app.amber.feature.runtime.PermissionDecisionResolver
 import app.amber.feature.runtime.ToolEffect
@@ -591,6 +593,40 @@ class RecipeRuntimeTest {
         assertEquals("ok", resumed["status"]!!.jsonPrimitive.content)
         assertEquals(1, writeCalls.size)
         assertEquals("w1", fakeLedger.prepared.single().toolCallId.substringAfterLast(":"))
+    }
+
+    @Test
+    fun `nested screen approval retains the target and refuses a changed foreground app`() = runBlocking {
+        var foreground = "target.app"
+        val context = runContext(runId = "screen-recipe", effectLedger = FakeToolEffectLedger()).copy(
+            dispatcher = AgentToolDispatcher(json, PermissionDecisionResolver(), activeScreenPackage = { foreground }),
+        )
+        val screen = Tool(name = "screen_input_text", description = "screen write", execute = {
+            writeCalls += it
+            emptyList()
+        })
+        val primitives = ToolRegistry.from(listOf(screen))
+        val manifest = """{"schemaVersion":1,"name":"typing","version":"1.0.0","steps":[{"id":"write","tool":"screen_input_text","args":{"text":"235913"}}]}"""
+        val recipe = RecipeManifestParser.parse(manifest).toDefinition(manifest, primitives)
+        val runner = RecipeRunner(json)
+        val inputs = JsonObject(emptyMap())
+        val waiting = runner.run(recipe, inputs, context) { primitives }
+        val resume = RecipeRunner.resumeInput(inputs, waiting.getValue("checkpoint").jsonObject)
+        val outer = UIMessagePart.Tool(toolCallId = "outer", toolName = "recipe_write_typing", input = resume, approvalState = ToolApprovalState.Pending)
+        assertTrue(AgentLiveStatusNotifier.requiresInAppApprovalOnly(outer))
+        val summary = checkNotNull(AccessibilityApprovalSummaryFormatter.format(outer, outer.inputAsJson()))
+        assertEquals("target.app", summary.targetApp)
+        assertTrue(summary.operationSummary.contains("6 个字符"))
+        assertFalse(resume.contains("235913"))
+
+        foreground = "different.app"
+        val approved = buildJsonObject {
+            outer.inputAsJson().jsonObject.forEach { (key, value) -> put(key, value) }
+            put(RECIPE_RESUME_APPROVED_INPUT_KEY, true)
+        }
+        val result = runner.run(recipe, approved, context) { primitives }
+        assertEquals("failed", result.getValue("status").jsonPrimitive.content)
+        assertTrue(writeCalls.isEmpty())
     }
 
     @Test

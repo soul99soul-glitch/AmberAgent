@@ -253,6 +253,7 @@ class MacGatewayClient(
         targetDevice: String? = null,
         targetSummary: String? = null,
         diffPreview: String? = null,
+        verifyForeground: (suspend () -> Boolean)? = null,
     ) {
         val localApprovalOnly = highRisk ||
             requiresLocalApproval ||
@@ -267,11 +268,24 @@ class MacGatewayClient(
                 diffPreview = diffPreview,
             )
         }
-        send(
-            "POST",
-            listOf("v1", "amber", "decision"),
-            mapOf("sessionKey" to sessionKey, "toolCallId" to toolCallId, "allow" to allow),
-        )
+        suspend fun submit(headers: Map<String, String> = emptyMap()) {
+            send(
+                "POST", listOf("v1", "amber", "decision"),
+                mapOf("sessionKey" to sessionKey, "toolCallId" to toolCallId, "allow" to allow),
+                headers = headers,
+            )
+        }
+        try {
+            submit()
+        } catch (denial: MacGatewayException.Forbidden) {
+            if (!allow || denial.requiresLocalApproval || denial.riskLevel !in setOf("L1", "L2") ||
+                verifyForeground == null || !verifyForeground()) throw denial
+            submit(mapOf(
+                "X-Amber-Trusted-Foreground" to "true",
+                "X-Amber-Biometric-Verified" to "true",
+                "X-Amber-Surface" to "app",
+            ))
+        }
     }
 
     suspend fun registerPushToken(pushToken: String) {

@@ -253,7 +253,7 @@ internal class ScreenPrimitiveTools(
 
     val screenReadUiTool = Tool(
         name = "screen_read_ui",
-        description = "Read the current Accessibility UI tree for screen reasoning (with automatic compiled on-device OCR fallback for low-coverage/WebView/Canvas screens). OCR uses bundled ML Kit text recognition for Chinese (Simplified/Traditional) and Latin/English; `ocr_source`/`ocr_outcome` in the result distinguish real bitmap OCR from Accessibility-only metadata. For a multi-step phone goal, first discover screen_run_goal: when enabled it uses Jev inside Accessibility to select and execute validated actions, reducing model round trips. Use this raw tree tool for inspection or when that tool hands back.",
+        description = "Read the current Accessibility UI tree for screen reasoning (with automatic compiled on-device OCR fallback for low-coverage/WebView/Canvas screens). OCR uses bundled ML Kit text recognition for Chinese (Simplified/Traditional) and Latin/English; `ocr_source`/`ocr_outcome` in the result distinguish real bitmap OCR from Accessibility-only metadata. For a multi-step phone goal, first discover screen_run_goal: when enabled it uses Jev to propose the next action for individual approval. Use this raw tree tool for inspection or when that tool hands back.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -484,13 +484,13 @@ internal class ScreenPrimitiveTools(
 
     val screenScrollUntilTool = Tool(
         name = "screen_scroll_until",
-        description = "Swipe repeatedly until target text appears in the Accessibility UI tree (with automatic on-device OCR fallback).",
+        description = "Check and swipe once if needed to locate target text in the Accessibility UI tree (with automatic on-device OCR fallback).",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("text", screenStringProp("Text to find."))
                     put("direction", screenStringProp("Swipe direction: down, up, left, or right. Defaults to down."))
-                    put("max_swipes", screenIntegerProp("Maximum swipes. Defaults to 8."))
+                    put("max_swipes", screenIntegerProp("At most one swipe per approved call."))
                     put("ocr_mode", screenStringProp("On-device OCR mode: 'auto' (default), 'on', or 'off'."))
                     put("include_ocr", buildJsonObject { put("type", "boolean"); put("description", "Optional boolean alias to explicitly enable or disable on-device OCR.") })
                 },
@@ -503,7 +503,6 @@ internal class ScreenPrimitiveTools(
         execute = { input ->
             operations.trackScreenTool("screen_scroll_until", "滚动查找文字", input) {
                 val service = requireScreenAccessibility()
-                val maxSwipes = (input.int("max_swipes") ?: 8).coerceIn(1, 20)
                 val direction = input.string("direction") ?: "down"
                 val query = input.requiredString("text")
                 val ocrMode = input.resolveOcrMode()
@@ -522,10 +521,10 @@ internal class ScreenPrimitiveTools(
                 }
                 var swipes = 0
                 var stalled = false
-                var lastTree = service.dumpUiTree(maxNodes = 200)
-                while (matches.isEmpty() && ocrMatches.isEmpty() && swipes < maxSwipes) {
+                if (matches.isEmpty() && ocrMatches.isEmpty()) {
+                    val before = service.dumpUiTree(maxNodes = 200)
                     swipeByDirection(service, direction)
-                    swipes++
+                    swipes = 1
                     delay(450)
                     val tree = service.dumpUiTree(maxNodes = 200)
                     matches = service.findTextNodes(query, maxNodes = 200)
@@ -539,12 +538,7 @@ internal class ScreenPrimitiveTools(
                         lastOcrObservation = obs
                         ocrMatches = obs.findMatches(query)
                     }
-                    if (tree == lastTree && matches.isEmpty() && ocrMatches.isEmpty()) {
-                        // 滑到底/无位移：树完全没变，不再空滑到上限。
-                        stalled = true
-                        break
-                    }
-                    lastTree = tree
+                    stalled = tree == before && matches.isEmpty() && ocrMatches.isEmpty()
                 }
                 val found = matches.isNotEmpty() || ocrMatches.isNotEmpty()
                 textJson {

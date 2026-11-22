@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.setting
 
+import android.app.KeyguardManager
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -7,6 +8,10 @@ import android.net.Uri
 import android.os.Build
 import android.text.format.DateUtils
 import android.text.format.Formatter
+import androidx.activity.compose.LocalActivity
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -54,6 +59,9 @@ import com.composables.icons.lucide.Laptop
 import com.composables.icons.lucide.Lucide
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -69,6 +77,7 @@ fun SettingExperimentalMacGatewayPage(
 ) {
     val state by repository.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val activity = LocalActivity.current as? FragmentActivity
     val scope = rememberCoroutineScope()
     var pending by remember { mutableStateOf<MacGatewayPairingPayload?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -266,6 +275,9 @@ fun SettingExperimentalMacGatewayPage(
                                         highRisk = approval.highRisk,
                                         requiresLocalApproval = approval.effectiveRequiresLocalApproval,
                                         riskLevel = approval.riskLevel,
+                                        verifyForeground = activity?.let { host ->
+                                            { host.verifyGatewayApproval(approval.tool) }
+                                        },
                                     )
                                 }
                             },
@@ -551,6 +563,33 @@ private fun relativeTime(secondsSince1970: Double): String {
     val then = minOf((secondsSince1970 * 1000).toLong(), now)
     if (now - then < DateUtils.MINUTE_IN_MILLIS) return stringResource(R.string.workspace_time_just_now)
     return DateUtils.getRelativeTimeSpanString(then, now, DateUtils.MINUTE_IN_MILLIS).toString()
+}
+
+private suspend fun FragmentActivity.verifyGatewayApproval(tool: String): Boolean {
+    val keyguard = getSystemService(KeyguardManager::class.java)
+    fun isUnlockedForeground() = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
+        keyguard != null && !keyguard.isDeviceLocked && !keyguard.isKeyguardLocked
+    if (!isUnlockedForeground()) return false
+    return suspendCancellableCoroutine { continuation ->
+        val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                if (continuation.isActive) continuation.resume(isUnlockedForeground())
+            }
+
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                if (!continuation.isActive) return
+                if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON || errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
+                    errorCode == BiometricPrompt.ERROR_CANCELED) continuation.resume(false)
+                else continuation.resumeWithException(IllegalStateException(errString.toString()))
+            }
+        })
+        continuation.invokeOnCancellation { prompt.cancelAuthentication() }
+        prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
+            .setTitle(getString(R.string.mac_gateway_approval_approve))
+            .setSubtitle(tool)
+            .setNegativeButtonText(getString(R.string.cancel))
+            .build())
+    }
 }
 
 private fun Context.clipboardText(): String =

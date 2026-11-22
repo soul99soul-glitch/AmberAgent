@@ -33,6 +33,8 @@ import app.amber.feature.tools.effectClass
 import app.amber.feature.tools.invocationPolicy
 import app.amber.feature.tools.isAccessibilityL3ActionTool
 
+internal const val SCREEN_TARGET_PACKAGE = "accessibility_target_app"
+
 private const val TAG = "AgentToolDispatcher"
 
 /** Ledger/event errorCategory for sandbox denials (distinct from approval_denied). */
@@ -85,21 +87,24 @@ class AgentToolDispatcher(
     private val permissionDecisionResolver: PermissionDecisionResolver,
     private val hooks: List<ToolInvocationHook> = emptyList(),
     private val sshApprovalTargetGuard: SshApprovalTargetGuard? = null,
+    private val activeScreenPackage: suspend () -> String? = {
+        AmberAccessibilityService.getActiveService()?.let { service ->
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) { service.activePackageName() }
+        }
+    },
 ) {
+    private fun targetsForegroundScreen(name: String): Boolean = isAccessibilityL3ActionTool(name) &&
+        name !in setOf("screen_open_app", "screen_add_app", "screen_run_flow", "screen_run_goal", "screen_open_url", "screen_home")
+
     suspend fun captureApprovalTarget(tool: UIMessagePart.Tool): UIMessagePart.Tool {
         val sshCaptured = sshApprovalTargetGuard?.capture(tool) ?: tool
-        if (!isAccessibilityL3ActionTool(sshCaptured.toolName)) return sshCaptured
-        val activePackage = AmberAccessibilityService.getActiveService()
-            ?.activePackageName()
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: return sshCaptured
-        val merged = LinkedHashMap<String, kotlinx.serialization.json.JsonElement>()
-        sshCaptured.metadata?.forEach { (key, value) -> merged[key] = value }
-        if ("accessibility_target_app" !in merged) {
-            merged["accessibility_target_app"] = kotlinx.serialization.json.JsonPrimitive(activePackage)
-        }
-        return sshCaptured.copy(metadata = kotlinx.serialization.json.JsonObject(merged))
+        if (!targetsForegroundScreen(sshCaptured.toolName)) return sshCaptured
+        val activePackage = activeScreenPackage()
+        val metadata = sshCaptured.metadata.orEmpty().toMutableMap()
+        // Only the service's observation can identify the foreground app for an implicit action.
+        if (activePackage.isNullOrEmpty()) metadata.remove(SCREEN_TARGET_PACKAGE)
+        else metadata[SCREEN_TARGET_PACKAGE] = JsonPrimitive(activePackage)
+        return sshCaptured.copy(metadata = JsonObject(metadata))
     }
 
     fun resolveDecision(
@@ -307,6 +312,11 @@ class AgentToolDispatcher(
                         )
                     )
                 )
+            } else if (targetsForegroundScreen(tool.toolName) && !isApprovedScreenTargetCurrent(tool)) {
+                recordDeniedEffect(ledgerContext, tool, errorCategory = "approvedTargetChanged")
+                tracedTool.copy(output = listOf(UIMessagePart.Text(
+                    """{"status":"failed","code":"approvedTargetChanged","error":"Foreground app changed or could not be identified. Issue a fresh call.","recoverable":true}""",
+                )))
             } else if (sshApprovalTargetGuard?.isCurrent(tool) == false) {
                 recordDeniedEffect(ledgerContext, tool, errorCategory = "approvedTargetChanged")
                 tracedTool.copy(output = listOf(UIMessagePart.Text(
@@ -366,6 +376,11 @@ class AgentToolDispatcher(
                 )
             ),
         )
+    }
+
+    private suspend fun isApprovedScreenTargetCurrent(tool: UIMessagePart.Tool): Boolean {
+        val expected = (tool.metadata?.get(SCREEN_TARGET_PACKAGE) as? JsonPrimitive)?.contentOrNull ?: return false
+        return expected == activeScreenPackage()
     }
 
     private suspend fun recordDeniedEffect(

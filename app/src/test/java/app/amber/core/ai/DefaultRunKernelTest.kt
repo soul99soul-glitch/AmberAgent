@@ -510,7 +510,7 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
         scriptJudgment: app.amber.core.jev.JevScriptJudgment? = null,
     ): DefaultRunKernel = DefaultRunKernel(
         context = testContext(),
-        toolDispatcher = AgentToolDispatcher(json, PermissionDecisionResolver()),
+        toolDispatcher = AgentToolDispatcher(json, PermissionDecisionResolver(), activeScreenPackage = { "test.foreground" }),
         roundEngine = engine,
         autoApprovalGate = gate,
         approvalTriage = triage,

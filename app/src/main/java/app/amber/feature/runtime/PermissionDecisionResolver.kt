@@ -1,6 +1,7 @@
 package app.amber.feature.runtime
 
 import android.content.Context
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -26,6 +27,22 @@ enum class PermissionDecisionAction {
     ALLOW,
     ASK,
     DENY,
+}
+
+/** A parked recipe carries the nested tool's permission trace in its persisted checkpoint. */
+internal fun UIMessagePart.Tool.pendingRecipeApprovalStep(): JsonObject? {
+    if (!toolName.startsWith("recipe_")) return null
+    val checkpoint = (inputAsJson() as? JsonObject)
+        ?.get(app.amber.feature.recipe.RECIPE_CHECKPOINT_INPUT_KEY) as? JsonObject ?: return null
+    val pending = (checkpoint["pending_step"] as? JsonPrimitive)?.content ?: return null
+    return (checkpoint["step_results"] as? JsonObject)?.get(pending) as? JsonObject
+}
+
+internal fun UIMessagePart.Tool.requiresIndividualScreenApproval(): Boolean {
+    if (isAccessibilityL3ActionTool(toolName)) return true
+    val step = pendingRecipeApprovalStep() ?: return false
+    val name = ((step["permission_trace"] as? JsonObject)?.get("tool_name") as? JsonPrimitive)?.content
+    return name != null && isAccessibilityL3ActionTool(name)
 }
 
 data class PermissionDecision(

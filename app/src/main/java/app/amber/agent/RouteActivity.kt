@@ -13,7 +13,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -122,7 +122,7 @@ internal fun <S> AnimatedContentTransitionScope<S>.routePopTransition(): Content
     slideInHorizontally(animationSpec = RouteTransitionSpec) { -it } togetherWith
         slideOutHorizontally(animationSpec = RouteTransitionSpec) { it }
 
-class RouteActivity : ComponentActivity() {
+class RouteActivity : FragmentActivity() {
     private val highlighter by inject<Highlighter>()
     private val okHttpClient by inject<OkHttpClient>()
     private val settingsStore by inject<SettingsAggregator>()

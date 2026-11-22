@@ -241,7 +241,9 @@ internal class ScreenAppScopeTools(
 
     fun screenGoalTool(runId: String?) = Tool(
         name = "screen_run_goal",
-        description = "Use Jev to accelerate Android Accessibility: open the specified app, then execute a bounded goal internally with fresh UI-node validation. Prefer this over repeated screen_read_ui/click/swipe for read-only navigation, locating content, scrolling, or filling supplied search text. Jev is a decision service, not JavaScript. Requires Jev screen automation and screen-content consent. Returns engine, jev_decisions, actions_dispatched, steps and visible_text; report those facts, never infer Jev usage from tool names. No sending, purchases, account changes or permission grants. On handback use the returned screen evidence and low-level tools. Each call requires approval.",
+        description = "Open the approved package and use Jev to observe progress toward a goal. " +
+            "A proposed click, text entry or scroll is returned without dispatch. Request that step " +
+            "through an individual screen tool for approval, then observe again. Dry run never opens an app.",
         parameters = {
             InputSchema.Obj(properties = buildJsonObject {
                 put("package_name", screenStringProp("Android package to open and stay within, e.g. tv.danmaku.bili."))
@@ -254,7 +256,7 @@ internal class ScreenAppScopeTools(
                 put("max_steps", screenIntegerProp("Jev decision limit, default 15, hard maximum 30."))
                 put("max_duration_ms", screenIntegerProp("Deadline, default 180000ms, hard maximum 180000ms."))
                 put("dry_run", buildJsonObject { put("type", "boolean"); put("description", "Only inspect the currently open target app and judge; do not launch or execute actions.") })
-                put("return_to_host", buildJsonObject { put("type", "boolean"); put("description", "Optional override for automatically returning to Amber when the goal completes.") })
+                put("return_to_host", buildJsonObject { put("type", "boolean"); put("description", "Legacy option; the target stays in front during individually approved steps.") })
                 put("ocr_mode", screenStringProp("On-device OCR mode: 'auto' (default, zero-overhead tree-first with low-coverage fallback), 'on' (force OCR), or 'off' (disable OCR)."))
                 put("include_ocr", buildJsonObject { put("type", "boolean"); put("description", "Optional boolean alias to explicitly enable or disable on-device OCR.") })
             }, required = listOf("package_name", "goal"))
@@ -310,6 +312,7 @@ internal class ScreenAppScopeTools(
                     maxSteps = input.int("max_steps") ?: 15,
                     maxDurationMs = input.long("max_duration_ms") ?: 180_000,
                     dryRun = dryRun,
+                    proposeNextAction = true,
                     hostPackageName = context.packageName,
                     autoReturnToHost = returnToHostOverride,
                     returnToHostLauncher = { hostPkg -> launchHostApp(service, hostPkg) },

@@ -769,7 +769,7 @@ class ChatRunCoordinator(
         message: PendingUserMessage,
     ): Boolean {
         val decision = approvalActions.resolveIdleToolBlockerBeforeDispatch(conversationId, message)
-        if (!decision.changed) return false
+        if (!decision.changed) return decision.awaitingIndividualApproval
         recordPendingMessageEvent(
             conversationId = conversationId,
             event = if (decision.shouldResume) "pending_tool_resume" else "pending_tool_cancel",

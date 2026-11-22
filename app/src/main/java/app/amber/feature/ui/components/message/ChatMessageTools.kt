@@ -1,5 +1,9 @@
 package app.amber.feature.ui.components.message
 
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.buildJsonObject
+import app.amber.feature.runtime.requiresIndividualScreenApproval
+import app.amber.feature.runtime.AccessibilityApprovalSummaryFormatter
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
@@ -392,9 +396,20 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     }
 
     if (showResult) {
+        val previewArguments = if (isPending && tool.requiresIndividualScreenApproval()) {
+            val summary = AccessibilityApprovalSummaryFormatter.format(tool, arguments)
+            buildJsonObject {
+                put("风险级别", "L3")
+                summary?.let {
+                    put("目标应用", it.targetApp)
+                    put("动作类型", it.actionType)
+                    put("操作摘要", it.operationSummary)
+                }
+            }
+        } else arguments
         ToolCallPreviewSheet(
             toolName = tool.toolName,
-            arguments = arguments,
+            arguments = previewArguments,
             content = content,
             output = tool.output,
             onDismissRequest = { showResult = false }

@@ -3,6 +3,10 @@ package app.amber.feature.recipe
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.agent.runtime.AgentEventWriter
+import app.amber.feature.runtime.AccessibilityApprovalSummary
+import app.amber.feature.runtime.AccessibilityApprovalSummaryFormatter
+import app.amber.feature.runtime.SCREEN_TARGET_PACKAGE
+import app.amber.feature.tools.isAccessibilityL3ActionTool
 import app.amber.feature.runtime.AgentToolDispatcher
 import app.amber.feature.runtime.CapabilityPermissionState
 import app.amber.feature.runtime.CapabilityPermissionStore
@@ -164,7 +168,8 @@ class RecipeRunner(
                 primitives = primitives,
                 primitiveRegistry = primitiveRegistry,
                 invocationId = invocationId,
-                approvalGranted = resumeApproved && index == checkpoint?.nextStepIndex,
+                approvalGranted = resumeApproved && index == checkpoint.nextStepIndex,
+                approvedTarget = checkpoint?.stepResults?.get(step.id)?.get(SCREEN_TARGET_PACKAGE) as? JsonPrimitive,
             )
             stepResults[step.id] = result
             if (output != null) stepOutputs[step.id] = output
@@ -250,6 +255,7 @@ class RecipeRunner(
         primitiveRegistry: ToolRegistry,
         invocationId: String,
         approvalGranted: Boolean,
+        approvedTarget: JsonPrimitive? = null,
     ): Pair<JsonObject, JsonElement?> {
         if (step.condition != null) {
             val actual = resolveReference(step.condition.field, inputs, stepOutputs)
@@ -282,6 +288,7 @@ class RecipeRunner(
             toolCallId = "recipe:${context.runId ?: "runless"}:$invocationId:${recipe.name}:${step.id}",
             toolName = step.tool,
             input = resolvedArgs.toString(),
+            metadata = approvedTarget?.let { buildJsonObject { put(SCREEN_TARGET_PACKAGE, it) } },
             approvalState = if (approvalGranted) ToolApprovalState.Approved else ToolApprovalState.Auto,
         )
         val decision = context.dispatcher.resolveDecision(
@@ -295,7 +302,14 @@ class RecipeRunner(
             permissionContext = context.permissionContext,
         )
         if (decision.action == PermissionDecisionAction.ASK) {
+            val screenCall = if (isAccessibilityL3ActionTool(step.tool)) context.dispatcher.captureApprovalTarget(toolCall) else null
             return buildJsonObject {
+                if (screenCall != null) {
+                    screenCall.metadata?.get(SCREEN_TARGET_PACKAGE)?.let { put(SCREEN_TARGET_PACKAGE, it) }
+                    AccessibilityApprovalSummaryFormatter.format(screenCall, resolvedArgs)?.let { summary ->
+                        put("screen_approval_summary", json.encodeToJsonElement(AccessibilityApprovalSummary.serializer(), summary))
+                    }
+                }
                 put("status", "waiting_user")
                 put("error", decision.reason)
                 put("permission_trace", decision.trace.toJson())
@@ -353,6 +367,9 @@ class RecipeRunner(
             return failedStep("timeout", "Step exceeded its ${step.timeoutSeconds ?: recipe.defaultTimeoutSeconds}s timeout") to null
         }
         val output = stepOutput(executed)
+        if (output is JsonObject && (output["code"] as? JsonPrimitive)?.contentOrNull == "approvedTargetChanged") {
+            return failedStep("blocked", (output["error"] as? JsonPrimitive)?.contentOrNull) to null
+        }
         return buildJsonObject {
             put("status", "ok")
             put("output", output)
