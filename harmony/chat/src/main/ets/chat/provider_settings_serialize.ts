@@ -106,6 +106,8 @@ const serializeModel = (m: ProviderModel): string => {
   parts.push(`"abilities":[${m.abilities.map((v): string => esc(ABILITY_WIRE[v])).join(',')}]`);
   // 旧版空能力列表没有关闭开关。保存显式关闭标记，避免下次读取恢复默认开启。
   if (m.type === 'chat' && !m.abilities.includes('tool')) parts.push('"toolCallingDisabled":true');
+  // 只有显式空列表与旧数据有歧义；非空列表已经能表达是否允许推理。
+  if (m.type === 'chat' && m.abilities.length === 0) parts.push('"reasoningDisabled":true');
   parts.push(`"tools":[${m.tools.map(
     (t: BuiltInTools): string => `{"type":${esc(t)}}`).join(',')}]`);
   if (m.contextWindowTokens !== null) parts.push(`"contextWindowTokens":${m.contextWindowTokens}`);
@@ -129,6 +131,9 @@ const parseModel = (v: JsonValue): ProviderModel => {
   let abilities: ModelAbility[] = type === 'chat' && rawAbilities.length === 0
     ? defaultModelAbilities(modelId) : rawAbilities;
   if (toolDisabled) abilities = abilities.filter((a: ModelAbility): boolean => a !== 'tool');
+  if (type === 'chat' && boolOr(o, 'reasoningDisabled', false)) {
+    abilities = abilities.filter((a: ModelAbility): boolean => a !== 'reasoning');
+  }
   if (type === 'chat' && !toolDisabled && !abilities.includes('tool')) {
     abilities.push('tool');
   }

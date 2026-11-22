@@ -159,7 +159,7 @@ test('空 abilities + 显式关闭工具：保留 reasoning 但不恢复 tool', 
     { id: 'deepseek', modelId: 'deepseek-flash', type: 'CHAT', abilities: [], toolCallingDisabled: true },
   ] });
   const parsed = parseProviderSetting(raw);
-  assert.deepEqual(parsed.models[0].abilities, []);
+  assert.deepEqual(parsed.models[0].abilities, ['reasoning']);
   assert.deepEqual(parsed.models[1].abilities, ['reasoning']);
 });
 

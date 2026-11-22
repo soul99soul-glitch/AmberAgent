@@ -72,7 +72,7 @@ test('图片输出模型:不带 systemInstruction;responseModalities TEXT+IMAGE'
 });
 
 test('thinkingConfig:AUTO 仅 includeThoughts;OFF 非 3 系非 pro → budget 0 + 不含 thoughts', () => {
-  const reasoningFlash = makeChatModel({ modelId: 'gemini-2.5-flash', abilities: ['reasoning'] });
+  const reasoningFlash = makeChatModel({ modelId: 'gemini-2.5-flash' });
   const auto = buildGoogleCompletionRequestBody({
     messages: [makeUserMessage('x')],
     params: baseParams({ model: reasoningFlash, reasoningLevel: 'auto' }),
@@ -137,7 +137,7 @@ test('thinkingConfig 显式档:3 系 → thinkingLevel 映射(low/medium/high);�
   // 无 reasoning 能力 → 无 thinkingConfig
   const plain = buildGoogleCompletionRequestBody({
     messages: [makeUserMessage('x')],
-    params: baseParams({ reasoningLevel: 'high' }),
+    params: baseParams({ model: makeChatModel({ modelId: 'gemini-2.5-flash', abilities: ['tool'] }), reasoningLevel: 'high' }),
   });
   assert.equal('thinkingConfig' in genConfig(plain), false);
 });
