@@ -2,7 +2,7 @@
 import type { HttpClient, Storage } from '@amber/deepread-domain';
 import { getChatKeyRoulette } from '../platform_impl/KeyRouletteSupport.ets';
 import type { KeyValueStore, Assistant, OpenAIChatApi, ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude, ProviderSettingGoogle, ProviderModel, ModelType, TaskModelPair, TaskModelReference, ProviderRuntimeSnapshot, ProviderAuthSnapshot, ProviderOAuthSnapshot, TextGenerationParams } from '@amber/chat-domain';
-import { loadProviders, makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi, hasUsableAuth, openAIAuthHeaders, copyProviderSettingWithModels, taskModelReferenceId, taskModelReferenceFromId, findTaskProviderModel, prepareProviderRuntime, prepareProviderAuth, DEFAULT_AUTO_MODEL_ID, DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT, createKvResponseResumeStore } from '@amber/chat-domain';
+import { loadProviders, makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi, hasUsableAuth, openAIAuthHeaders, copyProviderSettingWithModels, taskModelReferenceId, taskModelReferenceFromId, findTaskProviderModel, prepareProviderRuntime, prepareProviderAuth, DEFAULT_AUTO_MODEL_ID, DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT, createKvResponseResumeStore, resolveEffectiveModelContextWindow } from '@amber/chat-domain';
 import { loadTaskModelReference, storeTaskModelPair } from '../platform_impl/TaskModelSelectionSupport.ets';
 import { resolveEntryGoogleAuth } from '../platform_impl/GoogleAuthSupport.ets';
 import { encodeImageForChat, encodeImageDetailed } from '../platform_impl/EntryImageEncoder.ets';
@@ -417,7 +417,7 @@ export const createProviderModelRuntime = (ports: ProviderModelRuntimePorts): Pr
         return {
             api, resolvedChoice: choice, assistant, params,
             contextMessageSize: runtime.defaults.contextMessageSize,
-            modelContextWindowTokens: model.contextWindowTokens,
+            modelContextWindowTokens: resolveEffectiveModelContextWindow(model),
             modelSupportsImageInput: model.inputModalities.includes('image'),
             modelAbilities: model.abilities,
         };

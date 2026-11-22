@@ -11,6 +11,7 @@
 //   - models 列表/动态拉取逻辑不迁移(本次只迁请求构建所需字段)。
 
 import type { JsonObject, JsonValue } from './json.ts';
+import { resolveModelDefaults } from './model_registry.ts';
 
 // ===== 模型能力/模态 =====
 
@@ -18,16 +19,9 @@ export type ModelAbility = 'tool' | 'reasoning';
 export type Modality = 'text' | 'image' | 'audio';  // Android Modality(TEXT/IMAGE/AUDIO)
 export type BuiltInTools = 'search' | 'url_context' | 'image_generation';
 
-// 聊天模型默认开启工具调用；显式配置（包括 []）由调用方优先保留。
-export const defaultModelAbilities = (modelId: string): ModelAbility[] => {
-  switch (modelId.toLowerCase()) {
-    case 'deepseek-flash':
-    case 'deepseek-v4-pro':
-      return ['tool', 'reasoning'];
-    default:
-      return ['tool'];
-  }
-};
+// 按模型注册表推断默认能力；未命中已知模型时默认开启工具调用。
+export const defaultModelAbilities = (modelId: string): ModelAbility[] =>
+  resolveModelDefaults(modelId).abilities;
 
 export interface ChatModel {
   modelId: string;
@@ -47,14 +41,18 @@ export interface ChatModelOpts {
   tools?: BuiltInTools[];
 }
 
-export const makeChatModel = (opts: ChatModelOpts = {}): ChatModel => ({
-  modelId: opts.modelId ?? 'test-model',
-  displayName: opts.displayName ?? (opts.modelId ?? 'test-model'),
-  abilities: opts.abilities ?? defaultModelAbilities(opts.modelId ?? 'test-model'),
-  inputModalities: opts.inputModalities ?? ['text'],
-  outputModalities: opts.outputModalities ?? ['text'],
-  tools: opts.tools ?? [],
-});
+export const makeChatModel = (opts: ChatModelOpts = {}): ChatModel => {
+  const modelId: string = opts.modelId ?? 'test-model';
+  const defaults = resolveModelDefaults(modelId);
+  return {
+    modelId,
+    displayName: opts.displayName ?? modelId,
+    abilities: opts.abilities ?? defaults.abilities.slice(),
+    inputModalities: opts.inputModalities ?? defaults.inputModalities.slice(),
+    outputModalities: opts.outputModalities ?? defaults.outputModalities.slice(),
+    tools: opts.tools ?? [],
+  };
+};
 
 // ===== ReasoningLevel(Reasoning.kt) =====
 

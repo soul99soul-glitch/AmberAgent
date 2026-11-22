@@ -10,7 +10,7 @@
 
 import { newId } from './ids.ts';
 import type { BuiltInTools, CustomBody, ModelAbility } from './provider_model.ts';
-import { defaultModelAbilities } from './provider_model.ts';
+import { resolveModelDefaults } from './model_registry.ts';
 import type { CustomHeader } from './assistant.ts';
 import type { OpenAIAuthMode, OpenAIBrand } from './provider_model.ts';
 
@@ -36,21 +36,29 @@ export interface ProviderModel {
   providerOverwrite: ProviderSetting | null;
 }
 
-export const makeProviderModel = (opts: Partial<ProviderModel> = {}): ProviderModel => ({
-  modelId: opts.modelId ?? '',
-  displayName: opts.displayName ?? '',
-  id: opts.id ?? newId(),
-  type: opts.type ?? 'chat',
-  customHeaders: opts.customHeaders ?? [],
-  customBodies: opts.customBodies ?? [],
-  inputModalities: opts.inputModalities ?? ['text'],
-  outputModalities: opts.outputModalities ?? ['text'],
-  abilities: opts.abilities ?? (opts.type === 'image' || opts.type === 'embedding'
-    ? [] : defaultModelAbilities(opts.modelId ?? '')),
-  tools: opts.tools ?? [],
-  contextWindowTokens: opts.contextWindowTokens ?? null,
-  providerOverwrite: opts.providerOverwrite ?? null,
-});
+export const makeProviderModel = (opts: Partial<ProviderModel> = {}): ProviderModel => {
+  const modelId: string = opts.modelId ?? '';
+  const defaults = resolveModelDefaults(modelId);
+  const resolvedType: ModelType = opts.type ?? defaults.type;
+  return {
+    modelId,
+    displayName: opts.displayName ?? '',
+    id: opts.id ?? newId(),
+    type: resolvedType,
+    customHeaders: opts.customHeaders ?? [],
+    customBodies: opts.customBodies ?? [],
+    inputModalities: opts.inputModalities ?? defaults.inputModalities.slice(),
+    outputModalities: opts.outputModalities ?? defaults.outputModalities.slice(),
+    abilities: opts.abilities ?? (resolvedType === 'image' || resolvedType === 'embedding'
+      ? (defaults.type === resolvedType ? defaults.abilities.slice() : [])
+      : defaults.abilities.slice()),
+    tools: opts.tools ?? [],
+    contextWindowTokens: opts.contextWindowTokens !== undefined
+      ? opts.contextWindowTokens
+      : defaults.contextWindowTokens,
+    providerOverwrite: opts.providerOverwrite ?? null,
+  };
+};
 
 // ===== BalanceOption =====
 

@@ -8,7 +8,7 @@ import {
   currentMessages, estimateConversationInputTokens, nativeTokenizerForModel,
   formatContextTokens, formatNumberInt, buildTopModelMenuGroups, loadProviders,
   reasoningLevelForModel, withReasoningLevelForModel, defaultReasoningLevelForModel,
-  reasoningLevelsForModel,
+  reasoningLevelsForModel, resolveEffectiveModelContextWindow,
 } from '@amber/chat-domain';
 import type { ChatProviderChoice } from '../../di/ChatRuntimeContracts.ets';
 import type { ConversationRunSnapshot } from '../ConversationRunService.ets';
@@ -190,7 +190,12 @@ export class ChatModelContextSession {
   }
 
   setContextModel(choice: ChatProviderChoice | null): void {
-    this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
+    this.contextWindowTokens = choice !== null
+      ? (choice.model.contextWindowTokens !== null
+        ? choice.model.contextWindowTokens
+        : (typeof resolveEffectiveModelContextWindow === 'function'
+          ? resolveEffectiveModelContextWindow(choice.model) : null))
+      : null;
     this.contextTokenModelId = choice !== null ? choice.model.modelId : '';
     this.contextTokenizerId = nativeTokenizerForModel(this.contextTokenModelId);
     this.refreshNativeContextEstimate();

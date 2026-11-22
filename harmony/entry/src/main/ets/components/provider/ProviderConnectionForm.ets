@@ -1,6 +1,7 @@
 
 
 import type { ProviderModel } from '@amber/chat-domain';
+import { formatContextTokens, resolveEffectiveModelContextWindow } from '@amber/chat-domain';
 import { providerSlug, providerAuthLabel } from '../../di/ProviderDefaults.ets';
 import {
   ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, BODY, BODY2, META, MONO_SMALL, LABEL, ERROR, RADIUS, TEXT_STYLES, lineHeightForSize
@@ -59,6 +60,21 @@ export struct ProviderConnectionForm {
     const q: string = this.fetchedSearch.trim().toLowerCase();
     if (q.length === 0) return this.catalog.fetchedIds;
     return this.catalog.fetchedIds.filter((id: string): boolean => id.toLowerCase().includes(q));
+  }
+
+  private modelCapabilitySummary(m: ProviderModel): string {
+    const tags: string[] = [];
+    const ctx: number | null = resolveEffectiveModelContextWindow(m);
+    if (ctx !== null) tags.push(formatContextTokens(ctx));
+    if (m.inputModalities.indexOf('image') >= 0 && m.inputModalities.indexOf('audio') >= 0) {
+      tags.push('全模态');
+    } else if (m.inputModalities.indexOf('image') >= 0) {
+      tags.push('视觉');
+    } else if (m.type === 'chat') {
+      tags.push('文本');
+    }
+    if (m.abilities.indexOf('reasoning') >= 0) tags.push('思考');
+    return tags.join(' · ');
   }
 
   private submitManualModels(): void {
@@ -492,6 +508,11 @@ export struct ProviderConnectionForm {
                             Text(m.modelId)
                               .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
                               .fontFamily(FONT_MONO).fontColor(INK3)
+                              .margin({ top: 2 })
+                              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                          } else if (this.modelCapabilitySummary(m).length > 0) {
+                            Text(this.modelCapabilitySummary(m))
+                              .fontSize(11.5).fontFamily(FONT_MONO).fontColor(INK3)
                               .margin({ top: 2 })
                               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                           }

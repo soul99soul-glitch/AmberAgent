@@ -48,7 +48,7 @@ export const reasoningLevelsForModel = (model: ProviderModel): ReasoningLevelOpt
     ];
   }
   if (id.includes('gpt') || id.includes('codex') || id.includes('o1')
-    || id.includes('o3') || id.includes('o4')) {
+    || id.includes('o3') || id.includes('o4') || id.includes('grok-4.7')) {
     return [
       { level: 'low', label: 'low' },
       { level: 'medium', label: 'med' },

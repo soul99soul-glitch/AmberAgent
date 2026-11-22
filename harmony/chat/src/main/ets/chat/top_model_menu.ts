@@ -27,6 +27,7 @@
 
 import type { ProviderSetting, ProviderModel, ModelType } from './provider_settings.ts';
 import { hasUsableAuth } from './provider_settings.ts';
+import { resolveEffectiveModelContextWindow } from './model_registry.ts';
 
 // 单个模型行(UI 用)— modelId 为人类可读字符串(model.modelId)
 export interface TopModelMenuModel {
@@ -68,7 +69,7 @@ export const buildTopModelMenuGroups = (
       models.push({
         modelId: m.modelId,
         displayName: m.displayName,
-        contextWindowTokens: m.contextWindowTokens,
+        contextWindowTokens: resolveEffectiveModelContextWindow(m),
         selected,
       });
     }

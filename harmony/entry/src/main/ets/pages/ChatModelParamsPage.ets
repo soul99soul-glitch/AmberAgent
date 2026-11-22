@@ -8,7 +8,7 @@ import type {
   CustomBody, CustomHeader, JsonValue, ProviderModel, ProviderSetting,
   ModelType, ModalityFull, BuiltInTools, ProviderSettingOpenAIVariant, ModelAbility,
 } from '@amber/chat-domain';
-import { loadProviders, saveProviders } from '@amber/chat-domain';
+import { loadProviders, saveProviders, resolveModelDefaults } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 
 interface ModelFieldOptions {
@@ -75,6 +75,9 @@ struct ChatModelParamsPage {
   @State inputAudio: boolean = false;
   @State contextWindowText: string = '';
   @State toolCallingEnabled: boolean = true;
+  @State reasoningEnabled: boolean = false;
+  @State rawModelId: string = '';
+  @State hasRegistryDefaults: boolean = false;
   // 同一 model.tools 草稿；不因当前协议不支持而移除已存选项。
   @State toolSearch: boolean = false;
   @State toolUrlContext: boolean = false;
@@ -113,8 +116,11 @@ struct ChatModelParamsPage {
         this.overwriteName = model.providerOverwrite !== null
           ? model.providerOverwrite.name : '';
         // 模型属性草稿
+        this.rawModelId = model.modelId;
+        this.hasRegistryDefaults = resolveModelDefaults(model.modelId).matched;
         this.modelType = model.type;
         this.toolCallingEnabled = model.abilities.indexOf('tool') >= 0;
+        this.reasoningEnabled = model.abilities.indexOf('reasoning') >= 0;
         this.inputText = model.inputModalities.indexOf('text') >= 0;
         this.inputImage = model.inputModalities.indexOf('image') >= 0;
         this.inputAudio = model.inputModalities.indexOf('audio') >= 0;
@@ -133,6 +139,19 @@ struct ChatModelParamsPage {
   }
 
   onBackPress(): boolean { return this.saving; }
+
+  private applyRecommendedDefaults(): void {
+    const defaults = resolveModelDefaults(this.rawModelId);
+    if (!defaults.matched) return;
+    this.modelType = defaults.type;
+    this.toolCallingEnabled = defaults.abilities.indexOf('tool') >= 0;
+    this.reasoningEnabled = defaults.abilities.indexOf('reasoning') >= 0;
+    this.inputText = defaults.inputModalities.indexOf('text') >= 0;
+    this.inputImage = defaults.inputModalities.indexOf('image') >= 0;
+    this.inputAudio = defaults.inputModalities.indexOf('audio') >= 0;
+    this.contextWindowText = defaults.contextWindowTokens !== null
+      ? `${defaults.contextWindowTokens}` : '';
+  }
 
   private refreshColors(): void { this.colors = new ModelParameterColors(); }
   private updateToolProtocol(provider: ProviderSetting): void {
@@ -300,8 +319,10 @@ struct ChatModelParamsPage {
       updated.inputModalities = this.draftInputModalities();
       updated.contextWindowTokens = contextWindow;
       updated.tools = tools;
-      updated.abilities = model.abilities.filter((ability: ModelAbility): boolean => ability !== 'tool');
+      updated.abilities = model.abilities.filter(
+        (ability: ModelAbility): boolean => ability !== 'tool' && ability !== 'reasoning');
       if (this.toolCallingEnabled) updated.abilities.push('tool');
+      if (this.reasoningEnabled) updated.abilities.push('reasoning');
       const models: ProviderModel[] = provider.models.map((m: ProviderModel): ProviderModel => m.id === this.modelRowId ? updated : m);
       const next: ProviderSetting[] = all.map((p: ProviderSetting): ProviderSetting => p.id === providerId ? this.rebuildProvider(p, models) : p);
       await saveProviders(getChatKvStore(), next);
@@ -468,7 +489,24 @@ struct ChatModelParamsPage {
               .padding({ left: 16, right: 16, top: this.hasOverwrite ? 8 : 12, bottom: 8 })
 
             // ── 模型属性(类型/输入模态/上下文窗口;Android 单模型表单对齐) ──
-            SectionHeader({ label: '模型属性' })
+            Row() {
+              SectionHeader({ label: '模型属性' })
+              Blank()
+              if (this.hasRegistryDefaults) {
+                Text('恢复推荐默认')
+                  .fontSize(TEXT_STYLES.meta.size)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(this.accentColor)
+                  .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                  .margin({ right: 16, top: 10 })
+                  .backgroundColor(this.colors.raised)
+                  .borderRadius(8)
+                  .border({ width: 0.75, color: this.colors.line })
+                  .onClick((): void => { this.applyRecommendedDefaults(); })
+              }
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Bottom)
             Column() {
               Text('类型')
                 .fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
@@ -484,10 +522,14 @@ struct ChatModelParamsPage {
             .padding({ left: 16, right: 16, top: 12, bottom: 4 })
             if (this.modelType === 'chat') {
               ToggleRow({
-                label: '工具调用', checked: this.toolCallingEnabled, isLast: true,
+                label: '工具调用', checked: this.toolCallingEnabled, isLast: false,
                 onToggle: (): void => { this.toolCallingEnabled = !this.toolCallingEnabled; },
               })
-              Text('默认开启，允许模型调用搜索、MCP 等工具。模型不支持工具调用时可关闭。')
+              ToggleRow({
+                label: '深度思考 / 推理', checked: this.reasoningEnabled, isLast: true,
+                onToggle: (): void => { this.reasoningEnabled = !this.reasoningEnabled; },
+              })
+              Text('默认按模型规格自动识别，模型不支持工具或思考时可手动关闭。')
                 .fontSize(TEXT_STYLES.secondary.size).fontColor(this.colors.muted)
                 .width('100%').padding({ left: 16, right: 16, bottom: 8 })
             }

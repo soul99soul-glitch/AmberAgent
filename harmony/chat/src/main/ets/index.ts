@@ -582,6 +582,13 @@ export type {
 export { reasoningLevelsForModel } from './chat/reasoning_levels.ts';
 export type { ReasoningLevelOption } from './chat/reasoning_levels.ts';
 
+// 模型默认参数注册表（前沿模型与国产开源模型：多模态、上下文窗口、推理/工具能力）
+export {
+  resolveModelDefaults, resolveModelInputModalities, resolveModelOutputModalities,
+  resolveModelAbilities, resolveModelContextWindow, resolveEffectiveModelContextWindow,
+} from './chat/model_registry.ts';
+export type { ModelRegistryDefaults } from './chat/model_registry.ts';
+
 // M2.3:代码块语法高亮(HighlightCodeBlock.kt)
 export { highlightCode, tokenizeCode, HIGHLIGHT_COLORS } from './chat/code_highlight.ts';
 export type { HighlightToken, HighlightTokenType } from './chat/code_highlight.ts';
