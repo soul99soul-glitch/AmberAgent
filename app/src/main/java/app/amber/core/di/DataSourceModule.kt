@@ -18,6 +18,8 @@ import app.amber.ai.provider.providers.google.AntigravityAuthStore
 import app.amber.ai.provider.providers.google.AntigravityOAuthClient
 import app.amber.ai.provider.providers.grok.GrokAuthStore
 import app.amber.ai.provider.providers.grok.GrokOAuthClient
+import app.amber.ai.provider.providers.openai.OpenAIChatGptSiwcAuthStore
+import app.amber.ai.provider.providers.openai.OpenAIChatGptSiwcOAuthClient
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.providers.ClaudeProvider
@@ -683,6 +685,8 @@ val dataSourceModule = module {
     }
 
     single { OpenAICodexAuthStore(context = get()) }
+    single { OpenAIChatGptSiwcAuthStore(context = get()) }
+    single { OpenAIChatGptSiwcOAuthClient(client = get(), authStore = get()) }
     single { GoogleGeminiAuthStore(context = get()) }
     single {
         GoogleGeminiOAuthClient(

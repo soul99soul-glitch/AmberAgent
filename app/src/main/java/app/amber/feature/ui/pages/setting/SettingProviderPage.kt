@@ -108,6 +108,7 @@ import app.amber.ai.provider.providers.google.AntigravityAuthStore
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStore
 import app.amber.ai.provider.providers.grok.GrokAuthStatus
 import app.amber.ai.provider.providers.grok.GrokAuthStore
+import app.amber.ai.provider.providers.openai.OpenAIChatGptSiwcAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
@@ -421,7 +422,9 @@ internal fun ProviderSetting.statusChip(oauthSignedIn: Boolean? = null): Pair<In
 
 internal fun ProviderSetting.isOAuthMode(): Boolean = when (this) {
     is ProviderSetting.OpenAI ->
-        authMode == OpenAIAuthMode.CODEX_OAUTH || authMode == OpenAIAuthMode.GROK_OAUTH
+        authMode == OpenAIAuthMode.CODEX_OAUTH ||
+            authMode == OpenAIAuthMode.CHATGPT_SIWC ||
+            authMode == OpenAIAuthMode.GROK_OAUTH
     is ProviderSetting.Google ->
         authMode == GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH || authMode == GoogleAuthMode.ANTIGRAVITY_OAUTH
     is ProviderSetting.Claude -> false
@@ -432,12 +435,14 @@ internal fun ProviderSetting.isOAuthMode(): Boolean = when (this) {
 internal fun rememberOAuthSignedIn(provider: ProviderSetting): Boolean? {
     if (!provider.isOAuthMode()) return null
     val codex = koinInject<OpenAICodexAuthStore>()
+    val siwc = koinInject<OpenAIChatGptSiwcAuthStore>()
     val grok = koinInject<GrokAuthStore>()
     val gemini = koinInject<GoogleGeminiAuthStore>()
     val antigravity = koinInject<AntigravityAuthStore>()
     fun read(): Boolean = when (provider) {
         is ProviderSetting.OpenAI -> when (provider.authMode) {
             OpenAIAuthMode.CODEX_OAUTH -> codex.get(provider.id) != null
+            OpenAIAuthMode.CHATGPT_SIWC -> siwc.get(provider.id)?.isUsable() == true
             OpenAIAuthMode.GROK_OAUTH -> GrokAuthStatus.from(grok.get(provider.id), System.currentTimeMillis()).usable
             else -> true
         }

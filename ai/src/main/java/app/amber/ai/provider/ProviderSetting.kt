@@ -69,6 +69,10 @@ enum class OpenAIAuthMode {
     @SerialName("codex_oauth")
     CODEX_OAUTH,
 
+    /** OpenAI official Sign in with ChatGPT (SIWC) open-source plan sharing OAuth. */
+    @SerialName("chatgpt_siwc")
+    CHATGPT_SIWC,
+
     /** xAI Grok CLI proxy OAuth；token 存在 GrokAuthStore，不依赖 apiKey。 */
     @SerialName("grok_oauth")
     GROK_OAUTH,
@@ -127,7 +131,7 @@ fun OpenAIBrand.availableAuthModes(): List<OpenAIAuthMode> = when (this) {
     OpenAIBrand.GENERIC, OpenAIBrand.DEEPSEEK -> listOf(OpenAIAuthMode.API_KEY)
     // xAI preset is identified by its stable endpoint/brand at the UI layer; keep the
     // API-key mode available so Grok OAuth remains an additive capability.
-    OpenAIBrand.OPENAI -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.CODEX_OAUTH)
+    OpenAIBrand.OPENAI -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.CHATGPT_SIWC, OpenAIAuthMode.CODEX_OAUTH)
     OpenAIBrand.ZHIPU -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.ZHIPU_CODING_PLAN)
     OpenAIBrand.KIMI -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.KIMI_CODING_PLAN)
     OpenAIBrand.MIMO -> listOf(OpenAIAuthMode.API_KEY, OpenAIAuthMode.MIMO_CODING_PLAN)
@@ -142,6 +146,7 @@ fun OpenAIBrand.availableAuthModes(): List<OpenAIAuthMode> = when (this) {
 fun OpenAIAuthMode.fixedBaseUrl(): String? = when (this) {
     OpenAIAuthMode.API_KEY -> null
     OpenAIAuthMode.CODEX_OAUTH -> "https://chatgpt.com/backend-api/codex"
+    OpenAIAuthMode.CHATGPT_SIWC -> "https://api.openai.com/v1"
     OpenAIAuthMode.GROK_OAUTH -> "https://cli-chat-proxy.grok.com/v1"
     OpenAIAuthMode.ZHIPU_CODING_PLAN -> "https://open.bigmodel.cn/api/coding/paas/v4"
     OpenAIAuthMode.KIMI_CODING_PLAN -> "https://api.kimi.com/coding/v1"
@@ -411,6 +416,7 @@ fun ProviderSetting.hasUsableAuth(oauthUsable: Boolean? = null): Boolean {
         is ProviderSetting.OpenAI -> when (authMode) {
             // OAuth 模式用单独 token, 不依赖用户填的 apiKey
             OpenAIAuthMode.CODEX_OAUTH,
+            OpenAIAuthMode.CHATGPT_SIWC,
             OpenAIAuthMode.GROK_OAUTH -> oauthUsable ?: true
             else -> apiKey.isNotBlank()
         }

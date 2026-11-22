@@ -669,7 +669,9 @@
   <string name="setting_provider_page_add_provider_override">Add Provider Override</string>
   <!-- Picker OAuth quick-start section: permanently visible so OAuth is discoverable on first run. -->
   <string name="setting_provider_page_template_section_oauth">Sign in with account</string>
-  <string name="setting_provider_page_template_oauth_codex_title">Sign in with ChatGPT</string>
+  <string name="setting_provider_page_template_oauth_siwc_title">Sign in with ChatGPT (Official)</string>
+  <string name="setting_provider_page_template_oauth_siwc_subtitle">Use your ChatGPT plan — official SIWC</string>
+  <string name="setting_provider_page_template_oauth_codex_title">Sign in with ChatGPT (Codex)</string>
   <string name="setting_provider_page_template_oauth_codex_subtitle">No API key — Codex backend</string>
   <string name="setting_provider_page_template_oauth_gemini_title">Sign in with Google</string>
   <string name="setting_provider_page_template_oauth_gemini_subtitle">No API key — Gemini Code Assist</string>
@@ -738,6 +740,25 @@
   <string name="setting_provider_page_codex_oauth_refresh_success">Codex OAuth token refreshed</string>
   <string name="setting_provider_page_codex_oauth_refresh_failed">Codex OAuth refresh failed: %1$s</string>
   <string name="setting_provider_page_codex_oauth_logged_out">Codex OAuth signed out</string>
+  <string name="setting_provider_page_siwc_not_signed_in">Use your ChatGPT plan without an API key</string>
+  <string name="setting_provider_page_siwc_using_plan">Using ChatGPT plan</string>
+  <string name="setting_provider_page_siwc_continue_with_chatgpt">Continue with ChatGPT</string>
+  <string name="setting_provider_page_siwc_manage_usage">Manage usage</string>
+  <string name="setting_provider_page_siwc_fetch_models">Fetch Models</string>
+  <string name="setting_provider_page_siwc_refresh">Refresh</string>
+  <string name="setting_provider_page_siwc_logout">Log Out</string>
+  <string name="setting_provider_page_siwc_signed_in">Signed in with ChatGPT</string>
+  <string name="setting_provider_page_siwc_login_success_with_models">Signed in with ChatGPT. Loaded %1$d models.</string>
+  <string name="setting_provider_page_siwc_login_failed">Sign in with ChatGPT failed: %1$s</string>
+  <string name="setting_provider_page_siwc_models_loaded">Loaded %1$d ChatGPT models</string>
+  <string name="setting_provider_page_siwc_models_failed">Failed to load ChatGPT models: %1$s</string>
+  <string name="setting_provider_page_siwc_refresh_success">ChatGPT session refreshed</string>
+  <string name="setting_provider_page_siwc_refresh_failed">ChatGPT session refresh failed: %1$s</string>
+  <string name="setting_provider_page_siwc_logged_out">Signed out of ChatGPT</string>
+  <string name="setting_provider_page_siwc_logged_out_local_only">Signed out locally; remote revocation could not be confirmed</string>
+  <string name="setting_provider_page_siwc_welcome_title">You\'re using your ChatGPT plan</string>
+  <string name="setting_provider_page_siwc_welcome_body">Eligible AI requests in Amber will use your ChatGPT plan. You can review or adjust app usage limits anytime in ChatGPT Settings.</string>
+  <string name="setting_provider_page_siwc_welcome_got_it">Got it</string>
   <string name="setting_provider_page_response_api">Response API</string>
   <string name="setting_provider_page_responses_resume">Server-side resume (store responses)</string>
   <string name="setting_provider_page_save">Save</string>

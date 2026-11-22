@@ -939,7 +939,9 @@
   <!-- TODO: setting_provider_page_add_codex_oauth 在 template-picker 重构后已无引用；保留一次发版作缓冲，下版本删除。 -->
   <string name="setting_provider_page_add_provider_override">添加提供商重写</string>
   <string name="setting_provider_page_template_section_oauth">一键登录账号</string>
-  <string name="setting_provider_page_template_oauth_codex_title">用 ChatGPT 登录</string>
+  <string name="setting_provider_page_template_oauth_siwc_title">ChatGPT 套餐登录（SIWC）</string>
+  <string name="setting_provider_page_template_oauth_siwc_subtitle">官方 Sign in with ChatGPT · 免 API Key</string>
+  <string name="setting_provider_page_template_oauth_codex_title">用 ChatGPT 登录（Codex）</string>
   <string name="setting_provider_page_template_oauth_codex_subtitle">免 API Key · Codex 通道</string>
   <string name="setting_provider_page_template_oauth_gemini_title">用 Google 登录</string>
   <string name="setting_provider_page_template_oauth_gemini_subtitle">免 API Key · Gemini Code Assist</string>
@@ -1008,6 +1010,25 @@
   <string name="setting_provider_page_codex_oauth_refresh_success">Codex OAuth token 已刷新</string>
   <string name="setting_provider_page_codex_oauth_refresh_failed">Codex OAuth 刷新失败：%1$s</string>
   <string name="setting_provider_page_codex_oauth_logged_out">Codex OAuth 已退出登录</string>
+  <string name="setting_provider_page_siwc_not_signed_in">免 API Key，直接使用你的 ChatGPT 套餐额度</string>
+  <string name="setting_provider_page_siwc_using_plan">Using ChatGPT plan</string>
+  <string name="setting_provider_page_siwc_continue_with_chatgpt">Continue with ChatGPT</string>
+  <string name="setting_provider_page_siwc_manage_usage">Manage usage</string>
+  <string name="setting_provider_page_siwc_fetch_models">刷新模型</string>
+  <string name="setting_provider_page_siwc_refresh">刷新凭证</string>
+  <string name="setting_provider_page_siwc_logout">退出登录</string>
+  <string name="setting_provider_page_siwc_signed_in">已通过 ChatGPT 登录</string>
+  <string name="setting_provider_page_siwc_login_success_with_models">ChatGPT 登录完成，已加载 %1$d 个模型。</string>
+  <string name="setting_provider_page_siwc_login_failed">ChatGPT 登录失败：%1$s</string>
+  <string name="setting_provider_page_siwc_models_loaded">已加载 %1$d 个 ChatGPT 模型</string>
+  <string name="setting_provider_page_siwc_models_failed">获取 ChatGPT 模型失败：%1$s</string>
+  <string name="setting_provider_page_siwc_refresh_success">ChatGPT 会话凭证已刷新</string>
+  <string name="setting_provider_page_siwc_refresh_failed">刷新 ChatGPT 凭证失败：%1$s</string>
+  <string name="setting_provider_page_siwc_logged_out">已退出 ChatGPT 登录</string>
+  <string name="setting_provider_page_siwc_logged_out_local_only">已在本地退出登录，未能确认远端吊销（可在 ChatGPT 设置中断开）</string>
+  <string name="setting_provider_page_siwc_welcome_title">You\'re using your ChatGPT plan</string>
+  <string name="setting_provider_page_siwc_welcome_body">Amber 中符合条件的 AI 请求将使用你的 ChatGPT 套餐额度。你可以随时在 ChatGPT 设置中查看或管理本应用的用量限制。</string>
+  <string name="setting_provider_page_siwc_welcome_got_it">Got it</string>
   <string name="setting_provider_page_response_api">Response API</string>
   <string name="setting_provider_page_responses_resume">服务端续接（存储响应）</string>
   <string name="setting_provider_page_save">保存</string>

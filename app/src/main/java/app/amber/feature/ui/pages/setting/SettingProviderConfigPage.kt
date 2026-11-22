@@ -449,6 +449,14 @@ private fun ProviderOAuthAccountConsole(
                 OpenAIAuthModeCapsule(provider, onEdit, availableModes)
             }
             when (provider.authMode) {
+                OpenAIAuthMode.CHATGPT_SIWC -> ChatGptSiwcConsole(
+                    provider = provider,
+                    onCommit = onCommit,
+                    onModelsFetched = onModelsFetched,
+                    onModelCandidatesInvalidated = onModelCandidatesInvalidated,
+                    autoStartOAuth = autoStartOAuth,
+                    onAutoStartConsumed = onAutoStartConsumed,
+                )
                 OpenAIAuthMode.CODEX_OAUTH -> CodexOAuthConsole(
                     provider = provider,
                     onCommit = onCommit,
@@ -790,6 +798,13 @@ internal fun ProviderSetting.OpenAI.switchOpenAIAuthMode(
         return copy(authMode = mode, useResponseApi = false, chatCompletionsPath = "/chat/completions")
     }
     return when (mode) {
+        OpenAIAuthMode.CHATGPT_SIWC -> copy(
+            authMode = OpenAIAuthMode.CHATGPT_SIWC,
+            baseUrl = pinned ?: baseUrl,
+            useResponseApi = true,
+            enableResponsesResume = false,
+            name = if (name == "OpenAI") "ChatGPT" else name,
+        )
         OpenAIAuthMode.CODEX_OAUTH -> copy(
             authMode = OpenAIAuthMode.CODEX_OAUTH,
             baseUrl = pinned ?: baseUrl,
@@ -855,7 +870,8 @@ private fun ProviderSetting.Google.switchGoogleAuthMode(mode: GoogleAuthMode): P
 
 private fun OpenAIAuthMode.openAIAuthLabel(): String = when (this) {
     OpenAIAuthMode.API_KEY -> "API Key"
-    OpenAIAuthMode.CODEX_OAUTH -> "OAuth"
+    OpenAIAuthMode.CHATGPT_SIWC -> "ChatGPT"
+    OpenAIAuthMode.CODEX_OAUTH -> "Codex"
     OpenAIAuthMode.GROK_OAUTH -> "Grok"
     OpenAIAuthMode.ZHIPU_CODING_PLAN,
     OpenAIAuthMode.KIMI_CODING_PLAN,

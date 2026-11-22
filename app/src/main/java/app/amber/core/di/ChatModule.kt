@@ -177,6 +177,7 @@ val chatModule = module {
             openAICodexAuthStore = get(),
             grokAuthStore = get(),
             antigravityAuthStore = get(),
+            openAIChatGptSiwcAuthStore = get(),
             capabilityFlags = get(),
             capabilityPermissionStore = get(),
             toolEffectLedger = get(),

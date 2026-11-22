@@ -122,6 +122,7 @@ private fun ProviderRows.addOpenAIEndpointRows(
 ) {
     // Grok OAuth pins the CLI proxy endpoint exactly like Codex does.
     val fixed = provider.authMode == OpenAIAuthMode.CODEX_OAUTH ||
+        provider.authMode == OpenAIAuthMode.CHATGPT_SIWC ||
         provider.authMode == OpenAIAuthMode.GROK_OAUTH
     addBaseUrlRow(
         value = if (fixed) checkNotNull(provider.authMode.fixedBaseUrl()) else provider.baseUrl,

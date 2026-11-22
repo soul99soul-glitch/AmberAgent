@@ -19,6 +19,7 @@ internal enum class ChatConfigurationIssue(@param:StringRes val messageRes: Int)
     InvalidAddress(R.string.chat_setup_invalid_address),
     MissingKey(R.string.chat_setup_missing_key),
     CodexSignIn(R.string.chat_setup_codex_sign_in),
+    ChatGptSiwcSignIn(R.string.chat_setup_chatgpt_siwc_sign_in),
     GeminiSignIn(R.string.chat_setup_gemini_sign_in),
     GrokSignIn(R.string.chat_setup_grok_sign_in),
     AntigravitySignIn(R.string.chat_setup_antigravity_sign_in),
@@ -36,6 +37,9 @@ internal fun chatConfigurationIssue(
     if (!provider.enabled) return ChatConfigurationIssue.DisabledProvider
     if (provider is ProviderSetting.OpenAI && provider.authMode == OpenAIAuthMode.CODEX_OAUTH) {
         return if (oauthReady == false) ChatConfigurationIssue.CodexSignIn else null
+    }
+    if (provider is ProviderSetting.OpenAI && provider.authMode == OpenAIAuthMode.CHATGPT_SIWC) {
+        return if (oauthReady == false) ChatConfigurationIssue.ChatGptSiwcSignIn else null
     }
     if (provider is ProviderSetting.Google && provider.authMode == GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH) {
         return if (oauthReady == false) ChatConfigurationIssue.GeminiSignIn else null

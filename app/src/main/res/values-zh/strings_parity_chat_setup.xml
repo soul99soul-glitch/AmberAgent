@@ -6,6 +6,7 @@
     <string name="chat_setup_invalid_address">请修正服务商地址</string>
     <string name="chat_setup_missing_key">请为当前服务商添加 API Key</string>
     <string name="chat_setup_codex_sign_in">请先为当前服务商登录 ChatGPT</string>
+    <string name="chat_setup_chatgpt_siwc_sign_in">请先为当前服务商完成 ChatGPT 官方登录</string>
     <string name="chat_setup_gemini_sign_in">请先为当前服务商登录 Google</string>
     <string name="chat_setup_grok_sign_in">请先为当前服务商登录 Grok</string>
     <string name="chat_setup_antigravity_sign_in">请先为当前服务商登录 Antigravity</string>

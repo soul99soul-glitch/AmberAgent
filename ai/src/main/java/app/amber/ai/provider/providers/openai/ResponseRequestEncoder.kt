@@ -5,6 +5,7 @@ import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.BuiltInTools
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelAbility
+import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.ResponsesResumeRequest
 import app.amber.ai.provider.TextGenerationParams
@@ -17,6 +18,7 @@ import app.amber.ai.util.encodeBase64
 import app.amber.ai.util.json
 import app.amber.ai.util.mergeCustomBody
 import app.amber.common.http.jsonPrimitiveOrNull
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -40,26 +42,31 @@ internal object ResponseRequestEncoder {
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val capabilities = resolveResponseProviderCapabilities(host)
+        val isSiwc = providerSetting.authMode == OpenAIAuthMode.CHATGPT_SIWC
+        val effectiveStream = if (isSiwc) true else stream
         return buildJsonObject {
             put("model", params.model.modelId)
-            put("stream", stream)
+            put("stream", effectiveStream)
             // P6-01: resume requests store the response server-side so a
             // disconnect / process death can re-attach and fetch missing
             // events. store=false stays the default otherwise (the
             // image_generation built-in tool still forces store=true —
             // the server rejects store=false for it).
-            if (resume != null) {
+            // SIWC Preview strictly requires store=false and stream=true.
+            if (isSiwc) {
+                put("store", false)
+            } else if (resume != null) {
                 put("store", true)
-                if (stream) put("background", true)
+                if (effectiveStream) put("background", true)
             } else if (!params.model.tools.contains(BuiltInTools.ImageGeneration)) {
                 put("store", false)
             }
 
-            if (isModelAllowTemperature(params.model)) {
+            if (!isSiwc && isModelAllowTemperature(params.model)) {
                 if (params.temperature != null) put("temperature", params.temperature)
                 if (params.topP != null) put("top_p", params.topP)
             }
-            if (params.maxTokens != null) put("max_output_tokens", params.maxTokens)
+            if (!isSiwc && params.maxTokens != null) put("max_output_tokens", params.maxTokens)
 
             // system instructions: Responses has one instructions field, so preserve
             // every system message/part in source order instead of silently dropping
@@ -122,10 +129,12 @@ internal object ResponseRequestEncoder {
                         BuiltInTools.UrlContext -> {} // not supported
 
                         BuiltInTools.ImageGeneration -> {
-                            add(buildJsonObject {
-                                put("type", "image_generation")
-                                put("model", "gpt-image-2")
-                            })
+                            if (!isSiwc) {
+                                add(buildJsonObject {
+                                    put("type", "image_generation")
+                                    put("model", "gpt-image-2")
+                                })
+                            }
                         }
                     }
                 }
@@ -135,7 +144,49 @@ internal object ResponseRequestEncoder {
             }
         }.mergeCustomBody(params.customBody)
             .withoutSamplingParamsIfNeeded(params.model)
-            .withForcedStream(stream)
+            .withSiwcPreviewSanitizationIfNeeded(isSiwc)
+            .withForcedStream(effectiveStream)
+    }
+
+    private fun JsonObject.withSiwcPreviewSanitizationIfNeeded(isSiwc: Boolean): JsonObject {
+        if (!isSiwc) return this
+        val sanitized = toMutableMap()
+        for (field in SIWC_UNSUPPORTED_REQUEST_FIELDS) {
+            sanitized.remove(field)
+        }
+        sanitized["store"] = JsonPrimitive(false)
+        sanitized["stream"] = JsonPrimitive(true)
+
+        // Ensure no `{type: "message", role: "system"}` item leaks into `input` (convert to developer).
+        val inputArray = sanitized["input"] as? JsonArray
+        if (inputArray != null) {
+            sanitized["input"] = JsonArray(
+                inputArray.map { item ->
+                    val obj = item as? JsonObject ?: return@map item
+                    val role = obj["role"]?.jsonPrimitiveOrNull?.contentOrNull
+                    if (role.equals("system", ignoreCase = true)) {
+                        JsonObject(obj.toMutableMap().apply { put("role", JsonPrimitive("developer")) })
+                    } else {
+                        item
+                    }
+                }
+            )
+        }
+
+        // Filter out unsupported hosted tools while retaining custom function tools (and web_search).
+        val toolsArray = sanitized["tools"] as? JsonArray
+        if (toolsArray != null) {
+            val allowedTools = toolsArray.filter { toolElement ->
+                val type = (toolElement as? JsonObject)?.get("type")?.jsonPrimitiveOrNull?.contentOrNull
+                type != null && type in SIWC_ALLOWED_TOOL_TYPES
+            }
+            if (allowedTools.isEmpty()) {
+                sanitized.remove("tools")
+            } else {
+                sanitized["tools"] = JsonArray(allowedTools)
+            }
+        }
+        return JsonObject(sanitized)
     }
 
     private fun JsonObject.withoutSamplingParamsIfNeeded(model: Model): JsonObject {
@@ -300,6 +351,32 @@ internal object ResponseRequestEncoder {
     }
 
 }
+
+private val SIWC_UNSUPPORTED_REQUEST_FIELDS = setOf(
+    "background",
+    "conversation",
+    "max_output_tokens",
+    "max_tool_calls",
+    "metadata",
+    "moderation",
+    "multi_agent",
+    "previous_response_id",
+    "prompt",
+    "prompt_cache_retention",
+    "safety_identifier",
+    "temperature",
+    "top_logprobs",
+    "top_p",
+    "truncation",
+    "user",
+)
+
+private val SIWC_ALLOWED_TOOL_TYPES = setOf(
+    "function",
+    "custom",
+    "web_search",
+    "web_search_preview",
+)
 
 private fun isModelAllowTemperature(model: Model): Boolean {
     val modelId = model.modelId.lowercase()

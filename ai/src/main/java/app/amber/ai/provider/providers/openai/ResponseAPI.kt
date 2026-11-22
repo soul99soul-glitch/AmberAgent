@@ -68,7 +68,9 @@ class ResponseAPI(
         //      而是与流内累积做 diff, 缺失部分降级为增量 delta, 一致部分只保留
         //      usage/annotations/finishReason; 同时仍阻止 replaceActive 重置累积
         val reconciler = ResponseStreamReconciler()
-        if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
+        if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH ||
+            providerSetting.authMode == OpenAIAuthMode.CHATGPT_SIWC
+        ) {
             return eventTransport.streamCodexText(providerSetting, messages, params)
                 .map { chunk -> reconciler.reconcile(chunk) }
         }

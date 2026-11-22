@@ -20,6 +20,8 @@ import app.amber.ai.provider.hasUsableAuth
 import app.amber.ai.provider.providers.GoogleProvider
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStatus
 import app.amber.ai.provider.providers.google.AntigravityAuthStatus
+import app.amber.ai.provider.providers.openai.OpenAIChatGptSiwcAuthStore
+import app.amber.ai.provider.providers.openai.OpenAIChatGptSiwcTokens
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthTokens
 import app.amber.ai.provider.providers.grok.GrokAuthStatus
@@ -67,10 +69,30 @@ internal fun codexAuthStatus(
     return ManagedProviderAuthStatus(AUTH_STATUS_READY, usable = true)
 }
 
+internal fun siwcAuthStatus(
+    tokens: OpenAIChatGptSiwcTokens?,
+    nowMillis: Long = System.currentTimeMillis(),
+): ManagedProviderAuthStatus {
+    if (tokens == null) {
+        return ManagedProviderAuthStatus(AUTH_STATUS_NOT_SIGNED_IN, usable = false)
+    }
+    if (!tokens.hasDirectUsageScope || tokens.accessToken.isBlank()) {
+        return ManagedProviderAuthStatus(AUTH_STATUS_TOKEN_MISSING, usable = false)
+    }
+    if (tokens.expiresAtMillis <= nowMillis) {
+        return ManagedProviderAuthStatus(
+            AUTH_STATUS_TOKEN_EXPIRED,
+            usable = tokens.refreshToken.isNotBlank(),
+        )
+    }
+    return ManagedProviderAuthStatus(AUTH_STATUS_READY, usable = true)
+}
+
 internal fun managedProviderAuthStatusResolver(
     googleProvider: GoogleProvider,
     openAICodexAuthStore: OpenAICodexAuthStore?,
     grokAuthStore: GrokAuthStore?,
+    openAIChatGptSiwcAuthStore: OpenAIChatGptSiwcAuthStore? = null,
 ): (ProviderSetting) -> ManagedProviderAuthStatus? {
     // Google OAuth state lives in the provider's encrypted token store, not in
     // Settings/SecretStore. Keep the resolver here so status and refresh use the
@@ -96,6 +118,14 @@ internal fun managedProviderAuthStatusResolver(
                 } else {
                     runCatching {
                         codexAuthStatus(openAICodexAuthStore.get(provider.id))
+                    }.getOrElse { ManagedProviderAuthStatus(AUTH_STATUS_CLIENT_UNAVAILABLE, usable = false) }
+                }
+            } else if (provider.authMode == OpenAIAuthMode.CHATGPT_SIWC) {
+                if (openAIChatGptSiwcAuthStore == null) {
+                    ManagedProviderAuthStatus(AUTH_STATUS_CLIENT_UNAVAILABLE, usable = false)
+                } else {
+                    runCatching {
+                        siwcAuthStatus(openAIChatGptSiwcAuthStore.get(provider.id))
                     }.getOrElse { ManagedProviderAuthStatus(AUTH_STATUS_CLIENT_UNAVAILABLE, usable = false) }
                 }
             } else {

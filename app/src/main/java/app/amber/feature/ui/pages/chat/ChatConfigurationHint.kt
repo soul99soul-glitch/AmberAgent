@@ -28,6 +28,7 @@ import app.amber.ai.provider.providers.google.AntigravityAuthStatus
 import app.amber.ai.provider.providers.google.AntigravityAuthStore
 import app.amber.ai.provider.providers.grok.GrokAuthStore
 import app.amber.ai.provider.providers.grok.GrokAuthStatus
+import app.amber.ai.provider.providers.openai.OpenAIChatGptSiwcAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.core.settings.findProvider
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -41,6 +42,7 @@ internal fun rememberChatConfigurationIssue(model: Model?, providers: List<Provi
     val provider = model?.findProvider(providers)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val codexStore = koinInject<OpenAICodexAuthStore>()
+    val siwcStore = koinInject<OpenAIChatGptSiwcAuthStore>()
     val googleStore = koinInject<GoogleGeminiAuthStore>()
     val grokStore = koinInject<GrokAuthStore>()
     val antigravityStore = koinInject<AntigravityAuthStore>()
@@ -54,6 +56,8 @@ internal fun rememberChatConfigurationIssue(model: Model?, providers: List<Provi
                         tokens != null && (tokens.refreshToken.isNotBlank() ||
                             (tokens.accessToken.isNotBlank() && tokens.expiresAtMillis > System.currentTimeMillis()))
                     }
+                    provider is ProviderSetting.OpenAI && provider.authMode == OpenAIAuthMode.CHATGPT_SIWC ->
+                        siwcStore.get(provider.id)?.isUsable() == true
                     provider is ProviderSetting.Google && provider.authMode == GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH ->
                         GoogleGeminiAuthStatus.from(googleStore.get(provider.id), System.currentTimeMillis()).usable
                     provider is ProviderSetting.OpenAI && provider.authMode == OpenAIAuthMode.GROK_OAUTH ->

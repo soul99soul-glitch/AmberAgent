@@ -334,7 +334,13 @@ internal object ResponseEventDecoder {
                 val response = jsonObject["response"]?.jsonObjectOrNull
                 val error = (response?.get("error") ?: jsonObject["error"])
                     ?.takeUnless { it is JsonNull }
-                throw error?.parseErrorDetail() ?: HttpException("Response stream failed")
+                throw error?.let(::parseOpenAIResponseError) ?: HttpException("Response stream failed")
+            }
+
+            "error" -> {
+                val error = (jsonObject["error"] ?: jsonObject)
+                    .takeUnless { it is JsonNull }
+                throw error?.let(::parseOpenAIResponseError) ?: HttpException("Response stream error")
             }
 
             // incomplete 与 completed 同构: response 对象携带 (可能不完整的) 最终输出,
@@ -554,4 +560,42 @@ internal object ResponseEventDecoder {
                 ?: 0
         )
     }
+}
+
+internal fun parseOpenAIResponseError(errorElement: kotlinx.serialization.json.JsonElement): HttpException {
+    val obj = errorElement.jsonObjectOrNull
+    val nested = obj?.get("error")?.jsonObjectOrNull ?: obj
+    val code = nested?.get("code")?.jsonPrimitiveOrNull?.contentOrNull
+    val detailMessage = nested?.get("message")?.jsonPrimitiveOrNull?.contentOrNull?.takeIf { it.isNotBlank() }
+    return when (code) {
+        "subscription_sharing_usage_limit_exceeded" -> HttpException(
+            buildString {
+                append("ChatGPT plan usage limit reached (subscription_sharing_usage_limit_exceeded).")
+                if (detailMessage != null) append(" ").append(detailMessage)
+                append(" Manage your usage limits at $OPENAI_CHATGPT_SIWC_USAGE_URL")
+            }
+        )
+        "subscription_sharing_usage_unavailable" -> HttpException(
+            buildString {
+                append("ChatGPT plan usage is temporarily unavailable (subscription_sharing_usage_unavailable).")
+                if (detailMessage != null) append(" ").append(detailMessage)
+                append(" Your sign-in is preserved; please retry shortly or check $OPENAI_CHATGPT_SIWC_USAGE_URL")
+            }
+        )
+        "subscription_sharing_user_not_eligible" -> HttpException(
+            buildString {
+                append("This ChatGPT account or workspace is not eligible for plan usage sharing (subscription_sharing_user_not_eligible).")
+                if (detailMessage != null) append(" ").append(detailMessage)
+                append(" Review your account at $OPENAI_CHATGPT_SIWC_USAGE_URL")
+            }
+        )
+        else -> errorElement.parseErrorDetail()
+    }
+}
+
+internal fun isSubscriptionSharingErrorCode(errorElement: kotlinx.serialization.json.JsonElement): Boolean {
+    val obj = errorElement.jsonObjectOrNull ?: return false
+    val nested = obj["error"]?.jsonObjectOrNull ?: obj
+    val code = nested["code"]?.jsonPrimitiveOrNull?.contentOrNull ?: return false
+    return code.startsWith("subscription_sharing_")
 }

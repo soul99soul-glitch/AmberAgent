@@ -5,6 +5,7 @@ import app.amber.ai.provider.Model
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.providers.GoogleProvider
+import app.amber.ai.provider.providers.openai.OpenAIChatGptSiwcAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.providers.grok.GrokAuthStore
 import app.amber.core.settings.prefs.SettingsAggregator
@@ -57,8 +58,14 @@ fun createProviderConfigTools(
     openAICodexAuthStore: OpenAICodexAuthStore? = null,
     grokAuthStore: GrokAuthStore? = null,
     antigravityAuthStore: app.amber.ai.provider.providers.google.AntigravityAuthStore? = null,
+    openAIChatGptSiwcAuthStore: OpenAIChatGptSiwcAuthStore? = null,
 ): List<Tool> {
-    val oauthStatusResolver = managedProviderAuthStatusResolver(googleProvider, openAICodexAuthStore, grokAuthStore)
+    val oauthStatusResolver = managedProviderAuthStatusResolver(
+        googleProvider = googleProvider,
+        openAICodexAuthStore = openAICodexAuthStore,
+        grokAuthStore = grokAuthStore,
+        openAIChatGptSiwcAuthStore = openAIChatGptSiwcAuthStore,
+    )
     return listOf(
         providerConfigStatusTool(settingsStore, secretStore, oauthStatusResolver),
         providerConfigApplyTool(settingsStore, secretStore),

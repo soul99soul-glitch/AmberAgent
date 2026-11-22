@@ -91,6 +91,14 @@ fun ProviderTemplatePickerSheet(
                 item("oauth-card") {
                     ProviderCard(modifier = Modifier.fillMaxWidth()) {
                         ProviderTemplateRow(
+                            name = stringResource(R.string.setting_provider_page_template_oauth_siwc_title),
+                            subtitle = stringResource(R.string.setting_provider_page_template_oauth_siwc_subtitle),
+                            monogram = "CG",
+                            tagText = "official",
+                            onClick = { closeAndPick(buildChatGptSiwcInitial(), true) },
+                        )
+                        ProviderRowDivider(inset = TemplateRowDividerInset)
+                        ProviderTemplateRow(
                             name = stringResource(R.string.setting_provider_page_template_oauth_codex_title),
                             subtitle = stringResource(R.string.setting_provider_page_template_oauth_codex_subtitle),
                             monogram = "OC",
@@ -152,6 +160,17 @@ fun ProviderTemplatePickerSheet(
 
 /** 14dp row inset + 36dp tile + 12dp gap. */
 private val TemplateRowDividerInset = 62.dp
+
+internal fun buildChatGptSiwcInitial(): ProviderSetting.OpenAI = ProviderSetting.OpenAI(
+    id = Uuid.random(),
+    name = "ChatGPT",
+    baseUrl = OpenAIAuthMode.CHATGPT_SIWC.fixedBaseUrl()!!,
+    apiKey = "",
+    useResponseApi = true,
+    enableResponsesResume = false,
+    authMode = OpenAIAuthMode.CHATGPT_SIWC,
+    brand = OpenAIBrand.OPENAI,
+)
 
 internal fun buildCodexOAuthInitial(): ProviderSetting.OpenAI = ProviderSetting.OpenAI(
     id = Uuid.random(),

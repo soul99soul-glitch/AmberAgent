@@ -174,7 +174,13 @@ internal class ResponseEventTransport(
                 response = awaitResponse(client.newCall(retryRequest))
             }
             if (!response.isSuccessful) {
-                throw Exception("Failed to get response: ${response.code} ${response.body.stringSafe()}")
+                val bodyText = response.body.stringSafe().orEmpty()
+                val parsedSubscriptionError = runCatching {
+                    val element = Json.parseToJsonElement(bodyText)
+                    if (isSubscriptionSharingErrorCode(element)) parseOpenAIResponseError(element) else null
+                }.getOrNull()
+                if (parsedSubscriptionError != null) throw parsedSubscriptionError
+                throw Exception("Failed to get response: ${response.code} $bodyText")
             }
 
             response.use { activeResponse ->
@@ -286,7 +292,7 @@ internal class ResponseEventTransport(
                     for (payload in payloads) {
                         val json = json.parseToJsonElement(payload).jsonObject
                         if (json["error"] != null) {
-                            throw json["error"]!!.parseErrorDetail()
+                            throw parseOpenAIResponseError(json["error"]!!)
                         }
                         val sequence = json["sequence_number"]?.jsonPrimitive?.longOrNull ?: -1L
                         if (json["type"]?.jsonPrimitive?.contentOrNull == "response.created") {
@@ -337,7 +343,7 @@ internal class ResponseEventTransport(
                         val bodyElement = Json.parseToJsonElement(
                             normalizeOpenAIStreamDataLines(bodyRaw).firstOrNull() ?: bodyRaw
                         )
-                        exception = bodyElement.parseErrorDetail()
+                        exception = parseOpenAIResponseError(bodyElement)
                         Log.i(TAG, "onFailure: $exception")
                     }
                 } catch (e: Throwable) {

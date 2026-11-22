@@ -27,8 +27,12 @@ import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextModelGateway
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.provider.providers.openai.ChatCompletionsAPI
+import app.amber.ai.provider.providers.openai.OPENAI_CHATGPT_SIWC_API_BASE_URL
+import app.amber.ai.provider.providers.openai.OPENAI_CHATGPT_SIWC_USAGE_URL
 import app.amber.ai.provider.providers.openai.OPENAI_CODEX_BACKEND_BASE_URL
 import app.amber.ai.provider.providers.openai.OPENAI_CODEX_CLIENT_VERSION
+import app.amber.ai.provider.providers.openai.OpenAIChatGptSiwcAuthStore
+import app.amber.ai.provider.providers.openai.OpenAIChatGptSiwcOAuthClient
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexOAuthClient
 import app.amber.ai.provider.providers.openai.ResponseAPI
@@ -63,10 +67,18 @@ import java.math.RoundingMode
 
 private const val TAG = "OpenAIProvider"
 
-class OpenAIProvider(
+class OpenAIProvider internal constructor(
     private val client: OkHttpClient,
-    context: Context? = null
+    context: Context? = null,
+    private val siwcOAuthClient: OpenAIChatGptSiwcOAuthClient? =
+        context?.let { OpenAIChatGptSiwcOAuthClient(client, OpenAIChatGptSiwcAuthStore(it)) },
 ) : TextModelGateway<ProviderSetting.OpenAI>, ImageModelGateway<ProviderSetting.OpenAI> {
+    constructor(client: OkHttpClient, context: Context? = null) : this(
+        client = client,
+        context = context,
+        siwcOAuthClient = context?.let { OpenAIChatGptSiwcOAuthClient(client, OpenAIChatGptSiwcAuthStore(it)) },
+    )
+
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
     private val oauthClient = context?.let { OpenAICodexOAuthClient(client, OpenAICodexAuthStore(it)) }
     private val grokOAuthClient = context?.let { GrokOAuthClient(client, GrokAuthStore(it)) }
@@ -99,6 +111,10 @@ class OpenAIProvider(
         withContext(Dispatchers.IO) {
             if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
                 return@withContext listCodexModels(providerSetting)
+            }
+            if (providerSetting.authMode == OpenAIAuthMode.CHATGPT_SIWC) {
+                return@withContext siwcOAuthClient?.listModels(providerSetting.id)
+                    ?: error("Sign in with ChatGPT requires an Android context-backed auth store.")
             }
             if (providerSetting.authMode == OpenAIAuthMode.GROK_OAUTH) {
                 return@withContext grokOAuthClient?.listModels(providerSetting.id).orEmpty()
@@ -141,6 +157,9 @@ class OpenAIProvider(
         // string even for Kimi/Zhipu/MiMo, confusing users who'd never picked Codex.
         require(providerSetting.authMode != OpenAIAuthMode.CODEX_OAUTH) {
             "Codex OAuth does not support balance lookup. Use an API Key provider for balance."
+        }
+        require(providerSetting.authMode != OpenAIAuthMode.CHATGPT_SIWC) {
+            "ChatGPT plan usage does not support API balance lookup. Manage usage at $OPENAI_CHATGPT_SIWC_USAGE_URL"
         }
         val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
         val url = if (providerSetting.balanceOption.apiPath.startsWith("http")) {
@@ -207,10 +226,14 @@ class OpenAIProvider(
     ): Flow<MessageChunk> {
         val transportSetting = providerSetting.managedOAuthSettingIfNeeded()
         return when {
-            transportSetting.authMode == OpenAIAuthMode.CODEX_OAUTH || transportSetting.useResponseApi -> responseAPI.streamText(
+            transportSetting.authMode == OpenAIAuthMode.CODEX_OAUTH ||
+                transportSetting.authMode == OpenAIAuthMode.CHATGPT_SIWC ||
+                transportSetting.useResponseApi -> responseAPI.streamText(
                 providerSetting = transportSetting,
                 messages = messages,
-                params = if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
+                params = if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH ||
+                    providerSetting.authMode == OpenAIAuthMode.CHATGPT_SIWC
+                ) {
                     params.withCodexResponsesCompatibility()
                 } else {
                     params
@@ -232,7 +255,8 @@ class OpenAIProvider(
     ): MessageChunk {
         val transportSetting = providerSetting.managedOAuthSettingIfNeeded()
         return when {
-            transportSetting.authMode == OpenAIAuthMode.CODEX_OAUTH -> generateCodexTextWithStreaming(
+            transportSetting.authMode == OpenAIAuthMode.CODEX_OAUTH ||
+                transportSetting.authMode == OpenAIAuthMode.CHATGPT_SIWC -> generateCodexTextWithStreaming(
                 providerSetting = transportSetting,
                 messages = messages,
                 params = params.withCodexResponsesCompatibility(),
@@ -346,7 +370,7 @@ class OpenAIProvider(
             "not support" in this
 
     private fun ProviderSetting.OpenAI.shouldRetryGenerateTextWithStreaming(error: Throwable): Boolean {
-        if (authMode != OpenAIAuthMode.CODEX_OAUTH && !useResponseApi) return false
+        if (authMode != OpenAIAuthMode.CODEX_OAUTH && authMode != OpenAIAuthMode.CHATGPT_SIWC && !useResponseApi) return false
         return error.isOpenAIStreamRequiredError()
     }
 
@@ -380,7 +404,9 @@ class OpenAIProvider(
         responseAPI.streamText(
             providerSetting = providerSetting,
             messages = messages,
-            params = if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH) {
+            params = if (providerSetting.authMode == OpenAIAuthMode.CODEX_OAUTH ||
+                providerSetting.authMode == OpenAIAuthMode.CHATGPT_SIWC
+            ) {
                 params.withCodexResponsesCompatibility()
             } else {
                 params
@@ -664,6 +690,9 @@ class OpenAIProvider(
             OpenAIAuthMode.CODEX_OAUTH -> oauthClient
                 ?.getValidAccessToken(providerSetting.id, forceRefresh)
                 ?: error("Codex OAuth requires an Android context-backed auth store.")
+            OpenAIAuthMode.CHATGPT_SIWC -> siwcOAuthClient
+                ?.getValidAccessToken(providerSetting.id, forceRefresh)
+                ?: error("Sign in with ChatGPT requires an Android context-backed auth store.")
         }
     }
 
@@ -671,6 +700,11 @@ class OpenAIProvider(
         OpenAIAuthMode.CODEX_OAUTH -> copy(
             baseUrl = OPENAI_CODEX_BACKEND_BASE_URL,
             useResponseApi = true,
+        )
+        OpenAIAuthMode.CHATGPT_SIWC -> copy(
+            baseUrl = OPENAI_CHATGPT_SIWC_API_BASE_URL,
+            useResponseApi = true,
+            enableResponsesResume = false,
         )
         OpenAIAuthMode.GROK_OAUTH -> copy(
             baseUrl = GROK_CLI_PROXY_BASE_URL,
@@ -934,6 +968,7 @@ fun Model.isCodexOAuthReviewModel(): Boolean {
 internal fun unsupportedAuthModeMessage(authMode: OpenAIAuthMode, capability: String): String {
     val modeLabel = when (authMode) {
         OpenAIAuthMode.CODEX_OAUTH -> "Codex OAuth"
+        OpenAIAuthMode.CHATGPT_SIWC -> "ChatGPT plan (SIWC)"
         OpenAIAuthMode.GROK_OAUTH -> "Grok OAuth"
         OpenAIAuthMode.ZHIPU_CODING_PLAN,
         OpenAIAuthMode.KIMI_CODING_PLAN,

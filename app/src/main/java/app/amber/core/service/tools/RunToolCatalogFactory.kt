@@ -7,6 +7,7 @@ import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.providers.GoogleProvider
 import app.amber.ai.provider.providers.google.AntigravityAuthStore
 import app.amber.ai.provider.providers.grok.GrokAuthStore
+import app.amber.ai.provider.providers.openai.OpenAIChatGptSiwcAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.mcp.McpManager
@@ -86,6 +87,7 @@ class RunToolCatalogFactory(
     private val openAICodexAuthStore: OpenAICodexAuthStore,
     private val grokAuthStore: GrokAuthStore,
     private val antigravityAuthStore: AntigravityAuthStore,
+    private val openAIChatGptSiwcAuthStore: OpenAIChatGptSiwcAuthStore? = null,
     private val capabilityFlags: CapabilityFlags? = null,
     private val capabilityPermissionStore: CapabilityPermissionStore? = null,
     private val toolEffectLedger: ToolEffectLedger? = null,
@@ -416,6 +418,7 @@ class RunToolCatalogFactory(
                 openAICodexAuthStore = openAICodexAuthStore,
                 grokAuthStore = grokAuthStore,
                 antigravityAuthStore = antigravityAuthStore,
+                openAIChatGptSiwcAuthStore = openAIChatGptSiwcAuthStore,
             )
         } else {
             emptyList()
