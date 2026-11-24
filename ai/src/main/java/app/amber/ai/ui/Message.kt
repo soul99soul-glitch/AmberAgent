@@ -682,7 +682,23 @@ sealed class UIMessageAnnotation {
     data class GenerationInterrupted(
         val reason: String = "",
     ) : UIMessageAnnotation()
+
+    /**
+     * Marks timeline-only live-interjection messages (status inquiries/replies,
+     * instant steer acknowledgements, stop confirmations) so they stay visible
+     * to the user without polluting model role alternation on subsequent rounds.
+     */
+    @Serializable
+    @SerialName("live_interjection")
+    data class LiveInterjection(
+        val kind: String,
+        val targetTaskId: String = "",
+    ) : UIMessageAnnotation()
 }
+
+/** True when this message is a timeline-only live-interjection auxiliary message. */
+val UIMessage.isEphemeralInterjectionMessage: Boolean
+    get() = annotations.any { it is UIMessageAnnotation.LiveInterjection }
 
 @Serializable
 data class MessageChunk(

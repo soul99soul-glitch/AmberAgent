@@ -126,7 +126,6 @@ internal fun ChatInput(
     conversation: Conversation,
     contextCompacts: List<app.amber.core.context.ConversationCompact> = emptyList(),
     compactLifecycleState: CompactLifecycleState = CompactLifecycleState.idle(),
-    pendingQueueCount: Int = 0,
     settings: Settings,
     timelineScrolling: Boolean = false,
     enableSearch: Boolean,
@@ -149,7 +148,6 @@ internal fun ChatInput(
     onCancelClick: () -> Unit,
     onSendClick: (PendingUserMessageMode, List<UIMessagePart>, Uuid?) -> Boolean,
     onLongSendClick: (PendingUserMessageMode, List<UIMessagePart>, Uuid?) -> Boolean,
-    onOpenQueue: () -> Unit = {},
     onCompactContext: () -> Unit = {},
 ) {
     val toaster = LocalToaster.current

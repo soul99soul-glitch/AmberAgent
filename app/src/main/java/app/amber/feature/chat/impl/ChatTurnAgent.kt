@@ -10,6 +10,8 @@ import app.amber.feature.chat.api.ChatTurnInput
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.last
 import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessageAnnotation
+import app.amber.ai.ui.isEphemeralInterjectionMessage
 import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.GenerationRunSession
 import app.amber.core.ai.toGenerationSettings
@@ -79,6 +81,7 @@ class ChatTurnAgent(
                     // arrives via sub-agent payloads.
                     executionPolicy = session.executionPolicy,
                     consumeSteerMessages = hooks?.consumeSteerMessages ?: { emptyList() },
+                    interjectionController = hooks?.interjectionController,
                     // runId / onTerminal / responsesResume enter the generation
                     // loop only on the durable path — with the flags off the
                     // loop keeps the exact legacy non-durable behavior (the
@@ -107,6 +110,7 @@ class ChatTurnAgent(
                                 generatedMessages = chunk.messages,
                                 sourceStartIndex = input.messageRangeStart,
                                 anchorNodeId = anchorNodeUuid,
+                                retractedMessageIds = chunk.retractedMessageIds,
                             )
                         }
                         hooks?.onStreamingMessages?.invoke(runId, chunk.messages)
@@ -203,8 +207,9 @@ private fun mergeMessages(
     generatedMessages: List<UIMessage>,
     sourceStartIndex: Int? = null,
     anchorNodeId: Uuid? = null,
+    retractedMessageIds: Set<Uuid> = emptySet(),
 ): Conversation {
-    if (generatedMessages.isEmpty()) return conversation
+    if (generatedMessages.isEmpty() && retractedMessageIds.isEmpty()) return conversation
     // Storage boundary: a credential that is still awaiting approval must not
     // land in the conversation — that persisted copy is what the mid-approval
     // checkpoint writes and what a restart resumes from. The live in-memory
@@ -216,6 +221,7 @@ private fun mergeMessages(
         generatedMessages = generatedMessages.withUnapprovedCredentialsWithheld(),
         sourceStartIndex = sourceStartIndex,
         anchorNodeId = anchorNodeId,
+        retractedMessageIds = retractedMessageIds,
     )
 }
 
@@ -224,10 +230,27 @@ private fun mergeMessagesIntoConversation(
     generatedMessages: List<UIMessage>,
     sourceStartIndex: Int? = null,
     anchorNodeId: Uuid? = null,
+    retractedMessageIds: Set<Uuid> = emptySet(),
 ): Conversation {
+    val baseConversation = if (retractedMessageIds.isEmpty()) {
+        conversation
+    } else {
+        val filtered = conversation.messageNodes.filterNot { node ->
+            node.currentMessage.id in retractedMessageIds
+        }
+        if (filtered.size == conversation.messageNodes.size) {
+            conversation
+        } else {
+            conversation.copy(
+                messageNodes = filtered,
+                updateAt = Instant.now(),
+            )
+        }
+    }
+    if (generatedMessages.isEmpty()) return baseConversation
     if (sourceStartIndex != null) {
-        val updatedNodes = conversation.messageNodes.toMutableList()
-        var changed = false
+        val updatedNodes = baseConversation.messageNodes.toMutableList()
+        var changed = baseConversation !== conversation
         generatedMessages.forEachIndexed { offset, message ->
             val nodeIndex = sourceStartIndex + offset
             val existingNode = updatedNodes.getOrNull(nodeIndex)
@@ -264,20 +287,20 @@ private fun mergeMessagesIntoConversation(
             }
         }
         return if (changed) {
-            conversation.copy(
+            baseConversation.copy(
                 messageNodes = updatedNodes,
                 updateAt = Instant.now(),
             )
         } else {
-            conversation
+            baseConversation
         }
     }
 
     val initialAnchorIndex = anchorNodeId?.let { id ->
-        conversation.messageNodes.indexOfFirst { it.id == id }
+        baseConversation.messageNodes.indexOfFirst { it.id == id }
     } ?: -1
     val anchorMsgId = if (initialAnchorIndex >= 0) {
-        conversation.messageNodes[initialAnchorIndex].currentMessage.id
+        baseConversation.messageNodes[initialAnchorIndex].currentMessage.id
     } else {
         null
     }
@@ -293,8 +316,8 @@ private fun mergeMessagesIntoConversation(
     }
 
     val generatedById = ownedGeneratedMessages.associateBy { it.id }
-    var changed = false
-    val updatedNodes = conversation.messageNodes.map { node ->
+    var changed = baseConversation !== conversation
+    val updatedNodes = baseConversation.messageNodes.map { node ->
         val selected = node.currentMessage
         val replacement = generatedById[selected.id] ?: return@map node
         if (replacement === selected || replacement == selected) {
@@ -315,7 +338,7 @@ private fun mergeMessagesIntoConversation(
             changed = true
             app.amber.core.model.MessageNode(messages = listOf(msg))
         }
-    if (!changed) return conversation
+    if (!changed) return baseConversation
     val anchorIndex = anchorNodeId?.let { id ->
         updatedNodes.indexOfFirst { it.id == id }
     } ?: -1
@@ -323,8 +346,22 @@ private fun mergeMessagesIntoConversation(
         val taskOwnedIds = ownedGeneratedMessages.mapTo(hashSetOf()) { it.id }
         var insertAfterIndex = anchorIndex
         for (idx in (anchorIndex + 1) until updatedNodes.size) {
-            if (updatedNodes[idx].currentMessage.id in taskOwnedIds) {
+            val currentMsg = updatedNodes[idx].currentMessage
+            if (currentMsg.id in taskOwnedIds) {
                 insertAfterIndex = idx
+            }
+        }
+        // If the task absorbed a live steer user message that was immediately followed
+        // by an ephemeral steer acknowledgement bubble, place the replanned answer
+        // directly after that acknowledgement so timeline chronology stays natural.
+        while (insertAfterIndex + 1 < updatedNodes.size) {
+            val nextMsg = updatedNodes[insertAfterIndex + 1].currentMessage
+            val isSteerAck = nextMsg.isEphemeralInterjectionMessage &&
+                nextMsg.annotations.any {
+                    it is UIMessageAnnotation.LiveInterjection && it.kind == "steer_ack"
+                }
+            if (isSteerAck) {
+                insertAfterIndex++
             } else {
                 break
             }
@@ -335,7 +372,7 @@ private fun mergeMessagesIntoConversation(
     } else {
         updatedNodes + appendedNodes
     }
-    return conversation.copy(
+    return baseConversation.copy(
         messageNodes = mergedNodes,
         updateAt = Instant.now(),
     )
@@ -380,6 +417,8 @@ class ChatRunHooks(
     val autoApprovedToolNames: Set<String> = emptySet(),
     /** Steer drain: queued mid-run user messages, consumed between steps. */
     val consumeSteerMessages: suspend () -> List<UIMessage> = { emptyList() },
+    /** Live interjection controller for thinking preemption, tool-batch safe abort and phase reporting. */
+    val interjectionController: app.amber.core.ai.RunInterjectionController? = null,
     /** Arm the run before the loop's first write-ahead ledger prepare. */
     val onRunStarted: suspend (runId: String) -> Unit = {},
     /** In-loop terminal signal (approval pause / step limit) to persist. */

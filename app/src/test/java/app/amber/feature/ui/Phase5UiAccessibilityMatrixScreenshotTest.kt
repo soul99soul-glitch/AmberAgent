@@ -56,7 +56,6 @@ import androidx.compose.ui.unit.dp
 import app.amber.agent.R
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.automation.PhoneAutomationTakeoverController
-import app.amber.core.service.PendingUserMessage
 import app.amber.core.utils.JsonInstant
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
@@ -76,7 +75,6 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.pages.chat.ContextCompactMarker
 import app.amber.feature.ui.pages.chat.ContextUsageSummary
 import app.amber.feature.ui.pages.chat.LocalChatTheme
-import app.amber.feature.ui.pages.chat.PendingUserMessageBubble
 import app.amber.feature.ui.pages.chat.toChatTheme
 import app.amber.feature.ui.pages.setting.SettingCardGroup
 import app.amber.feature.ui.pages.setting.settingSingleLine
@@ -379,17 +377,6 @@ class Phase5UiAccessibilityMatrixScreenshotTest {
             )
             ContextCompactMarker(
                 summaryPreview = "上下文已自动压缩 · 保留最近 4 轮完整工具调用与关键决策",
-            )
-
-            // 3. Pending User Message Bubble with 48dp cancel button
-            PendingUserMessageBubble(
-                message = PendingUserMessage(
-                    id = "q-1",
-                    parts = listOf(UIMessagePart.Text("请继续检查设置页和底部弹层在 2.0 倍字体下的换行与点击热区表现")),
-                ),
-                queueCount = 2,
-                onCancel = {},
-                onOpenQueue = {},
             )
 
             // 4. Phone Takeover Banner (responsive stacked layout at >= 1.3x font scale or < 280dp)

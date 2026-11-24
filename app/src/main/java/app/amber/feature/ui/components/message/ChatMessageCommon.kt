@@ -124,10 +124,13 @@ internal fun MessageAnnotations(
     annotations: List<UIMessageAnnotation>,
     loading: Boolean,
 ) {
-    // GenerationInterrupted is a recovery marker, not a citation — never
+    // GenerationInterrupted and LiveInterjection are non-citation markers — never
     // rendered in this citations block.
     val citationAnnotations = annotations
-        .filterNot { it is UIMessageAnnotation.GenerationInterrupted }
+        .filterNot {
+            it is UIMessageAnnotation.GenerationInterrupted ||
+                it is UIMessageAnnotation.LiveInterjection
+        }
     val visibleAnnotations = if (LocalSearchSources.current?.isNotEmpty == true) {
         citationAnnotations.filterNot { it is UIMessageAnnotation.UrlCitation }
     } else {
@@ -182,6 +185,7 @@ internal fun MessageAnnotations(
                             }
 
                             is UIMessageAnnotation.GenerationInterrupted -> Unit
+                            is UIMessageAnnotation.LiveInterjection -> Unit
                         }
                     }
                 }

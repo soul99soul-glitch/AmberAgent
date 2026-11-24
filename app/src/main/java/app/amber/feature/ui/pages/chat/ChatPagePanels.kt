@@ -5,18 +5,14 @@ import app.amber.core.service.ConversationTimelineLoadState
 import app.amber.core.recap.RecapState
 import app.amber.core.model.Conversation
 import kotlinx.coroutines.flow.StateFlow
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -29,7 +25,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
@@ -47,10 +42,6 @@ import com.composables.icons.lucide.X
 import com.composables.icons.lucide.RefreshCw
 import com.composables.icons.lucide.Clock
 import app.amber.agent.R
-import app.amber.core.service.PendingUserMessage
-import app.amber.core.service.PendingUserMessageDisplayCopy
-import app.amber.core.service.PendingUserMessageMode
-import app.amber.core.service.previewText
 import app.amber.feature.ui.components.ui.WorkspaceIconButton
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -206,147 +197,6 @@ internal fun UserMessageEditConfirmBar(
             modifier = Modifier.align(Alignment.CenterVertically),
         ) {
             Text(stringResource(R.string.chat_page_save_and_regenerate), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
-internal fun PendingUserMessageQueueDialog(
-    messages: List<PendingUserMessage>,
-    onDismiss: () -> Unit,
-    onCancelMessage: (String) -> Unit,
-    onMoveMessage: (String, Int) -> Unit,
-    onClear: () -> Unit,
-    onResumeQueue: () -> Unit,
-    onMoveToInput: () -> Unit,
-) {
-    val workspace = workspaceColors()
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(stringResource(R.string.chat_page_queue_title))
-        },
-        text = {
-            if (messages.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.chat_page_queue_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = workspace.muted,
-                )
-            } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    messages.forEachIndexed { index, message ->
-                        PendingUserMessageQueueRow(
-                            index = index,
-                            total = messages.size,
-                            message = message,
-                            onCancel = { onCancelMessage(message.id) },
-                            onMoveUp = { onMoveMessage(message.id, -1) },
-                            onMoveDown = { onMoveMessage(message.id, 1) },
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            // P1-06: Stop 后会话进入 idle，队列保留；用户显式选择继续队列
-            // 或把第一条移回输入框编辑。
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (messages.isNotEmpty()) {
-                    TextButton(onClick = onMoveToInput) {
-                        Text(stringResource(R.string.chat_page_queue_move_to_input))
-                    }
-                    TextButton(onClick = onResumeQueue) {
-                        Text(stringResource(R.string.chat_page_queue_resume))
-                    }
-                }
-            }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.chat_page_close))
-                }
-                if (messages.isNotEmpty()) {
-                    TextButton(onClick = onClear) {
-                        Text(stringResource(R.string.clear))
-                    }
-                }
-            }
-        },
-    )
-}
-
-@Composable
-private fun PendingUserMessageQueueRow(
-    index: Int,
-    total: Int,
-    message: PendingUserMessage,
-    onCancel: () -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
-) {
-    val context = LocalContext.current
-    val workspace = workspaceColors()
-    val modeLabel = when (message.mode) {
-        PendingUserMessageMode.FOLLOWUP -> stringResource(R.string.chat_page_queue_mode_followup)
-        PendingUserMessageMode.STEER -> stringResource(R.string.chat_page_queue_mode_steer)
-        PendingUserMessageMode.COLLECT -> stringResource(R.string.chat_page_queue_mode_collect)
-    }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = workspace.paper,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, workspace.hairline),
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = "#${index + 1} · $modeLabel",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = workspace.muted,
-                )
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(
-                        onClick = onMoveUp,
-                        enabled = index > 0,
-                    ) {
-                        Text(stringResource(R.string.chat_page_queue_move_up))
-                    }
-                    TextButton(
-                        onClick = onMoveDown,
-                        enabled = index < total - 1,
-                    ) {
-                        Text(stringResource(R.string.chat_page_queue_move_down))
-                    }
-                    TextButton(onClick = onCancel) {
-                        Text(stringResource(R.string.chat_page_cancel))
-                    }
-                }
-            }
-            Text(
-                text = message.previewText(
-                    maxChars = 280,
-                    copy = PendingUserMessageDisplayCopy.from(context),
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = workspace.ink,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }

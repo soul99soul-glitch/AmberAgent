@@ -16,11 +16,14 @@ import app.amber.core.agent.runtime.AgentRunner
 import app.amber.core.agent.runtime.AssistantId
 import app.amber.core.agent.runtime.ConversationId
 import app.amber.core.agent.runtime.MessageNodeId
+import app.amber.core.ai.RunExecutionPhase
+import app.amber.core.ai.RunInterjectionController
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import app.amber.core.model.toMessageNode
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.utils.ChatSendTransitionTracker
 import app.amber.core.utils.withSettledCredentialArgumentsRedacted
 import app.amber.feature.chat.api.ChatTurnDescriptor
 import app.amber.feature.chat.api.ChatTurnInput
@@ -46,8 +49,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -93,6 +99,8 @@ internal data class LocalTaskFollowup(
     val taskId: String,
     val message: UIMessage,
     val text: String,
+    val userNode: MessageNode? = null,
+    val userNodePersisted: CompletableDeferred<Unit>? = null,
     @Volatile var state: CloudInputDisposition = CloudInputDisposition.RECEIVED,
 )
 
@@ -102,16 +110,21 @@ internal class ManagedLocalTask(
     val anchorUserNode: MessageNode,
     val title: String,
     val createdOrder: Long,
+    val startedAtMs: Long = System.currentTimeMillis(),
+    val userNodePersisted: CompletableDeferred<Unit> = CompletableDeferred(),
 ) {
     val anchorUserNodeId: Uuid = anchorUserNode.id
     val processingStatus: MutableStateFlow<String?> = MutableStateFlow(null)
-    val userNodePersisted: CompletableDeferred<Unit> = CompletableDeferred()
     val settled: CompletableDeferred<Unit> = CompletableDeferred()
     val followups: CopyOnWriteArrayList<LocalTaskFollowup> = CopyOnWriteArrayList()
     val streamedMessageIds: MutableSet<Uuid> = ConcurrentHashMap.newKeySet()
+    val steerSignalFlow: MutableSharedFlow<Unit> = MutableSharedFlow(extraBufferCapacity = 16)
 
     @Volatile var runId: String? = null
     @Volatile var status: LocalTaskStatus = LocalTaskStatus.QUEUED
+    @Volatile var phase: RunExecutionPhase = RunExecutionPhase.THINKING
+    @Volatile var activeToolName: String? = null
+    @Volatile var completedToolCount: Int = 0
     @Volatile var progressText: String? = null
     @Volatile var cancelledByUser: Boolean = false
     @Volatile var executionJob: Job? = null
@@ -142,6 +155,8 @@ class LocalAsyncTaskCoordinator(
     private val runOwnershipRegistry: RunOwnershipRegistry? = null,
     val maxConcurrentTasks: Int = DEFAULT_MAX_CONCURRENT_LOCAL_TASKS,
     private val recoveryFileOverride: File? = null,
+    private val liveInterjectionTriager: LiveInterjectionTriager = LiveInterjectionTriager(),
+    private val clockMs: () -> Long = System::currentTimeMillis,
 ) {
     private val slotLock = Any()
     private val tasksById = ConcurrentHashMap<String, ManagedLocalTask>()
@@ -173,15 +188,13 @@ class LocalAsyncTaskCoordinator(
         answer: Boolean = true,
     ): Boolean {
         if (content.isEmptyInputMessage()) return false
-        val selectedTarget = resolvedFollowupTarget(conversationId)
-        if (answer && selectedTarget != null) {
-            return submitFollowup(conversationId, selectedTarget.workItemId, content)
-        }
 
         val processed = userInputPreprocessor.process(content)
         val userMessage = UIMessage(role = MessageRole.USER, parts = processed)
         val userNode = userMessage.toMessageNode()
-        val title = userMessage.toText()
+        val userText = userMessage.toText().trim()
+        val hasNonTextParts = processed.any { it !is UIMessagePart.Text }
+        val title = userText
             .lineSequence()
             .map { it.trim() }
             .firstOrNull { it.isNotEmpty() }
@@ -189,6 +202,90 @@ class LocalAsyncTaskCoordinator(
             ?.ifBlank { "Task" }
             ?: "Task"
 
+        // Always land the user bubble on the timeline immediately so the composer clears
+        // without exposing any queued-message banner or queue-full rejection.
+        val userNodePersisted = appendUserNodeImmediately(conversationId, userNode)
+
+        if (!answer) {
+            return true
+        }
+
+        val selectedTarget = resolvedFollowupTarget(conversationId)
+        val primaryActiveTask = resolvePrimaryActiveTask(conversationId, selectedTarget?.workItemId)
+        if (primaryActiveTask == null) {
+            startManagedTask(
+                conversationId = conversationId,
+                userNode = userNode,
+                title = title,
+                userNodePersisted = userNodePersisted,
+            )
+            return true
+        }
+
+        val snapshot = primaryActiveTask.toRuntimeSnapshot(nowMs = clockMs())
+        val fastDecision = liveInterjectionTriager.tryFastLocalDecision(
+            userText = userText,
+            snapshot = snapshot,
+            selectedTargetTaskId = selectedTarget?.workItemId,
+            hasNonTextParts = hasNonTextParts,
+        )
+        if (fastDecision != null) {
+            selectedFollowupByConversation.remove(conversationId.toString())
+            applyInterjectionDecision(
+                conversationId = conversationId,
+                userNode = userNode,
+                title = title,
+                userNodePersisted = userNodePersisted,
+                primaryTask = primaryActiveTask,
+                decision = fastDecision,
+            )
+            return true
+        }
+
+        // Fast-path auxiliary model classification (with strict timeout & local fallback) runs
+        // asynchronously so composer submission never blocks the UI thread.
+        appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            val latestTask = findTask(primaryActiveTask.taskId)
+                ?.takeIf { it.status.isActiveOrQueued }
+                ?: resolvePrimaryActiveTask(conversationId, selectedTargetTaskId = null)
+            if (latestTask == null) {
+                // Active task already finished before triage began — seamlessly answer as a fresh turn.
+                startManagedTask(
+                    conversationId = conversationId,
+                    userNode = userNode,
+                    title = title,
+                    userNodePersisted = userNodePersisted,
+                )
+                return@launch
+            }
+            val latestSnapshot = latestTask.toRuntimeSnapshot(nowMs = clockMs())
+            val decision = liveInterjectionTriager.classify(
+                conversationId = conversationId,
+                userText = userText,
+                snapshot = latestSnapshot,
+                selectedTargetTaskId = null,
+                hasNonTextParts = hasNonTextParts,
+            )
+            applyInterjectionDecision(
+                conversationId = conversationId,
+                userNode = userNode,
+                title = title,
+                userNodePersisted = userNodePersisted,
+                primaryTask = latestTask,
+                decision = decision,
+            )
+        }
+        return true
+    }
+
+    private fun appendUserNodeImmediately(
+        conversationId: Uuid,
+        userNode: MessageNode,
+    ): CompletableDeferred<Unit> {
+        ChatSendTransitionTracker.markSentUserMessage(
+            conversationId = conversationId.toString(),
+            messageId = userNode.currentMessage.id.toString(),
+        )
         val session = conversationStore.session(conversationId)
         if (session.timelineLoadState.value.initialized) {
             conversationStore.updateConversationState(conversationId) { current ->
@@ -202,14 +299,281 @@ class LocalAsyncTaskCoordinator(
                 }
             }
         }
-
-        if (!answer) {
-            appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+        val persisted = CompletableDeferred<Unit>()
+        appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
                 persistUserNode(conversationId, userNode)
+                persisted.complete(Unit)
+            } catch (t: Throwable) {
+                persisted.completeExceptionally(t)
             }
-            return true
+        }
+        return persisted
+    }
+
+    private fun resolvePrimaryActiveTask(
+        conversationId: Uuid,
+        selectedTargetTaskId: String?,
+    ): ManagedLocalTask? {
+        if (selectedTargetTaskId != null) {
+            findTask(selectedTargetTaskId)
+                ?.takeIf { it.conversationId == conversationId && it.status.isActiveOrQueued }
+                ?.let { return it }
+        }
+        val active = tasksById.values.filter {
+            it.conversationId == conversationId && it.status.isActiveOrQueued
+        }
+        return active.filter { it.status == LocalTaskStatus.RUNNING }.maxByOrNull { it.createdOrder }
+            ?: active.maxByOrNull { it.createdOrder }
+    }
+
+    private fun ManagedLocalTask.toRuntimeSnapshot(nowMs: Long): ActiveTaskRuntimeSnapshot {
+        val elapsedSec = ((nowMs - startedAtMs).coerceAtLeast(0L)) / 1_000L
+        return ActiveTaskRuntimeSnapshot(
+            taskId = taskId,
+            title = title,
+            phase = phase,
+            activeToolName = activeToolName,
+            completedToolCount = completedToolCount,
+            elapsedSeconds = elapsedSec,
+            progressText = progressText,
+            isQueued = status == LocalTaskStatus.QUEUED,
+        )
+    }
+
+    private fun applyInterjectionDecision(
+        conversationId: Uuid,
+        userNode: MessageNode,
+        title: String,
+        userNodePersisted: CompletableDeferred<Unit>,
+        primaryTask: ManagedLocalTask,
+        decision: LiveInterjectionDecision,
+    ) {
+        val targetTask = decision.targetTaskId?.let(::findTask)
+            ?.takeIf { it.conversationId == conversationId }
+            ?: primaryTask
+        when (decision.intent) {
+            LiveInterjectionIntent.STATUS_REPLY -> {
+                appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    runCatching { userNodePersisted.await() }
+                    annotateUserNodeAsInterjection(
+                        conversationId = conversationId,
+                        userNodeId = userNode.id,
+                        kind = "status_question",
+                        targetTaskId = targetTask.taskId,
+                    )
+                    val replyText = decision.reply?.trim().orEmpty()
+                    if (replyText.isNotEmpty()) {
+                        appendEphemeralAssistantReply(
+                            conversationId = conversationId,
+                            afterNodeId = userNode.id,
+                            text = replyText,
+                            kind = "status_reply",
+                            targetTaskId = targetTask.taskId,
+                        )
+                    }
+                }
+            }
+
+            LiveInterjectionIntent.STEER_ACTIVE -> {
+                val ackText = decision.reply?.trim().orEmpty()
+                if (ackText.isNotEmpty()) {
+                    appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                        runCatching { userNodePersisted.await() }
+                        appendEphemeralAssistantReply(
+                            conversationId = conversationId,
+                            afterNodeId = userNode.id,
+                            text = ackText,
+                            kind = "steer_ack",
+                            targetTaskId = targetTask.taskId,
+                        )
+                    }
+                }
+                deliverSteerToTask(
+                    conversationId = conversationId,
+                    targetTask = targetTask,
+                    userNode = userNode,
+                    title = title,
+                    userNodePersisted = userNodePersisted,
+                )
+            }
+
+            LiveInterjectionIntent.INDEPENDENT_NEW_TASK -> {
+                startManagedTask(
+                    conversationId = conversationId,
+                    userNode = userNode,
+                    title = title,
+                    userNodePersisted = userNodePersisted,
+                )
+            }
+
+            LiveInterjectionIntent.STOP -> {
+                appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    runCatching { userNodePersisted.await() }
+                    annotateUserNodeAsInterjection(
+                        conversationId = conversationId,
+                        userNodeId = userNode.id,
+                        kind = "stop_command",
+                        targetTaskId = targetTask.taskId,
+                    )
+                    if (decision.stopAll) {
+                        stopAllForConversation(conversationId)
+                    } else {
+                        stopTask(conversationId, targetTask.taskId)
+                    }
+                    val replyText = decision.reply?.trim().orEmpty()
+                    if (replyText.isNotEmpty()) {
+                        appendEphemeralAssistantReply(
+                            conversationId = conversationId,
+                            afterNodeId = userNode.id,
+                            text = replyText,
+                            kind = "stop_ack",
+                            targetTaskId = targetTask.taskId,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun deliverSteerToTask(
+        conversationId: Uuid,
+        targetTask: ManagedLocalTask,
+        userNode: MessageNode,
+        title: String,
+        userNodePersisted: CompletableDeferred<Unit>,
+    ) {
+        val attachedToActiveTask: Boolean
+        synchronized(slotLock) {
+            if (targetTask.status.isActiveOrQueued && !targetTask.cancelledByUser) {
+                val followupMessage = userNode.currentMessage
+                val text = followupMessage.toText().trim()
+                val submissionId = Uuid.random().toString()
+                val followup = LocalTaskFollowup(
+                    submissionId = submissionId,
+                    conversationId = conversationId,
+                    taskId = targetTask.taskId,
+                    message = followupMessage,
+                    text = text,
+                    userNode = userNode,
+                    userNodePersisted = userNodePersisted,
+                    state = CloudInputDisposition.RECEIVED,
+                )
+                targetTask.followups.add(followup)
+                targetTask.streamedMessageIds.add(followupMessage.id)
+                val submission = CloudDialogueSubmission(
+                    requestId = submissionId,
+                    eventId = submissionId,
+                    topicId = conversationId.toString(),
+                    conversationId = conversationId.toString(),
+                    kind = CloudSubmissionKind.FOLLOWUP,
+                    text = text,
+                    targetWorkItemId = targetTask.taskId,
+                    workItemIds = listOf(targetTask.taskId),
+                    state = CloudInputDisposition.RECEIVED,
+                )
+                submissionsById[submissionId] = submission
+                submissionOrder.add(0, submissionId)
+                selectedFollowupByConversation.remove(conversationId.toString())
+                attachedToActiveTask = true
+            } else {
+                attachedToActiveTask = false
+            }
         }
 
+        if (attachedToActiveTask) {
+            publishUiState()
+            targetTask.steerSignalFlow.tryEmit(Unit)
+        } else {
+            // Terminal-boundary handoff: target task already completed while triage was in flight.
+            // Seamlessly launch a continuation turn anchored on the already-visible user node.
+            startManagedTask(
+                conversationId = conversationId,
+                userNode = userNode,
+                title = title,
+                userNodePersisted = userNodePersisted,
+            )
+        }
+    }
+
+    private suspend fun annotateUserNodeAsInterjection(
+        conversationId: Uuid,
+        userNodeId: Uuid,
+        kind: String,
+        targetTaskId: String,
+    ) {
+        val mutex = appendMutexes.computeIfAbsent(conversationId) { Mutex() }
+        mutex.withLock {
+            conversationStore.ensureInitialized(conversationId)
+            var updatedConversation: Conversation? = null
+            conversationStore.updateConversationState(conversationId) { current ->
+                val idx = current.messageNodes.indexOfFirst { it.id == userNodeId }
+                if (idx < 0) return@updateConversationState current
+                val node = current.messageNodes[idx]
+                val msg = node.currentMessage
+                val marker = UIMessageAnnotation.LiveInterjection(kind = kind, targetTaskId = targetTaskId)
+                if (msg.annotations.any { it == marker }) return@updateConversationState current
+                val updatedMsg = msg.copy(annotations = msg.annotations + marker)
+                val updatedNode = node.copy(
+                    messages = node.messages.map { if (it.id == msg.id) updatedMsg else it },
+                )
+                val nextNodes = current.messageNodes.toMutableList().apply { set(idx, updatedNode) }
+                current.copy(messageNodes = nextNodes, updateAt = Instant.now()).also {
+                    updatedConversation = it
+                }
+            }
+            updatedConversation?.let {
+                conversationStore.persistConversationWindow(conversationId, it, indexFts = false)
+            }
+        }
+    }
+
+    private suspend fun appendEphemeralAssistantReply(
+        conversationId: Uuid,
+        afterNodeId: Uuid,
+        text: String,
+        kind: String,
+        targetTaskId: String,
+    ) {
+        val mutex = appendMutexes.computeIfAbsent(conversationId) { Mutex() }
+        mutex.withLock {
+            conversationStore.ensureInitialized(conversationId)
+            val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+            val replyMessage = UIMessage(
+                role = MessageRole.ASSISTANT,
+                parts = listOf(UIMessagePart.Text(text)),
+                annotations = listOf(
+                    UIMessageAnnotation.LiveInterjection(kind = kind, targetTaskId = targetTaskId),
+                ),
+                finishedAt = now,
+            )
+            val replyNode = replyMessage.toMessageNode()
+            var updatedConversation: Conversation? = null
+            conversationStore.updateConversationState(conversationId) { current ->
+                val anchorIdx = current.messageNodes.indexOfFirst { it.id == afterNodeId }
+                val nextNodes = current.messageNodes.toMutableList().apply {
+                    if (anchorIdx >= 0) {
+                        add(anchorIdx + 1, replyNode)
+                    } else {
+                        add(replyNode)
+                    }
+                }
+                current.copy(messageNodes = nextNodes, updateAt = Instant.now()).also {
+                    updatedConversation = it
+                }
+            }
+            updatedConversation?.let {
+                conversationStore.persistConversationWindow(conversationId, it, indexFts = true)
+            }
+        }
+    }
+
+    private fun startManagedTask(
+        conversationId: Uuid,
+        userNode: MessageNode,
+        title: String,
+        userNodePersisted: CompletableDeferred<Unit>,
+    ) {
         val taskId = Uuid.random().toString()
         val task = ManagedLocalTask(
             taskId = taskId,
@@ -217,8 +581,10 @@ class LocalAsyncTaskCoordinator(
             anchorUserNode = userNode,
             title = title,
             createdOrder = orderCounter.incrementAndGet(),
+            startedAtMs = clockMs(),
+            userNodePersisted = userNodePersisted,
         )
-        task.streamedMessageIds.add(userMessage.id)
+        task.streamedMessageIds.add(userNode.currentMessage.id)
         task.runId = taskId
         tasksById[taskId] = task
         nodeIdToTaskId[userNode.id] = taskId
@@ -234,7 +600,7 @@ class LocalAsyncTaskCoordinator(
             } else {
                 waitQueue.addLast(taskId)
                 task.status = LocalTaskStatus.QUEUED
-                task.progressText = "排队中（等待本地执行槽位）…"
+                task.progressText = "等待空闲执行槽位…"
                 startImmediately = false
             }
         }
@@ -251,22 +617,12 @@ class LocalAsyncTaskCoordinator(
         persistRecoverySnapshot()
         publishUiState()
 
-        appScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            try {
-                persistUserNode(conversationId, userNode)
-                task.userNodePersisted.complete(Unit)
-            } catch (t: Throwable) {
-                task.userNodePersisted.completeExceptionally(t)
-            }
-        }
-
         if (startImmediately) {
             launchTaskExecution(task, statusCollectorJob)
         } else {
             task.executionJob = statusCollectorJob
             refreshConversationSessionJob(conversationId)
         }
-        return true
     }
 
     fun submitFollowup(
@@ -291,22 +647,31 @@ class LocalAsyncTaskCoordinator(
             text = text,
             state = CloudInputDisposition.RECEIVED,
         )
-        task.followups.add(followup)
-        val submission = CloudDialogueSubmission(
-            requestId = submissionId,
-            eventId = submissionId,
-            topicId = conversationId.toString(),
-            conversationId = conversationId.toString(),
-            kind = CloudSubmissionKind.FOLLOWUP,
-            text = text,
-            targetWorkItemId = task.taskId,
-            workItemIds = listOf(task.taskId),
-            state = CloudInputDisposition.RECEIVED,
-        )
-        submissionsById[submissionId] = submission
-        submissionOrder.add(0, submissionId)
-        selectedFollowupByConversation.remove(conversationId.toString())
+        val attached = synchronized(slotLock) {
+            if (task.status.isActiveOrQueued && !task.cancelledByUser) {
+                task.followups.add(followup)
+                val submission = CloudDialogueSubmission(
+                    requestId = submissionId,
+                    eventId = submissionId,
+                    topicId = conversationId.toString(),
+                    conversationId = conversationId.toString(),
+                    kind = CloudSubmissionKind.FOLLOWUP,
+                    text = text,
+                    targetWorkItemId = task.taskId,
+                    workItemIds = listOf(task.taskId),
+                    state = CloudInputDisposition.RECEIVED,
+                )
+                submissionsById[submissionId] = submission
+                submissionOrder.add(0, submissionId)
+                selectedFollowupByConversation.remove(conversationId.toString())
+                true
+            } else {
+                false
+            }
+        }
+        if (!attached) return false
         publishUiState()
+        task.steerSignalFlow.tryEmit(Unit)
         return true
     }
 
@@ -372,17 +737,59 @@ class LocalAsyncTaskCoordinator(
     internal fun processingStatusForRun(runId: String, anchorNodeId: Uuid?): MutableStateFlow<String?>? =
         findTaskForRun(runId, anchorNodeId)?.processingStatus
 
+    internal fun interjectionControllerForRun(
+        runId: String?,
+        anchorNodeId: Uuid? = null,
+    ): RunInterjectionController? {
+        val task = findTaskForRun(runId, anchorNodeId) ?: return null
+        return object : RunInterjectionController {
+            override fun hasPendingSteer(): Boolean =
+                task.followups.any { it.state == CloudInputDisposition.RECEIVED }
+
+            override val steerSignal: Flow<Unit> = task.steerSignalFlow.asSharedFlow()
+
+            override suspend fun consumePendingSteer(): List<UIMessage> =
+                consumeFollowupsForRun(runId ?: task.runId ?: task.taskId, anchorNodeId ?: task.anchorUserNodeId)
+
+            override fun onPhaseChanged(
+                phase: RunExecutionPhase,
+                activeToolName: String?,
+                completedToolCount: Int,
+            ) {
+                task.phase = phase
+                task.activeToolName = activeToolName
+                task.completedToolCount = completedToolCount
+                if (task.status == LocalTaskStatus.RUNNING) {
+                    val derived = when (phase) {
+                        RunExecutionPhase.EXECUTING_TOOLS ->
+                            activeToolName?.let { "执行工具：$it" } ?: task.progressText
+                        RunExecutionPhase.WAITING_APPROVAL ->
+                            activeToolName?.let { "等待工具审批：$it" } ?: "等待工具审批…"
+                        RunExecutionPhase.THINKING ->
+                            task.progressText ?: "正在思考…"
+                    }
+                    if (!derived.isNullOrBlank() && derived != task.progressText) {
+                        task.progressText = derived
+                        publishUiState()
+                    }
+                }
+            }
+        }
+    }
+
     internal fun consumeFollowupsForRun(runId: String, anchorNodeId: Uuid? = null): List<UIMessage> {
         val task = findTaskForRun(runId, anchorNodeId) ?: return emptyList()
         val consumed = mutableListOf<UIMessage>()
-        for (followup in task.followups) {
-            if (followup.state == CloudInputDisposition.RECEIVED) {
-                followup.state = CloudInputDisposition.CONSUMED
-                task.streamedMessageIds.add(followup.message.id)
-                submissionsById.computeIfPresent(followup.submissionId) { _, existing ->
-                    existing.copy(state = CloudInputDisposition.CONSUMED)
+        synchronized(slotLock) {
+            for (followup in task.followups) {
+                if (followup.state == CloudInputDisposition.RECEIVED) {
+                    followup.state = CloudInputDisposition.CONSUMED
+                    task.streamedMessageIds.add(followup.message.id)
+                    submissionsById.computeIfPresent(followup.submissionId) { _, existing ->
+                        existing.copy(state = CloudInputDisposition.CONSUMED)
+                    }
+                    consumed += followup.message
                 }
-                consumed += followup.message
             }
         }
         if (consumed.isNotEmpty()) {
@@ -571,12 +978,31 @@ class LocalAsyncTaskCoordinator(
         finalStatus: LocalTaskStatus,
     ) {
         var nextToLaunch: ManagedLocalTask? = null
+        var unconsumedFollowupsAtTerminal: List<LocalTaskFollowup> = emptyList()
         synchronized(slotLock) {
             if (task.status != LocalTaskStatus.CANCELLED) {
                 task.status = finalStatus
             }
             if (runningTaskIds.remove(task.taskId)) {
                 nextToLaunch = pollNextQueuedTaskLocked()
+            }
+            // Terminal-boundary guard: if a live steer interjection arrived after the kernel's
+            // last check but before this task transitioned to its terminal state, claim it
+            // atomically here so we launch a seamless continuation instead of dropping it.
+            if (!task.cancelledByUser &&
+                task.status != LocalTaskStatus.CANCELLED &&
+                task.status != LocalTaskStatus.PAUSED
+            ) {
+                val pending = task.followups.filter { it.state == CloudInputDisposition.RECEIVED }
+                if (pending.isNotEmpty()) {
+                    for (followup in pending) {
+                        followup.state = CloudInputDisposition.CONSUMED
+                        submissionsById.computeIfPresent(followup.submissionId) { _, existing ->
+                            existing.copy(state = CloudInputDisposition.CONSUMED)
+                        }
+                    }
+                    unconsumedFollowupsAtTerminal = pending
+                }
             }
         }
         if (task.status == LocalTaskStatus.CANCELLED || task.status == LocalTaskStatus.FAILED || task.status == LocalTaskStatus.INTERRUPTED) {
@@ -594,6 +1020,55 @@ class LocalAsyncTaskCoordinator(
         nextToLaunch?.let { next ->
             launchTaskExecution(next, statusCollectorJob = next.executionJob)
         }
+
+        if (unconsumedFollowupsAtTerminal.isNotEmpty()) {
+            launchContinuationForTerminalFollowups(
+                conversationId = task.conversationId,
+                followups = unconsumedFollowupsAtTerminal,
+            )
+        }
+    }
+
+    private fun launchContinuationForTerminalFollowups(
+        conversationId: Uuid,
+        followups: List<LocalTaskFollowup>,
+    ) {
+        val anchorFollowup = followups.last()
+        val existingNode = anchorFollowup.userNode
+        val anchorNode: MessageNode
+        val persisted: CompletableDeferred<Unit>
+        if (existingNode != null) {
+            // Earlier followups in the same burst (if any) were already appended to the timeline
+            // before anchorNode, so anchoring the continuation on anchorNode includes all of them
+            // without duplicating any user bubble.
+            anchorNode = existingNode
+            persisted = anchorFollowup.userNodePersisted ?: CompletableDeferred(Unit)
+        } else {
+            val combinedMessage = if (followups.size == 1) {
+                anchorFollowup.message
+            } else {
+                UIMessage(
+                    id = anchorFollowup.message.id,
+                    role = MessageRole.USER,
+                    parts = followups.flatMap { it.message.parts },
+                )
+            }
+            anchorNode = combinedMessage.toMessageNode()
+            persisted = appendUserNodeImmediately(conversationId, anchorNode)
+        }
+        val title = anchorNode.currentMessage.toText()
+            .lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() }
+            ?.take(48)
+            ?.ifBlank { "Task" }
+            ?: "Task"
+        startManagedTask(
+            conversationId = conversationId,
+            userNode = anchorNode,
+            title = title,
+            userNodePersisted = persisted,
+        )
     }
 
     private fun pollNextQueuedTaskLocked(): ManagedLocalTask? {

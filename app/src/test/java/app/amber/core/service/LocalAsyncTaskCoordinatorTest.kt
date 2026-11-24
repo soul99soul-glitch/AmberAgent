@@ -337,13 +337,13 @@ class LocalAsyncTaskCoordinatorTest : DurableRuntimeTestBase() {
             fixture.runner.awaitTurnStarted("Conv1 Task1")
             fixture.runner.awaitTurnStarted("Conv2 Task2")
 
-            // Submit Task 3 in conv1 -> exceeds cap = 2, so it enters QUEUED state with queued status text
+            // Submit Task 3 in conv1 -> exceeds cap = 2, so it enters QUEUED state waiting for a slot
             fixture.coordinator.submitMessage(conv1, listOf(UIMessagePart.Text("Conv1 Task3 Queued")))
             val conv1TasksWhileFull = fixture.coordinator.uiState.value.activeTasksForConversation(conv1.toString())
             assertEquals(2, conv1TasksWhileFull.size)
             val queuedTask = conv1TasksWhileFull.first { it.title == "Conv1 Task3 Queued" }
             assertEquals("queued", queuedTask.outcome)
-            assertTrue(queuedTask.progressText.orEmpty().contains("排队中"))
+            assertTrue(queuedTask.progressText.orEmpty().contains("槽位"))
 
             // Finish Task 2 in conv2 -> frees a slot -> Task 3 in conv1 automatically dequeues and completes!
             gate2.complete(Unit)
@@ -476,6 +476,11 @@ class LocalAsyncTaskCoordinatorTest : DurableRuntimeTestBase() {
         val events = InMemoryAgentEventStore()
         val ownership = RunOwnershipRegistry()
         val runner = ScriptedTurnRunner(scope, store)
+        val parallelTriager = LiveInterjectionTriager(
+            auxiliaryClient = LiveInterjectionAuxiliaryClient { _, _, _ ->
+                """{"intent":"independent_new_task","reply":""}"""
+            },
+        )
         val coordinator = LocalAsyncTaskCoordinator(
             context = fileContext,
             appScope = scope,
@@ -489,6 +494,7 @@ class LocalAsyncTaskCoordinatorTest : DurableRuntimeTestBase() {
             runOwnershipRegistry = ownership,
             maxConcurrentTasks = maxConcurrentTasks,
             recoveryFileOverride = recoveryFile,
+            liveInterjectionTriager = parallelTriager,
         )
         runner.coordinator = coordinator
         return AsyncFixture(coordinator, store, repo, scope, runner, presenter, queue).also(fixtures::add)

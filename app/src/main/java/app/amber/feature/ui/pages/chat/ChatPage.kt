@@ -110,8 +110,6 @@ fun ChatPage(
     val streamingSummary by vm.streamingSummary.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
-    val pendingUserMessageState = vm.pendingUserMessages.collectAsStateWithLifecycle()
-    val pendingUserMessages = pendingUserMessageState.value
     val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
     val configurationIssue = rememberChatConfigurationIssue(currentChatModel, setting.providers)
     val latestConfigurationIssue by rememberUpdatedState(configurationIssue)
@@ -233,7 +231,7 @@ fun ChatPage(
     }
 
     val compactInTimelineActive = isCompacting || compactLifecycleState.isActive
-    val activeGeneration = loadingJob != null || pendingUserMessages.isNotEmpty() || compactInTimelineActive
+    val activeGeneration = loadingJob != null || compactInTimelineActive
     // Preserve the deep-link first-visible index at the same point as before. This
     // snapshot is used only when the LazyListState is first created; live plans are
     // collected and built inside the list content below.
@@ -251,7 +249,7 @@ fun ChatPage(
             loading = loadingJob != null,
             activeGeneration = activeGeneration,
             hasHistoryLoadingItem = !timelineLoadState.isFullyLoaded,
-            pendingMessageCount = pendingUserMessages.size,
+            pendingMessageCount = 0,
         )
     } else {
         null
@@ -291,7 +289,6 @@ fun ChatPage(
         setting = setting,
         conversation = conversation,
         timelineLoadState = timelineLoadState,
-        pendingUserMessages = pendingUserMessages,
         contextCompacts = contextCompacts,
         activeCompactBoundary = activeCompactBoundary,
         compactLifecycleState = compactLifecycleState,

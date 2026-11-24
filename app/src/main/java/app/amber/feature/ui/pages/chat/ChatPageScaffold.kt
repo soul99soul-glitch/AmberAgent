@@ -85,7 +85,6 @@ internal fun ChatPageScaffold(
     bigScreen: Boolean,
     conversation: Conversation,
     timelineLoadState: app.amber.core.service.ConversationTimelineLoadState,
-    pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
     activeCompactBoundary: ActiveCompactBoundary?,
     compactLifecycleState: CompactLifecycleState,
@@ -129,7 +128,6 @@ internal fun ChatPageScaffold(
     val localeTag = resourceContext.resources.configuration.locales.toLanguageTags()
     var previewMode by rememberSaveable { mutableStateOf(false) }
     var sandboxOverlayOpen by rememberSaveable { mutableStateOf(false) }
-    var queuePanelOpen by rememberSaveable { mutableStateOf(false) }
     var suggestionFillPulseKey by remember(conversation.id) { mutableIntStateOf(0) }
     var selectedSandboxIndex by rememberSaveable(conversation.id) { mutableStateOf<Int?>(null) }
     val activityStore: AgentToolActivityStore = koinInject()
@@ -249,8 +247,6 @@ internal fun ChatPageScaffold(
             selectedSandboxIndex = null
         }
     }
-
-    val pendingQueueCount = pendingUserMessages.size
 
     // Graphite TopModelMenu: header 下方卷帘下拉的开合状态（顶栏触发器 + 内容区 overlay 共享）
     var modelMenuOpen by remember { mutableStateOf(false) }
@@ -414,7 +410,6 @@ internal fun ChatPageScaffold(
                         conversation = conversation,
                         contextCompacts = contextCompacts,
                         compactLifecycleState = compactLifecycleState,
-                        pendingQueueCount = pendingQueueCount,
                         timelineScrolling = chatListState.isScrollInProgress,
                         enableWebSearch = enableWebSearch,
                         configurationIssue = configurationIssue,
@@ -433,7 +428,6 @@ internal fun ChatPageScaffold(
                             }
                         } else null,
                         onCancelSandbox = if (canCancelSandbox) { { vm.stopGeneration() } } else null,
-                        onOpenQueue = { queuePanelOpen = true },
                         suggestionFillPulseKey = suggestionFillPulseKey,
                         onConfigureModel = {
                             if (configurationIssue == ChatConfigurationIssue.MissingModel && chatProvidersForMenu.isNotEmpty()) {
@@ -479,7 +473,6 @@ internal fun ChatPageScaffold(
                         processingStatus = processingStatus,
                         setting = setting,
                         timelineLoadState = timelineLoadState,
-                        pendingUserMessages = pendingUserMessages,
                         contextCompacts = contextCompacts,
                         activeCompactBoundary = activeCompactBoundary,
                         compactLifecycleState = compactLifecycleState,
@@ -506,7 +499,6 @@ internal fun ChatPageScaffold(
                             inputState.setMessageText(suggestion)
                             suggestionFillPulseKey += 1
                         },
-                        onOpenQueue = { queuePanelOpen = true },
                     )
 
                     ChatRecapPanelHost(
@@ -645,18 +637,6 @@ internal fun ChatPageScaffold(
                     } else {
                         null
                     },
-                )
-            }
-
-            if (queuePanelOpen) {
-                PendingUserMessageQueueDialog(
-                    messages = pendingUserMessages,
-                    onDismiss = { queuePanelOpen = false },
-                    onCancelMessage = { vm.cancelPendingUserMessage(it) },
-                    onMoveMessage = { id, offset -> vm.movePendingUserMessage(id, offset) },
-                    onClear = { vm.clearPendingUserMessages() },
-                    onResumeQueue = { vm.resumePendingQueue() },
-                    onMoveToInput = { vm.moveFirstPendingMessageToInput() },
                 )
             }
 

@@ -48,6 +48,7 @@ sealed interface GenerationChunk {
     data class Messages(
         val messages: List<UIMessage>,
         val update: GenerationUpdate = GenerationUpdate.full(messages),
+        val retractedMessageIds: Set<Uuid> = emptySet(),
     ) : GenerationChunk
 }
 

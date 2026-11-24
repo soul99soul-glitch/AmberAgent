@@ -28,6 +28,37 @@ interface RunKernel {
 
 }
 
+/** Live execution phase reported by [RunKernel] for fast-path interjection status summaries. */
+enum class RunExecutionPhase {
+    THINKING,
+    EXECUTING_TOOLS,
+    WAITING_APPROVAL,
+}
+
+/**
+ * Runtime hook connecting a live interjection coordinator to an active [RunKernel] turn:
+ * - Thinking/streaming preemption via [steerSignal] and [hasPendingSteer]
+ * - Tool-batch safe boundary absorption via [hasPendingSteer] and [consumePendingSteer]
+ * - Phase/tool progress snapshots via [onPhaseChanged]
+ */
+interface RunInterjectionController {
+    /** Non-consuming check for waiting steer messages. */
+    fun hasPendingSteer(): Boolean
+
+    /** Hot signal emitted whenever a new steer interjection arrives for this run. */
+    val steerSignal: Flow<Unit>
+
+    /** Atomically consume all waiting steer messages for this run. */
+    suspend fun consumePendingSteer(): List<UIMessage>
+
+    /** Report execution phase transitions for instant status replies. */
+    fun onPhaseChanged(
+        phase: RunExecutionPhase,
+        activeToolName: String? = null,
+        completedToolCount: Int = 0,
+    ) = Unit
+}
+
 /**
  * Everything the tool loop needs for one run, packed so the [RunKernel]
  * signature stays stable as loop concerns evolve.
@@ -49,6 +80,7 @@ class GenerationRunSession(
     val invocationContext: ToolInvocationContext = ToolInvocationContext.Normal,
     val conversation: Conversation? = null,
     val consumeSteerMessages: suspend () -> List<UIMessage> = { emptyList() },
+    val interjectionController: RunInterjectionController? = null,
     val runId: String? = null,
     val onTerminal: (suspend (GenerationTerminal) -> Unit)? = null,
     /**

@@ -51,6 +51,7 @@ private fun List<UIMessageAnnotation>.compactRenderToken(): String {
         when (annotation) {
             is UIMessageAnnotation.UrlCitation -> "url:${annotation.title}:${annotation.url}"
             is UIMessageAnnotation.GenerationInterrupted -> "interrupted:${annotation.reason}"
+            is UIMessageAnnotation.LiveInterjection -> "interjection:${annotation.kind}:${annotation.targetTaskId}"
         }
     }.hashCode()
     return "$size:$annotationToken"

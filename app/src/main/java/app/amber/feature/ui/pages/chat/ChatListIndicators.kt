@@ -8,10 +8,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,13 +17,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -39,21 +34,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.X
 import com.composables.icons.lucide.PackageOpen
 import app.amber.agent.R
 import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.CompactSummaryPayloads
 import app.amber.core.context.ConversationCompact
-import app.amber.core.service.PendingUserMessage
-import app.amber.core.service.PendingUserMessageDisplayCopy
-import app.amber.core.service.PendingUserMessageMode
-import app.amber.core.service.previewText
 import app.amber.feature.ui.components.ui.workspaceColors
 
 @Composable
@@ -424,93 +413,6 @@ internal fun ContextCompactMarker(
                 color = workspace.muted,
                 modifier = Modifier.padding(horizontal = 24.dp),
             )
-        }
-    }
-}
-
-@Composable
-internal fun PendingUserMessageBubble(
-    message: PendingUserMessage,
-    onCancel: () -> Unit,
-    queueCount: Int? = null,
-    onOpenQueue: () -> Unit = {},
-    modifier: Modifier = Modifier,
-) {
-    val context = LocalContext.current
-    val workspace = workspaceColors()
-    val accent = LocalChatTheme.current.accent
-    val borderColor = when (message.mode) {
-        PendingUserMessageMode.FOLLOWUP -> workspace.muted.copy(alpha = 0.42f)
-        PendingUserMessageMode.STEER -> accent.copy(alpha = 0.48f)
-        PendingUserMessageMode.COLLECT -> accent.copy(alpha = 0.28f)
-    }
-    val textColor = when (message.mode) {
-        PendingUserMessageMode.FOLLOWUP -> workspace.muted
-        PendingUserMessageMode.STEER -> workspace.muted
-        PendingUserMessageMode.COLLECT -> workspace.muted.copy(alpha = 0.9f)
-    }
-    val cancelTint = workspace.muted.copy(alpha = 0.84f)
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
-    ) {
-        BoxWithConstraints(
-            modifier = Modifier.fillMaxWidth(),
-            contentAlignment = Alignment.TopEnd,
-        ) {
-            val bubbleMaxWidth = maxOf(96.dp, minOf(maxWidth * 0.72f, 560.dp))
-            Column(
-                horizontalAlignment = Alignment.End,
-            ) {
-                Surface(
-                    modifier = Modifier
-                        .widthIn(min = 96.dp, max = bubbleMaxWidth)
-                        .dashedRoundedBorder(borderColor, 10.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    color = workspace.paper.copy(alpha = 0.62f),
-                    tonalElevation = 0.dp,
-                    shadowElevation = 0.dp,
-                ) {
-                    Row(
-                        modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = message.previewText(
-                                copy = PendingUserMessageDisplayCopy.from(context),
-                            ),
-                            modifier = Modifier.weight(1f, fill = false),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = textColor,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        IconButton(
-                            onClick = onCancel,
-                            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
-                        ) {
-                            Icon(
-                                imageVector = Lucide.X,
-                                contentDescription = stringResource(R.string.chat_page_cancel_queued_message),
-                                tint = cancelTint,
-                                modifier = Modifier.size(15.dp),
-                            )
-                        }
-                    }
-                }
-                if (queueCount != null && queueCount > 0) {
-                    Text(
-                        text = stringResource(R.string.chat_page_queued_message_count, queueCount),
-                        modifier = Modifier
-                            .padding(top = 4.dp, end = 2.dp)
-                            .clickable { onOpenQueue() },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = workspace.muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
         }
     }
 }

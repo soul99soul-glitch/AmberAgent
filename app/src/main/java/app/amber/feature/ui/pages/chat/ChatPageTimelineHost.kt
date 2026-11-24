@@ -60,7 +60,6 @@ internal fun ChatPageTimelineContent(
     resolvedNodeId: Uuid?,
     state: LazyListState,
     timelineLoadState: ConversationTimelineLoadState,
-    pendingUserMessages: List<PendingUserMessage>,
     compactLifecycleState: CompactLifecycleState,
     isCompacting: Boolean,
     loading: Boolean,
@@ -77,7 +76,7 @@ internal fun ChatPageTimelineContent(
         remember(conversation.id) { conversation.copy(messageNodes = emptyList()) }
     }
     val compactInTimelineActive = isCompacting || compactLifecycleState.isActive
-    val activeGeneration = loading || pendingUserMessages.isNotEmpty() || compactInTimelineActive
+    val activeGeneration = loading || compactInTimelineActive
     val chatTimelinePlan = rememberChatTimelinePlan(
         conversation = timelineConversation,
         regexes = settings.regexes,
@@ -85,7 +84,7 @@ internal fun ChatPageTimelineContent(
         loading = loading,
         activeGeneration = activeGeneration,
         hasHistoryLoadingItem = !timelineLoadState.isFullyLoaded,
-        pendingMessageCount = pendingUserMessages.size,
+        pendingMessageCount = 0,
         listState = state,
     )
 
@@ -126,7 +125,6 @@ internal fun ChatPageTimelineHost(
     processingStatus: String?,
     setting: Settings,
     timelineLoadState: ConversationTimelineLoadState,
-    pendingUserMessages: List<PendingUserMessage>,
     contextCompacts: List<ConversationCompact>,
     activeCompactBoundary: ActiveCompactBoundary?,
     compactLifecycleState: CompactLifecycleState,
@@ -150,7 +148,6 @@ internal fun ChatPageTimelineHost(
     onJumpTargetConsumed: () -> Unit,
     timelineHighlight: TimelineHighlightState,
     onFillSuggestion: (String) -> Unit,
-    onOpenQueue: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -179,7 +176,6 @@ internal fun ChatPageTimelineHost(
         resolvedNodeId = resolvedNodeId,
         state = chatListState,
         timelineLoadState = timelineLoadState,
-        pendingUserMessages = pendingUserMessages,
         compactLifecycleState = compactLifecycleState,
         isCompacting = isCompacting,
         loading = loading,
@@ -280,7 +276,6 @@ internal fun ChatPageTimelineHost(
                     innerPadding = innerPadding,
                     conversation = timelineConversation,
                     timelineLoadState = timelineLoadState,
-                    pendingUserMessages = pendingUserMessages,
                     contextCompacts = contextCompacts,
                     activeCompactBoundary = activeCompactBoundary,
                     compactLifecycleState = compactLifecycleState,
@@ -370,12 +365,6 @@ internal fun ChatPageTimelineHost(
                     onSaveToWorkspace = onSaveToWorkspace,
                     onToggleFavorite = { node ->
                         vm.toggleMessageFavorite(node)
-                    },
-                    onCancelPendingMessage = { messageId ->
-                        vm.cancelPendingUserMessage(messageId)
-                    },
-                    onOpenQueue = {
-                        onOpenQueue()
                     },
                     onGenerativeWidgetAction = { instruction ->
                         inputActions.sendWidgetAction(instruction)

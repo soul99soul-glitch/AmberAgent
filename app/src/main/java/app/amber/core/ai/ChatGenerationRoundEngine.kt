@@ -19,6 +19,7 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.MessageStreamAccumulator
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.handleMessageChunk
+import app.amber.ai.ui.isEphemeralInterjectionMessage
 import app.amber.ai.util.ImageEncodingException
 import app.amber.core.ai.transformers.transforms
 import app.amber.core.ai.transformers.OcrStrings
@@ -116,11 +117,12 @@ class ChatGenerationRoundEngine(
         val generativeWidgetCopy = GenerativeWidgetCopy.from(context)
 
         var messages: List<UIMessage> = request.messages
+        val promptMessages = sanitizeMessagesForModelRound(messages)
         val sessionDefaults = settings.defaults
         val memoryStartedAt = if (perfEnabled) System.nanoTime() else 0L
         val memoryContextPrompt = memoryRecallStore.buildPrompt(
             settings = settings.memory,
-            messages = messages,
+            messages = promptMessages,
             locale = context.appLocale(),
             runKey = request.runId,
         )
@@ -130,7 +132,7 @@ class ChatGenerationRoundEngine(
         val systemParts = buildSystemPromptParts(
             settings = settings,
             model = model,
-            messages = messages,
+            messages = promptMessages,
             tools = tools,
             memoryContextPrompt = memoryContextPrompt,
             loopBudgetPrompt = loopBudgetPrompt,
@@ -141,7 +143,7 @@ class ChatGenerationRoundEngine(
             conversation = conversation,
             settings = settings.context,
             model = model,
-            messages = messages,
+            messages = promptMessages,
             tools = tools,
             contextMessageSize = sessionDefaults.contextMessageSize,
             promptOverheadTokens = ConversationContextPlanner.estimateTokens(listOf(UIMessage.system(system))),
@@ -600,4 +602,39 @@ class ChatGenerationRoundEngine(
             "base64"
         ).any { it in message }
     }
+}
+
+/**
+ * Strips timeline-only live-interjection messages (status replies / steer acks / stop acks)
+ * and merges consecutive USER messages (e.g. after thinking-phase draft retraction) so
+ * provider role alternation stays strictly valid without altering timeline bubbles.
+ */
+internal fun sanitizeMessagesForModelRound(messages: List<UIMessage>): List<UIMessage> {
+    if (messages.isEmpty()) return emptyList()
+    val result = ArrayList<UIMessage>(messages.size)
+    for (message in messages) {
+        if (message.isEphemeralInterjectionMessage) continue
+        val previous = result.lastOrNull()
+        if (previous != null && previous.role == MessageRole.USER && message.role == MessageRole.USER) {
+            val mergedParts = buildList {
+                addAll(previous.parts)
+                val lastPrev = previous.parts.lastOrNull()
+                val firstNext = message.parts.firstOrNull()
+                if (lastPrev is UIMessagePart.Text && firstNext is UIMessagePart.Text) {
+                    removeAt(lastIndex)
+                    val combined = listOf(lastPrev.text, firstNext.text)
+                        .filter { it.isNotBlank() }
+                        .joinToString("\n\n")
+                    add(lastPrev.copy(text = combined))
+                    addAll(message.parts.drop(1))
+                } else {
+                    addAll(message.parts)
+                }
+            }
+            result[result.lastIndex] = previous.copy(parts = mergedParts)
+        } else {
+            result += message
+        }
+    }
+    return result
 }

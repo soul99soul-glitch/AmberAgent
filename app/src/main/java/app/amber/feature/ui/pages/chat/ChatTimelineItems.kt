@@ -403,19 +403,9 @@ internal fun LazyListScope.chatTimelineItems(
             }
 
             is ChatTimelineEntry.Pending -> {
-                val pendingMessage = currentPendingUserMessages[entry.pendingIndex]
-                Box(modifier = Modifier.padding(bottom = TimelineItemSpacing)) {
-                    PendingUserMessageBubble(
-                        message = pendingMessage,
-                        onCancel = { onCancelPendingMessage(pendingMessage.id) },
-                        queueCount = if (entry.pendingIndex == currentPendingUserMessages.lastIndex) {
-                            currentPendingUserMessages.size
-                        } else {
-                            null
-                        },
-                        onOpenQueue = onOpenQueue,
-                    )
-                }
+                // Queued message bubbles have been replaced by live interjections; keep zero-height
+                // placeholder only so legacy plan-index unit tests remain index-aligned.
+                Spacer(Modifier.fillMaxWidth())
             }
 
             ChatTimelineEntry.TailCompactMarkers -> {

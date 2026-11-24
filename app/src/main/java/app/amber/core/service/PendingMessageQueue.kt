@@ -232,26 +232,18 @@ class PendingMessageQueue(
 
     fun enqueuePendingUserMessage(conversationId: Uuid, message: PendingUserMessage): Boolean {
         val messages = pendingState(conversationId)
-        var accepted = false
         messages.update { current ->
-            if (current.size >= MAX_PENDING_USER_MESSAGES) {
-                current
+            if (message.mode == PendingUserMessageMode.STEER) {
+                val steerPrefixSize = current.indexOfFirst { it.mode != PendingUserMessageMode.STEER }
+                    .takeIf { it >= 0 }
+                    ?: current.size
+                current.take(steerPrefixSize) + message + current.drop(steerPrefixSize)
             } else {
-                accepted = true
-                if (message.mode == PendingUserMessageMode.STEER) {
-                    val steerPrefixSize = current.indexOfFirst { it.mode != PendingUserMessageMode.STEER }
-                        .takeIf { it >= 0 }
-                        ?: current.size
-                    current.take(steerPrefixSize) + message + current.drop(steerPrefixSize)
-                } else {
-                    current + message
-                }
+                current + message
             }
         }
-        if (accepted) {
-            persistPendingMessagesAsync(conversationId, messages.value)
-        }
-        return accepted
+        persistPendingMessagesAsync(conversationId, messages.value)
+        return true
     }
 
     private fun dequeueNextPendingUserMessage(conversationId: Uuid): PendingUserMessage? {

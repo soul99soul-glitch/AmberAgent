@@ -228,23 +228,14 @@ class ChatRunCoordinator(
         // A matching Stop can still cancel the waiting successor drain. Keep
         // accepted input in the existing durable queue until the handoff ends.
         if (session.isGenerating || waitingForCleanup || session.pendingUserMessages.value.isNotEmpty()) {
-            val accepted = pendingMessageQueue.enqueuePendingUserMessage(conversationId, pendingMessage)
-            if (!accepted) {
-                errorStore.addError(
-                    IllegalStateException(context.getString(R.string.chat_page_queue_full_error)),
-                    conversationId = conversationId,
-                    title = context.getString(R.string.chat_page_queue_message_not_added)
-                )
-                return false
-            } else {
-                pendingMessageQueue.persistCurrentPendingMessagesDurably(conversationId)
-                recordPendingMessageEvent(
-                    conversationId = conversationId,
-                    event = "enqueue",
-                    messageId = pendingMessage.id,
-                    detail = pendingMessage.mode.name.lowercase(),
-                )
-            }
+            pendingMessageQueue.enqueuePendingUserMessage(conversationId, pendingMessage)
+            pendingMessageQueue.persistCurrentPendingMessagesDurably(conversationId)
+            recordPendingMessageEvent(
+                conversationId = conversationId,
+                event = "enqueue",
+                messageId = pendingMessage.id,
+                detail = pendingMessage.mode.name.lowercase(),
+            )
             // A queue restored after process death must stay ahead of a new
             // message entered while the session is idle; otherwise the new
             // message would bypass the durable FIFO and run first.
@@ -360,21 +351,14 @@ class ChatRunCoordinator(
             // messages into the queue; external resume requests during an
             // active turn are dropped (the active turn owns the conversation).
             firstMessage?.let { message ->
-                if (!pendingMessageQueue.enqueuePendingUserMessage(conversationId, message)) {
-                    errorStore.addError(
-                        IllegalStateException(context.getString(R.string.chat_page_queue_full_error)),
-                        conversationId = conversationId,
-                        title = context.getString(R.string.chat_page_queue_message_not_added)
-                    )
-                } else {
-                    pendingMessageQueue.persistCurrentPendingMessagesDurably(conversationId)
-                    recordPendingMessageEvent(
-                        conversationId = conversationId,
-                        event = "enqueue",
-                        messageId = message.id,
-                        detail = message.mode.name.lowercase(),
-                    )
-                }
+                pendingMessageQueue.enqueuePendingUserMessage(conversationId, message)
+                pendingMessageQueue.persistCurrentPendingMessagesDurably(conversationId)
+                recordPendingMessageEvent(
+                    conversationId = conversationId,
+                    event = "enqueue",
+                    messageId = message.id,
+                    detail = message.mode.name.lowercase(),
+                )
             }
             return null
         }

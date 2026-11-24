@@ -120,6 +120,7 @@ class ChatRunHooksFactory(
                     pendingMessageQueue.consumeSteerMessagesForRun(conversationId)
                 }
             },
+            interjectionController = localAsyncTaskCoordinator?.interjectionControllerForRun(runIdHint, anchorNodeId),
             onRunStarted = { runId ->
                 if (durable) {
                     runTerminalStore!!.begin(runId, conversationId.toString(), AMBER_AGENT_ID.toString())

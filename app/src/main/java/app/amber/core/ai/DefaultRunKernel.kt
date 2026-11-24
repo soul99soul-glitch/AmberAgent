@@ -3,11 +3,17 @@ package app.amber.core.ai
 import app.amber.ai.core.MessageRole
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.buildJsonObject
@@ -51,6 +57,9 @@ private const val PERF_TAG = "AmberChatPerf"
 // and the localized note persists with the messages.
 /** Wire reason carried by [GenerationTerminal.GuardStopped]. */
 private const val DUPLICATE_TOOL_CALL_GUARD_REASON = "duplicate_tool_call"
+private const val MAX_PREEMPTED_THINKING_ROUNDS = 8
+
+private class RoundPreemptedBySteerException : CancellationException("Model round preempted by live steer interjection")
 
 /** Fixed copy snapshot for kernel-owned text persisted in [UIMessagePart.Text]. */
 private data class RunKernelMessages(
@@ -116,6 +125,13 @@ class DefaultRunKernel(
         val invocationContext = session.invocationContext
         val conversation = session.conversation
         val consumeSteerMessages = session.consumeSteerMessages
+        val interjectionController = session.interjectionController
+        val hasPendingSteer: () -> Boolean = { interjectionController?.hasPendingSteer() == true }
+        val drainSteer: suspend () -> List<UIMessage> = {
+            interjectionController?.consumePendingSteer() ?: consumeSteerMessages()
+        }
+        var completedToolsCount = 0
+        var preemptedThinkingRounds = 0
         val runId = session.runId
         val onTerminal = session.onTerminal
         val responsesResume = session.responsesResume
@@ -207,7 +223,8 @@ class DefaultRunKernel(
             toolCallHistory.seed(toolEffectLedger!!.listByRun(runId!!))
         }
 
-        for (stepIndex in 0 until maxSteps) {
+        var stepIndex = 0
+        while (stepIndex < maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
             // Recipe import/rollback/delete may update the catalog while the
@@ -335,79 +352,171 @@ class DefaultRunKernel(
                     ?.mapNotNull { tool -> dispatchableTools[tool.toolCallId] }
                     .orEmpty()
             } else if (waitingTools.isNotEmpty()) {
+                interjectionController?.onPhaseChanged(
+                    phase = RunExecutionPhase.WAITING_APPROVAL,
+                    activeToolName = waitingTools.firstOrNull()?.toolName,
+                    completedToolCount = completedToolsCount,
+                )
                 terminal = GenerationTerminal.WaitingUser
                 brokeEarly = true
                 break
             // Skip generation if we have approved/denied tool calls to handle
             } else if (pendingTools.isEmpty()) {
+                if (hasPendingSteer()) {
+                    val preRoundSteer = drainSteer()
+                    if (preRoundSteer.isNotEmpty()) {
+                        messages = appendUniqueMessages(messages, preRoundSteer)
+                        emit(GenerationChunk.Messages(messages))
+                    }
+                }
+                interjectionController?.onPhaseChanged(
+                    phase = RunExecutionPhase.THINKING,
+                    activeToolName = null,
+                    completedToolCount = completedToolsCount,
+                )
+                val preRoundMessages = messages
+                val preRoundMessageIds = preRoundMessages.mapTo(hashSetOf()) { it.id }
                 var streamingVisualBaselineReady = false
-                val roundOutcome = roundEngine.generateRound(
-                    GenerationRoundRequest(
-                        settings = settings,
-                        messages = messages,
-                        transformers = inputTransformers,
+                val roundRequest = GenerationRoundRequest(
+                    settings = settings,
+                    messages = messages,
+                    transformers = inputTransformers,
+                    model = model,
+                    tools = toolsInternal,
+                    memories = memories ?: emptyList(),
+                    stream = settings.streamOutput,
+                    processingStatus = processingStatus,
+                    conversation = conversation,
+                    speculativeRunner = speculativeRunner,
+                    loopBudgetPrompt = loopBudgetPrompt,
+                    // A stored Responses response can resume only the first
+                    // model round; later rounds must start fresh requests.
+                    responsesResume = responsesResume?.let {
+                        if (stepIndex == 0) it else it.copy(resumeFrom = null)
+                    },
+                    // Step 5: thread the durable stream so each model round
+                    // leaves a RequestSnapshot at the provider boundary —
+                    // gated on the same durablePath that gates the tool
+                    // lifecycle below.
+                    runId = runId,
+                    stepIndex = stepIndex,
+                    events = session.toolLifecycleEvents,
+                    durablePath = durablePath,
+                )
+                val transformRoundUpdate: suspend (GenerationUpdate) -> GenerationChunk.Messages = { update ->
+                    messages = update.messages.transforms(
+                        transformers = outputTransformers,
+                        context = context,
                         model = model,
-                        tools = toolsInternal,
-                        memories = memories ?: emptyList(),
-                        stream = settings.streamOutput,
-                        processingStatus = processingStatus,
-                        conversation = conversation,
-                        speculativeRunner = speculativeRunner,
-                        loopBudgetPrompt = loopBudgetPrompt,
-                        // A stored Responses response can resume only the first
-                        // model round; later rounds must start fresh requests.
-                        responsesResume = responsesResume?.let {
-                            if (stepIndex == 0) it else it.copy(resumeFrom = null)
-                        },
-                        // Step 5: thread the durable stream so each model round
-                        // leaves a RequestSnapshot at the provider boundary —
-                        // gated on the same durablePath that gates the tool
-                        // lifecycle below.
-                        runId = runId,
-                        stepIndex = stepIndex,
-                        events = session.toolLifecycleEvents,
-                        durablePath = durablePath,
-                    ),
-                    onUpdateMessages = { update ->
-                        messages = update.messages.transforms(
+                        settings = settings.transformers
+                    )
+                    val startedAt = if (BuildConfig.DEBUG) System.nanoTime() else 0L
+                    val visualMessages = if (update.isStreamingTail && streamingVisualBaselineReady) {
+                        messages.visualTransformsStreamingTail(
                             transformers = outputTransformers,
                             context = context,
                             model = model,
                             settings = settings.transformers
                         )
-                        val startedAt = if (BuildConfig.DEBUG) System.nanoTime() else 0L
-                        val visualMessages = if (update.isStreamingTail && streamingVisualBaselineReady) {
-                            messages.visualTransformsStreamingTail(
-                                transformers = outputTransformers,
-                                context = context,
-                                model = model,
-                                settings = settings.transformers
-                            )
-                        } else {
-                            streamingVisualBaselineReady = true
-                            messages.visualTransforms(
-                                transformers = outputTransformers,
-                                context = context,
-                                model = model,
-                                settings = settings.transformers
-                            )
+                    } else {
+                        streamingVisualBaselineReady = true
+                        messages.visualTransforms(
+                            transformers = outputTransformers,
+                            context = context,
+                            model = model,
+                            settings = settings.transformers
+                        )
+                    }
+                    if (BuildConfig.DEBUG) {
+                        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000.0
+                        Log.d(
+                            PERF_TAG,
+                            "streamFlush kind=${if (update.isStreamingTail) "tail" else "full"} " +
+                                "messages=${visualMessages.size} elapsedMs=${String.format(Locale.US, "%.2f", elapsedMs)}",
+                        )
+                    }
+                    GenerationChunk.Messages(
+                        messages = visualMessages,
+                        update = update.withMessages(visualMessages),
+                    )
+                }
+                val roundOutcome = if (interjectionController == null) {
+                    roundEngine.generateRound(roundRequest) { update ->
+                        emit(transformRoundUpdate(update))
+                    }
+                } else {
+                    try {
+                        coroutineScope {
+                            val preempted = CompletableDeferred<Unit>()
+                            val chunkChannel = Channel<GenerationChunk>(Channel.RENDEZVOUS)
+                            val roundJob = async {
+                                try {
+                                    roundEngine.generateRound(roundRequest) { update ->
+                                        chunkChannel.send(transformRoundUpdate(update))
+                                    }
+                                } finally {
+                                    chunkChannel.close()
+                                }
+                            }
+                            val watcherJob = launch(start = CoroutineStart.UNDISPATCHED) {
+                                if (interjectionController.hasPendingSteer()) {
+                                    preempted.complete(Unit)
+                                    roundJob.cancel(RoundPreemptedBySteerException())
+                                    return@launch
+                                }
+                                interjectionController.steerSignal.collect {
+                                    if (interjectionController.hasPendingSteer()) {
+                                        preempted.complete(Unit)
+                                        roundJob.cancel(RoundPreemptedBySteerException())
+                                        return@collect
+                                    }
+                                }
+                            }
+                            try {
+                                // Emit strictly from the flow's own coroutine so SafeCollector's
+                                // context invariant is preserved while roundJob can be preempted.
+                                for (chunk in chunkChannel) {
+                                    emit(chunk)
+                                }
+                                val outcome = roundJob.await()
+                                watcherJob.cancel()
+                                outcome
+                            } catch (cancelled: CancellationException) {
+                                watcherJob.cancel()
+                                chunkChannel.close()
+                                if (preempted.isCompleted ||
+                                    cancelled is RoundPreemptedBySteerException ||
+                                    cancelled.cause is RoundPreemptedBySteerException
+                                ) {
+                                    throw RoundPreemptedBySteerException()
+                                }
+                                throw cancelled
+                            }
                         }
-                        if (BuildConfig.DEBUG) {
-                            val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000.0
-                            Log.d(
-                                PERF_TAG,
-                                "streamFlush kind=${if (update.isStreamingTail) "tail" else "full"} " +
-                                    "messages=${visualMessages.size} elapsedMs=${String.format(Locale.US, "%.2f", elapsedMs)}",
-                            )
+                    } catch (_: RoundPreemptedBySteerException) {
+                        val retractedIds = messages
+                            .asSequence()
+                            .map { it.id }
+                            .filterNot { it in preRoundMessageIds }
+                            .toSet()
+                        messages = preRoundMessages
+                        val steerMessages = drainSteer()
+                        if (steerMessages.isNotEmpty()) {
+                            messages = appendUniqueMessages(messages, steerMessages)
                         }
                         emit(
                             GenerationChunk.Messages(
-                                messages = visualMessages,
-                                update = update.withMessages(visualMessages),
+                                messages = messages,
+                                retractedMessageIds = retractedIds,
                             )
                         )
-                    },
-                )
+                        preemptedThinkingRounds++
+                        if (preemptedThinkingRounds > MAX_PREEMPTED_THINKING_ROUNDS) {
+                            stepIndex++
+                        }
+                        continue
+                    }
+                }
                 val finalizedTurn = messages.visualTransforms(
                     transformers = outputTransformers,
                     context = context,
@@ -458,15 +567,20 @@ class DefaultRunKernel(
                         completionNudged = true
                         // 以一条可见的用户消息续跑：请求以 user 收尾（不构成 assistant 预填），
                         // 续跑输出新开一条 assistant 消息；与 steer 并入同一路径。
-                        messages = messages + UIMessage.user(runKernelMessages.completionCheckPrompt) + consumeSteerMessages()
+                        messages = appendUniqueMessages(
+                            messages + UIMessage.user(runKernelMessages.completionCheckPrompt),
+                            drainSteer(),
+                        )
                         emit(GenerationChunk.Messages(messages))
+                        stepIndex++
                         continue
                     }
                     if (stepIndex < maxSteps - 1) {
-                        val steerAtTurnEnd = consumeSteerMessages()
+                        val steerAtTurnEnd = drainSteer()
                         if (steerAtTurnEnd.isNotEmpty()) {
-                            messages = messages + steerAtTurnEnd
+                            messages = appendUniqueMessages(messages, steerAtTurnEnd)
                             emit(GenerationChunk.Messages(messages))
+                            stepIndex++
                             continue
                         }
                     }
@@ -574,6 +688,11 @@ class DefaultRunKernel(
 
                 if (freshApproval.hasPendingApproval) {
                     Log.i(TAG, "run paused for tool approval")
+                    interjectionController?.onPhaseChanged(
+                        phase = RunExecutionPhase.WAITING_APPROVAL,
+                        activeToolName = updatedTools.firstOrNull { it.isPending }?.toolName,
+                        completedToolCount = completedToolsCount,
+                    )
                     terminal = GenerationTerminal.WaitingUser
                     brokeEarly = true
                     break
@@ -658,6 +777,22 @@ class DefaultRunKernel(
                 approvalHistory = if (capabilityState != null) capabilityPermissionStore else null,
                 permissionContext = permissionContext,
                 executionPolicy = executionPolicy,
+                shouldAbortRemaining = hasPendingSteer,
+                onToolStarted = { toolName ->
+                    interjectionController?.onPhaseChanged(
+                        phase = RunExecutionPhase.EXECUTING_TOOLS,
+                        activeToolName = toolName,
+                        completedToolCount = completedToolsCount,
+                    )
+                },
+                onToolFinished = {
+                    completedToolsCount++
+                    interjectionController?.onPhaseChanged(
+                        phase = RunExecutionPhase.EXECUTING_TOOLS,
+                        activeToolName = null,
+                        completedToolCount = completedToolsCount,
+                    )
+                },
             )
             val executedTools = scriptJudgment?.annotate(rawExecutedTools, runId) ?: rawExecutedTools
 
@@ -722,11 +857,12 @@ class DefaultRunKernel(
                 break
             }
 
-            val steerMessages = consumeSteerMessages()
+            val steerMessages = drainSteer()
             if (steerMessages.isNotEmpty()) {
-                messages = messages + steerMessages
+                messages = appendUniqueMessages(messages, steerMessages)
                 emit(GenerationChunk.Messages(messages))
             }
+            stepIndex++
         }
 
         // The loop ran out of step budget without breaking: the model still
@@ -788,5 +924,15 @@ class DefaultRunKernel(
                     Log.w(TAG, "guard-reject effect terminalization failed for ${effect.effectId}", error)
                 }
         }
+    }
+
+    private fun appendUniqueMessages(
+        current: List<UIMessage>,
+        additions: List<UIMessage>,
+    ): List<UIMessage> {
+        if (additions.isEmpty()) return current
+        val existingIds = current.mapTo(hashSetOf()) { it.id }
+        val fresh = additions.filterNot { it.id in existingIds }
+        return if (fresh.isEmpty()) current else current + fresh
     }
 }

@@ -70,16 +70,15 @@ class ConversationSessionQueueTest {
     }
 
     @Test
-    fun queueLimitAndCancelAreStable() {
+    fun queueAcceptsUnboundedMessagesAndCancelIsStable() {
         val queue = queue().queue
         val id = Uuid.random()
-        repeat(MAX_PENDING_USER_MESSAGES) { index ->
+        repeat(MAX_PENDING_USER_MESSAGES + 5) { index ->
             assertTrue(queue.enqueuePendingUserMessage(id, pending("message-$index")))
         }
-        assertFalse(queue.enqueuePendingUserMessage(id, pending("overflow")))
         assertTrue(queue.cancelPendingUserMessage(id, "message-3"))
         assertFalse(queue.cancelPendingUserMessage(id, "missing"))
-        assertEquals(MAX_PENDING_USER_MESSAGES - 1, queue.flow(id).value.size)
+        assertEquals(MAX_PENDING_USER_MESSAGES + 4, queue.flow(id).value.size)
     }
 
     @Test

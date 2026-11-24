@@ -16,10 +16,12 @@ import app.amber.core.service.ConversationAccess
 import app.amber.core.service.ConversationStore
 import app.amber.core.service.ConversationEditor
 import app.amber.core.service.ChatErrorStore
+import app.amber.core.service.LiveInterjectionTriager
 import app.amber.core.service.LocalAsyncTaskCoordinator
 import app.amber.core.service.PendingMessageQueue
 import app.amber.core.infra.AppScope
 import app.amber.core.service.PendingMessageStore
+import app.amber.core.service.ProviderLiveInterjectionAuxiliaryClient
 import app.amber.core.service.UserInputPreprocessor
 import java.io.File
 import org.koin.dsl.module
@@ -223,6 +225,15 @@ val chatModule = module {
     }
 
     single {
+        LiveInterjectionTriager(
+            auxiliaryClient = ProviderLiveInterjectionAuxiliaryClient(
+                settingsStore = get(),
+                providerCatalog = get(),
+            ),
+        )
+    }
+
+    single {
         LocalAsyncTaskCoordinator(
             context = get(),
             appScope = get<AppScope>(),
@@ -234,6 +245,7 @@ val chatModule = module {
             agentEventStore = get(),
             runTerminalStore = get(),
             runOwnershipRegistry = get(),
+            liveInterjectionTriager = get(),
         ).also { coordinator ->
             get<ChatRunHooksFactory>().bindLocalAsyncTaskCoordinator(coordinator)
         }

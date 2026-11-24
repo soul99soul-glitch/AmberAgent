@@ -24,6 +24,7 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.canResumeToolExecution
+import app.amber.ai.ui.isEphemeralInterjectionMessage
 import app.amber.core.model.Conversation
 import app.amber.core.service.ChatRunCoordinator
 import app.amber.core.service.ChatRunHooksFactory
@@ -154,10 +155,11 @@ class ChatSessionResolverImpl(
             if (start != null && end != null) {
                 val clampedEnd = end.coerceAtMost(all.size)
                 all.subList(start.coerceAtMost(clampedEnd), clampedEnd)
+                    .filterNot { it.isEphemeralInterjectionMessage }
             } else if (managedTask != null && anchorNodeId != null) {
                 resolveMessagesForAnchoredTask(conversation, anchorNodeId)
             } else {
-                all
+                all.filterNot { it.isEphemeralInterjectionMessage }
             }
         }
 
@@ -211,6 +213,7 @@ class ChatSessionResolverImpl(
         val result = ArrayList<UIMessage>(endInclusive + 1)
         for (idx in 0..endInclusive) {
             val msg = nodes[idx].currentMessage
+            if (msg.isEphemeralInterjectionMessage) continue
             if (idx < anchorIndex && msg.role == MessageRole.ASSISTANT) {
                 // Sanitize in-flight unexecuted tool parts from earlier concurrent tasks
                 // so this task's prompt remains valid without mutating ConversationStore.

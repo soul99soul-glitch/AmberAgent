@@ -39,6 +39,8 @@ private const val TAG = "AgentToolDispatcher"
 
 /** Ledger/event errorCategory for sandbox denials (distinct from approval_denied). */
 const val POLICY_DENIED_EFFECT_CATEGORY = "policy_denied"
+/** Ledger/event errorCategory for tool calls skipped due to live interjection replan. */
+const val REPLAN_REQUIRED_EFFECT_CATEGORY = "replan_required"
 
 /** Metadata binding a pending composite resume to its original checkpoint. */
 const val TOOL_RESUME_PROVENANCE_METADATA_KEY = "__amber_recipe_resume_provenance"
@@ -141,6 +143,9 @@ class AgentToolDispatcher(
         approvalHistory: CapabilityPermissionStore? = null,
         permissionContext: CapabilityPermissionContext? = null,
         executionPolicy: ExecutionPolicy = ExecutionPolicy.permissive(),
+        shouldAbortRemaining: () -> Boolean = { false },
+        onToolStarted: ((toolName: String) -> Unit)? = null,
+        onToolFinished: ((toolName: String) -> Unit)? = null,
     ): List<UIMessagePart.Tool> {
         val reused = tools.mapNotNull { tool ->
             prefetchedTools[tool.toolCallId]?.takeIf { prefetched ->
@@ -173,20 +178,29 @@ class AgentToolDispatcher(
                 remaining.map { tool ->
                     async {
                         val executeTool: suspend () -> UIMessagePart.Tool? = {
-                            execute(
-                                tool = tool,
-                                toolDef = toolDefinitions[tool.toolName],
-                                autoApproveTools = autoApproveTools,
-                                autoApproveHighRiskTools = autoApproveHighRiskTools,
-                                autoApprovedToolNames = autoApprovedToolNames,
-                                invocationContext = invocationContext,
-                                retrySetting = retrySetting,
-                                ledgerContext = ledgerContext,
-                                capabilityPermissions = capabilityPermissions,
-                                approvalHistory = approvalHistory,
-                                permissionContext = permissionContext,
-                                executionPolicy = executionPolicy,
-                            )
+                            if (shouldAbortRemaining()) {
+                                skipToolForReplan(ledgerContext, tool)
+                            } else {
+                                onToolStarted?.invoke(tool.toolName)
+                                try {
+                                    execute(
+                                        tool = tool,
+                                        toolDef = toolDefinitions[tool.toolName],
+                                        autoApproveTools = autoApproveTools,
+                                        autoApproveHighRiskTools = autoApproveHighRiskTools,
+                                        autoApprovedToolNames = autoApprovedToolNames,
+                                        invocationContext = invocationContext,
+                                        retrySetting = retrySetting,
+                                        ledgerContext = ledgerContext,
+                                        capabilityPermissions = capabilityPermissions,
+                                        approvalHistory = approvalHistory,
+                                        permissionContext = permissionContext,
+                                        executionPolicy = executionPolicy,
+                                    )
+                                } finally {
+                                    onToolFinished?.invoke(tool.toolName)
+                                }
+                            }
                         }
                         val group = webMountGroups[tool]
                         if (group == null) {
@@ -206,20 +220,30 @@ class AgentToolDispatcher(
         } else {
             val executed = ArrayList<UIMessagePart.Tool>()
             remaining.forEach { tool ->
-                execute(
-                    tool = tool,
-                    toolDef = toolDefinitions[tool.toolName],
-                    autoApproveTools = autoApproveTools,
-                    autoApproveHighRiskTools = autoApproveHighRiskTools,
-                    autoApprovedToolNames = autoApprovedToolNames,
-                    invocationContext = invocationContext,
-                    retrySetting = retrySetting,
-                    ledgerContext = ledgerContext,
-                    capabilityPermissions = capabilityPermissions,
-                    approvalHistory = approvalHistory,
-                    permissionContext = permissionContext,
-                    executionPolicy = executionPolicy,
-                )?.let { executed += it }
+                if (shouldAbortRemaining()) {
+                    executed += skipToolForReplan(ledgerContext, tool)
+                } else {
+                    onToolStarted?.invoke(tool.toolName)
+                    val result = try {
+                        execute(
+                            tool = tool,
+                            toolDef = toolDefinitions[tool.toolName],
+                            autoApproveTools = autoApproveTools,
+                            autoApproveHighRiskTools = autoApproveHighRiskTools,
+                            autoApprovedToolNames = autoApprovedToolNames,
+                            invocationContext = invocationContext,
+                            retrySetting = retrySetting,
+                            ledgerContext = ledgerContext,
+                            capabilityPermissions = capabilityPermissions,
+                            approvalHistory = approvalHistory,
+                            permissionContext = permissionContext,
+                            executionPolicy = executionPolicy,
+                        )
+                    } finally {
+                        onToolFinished?.invoke(tool.toolName)
+                    }
+                    result?.let { executed += it }
+                }
             }
             executed
         }
@@ -228,6 +252,50 @@ class AgentToolDispatcher(
         return tools.mapNotNull { tool ->
             reusedById[tool.toolCallId] ?: executedById[tool.toolCallId]
         }
+    }
+
+    /**
+     * Settles an unstarted tool call with a paired `not_sent / replan_required`
+     * result when a live interjection redirects the active task mid-batch.
+     * Any already-started atomic tool completes normally; only subsequent
+     * unstarted calls are skipped so tool_call / tool_result pairing stays valid.
+     */
+    private suspend fun skipToolForReplan(
+        ledgerContext: ToolLedgerContext?,
+        tool: UIMessagePart.Tool,
+    ): UIMessagePart.Tool {
+        if (ledgerContext != null) {
+            ledgerContext.ledger.getByToolCallId(tool.toolCallId)?.let { effect ->
+                if (effect.status == ToolEffectStatus.PREPARED) {
+                    ledgerContext.ledger.fail(effect.effectId, REPLAN_REQUIRED_EFFECT_CATEGORY)
+                    ledgerContext.emitLifecycle(
+                        ToolLifecycleEvent.Finished(
+                            effectId = effect.effectId,
+                            toolCallId = tool.toolCallId,
+                            toolName = tool.toolName,
+                            status = ToolLifecycleEvent.Finished.Status.DENIED,
+                            errorCategory = REPLAN_REQUIRED_EFFECT_CATEGORY,
+                        ),
+                    )
+                }
+            }
+        }
+        return tool.copy(
+            output = listOf(
+                UIMessagePart.Text(
+                    json.encodeToString(
+                        buildJsonObject {
+                            put("status", "not_sent")
+                            put("reason", REPLAN_REQUIRED_EFFECT_CATEGORY)
+                            put(
+                                "message",
+                                "Skipped before execution because the user sent a new instruction; replan with the latest user message.",
+                            )
+                        }
+                    )
+                )
+            ),
+        )
     }
 
     suspend fun execute(
