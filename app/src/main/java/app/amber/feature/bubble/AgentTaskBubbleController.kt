@@ -37,6 +37,9 @@ class AgentTaskBubbleController(
     private val settingsStore: SettingsAggregator,
     private val appScope: AppScope,
     private val takeoverController: PhoneAutomationTakeoverController? = null,
+    private val approvalDispatcher: (Uuid, String, Boolean) -> Unit = { uuid, toolCallId, approved ->
+        chatService.handleToolApproval(uuid, toolCallId, approved)
+    },
 ) {
     private val window = BubbleWindow()
     private var loopJob: Job? = null
@@ -205,15 +208,22 @@ class AgentTaskBubbleController(
         tick()
     }
 
-    private fun decideApproval(approved: Boolean) {
+    internal fun setUiStateForTest(state: AgentBubbleUiState) {
+        _uiState.value = state
+    }
+
+    internal fun decideApproval(approved: Boolean) {
         val state = _uiState.value
-        if (approved && state.approvalToolTitle in app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES) {
+        val requiresInApp = state.requiresInAppApproval ||
+            state.approvalToolTitle in app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES ||
+            state.approvalToolTitle in app.amber.feature.tools.ACCESSIBILITY_L3_ACTION_TOOLS
+        if (approved && requiresInApp) {
             openConversation()
             return
         }
         val uuid = state.conversationId?.let(::parseUuid) ?: return
         val toolCallId = state.approvalToolCallId ?: return
-        chatService.handleToolApproval(uuid, toolCallId, approved)
+        approvalDispatcher(uuid, toolCallId, approved)
     }
 
     private fun stopTask() {

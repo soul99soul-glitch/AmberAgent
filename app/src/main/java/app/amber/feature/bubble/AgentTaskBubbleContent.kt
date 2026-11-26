@@ -342,6 +342,10 @@ fun AgentTaskBubbleContent(
                 }
             }
 
+            val requiresInAppApproval = state.requiresInAppApproval ||
+                AgentBubbleReducer.requiresInAppApproval(state.approvalToolTitle)
+            val showInAppApprovalActions = running && state.waitingApproval && !state.waitingAskUser && requiresInAppApproval
+
             if (running && state.waitingApproval && !state.waitingAskUser) {
                 Text(
                     text = state.approvalToolTitle.replace('_', ' '),
@@ -354,17 +358,32 @@ fun AgentTaskBubbleContent(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    TextButton(
-                        modifier = Modifier.weight(1f),
-                        onClick = onApprove,
-                    ) {
-                        Text(
-                            stringResource(R.string.task_bubble_approve),
-                            fontSize = 13.sp,
-                            color = tokens.accent,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                    if (requiresInAppApproval) {
+                        TextButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = onOpenConversation,
+                        ) {
+                            Text(
+                                inAppApprovalLabel(),
+                                fontSize = 13.sp,
+                                color = tokens.accent,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    } else {
+                        TextButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = onApprove,
+                        ) {
+                            Text(
+                                stringResource(R.string.task_bubble_approve),
+                                fontSize = 13.sp,
+                                color = tokens.accent,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                     TextButton(
                         modifier = Modifier.weight(1f),
@@ -411,14 +430,16 @@ fun AgentTaskBubbleContent(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onOpenConversation) {
-                    Text(
-                        stringResource(R.string.task_bubble_open_conversation),
-                        fontSize = 13.sp,
-                        color = tokens.accent,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                if (!showInAppApprovalActions) {
+                    TextButton(onClick = onOpenConversation) {
+                        Text(
+                            stringResource(R.string.task_bubble_open_conversation),
+                            fontSize = 13.sp,
+                            color = tokens.accent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 TextButton(onClick = onStop, enabled = running) {
@@ -433,4 +454,18 @@ fun AgentTaskBubbleContent(
             }
         }
     }
+}
+
+@Composable
+private fun inAppApprovalLabel(): String {
+    val locales = LocalConfiguration.current.locales
+    val locale = if (!locales.isEmpty) locales[0] else null
+    if (locale?.language.equals("zh", ignoreCase = true)) {
+        val isTraditional = locale?.script.equals("Hant", ignoreCase = true) ||
+            locale?.country.equals("TW", ignoreCase = true) ||
+            locale?.country.equals("HK", ignoreCase = true) ||
+            locale?.country.equals("MO", ignoreCase = true)
+        return if (isTraditional) "去 App 審批" else "去 App 审批"
+    }
+    return "Review in app"
 }

@@ -6,6 +6,8 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
+import app.amber.feature.tools.ACCESSIBILITY_L3_ACTION_TOOLS
+import app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -109,8 +111,59 @@ class AgentBubbleReducerTest {
         )
         assertTrue(state.waitingApproval)
         assertFalse(state.waitingAskUser)
+        assertTrue(state.requiresInAppApproval)
         assertEquals("call_p", state.approvalToolCallId)
         assertEquals("screen_click", state.approvalToolTitle)
+    }
+
+    @Test
+    fun `all accessibility l3 action tools require in-app approval`() {
+        assertTrue(ACCESSIBILITY_L3_ACTION_TOOLS.isNotEmpty())
+        ACCESSIBILITY_L3_ACTION_TOOLS.forEach { toolName ->
+            val state = AgentBubbleReducer.reduce(
+                previous = AgentBubbleUiState(),
+                pickedConversationId = conversationA,
+                activity = null,
+                messages = listOf(assistantMessage(pendingToolPart(toolName = toolName, callId = "call_$toolName"))),
+                nowMillis = 1_000L,
+            )
+            assertTrue("Expected waitingApproval for $toolName", state.waitingApproval)
+            assertFalse("Expected waitingAskUser=false for $toolName", state.waitingAskUser)
+            assertTrue("Expected requiresInAppApproval=true for $toolName", state.requiresInAppApproval)
+        }
+    }
+
+    @Test
+    fun `all ssh profile write tools require in-app approval without ask user state`() {
+        assertTrue(SSH_PROFILE_WRITE_TOOL_NAMES.isNotEmpty())
+        SSH_PROFILE_WRITE_TOOL_NAMES.forEach { toolName ->
+            val state = AgentBubbleReducer.reduce(
+                previous = AgentBubbleUiState(),
+                pickedConversationId = conversationA,
+                activity = null,
+                messages = listOf(assistantMessage(pendingToolPart(toolName = toolName, callId = "call_$toolName"))),
+                nowMillis = 1_000L,
+            )
+            assertTrue("Expected waitingApproval for $toolName", state.waitingApproval)
+            assertFalse("Expected waitingAskUser=false for $toolName", state.waitingAskUser)
+            assertTrue("Expected requiresInAppApproval=true for $toolName", state.requiresInAppApproval)
+        }
+    }
+
+    @Test
+    fun `regular tools do not require in-app approval`() {
+        listOf("terminal_execute", "screen_read_ui", "web_fetch").forEach { toolName ->
+            val state = AgentBubbleReducer.reduce(
+                previous = AgentBubbleUiState(),
+                pickedConversationId = conversationA,
+                activity = null,
+                messages = listOf(assistantMessage(pendingToolPart(toolName = toolName, callId = "call_$toolName"))),
+                nowMillis = 1_000L,
+            )
+            assertTrue("Expected waitingApproval for $toolName", state.waitingApproval)
+            assertFalse("Expected waitingAskUser=false for $toolName", state.waitingAskUser)
+            assertFalse("Expected requiresInAppApproval=false for $toolName", state.requiresInAppApproval)
+        }
     }
 
     @Test
@@ -129,6 +182,7 @@ class AgentBubbleReducerTest {
         )
         assertTrue(state.waitingApproval)
         assertTrue(state.waitingAskUser)
+        assertFalse(state.requiresInAppApproval)
     }
 
     @Test
@@ -203,6 +257,7 @@ class AgentBubbleReducerTest {
             phase = AgentBubblePhase.RUNNING,
             conversationId = conversationA,
             waitingApproval = true,
+            requiresInAppApproval = true,
             approvalToolCallId = "call_p",
             replyPreview = "旧预览",
         )
@@ -219,6 +274,7 @@ class AgentBubbleReducerTest {
         assertEquals(5_000L, finished.finishedAtMillis)
         assertEquals("任务完成，已打开设置", finished.replyPreview)
         assertFalse(finished.waitingApproval)
+        assertFalse(finished.requiresInAppApproval)
         assertNull(finished.approvalToolCallId)
         assertFalse(finished.stepRunning)
         assertFalse(AgentBubbleReducer.isTouchPassthrough(finished))
