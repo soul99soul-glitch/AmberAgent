@@ -26,6 +26,7 @@ import app.amber.feature.ui.pages.history.HistoryPage
 import app.amber.feature.ui.pages.personalagent.PersonalAgentPage
 import app.amber.feature.ui.pages.phoneuse.PhoneUseLivePage
 import app.amber.feature.ui.pages.phoneuse.SettingPhoneUseDisplayPage
+import app.amber.feature.ui.pages.proactive.CloudProactiveCenterPage
 import app.amber.feature.ui.pages.sessionhome.SessionHomePage
 import app.amber.feature.ui.pages.profile.ProfilePage
 import app.amber.feature.ui.pages.live.LiveCompanionPage
@@ -316,6 +317,10 @@ internal fun appNavigationEntries(): (NavKey) -> NavEntry<NavKey> = entryProvide
 
     entry<Screen.SettingExperimentalMacGateway>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
         SettingExperimentalMacGatewayPage()
+    }
+
+    entry<Screen.CloudProactiveCenter>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
+        CloudProactiveCenterPage()
     }
 
     entry<Screen.SettingExperimentalSubAgent>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {

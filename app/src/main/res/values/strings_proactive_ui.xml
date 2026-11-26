@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="proactive_card_urgent_badge">Urgent</string>
+    <string name="proactive_card_action_act">Let Amber handle</string>
+    <string name="proactive_card_action_snooze">In 1 hour</string>
+    <string name="proactive_card_action_mute">Fewer like this</string>
+    <string name="proactive_card_view_detail">View details</string>
+    <string name="proactive_card_status_act_sent">Sent to Amber in cloud chat</string>
+    <string name="proactive_card_status_snoozed">Will remind again in 1 hour</string>
+    <string name="proactive_card_status_muted">Reduced similar alerts</string>
+    <string name="proactive_card_status_opened">Opened</string>
+    <string name="proactive_card_status_dismissed">Dismissed</string>
+    <string name="proactive_card_action_failed">Action failed. Check your cloud connection and try again.</string>
+    <string name="proactive_card_source_watchtower">Watchtower</string>
+    <string name="proactive_card_source_webhook">Webhook</string>
+    <string name="proactive_card_source_pulse">Daily Pulse</string>
+    <string name="proactive_card_source_commitment">Reminder</string>
+    <string name="proactive_card_source_snooze">Snoozed</string>
+    <string name="proactive_card_source_agent">Amber</string>
+
+    <string name="proactive_detail_title">Proactive Alert</string>
+    <string name="proactive_detail_loading">Loading alert details…</string>
+    <string name="proactive_detail_not_found">This alert could not be found or has expired on the cloud server.</string>
+    <string name="proactive_detail_load_error">Could not load alert details.</string>
+    <string name="proactive_detail_retry">Retry</string>
+    <string name="proactive_detail_close">Close</string>
+    <string name="proactive_detail_topic_label">Topic: %1$s</string>
+
+    <string name="proactive_center_title">Proactive Center</string>
+    <string name="proactive_center_entry_desc">Reminders, daily brief, monitors, webhooks, and quiet hours</string>
+    <string name="proactive_center_entry_unpaired_desc">Pair a cloud gateway to manage proactive alerts</string>
+    <string name="proactive_center_chat_hint">To create monitors, webhooks, or follow-up reminders, simply tell Amber in your cloud conversation.</string>
+    <string name="proactive_center_refresh">Refresh</string>
+    <string name="proactive_center_unpaired_title">No cloud gateway paired</string>
+    <string name="proactive_center_unpaired_body">Pair your cloud gateway first to view and manage proactive reminders, monitors, and daily briefings.</string>
+    <string name="proactive_center_go_pair">Open Gateway Settings</string>
+    <string name="proactive_center_error_unsupported">This cloud server version does not support this feature yet.</string>
+    <string name="proactive_center_error_unreachable">Cloud gateway is unreachable. Check your connection and try again.</string>
+    <string name="proactive_center_error_unauthorized">Gateway authorization expired. Please re-pair in Gateway Settings.</string>
+    <string name="proactive_center_error_generic">Request failed: %1$s</string>
+    <string name="proactive_center_saved">Saved</string>
+
+    <string name="proactive_center_section_wakeups">Upcoming Reminders</string>
+    <string name="proactive_center_wakeups_empty">No upcoming reminders scheduled.</string>
+    <string name="proactive_center_wakeup_source_commitment">Noted from chat</string>
+    <string name="proactive_center_wakeup_source_snooze">Snoozed reminder</string>
+    <string name="proactive_center_wakeup_source_agent">Scheduled by Amber</string>
+    <string name="proactive_center_wakeup_cancel">Cancel</string>
+    <string name="proactive_center_wakeup_cancelled">Reminder cancelled</string>
+
+    <string name="proactive_center_section_restraint">Restraint &amp; Daily Pulse</string>
+    <string name="proactive_center_quiet_hours">Quiet hours</string>
+    <string name="proactive_center_quiet_hours_desc">Hold non-urgent alerts during quiet hours</string>
+    <string name="proactive_center_quiet_start">Start (HH:mm)</string>
+    <string name="proactive_center_quiet_end">End (HH:mm)</string>
+    <string name="proactive_center_daily_cap">Daily push limit</string>
+    <string name="proactive_center_daily_cap_usage">Today: %1$d / %2$d · Remaining: %3$d</string>
+    <string name="proactive_center_daily_cap_decrease">Decrease daily limit</string>
+    <string name="proactive_center_daily_cap_increase">Increase daily limit</string>
+    <string name="proactive_center_pulse">Daily Pulse morning brief</string>
+    <string name="proactive_center_pulse_desc">Bundle digest updates into a daily summary</string>
+    <string name="proactive_center_pulse_buffered">Buffered for next brief: %1$d</string>
+    <string name="proactive_center_pulse_time">Brief time (HH:mm)</string>
+    <string name="proactive_center_commitment">Auto-extract commitments</string>
+    <string name="proactive_center_commitment_desc">Automatically note follow-up promises from conversations</string>
+    <string name="proactive_center_save_schedule">Save times</string>
+    <string name="proactive_center_invalid_time">Enter valid 24-hour times in HH:mm format (e.g. 23:00)</string>
+
+    <string name="proactive_center_section_monitors">Monitors</string>
+    <string name="proactive_center_monitors_empty">No monitors configured yet.</string>
+    <string name="proactive_center_monitor_delivery_immediate">Instant push</string>
+    <string name="proactive_center_monitor_delivery_digest">Daily brief</string>
+    <string name="proactive_center_monitor_interval">Every %1$d min</string>
+    <string name="proactive_center_monitor_delete">Delete</string>
+    <string name="proactive_center_monitor_deleted">Monitor deleted</string>
+    <string name="proactive_center_github_title">Subscribe to GitHub Releases</string>
+    <string name="proactive_center_github_placeholder">owner/repo (e.g. JetBrains/kotlin)</string>
+    <string name="proactive_center_github_subscribe">Subscribe</string>
+    <string name="proactive_center_github_subscribed">Subscribed to %1$s releases</string>
+    <string name="proactive_center_github_err_format">Use exact owner/repo format (no URL or extra slashes)</string>
+    <string name="proactive_center_github_err_owner">Invalid GitHub owner name</string>
+    <string name="proactive_center_github_err_repo">Invalid GitHub repository name</string>
+
+    <string name="proactive_center_section_webhooks">Webhooks</string>
+    <string name="proactive_center_webhooks_empty">No inbound webhooks configured.</string>
+    <string name="proactive_center_webhook_triggers">Triggered %1$d times</string>
+    <string name="proactive_center_webhook_deleted">Webhook deleted</string>
+
+    <string name="proactive_center_section_muted">Muted Topics</string>
+    <string name="proactive_center_muted_empty">No muted topics.</string>
+    <string name="proactive_center_muted_until">Until %1$s</string>
+    <string name="proactive_center_unmute">Unmute</string>
+    <string name="proactive_center_unmuted">Topic unmuted</string>
+
+    <string name="proactive_center_section_runs">Recent Runs</string>
+    <string name="proactive_center_runs_empty">No recent proactive runs.</string>
+
+    <string name="proactive_center_confirm_delete_title">Confirm deletion</string>
+    <string name="proactive_center_confirm_delete_monitor">Delete monitor \"%1$s\"?</string>
+    <string name="proactive_center_confirm_delete_webhook">Delete webhook \"%1$s\"?</string>
+    <string name="proactive_center_cancel">Cancel</string>
+</resources>

@@ -14,10 +14,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.foundation.lazy.LazyListState
 import kotlinx.coroutines.flow.collect
 import app.amber.agent.BuildConfig
+import app.amber.agent.PersonalAgentMainSessionStore
 import app.amber.core.model.AssistantRegex
 import app.amber.core.utils.ChatSendTransitionTracker
+import app.amber.feature.macgateway.CloudProactiveRepository
+import app.amber.feature.macgateway.MacGatewayRepository
+import app.amber.feature.macgateway.ProactiveCard
 import app.amber.feature.ui.components.message.ChatMessageVirtualItem
 import app.amber.feature.ui.utils.ChatPerfTrace
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
+import org.koin.core.context.GlobalContext
 import java.util.Locale
 import kotlin.uuid.Uuid
 
@@ -67,6 +78,7 @@ internal fun rememberChatTimelinePlan(
             }
         }
     }
+    val proactiveCards = rememberScopedProactiveCards(conversation.id.toString())
     return remember(
         conversation.messageNodes,
         regexes,
@@ -79,24 +91,89 @@ internal fun rememberChatTimelinePlan(
         protectedStreamingNodeIds,
         virtualItemCache.preparedRevision,
         virtualItemCache.protectionRevision,
+        proactiveCards,
     ) {
         measureChatTimelinePlan(
             messageCount = conversation.messageNodes.size,
             cache = virtualItemCache,
         ) {
-            planReuseCache.build(
-                conversation = conversation,
-                assistant = regexes,
-                showAssistantBubble = showAssistantBubble,
-                timelineLoading = timelineLoading,
-                hasHistoryLoadingItem = hasHistoryLoadingItem,
-                pendingMessageCount = pendingMessageCount,
-                postSendState = postSendState,
-                virtualItemCache = virtualItemCache,
-                protectedStreamingNodeIds = protectedStreamingNodeIds,
-            ).copy(visualActivityCache = virtualItemCache)
+            val plan = if (proactiveCards.isEmpty()) {
+                planReuseCache.build(
+                    conversation = conversation,
+                    assistant = regexes,
+                    showAssistantBubble = showAssistantBubble,
+                    timelineLoading = timelineLoading,
+                    hasHistoryLoadingItem = hasHistoryLoadingItem,
+                    pendingMessageCount = pendingMessageCount,
+                    postSendState = postSendState,
+                    virtualItemCache = virtualItemCache,
+                    protectedStreamingNodeIds = protectedStreamingNodeIds,
+                )
+            } else {
+                buildChatTimelinePlan(
+                    conversation = conversation,
+                    assistant = regexes,
+                    showAssistantBubble = showAssistantBubble,
+                    timelineLoading = timelineLoading,
+                    hasHistoryLoadingItem = hasHistoryLoadingItem,
+                    pendingMessageCount = pendingMessageCount,
+                    postSendState = postSendState,
+                    virtualItemCache = virtualItemCache,
+                    protectedStreamingNodeIds = protectedStreamingNodeIds,
+                    proactiveCards = proactiveCards,
+                )
+            }
+            plan.copy(visualActivityCache = virtualItemCache)
         }
     }
+}
+
+/**
+ * Pure scope check for cloud main-stage proactive card injection.
+ * Returns the paired gateway ID only when [conversationId] matches the gateway's
+ * persisted cloud main conversation ID.
+ */
+internal fun resolveCloudMainGatewayIdForProactiveCards(
+    conversationId: String,
+    pairedGatewayId: String?,
+    peekCloudMainConversationId: (String) -> String?,
+): String? {
+    val gatewayId = pairedGatewayId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val cloudMainConversationId = peekCloudMainConversationId(gatewayId) ?: return null
+    return gatewayId.takeIf { cloudMainConversationId == conversationId }
+}
+
+@Composable
+private fun rememberScopedProactiveCards(conversationId: String): List<ProactiveCard> {
+    val koin = remember { GlobalContext.getOrNull() } ?: return emptyList()
+    val gatewayRepository = remember(koin) { koin.getOrNull<MacGatewayRepository>() } ?: return emptyList()
+    val mainSessionStore = remember(koin) { koin.getOrNull<PersonalAgentMainSessionStore>() } ?: return emptyList()
+    val proactiveRepository = remember(koin) { koin.getOrNull<CloudProactiveRepository>() } ?: return emptyList()
+
+    val pairedGatewayIdFlow = remember(gatewayRepository) {
+        gatewayRepository.state
+            .map { it.connection?.gatewayId }
+            .distinctUntilChanged()
+    }
+    val pairedGatewayId by pairedGatewayIdFlow.collectAsStateWithLifecycle(
+        initialValue = gatewayRepository.state.value.connection?.gatewayId,
+    )
+    val scopedGatewayId = remember(conversationId, pairedGatewayId, mainSessionStore) {
+        resolveCloudMainGatewayIdForProactiveCards(
+            conversationId = conversationId,
+            pairedGatewayId = pairedGatewayId,
+            peekCloudMainConversationId = mainSessionStore::peekCloudMainConversationId,
+        )
+    }
+    val cardsFlow = remember(proactiveRepository, scopedGatewayId) {
+        if (scopedGatewayId != null) {
+            proactiveRepository.cards(scopedGatewayId)
+        } else {
+            flowOf(emptyList())
+        }
+    }
+    val cards by cardsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    return cards
 }
 
 internal data class PostSendTimelineState(
@@ -220,6 +297,12 @@ internal sealed interface ChatTimelineEntry {
         override val messageIndex: Int? = null
     }
 
+    data class ProactiveCard(
+        val card: app.amber.feature.macgateway.ProactiveCard,
+    ) : ChatTimelineEntry {
+        override val messageIndex: Int? = null
+    }
+
     data object TimelineTail : ChatTimelineEntry {
         override val messageIndex: Int? = null
     }
@@ -236,6 +319,8 @@ internal fun buildChatTimelinePlan(
     virtualItemCache: ChatVirtualItemCache,
     protectedStreamingNodeIds: Set<Uuid> = emptySet(),
     reusedPrefix: ChatTimelinePrefix? = null,
+    proactiveCards: List<ProactiveCard> = emptyList(),
+    timeZone: TimeZone = TimeZone.currentSystemDefault(),
 ): ChatTimelinePlan {
     val regexes = assistant.orEmpty()
     // Built in reading order (oldest → newest, slices in reading order), then
@@ -244,14 +329,35 @@ internal fun buildChatTimelinePlan(
     // flips both the inter-message order and the intra-message virtual slice
     // order in one step.
     val tailEntries = if (reusedPrefix == null) {
+        val sortedCards = if (proactiveCards.isEmpty()) {
+            emptyList()
+        } else {
+            proactiveCards.sortedWith(
+                compareBy<ProactiveCard> { it.receivedAt }
+                    .thenBy { it.seq }
+                    .thenBy { it.eventId },
+            )
+        }
         buildList {
             if (hasHistoryLoadingItem) add(ChatTimelineEntry.HistoryLoading)
+            var nextCardIndex = 0
             conversation.messageNodes.forEachIndexed { index, node ->
+                if (nextCardIndex < sortedCards.size) {
+                    val nodeTimestampMs = node.currentMessage.createdAt.toInstant(timeZone).toEpochMilliseconds()
+                    while (nextCardIndex < sortedCards.size && sortedCards[nextCardIndex].receivedAt < nodeTimestampMs) {
+                        add(ChatTimelineEntry.ProactiveCard(sortedCards[nextCardIndex]))
+                        nextCardIndex++
+                    }
+                }
                 addTimelineMessageEntries(
                     index, node, conversation.messageNodes.lastIndex, regexes,
                     showAssistantBubble, timelineLoading, postSendState,
                     virtualItemCache, protectedStreamingNodeIds,
                 )
+            }
+            while (nextCardIndex < sortedCards.size) {
+                add(ChatTimelineEntry.ProactiveCard(sortedCards[nextCardIndex]))
+                nextCardIndex++
             }
             addTimelineTrailingEntries(postSendState, pendingMessageCount)
         }.reversed()

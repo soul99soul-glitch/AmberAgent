@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="proactive_card_urgent_badge">緊急</string>
+    <string name="proactive_card_action_act">讓 Amber 處理</string>
+    <string name="proactive_card_action_snooze">1 小時後</string>
+    <string name="proactive_card_action_mute">減少此類</string>
+    <string name="proactive_card_view_detail">檢視詳情</string>
+    <string name="proactive_card_status_act_sent">已交給雲端 Amber 處理</string>
+    <string name="proactive_card_status_snoozed">將在 1 小時後再次提醒</string>
+    <string name="proactive_card_status_muted">已減少此類提醒</string>
+    <string name="proactive_card_status_opened">已檢視</string>
+    <string name="proactive_card_status_dismissed">已忽略</string>
+    <string name="proactive_card_action_failed">操作未能完成，請檢查雲端連線後重試。</string>
+    <string name="proactive_card_source_watchtower">網頁監控</string>
+    <string name="proactive_card_source_webhook">Webhook</string>
+    <string name="proactive_card_source_pulse">每日晨報</string>
+    <string name="proactive_card_source_commitment">約定提醒</string>
+    <string name="proactive_card_source_snooze">稍後提醒</string>
+    <string name="proactive_card_source_agent">Amber 主動</string>
+
+    <string name="proactive_detail_title">主動提醒詳情</string>
+    <string name="proactive_detail_loading">正在載入提醒詳情…</string>
+    <string name="proactive_detail_not_found">找不到此提醒，或雲端已過期。</string>
+    <string name="proactive_detail_load_error">載入提醒詳情失敗。</string>
+    <string name="proactive_detail_retry">重試</string>
+    <string name="proactive_detail_close">關閉</string>
+    <string name="proactive_detail_topic_label">話題：%1$s</string>
+
+    <string name="proactive_center_title">主動中心</string>
+    <string name="proactive_center_entry_desc">管理待提醒、每日晨報、監控、Webhook 與節制規則</string>
+    <string name="proactive_center_entry_unpaired_desc">配對雲端閘道後可管理主動提醒</string>
+    <string name="proactive_center_chat_hint">建立監控、Webhook 或跟進提醒，可以直接在雲端對話裡告訴 Amber。</string>
+    <string name="proactive_center_refresh">重新整理</string>
+    <string name="proactive_center_unpaired_title">尚未配對雲端閘道</string>
+    <string name="proactive_center_unpaired_body">請先配對雲端閘道，隨後可在此管理待提醒、每日晨報、監控與 Webhook。</string>
+    <string name="proactive_center_go_pair">前往閘道配對</string>
+    <string name="proactive_center_error_unsupported">目前雲端版本暫不支援此項</string>
+    <string name="proactive_center_error_unreachable">無法連線雲端閘道，請檢查網路後重試。</string>
+    <string name="proactive_center_error_unauthorized">閘道認證已失效，請在閘道設定中重新配對。</string>
+    <string name="proactive_center_error_generic">請求失敗：%1$s</string>
+    <string name="proactive_center_saved">已儲存</string>
+
+    <string name="proactive_center_section_wakeups">待提醒</string>
+    <string name="proactive_center_wakeups_empty">暫無待觸發的提醒。</string>
+    <string name="proactive_center_wakeup_source_commitment">從對話記下</string>
+    <string name="proactive_center_wakeup_source_snooze">稍後提醒</string>
+    <string name="proactive_center_wakeup_source_agent">Amber 安排</string>
+    <string name="proactive_center_wakeup_cancel">取消提醒</string>
+    <string name="proactive_center_wakeup_cancelled">已取消該提醒</string>
+
+    <string name="proactive_center_section_restraint">節制與每日晨報</string>
+    <string name="proactive_center_quiet_hours">靜默時段</string>
+    <string name="proactive_center_quiet_hours_desc">靜默時段內暫緩非緊急推播</string>
+    <string name="proactive_center_quiet_start">開始時間 (HH:mm)</string>
+    <string name="proactive_center_quiet_end">結束時間 (HH:mm)</string>
+    <string name="proactive_center_daily_cap">每日推播上限</string>
+    <string name="proactive_center_daily_cap_usage">今日已推播 %1$d / %2$d · 剩餘 %3$d</string>
+    <string name="proactive_center_daily_cap_decrease">減少每日上限</string>
+    <string name="proactive_center_daily_cap_increase">增加每日上限</string>
+    <string name="proactive_center_pulse">Daily Pulse 每日晨報</string>
+    <string name="proactive_center_pulse_desc">將非緊急與併入晨報的更新彙總推播</string>
+    <string name="proactive_center_pulse_buffered">待併入下次晨報：%1$d 則</string>
+    <string name="proactive_center_pulse_time">晨報時間 (HH:mm)</string>
+    <string name="proactive_center_commitment">隱式承諾自動抽取</string>
+    <string name="proactive_center_commitment_desc">自動記下對話中提到的後續跟進事項</string>
+    <string name="proactive_center_save_schedule">儲存時間設定</string>
+    <string name="proactive_center_invalid_time">請輸入有效的 24 小時制時間（如 23:00）</string>
+
+    <string name="proactive_center_section_monitors">監控列表</string>
+    <string name="proactive_center_monitors_empty">暫無監控項。</string>
+    <string name="proactive_center_monitor_delivery_immediate">即時推播</string>
+    <string name="proactive_center_monitor_delivery_digest">併入晨報</string>
+    <string name="proactive_center_monitor_interval">每 %1$d 分鐘</string>
+    <string name="proactive_center_monitor_delete">刪除</string>
+    <string name="proactive_center_monitor_deleted">已刪除監控</string>
+    <string name="proactive_center_github_title">訂閱 GitHub Release</string>
+    <string name="proactive_center_github_placeholder">輸入 owner/repo（如 JetBrains/kotlin）</string>
+    <string name="proactive_center_github_subscribe">訂閱</string>
+    <string name="proactive_center_github_subscribed">已訂閱 %1$s 的版本發布</string>
+    <string name="proactive_center_github_err_format">請輸入 owner/repo 格式（不要包含連結或多餘斜線）</string>
+    <string name="proactive_center_github_err_owner">GitHub 使用者/組織名稱格式無效</string>
+    <string name="proactive_center_github_err_repo">GitHub 儲存庫名稱格式無效</string>
+
+    <string name="proactive_center_section_webhooks">Webhook 列表</string>
+    <string name="proactive_center_webhooks_empty">暫無 Webhook。</string>
+    <string name="proactive_center_webhook_triggers">已觸發 %1$d 次</string>
+    <string name="proactive_center_webhook_deleted">已刪除 Webhook</string>
+
+    <string name="proactive_center_section_muted">已靜音話題</string>
+    <string name="proactive_center_muted_empty">暫無已靜音話題。</string>
+    <string name="proactive_center_muted_until">靜音至 %1$s</string>
+    <string name="proactive_center_unmute">取消靜音</string>
+    <string name="proactive_center_unmuted">已取消靜音</string>
+
+    <string name="proactive_center_section_runs">最近執行記錄</string>
+    <string name="proactive_center_runs_empty">暫無最近執行記錄。</string>
+
+    <string name="proactive_center_confirm_delete_title">確認刪除</string>
+    <string name="proactive_center_confirm_delete_monitor">確定刪除監控「%1$s」嗎？</string>
+    <string name="proactive_center_confirm_delete_webhook">確定刪除 Webhook「%1$s」嗎？</string>
+    <string name="proactive_center_cancel">取消</string>
+</resources>

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="proactive_card_urgent_badge">紧急</string>
+    <string name="proactive_card_action_act">让 Amber 处理</string>
+    <string name="proactive_card_action_snooze">1 小时后</string>
+    <string name="proactive_card_action_mute">减少此类</string>
+    <string name="proactive_card_view_detail">查看详情</string>
+    <string name="proactive_card_status_act_sent">已交给云端 Amber 处理</string>
+    <string name="proactive_card_status_snoozed">将在 1 小时后再次提醒</string>
+    <string name="proactive_card_status_muted">已减少此类提醒</string>
+    <string name="proactive_card_status_opened">已查看</string>
+    <string name="proactive_card_status_dismissed">已忽略</string>
+    <string name="proactive_card_action_failed">操作未能完成，请检查云端连接后重试。</string>
+    <string name="proactive_card_source_watchtower">网页监控</string>
+    <string name="proactive_card_source_webhook">Webhook</string>
+    <string name="proactive_card_source_pulse">每日晨报</string>
+    <string name="proactive_card_source_commitment">约定提醒</string>
+    <string name="proactive_card_source_snooze">稍后提醒</string>
+    <string name="proactive_card_source_agent">Amber 主动</string>
+
+    <string name="proactive_detail_title">主动提醒详情</string>
+    <string name="proactive_detail_loading">正在加载提醒详情…</string>
+    <string name="proactive_detail_not_found">未找到该提醒，或云端已过期。</string>
+    <string name="proactive_detail_load_error">加载提醒详情失败。</string>
+    <string name="proactive_detail_retry">重试</string>
+    <string name="proactive_detail_close">关闭</string>
+    <string name="proactive_detail_topic_label">话题：%1$s</string>
+
+    <string name="proactive_center_title">主动中心</string>
+    <string name="proactive_center_entry_desc">管理待提醒、每日晨报、监控、Webhook 与节制规则</string>
+    <string name="proactive_center_entry_unpaired_desc">配对云端网关后可管理主动提醒</string>
+    <string name="proactive_center_chat_hint">创建监控、Webhook 或跟进提醒，可以直接在云端对话里告诉 Amber。</string>
+    <string name="proactive_center_refresh">刷新</string>
+    <string name="proactive_center_unpaired_title">尚未配对云端网关</string>
+    <string name="proactive_center_unpaired_body">请先配对云端网关，随后可在此管理待提醒、每日晨报、监控与 Webhook。</string>
+    <string name="proactive_center_go_pair">前往网关配对</string>
+    <string name="proactive_center_error_unsupported">当前云端版本暂不支持此项</string>
+    <string name="proactive_center_error_unreachable">无法连接云端网关，请检查网络后重试。</string>
+    <string name="proactive_center_error_unauthorized">网关认证已失效，请在网关设置中重新配对。</string>
+    <string name="proactive_center_error_generic">请求失败：%1$s</string>
+    <string name="proactive_center_saved">已保存</string>
+
+    <string name="proactive_center_section_wakeups">待提醒</string>
+    <string name="proactive_center_wakeups_empty">暂无待触发的提醒。</string>
+    <string name="proactive_center_wakeup_source_commitment">从对话记下</string>
+    <string name="proactive_center_wakeup_source_snooze">稍后提醒</string>
+    <string name="proactive_center_wakeup_source_agent">Amber 安排</string>
+    <string name="proactive_center_wakeup_cancel">取消提醒</string>
+    <string name="proactive_center_wakeup_cancelled">已取消该提醒</string>
+
+    <string name="proactive_center_section_restraint">节制与每日晨报</string>
+    <string name="proactive_center_quiet_hours">静默时段</string>
+    <string name="proactive_center_quiet_hours_desc">静默时段内暂缓非紧急推送</string>
+    <string name="proactive_center_quiet_start">开始时间 (HH:mm)</string>
+    <string name="proactive_center_quiet_end">结束时间 (HH:mm)</string>
+    <string name="proactive_center_daily_cap">每日推送上限</string>
+    <string name="proactive_center_daily_cap_usage">今日已推送 %1$d / %2$d · 剩余 %3$d</string>
+    <string name="proactive_center_daily_cap_decrease">减少每日上限</string>
+    <string name="proactive_center_daily_cap_increase">增加每日上限</string>
+    <string name="proactive_center_pulse">Daily Pulse 每日晨报</string>
+    <string name="proactive_center_pulse_desc">将非紧急与并入晨报的更新汇总推送</string>
+    <string name="proactive_center_pulse_buffered">待并入下次晨报：%1$d 条</string>
+    <string name="proactive_center_pulse_time">晨报时间 (HH:mm)</string>
+    <string name="proactive_center_commitment">隐式承诺自动抽取</string>
+    <string name="proactive_center_commitment_desc">自动记下对话中提到的后续跟进事项</string>
+    <string name="proactive_center_save_schedule">保存时间设置</string>
+    <string name="proactive_center_invalid_time">请输入有效的 24 小时制时间（如 23:00）</string>
+
+    <string name="proactive_center_section_monitors">监控列表</string>
+    <string name="proactive_center_monitors_empty">暂无监控项。</string>
+    <string name="proactive_center_monitor_delivery_immediate">即时推送</string>
+    <string name="proactive_center_monitor_delivery_digest">并入晨报</string>
+    <string name="proactive_center_monitor_interval">每 %1$d 分钟</string>
+    <string name="proactive_center_monitor_delete">删除</string>
+    <string name="proactive_center_monitor_deleted">已删除监控</string>
+    <string name="proactive_center_github_title">订阅 GitHub Release</string>
+    <string name="proactive_center_github_placeholder">输入 owner/repo（如 JetBrains/kotlin）</string>
+    <string name="proactive_center_github_subscribe">订阅</string>
+    <string name="proactive_center_github_subscribed">已订阅 %1$s 的版本发布</string>
+    <string name="proactive_center_github_err_format">请输入 owner/repo 格式（不要包含链接或多余斜杠）</string>
+    <string name="proactive_center_github_err_owner">GitHub 用户名/组织名格式无效</string>
+    <string name="proactive_center_github_err_repo">GitHub 仓库名格式无效</string>
+
+    <string name="proactive_center_section_webhooks">Webhook 列表</string>
+    <string name="proactive_center_webhooks_empty">暂无 Webhook。</string>
+    <string name="proactive_center_webhook_triggers">已触发 %1$d 次</string>
+    <string name="proactive_center_webhook_deleted">已删除 Webhook</string>
+
+    <string name="proactive_center_section_muted">已静音话题</string>
+    <string name="proactive_center_muted_empty">暂无已静音话题。</string>
+    <string name="proactive_center_muted_until">静音至 %1$s</string>
+    <string name="proactive_center_unmute">取消静音</string>
+    <string name="proactive_center_unmuted">已取消静音</string>
+
+    <string name="proactive_center_section_runs">最近运行记录</string>
+    <string name="proactive_center_runs_empty">暂无最近运行记录。</string>
+
+    <string name="proactive_center_confirm_delete_title">确认删除</string>
+    <string name="proactive_center_confirm_delete_monitor">确定删除监控「%1$s」吗？</string>
+    <string name="proactive_center_confirm_delete_webhook">确定删除 Webhook「%1$s」吗？</string>
+    <string name="proactive_center_cancel">取消</string>
+</resources>

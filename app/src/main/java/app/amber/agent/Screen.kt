@@ -188,6 +188,10 @@ sealed interface Screen : NavKey {
     @Serializable
     data object SettingExperimentalMacGateway : Screen
 
+    /** 云端轻量主动中心（P1–P3：待提醒、节制与每日晨报、监控、Webhook、已静音话题、运行记录）。 */
+    @Serializable
+    data object CloudProactiveCenter : Screen
+
     @Serializable
     data object SettingExperimentalSubAgent : Screen
 

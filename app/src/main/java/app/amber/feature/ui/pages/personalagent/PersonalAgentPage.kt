@@ -35,12 +35,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.PersonalAgentMainSessionStore
 import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.feature.macgateway.CloudProactiveRepository
 import app.amber.feature.macgateway.MacGatewayRepository
+import app.amber.feature.macgateway.ProactiveDeepLinkInbox
 import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.pages.chat.ChatPage
 import app.amber.feature.ui.pages.chat.ChatStageMode
 import app.amber.feature.ui.pages.chat.LocalPersonalAgentMoreMenu
+import app.amber.feature.ui.pages.proactive.LocalProactiveCardDetailOpener
+import app.amber.feature.ui.pages.proactive.ProactiveDetailSheet
 import app.amber.feature.ui.theme.LocalAmberTokens
 import com.composables.icons.lucide.EllipsisVertical
 import com.composables.icons.lucide.Layers
@@ -48,6 +52,7 @@ import com.composables.icons.lucide.LayoutDashboard
 import com.composables.icons.lucide.Link2
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Sparkles
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
@@ -65,7 +70,10 @@ fun PersonalAgentPage(
     val navController = LocalNavController.current
     val mainSessionStore: PersonalAgentMainSessionStore = koinInject()
     val macGatewayRepository: MacGatewayRepository = koinInject()
+    val proactiveRepository: CloudProactiveRepository = koinInject()
+    val proactiveDeepLinkInbox: ProactiveDeepLinkInbox = koinInject()
     val gatewayState by macGatewayRepository.state.collectAsStateWithLifecycle()
+    val pendingProactiveSignalId by proactiveDeepLinkInbox.pending.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     if (!gatewayState.loaded) {
@@ -92,12 +100,16 @@ fun PersonalAgentPage(
     }
 
     CompositionLocalProvider(
+        LocalProactiveCardDetailOpener provides { signalId ->
+            proactiveDeepLinkInbox.submit(signalId)
+        },
         LocalPersonalAgentMoreMenu provides { hasMessages, onToggleShelf ->
             PersonalAgentOverflowMenu(
                 pairedGatewayName = activeConnection?.name,
                 hasMessages = hasMessages,
                 onToggleShelf = onToggleShelf,
                 onOpenTodayBoard = { navController.navigate(Screen.TodayBoard) },
+                onOpenProactiveCenter = { navController.navigate(Screen.CloudProactiveCenter) },
                 onOpenPairedGateway = { navController.navigate(Screen.SettingExperimentalMacGateway) },
                 onOpenSettings = { navController.navigate(Screen.Setting) },
             )
@@ -126,6 +138,19 @@ fun PersonalAgentPage(
                 ),
             )
         }
+
+        val detailSignalId = pendingProactiveSignalId
+        if (detailSignalId != null) {
+            val detailConversationId = activeConnection?.let {
+                mainSessionStore.cloudMainConversationId(it.gatewayId)
+            } ?: resolvedId
+            ProactiveDetailSheet(
+                signalId = detailSignalId,
+                conversationId = detailConversationId,
+                repository = proactiveRepository,
+                onDismiss = { proactiveDeepLinkInbox.consume(detailSignalId) },
+            )
+        }
     }
 }
 
@@ -135,6 +160,7 @@ private fun PersonalAgentOverflowMenu(
     hasMessages: Boolean,
     onToggleShelf: () -> Unit,
     onOpenTodayBoard: () -> Unit,
+    onOpenProactiveCenter: () -> Unit,
     onOpenPairedGateway: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -182,6 +208,41 @@ private fun PersonalAgentOverflowMenu(
                 onClick = {
                     expanded = false
                     onOpenTodayBoard()
+                },
+            )
+            DropdownMenuItem(
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("personal-agent-menu-proactive-center"),
+                leadingIcon = {
+                    Icon(
+                        imageVector = Lucide.Sparkles,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+                text = {
+                    Column {
+                        Text(
+                            text = stringResource(R.string.proactive_center_title),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = stringResource(
+                                if (!pairedGatewayName.isNullOrBlank()) {
+                                    R.string.proactive_center_entry_desc
+                                } else {
+                                    R.string.proactive_center_entry_unpaired_desc
+                                },
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.ink3,
+                        )
+                    }
+                },
+                onClick = {
+                    expanded = false
+                    onOpenProactiveCenter()
                 },
             )
             DropdownMenuItem(
