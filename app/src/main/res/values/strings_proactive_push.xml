@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_channel_proactive_passive">Proactive Updates (Quiet)</string>
+    <string name="notification_channel_proactive_active">Proactive Reminders</string>
+    <string name="notification_channel_proactive_urgent">Urgent Proactive &amp; Approvals</string>
+
+    <string name="proactive_notif_action_act">Let Amber handle</string>
+    <string name="proactive_notif_action_snooze">In 1 hour</string>
+    <string name="proactive_notif_action_mute">Less like this</string>
+    <string name="proactive_notif_action_open_approval">Open app to review</string>
+
+    <string name="proactive_feedback_incomplete_title">Action not completed</string>
+    <string name="proactive_feedback_incomplete_body_snooze">Could not snooze this reminder. Open Amber to check your connection or try again.</string>
+    <string name="proactive_feedback_incomplete_body_mute">Could not reduce similar reminders. Open Amber to check your connection or try again.</string>
+    <string name="proactive_feedback_incomplete_body_generic">Could not complete this reminder action. Open Amber to check.</string>
+
+    <string name="quick_tile_amber_label">Amber</string>
+    <string name="quick_tile_amber_subtitle_idle">Personal Agent</string>
+    <string name="quick_tile_amber_subtitle_live">Virtual display active</string>
+</resources>

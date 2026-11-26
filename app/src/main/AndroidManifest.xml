@@ -207,6 +207,18 @@
           android:scheme="amberagent" />
       </intent-filter>
 
+      <!-- Cloud Proactive deep link: amber://proactive/<signalId> -->
+      <intent-filter android:autoVerify="false">
+        <action android:name="android.intent.action.VIEW" />
+
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+
+        <data
+          android:host="proactive"
+          android:scheme="amber" />
+      </intent-filter>
+
       <meta-data
         android:name="android.app.shortcuts"
         android:resource="@xml/shortcuts" />
@@ -267,6 +279,9 @@
       android:exported="false" />
     <receiver
       android:name="app.amber.core.automation.display.VirtualDisplayRunControlReceiver"
+      android:exported="false" />
+    <receiver
+      android:name="app.amber.feature.macgateway.ProactiveNotificationActionReceiver"
       android:exported="false" />
     <receiver
       android:name="app.amber.feature.terminal.TermuxCommandResultReceiver"
@@ -332,6 +347,22 @@
       <intent-filter>
         <action android:name="com.google.firebase.MESSAGING_EVENT" />
       </intent-filter>
+    </service>
+    <service
+      android:name="app.amber.feature.system.AmberQuickTileService"
+      android:exported="true"
+      android:icon="@drawable/ic_amber_tile"
+      android:label="@string/quick_tile_amber_label"
+      android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+      <intent-filter>
+        <action android:name="android.service.quicksettings.action.QS_TILE" />
+      </intent-filter>
+      <meta-data
+        android:name="android.service.quicksettings.ACTIVE_TILE"
+        android:value="false" />
+      <meta-data
+        android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+        android:value="false" />
     </service>
     <meta-data
       android:name="com.google.firebase.messaging.default_notification_icon"

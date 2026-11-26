@@ -14,6 +14,9 @@ const val NOVEL_GHOSTWRITE_FAILURE_NOTIFICATION_CHANNEL_ID = "novel_ghostwrite_f
 // Must match `channel_id` sent by amber-gateway's FCM sender.
 const val MAC_GATEWAY_NOTIFICATION_CHANNEL_ID = "mac_gateway"
 const val PHONE_USE_RUN_CHANNEL_ID = "phone_use_virtual_run"
+const val PROACTIVE_PASSIVE_CHANNEL_ID = "amber_proactive_passive"
+const val PROACTIVE_ACTIVE_CHANNEL_ID = "amber_proactive_active"
+const val PROACTIVE_URGENT_CHANNEL_ID = "amber_proactive_urgent"
 
 
 internal fun Application.createNotificationChannel() {
@@ -95,4 +98,28 @@ internal fun Application.createNotificationChannel() {
         .setShowBadge(false)
         .build()
     notificationManager.createNotificationChannel(phoneUseRunChannel)
+
+    val proactivePassiveChannel = NotificationChannelCompat
+        .Builder(PROACTIVE_PASSIVE_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+        .setName(getString(R.string.notification_channel_proactive_passive))
+        .setVibrationEnabled(false)
+        .setShowBadge(false)
+        .build()
+    notificationManager.createNotificationChannel(proactivePassiveChannel)
+
+    val proactiveActiveChannel = NotificationChannelCompat
+        .Builder(PROACTIVE_ACTIVE_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_DEFAULT)
+        .setName(getString(R.string.notification_channel_proactive_active))
+        .setVibrationEnabled(false)
+        .setShowBadge(true)
+        .build()
+    notificationManager.createNotificationChannel(proactiveActiveChannel)
+
+    val proactiveUrgentChannel = NotificationChannelCompat
+        .Builder(PROACTIVE_URGENT_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_HIGH)
+        .setName(getString(R.string.notification_channel_proactive_urgent))
+        .setVibrationEnabled(true)
+        .setShowBadge(true)
+        .build()
+    notificationManager.createNotificationChannel(proactiveUrgentChannel)
 }

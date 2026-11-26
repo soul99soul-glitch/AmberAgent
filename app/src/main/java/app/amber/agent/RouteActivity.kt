@@ -103,6 +103,8 @@ import app.amber.feature.ui.pages.live.LiveCompanionDeepLink
 import app.amber.core.utils.openUrl
 import app.amber.feature.ui.pages.novel.NovelLaunchCurtain
 import app.amber.feature.board.worker.BoardNotifier
+import app.amber.feature.macgateway.ProactiveDeepLinkInbox
+import app.amber.feature.macgateway.ProactiveForegroundStageTracker
 import app.amber.feature.runtime.RunTerminalStore
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.feature.ui.theme.AmberAgentTheme
@@ -149,9 +151,12 @@ class RouteActivity : FragmentActivity() {
     private val oauthCallbackDispatcher by inject<app.amber.feature.webmount.oauth.OAuthCallbackDispatcher>()
     private val runTerminalStore by inject<RunTerminalStore>()
     private val conversationRepository by inject<app.amber.core.repository.ConversationRepository>()
+    private val proactiveDeepLinkInbox by inject<ProactiveDeepLinkInbox>()
     private var navStack: MutableList<NavKey>? = null
     private var newIntentHandler: ((Intent) -> Unit)? = null
     private var shareIntentConsumed = false
+    private var proactiveDeepLinkConsumed = false
+    private var launchedFromProactiveDeepLink = false
 
     // Volume key listener registry — last registered handler wins
     internal val volumeKeyListeners = mutableListOf<(isVolumeUp: Boolean) -> Boolean>()
@@ -160,6 +165,7 @@ class RouteActivity : FragmentActivity() {
         const val EXTRA_OPEN_CHAT_PROMPT = "openChatPrompt"
         const val EXTRA_OPEN_LIVE_COMPANION = "openLiveCompanion"
         private const val STATE_SHARE_INTENT_CONSUMED = "shareIntentConsumed"
+        private const val STATE_PROACTIVE_DEEP_LINK_CONSUMED = "proactiveDeepLinkConsumed"
     }
 
     @SuppressLint("RestrictedApi")
@@ -199,10 +205,24 @@ class RouteActivity : FragmentActivity() {
         }
         enableAmberHdrWindow()
         shareIntentConsumed = savedInstanceState?.getBoolean(STATE_SHARE_INTENT_CONSUMED) ?: false
+        proactiveDeepLinkConsumed = savedInstanceState?.getBoolean(STATE_PROACTIVE_DEEP_LINK_CONSUMED) ?: false
         if (CrashHandler.hasCrashed(this)) {
             startActivity(Intent(this, SafeModeActivity::class.java))
             finish()
             return
+        }
+        if (StandaloneSurfaces.current != StandaloneSurfaces.NOVEL &&
+            StandaloneSurfaces.current != StandaloneSurfaces.DEEP_READ
+        ) {
+            val coldSignalId = consumeProactiveDeepLink(
+                intent = intent,
+                inbox = proactiveDeepLinkInbox,
+                alreadyConsumed = proactiveDeepLinkConsumed,
+            )
+            if (coldSignalId != null) {
+                proactiveDeepLinkConsumed = true
+                launchedFromProactiveDeepLink = true
+            }
         }
         // Phase 2 M2.0.3 fix: cold-start OAuth callback (e.g. AmberAgent's
         // process was killed during the browser handoff) lands here via
@@ -377,20 +397,51 @@ class RouteActivity : FragmentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        ProactiveForegroundStageTracker.onActivityForegroundChanged(true)
+    }
+
+    override fun onStop() {
+        ProactiveForegroundStageTracker.onActivityForegroundChanged(false)
+        super.onStop()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean(STATE_SHARE_INTENT_CONSUMED, shareIntentConsumed)
+        outState.putBoolean(STATE_PROACTIVE_DEEP_LINK_CONSUMED, proactiveDeepLinkConsumed)
         super.onSaveInstanceState(outState)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         shareIntentConsumed = false
+        proactiveDeepLinkConsumed = false
         setIntent(intent)
         // WebMount OAuth callback: amberagent://oauth/<provider>?code=...&state=...
         // Dispatched before any other handler so the awaiting OAuth flow gets
         // its callback even if other branches would also touch this intent.
         intent.data?.takeIf { it.scheme == "amberagent" && it.host == "oauth" }?.let { uri ->
             oauthCallbackDispatcher.dispatch(uri)
+        }
+        if (StandaloneSurfaces.current != StandaloneSurfaces.NOVEL &&
+            StandaloneSurfaces.current != StandaloneSurfaces.DEEP_READ
+        ) {
+            val warmProactiveSignalId = consumeProactiveDeepLink(
+                intent = intent,
+                inbox = proactiveDeepLinkInbox,
+                alreadyConsumed = false,
+            )
+            if (warmProactiveSignalId != null) {
+                proactiveDeepLinkConsumed = true
+                navStack?.let(::applyProactiveDeepLinkToBackStack)
+            }
+            phoneUseLiveScreenFromIntent(intent)?.let { screen ->
+                if (navStack?.lastOrNull() != screen) navStack?.add(screen)
+            }
+            if (openPersonalAgentFromIntent(intent)) {
+                navStack?.let(::applyProactiveDeepLinkToBackStack)
+            }
         }
         // Notification deep links use the same parser as cold start. A
         // malformed conversation identity is ignored; a valid conversation is
@@ -533,6 +584,15 @@ class RouteActivity : FragmentActivity() {
             standaloneStartScreen(intent)?.let { screen ->
                 return@remember screen
             }
+            if (launchedFromProactiveDeepLink) {
+                return@remember Screen.PersonalAgent
+            }
+            phoneUseLiveScreenFromIntent(intent)?.let { screen ->
+                return@remember screen
+            }
+            if (openPersonalAgentFromIntent(intent)) {
+                return@remember Screen.PersonalAgent
+            }
             // Cold-start notification taps must win over launch-mode/last-
             // conversation resolution. This prevents a mismatched run from
             // being hidden by an unrelated last session.
@@ -578,7 +638,11 @@ class RouteActivity : FragmentActivity() {
         }
 
         val initialBackStack = remember(startScreen, startMode) {
-            initialBackStackFor(startScreen = startScreen, startMode = startMode)
+            if (startScreen is Screen.PhoneUseLive) {
+                listOf(Screen.PersonalAgent, startScreen)
+            } else {
+                initialBackStackFor(startScreen = startScreen, startMode = startMode)
+            }
         }
         val backStack = rememberNavBackStack(*initialBackStack.toTypedArray())
         val navigator = remember(backStack) { Navigator(backStack) }
@@ -587,7 +651,8 @@ class RouteActivity : FragmentActivity() {
         val perfDarkMode = if (ChatPerfHomeEntry.enabled) LocalDarkMode.current else false
         // Read the snapshot-backed stack IN composition: an effect-only read
         // does not subscribe this parent when NavDisplay changes its top entry.
-        val perfTop = if (ChatPerfHomeEntry.enabled) backStack.lastOrNull() else null
+        val currentTopEntry = backStack.lastOrNull()
+        val perfTop = if (ChatPerfHomeEntry.enabled) currentTopEntry else null
         val perfTopRoute = when (perfTop) {
             is Screen.SessionHome -> "Home"
             is Screen.Chat -> "Chat"
@@ -595,6 +660,7 @@ class RouteActivity : FragmentActivity() {
             else -> "Other"
         }
         SideEffect {
+            ProactiveForegroundStageTracker.onTopRouteChanged(currentTopEntry == Screen.PersonalAgent)
             if (ChatPerfHomeEntry.enabled) {
                 val c = resources.configuration
                 val d = settings.displaySetting

@@ -1,10 +1,69 @@
 package app.amber.agent
 
 import android.content.Intent
+import android.net.Uri
+import androidx.navigation3.runtime.NavKey
+import app.amber.core.automation.display.VirtualDisplayRunNotifier
 import app.amber.feature.board.hotlist.deepread.DeepReadNotifier
+import app.amber.feature.macgateway.ProactiveContract
+import app.amber.feature.macgateway.ProactiveDeepLinkInbox
 import app.amber.feature.runtime.RunTerminal
 import app.amber.core.utils.base64Encode
 import kotlin.uuid.Uuid
+
+internal const val EXTRA_OPEN_PERSONAL_AGENT = "openPersonalAgent"
+private val PROACTIVE_DEEP_LINK_REGEX = Regex("^amber://proactive/([A-Za-z0-9_-]{1,48})$")
+
+/**
+ * Strictly parses `amber://proactive/<signalId>`.
+ * Rejects any multi-segment path, trailing slash, query string, fragment, userinfo, port,
+ * percent-encoded traversal, or illegal `signalId` character outside `^[A-Za-z0-9_-]{1,48}$`.
+ */
+internal fun proactiveDeepLinkSignalIdFrom(rawUri: String?): String? {
+    if (rawUri == null) return null
+    val match = PROACTIVE_DEEP_LINK_REGEX.matchEntire(rawUri) ?: return null
+    val signalId = match.groupValues[1]
+    return signalId.takeIf { ProactiveContract.isValidSignalId(it) }
+}
+
+internal fun proactiveDeepLinkSignalIdFrom(uri: Uri?): String? =
+    proactiveDeepLinkSignalIdFrom(uri?.toString())
+
+internal fun proactiveDeepLinkSignalIdFrom(intent: Intent?): String? =
+    proactiveDeepLinkSignalIdFrom(intent?.data)
+
+/**
+ * One-shot consumer for `amber://proactive/<signalId>`: validates, clears `intent.data`,
+ * and submits the signal ID to [ProactiveDeepLinkInbox] exactly once.
+ */
+internal fun consumeProactiveDeepLink(
+    intent: Intent?,
+    inbox: ProactiveDeepLinkInbox,
+    alreadyConsumed: Boolean = false,
+): String? {
+    if (alreadyConsumed || intent == null) return null
+    val signalId = proactiveDeepLinkSignalIdFrom(intent) ?: return null
+    intent.data = null
+    inbox.submit(signalId)
+    return signalId
+}
+
+/** Ensures the navigation stack resolves to `[Screen.PersonalAgent]`. */
+internal fun applyProactiveDeepLinkToBackStack(backStack: MutableList<NavKey>) {
+    backStack.clear()
+    backStack.add(Screen.PersonalAgent)
+}
+
+internal fun phoneUseLiveScreenFromIntent(intent: Intent?): Screen.PhoneUseLive? {
+    val runId = intent?.getStringExtra(VirtualDisplayRunNotifier.EXTRA_RUN_ID)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: return null
+    return Screen.PhoneUseLive(runId = runId)
+}
+
+internal fun openPersonalAgentFromIntent(intent: Intent?): Boolean =
+    intent?.getBooleanExtra(EXTRA_OPEN_PERSONAL_AGENT, false) == true
 
 internal fun standaloneStartScreen(intent: Intent, surface: String = StandaloneSurfaces.current): Screen? = when (surface) {
     StandaloneSurfaces.NOVEL ->

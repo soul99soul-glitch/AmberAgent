@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_channel_proactive_passive">主动消息（静默）</string>
+    <string name="notification_channel_proactive_active">主动提醒</string>
+    <string name="notification_channel_proactive_urgent">紧急主动提醒与审批</string>
+
+    <string name="proactive_notif_action_act">让 Amber 处理</string>
+    <string name="proactive_notif_action_snooze">1 小时后</string>
+    <string name="proactive_notif_action_mute">减少此类</string>
+    <string name="proactive_notif_action_open_approval">打开 App 审批</string>
+
+    <string name="proactive_feedback_incomplete_title">操作未完成</string>
+    <string name="proactive_feedback_incomplete_body_snooze">未能完成「1 小时后」操作，请打开 Amber 检查配对状态或重试。</string>
+    <string name="proactive_feedback_incomplete_body_mute">未能完成「减少此类」操作，请打开 Amber 检查配对状态或重试。</string>
+    <string name="proactive_feedback_incomplete_body_generic">未能完成此提醒操作，请打开 Amber 查看。</string>
+
+    <string name="quick_tile_amber_label">Amber</string>
+    <string name="quick_tile_amber_subtitle_idle">主舞台</string>
+    <string name="quick_tile_amber_subtitle_live">虚拟屏运行中</string>
+</resources>

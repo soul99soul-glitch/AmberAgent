@@ -20,6 +20,8 @@ import app.amber.feature.macgateway.CloudProactiveRepository
 import app.amber.feature.macgateway.ConversationStoreCloudDialogueSink
 import app.amber.feature.macgateway.MacGatewayRepository
 import app.amber.feature.macgateway.ProactiveDeepLinkInbox
+import app.amber.feature.macgateway.ProactiveFeedbackExecutor
+import app.amber.feature.macgateway.ProactiveNotificationPresenter
 import app.amber.feature.prompts.AgentSoulStore
 import org.koin.dsl.module
 
@@ -75,6 +77,23 @@ val appModule = module {
             dao = get<ProactiveCardDao>(),
             gateway = get<MacGatewayRepository>(),
             secretStore = get<SecretStore>(),
+        )
+    }
+
+    single {
+        ProactiveNotificationPresenter(
+            context = get<Context>(),
+            gatewayRepository = get<MacGatewayRepository>(),
+            proactiveRepository = get<CloudProactiveRepository>(),
+        )
+    }
+
+    single {
+        ProactiveFeedbackExecutor(
+            gatewayRepository = get<MacGatewayRepository>(),
+            proactiveCardDao = get<ProactiveCardDao>(),
+            secretStore = get<SecretStore>(),
+            presenter = get<ProactiveNotificationPresenter>(),
         )
     }
 
