@@ -10,9 +10,15 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewTreeObserver
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicBoolean
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -65,7 +71,13 @@ import com.dokar.sonner.Toaster
 import com.dokar.sonner.rememberToasterState
 import app.amber.highlight.Highlighter
 import app.amber.highlight.LocalHighlighter
+import app.amber.core.infra.PreferencesKeys
+import app.amber.core.settings.AgentRuntimeSetting
+import app.amber.core.settings.DisplaySetting
+import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.settingsStore
+import app.amber.core.utils.JsonInstant
 import app.amber.core.event.AppEvent
 import app.amber.core.event.AppEventBus
 import app.amber.core.memory.dream.MemoryDreamNotifier
@@ -78,6 +90,7 @@ import app.amber.feature.ui.context.Navigator
 import app.amber.feature.ui.hooks.containsPreference
 import app.amber.feature.ui.hooks.readBooleanPreference
 import app.amber.feature.ui.hooks.readStringPreference
+import androidx.core.content.edit
 import app.amber.feature.ui.utils.ChatPerfTrace
 import app.amber.feature.ui.utils.ChatPerfHomeEntry
 import app.amber.feature.ui.utils.HOME_FIRST_PATH
@@ -103,6 +116,13 @@ import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
 private const val TAG = "RouteActivity"
+internal const val STARTUP_THEME_PREFS_NAME = "amber_agent.preferences"
+internal const val STARTUP_THEME_SNAPSHOT_KNOWN_PREF = "startup_theme_snapshot_known"
+internal const val STARTUP_THEME_REQUIRES_CUSTOM_DISPLAY_PREF = "startup_theme_requires_custom_display"
+private const val MINIMAL_THEME_PROBE_TIMEOUT_MS = 500L
+private const val CUSTOM_THEME_READY_TIMEOUT_MS = 2_000L
+private val DEFAULT_STARTUP_DISPLAY_SETTING = DisplaySetting()
+private val DEFAULT_DEEP_READ_ACCENT = AgentRuntimeSetting().todayBoard.deepReadAccent
 private const val ROUTE_TRANSITION_DURATION_MILLIS = 320
 private val RouteTransitionEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 private val RouteTransitionSpec = tween<IntOffset>(
@@ -201,57 +221,154 @@ class RouteActivity : FragmentActivity() {
         if (savedInstanceState == null && intent?.getBooleanExtra(EXTRA_OPEN_LIVE_COMPANION, false) == true) {
             LiveCompanionDeepLink.request()
         }
-        // Keep the launch window visible until settings are ready so Compose's
-        // first frame uses the saved theme. A timeout preserves the dummy
-        // settings fallback without blocking the main thread.
-        var contentReady = false
+        // Shrink the pre-draw gate to the minimal appearance snapshot needed to
+        // avoid a theme flash:
+        // - colorMode and amoledDark are read synchronously from SharedPreferences
+        //   inside AmberAgentTheme.
+        // - Only non-default DataStore appearance overrides (custom base family,
+        //   accent color, themePack, or DeepRead accent) require waiting for
+        //   SettingsAggregator before the first draw.
+        // Compose setContent runs immediately so composition and settings decoding
+        // overlap instead of blocking serially.
+        val currentSettings = settingsStore.settingsFlow.value
+        val knownCustomTheme = readStartupThemeRequiresCustomDisplay()
+        var contentReady = !currentSettings.init || knownCustomTheme == false
         val contentView = findViewById<View>(android.R.id.content)
-        contentView.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
-            override fun onPreDraw(): Boolean {
-                if (!contentReady) return false
-                contentView.viewTreeObserver.removeOnPreDrawListener(this)
-                return true
-            }
-        })
-        lifecycleScope.launch {
-            withTimeoutOrNull(2_000) {
-                settingsStore.settingsFlow.first { !it.init }
-            }
-            // W16-B: refresh dynamic launcher shortcuts after settings are
-            // initialized; failures never block startup.
-            lifecycleScope.launch {
-                runCatching {
-                    app.amber.feature.tools.DynamicShortcutPublisher.publish(
-                        context = this@RouteActivity,
-                        settingsStore = settingsStore,
-                        conversationRepository = conversationRepository,
-                    )
+        if (!contentReady) {
+            contentView.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+                override fun onPreDraw(): Boolean {
+                    if (!contentReady) return false
+                    contentView.viewTreeObserver.removeOnPreDrawListener(this)
+                    return true
                 }
-            }
-            setContent {
-                AmberAgentTheme {
-                    setSingletonImageLoaderFactory { context ->
-                        ImageLoader.Builder(context)
-                            .crossfade(true)
-                            .components {
-                                add(OkHttpNetworkFetcherFactory(
-                                    callFactory = { okHttpClient },
-                                    cacheStrategy = { CacheControlCacheStrategy() },
-                                ))
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                    add(AnimatedImageDecoder.Factory())
-                                } else {
-                                    add(GifDecoder.Factory())
-                                }
-                                add(SvgDecoder.Factory(scaleToDensity = true))
-                            }
-                            .build()
-                    }
-                    AppRoutes()
-                }
-            }
-            contentReady = true
+            })
         }
+        val firstFrameNotified = AtomicBoolean(false)
+        val firstDrawListener = object : ViewTreeObserver.OnDrawListener {
+            override fun onDraw() {
+                if (!contentReady || !firstFrameNotified.compareAndSet(false, true)) return
+                contentView.post {
+                    val observer = contentView.viewTreeObserver
+                    if (observer.isAlive) {
+                        observer.removeOnDrawListener(this)
+                    }
+                    (application as? AmberAgentApp)?.notifyFirstFrameRendered()
+                    scheduleDynamicShortcutRefresh()
+                }
+            }
+        }
+        contentView.viewTreeObserver.addOnDrawListener(firstDrawListener)
+
+        setContent {
+            AmberAgentTheme {
+                setSingletonImageLoaderFactory { context ->
+                    ImageLoader.Builder(context)
+                        .crossfade(true)
+                        .components {
+                            add(OkHttpNetworkFetcherFactory(
+                                callFactory = { okHttpClient },
+                                cacheStrategy = { CacheControlCacheStrategy() },
+                            ))
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                add(AnimatedImageDecoder.Factory())
+                            } else {
+                                add(GifDecoder.Factory())
+                            }
+                            add(SvgDecoder.Factory(scaleToDensity = true))
+                        }
+                        .build()
+                }
+                AppRoutes()
+            }
+        }
+
+        if (!contentReady) {
+            lifecycleScope.launch {
+                val requiresCustomTheme = knownCustomTheme ?: withTimeoutOrNull(MINIMAL_THEME_PROBE_TIMEOUT_MS) {
+                    probeMinimalStartupThemeRequiresCustomDisplay()
+                } ?: true
+                if (requiresCustomTheme) {
+                    withTimeoutOrNull(CUSTOM_THEME_READY_TIMEOUT_MS) {
+                        settingsStore.settingsFlow.first { !it.init }
+                    }
+                }
+                contentReady = true
+                contentView.postInvalidateOnAnimation()
+            }
+        }
+        // Keep the lightweight startup theme snapshot in sync whenever persisted
+        // display settings change so the next cold start avoids any DataStore probe.
+        lifecycleScope.launch {
+            settingsStore.settingsFlow
+                .filterNot { it.init }
+                .map(::requiresCustomStartupTheme)
+                .distinctUntilChanged()
+                .collect(::writeStartupThemeRequiresCustomDisplay)
+        }
+    }
+
+    private fun scheduleDynamicShortcutRefresh() {
+        // W16-B: refresh dynamic launcher shortcuts off the main thread after
+        // the first frame and full settings initialization; failures never block startup.
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching {
+                settingsStore.settingsFlow.first { !it.init }
+                app.amber.feature.tools.DynamicShortcutPublisher.publish(
+                    context = this@RouteActivity,
+                    settingsStore = settingsStore,
+                    conversationRepository = conversationRepository,
+                )
+            }
+        }
+    }
+
+    private fun readStartupThemeRequiresCustomDisplay(): Boolean? {
+        if (!containsPreference(STARTUP_THEME_SNAPSHOT_KNOWN_PREF)) return null
+        return readBooleanPreference(STARTUP_THEME_REQUIRES_CUSTOM_DISPLAY_PREF, true)
+    }
+
+    private fun writeStartupThemeRequiresCustomDisplay(requiresCustom: Boolean) {
+        getSharedPreferences(STARTUP_THEME_PREFS_NAME, MODE_PRIVATE).edit {
+            putBoolean(STARTUP_THEME_SNAPSHOT_KNOWN_PREF, true)
+            putBoolean(STARTUP_THEME_REQUIRES_CUSTOM_DISPLAY_PREF, requiresCustom)
+        }
+    }
+
+    private suspend fun probeMinimalStartupThemeRequiresCustomDisplay(): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val prefs = applicationContext.settingsStore.data.first()
+                val rawDisplay = prefs[PreferencesKeys.DISPLAY_SETTING]
+                val display = rawDisplay?.let {
+                    runCatching { JsonInstant.decodeFromString<DisplaySetting>(it) }.getOrNull()
+                } ?: DisplaySetting()
+                if (hasCustomDisplayAppearance(display)) {
+                    return@runCatching true
+                }
+                if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+                    val rawAgent = prefs[PreferencesKeys.AGENT_RUNTIME]
+                    val agent = rawAgent?.let {
+                        runCatching { JsonInstant.decodeFromString<AgentRuntimeSetting>(it) }.getOrNull()
+                    }
+                    return@runCatching agent != null &&
+                        agent.todayBoard.deepReadAccent != DEFAULT_DEEP_READ_ACCENT
+                }
+                false
+            }.getOrDefault(true)
+        }
+
+    private fun requiresCustomStartupTheme(settings: Settings): Boolean {
+        if (hasCustomDisplayAppearance(settings.displaySetting)) return true
+        if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+            return settings.agentRuntime.todayBoard.deepReadAccent != DEFAULT_DEEP_READ_ACCENT
+        }
+        return false
+    }
+
+    private fun hasCustomDisplayAppearance(display: DisplaySetting): Boolean {
+        return display.amberBaseFamily != DEFAULT_STARTUP_DISPLAY_SETTING.amberBaseFamily ||
+            display.accentColor != DEFAULT_STARTUP_DISPLAY_SETTING.accentColor ||
+            display.themePack != null
     }
 
     private fun disableNavigationBarContrast() {
