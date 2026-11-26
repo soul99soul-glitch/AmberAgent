@@ -10,6 +10,17 @@ import app.amber.feature.ui.hooks.ChatInputAttachmentImportStatus
 import app.amber.feature.ui.hooks.ChatInputState
 import kotlin.uuid.Uuid
 
+/** Pure admission rule for whether a submitted message may arm a send stage. */
+internal fun shouldTriggerSendStage(
+    editingMessage: Uuid?,
+    queueMode: PendingUserMessageMode,
+    generating: Boolean,
+    followupTargetActive: Boolean,
+): Boolean = editingMessage == null &&
+    queueMode != PendingUserMessageMode.STEER &&
+    !generating &&
+    !followupTargetActive
+
 /** Page-level admission and edit actions; the composer retains its one submission owner. */
 internal class ChatPageInputActions(
     private val input: ChatInputState,
@@ -17,6 +28,11 @@ internal class ChatPageInputActions(
     private val configurationIssue: ChatConfigurationIssue?,
     private val generating: Boolean,
     private val cloudDialogueMode: Boolean = false,
+    private val conversationId: String = "",
+    private val sendStage: ChatSendStageState? = null,
+    private val isFollowupTargetActive: () -> Boolean = { false },
+    private val nextSendRevision: () -> Long = { 1L },
+    private val hideKeyboard: () -> Unit = {},
     private val showError: (messageRes: Int) -> Unit,
     private val sendMessage: (parts: List<UIMessagePart>, answer: Boolean, queueMode: PendingUserMessageMode) -> Boolean,
     private val editMessage: (parts: List<UIMessagePart>, messageId: Uuid, regenerate: Boolean) -> Boolean,
@@ -51,11 +67,27 @@ internal class ChatPageInputActions(
         editingMessage: Uuid?,
     ): Boolean {
         if (!checkConfiguration(parts, editingMessage)) return false
-        return if (editingMessage != null) {
-            editMessage(parts, editingMessage, true)
-        } else {
-            sendMessage(parts, true, queueMode)
+        if (editingMessage != null) {
+            return editMessage(parts, editingMessage, true)
         }
+        val armStage = shouldTriggerSendStage(
+            editingMessage = null,
+            queueMode = queueMode,
+            generating = generating,
+            followupTargetActive = isFollowupTargetActive(),
+        )
+        val accepted = sendMessage(parts, true, queueMode)
+        if (accepted && armStage) {
+            sendStage?.onSubmitAccepted(
+                SendStageIntent(
+                    host = if (cloudDialogueMode) "cloud" else "local",
+                    conversationId = conversationId,
+                    sendRevision = nextSendRevision(),
+                ),
+            )
+            hideKeyboard()
+        }
+        return accepted
     }
 
     fun longSend(

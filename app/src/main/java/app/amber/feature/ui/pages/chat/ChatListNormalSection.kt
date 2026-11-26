@@ -210,6 +210,7 @@ internal fun ChatListNormal(
     val tailPresentation = rememberTimelineTailPresentation(
         conversation.id, latestMessage?.id, timelineLoading, showBottomFollowAnimation,
     )
+    val sendStage = LocalChatSendStage.current
     ChatTimelineScrollEffects(
         conversation = conversation,
         pendingUserMessages = pendingUserMessages,
@@ -222,6 +223,7 @@ internal fun ChatListNormal(
         settings = settings,
         onLoadOlderTimeline = onLoadOlderTimeline,
         onRecentScrollChanged = { isRecentScroll = it },
+        sendStage = sendStage,
     )
 
     if ((BuildConfig.DEBUG || BuildConfig.CHAT_PERF_TRACE)) Trace.beginSection("Amber chatlist compaction+selection")
@@ -298,18 +300,41 @@ internal fun ChatListNormal(
                         regexes = settings.regexes,
                         sessionId = conversation.id,
                     )
+                    val stagedLazyTopIndex = remember(
+                        conversation.messageNodes,
+                        chatTimelinePlan,
+                        sendStage?.stagedMessageKey,
+                    ) {
+                        findStagedLazyTopIndex(
+                            conversation = conversation,
+                            timelinePlan = chatTimelinePlan,
+                            stagedMessageKey = sendStage?.stagedMessageKey,
+                        )
+                    }
+                    val timelineTopPaddingPx = with(density) { TimelineTopPadding.roundToPx() }
+                    val timelineBaseBottomPaddingPx = with(density) { timelineBottomPadding.roundToPx() }
+                    val timelineContentPadding = remember(
+                        readingGutter,
+                        timelineBottomPadding,
+                        density,
+                        sendStage,
+                    ) {
+                        SendStageContentPaddingValues(
+                            start = TimelineHorizontalPadding + readingGutter,
+                            top = TimelineTopPadding,
+                            end = TimelineHorizontalPadding + readingGutter,
+                            baseBottom = timelineBottomPadding,
+                            density = density,
+                            sendStage = sendStage,
+                        )
+                    }
                     if ((BuildConfig.DEBUG || BuildConfig.CHAT_PERF_TRACE)) Trace.beginSection("Amber chatlist lazy column")
                     LazyColumn(
                         state = state,
                         // 底部锚定列表：index 0 是视觉底部（最新内容），流式增长从锚定的
                         // start 边（屏幕底缘）原生向上展开，钉底跟随不需要任何滚动调用。
                         reverseLayout = true,
-                        contentPadding = PaddingValues(
-                            start = TimelineHorizontalPadding + readingGutter,
-                            top = TimelineTopPadding,
-                            end = TimelineHorizontalPadding + readingGutter,
-                            bottom = timelineBottomPadding,
-                        ),
+                        contentPadding = timelineContentPadding,
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(0.dp),
                         modifier = Modifier
@@ -329,6 +354,13 @@ internal fun ChatListNormal(
                             .padding(
                                 top = innerPadding.calculateTopPadding(),
                                 bottom = innerPadding.calculateBottomPadding(),
+                            )
+                            .chatSendStageLayout(
+                                listState = state,
+                                sendStage = sendStage,
+                                topPaddingPx = timelineTopPaddingPx,
+                                baseBottomPaddingPx = timelineBaseBottomPaddingPx,
+                                stagedLazyTopIndex = stagedLazyTopIndex,
                             ),
                     ) {
                         chatTimelineItems(

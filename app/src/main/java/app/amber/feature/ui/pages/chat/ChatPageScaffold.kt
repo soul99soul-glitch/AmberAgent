@@ -29,7 +29,9 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
+import java.util.concurrent.atomic.AtomicLong
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
@@ -136,12 +138,28 @@ internal fun ChatPageScaffold(
     val soulState by agentSoulStore.state.collectAsStateWithLifecycle()
     var agentSoulSheetOpen by rememberSaveable { mutableStateOf(false) }
     val localAsyncTaskCoordinator: app.amber.core.service.LocalAsyncTaskCoordinator = koinInject()
-    val gatewayState by macGatewayRepository.state.collectAsStateWithLifecycle()
-    val cloudDialogueState by macGatewayRepository.cloudDialogueState.collectAsStateWithLifecycle()
+    // R6-4: Subscribe only to the boolean cloud dialogue activation slice at scaffold root so
+    // cursor advances, gateway reachability polls, and other-conversation tasks never recompose
+    // the chat scaffold.
+    val isCloudDialogueActiveFlow = remember(macGatewayRepository) {
+        macGatewayRepository.state
+            .map { it.isCloudDialogueActive }
+            .distinctUntilChanged()
+    }
+    val isCloudDialogueActive by isCloudDialogueActiveFlow.collectAsStateWithLifecycle(
+        initialValue = macGatewayRepository.state.value.isCloudDialogueActive,
+    )
     val cloudScope = rememberCoroutineScope()
     val conversationIdString = conversation.id.toString()
-    LaunchedEffect(conversationIdString, gatewayState.isCloudDialogueActive) {
-        if (gatewayState.isCloudDialogueActive) {
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val sendStage = remember(conversationIdString) { ChatSendStageState() }
+    val sendRevisionCounter = remember(conversationIdString) { AtomicLong(0L) }
+    DisposableEffect(sendStage) {
+        onDispose { sendStage.reset() }
+    }
+    LaunchedEffect(conversationIdString, isCloudDialogueActive) {
+        sendStage.reset()
+        if (isCloudDialogueActive) {
             macGatewayRepository.bindActiveConversation(conversationIdString)
         } else {
             localAsyncTaskCoordinator.bindActiveConversation(conversation.id)
@@ -174,12 +192,21 @@ internal fun ChatPageScaffold(
         submission = inputSubmissionOwner,
         configurationIssue = configurationIssue,
         generating = loadingJob != null,
-        cloudDialogueMode = gatewayState.isCloudDialogueActive,
+        cloudDialogueMode = isCloudDialogueActive,
+        conversationId = conversationIdString,
+        sendStage = sendStage,
+        isFollowupTargetActive = {
+            isCloudDialogueActive &&
+                macGatewayRepository.cloudDialogueState.value
+                    .resolvedFollowupTarget(conversationIdString) != null
+        },
+        nextSendRevision = { sendRevisionCounter.incrementAndGet() },
+        hideKeyboard = { keyboardController?.hide() },
         showError = { messageRes ->
             toaster.show(context.getString(messageRes), type = ToastType.Error)
         },
         sendMessage = { parts, answer, queueMode ->
-            if (gatewayState.isCloudDialogueActive) {
+            if (isCloudDialogueActive) {
                 val text = parts
                     .filterIsInstance<UIMessagePart.Text>()
                     .joinToString("\n") { it.text }
@@ -187,7 +214,8 @@ internal fun ChatPageScaffold(
                 if (text.isEmpty()) {
                     false
                 } else {
-                    val followupTarget = cloudDialogueState.resolvedFollowupTarget(conversationIdString)
+                    val followupTarget = macGatewayRepository.cloudDialogueState.value
+                        .resolvedFollowupTarget(conversationIdString)
                     cloudScope.launch {
                         if (followupTarget != null) {
                             macGatewayRepository.sendCloudFollowup(
@@ -302,6 +330,11 @@ internal fun ChatPageScaffold(
             conversation.id.toString(),
         )
     }
+    LaunchedEffect(resolvedNodeId, jumpTarget, jumpToLiveKey) {
+        if (resolvedNodeId != null || jumpTarget != null || jumpToLiveKey > 0) {
+            sendStage.reset()
+        }
+    }
     LaunchedEffect(jumpToLiveKey) {
         if (jumpToLiveKey > 0) {
             previewMode = false
@@ -314,7 +347,10 @@ internal fun ChatPageScaffold(
         shelfOpen = false
         activityOpen = false
     }
-    CompositionLocalProvider(LocalTimelineHighlight provides timelineHighlight) {
+    CompositionLocalProvider(
+        LocalTimelineHighlight provides timelineHighlight,
+        LocalChatSendStage provides sendStage,
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()

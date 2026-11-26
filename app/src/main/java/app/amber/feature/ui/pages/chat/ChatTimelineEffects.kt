@@ -1,6 +1,7 @@
 package app.amber.feature.ui.pages.chat
 
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
@@ -54,6 +55,16 @@ internal data class TimelineTailPresentation(
     val drainAmortizeGrace: Boolean,
 )
 
+private data class SendAppendSnapshot(
+    val pendingCount: Int,
+    val nodeCount: Int,
+    val lastNodeId: Uuid?,
+    val lastNodeRole: MessageRole?,
+    val lastUserNodeId: Uuid?,
+    val pendingIntent: SendStageIntent?,
+    val sendStageActive: Boolean,
+)
+
 @Composable
 internal fun rememberTimelineTailPresentation(
     conversationId: Uuid,
@@ -103,6 +114,17 @@ internal fun rememberTimelineTailPresentation(
     )
 }
 
+/**
+ * Pure single-owner scroll gate for send-append auto-scroll: when [ChatSendStageState]
+ * is active, the stage owns scroll positioning and the legacy jump-to-tail path must stay off.
+ */
+internal fun shouldAutoScrollOnSendAppend(
+    enableAutoScroll: Boolean,
+    pendingAdded: Int,
+    directSendAppend: Boolean,
+    sendStageActive: Boolean,
+): Boolean = enableAutoScroll && !sendStageActive && (pendingAdded > 0 || directSendAppend)
+
 @Composable
 internal fun ChatTimelineScrollEffects(
     conversation: Conversation,
@@ -116,6 +138,7 @@ internal fun ChatTimelineScrollEffects(
     settings: Settings,
     onLoadOlderTimeline: suspend () -> Unit,
     onRecentScrollChanged: (Boolean) -> Unit,
+    sendStage: ChatSendStageState? = LocalChatSendStage.current,
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -143,39 +166,119 @@ internal fun ChatTimelineScrollEffects(
         }
     }
 
-    if (settings.displaySetting.enableAutoScroll) {
-        // 发送统一回底，即使用户正滚在历史里阅读。监听计数覆盖所有发送路径
-        // （输入栏/队列/建议/组件）而不逐个改调用点。`prevPendingCount == 0`
-        // 守卫把"用户此刻发送"（此前队列空，直接追加 user 尾节点）与"队列排水
-        // 追加"（排水前 pending 非空）区分开——后者不得拽走读历史的用户。
-        // 其余结构性插入无需处理：TimelineTail 恒占 lazy index 0，Compose 的
-        // key 锚定使插入永远发生在它之上（index ≥ 1），钉底视图原生保持不动。
-        LaunchedEffect(state, conversation.id) {
-            var prevPendingCount = -1
-            var prevNodeCount = -1
-            var prevLastNodeId: Uuid? = null
-            snapshotFlow {
-                val lastNode = currentConversationState.messageNodes.lastOrNull()
-                Triple(
-                    currentPendingUserMessages.size,
-                    currentConversationState.messageNodes.size,
-                    lastNode?.id to lastNode?.currentMessage?.role,
-                )
-            }.collect { (pendingCount, nodeCount, lastIdAndRole) ->
-                val (lastNodeId, lastRole) = lastIdAndRole
-                val pendingAdded = if (prevPendingCount >= 0) pendingCount - prevPendingCount else 0
-                val directSendAppend = prevPendingCount == 0 &&
-                    prevNodeCount >= 0 &&
-                    nodeCount > prevNodeCount &&
-                    lastNodeId != null &&
-                    lastNodeId != prevLastNodeId &&
-                    lastRole == MessageRole.USER
-                prevPendingCount = pendingCount
-                prevNodeCount = nodeCount
-                prevLastNodeId = lastNodeId
-                if (pendingAdded > 0 || directSendAppend) {
+    // User manual drag immediately exits the send stage and hands back the reading anchor.
+    // DragInteraction.Start fires strictly on real touch drag (never on programmatic scroll).
+    LaunchedEffect(state, sendStage) {
+        if (sendStage == null) return@LaunchedEffect
+        state.interactionSource.interactions.collect { interaction ->
+            if (interaction is DragInteraction.Start) {
+                sendStage.onUserDrag()
+            }
+        }
+    }
+
+    // Reset stage on branch switch (any existing node up to the staged user node changes
+    // selectIndex, or the staged user node disappears from the conversation).
+    LaunchedEffect(conversation.id, sendStage) {
+        if (sendStage == null) return@LaunchedEffect
+        var prevBranchById: Map<Uuid, Int>? = null
+        snapshotFlow {
+            val active = sendStage.isActive
+            val stagedKey = sendStage.stagedMessageKey
+            val nodes = currentConversationState.messageNodes
+            Triple(active, stagedKey, nodes.map { it.id to it.selectIndex })
+        }
+            .distinctUntilChanged()
+            .collect { (active, stagedKey, branchPairs) ->
+                if (!active || stagedKey == null) {
+                    prevBranchById = null
+                    return@collect
+                }
+                val stagedIndex = branchPairs.indexOfLast { it.first == stagedKey }
+                if (stagedIndex < 0) {
+                    sendStage.reset()
+                    prevBranchById = null
+                    return@collect
+                }
+                val currentUpToStaged = branchPairs.take(stagedIndex + 1).toMap()
+                val previous = prevBranchById
+                if (previous != null) {
+                    val branchSwitched = currentUpToStaged.any { (nodeId, selectIdx) ->
+                        val prevSelectIdx = previous[nodeId]
+                        prevSelectIdx != null && prevSelectIdx != selectIdx
+                    }
+                    if (branchSwitched) {
+                        sendStage.reset()
+                        prevBranchById = null
+                        return@collect
+                    }
+                }
+                prevBranchById = currentUpToStaged
+            }
+    }
+
+    // Single scroll owner coordination:
+    // 1. When a normal send has armed sendStage (pendingIntent matches this conversation)
+    //    and a matching new user node appears, activate sendStage and perform at most one
+    //    initial index-0 alignment owned by the stage.
+    // 2. Otherwise (when sendStage is NOT active) fall back to the legacy direct-send
+    //    return-to-tail gated by enableAutoScroll. Queue drains never arm sendStage and
+    //    never yank history readers.
+    val enableAutoScrollState by rememberUpdatedState(settings.displaySetting.enableAutoScroll)
+    LaunchedEffect(state, conversation.id, sendStage) {
+        var prevPendingCount = -1
+        var prevNodeCount = -1
+        var prevLastNodeId: Uuid? = null
+        var prevLastUserNodeId: Uuid? = null
+        snapshotFlow {
+            val nodes = currentConversationState.messageNodes
+            val lastNode = nodes.lastOrNull()
+            val lastUserNode = nodes.lastOrNull { it.currentMessage.role == MessageRole.USER }
+            SendAppendSnapshot(
+                pendingCount = currentPendingUserMessages.size,
+                nodeCount = nodes.size,
+                lastNodeId = lastNode?.id,
+                lastNodeRole = lastNode?.currentMessage?.role,
+                lastUserNodeId = lastUserNode?.id,
+                pendingIntent = sendStage?.pendingIntent,
+                sendStageActive = sendStage?.isActive == true,
+            )
+        }.collect { snap ->
+            val pendingAdded = if (prevPendingCount >= 0) snap.pendingCount - prevPendingCount else 0
+            val directSendAppend = prevPendingCount == 0 &&
+                prevNodeCount >= 0 &&
+                snap.nodeCount > prevNodeCount &&
+                snap.lastNodeId != null &&
+                snap.lastNodeId != prevLastNodeId &&
+                snap.lastNodeRole == MessageRole.USER
+            val newUserNodeAppeared = prevNodeCount >= 0 &&
+                snap.nodeCount > prevNodeCount &&
+                snap.lastUserNodeId != null &&
+                snap.lastUserNodeId != prevLastUserNodeId
+            val stageMatchesPending = sendStage != null &&
+                snap.pendingIntent?.conversationId == conversationId &&
+                prevPendingCount == 0 &&
+                newUserNodeAppeared
+            prevPendingCount = snap.pendingCount
+            prevNodeCount = snap.nodeCount
+            prevLastNodeId = snap.lastNodeId
+            prevLastUserNodeId = snap.lastUserNodeId
+
+            if (stageMatchesPending) {
+                val appearedKey = snap.lastUserNodeId!!
+                sendStage!!.onUserNodeAppeared(appearedKey)
+                if (sendStage.consumeInitialScroll()) {
                     state.requestScrollToItem(0)
                 }
+            } else if (
+                shouldAutoScrollOnSendAppend(
+                    enableAutoScroll = enableAutoScrollState,
+                    pendingAdded = pendingAdded,
+                    directSendAppend = directSendAppend,
+                    sendStageActive = snap.sendStageActive || (sendStage?.isActive == true),
+                )
+            ) {
+                state.requestScrollToItem(0)
             }
         }
     }

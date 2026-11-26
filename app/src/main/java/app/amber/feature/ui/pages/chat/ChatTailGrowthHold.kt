@@ -38,23 +38,30 @@ internal fun Modifier.streamingTailLayout(
     animate: Boolean,
     itemKey: Any?,
 ): Modifier {
-    val animateHeight by remember(state, followBottomPx, animate) {
+    val sendStage = LocalChatSendStage.current
+    val animateHeight by remember(state, followBottomPx, animate, sendStage) {
         derivedStateOf {
             animate && shouldAnimateStreamingTail(
                 state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset,
                 followBottomPx, state.isScrollInProgress,
+                sendStageActive = sendStage?.isActive == true,
             )
         }
     }
-    return holdReadingOnTailGrowth(state, lazyIndex, followBottomPx, itemKey).then(
+    return holdReadingOnTailGrowth(state, lazyIndex, followBottomPx, itemKey, sendStage).then(
         if (animateHeight) Modifier.animateContentSize(
             spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
         ) else Modifier,
     )
 }
 
-internal fun shouldAnimateStreamingTail(index: Int, offset: Int, threshold: Int, scrolling: Boolean): Boolean =
-    !scrolling && index == 0 && offset <= threshold
+internal fun shouldAnimateStreamingTail(
+    index: Int,
+    offset: Int,
+    threshold: Int,
+    scrolling: Boolean,
+    sendStageActive: Boolean = false,
+): Boolean = !sendStageActive && !scrolling && index == 0 && offset <= threshold
 
 /**
  * First-visible (index, offset) the idle hold should compensate against.
@@ -102,13 +109,15 @@ internal fun readingAnchorFromLayout(
     return publishedIndex to publishedOffset
 }
 
-/** Hold iff the reader is not pinned to the reverseLayout bottom. */
+/** Hold iff the reader is not pinned to the reverseLayout bottom and send-stage is not owning scroll. */
 internal fun shouldHoldReadingOnTailGrowth(
     firstIndex: Int,
     firstOffset: Int,
     followBottomPx: Int,
     growingItemVisible: Boolean,
+    sendStageActive: Boolean = false,
 ): Boolean {
+    if (sendStageActive) return false
     if (firstIndex == 0 && firstOffset <= followBottomPx) return false
     return growingItemVisible
 }
@@ -255,21 +264,24 @@ internal fun Modifier.holdReadingOnTailGrowth(
     lazyIndex: Int,
     followBottomPx: Int,
     itemKey: Any? = null,
-): Modifier = this then HoldReadingOnTailGrowthElement(state, lazyIndex, followBottomPx, itemKey)
+    sendStage: ChatSendStageState? = null,
+): Modifier = this then HoldReadingOnTailGrowthElement(state, lazyIndex, followBottomPx, itemKey, sendStage)
 
 private data class HoldReadingOnTailGrowthElement(
     val state: LazyListState,
     val lazyIndex: Int,
     val followBottomPx: Int,
     val itemKey: Any? = null,
+    val sendStage: ChatSendStageState? = null,
 ) : ModifierNodeElement<HoldReadingOnTailGrowthNode>() {
-    override fun create() = HoldReadingOnTailGrowthNode(state, lazyIndex, followBottomPx, itemKey)
+    override fun create() = HoldReadingOnTailGrowthNode(state, lazyIndex, followBottomPx, itemKey, sendStage)
 
     override fun update(node: HoldReadingOnTailGrowthNode) {
         node.state = state
         node.lazyIndex = lazyIndex
         node.followBottomPx = followBottomPx
         node.itemKey = itemKey
+        node.sendStage = sendStage
     }
 }
 
@@ -278,6 +290,7 @@ private class HoldReadingOnTailGrowthNode(
     var lazyIndex: Int,
     var followBottomPx: Int,
     var itemKey: Any? = null,
+    var sendStage: ChatSendStageState? = null,
 ) : Modifier.Node(), LayoutModifierNode, GlobalPositionAwareModifierNode {
     private var lastHeight = -1
     private var applyingHold = false
@@ -328,6 +341,20 @@ private class HoldReadingOnTailGrowthNode(
     ): MeasureResult {
         val placeable = measurable.measure(constraints)
         val height = placeable.height
+        if (sendStage?.isActive == true) {
+            // Single scroll owner: while send-stage owns the viewport, keep the height baseline
+            // fresh so drag handoff starts cleanly, but never write scroll state.
+            lastHeight = height
+            pendingDelta = 0
+            pendingIdleDelta = 0
+            requestedIndex = -1
+            requestedOffset = -1
+            programmaticScroll = false
+            stableIdleFrames = 0
+            return layout(placeable.width, placeable.height) {
+                placeable.place(0, 0)
+            }
+        }
         if (!state.isScrollInProgress) programmaticScroll = false
         val publishedIndex = state.firstVisibleItemIndex
         val publishedOffset = state.firstVisibleItemScrollOffset
@@ -378,6 +405,14 @@ private class HoldReadingOnTailGrowthNode(
     }
 
     override fun onGloballyPositioned(coordinates: LayoutCoordinates) {
+        if (sendStage?.isActive == true) {
+            lastHeight = coordinates.size.height
+            pendingDelta = 0
+            requestedIndex = -1
+            requestedOffset = -1
+            programmaticScroll = false
+            return
+        }
         // Device production completion (392288d7): requestScrollToItem(2, 171)
         // during measure of the growing first-visible item did not stick
         // (scrollValue stayed 1105 while the token moved 132px). After
@@ -535,6 +570,7 @@ private class HoldReadingOnTailGrowthNode(
         userGestureOwnsScroll(state.isScrollInProgress, programmaticScroll)
 
     private fun shouldHold(): Boolean {
+        if (sendStage?.isActive == true) return false
         val visible = state.layoutInfo.visibleItemsInfo
         val anchor = readingAnchorFromLayout(
             visibleItems = visible,
@@ -552,6 +588,7 @@ private class HoldReadingOnTailGrowthNode(
             firstOffset = anchor.second,
             followBottomPx = followBottomPx,
             growingItemVisible = growingVisible,
+            sendStageActive = sendStage?.isActive == true,
         )
     }
 }
