@@ -38,7 +38,11 @@ sealed interface Screen : NavKey {
     @Serializable
     data object History : Screen
 
-    /** 会话首页 —— 聊天侧滑抽屉提升成的固定首页（冷启动默认落地页）。 */
+    /** Personal Agent 主舞台 —— 默认产品首页路由。 */
+    @Serializable
+    data object PersonalAgent : Screen
+
+    /** 会话首页 —— 聊天侧滑抽屉提升成的固定首页。 */
     @Serializable
     data object SessionHome : Screen
 

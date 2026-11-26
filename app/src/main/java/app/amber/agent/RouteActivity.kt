@@ -395,6 +395,17 @@ class RouteActivity : FragmentActivity() {
         val appModalOverlay = rememberAppModalOverlayHostState()
 
         val notificationLink = remember { notificationDeepLinkFrom(intent) }
+        val startMode = remember {
+            val legacyCreateNew = if (containsPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF)) {
+                readBooleanPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF, true)
+            } else {
+                null
+            }
+            migrateLaunchStartMode(
+                storedMode = readStringPreference(LAUNCH_START_MODE_PREF),
+                legacyCreateNewConversationOnStart = legacyCreateNew,
+            )
+        }
         val startScreen = remember {
             if (ChatPerfHomeEntry.enabled && intent?.getStringExtra("perfPathId") == HOME_FIRST_PATH) {
                 return@remember Screen.SessionHome
@@ -432,15 +443,6 @@ class RouteActivity : FragmentActivity() {
             app.amber.feature.tools.DynamicShortcutPublisher.screenFromIntent(intent)?.let { route ->
                 return@remember shortcutStartScreen(route)
             }
-            val legacyCreateNew = if (containsPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF)) {
-                readBooleanPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF, true)
-            } else {
-                null
-            }
-            val startMode = migrateLaunchStartMode(
-                storedMode = readStringPreference(LAUNCH_START_MODE_PREF),
-                legacyCreateNewConversationOnStart = legacyCreateNew,
-            )
             resolveLaunchStartScreen(
                 mode = startMode,
                 lastConversationId = readStringPreference(LAST_CONVERSATION_ID_PREF),
@@ -458,10 +460,10 @@ class RouteActivity : FragmentActivity() {
             }
         }
 
-        val backStack = rememberNavBackStack(
-            *if (startScreen is Screen.Chat) arrayOf(Screen.SessionHome, startScreen)
-            else arrayOf(startScreen)
-        )
+        val initialBackStack = remember(startScreen, startMode) {
+            initialBackStackFor(startScreen = startScreen, startMode = startMode)
+        }
+        val backStack = rememberNavBackStack(*initialBackStack.toTypedArray())
         val navigator = remember(backStack) { Navigator(backStack) }
         val navigationEntries = remember { appNavigationEntries() }
         var currentIntent by remember { mutableStateOf(intent) }

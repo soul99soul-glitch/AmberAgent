@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="personal_agent_host_local">Local</string>
+    <string name="personal_agent_host_cloud">Cloud</string>
+    <string name="personal_agent_host_switch_a11y">Switch host, current: %1$s</string>
+    <string name="personal_agent_host_local_desc">Run conversations on this device</string>
+    <string name="personal_agent_host_cloud_desc_paired">Connected to %1$s</string>
+    <string name="personal_agent_host_cloud_desc_unpaired">Pair a gateway first</string>
+    <string name="personal_agent_sessions">Sessions</string>
+    <string name="personal_agent_more">More</string>
+    <string name="personal_agent_menu_today_board">Today Board</string>
+    <string name="personal_agent_menu_paired_gateway">Paired Gateway</string>
+    <string name="personal_agent_menu_paired_gateway_connected">Connected: %1$s</string>
+    <string name="personal_agent_menu_paired_gateway_unpaired">Not paired</string>
+    <string name="personal_agent_menu_shelf">Artifacts &amp; Shelf</string>
+    <string name="personal_agent_menu_settings">Settings</string>
+    <string name="setting_display_launch_start_mode_title">Open on launch</string>
+    <string name="setting_display_launch_start_mode_personal_agent">Personal Agent</string>
+    <string name="setting_display_launch_start_mode_personal_agent_desc">Open your continuous Personal Agent stage</string>
+    <string name="setting_display_launch_start_mode_home">Session Home</string>
+    <string name="setting_display_launch_start_mode_home_desc">Open the session list and tools home</string>
+    <string name="setting_display_launch_start_mode_last_session">Resume last session</string>
+    <string name="setting_display_launch_start_mode_last_session_desc">Return directly to the last visited chat</string>
+    <string name="setting_display_launch_start_mode_new_chat">New chat</string>
+    <string name="setting_display_launch_start_mode_new_chat_desc">Start a fresh conversation on launch</string>
+</resources>

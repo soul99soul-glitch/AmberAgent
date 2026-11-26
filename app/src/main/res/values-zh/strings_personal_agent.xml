@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="personal_agent_host_local">本机</string>
+    <string name="personal_agent_host_cloud">云端</string>
+    <string name="personal_agent_host_switch_a11y">切换宿主，当前：%1$s</string>
+    <string name="personal_agent_host_local_desc">在本机运行对话</string>
+    <string name="personal_agent_host_cloud_desc_paired">已连接 %1$s</string>
+    <string name="personal_agent_host_cloud_desc_unpaired">请先配对网关</string>
+    <string name="personal_agent_sessions">会话</string>
+    <string name="personal_agent_more">更多</string>
+    <string name="personal_agent_menu_today_board">今日看板</string>
+    <string name="personal_agent_menu_paired_gateway">配对网关</string>
+    <string name="personal_agent_menu_paired_gateway_connected">已连接：%1$s</string>
+    <string name="personal_agent_menu_paired_gateway_unpaired">未配对</string>
+    <string name="personal_agent_menu_shelf">产物架</string>
+    <string name="personal_agent_menu_settings">设置</string>
+    <string name="setting_display_launch_start_mode_title">启动时打开</string>
+    <string name="setting_display_launch_start_mode_personal_agent">Personal Agent</string>
+    <string name="setting_display_launch_start_mode_personal_agent_desc">打开持续对话的 Personal Agent 主舞台</string>
+    <string name="setting_display_launch_start_mode_home">会话首页</string>
+    <string name="setting_display_launch_start_mode_home_desc">打开会话列表与工具首页</string>
+    <string name="setting_display_launch_start_mode_last_session">恢复上次</string>
+    <string name="setting_display_launch_start_mode_last_session_desc">直接回到上次访问的对话</string>
+    <string name="setting_display_launch_start_mode_new_chat">新对话</string>
+    <string name="setting_display_launch_start_mode_new_chat_desc">每次启动都新建一段对话</string>
+</resources>
