@@ -1,7 +1,9 @@
 package app.amber.feature.macgateway
 
+import app.amber.agent.data.db.entity.ProactiveCardEntity
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -10,7 +12,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Contract rules from `cloud-dialogue-api.md`:
@@ -72,6 +83,62 @@ data class CloudDialogueReceipt(
     val schemaVersion: Int? = null,
 )
 
+const val PROACTIVE_MESSAGE_KIND = "proactive_message"
+
+/**
+ * Structured metadata attached to `proactive_message` dialogue events (frozen contract §3.5 / §4.2).
+ * Only [signalId], [topicKey], [category], and [title] are required; all other fields have defaults.
+ */
+@Serializable
+data class ProactiveEventMeta(
+    val signalId: String,
+    val topicKey: String,
+    val category: String,
+    val title: String,
+    val urgency: String = "normal",
+    val silent: Boolean = false,
+    val sourceLabel: String = "",
+    val actions: List<String> = listOf("act", "snooze", "mute"),
+    val checkPrompt: String? = null,
+    val wakeupId: String? = null,
+    val originSignalId: String? = null,
+)
+
+/**
+ * Tolerates malformed or partially missing `proactive` JSON objects so a single bad proactive card
+ * never fails decoding of the entire `/v2/dialogue/events` page.
+ */
+object LenientProactiveEventMetaSerializer : KSerializer<ProactiveEventMeta?> {
+    override val descriptor: SerialDescriptor = JsonElement.serializer().descriptor
+
+    override fun serialize(encoder: Encoder, value: ProactiveEventMeta?) {
+        if (encoder is JsonEncoder) {
+            if (value == null) {
+                encoder.encodeJsonElement(JsonNull)
+            } else {
+                encoder.encodeJsonElement(
+                    encoder.json.encodeToJsonElement(ProactiveEventMeta.serializer(), value),
+                )
+            }
+        } else if (value == null) {
+            encoder.encodeString("")
+        } else {
+            ProactiveEventMeta.serializer().serialize(encoder, value)
+        }
+    }
+
+    override fun deserialize(decoder: Decoder): ProactiveEventMeta? {
+        if (decoder !is JsonDecoder) {
+            return runCatching { ProactiveEventMeta.serializer().deserialize(decoder) }.getOrNull()
+        }
+        val element = decoder.decodeJsonElement()
+        if (element is JsonNull || element !is JsonObject) return null
+        return runCatching {
+            decoder.json.decodeFromJsonElement(ProactiveEventMeta.serializer(), element)
+        }.getOrNull()
+    }
+}
+
 /**
  * Incremental timeline item returned by `GET /v2/dialogue/events?after={seq}&limit={limit}`.
  *
@@ -106,6 +173,8 @@ data class CloudDialogueEvent(
     val requiresLocalApproval: Boolean? = null,
     val sourceRefs: List<String>? = null,
     val sourcePaths: List<String>? = null,
+    @Serializable(with = LenientProactiveEventMetaSerializer::class)
+    val proactive: ProactiveEventMeta? = null,
 )
 
 @Serializable
@@ -254,11 +323,39 @@ class CloudDialogueCoordinator(
     private val maxSettledTasks: Int = DEFAULT_MAX_SETTLED_TASKS,
     private val maxSettledSubmissions: Int = DEFAULT_MAX_SETTLED_SUBMISSIONS,
     private val maxTopicMappings: Int = DEFAULT_MAX_TOPIC_MAPPINGS,
+    private val onProactiveCard: (suspend (ProactiveCardEntity) -> Unit)? = null,
+    private val connectionGenerationProvider: (() -> Long)? = null,
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+    private val onDiagnostic: (String) -> Unit = { message ->
+        runCatching { android.util.Log.w("CloudDialogue", message) }
+    },
 ) {
     private data class PendingPersist(
         val sessionEpoch: Long,
         val revision: Long,
         val state: CloudDialoguePersistedState,
+    )
+
+    private data class PollGeneration(
+        val sessionEpoch: Long,
+        val externalGeneration: Long?,
+        val gatewayId: String,
+        val deviceId: String,
+    )
+
+    private sealed interface ApplyEventOutcome {
+        data object Applied : ApplyEventOutcome
+        data object AppliedProactive : ApplyEventOutcome
+        data object SkippedMalformedProactive : ApplyEventOutcome
+        data object StaleGeneration : ApplyEventOutcome
+        data class ProactivePersistFailed(val error: Throwable) : ApplyEventOutcome
+    }
+
+    private data class PollPageResult(
+        val pendingPersist: PendingPersist?,
+        val immediatePersist: Boolean,
+        val staleGeneration: Boolean,
+        val proactivePersistFailure: Throwable?,
     )
 
     private val mutex = Mutex()
@@ -288,6 +385,36 @@ class CloudDialogueCoordinator(
     private val tasksById = LinkedHashMap<String, CloudTaskSession>()
     private val submissionsByRequestId = LinkedHashMap<String, CloudDialogueSubmission>()
     private var lastError: String? = null
+    private var lastMonotonicTimestampMs: Long = 0L
+
+    private fun effectiveProactiveCardStore(): (suspend (ProactiveCardEntity) -> Unit)? =
+        onProactiveCard ?: defaultProactiveCardStore.get()
+
+    private fun effectiveConnectionGeneration(): Long? =
+        (connectionGenerationProvider ?: defaultConnectionGenerationProvider.get())?.invoke()
+
+    private fun capturePollGenerationLocked(): PollGeneration =
+        PollGeneration(
+            sessionEpoch = sessionEpoch.get(),
+            externalGeneration = effectiveConnectionGeneration(),
+            gatewayId = gatewayId,
+            deviceId = deviceId,
+        )
+
+    private fun isGenerationCurrentFast(captured: PollGeneration): Boolean =
+        sessionEpoch.get() == captured.sessionEpoch &&
+            effectiveConnectionGeneration() == captured.externalGeneration
+
+    private fun isGenerationCurrentLocked(captured: PollGeneration): Boolean =
+        isGenerationCurrentFast(captured) &&
+            gatewayId == captured.gatewayId &&
+            deviceId == captured.deviceId
+
+    private fun nextMonotonicTimestampLocked(): Long {
+        val next = maxOf(nowMs(), lastMonotonicTimestampMs + 1L)
+        lastMonotonicTimestampMs = next
+        return next
+    }
 
     suspend fun restore(
         enabled: Boolean,
@@ -625,46 +752,138 @@ class CloudDialogueCoordinator(
 
     suspend fun pollOnce(reportFailure: Boolean = false) {
         val client = clientProvider() ?: if (reportFailure) throw MacGatewayException.Unreachable() else return
-        val (currentCursor, boundConversationId) = mutex.withLock { cursor to activeConversationId }
+        val (currentCursor, boundConversationId, pollGen) = mutex.withLock {
+            Triple(cursor, activeConversationId, capturePollGenerationLocked())
+        }
         try {
             val page = client.events(
                 after = currentCursor,
                 limit = 100,
                 conversationId = boundConversationId,
             )
-            page.soulRevision?.let { rev ->
-                runCatching { onSoulRevision(rev) }
-            }
-            val (eventsPending, eventsImmediate) = mutex.withLock {
-                var dirty = false
-                var durableBarrier = false
-                val sortedItems = page.items.sortedBy { it.seq }
-                for (event in sortedItems) {
-                    if (event.id in seenEventIds) continue
-                    applyEventLocked(event)
-                    seenEventIds.add(event.id)
-                    dirty = true
-                    if (isDurableBarrierEvent(event)) {
-                        durableBarrier = true
+            if (!isGenerationCurrentFast(pollGen)) return
+            val hasOnlyProactiveItems = page.items.isNotEmpty() &&
+                page.items.all { it.kind == PROACTIVE_MESSAGE_KIND }
+            if (!hasOnlyProactiveItems) {
+                page.soulRevision?.let { rev ->
+                    if (isGenerationCurrentFast(pollGen)) {
+                        runCatching { onSoulRevision(rev) }
                     }
                 }
-                val maxItemSeq = sortedItems.maxOfOrNull { it.seq } ?: 0L
-                val nextCursor = maxOf(page.nextCursor, maxItemSeq)
-                if (page.items.isNotEmpty() && nextCursor > cursor) {
-                    cursor = nextCursor
-                    dirty = true
+            }
+            val pageResult = mutex.withLock {
+                if (!isGenerationCurrentLocked(pollGen)) {
+                    return@withLock PollPageResult(
+                        pendingPersist = null,
+                        immediatePersist = false,
+                        staleGeneration = true,
+                        proactivePersistFailure = null,
+                    )
+                }
+                var dirty = false
+                var durableBarrier = false
+                var stale = false
+                var proactiveFailure: Throwable? = null
+                var lastAppliedSeq = cursor
+                val sortedItems = page.items.sortedBy { it.seq }
+                for (event in sortedItems) {
+                    if (!isGenerationCurrentLocked(pollGen)) {
+                        stale = true
+                        break
+                    }
+                    if (event.id in seenEventIds) {
+                        if (event.seq > lastAppliedSeq) lastAppliedSeq = event.seq
+                        continue
+                    }
+                    when (val outcome = applyEventLocked(event, pollGen)) {
+                        ApplyEventOutcome.Applied -> {
+                            seenEventIds.add(event.id)
+                            if (event.seq > lastAppliedSeq) lastAppliedSeq = event.seq
+                            dirty = true
+                            if (isDurableBarrierEvent(event)) {
+                                durableBarrier = true
+                            }
+                        }
+
+                        ApplyEventOutcome.AppliedProactive -> {
+                            if (!isGenerationCurrentLocked(pollGen)) {
+                                stale = true
+                                break
+                            }
+                            seenEventIds.add(event.id)
+                            if (event.seq > lastAppliedSeq) lastAppliedSeq = event.seq
+                            dirty = true
+                            durableBarrier = true
+                        }
+
+                        ApplyEventOutcome.SkippedMalformedProactive -> {
+                            seenEventIds.add(event.id)
+                            if (event.seq > lastAppliedSeq) lastAppliedSeq = event.seq
+                            dirty = true
+                        }
+
+                        ApplyEventOutcome.StaleGeneration -> {
+                            stale = true
+                            break
+                        }
+
+                        is ApplyEventOutcome.ProactivePersistFailed -> {
+                            proactiveFailure = outcome.error
+                            lastError = outcome.error.message ?: outcome.error.javaClass.simpleName
+                            break
+                        }
+                    }
+                }
+                if (stale || !isGenerationCurrentLocked(pollGen)) {
+                    return@withLock PollPageResult(
+                        pendingPersist = null,
+                        immediatePersist = false,
+                        staleGeneration = true,
+                        proactivePersistFailure = null,
+                    )
+                }
+                if (proactiveFailure == null) {
+                    val maxItemSeq = sortedItems.maxOfOrNull { it.seq } ?: 0L
+                    val nextCursor = maxOf(page.nextCursor, maxItemSeq)
+                    if (page.items.isNotEmpty() && nextCursor > cursor) {
+                        cursor = nextCursor
+                        dirty = true
+                    }
+                } else {
+                    if (lastAppliedSeq > cursor) {
+                        cursor = lastAppliedSeq
+                        dirty = true
+                    }
+                    publishLocked()
                 }
                 if (dirty) {
                     val pending = capturePersistLocked()
                     publishLocked()
-                    pending to durableBarrier
+                    PollPageResult(
+                        pendingPersist = pending,
+                        immediatePersist = durableBarrier || proactiveFailure != null,
+                        staleGeneration = false,
+                        proactivePersistFailure = proactiveFailure,
+                    )
                 } else {
-                    null to false
+                    PollPageResult(
+                        pendingPersist = null,
+                        immediatePersist = false,
+                        staleGeneration = false,
+                        proactivePersistFailure = proactiveFailure,
+                    )
                 }
             }
-            commitPersist(eventsPending, immediate = eventsImmediate)
+            if (pageResult.staleGeneration) return
+            commitPersist(pageResult.pendingPersist, immediate = pageResult.immediatePersist)
+            pageResult.proactivePersistFailure?.let { failure ->
+                if (reportFailure) throw failure
+                return
+            }
 
+            if (!isGenerationCurrentFast(pollGen)) return
             val pendingReceiptRequests = mutex.withLock {
+                if (!isGenerationCurrentLocked(pollGen)) return@withLock emptyList()
                 submissionsByRequestId.values
                     .filter { sub ->
                         sub.eventId != null && (
@@ -677,13 +896,16 @@ class CloudDialogueCoordinator(
             var receiptsUpdated = false
             var receiptsDurable = false
             for ((reqId, subConversationId) in pendingReceiptRequests) {
+                if (!isGenerationCurrentFast(pollGen)) return
                 val receipt = runCatching {
                     client.receipts(
                         requestId = reqId,
                         conversationId = subConversationId.takeIf { it.isNotBlank() } ?: boundConversationId,
                     )
                 }.getOrNull() ?: continue
+                if (!isGenerationCurrentFast(pollGen)) return
                 mutex.withLock {
+                    if (!isGenerationCurrentLocked(pollGen)) return@withLock
                     val existing = submissionsByRequestId[reqId] ?: return@withLock
                     val next = existing.withReceipt(receipt)
                     if (next != existing) {
@@ -713,8 +935,9 @@ class CloudDialogueCoordinator(
                     }
                 }
             }
-            if (receiptsUpdated) {
+            if (receiptsUpdated && isGenerationCurrentFast(pollGen)) {
                 val receiptsPending = mutex.withLock {
+                    if (!isGenerationCurrentLocked(pollGen)) return@withLock null
                     val pending = capturePersistLocked()
                     publishLocked()
                     pending
@@ -722,14 +945,20 @@ class CloudDialogueCoordinator(
                 commitPersist(receiptsPending, immediate = receiptsDurable)
             }
         } catch (error: MacGatewayException.Unauthorized) {
-            onUnauthorized()
-            if (reportFailure) throw error
-        } catch (error: MacGatewayException) {
-            mutex.withLock {
-                lastError = error.message
-                publishLocked()
+            if (isGenerationCurrentFast(pollGen)) {
+                onUnauthorized()
+                if (reportFailure) throw error
             }
-            if (reportFailure) throw error
+        } catch (error: MacGatewayException) {
+            if (isGenerationCurrentFast(pollGen)) {
+                mutex.withLock {
+                    if (isGenerationCurrentLocked(pollGen)) {
+                        lastError = error.message
+                        publishLocked()
+                    }
+                }
+                if (reportFailure) throw error
+            }
         }
     }
 
@@ -749,11 +978,20 @@ class CloudDialogueCoordinator(
         return if (next == this) this else next.copy(updatedAtMs = System.currentTimeMillis())
     }
 
-    private suspend fun applyEventLocked(event: CloudDialogueEvent) {
+    private suspend fun applyEventLocked(
+        event: CloudDialogueEvent,
+        pollGen: PollGeneration,
+    ): ApplyEventOutcome {
+        // Intercept proactive_message before any causal submission, conversation resolution,
+        // topic mapping, timeline sink, receipt consumption, waiting state, or soul handling.
+        if (event.kind == PROACTIVE_MESSAGE_KIND) {
+            return handleProactiveEventLocked(event, pollGen)
+        }
+
         val submission = causalSubmissionLocked(event)
         val resolvedConvId = event.conversationId?.takeIf(String::isNotBlank)
             ?: submission?.conversationId ?: resolveConversationIdLocked(event.topicId, event.workItemId)
-        val now = System.currentTimeMillis()
+        val now = nextMonotonicTimestampLocked()
 
         when (event.kind) {
             "user_message", "followup" -> {
@@ -766,7 +1004,7 @@ class CloudDialogueCoordinator(
             }
 
             "stop_requested" -> {
-                val workId = event.workItemId ?: return
+                val workId = event.workItemId ?: return ApplyEventOutcome.Applied
                 val current = tasksById[workId]
                 if (current != null && current.active) {
                     tasksById[workId] = current.copy(
@@ -953,12 +1191,59 @@ class CloudDialogueCoordinator(
             else -> {
                 // Unknown Contract v1 event kinds (including future extensions) are safely skipped
                 // so the seen-set and cursor still advance without stalling polling.
-                return
+                return ApplyEventOutcome.Applied
             }
         }
         if (resolvedConvId != null && event.topicId.isNotBlank()) {
             topicToConversation[event.topicId] = resolvedConvId
         }
+        return ApplyEventOutcome.Applied
+    }
+
+    private suspend fun handleProactiveEventLocked(
+        event: CloudDialogueEvent,
+        pollGen: PollGeneration,
+    ): ApplyEventOutcome {
+        if (!isGenerationCurrentLocked(pollGen)) return ApplyEventOutcome.StaleGeneration
+        val meta = event.proactive
+        if (meta == null ||
+            !ProactiveContract.isValidSignalId(meta.signalId) ||
+            meta.topicKey.isBlank() ||
+            meta.category.isBlank() ||
+            meta.title.isBlank()
+        ) {
+            onDiagnostic("Skipped malformed proactive_message event seq=${event.seq} id=${event.id}")
+            return ApplyEventOutcome.SkippedMalformedProactive
+        }
+        if (gatewayId.isBlank() || deviceId.isBlank()) {
+            onDiagnostic("Skipped proactive_message without active gateway session seq=${event.seq} id=${event.id}")
+            return ApplyEventOutcome.SkippedMalformedProactive
+        }
+        val entity = ProactiveCardEntity(
+            gatewayId = gatewayId,
+            deviceId = deviceId,
+            eventId = event.id.ifBlank { "proactive:${meta.signalId}" },
+            signalId = meta.signalId,
+            seq = event.seq,
+            text = event.text.take(ProactiveContract.MAX_CARD_TEXT_LENGTH),
+            metaJson = MacGatewayJson.encodeToString(ProactiveEventMeta.serializer(), meta),
+            receivedAt = nextMonotonicTimestampLocked(),
+            notifiedAt = null,
+            feedbackState = null,
+        )
+        val store = effectiveProactiveCardStore()
+        if (store != null) {
+            if (!isGenerationCurrentLocked(pollGen)) return ApplyEventOutcome.StaleGeneration
+            try {
+                store(entity)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                onDiagnostic("Failed to persist proactive_message seq=${event.seq} id=${event.id}: ${error.javaClass.simpleName}")
+                return ApplyEventOutcome.ProactivePersistFailed(error)
+            }
+        }
+        return ApplyEventOutcome.AppliedProactive
     }
 
     private fun resolveConversationIdLocked(
@@ -1089,6 +1374,7 @@ class CloudDialogueCoordinator(
         "input_consumed",
         "input_cancelled",
         "task_result",
+        PROACTIVE_MESSAGE_KIND,
         -> true
         else -> false
     }
@@ -1274,14 +1560,27 @@ class CloudDialogueCoordinator(
         )
     }
 
-    private companion object {
-        const val MAX_TRACKED_EVENT_IDS = 1_000
-        const val DEFAULT_PERSIST_COALESCE_WINDOW_MS = 300L
-        const val DEFAULT_MAX_SETTLED_TASKS = 100
-        const val DEFAULT_MAX_SETTLED_SUBMISSIONS = 200
-        const val DEFAULT_MAX_TOPIC_MAPPINGS = 200
+    companion object {
+        private const val MAX_TRACKED_EVENT_IDS = 1_000
+        private const val DEFAULT_PERSIST_COALESCE_WINDOW_MS = 300L
+        private const val DEFAULT_MAX_SETTLED_TASKS = 100
+        private const val DEFAULT_MAX_SETTLED_SUBMISSIONS = 200
+        private const val DEFAULT_MAX_TOPIC_MAPPINGS = 200
 
-        fun normalizedTitle(raw: String?, fallback: String): String {
+        private val defaultProactiveCardStore =
+            AtomicReference<(suspend (ProactiveCardEntity) -> Unit)?>(null)
+        private val defaultConnectionGenerationProvider =
+            AtomicReference<(() -> Long)?>(null)
+
+        fun setDefaultProactiveCardStore(store: (suspend (ProactiveCardEntity) -> Unit)?) {
+            defaultProactiveCardStore.set(store)
+        }
+
+        fun setDefaultConnectionGenerationProvider(provider: (() -> Long)?) {
+            defaultConnectionGenerationProvider.set(provider)
+        }
+
+        private fun normalizedTitle(raw: String?, fallback: String): String {
             val line = raw
                 ?.lineSequence()
                 ?.map { it.trim() }
