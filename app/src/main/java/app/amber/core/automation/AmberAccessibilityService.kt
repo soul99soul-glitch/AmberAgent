@@ -7,6 +7,7 @@ import android.graphics.Path
 import android.os.Build
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -113,6 +114,35 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
 
     override fun findTextNodes(query: String, maxNodes: Int): List<AccessibilityTextMatch> =
         legacyTree.findTextNodes(query, maxNodes)
+
+    /**
+     * 只读返回指定 display 上的无障碍窗口快照，不回退到默认屏或 active window。
+     * 调用方负责回收返回的 [AccessibilityWindowInfo] 列表；非目标 display 的窗口在此立即回收。
+     */
+    fun windowsOnDisplay(displayId: Int): List<AccessibilityWindowInfo> {
+        if (displayId < 0) return emptyList()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return runCatching {
+                val allDisplays = windowsOnAllDisplays
+                var matched: List<AccessibilityWindowInfo> = emptyList()
+                for (index in 0 until allDisplays.size()) {
+                    val key = allDisplays.keyAt(index)
+                    val list = allDisplays.valueAt(index).orEmpty()
+                    if (key == displayId) {
+                        matched = list.toList()
+                    } else {
+                        list.forEach { window -> runCatching { window.recycle() } }
+                    }
+                }
+                matched
+            }.getOrDefault(emptyList())
+        }
+        return if (displayId == Display.DEFAULT_DISPLAY) {
+            runCatching { windows.orEmpty().toList() }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+    }
 
 
     /**

@@ -160,6 +160,7 @@ android {
         versionName = "2.6.8"
 
         buildConfigField("boolean", "CHAT_PERF_TRACE", chatPerfTraceEnabled.toString())
+        buildConfigField("boolean", "PHONE_USE_VIRTUAL_DISPLAY_ALLOWED", "true")
         manifestPlaceholders["chatPerfTrace"] = chatPerfTraceEnabled.toString()
         testInstrumentationRunner = if (chatPerfFixtureEnabled) {
             // Fixture-only runner; never changes the default suites' runner.
@@ -360,6 +361,7 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        aidl = true
     }
     testOptions {
         // TD.Rust.1c — the HtmlDiffNormalizer (+ other native bridges)
@@ -1105,6 +1107,10 @@ dependencies {
 
     // sqlite-android (requery SQLite for Android)
     implementation(libs.sqlite.android)
+
+    // Shizuku (virtual display UserService bridge; shell UID 2000 only)
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 
     // modules
     implementation(project(":ai"))

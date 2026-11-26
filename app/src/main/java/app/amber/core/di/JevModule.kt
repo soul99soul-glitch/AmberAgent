@@ -1,5 +1,9 @@
 package app.amber.core.di
 
+import app.amber.core.automation.display.IsolationProbeRunner
+import app.amber.core.automation.display.PhoneDisplaySessionFactory
+import app.amber.core.automation.display.ShizukuDisplayBridge
+import app.amber.core.automation.display.VirtualDisplayProbeStore
 import app.amber.core.jev.AndroidJevUsageStore
 import app.amber.core.jev.FileJevCalibrationStore
 import app.amber.core.jev.JevCalibrationStore
@@ -82,6 +86,22 @@ val jevModule = module {
     single { JevCouncilPoolRanker(get()) }
     single<CouncilPoolRanker> { get<JevCouncilPoolRanker>() }
     single { JevWebGoalRunner(get()) }
+    single { VirtualDisplayProbeStore(androidContext()) }
+    single { ShizukuDisplayBridge(androidContext()) }
+    single {
+        PhoneDisplaySessionFactory(
+            context = androidContext(),
+            probeStore = get(),
+            displayBridge = get<ShizukuDisplayBridge>(),
+        )
+    }
+    single {
+        IsolationProbeRunner(
+            context = androidContext(),
+            sessionFactory = get(),
+            probeStore = get(),
+        )
+    }
     single {
         app.amber.core.jev.JevScreenGoalRunner(
             runtime = get(),

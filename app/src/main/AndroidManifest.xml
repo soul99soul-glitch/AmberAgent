@@ -130,6 +130,18 @@
       android:exported="false"
       android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     <activity
+      android:name="app.amber.core.automation.display.IsolationProbeMainActivity"
+      android:exported="false"
+      android:theme="@style/Theme.amberagent"
+      android:windowSoftInputMode="adjustResize" />
+    <activity
+      android:name="app.amber.core.automation.display.IsolationProbeTargetActivity"
+      android:exported="false"
+      android:launchMode="singleTask"
+      android:resizeableActivity="true"
+      android:taskAffinity=":vd_probe_target"
+      android:theme="@style/Theme.amberagent" />
+    <activity
       android:name="app.amber.agent.RouteActivity"
       android:configChanges="keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout"
       android:exported="true"
@@ -341,6 +353,13 @@
         android:value="androidx.startup"
         tools:node="remove" />
     </provider>
+    <provider
+      android:name="rikka.shizuku.ShizukuProvider"
+      android:authorities="${applicationId}.shizuku"
+      android:enabled="true"
+      android:exported="true"
+      android:multiprocess="false"
+      android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
   </application>
 
 </manifest>
