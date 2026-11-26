@@ -3,6 +3,7 @@ import app.amber.agent.R
 
 import android.app.Application
 import android.util.Log
+import androidx.core.content.edit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -14,10 +15,13 @@ import com.google.firebase.remoteconfig.FirebaseRemoteConfig
 import com.google.firebase.remoteconfig.remoteConfigSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
+import java.util.concurrent.atomic.AtomicBoolean
 import app.amber.common.android.appTempFolder
 import app.amber.core.di.agentInfraModule
 import app.amber.core.di.agentRuntimeModule
@@ -61,8 +65,11 @@ import org.koin.androidx.workmanager.koin.workManagerFactory
 import org.koin.core.context.startKoin
 
 private const val TAG = "AmberAgentApp"
+private const val DEFERRED_STARTUP_FALLBACK_DELAY_MS = 1_500L
 
 class AmberAgentApp : Application() {
+    private val postFirstFrameInitStarted = AtomicBoolean(false)
+
     private val backgroundSchedulers by lazy {
         AppBackgroundSchedulers(
             scope = get<AppScope>(),
@@ -90,6 +97,9 @@ class AmberAgentApp : Application() {
                 runBlocking(Dispatchers.IO) {
                     koin.get<SyncArchiveManager>().recoverInterruptedRestore()
                 }
+                // Archive restore may have replaced persisted theme settings; force
+                // the next cold start to re-probe the minimal appearance snapshot.
+                clearStartupThemeSnapshotCache()
             }
             workManagerFactory()
         }
@@ -101,44 +111,67 @@ class AmberAgentApp : Application() {
         // install crash handler
         CrashHandler.install(this)
 
+        // Keep the cold-start runtime recovery barrier eager so agent run admission
+        // never waits for UI first-frame callbacks.
+        recoverInterruptedAgentRuns()
+        if (StandaloneSurfaces.current == StandaloneSurfaces.NOVEL) {
+            recoverInterruptedNovelJobs()
+        }
+        if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
+            seedStandaloneDefaults()
+        }
+
+        // Move Remote Config + NativePath switch installation off the main thread;
+        // every native switch falls back safely to JVM until installed.
+        initRemoteConfigAndNativePathsAsync()
+
+        // Attach best-effort app-level cleanup for singleton services that own process lifecycle observers.
+        registerChatServiceCleanup()
+
+        // Non-first-frame warmups and background schedulers run once after the first
+        // drawn frame, with a bounded fallback so non-Activity process launches
+        // (FCM, WorkManager, services) still execute them reliably.
+        scheduleDeferredStartupFallback()
+
+        // Composer.setDiagnosticStackTraceMode(ComposeStackTraceMode.Auto)
+    }
+
+    /**
+     * Called once after [RouteActivity] draws its first frame to kick off
+     * non-critical background warmups without competing with cold-start rendering.
+     */
+    internal fun notifyFirstFrameRendered() {
+        runDeferredStartupOnce()
+    }
+
+    private fun scheduleDeferredStartupFallback() {
+        get<AppScope>().launch(Dispatchers.Default) {
+            delay(DEFERRED_STARTUP_FALLBACK_DELAY_MS)
+            runDeferredStartupOnce()
+        }
+    }
+
+    private fun runDeferredStartupOnce() {
+        if (!postFirstFrameInitStarted.compareAndSet(false, true)) return
+
         // delete temp files
         deleteTempFiles()
 
         // sync upload files to DB
         syncManagedFiles()
 
-        recoverInterruptedAgentRuns()
-        if (StandaloneSurfaces.allowsNovel) {
+        if (StandaloneSurfaces.allowsNovel && StandaloneSurfaces.current != StandaloneSurfaces.NOVEL) {
             recoverInterruptedNovelJobs()
         }
 
         if (StandaloneSurfaces.allowsAgentFeatures) {
-            // 任务气泡驱动循环：agent 任务（含 GUI 操控）运行中悬浮展示输出
-            runCatching { get<app.amber.feature.bubble.AgentTaskBubbleController>().start() }
-                .onFailure { Log.w(TAG, "start task bubble controller failed", it) }
+            // Resolve the heavy ChatService/bubble dependency graph off the main thread,
+            // then start the bubble controller loop on Main.immediate.
+            startTaskBubbleControllerDeferred()
 
             // install bundled agent skills
             installBuiltinSkills()
-        }
 
-        // Init remote config
-        get<FirebaseRemoteConfig>().apply {
-            setConfigSettingsAsync(remoteConfigSettings {
-                minimumFetchIntervalInSeconds = 1800
-            })
-            setDefaultsAsync(R.xml.remote_config_defaults)
-            fetchAndActivate()
-        }
-
-        // Install the existing user-pref and Remote Config switches before native consumers.
-        // Report installation failures so packaged JNI availability is not mistaken for activation.
-        runCatching { get<NativePathBootstrap>().install() }
-            .onFailure {
-                Log.e(TAG, "NativePathBootstrap.install failed; native path stays disabled", it)
-                runCatching { Firebase.crashlytics.recordException(it) }
-            }
-
-        if (StandaloneSurfaces.allowsAgentFeatures) {
             // Reschedule persisted mobile cron tasks after app startup.
             backgroundSchedulers.rescheduleCronTasks()
             // Reminder owner is durable and must be reattached after every process start.
@@ -147,8 +180,6 @@ class AmberAgentApp : Application() {
 
         // Migrate the persisted shape before cached-settings rescue can write it back.
         migrateAndRescueSettings()
-
-        seedStandaloneDefaults()
 
         if (StandaloneSurfaces.allowsAgentFeatures) {
             // Keep Daydream background review aligned with memory settings.
@@ -159,18 +190,56 @@ class AmberAgentApp : Application() {
             // Start Today Board notification collector if enabled.
             backgroundSchedulers.startBoardNotificationCollector()
 
-            // Sync Today Board scheduler with settings + foreground-compensation hook.
-            backgroundSchedulers.syncTodayBoardScheduler()
+            // ProcessLifecycleOwner observer registration must run on the main thread.
+            get<AppScope>().launch(Dispatchers.Main.immediate) {
+                backgroundSchedulers.syncTodayBoardScheduler()
+            }
             backgroundSchedulers.syncHotListScheduler()
         }
 
-        // Attach best-effort app-level cleanup for singleton services that own process lifecycle observers.
-        registerChatServiceCleanup()
-
-        // Increment launch count
+        // Increment launch count after first frame so its DataStore write does not
+        // trigger an immediate second full-settings decode during cold start.
         incrementLaunchCount()
+    }
 
-        // Composer.setDiagnosticStackTraceMode(ComposeStackTraceMode.Auto)
+    private fun initRemoteConfigAndNativePathsAsync() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching {
+                get<FirebaseRemoteConfig>().apply {
+                    setConfigSettingsAsync(remoteConfigSettings {
+                        minimumFetchIntervalInSeconds = 1800
+                    })
+                    setDefaultsAsync(R.xml.remote_config_defaults)
+                    fetchAndActivate()
+                }
+            }.onFailure { Log.w(TAG, "FirebaseRemoteConfig init failed", it) }
+
+            // Install the existing user-pref and Remote Config switches off the main thread.
+            // Report installation failures so packaged JNI availability is not mistaken for activation.
+            runCatching { get<NativePathBootstrap>().install() }
+                .onFailure {
+                    Log.e(TAG, "NativePathBootstrap.install failed; native path stays disabled", it)
+                    runCatching { Firebase.crashlytics.recordException(it) }
+                }
+        }
+    }
+
+    private fun startTaskBubbleControllerDeferred() {
+        get<AppScope>().launch(Dispatchers.IO) {
+            runCatching {
+                val controller = get<app.amber.feature.bubble.AgentTaskBubbleController>()
+                withContext(Dispatchers.Main.immediate) {
+                    controller.start()
+                }
+            }.onFailure { Log.w(TAG, "start task bubble controller failed", it) }
+        }
+    }
+
+    private fun clearStartupThemeSnapshotCache() {
+        getSharedPreferences(STARTUP_THEME_PREFS_NAME, MODE_PRIVATE).edit {
+            remove(STARTUP_THEME_SNAPSHOT_KNOWN_PREF)
+            remove(STARTUP_THEME_REQUIRES_CUSTOM_DISPLAY_PREF)
+        }
     }
 
     /**
