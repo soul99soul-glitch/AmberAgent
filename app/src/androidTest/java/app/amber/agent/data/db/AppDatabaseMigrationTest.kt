@@ -242,6 +242,53 @@ class AppDatabaseMigrationTest {
         db.close()
     }
 
+    @Test
+    fun migration_22_23_creates_proactive_cards_table_and_preserves_existing_rows() {
+        val version22 = helper.createDatabase(TEST_DB, 22)
+        version22.execSQL(
+            "INSERT INTO conversation_activity_seen (run_id, conversation_id, version_ms) " +
+                "VALUES ('run-keep', 'conv-keep', 5000)"
+        )
+        version22.execSQL(
+            "INSERT INTO conversation_activity_baseline (id, established_at_ms) VALUES (1, 6000)"
+        )
+        version22.close()
+
+        val db = helper.runMigrationsAndValidate(
+            TEST_DB,
+            23,
+            true,
+            AppDatabase.MIGRATION_22_23,
+        )
+
+        assertEquals(1, db.countRows("conversation_activity_seen", "run_id = 'run-keep'"))
+        assertEquals(6000, db.intValue("conversation_activity_baseline", "established_at_ms", "id = 1"))
+
+        db.execSQL(
+            "INSERT INTO proactive_cards (" +
+                "gateway_id, device_id, event_id, signal_id, seq, text, meta_json, " +
+                "received_at, notified_at, feedback_state" +
+                ") VALUES (" +
+                "'gw-1', 'dev-1', 'proactive:sig_1', 'sig_1', 42, 'Release v2.0 is out', " +
+                "'{\"signalId\":\"sig_1\",\"topicKey\":\"github:amber\",\"category\":\"WATCHTOWER\",\"title\":\"New release\"}', " +
+                "10001, NULL, NULL)"
+        )
+        assertEquals(1, db.countRows("proactive_cards", "gateway_id = 'gw-1' AND signal_id = 'sig_1'"))
+        assertEquals("Release v2.0 is out", db.stringValue("proactive_cards", "text", "event_id = 'proactive:sig_1'"))
+        assertTrue(db.isNullValue("proactive_cards", "notified_at", "event_id = 'proactive:sig_1'"))
+        assertTrue(db.isNullValue("proactive_cards", "feedback_state", "event_id = 'proactive:sig_1'"))
+
+        // Verify index exists on (gateway_id, signal_id)
+        db.query(
+            "SELECT COUNT(*) FROM sqlite_master " +
+                "WHERE type = 'index' AND name = 'index_proactive_cards_gateway_id_signal_id'"
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(1, cursor.getInt(0))
+        }
+        db.close()
+    }
+
     private fun SupportSQLiteDatabase.countRows(table: String, where: String): Int {
         query("SELECT COUNT(*) FROM $table WHERE $where").use { cursor ->
             assertTrue(cursor.moveToFirst())

@@ -13,8 +13,13 @@ import app.amber.core.utils.EmojiData
 import app.amber.core.utils.EmojiUtils
 import app.amber.core.utils.JsonInstant
 import android.content.Context
+import app.amber.agent.data.db.dao.ProactiveCardDao
+import app.amber.core.settings.secret.SecretStore
+import app.amber.feature.macgateway.CloudDialogueCoordinator
+import app.amber.feature.macgateway.CloudProactiveRepository
 import app.amber.feature.macgateway.ConversationStoreCloudDialogueSink
 import app.amber.feature.macgateway.MacGatewayRepository
+import app.amber.feature.macgateway.ProactiveDeepLinkInbox
 import app.amber.feature.prompts.AgentSoulStore
 import org.koin.dsl.module
 
@@ -44,11 +49,32 @@ val appModule = module {
     }
 
     single {
+        val proactiveCardDao = get<ProactiveCardDao>()
+        CloudDialogueCoordinator.setDefaultProactiveCardStore { entity ->
+            proactiveCardDao.insert(entity)
+        }
         MacGatewayRepository(
             context = get(),
             appScope = get<AppScope>(),
             timelineSink = ConversationStoreCloudDialogueSink(get()),
             agentSoulStore = get<AgentSoulStore>(),
+            secretStore = get<SecretStore>(),
+        ).also { repo ->
+            CloudDialogueCoordinator.setDefaultConnectionGenerationProvider {
+                repo.connectionGeneration.value
+            }
+        }
+    }
+
+    single {
+        ProactiveDeepLinkInbox()
+    }
+
+    single {
+        CloudProactiveRepository(
+            dao = get<ProactiveCardDao>(),
+            gateway = get<MacGatewayRepository>(),
+            secretStore = get<SecretStore>(),
         )
     }
 

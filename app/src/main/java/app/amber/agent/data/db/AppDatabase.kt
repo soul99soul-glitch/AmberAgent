@@ -37,6 +37,7 @@ import app.amber.agent.data.db.dao.MiniAppDAO
 import app.amber.agent.data.db.dao.MiniAppGrantDAO
 import app.amber.agent.data.db.dao.MiniAppSharedDataDAO
 import app.amber.agent.data.db.dao.MiniAppVersionDAO
+import app.amber.agent.data.db.dao.ProactiveCardDao
 import app.amber.agent.data.db.dao.RunResumeDAO
 import app.amber.agent.data.db.dao.RunTerminalDAO
 import app.amber.agent.data.db.dao.ThreadGraphDAO
@@ -85,6 +86,7 @@ import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.agent.data.db.entity.MiniAppGrantEntity
 import app.amber.agent.data.db.entity.MiniAppSharedDataEntity
 import app.amber.agent.data.db.entity.MiniAppVersionEntity
+import app.amber.agent.data.db.entity.ProactiveCardEntity
 import app.amber.agent.data.db.entity.RunResumeEntity
 import app.amber.agent.data.db.entity.RunTerminalEntity
 import app.amber.agent.data.db.entity.ThreadMessageEntity
@@ -145,8 +147,9 @@ import kotlinx.serialization.json.JsonPrimitive
         LiveCardEntity::class,
         ConversationActivitySeenEntity::class,
         ConversationActivityBaselineEntity::class,
+        ProactiveCardEntity::class,
     ],
-    version = 22
+    version = 23
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -225,6 +228,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun themePackageDao(): ThemePackageDAO
 
     abstract fun liveCardDao(): LiveCardDAO
+
+    abstract fun proactiveCardDao(): ProactiveCardDao
 
 
 
@@ -657,6 +662,30 @@ abstract class AppDatabase : RoomDatabase() {
                         "`id` INTEGER NOT NULL, " +
                         "`established_at_ms` INTEGER NOT NULL, " +
                         "PRIMARY KEY(`id`))"
+                )
+            }
+        }
+
+        /** Cloud proactive message cards persisted independently of the main dialogue timeline. */
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `proactive_cards` (" +
+                        "`gateway_id` TEXT NOT NULL, " +
+                        "`device_id` TEXT NOT NULL, " +
+                        "`event_id` TEXT NOT NULL, " +
+                        "`signal_id` TEXT NOT NULL, " +
+                        "`seq` INTEGER NOT NULL, " +
+                        "`text` TEXT NOT NULL, " +
+                        "`meta_json` TEXT NOT NULL, " +
+                        "`received_at` INTEGER NOT NULL, " +
+                        "`notified_at` INTEGER, " +
+                        "`feedback_state` TEXT, " +
+                        "PRIMARY KEY(`gateway_id`, `device_id`, `event_id`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_proactive_cards_gateway_id_signal_id` " +
+                        "ON `proactive_cards` (`gateway_id`, `signal_id`)"
                 )
             }
         }

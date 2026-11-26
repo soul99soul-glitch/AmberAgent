@@ -439,6 +439,173 @@ class MacGatewayClient(
             ),
         )
 
+    /** `GET /v2/proactive/summary` — fetch monitors, webhooks, restraint, recent runs, and pending wakeups. */
+    suspend fun proactiveSummary(): CloudProactiveSummary =
+        decode(
+            send(
+                method = "GET",
+                segments = listOf("v2", "proactive", "summary"),
+            ),
+        )
+
+    /** `GET /v2/proactive/signals/{signalId}` — fetch a single proactive card event; returns `null` on 404. */
+    suspend fun proactiveSignal(signalId: String): CloudDialogueEvent? {
+        val validSignalId = ProactiveContract.requireValidSignalId(signalId)
+        val raw = try {
+            send(
+                method = "GET",
+                segments = listOf("v2", "proactive", "signals", validSignalId),
+            )
+        } catch (_: MacGatewayException.NotFound) {
+            return null
+        }
+        return decode<ProactiveSignalResponseDto>(raw).event
+    }
+
+    /** `POST /v2/proactive/signals/{signalId}/feedback` — submit idempotent feedback for a proactive card. */
+    suspend fun proactiveFeedback(
+        signalId: String,
+        action: String,
+        snoozeMinutes: Int? = null,
+        muteHours: Int? = null,
+    ): ProactiveFeedbackResult {
+        val validSignalId = ProactiveContract.requireValidSignalId(signalId)
+        val validAction = ProactiveContract.requireValidFeedbackAction(action)
+        val payload = buildMap<String, Any> {
+            put("action", validAction)
+            snoozeMinutes?.let { put("snoozeMinutes", it) }
+            muteHours?.let { put("muteHours", it) }
+        }
+        return decode(
+            send(
+                method = "POST",
+                segments = listOf("v2", "proactive", "signals", validSignalId, "feedback"),
+                body = payload,
+            ),
+        )
+    }
+
+    /** `POST /v2/proactive/restraint/unmute` — unmute a previously muted proactive topic. */
+    suspend fun proactiveUnmute(topicKey: String): CloudProactiveRestraintSnapshot {
+        val trimmed = topicKey.trim()
+        require(trimmed.isNotEmpty()) { "topicKey must not be blank" }
+        return decode<ProactiveRestraintEnvelopeDto>(
+            send(
+                method = "POST",
+                segments = listOf("v2", "proactive", "restraint", "unmute"),
+                body = mapOf("topicKey" to trimmed),
+            ),
+        ).restraint
+    }
+
+    /** `PATCH /v2/proactive/restraint` — partially update quiet hours, daily cap, pulse, or commitment settings. */
+    suspend fun proactivePatchRestraint(patch: CloudProactiveRestraintPatch): CloudProactiveRestraintSnapshot {
+        val payload = buildMap<String, Any> {
+            patch.quietHoursEnabled?.let { put("quietHoursEnabled", it) }
+            patch.quietHoursStart?.let { put("quietHoursStart", it) }
+            patch.quietHoursEnd?.let { put("quietHoursEnd", it) }
+            patch.dailyMaxPushes?.let { put("dailyMaxPushes", it) }
+            patch.pulseEnabled?.let { put("pulseEnabled", it) }
+            patch.pulseTime?.let { put("pulseTime", it) }
+            patch.commitmentExtractionEnabled?.let { put("commitmentExtractionEnabled", it) }
+        }
+        return decode<ProactiveRestraintEnvelopeDto>(
+            send(
+                method = "PATCH",
+                segments = listOf("v2", "proactive", "restraint"),
+                body = payload,
+            ),
+        ).restraint
+    }
+
+    /** `PATCH /v2/proactive/monitors/{id}` — toggle enabled state of a Watchtower monitor. */
+    suspend fun proactiveSetMonitorEnabled(id: String, enabled: Boolean): CloudProactiveMonitorRecord {
+        val validId = ProactiveContract.requireValidResourceId(id, "monitorId")
+        return decode<ProactiveMonitorEnvelopeDto>(
+            send(
+                method = "PATCH",
+                segments = listOf("v2", "proactive", "monitors", validId),
+                body = mapOf("enabled" to enabled),
+            ),
+        ).monitor
+    }
+
+    /** `DELETE /v2/proactive/monitors/{id}` — delete a Watchtower monitor. */
+    suspend fun proactiveDeleteMonitor(id: String) {
+        val validId = ProactiveContract.requireValidResourceId(id, "monitorId")
+        send(
+            method = "DELETE",
+            segments = listOf("v2", "proactive", "monitors", validId),
+        )
+    }
+
+    /** `PATCH /v2/proactive/monitors/{id}` — update monitor deliveryMode (`immediate` | `digest`). */
+    suspend fun proactiveSetMonitorDeliveryMode(id: String, mode: String): CloudProactiveMonitorRecord {
+        val validId = ProactiveContract.requireValidResourceId(id, "monitorId")
+        val normalizedMode = ProactiveContract.normalizeDeliveryMode(mode)
+        return decode<ProactiveMonitorEnvelopeDto>(
+            send(
+                method = "PATCH",
+                segments = listOf("v2", "proactive", "monitors", validId),
+                body = mapOf("deliveryMode" to normalizedMode),
+            ),
+        ).monitor
+    }
+
+    /**
+     * `POST /v2/proactive/monitors` — create a GitHub Releases Atom monitor after strictly
+     * validating both `owner` and `repo` segments.
+     */
+    suspend fun proactiveCreateGithubReleaseMonitor(
+        owner: String,
+        repo: String,
+        deliveryMode: String = ProactiveContract.DELIVERY_MODE_IMMEDIATE,
+    ): CloudProactiveMonitorRecord {
+        val (title, url) = ProactiveContract.buildGithubReleaseAtomUrl(owner, repo)
+        val normalizedMode = ProactiveContract.normalizeDeliveryMode(deliveryMode)
+        return decode<ProactiveMonitorEnvelopeDto>(
+            send(
+                method = "POST",
+                segments = listOf("v2", "proactive", "monitors"),
+                body = mapOf(
+                    "title" to title,
+                    "url" to url,
+                    "deliveryMode" to normalizedMode,
+                ),
+            ),
+        ).monitor
+    }
+
+    /** `PATCH /v2/proactive/webhooks/{id}` — toggle enabled state of a personal inbound webhook. */
+    suspend fun proactiveSetWebhookEnabled(id: String, enabled: Boolean): CloudProactiveWebhookRecord {
+        val validId = ProactiveContract.requireValidResourceId(id, "webhookId")
+        return decode<ProactiveWebhookEnvelopeDto>(
+            send(
+                method = "PATCH",
+                segments = listOf("v2", "proactive", "webhooks", validId),
+                body = mapOf("enabled" to enabled),
+            ),
+        ).webhook
+    }
+
+    /** `DELETE /v2/proactive/webhooks/{id}` — delete a personal inbound webhook. */
+    suspend fun proactiveDeleteWebhook(id: String) {
+        val validId = ProactiveContract.requireValidResourceId(id, "webhookId")
+        send(
+            method = "DELETE",
+            segments = listOf("v2", "proactive", "webhooks", validId),
+        )
+    }
+
+    /** `DELETE /v2/proactive/wakeups/{id}` — cancel a pending self-wakeup reminder. */
+    suspend fun proactiveCancelWakeup(id: String) {
+        val validId = ProactiveContract.requireValidResourceId(id, "wakeupId")
+        send(
+            method = "DELETE",
+            segments = listOf("v2", "proactive", "wakeups", validId),
+        )
+    }
+
     private inline fun <reified T> decode(text: String): T =
         runCatching { MacGatewayJson.decodeFromString<T>(text) }.getOrElse { throw MacGatewayException.InvalidResponse() }
 
@@ -469,7 +636,14 @@ class MacGatewayClient(
                     }
                     .build()
                 val request = Request.Builder().url(url)
-                    .method(method, requestBody ?: if (method == "POST" || method == "PUT") ByteArray(0).toRequestBody() else null)
+                    .method(
+                        method,
+                        requestBody ?: if (method == "POST" || method == "PUT" || method == "PATCH") {
+                            ByteArray(0).toRequestBody()
+                        } else {
+                            null
+                        },
+                    )
                     .apply {
                         token?.let { header("Authorization", "Bearer $it") }
                         headers.forEach { (key, value) -> header(key, value) }
