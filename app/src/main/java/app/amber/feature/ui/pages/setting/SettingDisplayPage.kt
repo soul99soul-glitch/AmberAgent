@@ -3,6 +3,8 @@ package app.amber.feature.ui.pages.setting
 import android.os.Build
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +20,7 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -33,14 +36,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.amber.agent.LAUNCH_START_MODE_PREF
+import app.amber.agent.LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF
+import app.amber.agent.LaunchStartMode
 import app.amber.agent.R
+import app.amber.agent.migrateLaunchStartMode
+import app.amber.feature.ui.hooks.containsPreference
+import app.amber.feature.ui.hooks.readBooleanPreference
+import app.amber.feature.ui.hooks.rememberSharedPreferenceString
 import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.pages.setting.components.ProviderGhostButton
@@ -114,6 +127,23 @@ internal fun <T> WorkspaceSegmentedChoice(
 fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     var displaySetting by remember(settings) { mutableStateOf(settings.displaySetting) }
+    val context = LocalContext.current
+    var storedLaunchStartMode by rememberSharedPreferenceString(LAUNCH_START_MODE_PREF)
+    val legacyCreateNewOnStart = remember(context) {
+        if (context.containsPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF)) {
+            context.readBooleanPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF, true)
+        } else {
+            null
+        }
+    }
+    val effectiveLaunchStartMode = migrateLaunchStartMode(
+        storedMode = storedLaunchStartMode,
+        legacyCreateNewConversationOnStart = legacyCreateNewOnStart,
+    )
+    val selectedLaunchStartOption = when (effectiveLaunchStartMode) {
+        LaunchStartMode.AUTO -> LaunchStartMode.LAST_SESSION
+        else -> effectiveLaunchStartMode
+    }
 
     fun updateDisplaySetting(setting: DisplaySetting) {
         displaySetting = setting
@@ -156,6 +186,57 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
             contentPadding = contentPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            item {
+                val launchStartOptions = listOf(
+                    Triple(
+                        LaunchStartMode.PERSONAL_AGENT,
+                        stringResource(R.string.setting_display_launch_start_mode_personal_agent),
+                        stringResource(R.string.setting_display_launch_start_mode_personal_agent_desc),
+                    ),
+                    Triple(
+                        LaunchStartMode.HOME,
+                        stringResource(R.string.setting_display_launch_start_mode_home),
+                        stringResource(R.string.setting_display_launch_start_mode_home_desc),
+                    ),
+                    Triple(
+                        LaunchStartMode.LAST_SESSION,
+                        stringResource(R.string.setting_display_launch_start_mode_last_session),
+                        stringResource(R.string.setting_display_launch_start_mode_last_session_desc),
+                    ),
+                    Triple(
+                        LaunchStartMode.NEW_CHAT,
+                        stringResource(R.string.setting_display_launch_start_mode_new_chat),
+                        stringResource(R.string.setting_display_launch_start_mode_new_chat_desc),
+                    ),
+                )
+                SettingCardGroup(
+                    title = stringResource(R.string.setting_display_launch_start_mode_title),
+                    modifier = Modifier.selectableGroup(),
+                ) {
+                    launchStartOptions.forEach { (mode, label, description) ->
+                        val isSelected = selectedLaunchStartOption == mode
+                        item(
+                            modifier = Modifier
+                                .settingTwoLine()
+                                .testTag("launch-start-mode-${mode.name}")
+                                .selectable(
+                                    selected = isSelected,
+                                    role = Role.RadioButton,
+                                    onClick = { storedLaunchStartMode = mode.name },
+                                ),
+                            headlineContent = { Text(label) },
+                            supportingContent = { Text(description) },
+                            trailingContent = {
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = null,
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+
             item {
                 SettingCardGroup(
                     title = stringResource(R.string.setting_page_message_display_settings),

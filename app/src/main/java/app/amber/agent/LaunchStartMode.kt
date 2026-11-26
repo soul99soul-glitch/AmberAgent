@@ -11,6 +11,7 @@ enum class LaunchStartMode {
     LAST_SESSION,
     NEW_CHAT,
     HOME,
+    PERSONAL_AGENT,
 }
 
 fun parseLaunchStartMode(value: String?): LaunchStartMode? =
@@ -26,10 +27,27 @@ fun migrateLaunchStartMode(
         ?: when (legacyCreateNewConversationOnStart) {
             // 旧版里 create_new_conversation_on_start 默认就是 true（且会被持久化），
             // 它的存在不代表用户主动选择，只有显式关掉（false = 恢复上次会话）才算主动选择；
-            // 其余情况一律落到新的会话首页。
+            // 其余情况一律落到新的 Personal Agent 主舞台。
             false -> LaunchStartMode.LAST_SESSION
-            true, null -> LaunchStartMode.HOME
+            true, null -> LaunchStartMode.PERSONAL_AGENT
         }
+
+fun homeScreenFor(mode: LaunchStartMode): Screen =
+    when (mode) {
+        LaunchStartMode.HOME -> Screen.SessionHome
+        LaunchStartMode.AUTO,
+        LaunchStartMode.LAST_SESSION,
+        LaunchStartMode.NEW_CHAT,
+        LaunchStartMode.PERSONAL_AGENT,
+        -> Screen.PersonalAgent
+    }
+
+fun initialBackStackFor(
+    startScreen: Screen,
+    startMode: LaunchStartMode,
+): List<Screen> =
+    if (startScreen is Screen.Chat) listOf(homeScreenFor(startMode), startScreen)
+    else listOf(startScreen)
 
 fun resolveLaunchStartScreen(
     mode: LaunchStartMode,
@@ -42,6 +60,7 @@ fun resolveLaunchStartScreen(
         LaunchStartMode.LAST_SESSION -> Screen.Chat(reusableLastConversationId ?: newConversationId)
         LaunchStartMode.NEW_CHAT -> Screen.Chat(newConversationId)
         LaunchStartMode.HOME -> Screen.SessionHome
+        LaunchStartMode.PERSONAL_AGENT -> Screen.PersonalAgent
     }
 }
 

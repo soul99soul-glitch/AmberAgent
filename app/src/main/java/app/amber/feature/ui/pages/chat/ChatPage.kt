@@ -5,7 +5,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.Transition
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +49,18 @@ import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
 import kotlin.uuid.Uuid
 
+sealed interface ChatStageMode {
+    data object Standard : ChatStageMode
+    data class PersonalAgent(
+        val topBarLeading: @Composable () -> Unit,
+        val onOpenSessions: () -> Unit,
+    ) : ChatStageMode
+}
+
+internal val LocalChatStageMode = compositionLocalOf<ChatStageMode> { ChatStageMode.Standard }
+internal val LocalPersonalAgentMoreMenu =
+    compositionLocalOf<(@Composable (hasMessages: Boolean, onToggleShelf: () -> Unit) -> Unit)?> { null }
+
 @Composable
 fun ChatPage(
     id: Uuid,
@@ -57,9 +71,11 @@ fun ChatPage(
     toolCallId: String? = null,
     /** The route's enter transition; the timeline composes once it has settled. */
     enterTransition: Transition<EnterExitState>? = null,
+    stage: ChatStageMode = ChatStageMode.Standard,
 ) {
 
     val vm: ChatVM = koinViewModel(
+        key = "chat:$id",
         parameters = {
             parametersOf(id.toString())
         }
@@ -279,40 +295,42 @@ fun ChatPage(
 
     // ChatDrawer 侧边栏已废弃移除（手机 ModalNavigationDrawer / 平板 PermanentNavigationDrawer
     // 两个挂载点一起拆掉）：会话列表入口由 Session 首页承担，顶栏左上是返回。
-    ChatPageScaffold(
-        timelineReady = timelineReady,
-        timelinePrepared = timelinePrepared,
-        inputState = inputState,
-        inputSubmissionOwner = inputSubmissionOwner,
-        loadingJob = loadingJob,
-        processingStatus = processingStatus,
-        setting = setting,
-        conversation = conversation,
-        timelineLoadState = timelineLoadState,
-        contextCompacts = contextCompacts,
-        activeCompactBoundary = activeCompactBoundary,
-        compactLifecycleState = compactLifecycleState,
-        isCompacting = isCompacting,
-        streamingSummary = streamingSummary,
-        navController = navController,
-        vm = vm,
-        chatListState = chatListState,
-        resolvedNodeId = resolvedNodeId,
-        enableWebSearch = enableWebSearch,
-        currentChatModel = currentChatModel,
-        configurationIssue = configurationIssue,
-        bigScreen = isBigScreen,
-        errors = errors,
-        globalErrors = globalErrors,
-        onDismissError = { vm.dismissError(it) },
-        onClearAllErrors = { vm.clearAllErrors() },
-        onPreviewWorkspaceFile = { previewFilePath = it },
-        outcomeUnknown = outcomeUnknown,
-        onReconcileOutcomeUnknown = { effectId, retry -> vm.reconcileOutcomeUnknown(effectId, retry) },
-        onSaveToWorkspace = if (artifactsEnabled) {
-            { msg -> messageToSave = conversation.id.toString() to msg }
-        } else null,
-    )
+    CompositionLocalProvider(LocalChatStageMode provides stage) {
+        ChatPageScaffold(
+            timelineReady = timelineReady,
+            timelinePrepared = timelinePrepared,
+            inputState = inputState,
+            inputSubmissionOwner = inputSubmissionOwner,
+            loadingJob = loadingJob,
+            processingStatus = processingStatus,
+            setting = setting,
+            conversation = conversation,
+            timelineLoadState = timelineLoadState,
+            contextCompacts = contextCompacts,
+            activeCompactBoundary = activeCompactBoundary,
+            compactLifecycleState = compactLifecycleState,
+            isCompacting = isCompacting,
+            streamingSummary = streamingSummary,
+            navController = navController,
+            vm = vm,
+            chatListState = chatListState,
+            resolvedNodeId = resolvedNodeId,
+            enableWebSearch = enableWebSearch,
+            currentChatModel = currentChatModel,
+            configurationIssue = configurationIssue,
+            bigScreen = isBigScreen,
+            errors = errors,
+            globalErrors = globalErrors,
+            onDismissError = { vm.dismissError(it) },
+            onClearAllErrors = { vm.clearAllErrors() },
+            onPreviewWorkspaceFile = { previewFilePath = it },
+            outcomeUnknown = outcomeUnknown,
+            onReconcileOutcomeUnknown = { effectId, retry -> vm.reconcileOutcomeUnknown(effectId, retry) },
+            onSaveToWorkspace = if (artifactsEnabled) {
+                { msg -> messageToSave = conversation.id.toString() to msg }
+            } else null,
+        )
+    }
     previewFilePath?.let { path ->
         WorkspaceFilePreview(
             relativePath = path,

@@ -1,5 +1,6 @@
 package app.amber.core.di
 
+import app.amber.agent.PersonalAgentMainSessionStore
 import app.amber.core.infra.AppScope
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.ui.components.ai.SubAgentDockState
@@ -99,4 +100,5 @@ val viewModelModule = module {
     viewModelOf(::SearchVM)
     viewModelOf(::StatsVM)
     viewModelOf(::ProfileVM)
+    single { PersonalAgentMainSessionStore(get()) }
 }
