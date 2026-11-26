@@ -3,20 +3,29 @@ package app.amber.feature.macgateway
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
+import app.amber.core.settings.secret.SecretStore
+import app.amber.core.settings.secret.createAndroidSecretStore
 import app.amber.feature.prompts.AgentSoulState
 import app.amber.feature.prompts.AgentSoulStore
 import com.google.firebase.messaging.FirebaseMessaging
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,6 +36,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val Context.macGatewayDataStore by preferencesDataStore(name = "mac_gateway")
 
@@ -128,14 +138,21 @@ class AgentSoulCloudSyncCoordinator(
 }
 
 /**
- * The paired Mac Gateway. The device token lives in app-private DataStore next to the connection
- * (same treatment as the Synara companion token); treat it like a password.
+ * The paired Mac/Cloud Gateway. Device tokens are encrypted in [SecretStore] via [GatewayTokenVault]
+ * (with idempotent migration from legacy plaintext DataStore `token` entries).
  */
 class MacGatewayRepository(
     private val context: Context,
     private val appScope: CoroutineScope,
     timelineSink: CloudDialogueTimelineSink = CloudDialogueTimelineSink.NoOp,
     private val agentSoulStore: AgentSoulStore? = null,
+    secretStore: SecretStore = createAndroidSecretStore(context),
+    private val dataStore: DataStore<Preferences> = context.macGatewayDataStore,
+    foregroundFlow: StateFlow<Boolean>? = null,
+    private val clientFactory: (MacGatewayConnection, String) -> MacGatewayClient = { conn, token ->
+        MacGatewayClient(conn.addrs, conn.port, conn.fingerprint, token)
+    },
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
 ) {
     data class State(
         val loaded: Boolean = false,
@@ -151,18 +168,40 @@ class MacGatewayRepository(
             get() = cloudDialogueEnabled && connection != null
     }
 
+    private val tokenVault = GatewayTokenVault(secretStore)
+
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
     private val _cloudDialogueState = MutableStateFlow(CloudDialogueUiState())
     val cloudDialogueState: StateFlow<CloudDialogueUiState> = _cloudDialogueState.asStateFlow()
 
+    private val _connectionGeneration = MutableStateFlow(0L)
+    val connectionGeneration: StateFlow<Long> = _connectionGeneration.asStateFlow()
+
     private val ready = CompletableDeferred<Unit>()
 
     @Volatile
     private var client: MacGatewayClient? = null
 
+    private val pollLock = Any()
     private var cloudPollJob: Job? = null
+    private val pollWakeup = Channel<Unit>(Channel.CONFLATED)
+    private val immediatePollRequested = AtomicBoolean(false)
+    private val immediatePollForceWhenDisabled = AtomicBoolean(false)
+    private val pollExecutionMutex = Mutex()
+
+    private val ownedForegroundFlow: MutableStateFlow<Boolean>? =
+        if (foregroundFlow == null) MutableStateFlow(false) else null
+    private val isForeground: StateFlow<Boolean> = foregroundFlow ?: ownedForegroundFlow!!.asStateFlow()
+
+    private val lifecycleObserver = LifecycleEventObserver { _, event ->
+        when (event) {
+            Lifecycle.Event.ON_START -> ownedForegroundFlow?.value = true
+            Lifecycle.Event.ON_STOP -> ownedForegroundFlow?.value = false
+            else -> Unit
+        }
+    }
 
     private val soulSyncCoordinator: AgentSoulCloudSyncCoordinator? =
         agentSoulStore?.let { store ->
@@ -177,7 +216,7 @@ class MacGatewayRepository(
         clientProvider = { activeClient() },
         timelineSink = timelineSink,
         persistState = { persisted ->
-            context.macGatewayDataStore.edit { prefs ->
+            dataStore.edit { prefs ->
                 prefs[CLOUD_DIALOGUE_STATE] = MacGatewayJson.encodeToString(
                     CloudDialoguePersistedState.serializer(),
                     persisted,
@@ -194,20 +233,51 @@ class MacGatewayRepository(
         onSoulRevision = { rev ->
             soulSyncCoordinator?.onRemoteSoulRevision(rev)
         },
+        persistScope = appScope,
     )
 
     init {
+        if (ownedForegroundFlow != null) {
+            appScope.launch(Dispatchers.Main.immediate) {
+                runCatching {
+                    val lifecycle = ProcessLifecycleOwner.get().lifecycle
+                    ownedForegroundFlow.value = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                    lifecycle.addObserver(lifecycleObserver)
+                }.onFailure {
+                    Log.w(TAG, "failed to observe ProcessLifecycleOwner")
+                }
+            }
+        }
+
         appScope.launch {
-            val prefs = context.macGatewayDataStore.data.first()
+            var previousForeground = isForeground.value
+            isForeground.collect { foreground ->
+                if (foreground == previousForeground) return@collect
+                previousForeground = foreground
+                if (foreground) {
+                    requestImmediatePoll(REASON_FOREGROUND)
+                } else {
+                    reconcileCloudPolling()
+                }
+            }
+        }
+
+        appScope.launch {
+            val prefs = dataStore.data.first()
             val connection = prefs[CONNECTION]?.let {
                 runCatching { MacGatewayJson.decodeFromString<MacGatewayConnection>(it) }.getOrNull()
             }
-            val token = prefs[TOKEN]
+            val legacyToken = prefs[TOKEN]?.takeIf { it.isNotBlank() }
+            val token = if (connection != null) {
+                resolveAndMigrateToken(connection.gatewayId, legacyToken)
+            } else {
+                null
+            }
             val cloudEnabled = prefs[CLOUD_DIALOGUE_ENABLED] == true
             val persistedDialogue = prefs[CLOUD_DIALOGUE_STATE]?.let {
                 runCatching { MacGatewayJson.decodeFromString<CloudDialoguePersistedState>(it) }.getOrNull()
             }
-            if (connection != null && token != null) client = connection.client(token)
+            if (connection != null && token != null) client = clientFactory(connection, token)
             val activeConnection = connection.takeIf { client != null }
             _state.update {
                 it.copy(
@@ -231,8 +301,9 @@ class MacGatewayRepository(
 
     suspend fun pair(payload: MacGatewayPairingPayload) {
         ready.await()
+        val deviceName = Build.MODEL?.takeIf { it.isNotBlank() } ?: "Android"
         val response = MacGatewayClient(payload.addrs, payload.port, payload.fp, token = null)
-            .pair(payload.s, deviceName = Build.MODEL)
+            .pair(payload.s, deviceName = deviceName)
         val connection = MacGatewayConnection(
             gatewayId = response.gatewayId,
             name = response.gatewayName,
@@ -241,16 +312,24 @@ class MacGatewayRepository(
             fingerprint = payload.fp,
             deviceId = response.deviceId,
         )
+        val previousGatewayId = _state.value.connection?.gatewayId
         val cloudEnabled = _state.value.cloudDialogueEnabled
-        context.macGatewayDataStore.edit {
+        // Persist encrypted token with read-back verification before committing connection metadata.
+        tokenVault.write(connection.gatewayId, response.token)
+        dataStore.edit {
             it[CONNECTION] = MacGatewayJson.encodeToString(MacGatewayConnection.serializer(), connection)
-            it[TOKEN] = response.token
+            it.remove(TOKEN)
             it.remove(CLOUD_DIALOGUE_STATE)
         }
-        client = connection.client(response.token)
+        if (previousGatewayId != null && previousGatewayId != connection.gatewayId) {
+            runCatching { tokenVault.delete(previousGatewayId) }
+        }
+        _connectionGeneration.update { it + 1L }
+        client = clientFactory(connection, response.token)
         soulSyncCoordinator?.resetConnectionSession()
         _state.value = State(loaded = true, connection = connection, cloudDialogueEnabled = cloudEnabled)
         cloudCoordinator.restore(enabled = cloudEnabled, connection = connection, persisted = null)
+        reconcileCloudPolling()
         runCatching { uploadPushToken() }.onFailure { Log.w(TAG, "push token upload after pairing failed", it) }
         refresh()
         soulSyncCoordinator?.syncOnce()
@@ -259,12 +338,21 @@ class MacGatewayRepository(
     suspend fun setCloudDialogueEnabled(enabled: Boolean) {
         ready.await()
         val effective = enabled && _state.value.connection != null
-        context.macGatewayDataStore.edit {
+        dataStore.edit {
             it[CLOUD_DIALOGUE_ENABLED] = effective
         }
         _state.update { it.copy(cloudDialogueEnabled = effective) }
         cloudCoordinator.setEnabled(effective)
         reconcileCloudPolling()
+    }
+
+    fun requestImmediatePoll(reason: String) {
+        if (reason != REASON_FOREGROUND) {
+            immediatePollForceWhenDisabled.set(true)
+        }
+        immediatePollRequested.set(true)
+        pollWakeup.trySend(Unit)
+        ensurePollLoopRunning()
     }
 
     fun bindActiveConversation(conversationId: String) {
@@ -294,7 +382,7 @@ class MacGatewayRepository(
             requestId = requestId,
         )
         reconcileCloudPolling()
-        appScope.launch { cloudCoordinator.pollOnce() }
+        requestImmediatePoll("send_message")
         return sub
     }
 
@@ -312,7 +400,7 @@ class MacGatewayRepository(
             requestId = requestId,
         )
         reconcileCloudPolling()
-        appScope.launch { cloudCoordinator.pollOnce() }
+        requestImmediatePoll("send_followup")
         return sub
     }
 
@@ -326,13 +414,15 @@ class MacGatewayRepository(
             requestId = requestId,
         )
         reconcileCloudPolling()
-        appScope.launch { cloudCoordinator.pollOnce() }
+        requestImmediatePoll("stop_work_item")
         return sub
     }
 
     suspend fun pollCloudDialogueOnce() {
         ready.await()
-        cloudCoordinator.pollOnce()
+        pollExecutionMutex.withLock {
+            cloudCoordinator.pollOnce()
+        }
     }
 
     suspend fun recheckCloudOutcomeUnknown(workItemId: String): Boolean {
@@ -352,7 +442,7 @@ class MacGatewayRepository(
             requestId = requestId,
         )
         reconcileCloudPolling()
-        appScope.launch { cloudCoordinator.pollOnce() }
+        requestImmediatePoll("retry_outcome_unknown")
         return sub
     }
 
@@ -363,9 +453,11 @@ class MacGatewayRepository(
 
     /** Never throws; the outcome is reflected in [state]. A revoked device is forgotten locally. */
     suspend fun refresh() {
+        val gen = _connectionGeneration.value
         val client = activeClient() ?: return
         try {
             val status = client.status()
+            if (_connectionGeneration.value != gen) return
             _state.update { it.copy(status = status, reachable = true, error = null) }
             if (status.soulRevision != null) {
                 soulSyncCoordinator?.onRemoteSoulRevision(status.soulRevision)
@@ -373,9 +465,13 @@ class MacGatewayRepository(
                 soulSyncCoordinator?.syncOnce()
             }
         } catch (error: MacGatewayException.Unauthorized) {
-            forget(error)
+            if (_connectionGeneration.value == gen) {
+                forget(error)
+            }
         } catch (error: MacGatewayException) {
-            _state.update { it.copy(reachable = false, error = error) }
+            if (_connectionGeneration.value == gen) {
+                _state.update { it.copy(reachable = false, error = error) }
+            }
         }
     }
 
@@ -514,23 +610,134 @@ class MacGatewayRepository(
         }
     }
 
-    private fun reconcileCloudPolling() {
-        val shouldPoll = _state.value.isCloudDialogueActive ||
-            (_state.value.connection != null && _cloudDialogueState.value.tasks.any { it.active })
-        if (!shouldPoll) {
-            cloudPollJob?.cancel()
-            cloudPollJob = null
-            return
+    private suspend fun resolveAndMigrateToken(
+        gatewayId: String,
+        legacyToken: String?,
+    ): String? {
+        val vaultToken = runCatching { tokenVault.read(gatewayId) }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+        if (vaultToken != null) {
+            if (legacyToken != null) {
+                runCatching {
+                    dataStore.edit { it.remove(TOKEN) }
+                }.onFailure {
+                    Log.w(TAG, "failed to clean up legacy gateway token key after vault hit")
+                }
+            }
+            return vaultToken
         }
-        if (cloudPollJob?.isActive == true) return
-        cloudPollJob = appScope.launch {
-            ready.await()
-            while (isActive) {
-                val active = _state.value.isCloudDialogueActive ||
-                    (_state.value.connection != null && _cloudDialogueState.value.tasks.any { it.active })
-                if (!active) break
-                cloudCoordinator.pollOnce()
-                delay(CLOUD_POLL_INTERVAL_MS)
+        if (legacyToken == null) return null
+        val migrated = runCatching {
+            tokenVault.write(gatewayId, legacyToken)
+        }.isSuccess
+        if (migrated) {
+            runCatching {
+                dataStore.edit { it.remove(TOKEN) }
+            }.onFailure {
+                Log.w(TAG, "failed to remove legacy gateway token key after migration")
+            }
+        } else {
+            Log.w(TAG, "gateway token migration to SecretStore failed; keeping legacy fallback")
+        }
+        return legacyToken
+    }
+
+    private fun computePeriodicDelayMs(): Long? {
+        val state = _state.value
+        if (state.connection == null) return null
+        val ui = _cloudDialogueState.value
+        val hasActive = ui.hasActiveTasks()
+        val hasPending = ui.hasPendingSubmissions()
+        if (!state.isCloudDialogueActive && !hasActive && !hasPending) return null
+        return cloudPollDelayMs(
+            foreground = isForeground.value,
+            hasActiveTask = hasActive,
+            hasPendingSubmission = hasPending,
+        )
+    }
+
+    private fun reconcileCloudPolling() {
+        pollWakeup.trySend(Unit)
+        if (computePeriodicDelayMs() != null || immediatePollRequested.get()) {
+            ensurePollLoopRunning()
+        }
+    }
+
+    private fun ensurePollLoopRunning() {
+        synchronized(pollLock) {
+            if (cloudPollJob?.isActive == true) return
+            lateinit var launched: Job
+            launched = appScope.launch {
+                try {
+                    ready.await()
+                    runPollLoop()
+                } finally {
+                    var shouldRestart = false
+                    synchronized(pollLock) {
+                        if (cloudPollJob === launched) {
+                            cloudPollJob = null
+                        }
+                        if (immediatePollRequested.get() || computePeriodicDelayMs() != null) {
+                            shouldRestart = true
+                        }
+                    }
+                    if (shouldRestart) {
+                        ensurePollLoopRunning()
+                    }
+                }
+            }
+            cloudPollJob = launched
+        }
+    }
+
+    private suspend fun runPollLoop() {
+        var lastPollAtMs: Long? = null
+        while (appScope.isActive) {
+            val requestedImmediate = immediatePollRequested.getAndSet(false)
+            val forceWhenDisabled = immediatePollForceWhenDisabled.getAndSet(false)
+            val state = _state.value
+            if (state.connection == null) break
+
+            val ui = _cloudDialogueState.value
+            val hasActive = ui.hasActiveTasks()
+            val hasPending = ui.hasPendingSubmissions()
+            val periodicEnabled = state.isCloudDialogueActive || hasActive || hasPending
+            val delayMs = if (periodicEnabled) {
+                cloudPollDelayMs(
+                    foreground = isForeground.value,
+                    hasActiveTask = hasActive,
+                    hasPendingSubmission = hasPending,
+                )
+            } else {
+                null
+            }
+
+            val allowImmediate = requestedImmediate && (periodicEnabled || forceWhenDisabled)
+            if (!allowImmediate && delayMs == null) {
+                break
+            }
+
+            val elapsedMs = lastPollAtMs?.let { (nowMs() - it).coerceAtLeast(0L) }
+            val shouldPollNow = allowImmediate ||
+                elapsedMs == null ||
+                (delayMs != null && elapsedMs >= delayMs)
+
+            if (shouldPollNow) {
+                val pollGen = _connectionGeneration.value
+                pollExecutionMutex.withLock {
+                    if (_connectionGeneration.value != pollGen || _state.value.connection == null) {
+                        return@withLock
+                    }
+                    cloudCoordinator.pollOnce()
+                }
+                lastPollAtMs = nowMs()
+                continue
+            }
+
+            val remainingMs = (delayMs!! - elapsedMs!!).coerceAtLeast(1L)
+            withTimeoutOrNull(remainingMs) {
+                pollWakeup.receive()
             }
         }
     }
@@ -541,11 +748,25 @@ class MacGatewayRepository(
     }
 
     private suspend fun forget(reason: MacGatewayException? = null) {
-        cloudPollJob?.cancel()
-        cloudPollJob = null
+        val gatewayIdToDelete = _state.value.connection?.gatewayId
+            ?: runCatching {
+                dataStore.data.first()[CONNECTION]?.let {
+                    MacGatewayJson.decodeFromString<MacGatewayConnection>(it).gatewayId
+                }
+            }.getOrNull()
+        _connectionGeneration.update { it + 1L }
+        immediatePollRequested.set(false)
+        immediatePollForceWhenDisabled.set(false)
+        synchronized(pollLock) {
+            cloudPollJob?.cancel()
+            cloudPollJob = null
+        }
         client = null
         soulSyncCoordinator?.resetConnectionSession()
-        context.macGatewayDataStore.edit { it.clear() }
+        gatewayIdToDelete?.let { id ->
+            runCatching { tokenVault.delete(id) }
+        }
+        dataStore.edit { it.clear() }
         _state.value = State(loaded = true, error = reason, cloudDialogueEnabled = false)
         cloudCoordinator.restore(enabled = false, connection = null, persisted = null)
     }
@@ -558,11 +779,22 @@ class MacGatewayRepository(
         }
     }
 
-    private fun MacGatewayConnection.client(token: String) = MacGatewayClient(addrs, port, fingerprint, token)
+    private fun CloudDialogueUiState.hasActiveTasks(): Boolean =
+        tasks.any { it.active }
+
+    private fun CloudDialogueUiState.hasPendingSubmissions(): Boolean =
+        submissions.any { sub ->
+            (sub.state == CloudInputDisposition.RECEIVED && (sub.eventId != null || sub.error == null)) ||
+                (sub.eventId != null && sub.kind == CloudSubmissionKind.MESSAGE && !sub.receiptSyncedAfterConsumed)
+        }
+
+    internal suspend fun awaitReady() {
+        ready.await()
+    }
 
     private companion object {
         const val TAG = "MacGateway"
-        const val CLOUD_POLL_INTERVAL_MS = 1_000L
+        const val REASON_FOREGROUND = "foreground"
         val CONNECTION = stringPreferencesKey("connection")
         val TOKEN = stringPreferencesKey("token")
         val CLOUD_DIALOGUE_ENABLED = booleanPreferencesKey("cloud_dialogue_enabled")

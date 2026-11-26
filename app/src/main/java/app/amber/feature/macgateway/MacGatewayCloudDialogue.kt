@@ -1,5 +1,13 @@
 package app.amber.feature.macgateway
 
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
@@ -241,8 +249,32 @@ class CloudDialogueCoordinator(
     private val onUnauthorized: suspend () -> Unit = {},
     private val onStateChanged: (CloudDialogueUiState) -> Unit = {},
     private val onSoulRevision: suspend (Long) -> Unit = {},
+    private val persistScope: CoroutineScope? = null,
+    private val persistCoalesceWindowMs: Long = DEFAULT_PERSIST_COALESCE_WINDOW_MS,
+    private val maxSettledTasks: Int = DEFAULT_MAX_SETTLED_TASKS,
+    private val maxSettledSubmissions: Int = DEFAULT_MAX_SETTLED_SUBMISSIONS,
+    private val maxTopicMappings: Int = DEFAULT_MAX_TOPIC_MAPPINGS,
 ) {
+    private data class PendingPersist(
+        val sessionEpoch: Long,
+        val revision: Long,
+        val state: CloudDialoguePersistedState,
+    )
+
     private val mutex = Mutex()
+    private val persistWriteMutex = Mutex()
+    private val coalesceLock = Any()
+    private val sessionEpoch = AtomicLong(0L)
+    private val latestPendingPersist = AtomicReference<PendingPersist?>(null)
+    private var persistRevision: Long = 0L
+    private var lastPersistedRevision: Long = 0L
+    private var coalesceTimerPending: Boolean = false
+    private var coalesceJob: Job? = null
+    private val fallbackPersistScope by lazy {
+        CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    }
+    private val effectivePersistScope: CoroutineScope
+        get() = persistScope ?: fallbackPersistScope
 
     private var enabled: Boolean = false
     private var gatewayId: String = ""
@@ -262,6 +294,9 @@ class CloudDialogueCoordinator(
         connection: MacGatewayConnection?,
         persisted: CloudDialoguePersistedState?,
     ) = mutex.withLock {
+        sessionEpoch.incrementAndGet()
+        latestPendingPersist.set(null)
+        cancelCoalescedPersist()
         this.enabled = enabled
         if (connection == null) {
             clearSessionLocked()
@@ -324,7 +359,7 @@ class CloudDialogueCoordinator(
     ): CloudDialogueSubmission {
         val client = clientProvider() ?: throw MacGatewayException.Unreachable()
         val now = System.currentTimeMillis()
-        val initialSubmission = mutex.withLock {
+        val (initialSubmission, initialPending) = mutex.withLock {
             activeConversationId = conversationId
             val existing = submissionsByRequestId[requestId]
             val echoed = existing?.localEchoed == true
@@ -341,13 +376,14 @@ class CloudDialogueCoordinator(
                 error = null,
             )
             submissionsByRequestId[requestId] = sub
-            persistLocked()
+            val pending = capturePersistLocked()
             publishLocked()
             if (!echoed) {
                 timelineSink.appendUserMessage(conversationId, text, eventId = sub.eventId)
             }
-            sub
+            sub to pending
         }
+        commitPersist(initialPending, immediate = true)
 
         return try {
             val receipt = client.messages(
@@ -355,7 +391,7 @@ class CloudDialogueCoordinator(
                 text = initialSubmission.text,
                 conversationId = conversationId,
             )
-            val updated = mutex.withLock {
+            val (updated, receiptPending) = mutex.withLock {
                 localEchoedEventIds.add(receipt.eventId)
                 val resolvedConversation = receipt.conversationId?.takeIf { it.isNotBlank() } ?: conversationId
                 topicToConversation[receipt.topicId] = resolvedConversation
@@ -373,10 +409,11 @@ class CloudDialogueCoordinator(
                     outcomeUnknown = receipt.outcomeUnknown,
                 )
                 lastError = null
-                persistLocked()
+                val pending = capturePersistLocked()
                 publishLocked()
-                next
+                next to pending
             }
+            commitPersist(receiptPending, immediate = true)
             updated
         } catch (error: Throwable) {
             handleRequestFailure(requestId, error)
@@ -392,7 +429,7 @@ class CloudDialogueCoordinator(
     ): CloudDialogueSubmission {
         val client = clientProvider() ?: throw MacGatewayException.Unreachable()
         val now = System.currentTimeMillis()
-        val initialSubmission = mutex.withLock {
+        val (initialSubmission, initialPending) = mutex.withLock {
             activeConversationId = conversationId
             val existing = submissionsByRequestId[requestId]
             val echoed = existing?.localEchoed == true
@@ -417,13 +454,14 @@ class CloudDialogueCoordinator(
             if (selectedFollowupWorkItemId == workItemId) {
                 selectedFollowupWorkItemId = null
             }
-            persistLocked()
+            val pending = capturePersistLocked()
             publishLocked()
             if (!echoed) {
                 timelineSink.appendUserMessage(targetConv, text, eventId = sub.eventId)
             }
-            sub
+            sub to pending
         }
+        commitPersist(initialPending, immediate = true)
 
         return try {
             val receipt = client.inputs(
@@ -432,7 +470,7 @@ class CloudDialogueCoordinator(
                 text = initialSubmission.text,
                 conversationId = initialSubmission.conversationId,
             )
-            mutex.withLock {
+            val (updated, receiptPending) = mutex.withLock {
                 localEchoedEventIds.add(receipt.eventId)
                 val resolvedConversation = receipt.conversationId?.takeIf { it.isNotBlank() }
                     ?: initialSubmission.conversationId
@@ -451,10 +489,12 @@ class CloudDialogueCoordinator(
                     outcomeUnknown = receipt.outcomeUnknown,
                 )
                 lastError = null
-                persistLocked()
+                val pending = capturePersistLocked()
                 publishLocked()
-                next
+                next to pending
             }
+            commitPersist(receiptPending, immediate = true)
+            updated
         } catch (error: Throwable) {
             handleRequestFailure(requestId, error)
             throw error
@@ -467,7 +507,7 @@ class CloudDialogueCoordinator(
     ): CloudDialogueSubmission {
         val client = clientProvider() ?: throw MacGatewayException.Unreachable()
         val now = System.currentTimeMillis()
-        val initialSubmission = mutex.withLock {
+        val (initialSubmission, initialPending) = mutex.withLock {
             val task = tasksById[workItemId]
             val targetConv = task?.conversationId ?: activeConversationId.orEmpty()
             val existing = submissionsByRequestId[requestId]
@@ -490,10 +530,11 @@ class CloudDialogueCoordinator(
             if (selectedFollowupWorkItemId == workItemId) {
                 selectedFollowupWorkItemId = null
             }
-            persistLocked()
+            val pending = capturePersistLocked()
             publishLocked()
-            sub
+            sub to pending
         }
+        commitPersist(initialPending, immediate = true)
 
         return try {
             val receipt = client.stop(
@@ -501,15 +542,17 @@ class CloudDialogueCoordinator(
                 requestId = initialSubmission.requestId,
                 conversationId = initialSubmission.conversationId.takeIf { it.isNotBlank() },
             )
-            mutex.withLock {
+            val (updated, receiptPending) = mutex.withLock {
                 localEchoedEventIds.add(receipt.eventId)
                 val next = (submissionsByRequestId[requestId] ?: initialSubmission).withReceipt(receipt)
                 submissionsByRequestId[requestId] = next
                 lastError = null
-                persistLocked()
+                val pending = capturePersistLocked()
                 publishLocked()
-                next
+                next to pending
             }
+            commitPersist(receiptPending, immediate = true)
+            updated
         } catch (error: Throwable) {
             handleRequestFailure(requestId, error)
             throw error
@@ -527,7 +570,7 @@ class CloudDialogueCoordinator(
         workItemId: String,
         requestId: String,
     ): CloudDialogueSubmission {
-        val (retryId, prompt) = mutex.withLock {
+        val (retryId, prompt, retryPending) = mutex.withLock {
             val task = tasksById[workItemId]
             require(task != null && task.conversationId == conversationId &&
                 task.outcomeUnknown && !task.outcomeUnknownAbandoned) { "任务已不再等待结果确认" }
@@ -538,28 +581,36 @@ class CloudDialogueCoordinator(
                 ?: messages.singleOrNull { it.topicId == task.topicId }
                 ?: error("找不到原始任务指令，请在对话中重新发送")
             // A lost HTTP response or a second tap must replay the same server request.
+            var pending: PendingPersist? = null
             val id = task.retryRequestId ?: requestId.also {
                 tasksById[workItemId] = task.copy(retryRequestId = it)
-                persistLocked()
+                pending = capturePersistLocked()
             }
-            id to original.text
+            Triple(id, original.text, pending)
         }
+        commitPersist(retryPending, immediate = true)
         val submission = sendMessage(conversationId, prompt, retryId)
-        mutex.withLock {
+        val abandonPending = mutex.withLock {
             val task = tasksById[workItemId]
             if (task?.outcomeUnknown == true && task.retryRequestId == retryId) {
                 abandonOutcomeUnknownTaskLocked(task)
+            } else {
+                null
             }
         }
+        commitPersist(abandonPending, immediate = true)
         return submission
     }
 
-    suspend fun abandonOutcomeUnknownTask(workItemId: String) = mutex.withLock {
-        val existing = tasksById[workItemId] ?: return@withLock
-        if (existing.outcomeUnknown) abandonOutcomeUnknownTaskLocked(existing)
+    suspend fun abandonOutcomeUnknownTask(workItemId: String) {
+        val pending = mutex.withLock {
+            val existing = tasksById[workItemId] ?: return@withLock null
+            if (existing.outcomeUnknown) abandonOutcomeUnknownTaskLocked(existing) else null
+        }
+        commitPersist(pending, immediate = true)
     }
 
-    private suspend fun abandonOutcomeUnknownTaskLocked(existing: CloudTaskSession) {
+    private fun abandonOutcomeUnknownTaskLocked(existing: CloudTaskSession): PendingPersist? {
         tasksById[existing.workItemId] = existing.copy(
             active = false,
             outcomeUnknown = false,
@@ -567,8 +618,9 @@ class CloudDialogueCoordinator(
             outcome = existing.outcome ?: "abandoned",
             updatedAtMs = System.currentTimeMillis(),
         )
-        persistLocked()
+        val pending = capturePersistLocked()
         publishLocked()
+        return pending
     }
 
     suspend fun pollOnce(reportFailure: Boolean = false) {
@@ -583,14 +635,18 @@ class CloudDialogueCoordinator(
             page.soulRevision?.let { rev ->
                 runCatching { onSoulRevision(rev) }
             }
-            mutex.withLock {
+            val (eventsPending, eventsImmediate) = mutex.withLock {
                 var dirty = false
+                var durableBarrier = false
                 val sortedItems = page.items.sortedBy { it.seq }
                 for (event in sortedItems) {
                     if (event.id in seenEventIds) continue
                     applyEventLocked(event)
                     seenEventIds.add(event.id)
                     dirty = true
+                    if (isDurableBarrierEvent(event)) {
+                        durableBarrier = true
+                    }
                 }
                 val maxItemSeq = sortedItems.maxOfOrNull { it.seq } ?: 0L
                 val nextCursor = maxOf(page.nextCursor, maxItemSeq)
@@ -599,11 +655,14 @@ class CloudDialogueCoordinator(
                     dirty = true
                 }
                 if (dirty) {
-                    trimBoundedSetsLocked()
-                    persistLocked()
+                    val pending = capturePersistLocked()
                     publishLocked()
+                    pending to durableBarrier
+                } else {
+                    null to false
                 }
             }
+            commitPersist(eventsPending, immediate = eventsImmediate)
 
             val pendingReceiptRequests = mutex.withLock {
                 submissionsByRequestId.values
@@ -616,6 +675,7 @@ class CloudDialogueCoordinator(
                     .map { it.requestId to it.conversationId }
             }
             var receiptsUpdated = false
+            var receiptsDurable = false
             for ((reqId, subConversationId) in pendingReceiptRequests) {
                 val receipt = runCatching {
                     client.receipts(
@@ -629,6 +689,9 @@ class CloudDialogueCoordinator(
                     if (next != existing) {
                         submissionsByRequestId[reqId] = next
                         receiptsUpdated = true
+                        if (next.state != CloudInputDisposition.RECEIVED || next.outcomeUnknown) {
+                            receiptsDurable = true
+                        }
                     }
                     if (next.workItemIds.isNotEmpty()) {
                         val before = tasksById.toMap()
@@ -643,15 +706,20 @@ class CloudDialogueCoordinator(
                             epoch = receipt.epoch,
                             outcomeUnknown = receipt.outcomeUnknown,
                         )
-                        if (tasksById != before) receiptsUpdated = true
+                        if (tasksById != before) {
+                            receiptsUpdated = true
+                            receiptsDurable = true
+                        }
                     }
                 }
             }
             if (receiptsUpdated) {
-                mutex.withLock {
-                    persistLocked()
+                val receiptsPending = mutex.withLock {
+                    val pending = capturePersistLocked()
                     publishLocked()
+                    pending
                 }
+                commitPersist(receiptsPending, immediate = receiptsDurable)
             }
         } catch (error: MacGatewayException.Unauthorized) {
             onUnauthorized()
@@ -996,7 +1064,7 @@ class CloudDialogueCoordinator(
             onUnauthorized()
             return
         }
-        mutex.withLock {
+        val pending = mutex.withLock {
             val existing = submissionsByRequestId[requestId]
             if (existing != null) {
                 submissionsByRequestId[requestId] = existing.copy(
@@ -1005,9 +1073,24 @@ class CloudDialogueCoordinator(
                 )
             }
             lastError = error.message ?: error.javaClass.simpleName
-            persistLocked()
+            val snapshot = capturePersistLocked()
             publishLocked()
+            snapshot
         }
+        commitPersist(pending, immediate = true)
+    }
+
+    private fun isDurableBarrierEvent(event: CloudDialogueEvent): Boolean = when (event.kind) {
+        "user_message",
+        "followup",
+        "stop_requested",
+        "stop_too_late",
+        "assistant_reply",
+        "input_consumed",
+        "input_cancelled",
+        "task_result",
+        -> true
+        else -> false
     }
 
     private fun trimBoundedSetsLocked() {
@@ -1018,6 +1101,81 @@ class CloudDialogueCoordinator(
         while (localEchoedEventIds.size > MAX_TRACKED_EVENT_IDS) {
             val first = localEchoedEventIds.firstOrNull() ?: break
             localEchoedEventIds.remove(first)
+        }
+        pruneSettledHistoryLocked()
+    }
+
+    /**
+     * Prunes settled history beyond the replay window while strictly preserving every
+     * unsettled, unconfirmed, or `outcomeUnknown` task/submission (and any submission or
+     * topic mapping referenced by a protected task).
+     */
+    private fun pruneSettledHistoryLocked() {
+        val protectedTaskIds = HashSet<String>()
+        val protectedTaskTopics = HashSet<String>()
+        tasksById.values.forEach { task ->
+            val isProtected = task.active ||
+                (task.outcomeUnknown && !task.outcomeUnknownAbandoned) ||
+                task.workItemId == selectedFollowupWorkItemId
+            if (isProtected) {
+                protectedTaskIds.add(task.workItemId)
+                if (task.topicId.isNotBlank()) {
+                    protectedTaskTopics.add(task.topicId)
+                }
+            }
+        }
+
+        val protectedSubmissionIds = HashSet<String>()
+        submissionsByRequestId.values.forEach { sub ->
+            val isProtected = sub.state == CloudInputDisposition.RECEIVED ||
+                !sub.receiptSyncedAfterConsumed ||
+                sub.eventId == null ||
+                sub.outcomeUnknown ||
+                (sub.targetWorkItemId != null && sub.targetWorkItemId in protectedTaskIds) ||
+                sub.workItemIds.any { it in protectedTaskIds } ||
+                (!sub.topicId.isNullOrBlank() && sub.topicId in protectedTaskTopics)
+            if (isProtected) {
+                protectedSubmissionIds.add(sub.requestId)
+                sub.targetWorkItemId?.takeIf { it.isNotBlank() }?.let(protectedTaskIds::add)
+                sub.workItemIds.filter { it.isNotBlank() }.forEach(protectedTaskIds::add)
+            }
+        }
+
+        if (maxSettledTasks >= 0) {
+            val settledTasks = tasksById.values.filter { it.workItemId !in protectedTaskIds }
+            val excessTasks = settledTasks.size - maxSettledTasks
+            if (excessTasks > 0) {
+                settledTasks
+                    .sortedBy { it.updatedAtMs }
+                    .take(excessTasks)
+                    .forEach { tasksById.remove(it.workItemId) }
+            }
+        }
+
+        if (maxSettledSubmissions >= 0) {
+            val settledSubmissions = submissionsByRequestId.values.filter { it.requestId !in protectedSubmissionIds }
+            val excessSubmissions = settledSubmissions.size - maxSettledSubmissions
+            if (excessSubmissions > 0) {
+                settledSubmissions
+                    .sortedBy { it.updatedAtMs }
+                    .take(excessSubmissions)
+                    .forEach { submissionsByRequestId.remove(it.requestId) }
+            }
+        }
+
+        if (maxTopicMappings >= 0 && topicToConversation.size > maxTopicMappings) {
+            val referencedTopics = HashSet<String>()
+            tasksById.values.forEach { if (it.topicId.isNotBlank()) referencedTopics.add(it.topicId) }
+            submissionsByRequestId.values.forEach { sub ->
+                sub.topicId?.takeIf { it.isNotBlank() }?.let(referencedTopics::add)
+            }
+            val removable = topicToConversation.keys.filter { it !in referencedTopics }
+            var toRemove = topicToConversation.size - maxTopicMappings
+            for (topic in removable) {
+                if (toRemove <= 0) break
+                topicToConversation.remove(topic)
+                toRemove--
+            }
         }
     }
 
@@ -1034,20 +1192,72 @@ class CloudDialogueCoordinator(
         lastError = null
     }
 
-    private suspend fun persistLocked() {
-        if (gatewayId.isBlank() || deviceId.isBlank()) return
-        persistState(
-            CloudDialoguePersistedState(
-                gatewayId = gatewayId,
-                deviceId = deviceId,
-                cursor = cursor,
-                seenEventIds = seenEventIds.toList(),
-                localEchoedEventIds = localEchoedEventIds.toList(),
-                topicToConversation = topicToConversation.toMap(),
-                tasks = tasksById.values.toList(),
-                submissions = submissionsByRequestId.values.toList(),
-            ),
+    private fun capturePersistLocked(): PendingPersist? {
+        trimBoundedSetsLocked()
+        if (gatewayId.isBlank() || deviceId.isBlank()) return null
+        val snapshot = CloudDialoguePersistedState(
+            gatewayId = gatewayId,
+            deviceId = deviceId,
+            cursor = cursor,
+            seenEventIds = seenEventIds.toList(),
+            localEchoedEventIds = localEchoedEventIds.toList(),
+            topicToConversation = topicToConversation.toMap(),
+            tasks = tasksById.values.toList(),
+            submissions = submissionsByRequestId.values.toList(),
         )
+        val pending = PendingPersist(
+            sessionEpoch = sessionEpoch.get(),
+            revision = ++persistRevision,
+            state = snapshot,
+        )
+        latestPendingPersist.set(pending)
+        return pending
+    }
+
+    private suspend fun commitPersist(pending: PendingPersist?, immediate: Boolean) {
+        if (pending == null) return
+        if (immediate || persistCoalesceWindowMs <= 0L) {
+            cancelCoalescedPersist()
+            flushPendingPersist()
+        } else {
+            scheduleCoalescedPersist()
+        }
+    }
+
+    private fun scheduleCoalescedPersist() {
+        synchronized(coalesceLock) {
+            if (coalesceTimerPending) return
+            coalesceTimerPending = true
+            coalesceJob = effectivePersistScope.launch {
+                try {
+                    delay(persistCoalesceWindowMs)
+                } finally {
+                    synchronized(coalesceLock) {
+                        coalesceTimerPending = false
+                    }
+                }
+                runCatching { flushPendingPersist() }
+            }
+        }
+    }
+
+    private fun cancelCoalescedPersist() {
+        synchronized(coalesceLock) {
+            coalesceTimerPending = false
+            coalesceJob?.cancel()
+            coalesceJob = null
+        }
+    }
+
+    internal suspend fun flushPendingPersist() {
+        persistWriteMutex.withLock {
+            val candidate = latestPendingPersist.get() ?: return@withLock
+            if (candidate.sessionEpoch != sessionEpoch.get()) return@withLock
+            if (candidate.revision <= lastPersistedRevision) return@withLock
+            persistState(candidate.state)
+            lastPersistedRevision = candidate.revision
+            latestPendingPersist.compareAndSet(candidate, null)
+        }
     }
 
     private fun publishLocked() {
@@ -1066,6 +1276,10 @@ class CloudDialogueCoordinator(
 
     private companion object {
         const val MAX_TRACKED_EVENT_IDS = 1_000
+        const val DEFAULT_PERSIST_COALESCE_WINDOW_MS = 300L
+        const val DEFAULT_MAX_SETTLED_TASKS = 100
+        const val DEFAULT_MAX_SETTLED_SUBMISSIONS = 200
+        const val DEFAULT_MAX_TOPIC_MAPPINGS = 200
 
         fun normalizedTitle(raw: String?, fallback: String): String {
             val line = raw

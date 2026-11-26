@@ -13,6 +13,7 @@ import app.amber.core.utils.EmojiData
 import app.amber.core.utils.EmojiUtils
 import app.amber.core.utils.JsonInstant
 import android.content.Context
+import app.amber.core.settings.secret.SecretStore
 import app.amber.feature.macgateway.ConversationStoreCloudDialogueSink
 import app.amber.feature.macgateway.MacGatewayRepository
 import app.amber.feature.prompts.AgentSoulStore
@@ -49,6 +50,7 @@ val appModule = module {
             appScope = get<AppScope>(),
             timelineSink = ConversationStoreCloudDialogueSink(get()),
             agentSoulStore = get<AgentSoulStore>(),
+            secretStore = get<SecretStore>(),
         )
     }
 
