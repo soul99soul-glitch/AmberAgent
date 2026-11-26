@@ -246,6 +246,7 @@ val dataSourceModule = module {
                 AppDatabase.MIGRATION_19_20,
                 AppDatabase.MIGRATION_20_21,
                 AppDatabase.MIGRATION_21_22,
+                AppDatabase.MIGRATION_22_23,
             )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
@@ -446,6 +447,10 @@ val dataSourceModule = module {
 
     single {
         get<AppDatabase>().toolEffectDao()
+    }
+
+    single {
+        get<AppDatabase>().proactiveCardDao()
     }
 
     // P3-01: Workspace Artifact Registry (Room v11).
