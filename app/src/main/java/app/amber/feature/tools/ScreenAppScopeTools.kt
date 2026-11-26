@@ -2,21 +2,54 @@ package app.amber.feature.tools
 
 import android.content.Context
 import android.content.Intent
-import kotlinx.coroutines.delay
-import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
+import android.graphics.Bitmap
+import app.amber.agent.BuildConfig
 import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.automation.CapturedScreenBitmap
+import app.amber.core.automation.DefaultScreenOcrEngine
+import app.amber.core.automation.MlKitScreenTextRecognizer
+import app.amber.core.automation.ScreenOcrCapabilities
 import app.amber.core.automation.getActiveAccessibilityController
+import app.amber.core.automation.display.ActiveVirtualDisplayRun
+import app.amber.core.automation.display.DisplaySessionOutcome
+import app.amber.core.automation.display.PhoneDisplayMode
+import app.amber.core.automation.display.PhoneDisplaySession
+import app.amber.core.automation.display.PhoneDisplaySessionFactory
+import app.amber.core.automation.display.VirtualDisplayCompatibility
+import app.amber.core.automation.display.VirtualDisplayFrameSource
+import app.amber.core.automation.display.VirtualDisplayProbeStore
+import app.amber.core.automation.display.VirtualDisplayRunNotifier
+import app.amber.core.automation.display.VirtualDisplayRunRegistry
+import app.amber.core.automation.display.VirtualDisplaySession
+import app.amber.core.automation.display.VirtualDisplaySessionState
+import app.amber.core.automation.display.isPhoneUseVirtualDisplayEnabled
+import app.amber.core.jev.JevImageAsset
 import app.amber.core.jev.JevScreenGoalRunner
+import app.amber.core.jev.ScreenshotAttempt
 import app.amber.core.settings.prefs.SettingsAggregator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.atomic.AtomicReference
 
 /** Installed-app scope, run controls and the bounded Jev goal entry. */
 internal class ScreenAppScopeTools(
@@ -24,6 +57,20 @@ internal class ScreenAppScopeTools(
     private val settingsStore: SettingsAggregator?,
     private val jevScreenGoalRunner: JevScreenGoalRunner?,
     private val operations: ScreenOperationOwner,
+    private val displaySessionFactory: PhoneDisplaySessionFactory? = null,
+    private val probeStore: VirtualDisplayProbeStore? = null,
+    private val virtualDisplayRunNotifier: VirtualDisplayRunNotifier? = null,
+    private val virtualDisplayAllowedProvider: () -> Boolean = { BuildConfig.PHONE_USE_VIRTUAL_DISPLAY_ALLOWED },
+    private val virtualDisplayEnabledProvider: () -> Boolean = { isPhoneUseVirtualDisplayEnabled(context) },
+    private val probeCompatibilityProvider: () -> VirtualDisplayCompatibility = {
+        probeStore?.compatibility() ?: VirtualDisplayCompatibility.UNSUPPORTED
+    },
+    private val sessionOpener: (suspend (runId: String, packageName: String, mode: PhoneDisplayMode) -> DisplaySessionOutcome)? =
+        displaySessionFactory?.let { factory ->
+            { r, p, m -> factory.open(r, p, m) }
+        },
+    private val virtualLaunchObserveRetries: Int = 5,
+    private val virtualLaunchObserveDelayMs: Long = 200L,
 ) {
     fun screenStatusTool(runId: String?) = Tool(
         name = "screen_status",
@@ -259,6 +306,7 @@ internal class ScreenAppScopeTools(
                 put("return_to_host", buildJsonObject { put("type", "boolean"); put("description", "Legacy option; the target stays in front during individually approved steps.") })
                 put("ocr_mode", screenStringProp("On-device OCR mode: 'auto' (default, zero-overhead tree-first with low-coverage fallback), 'on' (force OCR), or 'off' (disable OCR)."))
                 put("include_ocr", buildJsonObject { put("type", "boolean"); put("description", "Optional boolean alias to explicitly enable or disable on-device OCR.") })
+                put("display_mode", screenStringProp("Target display mode: 'auto' (default), 'physical', or 'virtual'. 'auto' uses virtual only when allowed, enabled in settings, and verified on this device; 'virtual' fails closed with display_unavailable if unavailable and never falls back to physical."))
             }, required = listOf("package_name", "goal"))
         },
         needsApproval = true,
@@ -290,6 +338,46 @@ internal class ScreenAppScopeTools(
                 val dryRun = input.string("dry_run") == "true"
                 val returnToHostOverride = input.booleanOrNull("return_to_host")
                 val ocrMode = input.resolveOcrMode()
+                val maxSteps = input.int("max_steps") ?: 15
+                val maxDurationMs = input.long("max_duration_ms") ?: 180_000
+
+                // Resolve display mode BEFORE requireScreenAccessibility() and BEFORE context.startActivity().
+                val requestedDisplayModeRaw = input.string("display_mode")?.trim()?.lowercase().orEmpty().ifEmpty { "auto" }
+                val resolvedMode: PhoneDisplayMode = when (requestedDisplayModeRaw) {
+                    "physical" -> PhoneDisplayMode.PHYSICAL
+                    "auto" -> {
+                        val autoVirtualReady = virtualDisplayAllowedProvider() &&
+                            virtualDisplayEnabledProvider() &&
+                            probeCompatibilityProvider() == VirtualDisplayCompatibility.VERIFIED &&
+                            sessionOpener != null
+                        if (autoVirtualReady) PhoneDisplayMode.VIRTUAL else PhoneDisplayMode.PHYSICAL
+                    }
+                    "virtual" -> PhoneDisplayMode.VIRTUAL
+                    else -> {
+                        return@trackScreenTool displayUnavailableJson(
+                            packageName = packageName,
+                            requestedMode = requestedDisplayModeRaw,
+                            reason = "invalid_display_mode:$requestedDisplayModeRaw",
+                        )
+                    }
+                }
+
+                if (resolvedMode == PhoneDisplayMode.VIRTUAL) {
+                    return@trackScreenTool executeVirtualScreenGoal(
+                        runner = runner,
+                        ownerRun = ownerRun,
+                        packageName = packageName,
+                        goal = goal,
+                        texts = texts,
+                        maxSteps = maxSteps,
+                        maxDurationMs = maxDurationMs,
+                        dryRun = dryRun,
+                        ocrMode = ocrMode,
+                        requestedModeRaw = requestedDisplayModeRaw,
+                    )
+                }
+
+                // PHYSICAL path — strictly identical to prior production behavior.
                 val service = requireScreenAccessibility()
                 // The approval UI can have brought Amber to the front. Restore only the explicitly named app.
                 val alreadyOpen = if (!dryRun && runner.canExecute()) withContext(Dispatchers.Main.immediate) {
@@ -309,8 +397,8 @@ internal class ScreenAppScopeTools(
                     goal = goal,
                     texts = texts,
                     runKey = ownerRun,
-                    maxSteps = input.int("max_steps") ?: 15,
-                    maxDurationMs = input.long("max_duration_ms") ?: 180_000,
+                    maxSteps = maxSteps,
+                    maxDurationMs = maxDurationMs,
                     dryRun = dryRun,
                     proposeNextAction = true,
                     hostPackageName = context.packageName,
@@ -322,6 +410,396 @@ internal class ScreenAppScopeTools(
             }
         },
     )
+
+    private suspend fun executeVirtualScreenGoal(
+        runner: JevScreenGoalRunner,
+        ownerRun: String,
+        packageName: String,
+        goal: String,
+        texts: List<String>,
+        maxSteps: Int,
+        maxDurationMs: Long,
+        dryRun: Boolean,
+        ocrMode: app.amber.core.automation.ScreenOcrMode,
+        requestedModeRaw: String,
+    ): List<UIMessagePart> {
+        if (!virtualDisplayAllowedProvider()) {
+            return displayUnavailableJson(packageName, requestedModeRaw, "virtual_display_disabled_by_build")
+        }
+        if (!virtualDisplayEnabledProvider()) {
+            return displayUnavailableJson(packageName, requestedModeRaw, "virtual_display_setting_disabled")
+        }
+        val opener = sessionOpener
+            ?: return displayUnavailableJson(packageName, requestedModeRaw, "virtual_display_factory_unavailable")
+
+        val sessionOutcome = opener(ownerRun, packageName, PhoneDisplayMode.VIRTUAL)
+        if (sessionOutcome is DisplaySessionOutcome.Unavailable) {
+            // Fail closed: NEVER silently fall back to PHYSICAL and NEVER call context.startActivity.
+            return displayUnavailableJson(packageName, requestedModeRaw, sessionOutcome.reason)
+        }
+        val session = (sessionOutcome as DisplaySessionOutcome.Ready).session
+        if (session.mode != PhoneDisplayMode.VIRTUAL) {
+            runCatching { session.close("unexpected_session_mode") }
+            return displayUnavailableJson(packageName, requestedModeRaw, "unexpected_session_mode")
+        }
+
+        val controlInterruptReason = AtomicReference<String?>(null)
+        val controlInterruptOutcomeUnknown = java.util.concurrent.atomic.AtomicBoolean(false)
+        val runnerJobRef = AtomicReference<Job?>(null)
+        val virtualOcrEngine = buildVirtualOcrEngine(session)
+        val activeRun = ActiveVirtualDisplayRun(
+            runId = ownerRun,
+            packageName = packageName,
+            goal = goal,
+            session = session,
+            frameSource = (session as? VirtualDisplaySession)?.frameSource,
+            onPauseRequested = {
+                val takeover = operations.takeoverController
+                if (takeover != null) {
+                    takeover.requestUserTakeover(
+                        reason = "virtual_display_user_paused",
+                        controller = session.controller,
+                    )
+                } else {
+                    (session as? VirtualDisplaySession)?.invalidate(
+                        reason = "virtual_display_user_paused",
+                        targetState = VirtualDisplaySessionState.SAFE_PAUSED,
+                    )
+                }
+            },
+            onResumeRequested = {
+                operations.takeoverController?.requestResume()
+                virtualDisplayRunNotifier?.showRunning(ownerRun, packageName, goal, paused = false)
+            },
+            onTakeoverRequested = {
+                controlInterruptReason.compareAndSet(null, "user_takeover")
+                if ((session as? VirtualDisplaySession)?.state?.value == VirtualDisplaySessionState.OUTCOME_UNKNOWN) {
+                    controlInterruptOutcomeUnknown.set(true)
+                }
+                (session as? VirtualDisplaySession)?.invalidate(
+                    reason = "user_takeover",
+                    targetState = VirtualDisplaySessionState.SAFE_PAUSED,
+                )
+                runnerJobRef.get()?.cancel(CancellationException("virtual_display_user_takeover"))
+                operations.takeoverController?.finishSession(ownerRun)
+                session.close("user_takeover")
+                virtualDisplayRunNotifier?.cancel(ownerRun)
+            },
+            onEmergencyStopRequested = {
+                controlInterruptReason.compareAndSet(null, "emergency_stop")
+                if ((session as? VirtualDisplaySession)?.state?.value == VirtualDisplaySessionState.OUTCOME_UNKNOWN) {
+                    controlInterruptOutcomeUnknown.set(true)
+                }
+                operations.stop(ownerRun)
+                (session as? VirtualDisplaySession)?.invalidate(
+                    reason = "emergency_stop",
+                    targetState = VirtualDisplaySessionState.SAFE_PAUSED,
+                )
+                runnerJobRef.get()?.cancel(CancellationException("virtual_display_emergency_stop"))
+                operations.takeoverController?.finishSession(ownerRun)
+                session.close("emergency_stop")
+                virtualDisplayRunNotifier?.cancel(ownerRun)
+            },
+        )
+
+        VirtualDisplayRunRegistry.register(activeRun)
+        virtualDisplayRunNotifier?.showRunning(
+            runId = ownerRun,
+            packageName = packageName,
+            goal = goal,
+            paused = false,
+        )
+
+        var closeReason = "completed"
+        try {
+            // R3 L3: If the target package is already in the foreground on Display 0, stop instead of
+            // risking cross-display state conflicts or accidental input dispatch.
+            if (!dryRun) {
+                val display0Foreground = runCatching {
+                    withContext(Dispatchers.Main.immediate) {
+                        getActiveAccessibilityController()?.captureScreenSnapshot()?.packageName
+                    }
+                }.getOrNull()
+                if (display0Foreground == packageName) {
+                    closeReason = "target_already_foreground_on_main_display"
+                    return virtualFaultJson(
+                        status = "SAFE_PAUSED",
+                        packageName = packageName,
+                        session = session,
+                        reason = "target_already_foreground_on_main_display",
+                    )
+                }
+            }
+
+            if (!dryRun && runner.canExecute()) {
+                // Launch strictly on the virtual display — ZERO context.startActivity on Display 0.
+                val launched = session.launchTarget()
+                if (!launched) {
+                    val fault = virtualSessionFault(session)
+                    val faultStatus = fault?.first ?: "SAFE_PAUSED"
+                    val faultReason = fault?.second ?: "virtual_display_launch_failed"
+                    closeReason = faultReason
+                    return virtualFaultJson(
+                        status = faultStatus,
+                        packageName = packageName,
+                        session = session,
+                        reason = faultReason,
+                    )
+                }
+
+                // R3 L3: Confirm target package window actually landed on this virtual display before
+                // dispatching or handing control to Jev.
+                var targetObserved = false
+                val attempts = virtualLaunchObserveRetries.coerceAtLeast(1)
+                for (attempt in 0 until attempts) {
+                    virtualSessionFault(session)?.let { (faultStatus, faultReason) ->
+                        closeReason = faultReason
+                        return virtualFaultJson(
+                            status = faultStatus,
+                            packageName = packageName,
+                            session = session,
+                            reason = faultReason,
+                        )
+                    }
+                    val observedPkg = withContext(Dispatchers.Main.immediate) {
+                        session.controller.captureScreenSnapshot()?.packageName
+                    }
+                    if (observedPkg == packageName) {
+                        targetObserved = true
+                        break
+                    }
+                    if (attempt + 1 < attempts && virtualLaunchObserveDelayMs > 0L) {
+                        delay(virtualLaunchObserveDelayMs)
+                    }
+                }
+                if (!targetObserved) {
+                    val fault = virtualSessionFault(session)
+                    val faultStatus = fault?.first ?: "SAFE_PAUSED"
+                    val faultReason = fault?.second ?: "virtual_display_target_not_observed"
+                    closeReason = faultReason
+                    return virtualFaultJson(
+                        status = faultStatus,
+                        packageName = packageName,
+                        session = session,
+                        reason = faultReason,
+                    )
+                }
+            }
+
+            virtualSessionFault(session)?.let { (faultStatus, faultReason) ->
+                closeReason = faultReason
+                return virtualFaultJson(
+                    status = faultStatus,
+                    packageName = packageName,
+                    session = session,
+                    reason = faultReason,
+                )
+            }
+
+            val virtualScreenshotProvider = buildVirtualScreenshotProvider(session)
+            val outcome: JsonObject = try {
+                coroutineScope {
+                    val job = async {
+                        runner.run(
+                            controller = session.controller,
+                            packageName = packageName,
+                            goal = goal,
+                            texts = texts,
+                            runKey = ownerRun,
+                            maxSteps = maxSteps,
+                            maxDurationMs = maxDurationMs,
+                            dryRun = dryRun,
+                            proposeNextAction = true,
+                            hostPackageName = context.packageName,
+                            autoReturnToHost = false,
+                            returnToHostLauncher = null,
+                            ocrMode = ocrMode,
+                            screenshotProviderOverride = virtualScreenshotProvider,
+                            ocrEngineOverride = virtualOcrEngine,
+                            displayFaultProvider = { virtualSessionFault(session) },
+                        )
+                    }
+                    runnerJobRef.set(job)
+                    job.await()
+                }
+            } catch (ce: CancellationException) {
+                val interruptReason = controlInterruptReason.get()
+                if (interruptReason != null) {
+                    currentCoroutineContext().ensureActive()
+                    val faultStatus = if (controlInterruptOutcomeUnknown.get() ||
+                        (session as? VirtualDisplaySession)?.state?.value == VirtualDisplaySessionState.OUTCOME_UNKNOWN
+                    ) {
+                        "outcome_unknown"
+                    } else {
+                        "SAFE_PAUSED"
+                    }
+                    closeReason = interruptReason
+                    return virtualFaultJson(
+                        status = faultStatus,
+                        packageName = packageName,
+                        session = session,
+                        reason = interruptReason,
+                    )
+                }
+                closeReason = "cancelled"
+                throw ce
+            }
+
+            val postFault = virtualSessionFault(session)
+            val reconciled = reconcileVirtualOutcome(outcome, session, postFault)
+            closeReason = reconciled["status"]?.jsonPrimitive?.contentOrNull ?: "completed"
+            return listOf(UIMessagePart.Text(reconciled.toString()))
+        } finally {
+            withContext(NonCancellable) {
+                runCatching { virtualOcrEngine?.close() }
+                VirtualDisplayRunRegistry.unregister(ownerRun, activeRun)
+                virtualDisplayRunNotifier?.cancel(ownerRun)
+                runCatching { session.close(closeReason) }
+            }
+        }
+    }
+
+    private fun virtualSessionFault(session: PhoneDisplaySession): Pair<String, String>? {
+        val vd = session as? VirtualDisplaySession ?: return null
+        val frameStats = vd.frameSource.latestStats.value
+        if (frameStats?.unobservable == true && vd.state.value == VirtualDisplaySessionState.OPEN) {
+            vd.invalidate("virtual_display_frame_unobservable", VirtualDisplaySessionState.UNOBSERVABLE)
+        }
+        return when (vd.state.value) {
+            VirtualDisplaySessionState.OPEN -> null
+            VirtualDisplaySessionState.SAFE_PAUSED ->
+                "SAFE_PAUSED" to (vd.invalidationReason ?: "virtual_display_paused")
+            VirtualDisplaySessionState.OUTCOME_UNKNOWN ->
+                "outcome_unknown" to (vd.invalidationReason ?: "virtual_display_outcome_unknown")
+            VirtualDisplaySessionState.UNOBSERVABLE ->
+                "UNOBSERVABLE" to (vd.invalidationReason ?: "virtual_display_unobservable")
+            VirtualDisplaySessionState.CLOSED ->
+                "SAFE_PAUSED" to (vd.invalidationReason ?: "virtual_display_closed")
+        }
+    }
+
+    private fun reconcileVirtualOutcome(
+        outcome: JsonObject,
+        session: PhoneDisplaySession,
+        fault: Pair<String, String>?,
+    ): JsonObject {
+        val existingStatus = outcome["status"]?.jsonPrimitive?.contentOrNull
+        val overrides = linkedMapOf<String, JsonPrimitive>(
+            "display_mode" to JsonPrimitive("virtual"),
+            "display_id" to JsonPrimitive(session.displayId),
+            "display_generation" to JsonPrimitive(session.generation),
+            "auto_return_to_host" to JsonPrimitive(false),
+        )
+        if (fault != null &&
+            existingStatus != "SAFE_PAUSED" &&
+            existingStatus != "outcome_unknown" &&
+            existingStatus != "UNOBSERVABLE"
+        ) {
+            overrides["status"] = JsonPrimitive(fault.first)
+            overrides["reason"] = JsonPrimitive(fault.second)
+            overrides["goal_verified"] = JsonPrimitive(false)
+        }
+        return JsonObject(outcome + overrides)
+    }
+
+    private fun buildVirtualScreenshotProvider(
+        session: PhoneDisplaySession,
+    ): (suspend (reference: String) -> ScreenshotAttempt) {
+        val frameSource: VirtualDisplayFrameSource? = (session as? VirtualDisplaySession)?.frameSource
+        return provider@{ reference ->
+            if (frameSource == null) {
+                return@provider ScreenshotAttempt.Skipped("virtual_frame_source_unavailable")
+            }
+            if (frameSource.latestStats.value?.unobservable == true) {
+                (session as? VirtualDisplaySession)?.markUnobservable("virtual_display_frame_unobservable")
+                return@provider ScreenshotAttempt.Skipped("virtual_display_unobservable")
+            }
+            val bitmap = withContext(Dispatchers.Default) { frameSource.copyLatestBitmap() }
+                ?: return@provider ScreenshotAttempt.Skipped("virtual_frame_not_ready")
+            try {
+                if (bitmap.width > 1_568 || bitmap.height > 1_568) {
+                    return@provider ScreenshotAttempt.Skipped("image_edge_out_of_range")
+                }
+                val bytes = withContext(Dispatchers.Default) {
+                    ByteArrayOutputStream().use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                        out.toByteArray()
+                    }
+                }
+                runCatching {
+                    ScreenshotAttempt.Attached(
+                        JevImageAsset(
+                            reference = reference,
+                            format = "jpeg",
+                            data = bytes,
+                            widthPx = bitmap.width,
+                            heightPx = bitmap.height,
+                        ),
+                    )
+                }.getOrElse {
+                    ScreenshotAttempt.Skipped("image_edge_out_of_range")
+                }
+            } finally {
+                if (!bitmap.isRecycled) {
+                    runCatching { bitmap.recycle() }
+                }
+            }
+        }
+    }
+
+    private fun buildVirtualOcrEngine(session: PhoneDisplaySession): DefaultScreenOcrEngine? {
+        val vd = session as? VirtualDisplaySession ?: return null
+        return DefaultScreenOcrEngine(
+            displaySizeProvider = { vd.width to vd.height },
+            screenshotProvider = { _, _ ->
+                if (vd.frameSource.latestStats.value?.unobservable == true) {
+                    vd.markUnobservable("virtual_display_frame_unobservable")
+                    null
+                } else {
+                    val bitmap = withContext(Dispatchers.Default) { vd.frameSource.copyLatestBitmap() }
+                    bitmap?.let {
+                        CapturedScreenBitmap(
+                            bitmap = it,
+                            source = "virtual_display",
+                            width = it.width,
+                            height = it.height,
+                        )
+                    }
+                }
+            },
+            recognizerId = ScreenOcrCapabilities.RECOGNIZER_ID,
+            ownedRecognizer = MlKitScreenTextRecognizer(),
+        )
+    }
+
+    private fun displayUnavailableJson(
+        packageName: String,
+        requestedMode: String,
+        reason: String,
+    ): List<UIMessagePart> = textJson {
+        put("status", "display_unavailable")
+        put("display_mode", "virtual")
+        put("requested_display_mode", requestedMode)
+        put("package_name", packageName)
+        put("reason", reason)
+        put("fallback_attempted", false)
+    }
+
+    private fun virtualFaultJson(
+        status: String,
+        packageName: String,
+        session: PhoneDisplaySession,
+        reason: String,
+    ): List<UIMessagePart> = textJson {
+        put("status", status)
+        put("display_mode", "virtual")
+        put("display_id", session.displayId)
+        put("display_generation", session.generation)
+        put("package_name", packageName)
+        put("reason", reason)
+        put("goal_verified", false)
+        put("returned_to_host", false)
+    }
 
     private fun launchHostApp(service: app.amber.core.automation.AccessibilityController, hostPackageName: String): Boolean {
         val targetPkg = hostPackageName.trim().ifBlank { context.packageName }

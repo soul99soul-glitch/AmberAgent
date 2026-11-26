@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_channel_phone_use_virtual_run">Virtual Display Automation</string>
+    <string name="phone_use_vd_notif_title_running">Running on virtual display</string>
+    <string name="phone_use_vd_notif_title_paused">Virtual display paused</string>
+    <string name="phone_use_vd_notif_content">%1$s · %2$s</string>
+    <string name="phone_use_vd_notif_action_view">View</string>
+    <string name="phone_use_vd_notif_action_pause">Pause</string>
+    <string name="phone_use_vd_notif_action_emergency_stop">Emergency stop</string>
+
+    <string name="phone_use_vd_live_title">Virtual Display Live</string>
+    <string name="phone_use_vd_live_no_active_run">No active virtual display run for this ID.</string>
+    <string name="phone_use_vd_live_status_running">Running</string>
+    <string name="phone_use_vd_live_status_paused">Paused</string>
+    <string name="phone_use_vd_live_status_taken_over">Taken over</string>
+    <string name="phone_use_vd_live_status_stopped">Stopped</string>
+    <string name="phone_use_vd_live_status_unobservable">Unobservable (halted)</string>
+    <string name="phone_use_vd_live_status_outcome_unknown">Outcome unknown (halted)</string>
+    <string name="phone_use_vd_live_preview_waiting">Waiting for virtual display frame…</string>
+    <string name="phone_use_vd_live_preview_unobservable">Screen is unobservable (protected or blank). Input and preview have stopped.</string>
+    <string name="phone_use_vd_live_preview_meta">Display #%1$d · Gen %2$d · ≤5 fps preview</string>
+    <string name="phone_use_vd_live_btn_pause">Pause</string>
+    <string name="phone_use_vd_live_btn_resume">Resume</string>
+    <string name="phone_use_vd_live_btn_takeover">Take over</string>
+    <string name="phone_use_vd_live_btn_emergency_stop">Emergency stop</string>
+    <string name="phone_use_vd_live_takeover_dialog_title">Open app on main screen?</string>
+    <string name="phone_use_vd_live_takeover_dialog_body">Input has stopped and the virtual display has been released. Would you like to open %1$s on your main screen? In-app state from the virtual display is not guaranteed to carry over.</string>
+    <string name="phone_use_vd_live_takeover_open_main">Open on main screen</string>
+    <string name="phone_use_vd_live_takeover_stay">Not now</string>
+
+    <string name="setting_jev_phone_use_vd_entry_title">Virtual Display Phone Use (Experimental)</string>
+    <string name="setting_jev_phone_use_vd_entry_desc">Run phone automation on an isolated virtual display via Shizuku</string>
+
+    <string name="setting_phone_use_vd_title">Virtual Display Phone Use</string>
+    <string name="setting_phone_use_vd_status_section">This Device Status</string>
+    <string name="setting_phone_use_vd_status_verified">Verified on this device</string>
+    <string name="setting_phone_use_vd_status_verified_desc">Dual-display isolation self-test passed for the current OS build and app version.</string>
+    <string name="setting_phone_use_vd_status_unverified">Unverified</string>
+    <string name="setting_phone_use_vd_status_unverified_desc">Run the on-device isolation self-test before enabling virtual display mode. Compatibility is verified per device and resets after OS or app updates.</string>
+    <string name="setting_phone_use_vd_status_failed">Self-test failed</string>
+    <string name="setting_phone_use_vd_status_failed_desc">Last isolation self-test did not pass: %1$s</string>
+    <string name="setting_phone_use_vd_status_unsupported">Unsupported</string>
+    <string name="setting_phone_use_vd_status_unsupported_desc">This device does not meet requirements: %1$s</string>
+    <string name="setting_phone_use_vd_reason_build_disabled">Virtual display mode is disabled in this build.</string>
+    <string name="setting_phone_use_vd_reason_api_below_34">Requires Android 14 (API 34) or higher (current API %1$d).</string>
+    <string name="setting_phone_use_vd_reason_no_secondary_activities">Device does not advertise secondary display activity support.</string>
+
+    <string name="setting_phone_use_vd_shizuku_section">Shizuku Authorization</string>
+    <string name="setting_phone_use_vd_shizuku_title">Shizuku Service (UID 2000)</string>
+    <string name="setting_phone_use_vd_shizuku_ready">Running and authorized</string>
+    <string name="setting_phone_use_vd_shizuku_need_permission">Running, authorization required</string>
+    <string name="setting_phone_use_vd_shizuku_not_running">Not running. Start Shizuku via Wireless Debugging (ADB shell UID 2000; root is not used).</string>
+    <string name="setting_phone_use_vd_shizuku_request_btn">Authorize</string>
+    <string name="setting_phone_use_vd_shizuku_refresh_btn">Refresh</string>
+
+    <string name="setting_phone_use_vd_probe_section">Isolation Self-Test</string>
+    <string name="setting_phone_use_vd_probe_title">Dual-Display Isolation Probe</string>
+    <string name="setting_phone_use_vd_probe_desc">Verifies Display 0 receives zero injected events, keeps focus, target receives all events and Chinese text readback, and teardown leaves no window on Display 0.</string>
+    <string name="setting_phone_use_vd_probe_run_btn">Run self-test</string>
+    <string name="setting_phone_use_vd_probe_last_result">Last result: %1$s</string>
+
+    <string name="setting_phone_use_vd_toggle_section">Experimental Mode</string>
+    <string name="setting_phone_use_vd_toggle_title">Enable Virtual Display Mode</string>
+    <string name="setting_phone_use_vd_toggle_desc_ready">When enabled, screen_run_goal in auto mode uses an isolated virtual display instead of the main screen.</string>
+    <string name="setting_phone_use_vd_toggle_desc_locked">Available only after this device passes the isolation self-test (Verified).</string>
+
+    <string name="setting_phone_use_vd_active_run_section">Active Virtual Run</string>
+    <string name="setting_phone_use_vd_active_run_open">Open live preview (%1$s)</string>
+</resources>

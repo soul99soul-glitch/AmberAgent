@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_channel_phone_use_virtual_run">虛擬螢幕自動化執行</string>
+    <string name="phone_use_vd_notif_title_running">正在虛擬螢幕中執行</string>
+    <string name="phone_use_vd_notif_title_paused">虛擬螢幕執行已暫停</string>
+    <string name="phone_use_vd_notif_content">%1$s · %2$s</string>
+    <string name="phone_use_vd_notif_action_view">查看</string>
+    <string name="phone_use_vd_notif_action_pause">暫停</string>
+    <string name="phone_use_vd_notif_action_emergency_stop">急停</string>
+
+    <string name="phone_use_vd_live_title">虛擬螢幕即時預覽</string>
+    <string name="phone_use_vd_live_no_active_run">目前沒有對應的活躍虛擬螢幕工作。</string>
+    <string name="phone_use_vd_live_status_running">執行中</string>
+    <string name="phone_use_vd_live_status_paused">已暫停</string>
+    <string name="phone_use_vd_live_status_taken_over">已接管</string>
+    <string name="phone_use_vd_live_status_stopped">已急停</string>
+    <string name="phone_use_vd_live_status_unobservable">畫面不可觀察（已停止）</string>
+    <string name="phone_use_vd_live_status_outcome_unknown">結果未知（已停止）</string>
+    <string name="phone_use_vd_live_preview_waiting">正在等待虛擬螢幕畫面…</string>
+    <string name="phone_use_vd_live_preview_unobservable">目前畫面不可觀察（受保護或全黑），已停止觀察與輸入。</string>
+    <string name="phone_use_vd_live_preview_meta">虛擬螢幕 #%1$d · 代次 %2$d · ≤5fps 預覽</string>
+    <string name="phone_use_vd_live_btn_pause">暫停</string>
+    <string name="phone_use_vd_live_btn_resume">繼續</string>
+    <string name="phone_use_vd_live_btn_takeover">接管</string>
+    <string name="phone_use_vd_live_btn_emergency_stop">急停</string>
+    <string name="phone_use_vd_live_takeover_dialog_title">是否在主螢幕開啟目標應用程式？</string>
+    <string name="phone_use_vd_live_takeover_dialog_body">已停止虛擬螢幕輸入並釋放虛擬螢幕。是否現在於主螢幕開啟 %1$s？不承諾虛擬螢幕內頁面狀態無損遷移。</string>
+    <string name="phone_use_vd_live_takeover_open_main">在主螢幕開啟</string>
+    <string name="phone_use_vd_live_takeover_stay">暫不開啟</string>
+
+    <string name="setting_jev_phone_use_vd_entry_title">虛擬螢幕 Phone Use（實驗）</string>
+    <string name="setting_jev_phone_use_vd_entry_desc">透過 Shizuku 在隔離虛擬螢幕中執行手機操控，不搶佔主螢幕</string>
+
+    <string name="setting_phone_use_vd_title">虛擬螢幕 Phone Use</string>
+    <string name="setting_phone_use_vd_status_section">本機狀態</string>
+    <string name="setting_phone_use_vd_status_verified">已驗證</string>
+    <string name="setting_phone_use_vd_status_verified_desc">目前系統指紋與應用程式版本已通過雙螢幕隔離自測。</string>
+    <string name="setting_phone_use_vd_status_unverified">未驗證</string>
+    <string name="setting_phone_use_vd_status_unverified_desc">開啟前須先於本機通過雙螢幕隔離自測；系統更新或應用程式升級後會自動重設為未驗證。</string>
+    <string name="setting_phone_use_vd_status_failed">不支援（自測未通過）</string>
+    <string name="setting_phone_use_vd_status_failed_desc">最近一次隔離自測未通過：%1$s</string>
+    <string name="setting_phone_use_vd_status_unsupported">不支援</string>
+    <string name="setting_phone_use_vd_status_unsupported_desc">本機不滿足執行條件：%1$s</string>
+    <string name="setting_phone_use_vd_reason_build_disabled">目前建置版本未開放虛擬螢幕能力。</string>
+    <string name="setting_phone_use_vd_reason_api_below_34">需要 Android 14（API 34）以上版本（目前 API %1$d）。</string>
+    <string name="setting_phone_use_vd_reason_no_secondary_activities">系統未宣告支援副螢幕 Activity 特性。</string>
+
+    <string name="setting_phone_use_vd_shizuku_section">Shizuku 授權引導</string>
+    <string name="setting_phone_use_vd_shizuku_title">Shizuku 服務（僅限 UID 2000）</string>
+    <string name="setting_phone_use_vd_shizuku_ready">執行中且已授權</string>
+    <string name="setting_phone_use_vd_shizuku_need_permission">執行中，等待授權</string>
+    <string name="setting_phone_use_vd_shizuku_not_running">未執行。請透過無線除錯啟動 Shizuku（僅使用 ADB shell UID 2000，不使用 root）。</string>
+    <string name="setting_phone_use_vd_shizuku_request_btn">前往授權</string>
+    <string name="setting_phone_use_vd_shizuku_refresh_btn">重新整理</string>
+
+    <string name="setting_phone_use_vd_probe_section">雙螢幕隔離自測</string>
+    <string name="setting_phone_use_vd_probe_title">啟動隔離自測</string>
+    <string name="setting_phone_use_vd_probe_desc">驗證主螢幕零注入、焦點不遺失、目標視窗收到全部事件與中文回讀一致，以及銷毀後不洩漏至主螢幕。</string>
+    <string name="setting_phone_use_vd_probe_run_btn">開始自測</string>
+    <string name="setting_phone_use_vd_probe_last_result">最近結果：%1$s</string>
+
+    <string name="setting_phone_use_vd_toggle_section">實驗開關</string>
+    <string name="setting_phone_use_vd_toggle_title">啟用虛擬螢幕模式</string>
+    <string name="setting_phone_use_vd_toggle_desc_ready">開啟後，screen_run_goal 在 auto 模式下會優先使用隔離虛擬螢幕執行。</string>
+    <string name="setting_phone_use_vd_toggle_desc_locked">僅在本機通過隔離自測（已驗證）後方可開啟。</string>
+
+    <string name="setting_phone_use_vd_active_run_section">活躍虛擬螢幕工作</string>
+    <string name="setting_phone_use_vd_active_run_open">查看即時預覽（%1$s）</string>
+</resources>

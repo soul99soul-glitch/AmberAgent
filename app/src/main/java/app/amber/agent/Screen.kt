@@ -156,6 +156,14 @@ sealed interface Screen : NavKey {
     @Serializable
     data object SettingJev : Screen
 
+    /** 虚拟屏 Phone Use 实时预览、接管与急停页。 */
+    @Serializable
+    data class PhoneUseLive(val runId: String) : Screen
+
+    /** 虚拟屏 Phone Use 实验设置与隔离自测页。 */
+    @Serializable
+    data object SettingPhoneUseDisplay : Screen
+
     @Serializable
     data object SettingMcp : Screen
 

@@ -42,6 +42,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import app.amber.agent.R
+import app.amber.agent.Screen
 import app.amber.core.jev.JevApiMode
 import app.amber.core.jev.JevCalibrationRecord
 import app.amber.core.jev.JevCalibrationStore
@@ -66,6 +67,7 @@ import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.context.LocalNavController
 import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.Lucide
 import org.koin.androidx.compose.koinViewModel
@@ -95,6 +97,7 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
     val coordinator = koinInject<JevDecisionCoordinator>()
     val calibrationStore = koinInject<JevCalibrationStore>()
     val context = LocalContext.current
+    val navController = LocalNavController.current
     var editingKey by remember { mutableStateOf(false) }
     var keyInput by remember { mutableStateOf("") }
     var editingBaseUrl by remember { mutableStateOf(false) }
@@ -307,6 +310,19 @@ fun SettingJevPage(vm: SettingVM = koinViewModel()) {
                             },
                         )
                     }
+                    item(
+                        modifier = Modifier.settingTwoLine(),
+                        onClick = { navController.navigate(Screen.SettingPhoneUseDisplay) },
+                        headlineContent = { Text(stringResource(R.string.setting_jev_phone_use_vd_entry_title)) },
+                        supportingContent = {
+                            Text(
+                                stringResource(R.string.setting_jev_phone_use_vd_entry_desc),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = workspaceColors().muted,
+                            )
+                        },
+                        trailingContent = { SettingChevron() },
+                    )
                 }
             }
 

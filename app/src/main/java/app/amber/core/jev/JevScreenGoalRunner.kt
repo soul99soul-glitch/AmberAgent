@@ -63,6 +63,9 @@ class JevScreenGoalRunner(
         autoReturnToHost: Boolean? = null,
         returnToHostLauncher: (suspend (String) -> Boolean)? = null,
         ocrMode: ScreenOcrMode = ScreenOcrMode.AUTO,
+        screenshotProviderOverride: (suspend (reference: String) -> ScreenshotAttempt)? = null,
+        ocrEngineOverride: ScreenOcrEngine? = null,
+        displayFaultProvider: (() -> Pair<String, String>?)? = null,
     ): JsonObject {
         require(packageName.isNotBlank() && goal.isNotBlank() && runKey.isNotBlank())
         require(goal.length <= 1_000 && texts.size <= 8 && texts.all { it.length <= 300 })
@@ -206,6 +209,9 @@ class JevScreenGoalRunner(
                 var stepIndex = 0
                 while (stepIndex < boundedMaxSteps) {
                     currentCoroutineContext().ensureActive()
+                    displayFaultProvider?.invoke()?.let { (faultStatus, faultReason) ->
+                        return@withTimeoutOrNull finish(faultStatus, faultReason)
+                    }
                     if (!phoneConfigsUnchanged()) {
                         return@withTimeoutOrNull finish("handback", "configuration_changed")
                     }
@@ -238,7 +244,14 @@ class JevScreenGoalRunner(
                                 ScreenSnapshotInvalidationRegistry.markFreshCapture(captured.id)
                             }
                         }
-                        ?: return@withTimeoutOrNull finish("handback", "screen_unavailable")
+                        ?: run {
+                            val fault = displayFaultProvider?.invoke()
+                            return@withTimeoutOrNull if (fault != null) {
+                                finish(fault.first, fault.second)
+                            } else {
+                                finish("handback", "screen_unavailable")
+                            }
+                        }
                     pending = null
                     if (!dryRun && takeoverController != null) {
                         if (takeoverController.state.value.phase == PhoneTakeoverPhase.RESUMING) {
@@ -264,10 +277,13 @@ class JevScreenGoalRunner(
                         return@withTimeoutOrNull finish("needs_user_action", "foreground_package_changed")
                     }
                     last = snapshot
-                    val stepOcr = observeOcrIfNeeded(snapshot, ocrMode)
+                    val stepOcr = observeOcrIfNeeded(snapshot, ocrMode, ocrEngineOverride)
                     if (stepOcr != null) {
                         lastOcr = stepOcr
                         if (stepOcr.triggered) ocrTriggerCount++
+                    }
+                    displayFaultProvider?.invoke()?.let { (faultStatus, faultReason) ->
+                        return@withTimeoutOrNull finish(faultStatus, faultReason)
                     }
                     val guided = guideCandidates(snapshot, texts, packageName, goal)
                     val candidates = guided.candidates
@@ -296,7 +312,7 @@ class JevScreenGoalRunner(
                         },
                     )
                     // 截图与当前观察绑定：reference 同时出现在 state 里，网关据此切块。
-                    val screenshotFn = screenshotProvider
+                    val screenshotFn = screenshotProviderOverride ?: screenshotProvider
                     val wantsScreenshot = screenshotFn != null && (
                         (actionsAuthorized &&
                             JevDataScope.SCREEN_SCREENSHOTS in actionsConfig.allowedScopes) ||
@@ -305,6 +321,9 @@ class JevScreenGoalRunner(
                     )
                     val reference = "<<SCREEN:${snapshot.id}>>"
                     val attempt = if (wantsScreenshot) screenshotFn(reference) else null
+                    displayFaultProvider?.invoke()?.let { (faultStatus, faultReason) ->
+                        return@withTimeoutOrNull finish(faultStatus, faultReason)
+                    }
                     imageReport = describeImageAttempt(
                         providerPresent = screenshotFn != null,
                         scopeAllowed = wantsScreenshot,
@@ -317,7 +336,12 @@ class JevScreenGoalRunner(
                         val foreground = withContext(mainDispatcher) { controller.captureScreenSnapshot() }
                         if (foreground == null) {
                             imageReport = "skipped:screen_unavailable"
-                            return@withTimeoutOrNull finish("handback", "screen_unavailable")
+                            val fault = displayFaultProvider?.invoke()
+                            return@withTimeoutOrNull if (fault != null) {
+                                finish(fault.first, fault.second)
+                            } else {
+                                finish("handback", "screen_unavailable")
+                            }
                         }
                         if (foreground.packageName != packageName) {
                             imageReport = "skipped:foreground_package_changed"
@@ -346,6 +370,9 @@ class JevScreenGoalRunner(
                         ) ?: return@withTimeoutOrNull finish("handback", "jev_disabled")
                         if (verifyOutcome.stale || !phoneConfigsUnchanged()) {
                             return@withTimeoutOrNull finish("handback", "configuration_changed")
+                        }
+                        displayFaultProvider?.invoke()?.let { (faultStatus, faultReason) ->
+                            return@withTimeoutOrNull finish(faultStatus, faultReason)
                         }
                         if (!dryRun && takeoverController != null &&
                             (takeoverController.state.value.isPausedOrPausing ||
@@ -420,6 +447,9 @@ class JevScreenGoalRunner(
                     val evaluated = outcome.evaluated
                     if (outcome.stale || !phoneConfigsUnchanged()) {
                         return@withTimeoutOrNull finish("handback", "configuration_changed")
+                    }
+                    displayFaultProvider?.invoke()?.let { (faultStatus, faultReason) ->
+                        return@withTimeoutOrNull finish(faultStatus, faultReason)
                     }
                     if (!dryRun && takeoverController != null &&
                         (takeoverController.state.value.isPausedOrPausing ||
@@ -559,6 +589,9 @@ class JevScreenGoalRunner(
                         put("jev_latency_ms", evaluated.latencyMs)
                     }
                     if (receipt.status == "unknown") return@withTimeoutOrNull finish("outcome_unknown", receipt.reason)
+                    displayFaultProvider?.invoke()?.let { (faultStatus, faultReason) ->
+                        return@withTimeoutOrNull finish(faultStatus, faultReason)
+                    }
                     if (receipt.status != "ok") return@withTimeoutOrNull finish("handback", receipt.reason ?: receipt.status)
                     stepIndex++
                     settle()
@@ -580,7 +613,14 @@ class JevScreenGoalRunner(
                         controller.captureScreenSnapshot()?.also { captured ->
                             ScreenSnapshotInvalidationRegistry.markFreshCapture(captured.id)
                         }
-                    } ?: return@withTimeoutOrNull finish("outcome_unknown", "post_action_screen_unavailable")
+                    } ?: run {
+                        val fault = displayFaultProvider?.invoke()
+                        return@withTimeoutOrNull if (fault != null && fault.first == "UNOBSERVABLE") {
+                            finish(fault.first, fault.second)
+                        } else {
+                            finish("outcome_unknown", fault?.second ?: "post_action_screen_unavailable")
+                        }
+                    }
                     if (after.packageName != packageName) return@withTimeoutOrNull finish("needs_user_action", "foreground_package_changed")
                     last = after
                     pending = after
@@ -604,8 +644,9 @@ class JevScreenGoalRunner(
     private suspend fun observeOcrIfNeeded(
         snapshot: ScreenSnapshot,
         ocrMode: ScreenOcrMode,
+        ocrEngineOverride: ScreenOcrEngine? = null,
     ): ScreenOcrObservation? {
-        val engine = ocrEngine ?: return null
+        val engine = ocrEngineOverride ?: ocrEngine ?: return null
         return try {
             engine.observe(snapshot = snapshot, mode = ocrMode)
         } catch (e: CancellationException) {

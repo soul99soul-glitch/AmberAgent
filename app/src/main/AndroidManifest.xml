@@ -266,6 +266,9 @@
       android:name="app.amber.agent.feature.runtime.AgentNotificationActionReceiver"
       android:exported="false" />
     <receiver
+      android:name="app.amber.core.automation.display.VirtualDisplayRunControlReceiver"
+      android:exported="false" />
+    <receiver
       android:name="app.amber.feature.terminal.TermuxCommandResultReceiver"
       android:exported="false" />
     <receiver

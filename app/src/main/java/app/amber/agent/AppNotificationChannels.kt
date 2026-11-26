@@ -13,6 +13,7 @@ const val DEEP_READ_NOTIFICATION_CHANNEL_ID = "deep_read"
 const val NOVEL_GHOSTWRITE_FAILURE_NOTIFICATION_CHANNEL_ID = "novel_ghostwrite_failure"
 // Must match `channel_id` sent by amber-gateway's FCM sender.
 const val MAC_GATEWAY_NOTIFICATION_CHANNEL_ID = "mac_gateway"
+const val PHONE_USE_RUN_CHANNEL_ID = "phone_use_virtual_run"
 
 
 internal fun Application.createNotificationChannel() {
@@ -86,4 +87,12 @@ internal fun Application.createNotificationChannel() {
         .setVibrationEnabled(true)
         .build()
     notificationManager.createNotificationChannel(macGatewayChannel)
+
+    val phoneUseRunChannel = NotificationChannelCompat
+        .Builder(PHONE_USE_RUN_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+        .setName(getString(R.string.notification_channel_phone_use_virtual_run))
+        .setVibrationEnabled(false)
+        .setShowBadge(false)
+        .build()
+    notificationManager.createNotificationChannel(phoneUseRunChannel)
 }

@@ -24,6 +24,8 @@ import app.amber.feature.ui.pages.extensions.SkillsPage
 import app.amber.feature.ui.pages.favorite.FavoritePage
 import app.amber.feature.ui.pages.history.HistoryPage
 import app.amber.feature.ui.pages.personalagent.PersonalAgentPage
+import app.amber.feature.ui.pages.phoneuse.PhoneUseLivePage
+import app.amber.feature.ui.pages.phoneuse.SettingPhoneUseDisplayPage
 import app.amber.feature.ui.pages.sessionhome.SessionHomePage
 import app.amber.feature.ui.pages.profile.ProfilePage
 import app.amber.feature.ui.pages.live.LiveCompanionPage
@@ -274,6 +276,14 @@ internal fun appNavigationEntries(): (NavKey) -> NavEntry<NavKey> = entryProvide
 
     entry<Screen.SettingJev>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
         SettingJevPage()
+    }
+
+    entry<Screen.PhoneUseLive> { key ->
+        PhoneUseLivePage(runId = key.runId)
+    }
+
+    entry<Screen.SettingPhoneUseDisplay>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
+        SettingPhoneUseDisplayPage()
     }
 
     entry<Screen.SettingMcp>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {

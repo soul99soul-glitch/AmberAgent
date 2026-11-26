@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_channel_phone_use_virtual_run">虚拟屏自动化运行</string>
+    <string name="phone_use_vd_notif_title_running">正在虚拟屏中运行</string>
+    <string name="phone_use_vd_notif_title_paused">虚拟屏运行已暂停</string>
+    <string name="phone_use_vd_notif_content">%1$s · %2$s</string>
+    <string name="phone_use_vd_notif_action_view">查看</string>
+    <string name="phone_use_vd_notif_action_pause">暂停</string>
+    <string name="phone_use_vd_notif_action_emergency_stop">急停</string>
+
+    <string name="phone_use_vd_live_title">虚拟屏实时预览</string>
+    <string name="phone_use_vd_live_no_active_run">当前没有对应的活跃虚拟屏任务。</string>
+    <string name="phone_use_vd_live_status_running">运行中</string>
+    <string name="phone_use_vd_live_status_paused">已暂停</string>
+    <string name="phone_use_vd_live_status_taken_over">已接管</string>
+    <string name="phone_use_vd_live_status_stopped">已急停</string>
+    <string name="phone_use_vd_live_status_unobservable">画面不可观察（已停止）</string>
+    <string name="phone_use_vd_live_status_outcome_unknown">结果未知（已停止）</string>
+    <string name="phone_use_vd_live_preview_waiting">正在等待虚拟屏画面…</string>
+    <string name="phone_use_vd_live_preview_unobservable">当前画面不可观察（受保护或全黑），已停止观察与输入。</string>
+    <string name="phone_use_vd_live_preview_meta">虚拟屏 #%1$d · 代次 %2$d · ≤5fps 预览</string>
+    <string name="phone_use_vd_live_btn_pause">暂停</string>
+    <string name="phone_use_vd_live_btn_resume">继续</string>
+    <string name="phone_use_vd_live_btn_takeover">接管</string>
+    <string name="phone_use_vd_live_btn_emergency_stop">急停</string>
+    <string name="phone_use_vd_live_takeover_dialog_title">是否在主屏打开目标应用？</string>
+    <string name="phone_use_vd_live_takeover_dialog_body">已停止虚拟屏输入并释放虚拟屏。是否现在在主屏打开 %1$s？不承诺虚拟屏内页面状态无损迁移。</string>
+    <string name="phone_use_vd_live_takeover_open_main">在主屏打开</string>
+    <string name="phone_use_vd_live_takeover_stay">暂不打开</string>
+
+    <string name="setting_jev_phone_use_vd_entry_title">虚拟屏 Phone Use（实验）</string>
+    <string name="setting_jev_phone_use_vd_entry_desc">通过 Shizuku 在隔离虚拟屏中运行手机操控，不抢占主屏</string>
+
+    <string name="setting_phone_use_vd_title">虚拟屏 Phone Use</string>
+    <string name="setting_phone_use_vd_status_section">本机状态</string>
+    <string name="setting_phone_use_vd_status_verified">已验证</string>
+    <string name="setting_phone_use_vd_status_verified_desc">当前系统指纹与应用版本已通过双屏隔离自测。</string>
+    <string name="setting_phone_use_vd_status_unverified">未验证</string>
+    <string name="setting_phone_use_vd_status_unverified_desc">开启前需先在本机通过双屏隔离自测；系统更新或应用升级后会自动重置为未验证。</string>
+    <string name="setting_phone_use_vd_status_failed">不支持（自测未通过）</string>
+    <string name="setting_phone_use_vd_status_failed_desc">最近一次隔离自测未通过：%1$s</string>
+    <string name="setting_phone_use_vd_status_unsupported">不支持</string>
+    <string name="setting_phone_use_vd_status_unsupported_desc">本机不满足运行条件：%1$s</string>
+    <string name="setting_phone_use_vd_reason_build_disabled">当前构建版本未开放虚拟屏能力。</string>
+    <string name="setting_phone_use_vd_reason_api_below_34">需要 Android 14（API 34）及以上版本（当前 API %1$d）。</string>
+    <string name="setting_phone_use_vd_reason_no_secondary_activities">系统未声明支持副屏 Activity 特性。</string>
+
+    <string name="setting_phone_use_vd_shizuku_section">Shizuku 授权引导</string>
+    <string name="setting_phone_use_vd_shizuku_title">Shizuku 服务（仅限 UID 2000）</string>
+    <string name="setting_phone_use_vd_shizuku_ready">运行中且已授权</string>
+    <string name="setting_phone_use_vd_shizuku_need_permission">运行中，等待授权</string>
+    <string name="setting_phone_use_vd_shizuku_not_running">未运行。请通过无线调试启动 Shizuku（仅使用 ADB shell UID 2000，不使用 root）。</string>
+    <string name="setting_phone_use_vd_shizuku_request_btn">去授权</string>
+    <string name="setting_phone_use_vd_shizuku_refresh_btn">刷新</string>
+
+    <string name="setting_phone_use_vd_probe_section">双屏隔离自测</string>
+    <string name="setting_phone_use_vd_probe_title">启动隔离自测</string>
+    <string name="setting_phone_use_vd_probe_desc">验证主屏零注入、焦点不丢失、目标窗口收到全部事件与中文回读一致，以及销毁后不泄漏到主屏。</string>
+    <string name="setting_phone_use_vd_probe_run_btn">开始自测</string>
+    <string name="setting_phone_use_vd_probe_last_result">最近结果：%1$s</string>
+
+    <string name="setting_phone_use_vd_toggle_section">实验开关</string>
+    <string name="setting_phone_use_vd_toggle_title">启用虚拟屏模式</string>
+    <string name="setting_phone_use_vd_toggle_desc_ready">开启后，screen_run_goal 在 auto 模式下会优先使用隔离虚拟屏运行。</string>
+    <string name="setting_phone_use_vd_toggle_desc_locked">仅在本机通过隔离自测（已验证）后方可开启。</string>
+
+    <string name="setting_phone_use_vd_active_run_section">活跃虚拟屏任务</string>
+    <string name="setting_phone_use_vd_active_run_open">查看实时预览（%1$s）</string>
+</resources>

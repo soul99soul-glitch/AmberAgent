@@ -4,6 +4,8 @@ import app.amber.core.automation.display.IsolationProbeRunner
 import app.amber.core.automation.display.PhoneDisplaySessionFactory
 import app.amber.core.automation.display.ShizukuDisplayBridge
 import app.amber.core.automation.display.VirtualDisplayProbeStore
+import app.amber.core.automation.display.VirtualDisplayRunNotifier
+import app.amber.feature.tools.ScreenAutomationTools
 import app.amber.core.jev.AndroidJevUsageStore
 import app.amber.core.jev.FileJevCalibrationStore
 import app.amber.core.jev.JevCalibrationStore
@@ -88,6 +90,7 @@ val jevModule = module {
     single { JevWebGoalRunner(get()) }
     single { VirtualDisplayProbeStore(androidContext()) }
     single { ShizukuDisplayBridge(androidContext()) }
+    single { VirtualDisplayRunNotifier(androidContext()) }
     single {
         PhoneDisplaySessionFactory(
             context = androidContext(),
@@ -100,6 +103,22 @@ val jevModule = module {
             context = androidContext(),
             sessionFactory = get(),
             probeStore = get(),
+        )
+    }
+    // Override ScreenAutomationTools with virtual display session factory, probe store,
+    // and ongoing run notifier without modifying AgentInfraModule / AppModule.
+    single {
+        ScreenAutomationTools(
+            context = androidContext(),
+            screenCaptureManager = get(),
+            activityStore = get(),
+            jevScreenGoalRunner = get(),
+            settingsStore = get(),
+            ocrEngine = get(),
+            takeoverController = getOrNull(),
+            displaySessionFactory = get(),
+            probeStore = get(),
+            virtualDisplayRunNotifier = get(),
         )
     }
     single {

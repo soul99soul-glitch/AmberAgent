@@ -6,6 +6,9 @@ import app.amber.core.automation.DefaultScreenOcrEngine
 import app.amber.core.automation.PhoneAutomationTakeoverController
 import app.amber.core.automation.ScreenCaptureManager
 import app.amber.core.automation.ScreenOcrEngine
+import app.amber.core.automation.display.PhoneDisplaySessionFactory
+import app.amber.core.automation.display.VirtualDisplayProbeStore
+import app.amber.core.automation.display.VirtualDisplayRunNotifier
 import app.amber.core.jev.JevScreenGoalRunner
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.runtime.AgentToolActivityStore
@@ -18,6 +21,9 @@ class ScreenAutomationTools(
     settingsStore: SettingsAggregator? = null,
     ocrEngine: ScreenOcrEngine = DefaultScreenOcrEngine(context, screenCaptureManager),
     takeoverController: PhoneAutomationTakeoverController? = null,
+    displaySessionFactory: PhoneDisplaySessionFactory? = null,
+    probeStore: VirtualDisplayProbeStore? = null,
+    virtualDisplayRunNotifier: VirtualDisplayRunNotifier? = null,
 ) {
     constructor(
         context: Context,
@@ -37,7 +43,15 @@ class ScreenAutomationTools(
     )
 
     private val operations = ScreenOperationOwner(activityStore, takeoverController)
-    private val scope = ScreenAppScopeTools(context, settingsStore, jevScreenGoalRunner, operations)
+    private val scope = ScreenAppScopeTools(
+        context = context,
+        settingsStore = settingsStore,
+        jevScreenGoalRunner = jevScreenGoalRunner,
+        operations = operations,
+        displaySessionFactory = displaySessionFactory,
+        probeStore = probeStore,
+        virtualDisplayRunNotifier = virtualDisplayRunNotifier,
+    )
     private val primitives = ScreenPrimitiveTools(context, screenCaptureManager, operations, ocrEngine)
     private val flow = ScreenFlowTools(settingsStore, operations)
     private val collection = ScreenListCollection(operations)
