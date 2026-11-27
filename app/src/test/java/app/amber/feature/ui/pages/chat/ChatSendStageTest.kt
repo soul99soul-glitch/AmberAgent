@@ -183,6 +183,19 @@ class ChatSendStageTest {
         assertTrue(stage.isPending)
         assertEquals(SendStageIntent("cloud", "conv-1", 2L, submittedMessageId), stage.pendingIntent)
         assertEquals(2, hideCount)
+
+        // 10. Suggestion direct send (idle) -> arms stage and hides keyboard like normal send.
+        stage.reset()
+        assertTrue(makeActions().sendSuggestion("帮我总结一下"))
+        assertTrue(stage.isPending)
+        assertEquals(SendStageIntent("local", "conv-1", 3L, submittedMessageId), stage.pendingIntent)
+        assertEquals(3, hideCount)
+
+        // 11. Suggestion direct send while generating -> must not arm stage.
+        stage.reset()
+        assertTrue(makeActions(generating = true).sendSuggestion("继续补充"))
+        assertFalse(stage.isPending)
+        assertEquals(3, hideCount)
     }
 
     @Test
@@ -255,9 +268,58 @@ class ChatSendStageTest {
         assertEquals(200, stage.spacerPx)
         assertTrue(stage.isActive)
 
-        // Long reply exceeds viewport: T = 840 >= H = 820 -> spacer clamps to 0 and stage hands off.
+        // Long reply exceeds viewport: T = 840 >= H = 820 -> spacer clamps to 0 without killing stage,
+        // so a later viewport expansion still lifts cleanly; explicit drag exits the stage.
         assertEquals(0, stage.updateTurnHeight(840))
+        assertTrue(stage.isActive)
+        assertEquals(160, stage.updateViewportHeight(1000))
+        stage.onUserDrag()
         assertFalse(stage.isActive)
+    }
+
+    @Test
+    fun transientSmallViewportDuringKeyboardDismissDoesNotKillSendStageAndRecoversSpacer() {
+        val stage = ChatSendStageState()
+        val userKey = Uuid.random()
+        stage.onSubmitAccepted(SendStageIntent("local", "conv-1", 1L, Uuid.random()))
+        stage.onUserNodeAppeared(userKey)
+
+        // Soft keyboard still open: small viewport H = 220, turn T = 280 -> clamp spacer to 0, keep stage alive.
+        stage.updateViewportHeight(220)
+        assertEquals(0, stage.updateTurnHeight(280))
+        assertTrue(stage.isActive)
+        assertEquals(userKey, stage.stagedMessageKey)
+
+        // Keyboard dismisses and viewport expands to 820 -> spacer immediately lifts to 540.
+        assertEquals(540, stage.updateViewportHeight(820))
+        assertTrue(stage.isActive)
+
+        // Even if an overflow measurement happened transiently, stage stays active with spacer = 0
+        // and recovers as soon as the expanded viewport measures the turn again.
+        stage.onTurnExceededViewport()
+        assertEquals(0, stage.spacerPx)
+        assertTrue(stage.isActive)
+        assertEquals(userKey, stage.stagedMessageKey)
+        assertEquals(0, stage.updateViewportHeight(820))
+        assertEquals(540, stage.updateTurnHeight(280))
+
+        // measureTurnHeight must return NotFound until index 0 is present in visibleItems.
+        val fakeItemAtIndex2 = object : androidx.compose.foundation.lazy.LazyListItemInfo {
+            override val index: Int = 2
+            override val key: Any = userKey
+            override val offset: Int = 180
+            override val size: Int = 90
+        }
+        assertEquals(
+            TurnHeightMeasurement.NotFound,
+            measureTurnHeight(
+                visibleItems = listOf(fakeItemAtIndex2),
+                firstVisibleItemIndex = 1,
+                stagedMessageKey = userKey,
+                stagedLazyTopIndex = 2,
+                viewportHeightPx = 820,
+            ),
+        )
     }
 
     @Test
@@ -636,5 +698,78 @@ class ChatSendStageTest {
         val expected160 = with(compose.density) { 160.dp.roundToPx() }
         assertTrue("expected spacer ~${expected160}px, got ${stage.spacerPx}", abs(stage.spacerPx - expected160) <= 2)
         assertTrue("user message top stayed pinned during streaming growth, got $userTopPx", abs(userTopPx) <= 2f)
+    }
+
+    @Test
+    fun reverseLayoutStageRecoversAfterTransientSmallKeyboardViewportOverflow() {
+        // Start with viewport smaller than the 120dp staged turn (simulating IME still open on send).
+        var viewportHeightDp by mutableIntStateOf(90)
+        val stage = ChatSendStageState()
+        val userKey = Uuid.random()
+        var userTopPx = -1f
+
+        compose.setContent {
+            val density = LocalDensity.current
+            val listState = rememberLazyListState()
+            val contentPadding = remember(density, stage) {
+                SendStageContentPaddingValues(
+                    start = 0.dp,
+                    top = 0.dp,
+                    end = 0.dp,
+                    baseBottom = 0.dp,
+                    density = density,
+                    sendStage = stage,
+                )
+            }
+            CompositionLocalProvider(LocalChatSendStage provides stage) {
+                Box(Modifier.size(320.dp, viewportHeightDp.dp)) {
+                    LazyColumn(
+                        state = listState,
+                        reverseLayout = true,
+                        contentPadding = contentPadding,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .chatSendStageLayout(
+                                listState = listState,
+                                sendStage = stage,
+                                topPaddingPx = 0,
+                                baseBottomPaddingPx = 0,
+                                stagedLazyTopIndex = 2,
+                            ),
+                    ) {
+                        item(key = TimelineTailKey) { Box(Modifier.fillMaxWidth().height(20.dp)) }
+                        item(key = "assistant") { Box(Modifier.fillMaxWidth().height(40.dp)) }
+                        item(key = userKey) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(60.dp)
+                                    .onGloballyPositioned { userTopPx = it.positionInRoot().y },
+                            )
+                        }
+                        items(8, key = { "hist-$it" }) {
+                            Box(Modifier.fillMaxWidth().height(90.dp))
+                        }
+                    }
+                }
+            }
+        }
+
+        // Activate while viewport (90dp) < turn (120dp): spacer clamps to 0, but stage stays active.
+        compose.runOnIdle {
+            stage.onSubmitAccepted(SendStageIntent("local", "conv-1", 1L, Uuid.random()))
+            stage.onUserNodeAppeared(userKey)
+        }
+        compose.waitForIdle()
+        assertTrue("transient small keyboard viewport must not kill send stage", stage.isActive)
+        assertEquals(0, stage.spacerPx)
+
+        // Keyboard finishes dismissing: viewport expands to 420dp -> spacer lifts to 300dp and user top hits 0.
+        compose.runOnIdle { viewportHeightDp = 420 }
+        compose.waitForIdle()
+        val expected300 = with(compose.density) { 300.dp.roundToPx() }
+        assertTrue("stage remains active after recovery", stage.isActive)
+        assertTrue("expected spacer ~${expected300}px, got ${stage.spacerPx}", abs(stage.spacerPx - expected300) <= 2)
+        assertTrue("user message top should lift to reading line after IME dismiss, got $userTopPx", abs(userTopPx) <= 2f)
     }
 }

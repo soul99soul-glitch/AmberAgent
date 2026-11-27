@@ -197,7 +197,12 @@ internal fun LazyListScope.chatTimelineItems(
                 val isLoadingMessage = timelineLoading && isLastMessage
                 val isPersonalAgent = LocalChatStageMode.current is ChatStageMode.PersonalAgent
                 val nextMessageRole = conversation.messageNodes.getOrNull(index + 1)?.currentMessage?.role
-                val hasVisibleMessageContent = if (isLoadingMessage && node.currentMessage.role == MessageRole.ASSISTANT) {
+                val isPendingEmptyAssistantShell = isLastMessage &&
+                    node.currentMessage.role == MessageRole.ASSISTANT &&
+                    postSendState.waitingForAssistantContent
+                val hasVisibleMessageContent = if ((isLoadingMessage || isPendingEmptyAssistantShell) &&
+                    node.currentMessage.role == MessageRole.ASSISTANT
+                ) {
                     node.currentMessage.parts.hasVisibleChatMessageContent(
                         role = node.currentMessage.role,
                         loading = true,

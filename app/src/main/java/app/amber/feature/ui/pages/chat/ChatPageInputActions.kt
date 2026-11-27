@@ -8,6 +8,7 @@ import app.amber.feature.ui.components.ai.ChatInputSubmissionOwner
 import app.amber.feature.ui.hooks.ChatInputAttachmentImportStatus
 import app.amber.feature.ui.hooks.ChatInputState
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlin.uuid.Uuid
 
 /** Pure admission rule for whether a submitted message may arm a send stage. */
@@ -109,12 +110,47 @@ internal class ChatPageInputActions(
         }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun sendSuggestion(suggestion: String): Boolean {
         val text = suggestion.trim()
         if (text.isEmpty()) return false
         val parts = listOf(UIMessagePart.Text(text))
         if (!checkConfiguration(null)) return false
-        return sendMessage(parts, true, PendingUserMessageMode.FOLLOWUP, Uuid.random()) != null
+        val armStage = shouldTriggerSendStage(
+            editingMessage = null,
+            queueMode = PendingUserMessageMode.FOLLOWUP,
+            generating = generating,
+            followupTargetActive = isFollowupTargetActive(),
+        )
+        val messageId = Uuid.random()
+        if (armStage) sendStage?.beginLocalAdmission(messageId)
+        val deferred = sendMessage(parts, true, PendingUserMessageMode.FOLLOWUP, messageId)
+        if (deferred == null) {
+            sendStage?.endLocalAdmission(messageId)
+            return false
+        }
+        if (armStage) {
+            deferred.invokeOnCompletion { cause ->
+                try {
+                    val accepted = cause == null &&
+                        runCatching { deferred.getCompleted() }.getOrDefault(false)
+                    if (accepted && (sendStage == null || sendStage.admittingMessageId == messageId)) {
+                        sendStage?.onSubmitAccepted(
+                            SendStageIntent(
+                                host = if (cloudDialogueMode) "cloud" else "local",
+                                conversationId = conversationId,
+                                sendRevision = nextSendRevision(),
+                                messageId = messageId,
+                            ),
+                        )
+                        hideKeyboard()
+                    }
+                } finally {
+                    sendStage?.endLocalAdmission(messageId)
+                }
+            }
+        }
+        return true
     }
 
     fun sendWidgetAction(instruction: String): Boolean {

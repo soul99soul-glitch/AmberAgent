@@ -2,15 +2,24 @@ package app.amber.feature.ui.pages.chat
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.ReplyDeliveryMode
+import app.amber.feature.ui.components.message.AssistantBubbleEntranceAlphaDurationMs
+import app.amber.feature.ui.components.message.AssistantBubbleEntranceInitialScale
+import app.amber.feature.ui.components.message.AssistantBubbleEntranceMaxStaggerMs
+import app.amber.feature.ui.components.message.AssistantBubbleEntranceSlideDistance
+import app.amber.feature.ui.components.message.AssistantBubbleEntranceSlideDurationMs
+import app.amber.feature.ui.components.message.AssistantBubbleEntranceStaggerStepMs
+import app.amber.feature.ui.components.message.computeAssistantBubbleEntranceDelayMs
 import app.amber.feature.ui.components.message.resolveAgentPersonaDisplayName
 import app.amber.feature.ui.components.message.splitConversationalAssistantBubbles
 import app.amber.feature.ui.theme.AmberAccents
+import app.amber.feature.ui.theme.defaultAmberTextStyles
 import app.amber.feature.ui.theme.AmberDark
 import app.amber.feature.ui.theme.AmberLight
 import app.amber.feature.ui.theme.AmberSage
@@ -386,5 +395,40 @@ class ChatListIndicatorsTest {
         assertTrue(PersonalAgentSuggestionChipVerticalPadding <= 5.dp)
         assertTrue(PersonalAgentSuggestionChipHorizontalPadding <= 12.dp)
         assertTrue(PersonalAgentSuggestionChipLineHeight <= 16.sp)
+    }
+
+    @Test
+    fun `inline status and persona header lock line metrics without font padding jitter`() {
+        val type = defaultAmberTextStyles()
+        assertEquals(24.dp, InlineStatusRowHeight)
+        assertEquals(20.sp, InlineStatusTextLineHeight)
+
+        val statusStyle = resolveInlineStatusTextStyle(type.secondary)
+        assertEquals(20.sp, statusStyle.lineHeight)
+        assertEquals(false, statusStyle.platformStyle?.paragraphStyle?.includeFontPadding)
+        assertEquals(LineHeightStyle.Alignment.Center, statusStyle.lineHeightStyle?.alignment)
+        assertEquals(LineHeightStyle.Trim.Both, statusStyle.lineHeightStyle?.trim)
+
+        val headerStyle = resolveAgentPersonaHeaderTextStyle(type.meta)
+        assertEquals(false, headerStyle.platformStyle?.paragraphStyle?.includeFontPadding)
+        assertEquals(LineHeightStyle.Alignment.Center, headerStyle.lineHeightStyle?.alignment)
+        assertEquals(LineHeightStyle.Trim.Both, headerStyle.lineHeightStyle?.trim)
+    }
+
+    @Test
+    fun `assistant bubble entrance uses gentle decoupled timing and bounded multi-bubble stagger`() {
+        assertEquals(420, AssistantBubbleEntranceAlphaDurationMs)
+        assertEquals(460, AssistantBubbleEntranceSlideDurationMs)
+        assertEquals(12.dp, AssistantBubbleEntranceSlideDistance)
+        assertEquals(0.988f, AssistantBubbleEntranceInitialScale, 0.0001f)
+        assertEquals(90, AssistantBubbleEntranceStaggerStepMs)
+        assertEquals(270, AssistantBubbleEntranceMaxStaggerMs)
+
+        assertEquals(0, computeAssistantBubbleEntranceDelayMs(-1))
+        assertEquals(0, computeAssistantBubbleEntranceDelayMs(0))
+        assertEquals(90, computeAssistantBubbleEntranceDelayMs(1))
+        assertEquals(180, computeAssistantBubbleEntranceDelayMs(2))
+        assertEquals(270, computeAssistantBubbleEntranceDelayMs(3))
+        assertEquals(270, computeAssistantBubbleEntranceDelayMs(4))
     }
 }

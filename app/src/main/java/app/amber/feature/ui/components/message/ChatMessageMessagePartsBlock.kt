@@ -2,7 +2,8 @@ package app.amber.feature.ui.components.message
 
 import android.content.Intent
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -39,6 +40,9 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.drawWithContent
@@ -355,10 +359,10 @@ internal fun MessagePartsBlock(
                                     } else {
                                         assistantDisplayText
                                     }
-                                    if (visibleAssistantText.isEmpty() && isStreamingText) {
-                                        // Segmented mode holds back incomplete in-flight prose so
-                                        // the single-line 3-dot wave status stays clean until a
-                                        // complete block or full reply is ready to fade in.
+                                    if (visibleAssistantText.isBlank()) {
+                                        // Hold back empty assistant shells and incomplete in-flight
+                                        // segmented prose so neither renders a padded empty bubble
+                                        // while the single-line 3-dot wave status is shown.
                                     } else {
                                         // Streaming tail text block: single-Text markdown layer
                                         // (layout only grows, no block-tree re-layout mid-stream).
@@ -413,7 +417,10 @@ internal fun MessagePartsBlock(
                                                             Surface(
                                                                 modifier = Modifier
                                                                     .chatBubbleWidth(0.90f)
-                                                                    .assistantBubbleEntrance(animate = appearedDuringLiveTurn),
+                                                                    .assistantBubbleEntrance(
+                                                                        animate = appearedDuringLiveTurn,
+                                                                        staggerIndex = bubbleIndex,
+                                                                    ),
                                                                 shape = assistantBubbleShape,
                                                                 color = amberTokens.surface,
                                                                 contentColor = amberTokens.ink,
@@ -768,29 +775,68 @@ private fun UIMessagePart.Tool.stableStepKey(): String =
         streamToolIndex()?.let { "stream-tool-$it" } ?: hashCode().toString()
     }
 
+internal const val AssistantBubbleEntranceAlphaDurationMs = 420
+internal const val AssistantBubbleEntranceSlideDurationMs = 460
+internal val AssistantBubbleEntranceSlideDistance = 12.dp
+internal const val AssistantBubbleEntranceInitialScale = 0.988f
+internal const val AssistantBubbleEntranceStaggerStepMs = 90
+internal const val AssistantBubbleEntranceMaxStaggerMs = 270
+internal val AssistantBubbleEntranceAlphaEasing: Easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+internal val AssistantBubbleEntranceMotionEasing: Easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+
+internal fun computeAssistantBubbleEntranceDelayMs(staggerIndex: Int): Int =
+    (staggerIndex.coerceAtLeast(0) * AssistantBubbleEntranceStaggerStepMs)
+        .coerceAtMost(AssistantBubbleEntranceMaxStaggerMs)
+
 /**
- * Smooth whole-bubble fade-in + subtle upward glide and gentle TopStart scale settle when a
- * newly generated assistant bubble appears (aligned with iOS/HarmonyOS). Historical messages
- * skip animation (`animate == false`).
+ * Gentle, decelerating whole-bubble entrance with decoupled alpha and vertical glide when a
+ * newly generated assistant bubble appears. Multi-bubble turns stagger softly by [staggerIndex].
+ * Historical messages skip animation (`animate == false`).
  */
-internal fun Modifier.assistantBubbleEntrance(animate: Boolean): Modifier = composed {
-    val progress = remember { Animatable(if (animate) 0f else 1f) }
+internal fun Modifier.assistantBubbleEntrance(
+    animate: Boolean,
+    staggerIndex: Int = 0,
+): Modifier = composed {
+    val alphaProgress = remember { Animatable(if (animate) 0f else 1f) }
+    val motionProgress = remember { Animatable(if (animate) 0f else 1f) }
     LaunchedEffect(Unit) {
-        if (animate && progress.value < 1f) {
-            progress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
-            )
+        if (animate && (alphaProgress.value < 1f || motionProgress.value < 1f)) {
+            val delayMs = computeAssistantBubbleEntranceDelayMs(staggerIndex)
+            if (delayMs > 0) {
+                delay(delayMs.toLong())
+            }
+            coroutineScope {
+                launch {
+                    alphaProgress.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(
+                            durationMillis = AssistantBubbleEntranceAlphaDurationMs,
+                            easing = AssistantBubbleEntranceAlphaEasing,
+                        ),
+                    )
+                }
+                launch {
+                    motionProgress.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(
+                            durationMillis = AssistantBubbleEntranceSlideDurationMs,
+                            easing = AssistantBubbleEntranceMotionEasing,
+                        ),
+                    )
+                }
+            }
         }
     }
     this.graphicsLayer {
-        val p = progress.value
-        alpha = p
-        translationY = 7.dp.toPx() * (1f - p)
-        val scale = 0.985f + 0.015f * p
+        val a = alphaProgress.value
+        val m = motionProgress.value
+        alpha = a
+        translationY = AssistantBubbleEntranceSlideDistance.toPx() * (1f - m)
+        val scale = AssistantBubbleEntranceInitialScale +
+            (1f - AssistantBubbleEntranceInitialScale) * m
         scaleX = scale
         scaleY = scale
-        transformOrigin = TransformOrigin(0f, 0f)
+        transformOrigin = TransformOrigin(0f, 0.5f)
     }
 }
 

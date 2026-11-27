@@ -1,7 +1,6 @@
 package app.amber.feature.ui.pages.chat
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -49,7 +48,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -364,6 +366,32 @@ internal fun resolveWaitingIndicatorAgentName(
 }
 
 internal val PersonalAgentHeaderToBodySpacing = 6.dp
+internal val InlineStatusRowHeight = 24.dp
+internal val InlineStatusTextLineHeight = 20.sp
+internal val InlineStatusPlatformStyle = PlatformTextStyle(includeFontPadding = false)
+internal val InlineStatusLineHeightStyle = LineHeightStyle(
+    alignment = LineHeightStyle.Alignment.Center,
+    trim = LineHeightStyle.Trim.Both,
+)
+
+internal fun resolveAgentPersonaHeaderTextStyle(baseMetaStyle: TextStyle): TextStyle =
+    baseMetaStyle.copy(
+        fontWeight = FontWeight.Bold,
+        platformStyle = InlineStatusPlatformStyle,
+        lineHeightStyle = InlineStatusLineHeightStyle,
+    )
+
+internal fun resolveInlineStatusTextStyle(
+    baseSecondaryStyle: TextStyle,
+    brush: Brush? = null,
+): TextStyle = baseSecondaryStyle.copy(
+    fontSize = 14.sp,
+    lineHeight = InlineStatusTextLineHeight,
+    fontWeight = FontWeight.Medium,
+    brush = brush,
+    platformStyle = InlineStatusPlatformStyle,
+    lineHeightStyle = InlineStatusLineHeightStyle,
+)
 
 @Composable
 internal fun AgentWorkingIndicator(
@@ -407,7 +435,7 @@ internal fun AgentWorkingIndicator(
         if (headerLabel != null) {
             Text(
                 text = headerLabel,
-                style = amberType.meta.copy(fontWeight = FontWeight.Bold),
+                style = resolveAgentPersonaHeaderTextStyle(amberType.meta),
                 color = chatTheme.accent,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -416,7 +444,7 @@ internal fun AgentWorkingIndicator(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(30.dp),
+                .height(InlineStatusRowHeight),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -425,13 +453,13 @@ internal fun AgentWorkingIndicator(
                 targetState = statusText,
                 modifier = Modifier
                     .weight(1f)
-                    .height(22.dp),
+                    .height(InlineStatusRowHeight),
                 contentAlignment = Alignment.CenterStart,
                 transitionSpec = {
                     (
                         fadeIn(tween(180, easing = FastOutSlowInEasing)) togetherWith
                             fadeOut(tween(140, easing = FastOutSlowInEasing))
-                    ).using(SizeTransform(clip = false))
+                    ).using(null)
                 },
                 label = "inline_working_status",
             ) { line ->
@@ -457,27 +485,32 @@ internal fun AgentWorkingIndicator(
                     start = Offset(shimmerRange.startX, 0f),
                     end = Offset(shimmerRange.endX, 0f),
                 )
-                Text(
-                    text = line,
-                    style = amberType.secondary.copy(
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
-                        fontWeight = FontWeight.Medium,
-                        brush = textBrush,
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    onTextLayout = { layoutResult ->
-                        if (layoutResult.lineCount > 0) {
-                            val width = (layoutResult.getLineRight(0) - layoutResult.getLineLeft(0))
-                                .coerceAtLeast(1f)
-                            if (width != measuredTextWidthPx) {
-                                measuredTextWidthPx = width
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(InlineStatusRowHeight),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Text(
+                        text = line,
+                        style = resolveInlineStatusTextStyle(
+                            baseSecondaryStyle = amberType.secondary,
+                            brush = textBrush,
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        onTextLayout = { layoutResult ->
+                            if (layoutResult.lineCount > 0) {
+                                val width = (layoutResult.getLineRight(0) - layoutResult.getLineLeft(0))
+                                    .coerceAtLeast(1f)
+                                if (width != measuredTextWidthPx) {
+                                    measuredTextWidthPx = width
+                                }
+                                lastMeasuredTextWidthPx = width
                             }
-                            lastMeasuredTextWidthPx = width
-                        }
-                    },
-                )
+                        },
+                    )
+                }
             }
         }
     }

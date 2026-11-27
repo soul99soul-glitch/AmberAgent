@@ -86,8 +86,8 @@ fun ChatMessageAssistantAvatar(
         Text(
             text = displayLabel,
             modifier = modifier.clickable { showSoulSheet = true },
-            style = LocalAmberType.current.meta.copy(
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+            style = app.amber.feature.ui.pages.chat.resolveAgentPersonaHeaderTextStyle(
+                LocalAmberType.current.meta,
             ),
             color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent,
             maxLines = 1,

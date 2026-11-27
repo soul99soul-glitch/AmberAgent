@@ -171,18 +171,17 @@ class ChatSendStageState {
 
     internal fun onTurnExceededViewport() {
         if (!_isActive) return
-        _spacerPx = 0
-        _initialScrollPending = false
-        _activeIntent = null
-        _stagedMessageKey = null
-        _isActive = false
+        // Keep the stage active and preserve _stagedMessageKey so transient small viewports
+        // (e.g., soft keyboard still dismissing right after send) cannot permanently kill
+        // staging. Clear _hasMeasuredTurn so a stale smaller height is not reused until the
+        // next visible measurement succeeds; only onUserDrag() / reset() / new submit exits.
+        _hasMeasuredTurn = false
+        if (_spacerPx != 0) {
+            _spacerPx = 0
+        }
     }
 
     private fun reconcileSpacerLocked() {
-        if (_viewportHeightPx > 0 && _turnHeightPx >= _viewportHeightPx) {
-            onTurnExceededViewport()
-            return
-        }
         val next = computeSendStageSpacerPx(
             viewportHeightPx = _viewportHeightPx,
             turnHeightPx = _turnHeightPx,
@@ -231,10 +230,9 @@ internal fun measureTurnHeight(
     if (stagedMessageKey == null || visibleItems.isEmpty()) {
         return TurnHeightMeasurement.NotFound
     }
-    val bottomAnchorOffset = visibleItems
-        .firstOrNull { it.index == 0 }
-        ?.offset
-        ?: 0
+    val bottomAnchorItem = visibleItems.firstOrNull { it.index == 0 }
+        ?: return TurnHeightMeasurement.NotFound
+    val bottomAnchorOffset = bottomAnchorItem.offset
     val stagedTopItem = visibleItems
         .filter { matchesStagedMessageKey(it.key, stagedMessageKey) }
         .maxByOrNull { it.index }
