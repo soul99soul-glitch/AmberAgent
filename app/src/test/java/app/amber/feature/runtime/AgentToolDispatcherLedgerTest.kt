@@ -322,6 +322,26 @@ class AgentToolDispatcherLedgerTest : DurableRuntimeTestBase() {
     }
 
     @Test
+    fun changedDisplayModeRequiresFreshApprovalEvenWithoutCapabilityPolicies() = runBlocking {
+        val store = approvalStore()
+        val approvedInput = """{"package_name":"app.target","display_mode":"physical"}"""
+        val changed = toolCall(toolName = "screen_run_goal", input = approvedInput.replace("physical", "virtual"))
+        store.recordApproval(ApprovalHistoryEntry.approved(
+            capability = null, toolName = changed.toolName, runId = null, toolCallId = changed.toolCallId,
+            effectId = null, argsDigest = argsDigest(approvedInput), source = "user",
+        ))
+        var executions = 0
+        val result = dispatcher.executeBatch(
+            tools = listOf(changed),
+            toolDefinitions = mapOf(changed.toolName to toolDef(changed.toolName) { executions++; emptyList() }),
+            autoApproveTools = false,
+            approvalHistoryFor = { store },
+        ).single()
+        assertEquals(0, executions)
+        assertTrue((result.output.single() as UIMessagePart.Text).text.contains("approval_stale"))
+    }
+
+    @Test
     fun readOnlyToolIsClassifiedReadOnlyAndIdempotentToolGetsIdempotencyKey() = runBlocking {
         val readOnly = Tool(name = "file_read", description = "", execute = { emptyList() }).effectClass()
         assertEquals(app.amber.feature.tools.ToolEffectClass.READ_ONLY, readOnly)

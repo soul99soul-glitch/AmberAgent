@@ -164,20 +164,22 @@ class VirtualDisplayFrameSource internal constructor(
         get() = droppedCount.get()
 
     init {
-        readerPort.setListener(workerHandler) {
-            onImageAvailable()
+        try {
+            readerPort.setListener(workerHandler, ::onImageAvailable)
+        } catch (error: Throwable) {
+            close()
+            throw error
         }
     }
 
+    @Synchronized
     fun setOnFrameListener(listener: ((VirtualDisplayFrameStats) -> Unit)?) {
         frameListener = if (closed.get()) null else listener
     }
 
+    @Synchronized
     internal fun onImageAvailable() {
-        if (closed.get()) {
-            readerPort.dropLatestFrame()
-            return
-        }
+        if (closed.get()) return
         if (!busy.compareAndSet(false, true)) {
             droppedCount.incrementAndGet()
             readerPort.dropLatestFrame()
@@ -227,13 +229,9 @@ class VirtualDisplayFrameSource internal constructor(
      * Returns an immutable software [Bitmap] copy of the latest captured frame, or null when closed
      * or before the first frame arrives. Never encodes PNG.
      */
-    fun copyLatestBitmap(): Bitmap? {
-        if (closed.get()) return null
-        val snapshotPixels = synchronized(bufferLock) {
-            if (closed.get() || !hasFrame) return null
-            workingPixels.clone()
-        }
-        return Bitmap.createBitmap(snapshotPixels, width, height, Bitmap.Config.ARGB_8888)
+    fun copyLatestBitmap(): Bitmap? = synchronized(bufferLock) {
+        if (closed.get() || !hasFrame) return null
+        Bitmap.createBitmap(workingPixels, width, height, Bitmap.Config.ARGB_8888)
     }
 
     /**
@@ -257,6 +255,7 @@ class VirtualDisplayFrameSource internal constructor(
         matchesMarkerColor(workingPixels, expectedRgb, tolerance, minMatchingRatio)
     }
 
+    @Synchronized
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         frameListener = null
@@ -266,6 +265,7 @@ class VirtualDisplayFrameSource internal constructor(
         workerThread?.quitSafely()
         synchronized(bufferLock) {
             hasFrame = false
+            _latestStats.value = null
         }
     }
 

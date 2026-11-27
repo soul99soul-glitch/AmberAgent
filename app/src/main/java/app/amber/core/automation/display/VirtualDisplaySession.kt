@@ -38,6 +38,7 @@ class VirtualDisplaySession internal constructor(
         AmberAccessibilityService.getActiveService()?.windowsOnDisplay(id).orEmpty()
     },
     private val displayWatcherCloser: Closeable? = null,
+    private val deviceReadyForInput: () -> Boolean = { true },
 ) : PhoneDisplaySession {
 
     init {
@@ -60,7 +61,12 @@ class VirtualDisplaySession internal constructor(
     val state: StateFlow<VirtualDisplaySessionState> = _state.asStateFlow()
 
     val isGenerationValid: Boolean
-        get() = generationValid.get() && !closed.get()
+        get() {
+            if (!generationValid.get() || closed.get()) return false
+            if (deviceReadyForInput()) return true
+            invalidate("device_locked_or_screen_off")
+            return false
+        }
 
     val invalidationReason: String?
         get() = invalidationReasonRef.get()
@@ -80,26 +86,53 @@ class VirtualDisplaySession internal constructor(
         if (!isGenerationValid || displayId <= Display.DEFAULT_DISPLAY || packageName.isBlank()) {
             return false
         }
+        if (!packageName.endsWith(AmberDisplayUserService.PROBE_TARGET_SUFFIX)) {
+            mainDisplayLaunchConflict()?.let { reason ->
+                invalidate(reason)
+                return false
+            }
+        }
         return runGuardedDispatch {
             bridge.launchOnDisplay(generation, displayId, packageName) == 0
         }
     }
 
-    fun injectMotion(event: MotionEvent): Boolean {
-        if (!isGenerationValid || displayId <= Display.DEFAULT_DISPLAY) {
-            return false
+    private fun mainDisplayLaunchConflict(): String? {
+        val windows = runCatching { windowsProvider(Display.DEFAULT_DISPLAY) }.getOrDefault(emptyList())
+        try {
+            var observed = false
+            for (window in windows) {
+                if (window.displayId != Display.DEFAULT_DISPLAY ||
+                    window.type != AccessibilityWindowInfo.TYPE_APPLICATION ||
+                    !(window.isActive || window.isFocused)
+                ) continue
+                val root = window.root ?: return "main_display_unobservable"
+                val foreground = try {
+                    root.packageName?.toString()
+                } finally {
+                    runCatching { root.recycle() }
+                }
+                if (foreground.isNullOrBlank()) return "main_display_unobservable"
+                if (foreground == packageName) return "target_already_foreground_on_main_display"
+                observed = true
+            }
+            return if (observed) null else "main_display_unobservable"
+        } finally {
+            windows.forEach { window -> runCatching { window.recycle() } }
         }
+    }
+
+    fun injectMotion(event: MotionEvent): Boolean {
+        val observedPackageName = controller.observedTargetPackage() ?: return false
         return runGuardedDispatch {
-            bridge.injectMotion(generation, displayId, event)
+            bridge.injectMotion(generation, displayId, observedPackageName, event)
         }
     }
 
     fun injectKey(event: KeyEvent): Boolean {
-        if (!isGenerationValid || displayId <= Display.DEFAULT_DISPLAY) {
-            return false
-        }
+        val observedPackageName = controller.observedTargetPackage() ?: return false
         return runGuardedDispatch {
-            bridge.injectKey(generation, displayId, event)
+            bridge.injectKey(generation, displayId, observedPackageName, event)
         }
     }
 
@@ -121,6 +154,7 @@ class VirtualDisplaySession internal constructor(
         if (_state.value != VirtualDisplaySessionState.CLOSED) {
             _state.value = nextState
         }
+        teardownResources(reason)
     }
 
     /**

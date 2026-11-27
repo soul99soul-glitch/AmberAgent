@@ -11,7 +11,6 @@ import app.amber.agent.EXTRA_OPEN_PERSONAL_AGENT
 import app.amber.agent.R
 import app.amber.agent.RouteActivity
 import app.amber.core.automation.display.ActiveVirtualDisplayRun
-import app.amber.core.automation.display.VirtualDisplayRunNotifier
 import app.amber.core.automation.display.VirtualDisplayRunRegistry
 
 /**
@@ -83,16 +82,7 @@ class AmberQuickTileService : TileService() {
             activeRun: ActiveVirtualDisplayRun? = VirtualDisplayRunRegistry.firstActiveRun(),
         ): Intent {
             if (activeRun != null) {
-                return Intent(context, RouteActivity::class.java).apply {
-                    action = VirtualDisplayRunNotifier.ACTION_VIEW_VIRTUAL_RUN
-                    data = Uri.parse("amber://phone-use-live/${Uri.encode(activeRun.runId)}")
-                    putExtra(VirtualDisplayRunNotifier.EXTRA_RUN_ID, activeRun.runId)
-                    addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                            Intent.FLAG_ACTIVITY_SINGLE_TOP,
-                    )
-                }
+                return activeRun.viewIntent(context)
             }
             return Intent(context, RouteActivity::class.java).apply {
                 action = ACTION_TILE_OPEN_PERSONAL_AGENT

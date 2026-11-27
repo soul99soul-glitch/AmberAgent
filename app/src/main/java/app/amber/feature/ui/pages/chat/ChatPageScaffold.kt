@@ -27,14 +27,17 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import java.util.concurrent.atomic.AtomicLong
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -149,8 +152,10 @@ internal fun ChatPageScaffold(
     val isCloudDialogueActive by isCloudDialogueActiveFlow.collectAsStateWithLifecycle(
         initialValue = macGatewayRepository.state.value.isCloudDialogueActive,
     )
+    val composerGeneration = macGatewayRepository.connectionGeneration.collectAsStateWithLifecycle().value
     val cloudScope = rememberCoroutineScope()
     val conversationIdString = conversation.id.toString()
+    val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val sendStage = remember(conversationIdString) { ChatSendStageState() }
     val sendRevisionCounter = remember(conversationIdString) { AtomicLong(0L) }
@@ -196,55 +201,81 @@ internal fun ChatPageScaffold(
         conversationId = conversationIdString,
         sendStage = sendStage,
         isFollowupTargetActive = {
-            isCloudDialogueActive &&
-                macGatewayRepository.cloudDialogueState.value
-                    .resolvedFollowupTarget(conversationIdString) != null
+            if (isCloudDialogueActive) {
+                macGatewayRepository.cloudDialogueState.value.resolvedFollowupTarget(conversationIdString) != null
+            } else {
+                vm.pendingUserMessages.value.isNotEmpty() ||
+                    localAsyncTaskCoordinator.uiState.value.activeTasksForConversation(conversationIdString).isNotEmpty()
+            }
         },
         nextSendRevision = { sendRevisionCounter.incrementAndGet() },
-        hideKeyboard = { keyboardController?.hide() },
+        hideKeyboard = {
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
+        },
         showError = { messageRes ->
             toaster.show(context.getString(messageRes), type = ToastType.Error)
         },
-        sendMessage = { parts, answer, queueMode ->
+        sendMessage = { parts, answer, queueMode, messageId ->
             if (isCloudDialogueActive) {
                 val text = parts
                     .filterIsInstance<UIMessagePart.Text>()
                     .joinToString("\n") { it.text }
                     .trim()
-                if (text.isEmpty()) {
-                    false
+                if (text.isEmpty() || !macGatewayRepository.state.value.isCloudDialogueActive ||
+                    composerGeneration != macGatewayRepository.connectionGeneration.value
+                ) {
+                    null
                 } else {
                     val followupTarget = macGatewayRepository.cloudDialogueState.value
                         .resolvedFollowupTarget(conversationIdString)
+                    val admitted = CompletableDeferred<Boolean>()
                     cloudScope.launch {
-                        if (followupTarget != null) {
-                            macGatewayRepository.sendCloudFollowup(
-                                conversationId = conversationIdString,
-                                workItemId = followupTarget.workItemId,
-                                text = text,
-                            )
-                        } else {
-                            macGatewayRepository.sendCloudMessage(
-                                conversationId = conversationIdString,
-                                text = text,
-                            )
+                        try {
+                            if (followupTarget != null) {
+                                macGatewayRepository.sendCloudFollowup(
+                                    conversationId = conversationIdString,
+                                    workItemId = followupTarget.workItemId,
+                                    text = text,
+                                    requestId = messageId.toString(),
+                                    expectedConnectionGeneration = composerGeneration,
+                                    onLocalEcho = { admitted.complete(true) },
+                                )
+                            } else {
+                                macGatewayRepository.sendCloudMessage(
+                                    conversationId = conversationIdString,
+                                    text = text,
+                                    requestId = messageId.toString(),
+                                    expectedConnectionGeneration = composerGeneration,
+                                    onLocalEcho = { admitted.complete(true) },
+                                )
+                            }
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            toaster.show(context.getString(app.amber.agent.R.string.error_title_send_message), type = ToastType.Error)
                         }
-                    }
-                    true
+                    }.invokeOnCompletion { admitted.complete(false) }
+                    admitted
                 }
+            } else if (vm.handleMessageSend(parts, answer, queueMode, messageId)) {
+                CompletableDeferred(true)
             } else {
-                vm.handleMessageSend(parts, answer, queueMode)
+                null
             }
         },
         editMessage = vm::handleMessageEdit,
     )
 
     if (ChatPerfTrace.enabled || app.amber.agent.BuildConfig.BUILD_TYPE == "perffixture") {
-        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
         DisposableEffect(inputActions, conversation.id, focusManager) {
             ChatPerfCommandBridge.sendText = { text ->
                 val parts = listOf(app.amber.ai.ui.UIMessagePart.Text(text))
-                inputActions.send(PendingUserMessageMode.FOLLOWUP, parts, null)
+                var accepted: Boolean? = null
+                cloudScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    accepted = inputActions.send(PendingUserMessageMode.FOLLOWUP, parts, null)
+                }
+                accepted ?: true
             }
             ChatPerfCommandBridge.stopGeneration = {
                 vm.stopGeneration()

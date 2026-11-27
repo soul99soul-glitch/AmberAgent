@@ -3,6 +3,7 @@ package app.amber.feature.macgateway
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -45,8 +46,8 @@ class ProactiveNotificationActionReceiver : BroadcastReceiver() {
     companion object {
         internal var enqueueWorkOverride: ((Context, String, OneTimeWorkRequest) -> Unit)? = null
 
-        fun uniqueWorkName(gatewayId: String, signalId: String, actionWire: String): String =
-            "proactive-feedback-$gatewayId-$signalId-$actionWire"
+        fun uniqueWorkName(gatewayId: String, deviceId: String, signalId: String, actionWire: String): String =
+            "proactive-feedback/${Uri.encode(gatewayId)}/${Uri.encode(deviceId)}/$signalId/$actionWire"
 
         fun parseEnqueueSpec(intent: Intent?): EnqueueSpec? {
             if (intent == null) return null
@@ -79,7 +80,7 @@ class ProactiveNotificationActionReceiver : BroadcastReceiver() {
                 deviceId = deviceId,
                 signalId = signalId,
                 action = feedbackAction,
-                uniqueWorkName = uniqueWorkName(gatewayId, signalId, feedbackAction.wire),
+                uniqueWorkName = uniqueWorkName(gatewayId, deviceId, signalId, feedbackAction.wire),
                 notificationTag = notificationTag,
                 notificationId = notificationId,
             )

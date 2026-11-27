@@ -3,7 +3,6 @@ package app.amber.feature.bubble
 import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import app.amber.agent.AppScope
 import app.amber.agent.RouteActivity
 import app.amber.core.automation.AmberAccessibilityService
@@ -11,6 +10,7 @@ import app.amber.core.automation.PhoneAutomationTakeoverController
 import app.amber.core.service.ChatService
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.runtime.AgentToolActivityStore
+import app.amber.feature.runtime.argsDigest
 import app.amber.feature.ui.theme.AmberAgentTheme
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.Dispatchers
@@ -37,8 +37,11 @@ class AgentTaskBubbleController(
     private val settingsStore: SettingsAggregator,
     private val appScope: AppScope,
     private val takeoverController: PhoneAutomationTakeoverController? = null,
-    private val approvalDispatcher: (Uuid, String, Boolean) -> Unit = { uuid, toolCallId, approved ->
-        chatService.handleToolApproval(uuid, toolCallId, approved)
+    private val approvalDispatcher: (Uuid, String, Boolean, AgentBubbleUiState) -> Unit = { uuid, toolCallId, approved, shown ->
+        chatService.handleToolApproval(uuid, toolCallId, approved, matchesPending = { pending ->
+            pending.toolName == shown.approvalToolTitle && argsDigest(pending.input) == shown.approvalArgsDigest &&
+                (!approved || !AgentBubbleReducer.requiresInAppApproval(pending))
+        })
     },
 ) {
     private val window = BubbleWindow()
@@ -168,13 +171,13 @@ class AgentTaskBubbleController(
         val host = service ?: return
         window.show(host) {
             AmberAgentTheme {
-                val uiState by uiState.collectAsState()
+                val shown = uiState.collectAsState().value
                 AgentTaskBubbleContent(
-                    state = uiState,
-                    onApprove = { decideApproval(approved = true) },
-                    onDeny = { decideApproval(approved = false) },
+                    state = shown,
+                    onApprove = { decideApproval(approved = true, state = shown) },
+                    onDeny = { decideApproval(approved = false, state = shown) },
                     onStop = ::stopTask,
-                    onOpenConversation = ::openConversation,
+                    onOpenConversation = { openConversation(shown.conversationId) },
                     onDrag = window::moveBy,
                     onDragEnd = window::snapToEdge,
                     onSizeChanged = window::requestReclamp,
@@ -212,18 +215,15 @@ class AgentTaskBubbleController(
         _uiState.value = state
     }
 
-    internal fun decideApproval(approved: Boolean) {
-        val state = _uiState.value
-        val requiresInApp = state.requiresInAppApproval ||
-            state.approvalToolTitle in app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES ||
-            state.approvalToolTitle in app.amber.feature.tools.ACCESSIBILITY_L3_ACTION_TOOLS
+    internal fun decideApproval(approved: Boolean, state: AgentBubbleUiState = _uiState.value) {
+        val requiresInApp = state.requiresInAppApproval || AgentBubbleReducer.requiresInAppApproval(state.approvalToolTitle)
         if (approved && requiresInApp) {
-            openConversation()
+            openConversation(state.conversationId)
             return
         }
         val uuid = state.conversationId?.let(::parseUuid) ?: return
         val toolCallId = state.approvalToolCallId ?: return
-        approvalDispatcher(uuid, toolCallId, approved)
+        approvalDispatcher(uuid, toolCallId, approved, state)
     }
 
     private fun stopTask() {
@@ -231,8 +231,8 @@ class AgentTaskBubbleController(
         appScope.launch { chatService.stopGeneration(uuid) }
     }
 
-    private fun openConversation() {
-        val conversationId = _uiState.value.conversationId ?: return
+    private fun openConversation(conversationId: String?) {
+        if (conversationId == null) return
         val intent = Intent(context, RouteActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_CLEAR_TOP or

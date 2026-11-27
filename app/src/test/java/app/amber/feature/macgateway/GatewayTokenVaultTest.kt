@@ -2,6 +2,7 @@ package app.amber.feature.macgateway
 
 import android.content.ContextWrapper
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.amber.core.settings.secret.SecretCipher
@@ -19,6 +20,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -233,6 +235,83 @@ class GatewayTokenVaultTest {
         } finally {
             scope1.cancel()
             scope2.cancel()
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun unauthorizedPollFinishesForgetInsideItsOwnPollingJob() = runBlocking {
+        val tempDir = Files.createTempDirectory("macgw-401").toFile()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/v2/dialogue/events") { exchange ->
+            exchange.sendResponseHeaders(401, -1)
+            exchange.close()
+        }
+        server.start()
+        try {
+            val store = PreferenceDataStoreFactory.create(scope = scope) {
+                File(tempDir, "mac_gateway.preferences_pb")
+            }
+            val connection = MacGatewayConnection(
+                "gw-401", "Cloud", listOf("127.0.0.1"), server.address.port, "fp", "device",
+            )
+            val secretStore = SecretStore(InMemorySecretBackend(), ProgrammableSecretCipher())
+            val vault = GatewayTokenVault(secretStore)
+            vault.write(connection.gatewayId, "old-device-key")
+            store.edit {
+                it[stringPreferencesKey("connection")] = MacGatewayJson.encodeToString(MacGatewayConnection.serializer(), connection)
+                it[booleanPreferencesKey("cloud_dialogue_enabled")] = true
+                // A stop after the encrypted write can leave a second copy until the next launch.
+                it[stringPreferencesKey("token")] = "old-device-key"
+            }
+            val repo = MacGatewayRepository(
+                context = ContextWrapper(null), appScope = scope, secretStore = secretStore,
+                dataStore = store, foregroundFlow = MutableStateFlow(false),
+                clientFactory = { conn, key -> MacGatewayClient(conn.addrs, conn.port, conn.fingerprint, key, scheme = "http") },
+            )
+            repo.awaitReady()
+            assertNull(store.data.first()[stringPreferencesKey("token")])
+            repo.requestImmediatePoll("push")
+            withTimeout(5_000L) { repo.state.first { it.error is MacGatewayException.Unauthorized } }
+
+            assertNull(vault.read(connection.gatewayId))
+            assertNull(repo.state.value.connection)
+            assertTrue(store.data.first().asMap().isEmpty())
+        } finally {
+            server.stop(0)
+            scope.cancel()
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun invalidatedKeystoreWithNoLegacyCopyExposesUnpairedState() = runBlocking {
+        val tempDir = Files.createTempDirectory("macgw-invalid-key").toFile()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            val store = PreferenceDataStoreFactory.create(scope = scope) { File(tempDir, "mac_gateway.preferences_pb") }
+            val connection = MacGatewayConnection("gw", "Cloud", listOf("127.0.0.1"), 443, "fp", "device")
+            store.edit { it[stringPreferencesKey("connection")] = MacGatewayJson.encodeToString(MacGatewayConnection.serializer(), connection) }
+            val cipher = ProgrammableSecretCipher()
+            val secretStore = SecretStore(InMemorySecretBackend(), cipher)
+            val vault = GatewayTokenVault(secretStore)
+            vault.write(connection.gatewayId, "key-before-invalidation")
+            cipher.corruptDecrypt = true
+            assertNull(vault.read(connection.gatewayId))
+
+            val repo = MacGatewayRepository(
+                context = ContextWrapper(null), appScope = scope, secretStore = secretStore,
+                dataStore = store, foregroundFlow = MutableStateFlow(false),
+            )
+            repo.awaitReady()
+            assertNull(repo.state.value.connection)
+            assertFalse(repo.state.value.isCloudDialogueActive)
+            repo.unpair()
+            assertTrue(store.data.first().asMap().isEmpty())
+            assertFalse(secretStore.has(vault.descriptor(connection.gatewayId)))
+        } finally {
+            scope.cancel()
             tempDir.deleteRecursively()
         }
     }

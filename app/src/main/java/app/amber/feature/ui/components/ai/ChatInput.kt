@@ -47,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
@@ -99,8 +100,6 @@ import app.amber.core.utils.ChatSendTransitionTracker
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
-private const val PostSendKeyboardHideDelayMillis = 96L
-
 enum class ExpandState {
     Collapsed, Files,
 }
@@ -146,8 +145,8 @@ internal fun ChatInput(
     onUpdateSettings: (Settings) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
     onCancelClick: () -> Unit,
-    onSendClick: (PendingUserMessageMode, List<UIMessagePart>, Uuid?) -> Boolean,
-    onLongSendClick: (PendingUserMessageMode, List<UIMessagePart>, Uuid?) -> Boolean,
+    onSendClick: suspend (PendingUserMessageMode, List<UIMessagePart>, Uuid?) -> Boolean,
+    onLongSendClick: suspend (PendingUserMessageMode, List<UIMessagePart>, Uuid?) -> Boolean,
     onCompactContext: () -> Unit = {},
 ) {
     val toaster = LocalToaster.current
@@ -187,18 +186,6 @@ internal fun ChatInput(
         }
     }
 
-    fun hideKeyboardAfterSend() {
-        coroutineScope.launch {
-            // Let the sent message, input clear, and bottom-follow layout commit
-            // before IME starts its own inset animation. Starting both in the
-            // same frame makes the keyboard close look low-FPS on real devices.
-            delay(PostSendKeyboardHideDelayMillis)
-            if (!state.isEmpty() || state.isEditing() || state.hasUnresolvedAttachmentImports()) return@launch
-            focusManager.clearFocus(force = true)
-            keyboardController?.hide()
-        }
-    }
-
     fun showUnresolvedAttachmentImport(): Boolean {
         val unresolved = state.attachmentImports.firstOrNull { it.status != ChatInputAttachmentImportStatus.READY }
             ?: return false
@@ -211,14 +198,14 @@ internal fun ChatInput(
         return true
     }
 
-    fun prepareSend(onSubmit: (List<UIMessagePart>, Uuid?) -> Boolean) {
+    fun prepareSend(onSubmit: suspend (List<UIMessagePart>, Uuid?) -> Boolean) {
         ChatSendTransitionTracker.start(
             conversationId = conversation.id.toString(),
             preSendLatestMessageId = conversation.currentMessages.lastOrNull()?.id?.toString(),
         )
         // Capture the clicked draft before this callback returns, then allow validation to suspend.
         coroutineScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            val accepted = submissionOwner.submit(
+            submissionOwner.submit(
                 conversationId = conversation.id.toString(),
                 validate = { parts ->
                     val blockingIssue = withContext(Dispatchers.IO) {
@@ -236,7 +223,6 @@ internal fun ChatInput(
                 },
                 send = onSubmit,
             )
-            if (accepted) hideKeyboardAfterSend()
         }
     }
 
@@ -549,6 +535,7 @@ internal fun ChatInput(
                     )
                     Box(
                         modifier = Modifier
+                            .testTag("chat-composer-send")
                             .combinedClickable(
                                 interactionSource = sendInteraction,
                                 indication = null,

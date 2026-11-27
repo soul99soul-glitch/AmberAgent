@@ -316,7 +316,7 @@ class AgentSoulSyncAndToolsTest {
                 clientProvider = { client },
                 timelineSink = CloudDialogueTimelineSink.NoOp,
                 persistState = {},
-                onSoulRevision = { rev -> syncCoordinator.onRemoteSoulRevision(rev) },
+                onSoulRevision = { rev, source -> syncCoordinator.onRemoteSoulRevision(rev, source) },
             )
             dialogueCoordinator.restore(
                 enabled = true,

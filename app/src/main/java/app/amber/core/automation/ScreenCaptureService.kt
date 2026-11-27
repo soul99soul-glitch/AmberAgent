@@ -199,9 +199,13 @@ class ScreenCaptureService : Service() {
             MAX_READER_IMAGES,
         )
         val projectionManager = getSystemService(MediaProjectionManager::class.java)
-        val projection = requireNotNull(projectionManager.getMediaProjection(resultCode, resultData)) {
+        val projection = try {
+            requireNotNull(projectionManager.getMediaProjection(resultCode, resultData)) {
+                "MediaProjection permission result did not create a projection"
+            }
+        } catch (error: Throwable) {
             imageReader.close()
-            "MediaProjection permission result did not create a projection"
+            throw error
         }
         val projectionCallback = object : MediaProjection.Callback() {
             override fun onStop() {
@@ -212,8 +216,8 @@ class ScreenCaptureService : Service() {
                 }
             }
         }
-        projection.registerCallback(projectionCallback, captureHandler)
         val virtualDisplay = runCatching {
+            projection.registerCallback(projectionCallback, captureHandler)
             requireNotNull(
                 projection.createVirtualDisplay(
                     "AmberAgentScreenCapture",

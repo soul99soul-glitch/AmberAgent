@@ -15,6 +15,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.runBlocking
 import kotlin.uuid.Uuid
 
 @RunWith(RobolectricTestRunner::class)
@@ -81,7 +83,7 @@ class ChatPageInputActionsTest {
     }
 
     @Test
-    fun deepReadModelBypassAppliesToNewMessagesAndNotEditRegeneration() {
+    fun deepReadModelBypassAppliesToNewMessagesAndNotEditRegeneration() = runBlocking {
         val input = ChatInputState().apply { bindToConversation("conversation-a") }
         val errors = mutableListOf<Int>()
         var sends = 0
@@ -92,11 +94,11 @@ class ChatPageInputActionsTest {
             configurationIssue = ChatConfigurationIssue.MissingModel,
             generating = false,
             showError = { errors += it },
-            sendMessage = { _, answer, mode ->
+            sendMessage = { _, answer, mode, _ ->
                 assertTrue(answer)
                 assertEquals(PendingUserMessageMode.FOLLOWUP, mode)
                 sends++
-                true
+                CompletableDeferred(true)
             },
             editMessage = { _, _, _ -> edits++; true },
         )
@@ -119,7 +121,7 @@ class ChatPageInputActionsTest {
         configurationIssue = ChatConfigurationIssue.MissingModel,
         generating = false,
         showError = { errors += it },
-        sendMessage = { _, _, _ -> error("Edit confirmation must not submit a new message") },
+        sendMessage = { _, _, _, _ -> error("Edit confirmation must not submit a new message") },
         editMessage = edit,
     )
 }

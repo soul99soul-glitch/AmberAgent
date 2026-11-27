@@ -210,7 +210,7 @@ internal fun HomeHeader(
                     .height(44.dp)
                     .then(
                         if (!searchExpanded) {
-                            Modifier.clickable(
+                            Modifier.testTag("home-header-search").clickable(
                                 interactionSource = searchInteraction,
                                 indication = null,
                                 onClick = onOpenSearch,

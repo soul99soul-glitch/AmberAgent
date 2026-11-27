@@ -3,8 +3,11 @@ package app.amber.agent
 import android.content.Intent
 import android.net.Uri
 import androidx.navigation3.runtime.NavKey
+import app.amber.core.automation.display.VirtualDisplayRunRegistry
 import app.amber.core.automation.display.VirtualDisplayRunNotifier
 import app.amber.feature.board.hotlist.deepread.DeepReadNotifier
+import app.amber.feature.board.worker.BoardNotifier
+import app.amber.feature.macgateway.ProactiveNotificationPresenter
 import app.amber.feature.macgateway.ProactiveContract
 import app.amber.feature.macgateway.ProactiveDeepLinkInbox
 import app.amber.feature.runtime.RunTerminal
@@ -44,7 +47,8 @@ internal fun consumeProactiveDeepLink(
     if (alreadyConsumed || intent == null) return null
     val signalId = proactiveDeepLinkSignalIdFrom(intent) ?: return null
     intent.data = null
-    inbox.submit(signalId)
+    inbox.submit(signalId, intent.getStringExtra(ProactiveNotificationPresenter.EXTRA_GATEWAY_ID),
+        intent.getStringExtra(ProactiveNotificationPresenter.EXTRA_DEVICE_ID))
     return signalId
 }
 
@@ -55,22 +59,26 @@ internal fun applyProactiveDeepLinkToBackStack(backStack: MutableList<NavKey>) {
 }
 
 internal fun phoneUseLiveScreenFromIntent(intent: Intent?): Screen.PhoneUseLive? {
-    val runId = intent?.getStringExtra(VirtualDisplayRunNotifier.EXTRA_RUN_ID)
-        ?.trim()
-        ?.takeIf { it.isNotEmpty() }
-        ?: return null
-    return Screen.PhoneUseLive(runId = runId)
+    if (intent?.action != VirtualDisplayRunNotifier.ACTION_VIEW_VIRTUAL_RUN) return null
+    val run = VirtualDisplayRunRegistry.forIntent(intent) ?: return null
+    return Screen.PhoneUseLive(runId = run.runId)
 }
 
 internal fun openPersonalAgentFromIntent(intent: Intent?): Boolean =
     intent?.getBooleanExtra(EXTRA_OPEN_PERSONAL_AGENT, false) == true
 
-internal fun standaloneStartScreen(intent: Intent, surface: String = StandaloneSurfaces.current): Screen? = when (surface) {
+internal fun standaloneStartScreen(
+    intent: Intent,
+    surface: String = StandaloneSurfaces.current,
+    fallbackToHome: Boolean = true,
+): Screen? = when (surface) {
     StandaloneSurfaces.NOVEL ->
         app.amber.feature.novel.workspace.NovelWorkspaceNotificationRoute.screenFrom(intent)
-            ?: Screen.NovelProjects
+            ?: Screen.NovelProjects.takeIf { fallbackToHome }
     StandaloneSurfaces.DEEP_READ ->
-        deepReadScreenFromIntent(intent) ?: Screen.TodayBoard
+        deepReadScreenFromIntent(intent) ?: Screen.TodayBoard.takeIf {
+            fallbackToHome || intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)
+        }
     else -> null
 }
 

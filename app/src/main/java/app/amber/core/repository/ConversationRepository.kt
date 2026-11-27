@@ -268,17 +268,17 @@ class ConversationRepository(
         }
     }
 
-    suspend fun insertConversation(conversation: Conversation) {
+    suspend fun insertConversation(conversation: Conversation): Boolean =
         database.withTransaction {
             val inserted = conversationDAO.insert(
                 conversationToConversationEntity(conversation)
             )
-            if (inserted == -1L) return@withTransaction
+            if (inserted == -1L) return@withTransaction false
             saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
             // FTS 与会话写入同一事务，避免"已入库但搜不到"的崩溃窗口
             messageFtsManager.indexConversationInTransaction(conversation)
+            true
         }
-    }
 
     suspend fun updateConversation(conversation: Conversation) {
         database.withTransaction {
@@ -355,11 +355,8 @@ class ConversationRepository(
         val expectedRestoreEpoch = captureRestoreEpoch()
         // Load attachment references before entering the short durable
         // transaction; the captured epoch is checked again before deletion.
-        val fullConversation = if (conversation.messageNodes.isEmpty()) {
-            getConversationById(conversation.id) ?: conversation
-        } else {
-            conversation
-        }
+        // A nonempty ChatPage projection may still be only the last page.
+        val fullConversation = getConversationById(conversation.id) ?: conversation
         // The captured epoch is carried to cleanup so a delayed purge cannot
         // unlink files imported by a later restore.
         withRestoreWrite(expectedRestoreEpoch) {

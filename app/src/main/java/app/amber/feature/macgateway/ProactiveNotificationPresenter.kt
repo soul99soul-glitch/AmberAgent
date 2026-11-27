@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import android.content.Intent
 import android.net.Uri
 import androidx.core.app.NotificationCompat
@@ -20,30 +22,21 @@ const val ACTION_PROACTIVE_SNOOZE = "app.amber.action.PROACTIVE_SNOOZE"
 const val ACTION_PROACTIVE_MUTE = "app.amber.action.PROACTIVE_MUTE"
 
 /**
- * Lightweight process-scoped visibility tracker updated by [RouteActivity] so foreground
- * cloud main-stage pushes trigger an immediate poll without showing duplicate banners.
+ * Each resumed cloud Personal Agent page registers its displayed pairing. One visible
+ * activity cannot be cleared by another activity pausing in multi-window mode.
  */
 object ProactiveForegroundStageTracker {
-    @Volatile
-    private var activityForeground: Boolean = false
+    private val displayedCloudHosts = java.util.concurrent.ConcurrentHashMap<Any, MacGatewayConnection>()
 
-    @Volatile
-    private var personalAgentTop: Boolean = false
-
-    fun onActivityForegroundChanged(foreground: Boolean) {
-        activityForeground = foreground
+    fun enter(owner: Any, connection: MacGatewayConnection) {
+        displayedCloudHosts[owner] = connection
     }
-
-    fun onTopRouteChanged(isPersonalAgent: Boolean) {
-        personalAgentTop = isPersonalAgent
+    fun leave(owner: Any) {
+        displayedCloudHosts.remove(owner)
     }
+    fun isVisible(connection: MacGatewayConnection?): Boolean =
+        connection != null && displayedCloudHosts.containsValue(connection)
 
-    fun isPersonalAgentForeground(): Boolean = activityForeground && personalAgentTop
-
-    internal fun resetForTest() {
-        activityForeground = false
-        personalAgentTop = false
-    }
 }
 
 sealed interface ProactivePushPresentationOutcome {
@@ -99,8 +92,8 @@ class ProactiveNotificationPresenter internal constructor(
     private val currentConnection: () -> MacGatewayConnection?,
     private val isCloudMainStageVisible: () -> Boolean,
     private val requestImmediatePoll: (String) -> Unit,
-    private val findLocalCard: suspend (gatewayId: String, signalId: String) -> ProactiveCard?,
-    private val markCardNotified: suspend (gatewayId: String, signalId: String, notifiedAt: Long) -> Unit,
+    private val alreadyHandled: suspend (gatewayId: String, deviceId: String, signalId: String) -> Boolean,
+    private val markCardNotified: suspend (gatewayId: String, deviceId: String, signalId: String, notifiedAt: Long) -> Unit,
     private val hasNotificationPermission: () -> Boolean = { NotificationUtil.hasNotificationPermission(context) },
     private val notifyPlatform: (tag: String, id: Int, notification: Notification) -> Unit = { tag, id, notification ->
         notifyWithManager(context, tag, id, notification)
@@ -113,45 +106,43 @@ class ProactiveNotificationPresenter internal constructor(
     constructor(
         context: Context,
         gatewayRepository: MacGatewayRepository,
-        proactiveRepository: CloudProactiveRepository,
+        receipts: ProactiveDeliveryReceipts,
     ) : this(
         context = context.applicationContext,
         awaitGatewayReady = { gatewayRepository.awaitReady() },
         currentConnection = { gatewayRepository.state.value.connection },
         isCloudMainStageVisible = {
-            ProactiveForegroundStageTracker.isPersonalAgentForeground() &&
-                gatewayRepository.state.value.isCloudDialogueActive
+            val state = gatewayRepository.state.value
+            state.isCloudDialogueActive && ProactiveForegroundStageTracker.isVisible(state.connection)
         },
-        requestImmediatePoll = { reason -> gatewayRepository.requestImmediatePoll(reason) },
-        findLocalCard = { gatewayId, signalId ->
-            proactiveRepository.findLocalCard(gatewayId = gatewayId, signalId = signalId)
-        },
-        markCardNotified = { gatewayId, signalId, notifiedAt ->
-            proactiveRepository.markNotified(
-                gatewayId = gatewayId,
-                signalId = signalId,
-                notifiedAt = notifiedAt,
-            )
-        },
+        requestImmediatePoll = gatewayRepository::requestImmediatePoll,
+        alreadyHandled = receipts::handled,
+        markCardNotified = receipts::notified,
     )
 
-    suspend fun handleIncomingDataPush(data: Map<String, String>): ProactivePushPresentationOutcome {
+    private val incomingMutex = Mutex()
+
+    suspend fun handleIncomingDataPush(data: Map<String, String>): ProactivePushPresentationOutcome =
+        incomingMutex.withLock { present(data) }
+
+    private suspend fun present(data: Map<String, String>): ProactivePushPresentationOutcome {
         awaitGatewayReady()
         val message = ProactivePushMessage.parseForPairing(data, currentConnection())
             ?: return ProactivePushPresentationOutcome.DroppedInvalidOrMismatched
 
-        if (isCloudMainStageVisible()) {
-            requestImmediatePoll(POLL_REASON_PUSH)
-            return ProactivePushPresentationOutcome.SuppressedForegroundPolled
-        }
-
         if (message.type == ProactivePushType.PROACTIVE) {
             val signalId = message.signalId
                 ?: return ProactivePushPresentationOutcome.DroppedInvalidOrMismatched
-            val existing = findLocalCard(message.gatewayId, signalId)
-            if (existing != null && (existing.notifiedAt != null || !existing.feedbackState.isNullOrBlank())) {
+            if (alreadyHandled(message.gatewayId, message.deviceId, signalId)) {
+                requestImmediatePoll(POLL_REASON_PUSH)
                 return ProactivePushPresentationOutcome.SuppressedAlreadyHandled
             }
+        }
+
+        if (!message.matchesPairing(currentConnection())) return ProactivePushPresentationOutcome.DroppedInvalidOrMismatched
+        if (isCloudMainStageVisible()) {
+            requestImmediatePoll(POLL_REASON_PUSH)
+            return ProactivePushPresentationOutcome.SuppressedForegroundPolled
         }
 
         if (!hasNotificationPermission()) {
@@ -166,7 +157,7 @@ class ProactiveNotificationPresenter internal constructor(
 
         if (message.type == ProactivePushType.PROACTIVE) {
             val signalId = message.signalId!!
-            runCatching { markCardNotified(message.gatewayId, signalId, nowMs()) }
+            markCardNotified(message.gatewayId, message.deviceId, signalId, nowMs())
             requestImmediatePoll(POLL_REASON_PUSH)
         } else if (message.type == ProactivePushType.APPROVAL) {
             requestImmediatePoll(POLL_REASON_PUSH)
@@ -179,17 +170,27 @@ class ProactiveNotificationPresenter internal constructor(
         )
     }
 
+    private fun Intent.forPairing(message: ProactivePushMessage, operation: String): Intent = apply {
+        addCategory("app.amber.proactive.${Uri.encode(message.gatewayId)}/${Uri.encode(message.deviceId)}/$operation")
+        putExtra(EXTRA_GATEWAY_ID, message.gatewayId)
+        putExtra(EXTRA_DEVICE_ID, message.deviceId)
+    }
+
     fun buildNotification(message: ProactivePushMessage): BuiltProactiveNotification {
         val channelId = channelIdFor(message.interruptionLevel)
         val priority = priorityFor(message.interruptionLevel)
         val notificationId = PROACTIVE_NOTIFICATION_ID
-        val tag = message.tag
+        val tag = if (message.type == ProactivePushType.PROACTIVE) {
+            proactiveNotificationTag(message.gatewayId, message.deviceId, requireNotNull(message.signalId))
+        } else {
+            "${Uri.encode(message.gatewayId)}/${Uri.encode(message.deviceId)}/${message.tag}"
+        }
 
         val actions = mutableListOf<BuiltProactiveNotification.ActionDescriptor>()
         val contentIntent: PendingIntent = when (message.type) {
             ProactivePushType.PROACTIVE -> {
                 val signalId = requireNotNull(message.signalId) { "proactive push requires signalId" }
-                val openIntent = buildDeepLinkActivityIntent(context, signalId)
+                val openIntent = buildDeepLinkActivityIntent(context, signalId).forPairing(message, "open")
                 val openPi = PendingIntent.getActivity(
                     context,
                     actionRequestCode(message.gatewayId, signalId, "open"),
@@ -197,7 +198,7 @@ class ProactiveNotificationPresenter internal constructor(
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 )
 
-                val actIntent = buildDeepLinkActivityIntent(context, signalId)
+                val actIntent = buildDeepLinkActivityIntent(context, signalId).forPairing(message, "act")
                 val actRequestCode = actionRequestCode(message.gatewayId, signalId, "act")
                 val actPi = PendingIntent.getActivity(
                     context,
@@ -265,7 +266,7 @@ class ProactiveNotificationPresenter internal constructor(
 
             ProactivePushType.APPROVAL -> {
                 // Safety invariant: approval pushes NEVER expose a notification-shade approve button.
-                val reviewIntent = buildOpenPersonalAgentIntent(context, tag)
+                val reviewIntent = buildOpenPersonalAgentIntent(context, tag).forPairing(message, "review")
                 val reviewRequestCode = actionRequestCode(message.gatewayId, tag, "open_approval")
                 val reviewPi = PendingIntent.getActivity(
                     context,
@@ -284,7 +285,7 @@ class ProactiveNotificationPresenter internal constructor(
             }
 
             ProactivePushType.GENERIC -> {
-                val openIntent = buildOpenPersonalAgentIntent(context, tag)
+                val openIntent = buildOpenPersonalAgentIntent(context, tag).forPairing(message, "open")
                 PendingIntent.getActivity(
                     context,
                     actionRequestCode(message.gatewayId, tag, "generic"),
@@ -297,6 +298,7 @@ class ProactiveNotificationPresenter internal constructor(
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.amberagent_live_status_icon)
             .setContentTitle(message.title)
+            .setOnlyAlertOnce(true)
             .setContentText(message.body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message.body))
             .setContentIntent(contentIntent)
@@ -343,23 +345,15 @@ class ProactiveNotificationPresenter internal constructor(
         }
         val title = context.getString(R.string.proactive_feedback_incomplete_title)
         val body = context.getString(bodyRes)
-        val contentIntent = if (ProactiveContract.isValidSignalId(signalId)) {
-            val intent = buildDeepLinkActivityIntent(context, signalId)
-            PendingIntent.getActivity(
-                context,
-                actionRequestCode("local", signalId, "incomplete:${action.wire}"),
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-        } else {
-            val intent = buildOpenPersonalAgentIntent(context, "incomplete:${action.wire}")
-            PendingIntent.getActivity(
-                context,
-                actionRequestCode("local", "fallback", "incomplete:${action.wire}"),
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-        }
+        // Incomplete work can belong to a forgotten pairing. Open the stage without resolving
+        // this signal on the currently paired gateway.
+        val intent = buildOpenPersonalAgentIntent(context, "incomplete:$signalId:${action.wire}")
+        val contentIntent = PendingIntent.getActivity(
+            context,
+            actionRequestCode("local", signalId, "incomplete:${action.wire}"),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val notification = NotificationCompat.Builder(context, PROACTIVE_ACTIVE_CHANNEL_ID)
             .setSmallIcon(R.drawable.amberagent_live_status_icon)
             .setContentTitle(title)
@@ -377,12 +371,8 @@ class ProactiveNotificationPresenter internal constructor(
         )
     }
 
-    fun cancelProactiveNotification(
-        signalId: String,
-        tag: String = "proactive:$signalId",
-        notificationId: Int = PROACTIVE_NOTIFICATION_ID,
-    ) {
-        cancelPlatform(tag, notificationId)
+    fun cancelProactiveNotification(gatewayId: String, deviceId: String, signalId: String) {
+        cancelPlatform(proactiveNotificationTag(gatewayId, deviceId, signalId), PROACTIVE_NOTIFICATION_ID)
     }
 
     companion object {
@@ -411,6 +401,9 @@ class ProactiveNotificationPresenter internal constructor(
 
         fun actionRequestCode(gatewayId: String, signalId: String, action: String): Int =
             "$gatewayId|$signalId|$action".hashCode()
+
+        fun proactiveNotificationTag(gatewayId: String, deviceId: String, signalId: String): String =
+            "${Uri.encode(gatewayId)}/${Uri.encode(deviceId)}/proactive:$signalId"
 
         fun incompleteNotificationTag(signalId: String, action: ProactiveFeedbackAction): String =
             "proactive-incomplete:$signalId:${action.wire}"
@@ -449,7 +442,7 @@ class ProactiveNotificationPresenter internal constructor(
             // Distinct data URI per (gatewayId, signalId, action) so Android PendingIntent
             // equivalence (which ignores extras) never aliases different cards or gateways.
             data = Uri.parse(
-                "amber-proactive-action://${Uri.encode(gatewayId)}/${Uri.encode(signalId)}/${Uri.encode(action)}",
+                "amber-proactive-action://${Uri.encode(gatewayId)}/${Uri.encode(deviceId)}/${Uri.encode(signalId)}/${Uri.encode(action)}",
             )
             putExtra(EXTRA_GATEWAY_ID, gatewayId)
             putExtra(EXTRA_DEVICE_ID, deviceId)
@@ -466,9 +459,7 @@ class ProactiveNotificationPresenter internal constructor(
             id: Int,
             notification: Notification,
         ) {
-            runCatching {
-                NotificationManagerCompat.from(context).notify(tag, id, notification)
-            }
+            NotificationManagerCompat.from(context).notify(tag, id, notification)
         }
     }
 }

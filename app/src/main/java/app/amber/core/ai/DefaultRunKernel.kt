@@ -25,6 +25,7 @@ import app.amber.core.ai.transformers.onGenerationFinish
 import app.amber.core.ai.transformers.transforms
 import app.amber.core.ai.transformers.visualTransforms
 import app.amber.core.ai.transformers.visualTransformsStreamingTail
+import app.amber.feature.runtime.requiresIndividualScreenApproval
 import app.amber.feature.runtime.AgentLoopBudgetPrompt
 import app.amber.feature.runtime.AgentToolDispatcher
 import app.amber.feature.runtime.CapabilityPermissionContext
@@ -774,7 +775,9 @@ class DefaultRunKernel(
                     null
                 },
                 capabilityPermissions = capabilityState,
-                approvalHistory = if (capabilityState != null) capabilityPermissionStore else null,
+                approvalHistoryFor = { tool ->
+                    capabilityPermissionStore.takeIf { capabilityState != null || tool.requiresIndividualScreenApproval() }
+                },
                 permissionContext = permissionContext,
                 executionPolicy = executionPolicy,
                 shouldAbortRemaining = hasPendingSteer,

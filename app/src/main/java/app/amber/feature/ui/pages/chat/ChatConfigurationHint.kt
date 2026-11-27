@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -77,7 +78,7 @@ internal fun rememberChatConfigurationIssue(model: Model?, providers: List<Provi
 internal fun ChatConfigurationHint(issue: ChatConfigurationIssue, onConfigure: () -> Unit) {
     val colors = workspaceColors()
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp),
+        modifier = Modifier.fillMaxWidth().testTag("chat-configuration-hint").padding(start = 18.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

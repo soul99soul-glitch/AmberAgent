@@ -35,6 +35,7 @@ interface ConnectedDisplayBridge {
     fun capabilities(): DisplayCapabilities
     fun createDisplay(
         runId: String,
+        authorizedPackageName: String,
         generation: Long,
         width: Int,
         height: Int,
@@ -43,8 +44,8 @@ interface ConnectedDisplayBridge {
     ): Int
 
     fun launchOnDisplay(generation: Long, displayId: Int, packageName: String): Int
-    fun injectMotion(generation: Long, displayId: Int, event: MotionEvent): Boolean
-    fun injectKey(generation: Long, displayId: Int, event: KeyEvent): Boolean
+    fun injectMotion(generation: Long, displayId: Int, observedPackageName: String, event: MotionEvent): Boolean
+    fun injectKey(generation: Long, displayId: Int, observedPackageName: String, event: KeyEvent): Boolean
     fun release(generation: Long, reason: String)
     fun disconnect()
 }
@@ -146,7 +147,7 @@ class ShizukuDisplayBridge(
             val deathRecipient = IBinder.DeathRecipient {
                 notifyDisconnected("user_service_binder_died")
             }
-            runCatching { binder.linkToDeath(deathRecipient, 0) }
+            binder.linkToDeath(deathRecipient, 0)
             Result.success(
                 BoundShizukuDisplayBridge(
                     args = args,
@@ -202,32 +203,27 @@ class ShizukuDisplayBridge(
 
         override fun createDisplay(
             runId: String,
+            authorizedPackageName: String,
             generation: Long,
             width: Int,
             height: Int,
             dpi: Int,
             surface: Surface,
         ): Int = runCatching {
-            service.createDisplay(runId, generation, width, height, dpi, surface)
+            service.createDisplay(runId, authorizedPackageName, generation, width, height, dpi, surface)
         }.getOrElse {
             Log.w(TAG, "createDisplay IPC failed", it)
             AmberDisplayUserService.ERR_CREATE_FAILED
         }
 
-        override fun launchOnDisplay(generation: Long, displayId: Int, packageName: String): Int = runCatching {
+        override fun launchOnDisplay(generation: Long, displayId: Int, packageName: String): Int =
             service.launchOnDisplay(generation, displayId, packageName)
-        }.getOrElse {
-            Log.w(TAG, "launchOnDisplay IPC failed", it)
-            AmberDisplayUserService.ERR_LAUNCH_FAILED
-        }
 
-        override fun injectMotion(generation: Long, displayId: Int, event: MotionEvent): Boolean = runCatching {
-            service.injectMotion(generation, displayId, event)
-        }.getOrDefault(false)
+        override fun injectMotion(generation: Long, displayId: Int, observedPackageName: String, event: MotionEvent): Boolean =
+            service.injectMotion(generation, displayId, observedPackageName, event)
 
-        override fun injectKey(generation: Long, displayId: Int, event: KeyEvent): Boolean = runCatching {
-            service.injectKey(generation, displayId, event)
-        }.getOrDefault(false)
+        override fun injectKey(generation: Long, displayId: Int, observedPackageName: String, event: KeyEvent): Boolean =
+            service.injectKey(generation, displayId, observedPackageName, event)
 
         override fun release(generation: Long, reason: String) {
             runCatching { service.release(generation, reason) }

@@ -23,4 +23,5 @@
     <string name="setting_display_launch_start_mode_last_session_desc">直接回到上次開啟的對話</string>
     <string name="setting_display_launch_start_mode_new_chat">新對話</string>
     <string name="setting_display_launch_start_mode_new_chat_desc">每次啟動都新建一段對話</string>
+    <string name="personal_agent_host_cloud_unsupported">此閘道不支援雲端對話。</string>
 </resources>

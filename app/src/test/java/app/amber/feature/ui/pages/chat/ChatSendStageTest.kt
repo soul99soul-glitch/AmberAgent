@@ -35,8 +35,13 @@ import app.amber.core.service.ConversationTimelineLoadState
 import app.amber.core.service.PendingUserMessage
 import app.amber.core.service.PendingUserMessageMode
 import app.amber.core.settings.Settings
+import app.amber.feature.macgateway.ProactiveCard
+import app.amber.feature.macgateway.ProactiveEventMeta
 import app.amber.feature.ui.components.ai.ChatInputSubmissionOwner
 import app.amber.feature.ui.hooks.ChatInputState
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -69,7 +74,7 @@ class ChatSendStageTest {
         assertFalse(stage.isActive)
 
         // Accepted normal submit arms the stage, but does not activate until user node appears.
-        val intent = SendStageIntent(host = "local", conversationId = "conv-1", sendRevision = 1L)
+        val intent = SendStageIntent(host = "local", conversationId = "conv-1", sendRevision = 1L, messageId = Uuid.random())
         stage.onSubmitAccepted(intent)
         assertFalse(stage.isActive)
         assertTrue(stage.isPending)
@@ -91,13 +96,14 @@ class ChatSendStageTest {
     }
 
     @Test
-    fun inputActionsArmStageAndHideKeyboardOnlyForAcceptedNormalSend() {
+    fun onlyAcceptedNormalSendArmsStageForSubmittedMessageId() = runBlocking {
         val input = ChatInputState().apply {
             bindToConversation("conv-1")
             setMessageText("hello")
         }
         val stage = ChatSendStageState()
         var hideCount = 0
+        var submittedMessageId = Uuid.random()
         var rev = 0L
         var followupActive = false
         var sendAccepted = true
@@ -119,7 +125,10 @@ class ChatSendStageTest {
             nextSendRevision = { ++rev },
             hideKeyboard = { hideCount++ },
             showError = { errors += it },
-            sendMessage = { _, _, _ -> sendAccepted },
+            sendMessage = { _, _, _, messageId ->
+                submittedMessageId = messageId
+                if (sendAccepted) CompletableDeferred(true) else null
+            },
             editMessage = { _, _, _ -> true },
         )
 
@@ -131,54 +140,96 @@ class ChatSendStageTest {
                 .send(PendingUserMessageMode.FOLLOWUP, parts, null),
         )
         assertFalse(stage.isPending)
-        assertEquals(0, hideCount)
         assertEquals("hello", input.textContent.text.toString())
 
         // 2. Rejected send -> no stage, no keyboard hide.
         sendAccepted = false
         assertFalse(makeActions().send(PendingUserMessageMode.FOLLOWUP, parts, null))
         assertFalse(stage.isPending)
-        assertEquals(0, hideCount)
         sendAccepted = true
 
         // 3. Edit message -> must never trigger stage or hide via send stage.
         assertTrue(makeActions().send(PendingUserMessageMode.FOLLOWUP, parts, Uuid.random()))
         assertFalse(stage.isPending)
-        assertEquals(0, hideCount)
 
         // 4. STEER mode -> must never trigger stage.
         assertTrue(makeActions().send(PendingUserMessageMode.STEER, parts, null))
         assertFalse(stage.isPending)
-        assertEquals(0, hideCount)
 
         // 5. Interjection while generating -> must never trigger stage.
         assertTrue(makeActions(generating = true).send(PendingUserMessageMode.FOLLOWUP, parts, null))
         assertFalse(stage.isPending)
-        assertEquals(0, hideCount)
 
         // 6. Cloud targeted followup (interjection to an active cloud task) -> must never trigger stage.
         followupActive = true
         assertTrue(makeActions(cloudDialogueMode = true).send(PendingUserMessageMode.FOLLOWUP, parts, null))
         assertFalse(stage.isPending)
-        assertEquals(0, hideCount)
         followupActive = false
 
         // 7. longSend -> must never trigger stage.
         assertTrue(makeActions().longSend(PendingUserMessageMode.FOLLOWUP, parts, null))
         assertFalse(stage.isPending)
+
+        assertTrue(makeActions().send(
+            PendingUserMessageMode.FOLLOWUP,
+            listOf(UIMessagePart.Text("/deepread article")),
+            null,
+        ))
+        assertFalse("route commands do not arm a future chat message", stage.isPending)
         assertEquals(0, hideCount)
 
         // 8. Normal local send accepted -> arms stage with host="local" and hides keyboard.
         assertTrue(makeActions().send(PendingUserMessageMode.FOLLOWUP, parts, null))
         assertTrue(stage.isPending)
-        assertEquals(SendStageIntent("local", "conv-1", 1L), stage.pendingIntent)
+        assertEquals(SendStageIntent("local", "conv-1", 1L, submittedMessageId), stage.pendingIntent)
         assertEquals(1, hideCount)
 
         // 9. Normal cloud send accepted -> arms stage with host="cloud" and increments sendRevision.
         assertTrue(makeActions(cloudDialogueMode = true).send(PendingUserMessageMode.FOLLOWUP, parts, null))
         assertTrue(stage.isPending)
-        assertEquals(SendStageIntent("cloud", "conv-1", 2L), stage.pendingIntent)
+        assertEquals(SendStageIntent("cloud", "conv-1", 2L, submittedMessageId), stage.pendingIntent)
         assertEquals(2, hideCount)
+    }
+
+    @Test
+    fun cloudDraftIsConsumedOnlyAfterLocalEchoAndNewTypingSurvives() = runBlocking {
+        val input = ChatInputState().apply {
+            bindToConversation("conv")
+            setMessageText("original")
+        }
+        val owner = ChatInputSubmissionOwner(input)
+        val stage = ChatSendStageState()
+        var echo = CompletableDeferred<Boolean>()
+        var hidden = 0
+        var calls = 0
+        val actions = ChatPageInputActions(
+            input = input, submission = owner, configurationIssue = null, generating = false,
+            cloudDialogueMode = true, conversationId = "conv", sendStage = stage,
+            hideKeyboard = { hidden++ }, showError = {}, editMessage = { _, _, _ -> false },
+            sendMessage = { _, _, _, _ -> calls++; echo },
+        )
+        suspend fun submit() = owner.submit("conv", validate = { true }) { parts, edit ->
+            actions.send(PendingUserMessageMode.FOLLOWUP, parts, edit)
+        }
+
+        val rejected = async(start = CoroutineStart.UNDISPATCHED) { submit() }
+        assertFalse(submit())
+        assertEquals(1, calls)
+        assertEquals("original", input.textContent.text.toString())
+        assertFalse(stage.isPending)
+        echo.complete(false)
+        assertFalse(rejected.await())
+        assertEquals("original", input.textContent.text.toString())
+        assertEquals(0, hidden)
+
+        echo = CompletableDeferred()
+        val accepted = async(start = CoroutineStart.UNDISPATCHED) { submit() }
+        input.setMessageText("new draft")
+        echo.complete(true)
+        assertTrue(accepted.await())
+        assertEquals("new draft", input.textContent.text.toString())
+        assertEquals(0, hidden)
+        assertTrue(stage.isPending)
     }
 
     @Test
@@ -188,7 +239,7 @@ class ChatSendStageTest {
         assertEquals(0, computeSendStageSpacerPx(viewportHeightPx = 800, turnHeightPx = 1100))
 
         val stage = ChatSendStageState()
-        stage.onSubmitAccepted(SendStageIntent("local", "conv-1", 1L))
+        stage.onSubmitAccepted(SendStageIntent("local", "conv-1", 1L, Uuid.random()))
         stage.onUserNodeAppeared("u1")
 
         // Keyboard open: H = 420, T = 160 -> spacer = 260.
@@ -256,7 +307,7 @@ class ChatSendStageTest {
     @Test
     fun tailGrowthHoldDoesNotWriteScrollStateWhileSendStageIsActive() {
         val stage = ChatSendStageState().apply {
-            onSubmitAccepted(SendStageIntent("local", "conv-1", 1L))
+            onSubmitAccepted(SendStageIntent("local", "conv-1", 1L, Uuid.random()))
             onUserNodeAppeared("msg-1")
         }
         var tailHeight by mutableIntStateOf(120)
@@ -301,6 +352,7 @@ class ChatSendStageTest {
         var pending by mutableStateOf(
             listOf(PendingUserMessage("queued-1", listOf(UIMessagePart.Text("queued")))),
         )
+        var cards by mutableStateOf(emptyList<ProactiveCard>())
         val stage = ChatSendStageState()
         lateinit var listState: LazyListState
 
@@ -308,8 +360,16 @@ class ChatSendStageTest {
             listState = rememberLazyListState()
             val timelineConversation = conversation
             val timelinePending = pending
-            val plan = rememberChatTimelinePlan(
-                timelineConversation, emptyList(), true, false, false, false, timelinePending.size,
+            val plan = buildChatTimelinePlan(
+                conversation = timelineConversation,
+                assistant = emptyList(),
+                showAssistantBubble = true,
+                timelineLoading = false,
+                hasHistoryLoadingItem = false,
+                pendingMessageCount = timelinePending.size,
+                postSendState = buildPostSendTimelineState(timelineConversation, false),
+                virtualItemCache = remember { ChatVirtualItemCache() },
+                proactiveCards = cards,
             )
             ChatTimelineScrollEffects(
                 conversation = timelineConversation,
@@ -366,8 +426,28 @@ class ChatSendStageTest {
                     host = "local",
                     conversationId = conversation.id.toString(),
                     sendRevision = 1L,
+                    messageId = sentNode.currentMessage.id,
                 ),
             )
+            cards = listOf(ProactiveCard(
+                gatewayId = "gw", deviceId = "device", eventId = "proactive:s1",
+                signalId = "s1", seq = 1, text = "Reminder",
+                meta = ProactiveEventMeta("s1", "topic", "reminder", "Reminder"),
+                receivedAt = System.currentTimeMillis(),
+            ))
+        }
+        compose.waitForIdle()
+        assertTrue("an incoming proactive card leaves the send pending", stage.isPending)
+        assertTrue(listState.firstVisibleItemIndex > 0)
+
+        compose.runOnIdle {
+            conversation = conversation.copy(messageNodes = conversation.messageNodes + UIMessage.user("unrelated").toMessageNode())
+        }
+        compose.waitForIdle()
+        assertTrue("an unrelated user echo cannot claim the stage", stage.isPending)
+        assertTrue(listState.firstVisibleItemIndex > 0)
+
+        compose.runOnIdle {
             conversation = conversation.copy(messageNodes = conversation.messageNodes + sentNode)
         }
         compose.waitForIdle()
@@ -383,6 +463,26 @@ class ChatSendStageTest {
         }
         compose.waitForIdle()
         assertFalse("user drag must immediately exit send stage", stage.isActive)
+
+        val delayedNode = UIMessage.user("late echo").toMessageNode()
+        compose.runOnIdle {
+            listState.requestScrollToItem(6)
+            stage.onSubmitAccepted(SendStageIntent("cloud", conversation.id.toString(), 2L, delayedNode.currentMessage.id))
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("stage-list").performTouchInput {
+            down(Offset(160f, 180f))
+            moveBy(Offset(0f, 60f))
+            up()
+        }
+        compose.waitForIdle()
+        assertFalse(stage.isPending)
+        compose.runOnIdle {
+            conversation = conversation.copy(messageNodes = conversation.messageNodes + delayedNode)
+        }
+        compose.waitForIdle()
+        assertFalse(stage.isActive)
+        assertTrue("a late echo cannot pull a reader back after dragging", listState.firstVisibleItemIndex > 0)
     }
 
     @Test
@@ -421,7 +521,7 @@ class ChatSendStageTest {
         }
 
         compose.runOnIdle {
-            stage.onSubmitAccepted(SendStageIntent("local", firstConvId.toString(), 1L))
+            stage.onSubmitAccepted(SendStageIntent("local", firstConvId.toString(), 1L, stagedNode.currentMessage.id))
             conversation = conversation.copy(messageNodes = conversation.messageNodes + stagedNode)
         }
         compose.waitForIdle()
@@ -443,7 +543,7 @@ class ChatSendStageTest {
         // Re-arm and activate, then switch conversation -> reset.
         val secondUserNode = UIMessage.user("second").toMessageNode()
         compose.runOnIdle {
-            stage.onSubmitAccepted(SendStageIntent("local", firstConvId.toString(), 2L))
+            stage.onSubmitAccepted(SendStageIntent("local", firstConvId.toString(), 2L, secondUserNode.currentMessage.id))
             conversation = conversation.copy(messageNodes = conversation.messageNodes + secondUserNode)
         }
         compose.waitForIdle()
@@ -520,7 +620,7 @@ class ChatSendStageTest {
 
         // Activate stage: H = 260dp, T = 20 + 40 + 60 = 120dp -> spacer = 140dp.
         compose.runOnIdle {
-            stage.onSubmitAccepted(SendStageIntent("local", "conv-1", 1L))
+            stage.onSubmitAccepted(SendStageIntent("local", "conv-1", 1L, Uuid.random()))
             stage.onUserNodeAppeared(userKey)
         }
         compose.waitForIdle()

@@ -69,6 +69,10 @@ class VirtualDisplayProbeStoreTest {
         val invalidVariants = listOf(
             passingResult().copy(mainScreenInjectedEvents = 1),
             passingResult().copy(targetReceivedEvents = 19),
+            passingResult().copy(targetReceivedEvents = 21),
+            passingResult().copy(mainInputObserved = false),
+            passingResult().copy(disconnectObserved = false),
+            passingResult().copy(targetDestroyed = false),
             passingResult().copy(textReadBackOk = false),
             passingResult().copy(frameMarkerOk = false),
             passingResult().copy(focusStable = false),
@@ -92,6 +96,43 @@ class VirtualDisplayProbeStoreTest {
         assertEquals(VirtualDisplayCompatibility.UNVERIFIED, store.compatibility())
     }
 
+    @Test
+    fun sameBuildLegacyPassWithOnlyOrderlyCloseEvidenceRequiresNewProbe() {
+        val kv = InMemoryProbeKvStore()
+        kv.write(
+            mapOf(
+                "build_fingerprint" to "same-build", "app_version_code" to 396L, "passed" to true,
+                "main_screen_injected_events" to 0, "target_received_events" to 20, "text_read_back_ok" to true,
+                "frame_marker_ok" to true, "focus_stable" to true, "residual_after_disconnect" to 0,
+                "leaked_to_default_on_destroy" to false, "detail" to "ok",
+            ),
+        )
+        val store = VirtualDisplayProbeStore(kv, { "same-build" }, { 396L }, { true })
+        assertEquals(VirtualDisplayCompatibility.UNVERIFIED, store.compatibility())
+        assertNull(store.lastResult())
+    }
+
+    @Test
+    fun staleTargetCallbacksCannotProvideFreshRunEvidence() {
+        val (oldToken, _) = IsolationProbeChannel.resetForNewRun()
+        val (token, _) = IsolationProbeChannel.resetForNewRun()
+        try {
+            IsolationProbeChannel.setExpectedDisplayId(3)
+            IsolationProbeChannel.setInjectionBurstActive(true)
+            IsolationProbeChannel.recordTargetTap(oldToken, 3)
+            IsolationProbeChannel.recordTargetDestroyed(oldToken, 3)
+            assertEquals(0, IsolationProbeChannel.targetTapCount())
+            assertEquals(false, IsolationProbeChannel.targetDestroyed())
+            IsolationProbeChannel.recordTargetTap(token, 3)
+            IsolationProbeChannel.recordTargetDestroyed(token, 3)
+            assertEquals(1, IsolationProbeChannel.targetTapCount())
+            assertEquals(true, IsolationProbeChannel.targetDestroyed())
+        } finally {
+            IsolationProbeChannel.setInjectionBurstActive(false)
+            IsolationProbeChannel.endRun()
+        }
+    }
+
     private fun passingResult() = IsolationProbeResult(
         passed = true,
         mainScreenInjectedEvents = 0,
@@ -102,5 +143,8 @@ class VirtualDisplayProbeStoreTest {
         residualAfterDisconnect = 0,
         leakedToDefaultOnDestroy = false,
         detail = "ok",
+        mainInputObserved = true,
+        disconnectObserved = true,
+        targetDestroyed = true,
     )
 }

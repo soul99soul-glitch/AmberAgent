@@ -38,6 +38,13 @@ class PersonalAgentMainSessionStore private constructor(
         return prefs.getString(cloudMainKey(gatewayId), null)?.takeIf(::isValidUuid)
     }
 
+    fun ownsMainConversation(id: Uuid): Boolean {
+        val value = id.toString()
+        return prefs.all.any { (key, storedId) ->
+            storedId == value && (key == KEY_LOCAL_MAIN_CONVERSATION_ID || key.startsWith(KEY_CLOUD_MAIN_CONVERSATION_PREFIX))
+        }
+    }
+
     private fun getOrCreate(key: String): String {
         val existing = prefs.getString(key, null)?.takeIf(::isValidUuid)
         if (existing != null) return existing

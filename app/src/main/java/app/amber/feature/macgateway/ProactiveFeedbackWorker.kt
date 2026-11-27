@@ -4,8 +4,6 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import app.amber.agent.data.db.dao.ProactiveCardDao
-import app.amber.core.settings.secret.SecretStore
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import org.koin.core.component.KoinComponent
@@ -35,60 +33,38 @@ class ProactiveFeedbackExecutor internal constructor(
     private val awaitGatewayReady: suspend () -> Unit,
     private val currentConnection: () -> MacGatewayConnection?,
     private val currentGeneration: () -> Long,
-    private val readToken: (gatewayId: String) -> String?,
     private val submitFeedback: suspend (
         connection: MacGatewayConnection,
-        token: String,
+        generation: Long,
         signalId: String,
         action: ProactiveFeedbackAction,
         snoozeMinutes: Int?,
         muteHours: Int?,
-    ) -> ProactiveFeedbackResult,
-    private val recordLocalFeedback: suspend (gatewayId: String, signalId: String, feedbackState: String) -> Unit,
-    private val onCompletedCancelNotification: (signalId: String) -> Unit = {},
+    ) -> ProactiveFeedbackResult?,
+    private val recordLocalFeedback: suspend (gatewayId: String, deviceId: String, signalId: String, feedbackState: String) -> Unit,
+    private val onCompletedCancelNotification: (gatewayId: String, deviceId: String, signalId: String) -> Unit = { _, _, _ -> },
     private val onTerminalIncomplete: (signalId: String, action: ProactiveFeedbackAction) -> Unit = { _, _ -> },
     private val maxRetryAttempts: Int = DEFAULT_MAX_RETRY_ATTEMPTS,
 ) {
     constructor(
         gatewayRepository: MacGatewayRepository,
-        proactiveCardDao: ProactiveCardDao,
-        secretStore: SecretStore,
+        receipts: ProactiveDeliveryReceipts,
         presenter: ProactiveNotificationPresenter,
         maxRetryAttempts: Int = DEFAULT_MAX_RETRY_ATTEMPTS,
     ) : this(
         awaitGatewayReady = { gatewayRepository.awaitReady() },
         currentConnection = { gatewayRepository.state.value.connection },
         currentGeneration = { gatewayRepository.connectionGeneration.value },
-        readToken = { gatewayId ->
-            try {
-                GatewayTokenVault(secretStore).read(gatewayId)?.takeIf { it.isNotBlank() }
-            } catch (_: Throwable) {
-                null
-            }
-        },
-        submitFeedback = { connection, token, signalId, action, snoozeMinutes, muteHours ->
-            MacGatewayClient(
-                addrs = connection.addrs,
-                port = connection.port,
-                fingerprint = connection.fingerprint,
-                token = token,
-            ).proactiveFeedback(
+        submitFeedback = { connection, generation, signalId, action, snoozeMinutes, muteHours ->
+            gatewayRepository.clientForPairing(connection.gatewayId, connection.deviceId, generation)?.proactiveFeedback(
                 signalId = signalId,
                 action = action.wire,
                 snoozeMinutes = snoozeMinutes,
                 muteHours = muteHours,
             )
         },
-        recordLocalFeedback = { gatewayId, signalId, feedbackState ->
-            proactiveCardDao.setFeedback(
-                gatewayId = gatewayId,
-                signalId = signalId,
-                feedbackState = feedbackState,
-            )
-        },
-        onCompletedCancelNotification = { signalId ->
-            presenter.cancelProactiveNotification(signalId)
-        },
+        recordLocalFeedback = receipts::feedback,
+        onCompletedCancelNotification = presenter::cancelProactiveNotification,
         onTerminalIncomplete = { signalId, action ->
             presenter.showFeedbackIncompleteNotification(signalId, action)
         },
@@ -123,24 +99,13 @@ class ProactiveFeedbackExecutor internal constructor(
             return ProactiveFeedbackOutcome.PairingMismatch
         }
 
-        val token = readToken(cleanGatewayId)?.takeIf { it.isNotBlank() }
-        if (token == null) {
-            onTerminalIncomplete(cleanSignalId, action)
-            return ProactiveFeedbackOutcome.TerminalFailure("missing_token")
-        }
-
-        if (currentGeneration() != generationBefore) {
-            onTerminalIncomplete(cleanSignalId, action)
-            return ProactiveFeedbackOutcome.PairingMismatch
-        }
-
         val snoozeMinutes = if (action == ProactiveFeedbackAction.SNOOZE) DEFAULT_SNOOZE_MINUTES else null
         val muteHours = if (action == ProactiveFeedbackAction.MUTE_TOPIC) DEFAULT_MUTE_HOURS else null
 
         val result = try {
             submitFeedback(
                 connection,
-                token,
+                generationBefore,
                 cleanSignalId,
                 action,
                 snoozeMinutes,
@@ -176,17 +141,17 @@ class ProactiveFeedbackExecutor internal constructor(
             )
         }
 
+        if (result == null || currentGeneration() != generationBefore || currentConnection() != connection) {
+            onTerminalIncomplete(cleanSignalId, action)
+            return ProactiveFeedbackOutcome.PairingMismatch
+        }
         if (!result.ok) {
             onTerminalIncomplete(cleanSignalId, action)
             return ProactiveFeedbackOutcome.TerminalFailure("server_rejected")
         }
 
-        if (currentGeneration() == generationBefore) {
-            runCatching {
-                recordLocalFeedback(cleanGatewayId, cleanSignalId, action.wire)
-            }
-        }
-        onCompletedCancelNotification(cleanSignalId)
+        recordLocalFeedback(cleanGatewayId, cleanDeviceId, cleanSignalId, action.wire)
+        onCompletedCancelNotification(cleanGatewayId, cleanDeviceId, cleanSignalId)
         return ProactiveFeedbackOutcome.Success(applied = result.applied)
     }
 

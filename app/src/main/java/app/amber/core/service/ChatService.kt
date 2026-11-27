@@ -239,12 +239,13 @@ class ChatService(
         content: List<UIMessagePart>,
         answer: Boolean = true,
         queueMode: PendingUserMessageMode = PendingUserMessageMode.FOLLOWUP,
+        messageId: Uuid = Uuid.random(),
     ): Boolean {
         val localAsync = localAsyncTaskCoordinator
         if (localAsync != null) {
-            return localAsync.submitMessage(conversationId, content, answer)
+            return localAsync.submitMessage(conversationId, content, answer, messageId)
         }
-        return runCoordinator.sendMessage(conversationId, content, answer, queueMode)
+        return runCoordinator.sendMessage(conversationId, content, answer, queueMode, messageId)
     }
 
     internal suspend fun startTaskMessage(conversationId: Uuid, content: List<UIMessagePart>): ChatTaskRun =
@@ -267,8 +268,14 @@ class ChatService(
     suspend fun retryFromNotification(conversationId: Uuid, runId: String?) =
         runCoordinator.retryFromNotification(conversationId, runId)
 
-    fun handleToolApproval(conversationId: Uuid, toolCallId: String, approved: Boolean, reason: String = "", answer: String? = null) =
-        runCoordinator.handleToolApproval(conversationId, toolCallId, approved, reason, answer)
+    fun handleToolApproval(
+        conversationId: Uuid,
+        toolCallId: String,
+        approved: Boolean,
+        reason: String = "",
+        answer: String? = null,
+        matchesPending: (UIMessagePart.Tool) -> Boolean = { true },
+    ) = runCoordinator.handleToolApproval(conversationId, toolCallId, approved, reason, answer, matchesPending)
 
     suspend fun handleNotificationApproval(
         conversationId: Uuid,
@@ -529,11 +536,7 @@ class ChatService(
         try {
             localAsyncTaskCoordinator?.stopAllForConversation(conversationId)
             runCoordinator.stopRunForDeletion(conversationId)
-            conversationStore.sessionOrNull(conversationId)?.let { session ->
-                if (session.pendingUserMessages.value.isNotEmpty()) {
-                    pendingMessageQueue.clearPendingUserMessages(conversationId)
-                }
-            }
+            clearPendingForDeletion(conversationId)
             runPresenter.stopGenerationKeepAlive(conversationId)
             runPresenter.cancelLiveStatus(conversationId)
             conversationStore.deletePersisted(conversation, deferCleanup, expectedRestoreEpoch)
@@ -542,6 +545,13 @@ class ChatService(
             // tombstone in that case so an older checkpoint cannot revive it.
             conversationStore.rollbackDeletionIfPresent(conversationId)
             throw t
+        }
+    }
+
+    private suspend fun clearPendingForDeletion(id: Uuid) {
+        if (pendingMessageQueue.flow(id).value.isNotEmpty()) {
+            pendingMessageQueue.clearPendingUserMessages(id)
+            pendingMessageQueue.persistCurrentPendingMessagesNow(id)
         }
     }
 
@@ -565,15 +575,11 @@ class ChatService(
                 tombstoned.add(conversation.id)
                 localAsyncTaskCoordinator?.stopAllForConversation(conversation.id)
                 runCoordinator.stopRunForDeletion(conversation.id)
-                conversationStore.sessionOrNull(conversation.id)?.let { session ->
-                    if (session.pendingUserMessages.value.isNotEmpty()) {
-                        pendingMessageQueue.clearPendingUserMessages(conversation.id)
-                    }
-                }
+                clearPendingForDeletion(conversation.id)
                 runPresenter.stopGenerationKeepAlive(conversation.id)
                 runPresenter.cancelLiveStatus(conversation.id)
             }
-            conversationStore.deleteAllPersisted(tombstoned, expectedRestoreEpoch)
+            conversationStore.deleteAllPersisted(conversations, expectedRestoreEpoch)
         } catch (t: Throwable) {
             tombstoned.forEach { id ->
                 conversationStore.rollbackDeletionIfPresent(id)

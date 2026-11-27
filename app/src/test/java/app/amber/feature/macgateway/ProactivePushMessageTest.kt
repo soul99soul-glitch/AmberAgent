@@ -208,8 +208,8 @@ class ProactivePushMessageTest {
             currentConnection = { pairedConnection },
             isCloudMainStageVisible = { false },
             requestImmediatePoll = {},
-            findLocalCard = { _, _ -> null },
-            markCardNotified = { _, _, _ -> },
+            alreadyHandled = { _, _, _ -> false },
+            markCardNotified = { _, _, _, _ -> },
             hasNotificationPermission = { true },
             notifyPlatform = { _, _, _ -> },
         )
@@ -246,8 +246,8 @@ class ProactivePushMessageTest {
             currentConnection = { pairedConnection },
             isCloudMainStageVisible = { false },
             requestImmediatePoll = {},
-            findLocalCard = { _, _ -> null },
-            markCardNotified = { _, _, _ -> },
+            alreadyHandled = { _, _, _ -> false },
+            markCardNotified = { _, _, _, _ -> },
             hasNotificationPermission = { true },
             notifyPlatform = { _, _, _ -> },
         )
@@ -278,6 +278,13 @@ class ProactivePushMessageTest {
         assertEquals("gw-1|sig_1|$ACTION_PROACTIVE_SNOOZE".hashCode(), snooze1.requestCode)
         assertEquals("gw-1|sig_1|$ACTION_PROACTIVE_MUTE".hashCode(), mute1.requestCode)
 
+        // Same signal after re-pairing must never update a prior, still-clickable token's extras.
+        val repaired = presenter.buildNotification(msg1.copy(deviceId = "new-device"))
+        for (oldAction in built1.actions) {
+            val newAction = repaired.actions.single { it.kind == oldAction.kind }
+            assertFalse(oldAction.intent.filterEquals(newAction.intent))
+        }
+
         // Distinct request codes AND non-equal Intent filters (extras are ignored by Android PendingIntent matching)
         val codes = setOf(act1.requestCode, snooze1.requestCode, mute1.requestCode, snooze2.requestCode, snooze3.requestCode)
         assertEquals(5, codes.size)
@@ -299,8 +306,8 @@ class ProactivePushMessageTest {
             currentConnection = { pairedConnection },
             isCloudMainStageVisible = { true },
             requestImmediatePoll = { pollReasons += it },
-            findLocalCard = { _, _ -> null },
-            markCardNotified = { _, signalId, _ -> marked += signalId },
+            alreadyHandled = { _, _, _ -> false },
+            markCardNotified = { _, _, signalId, _ -> marked += signalId },
             hasNotificationPermission = { true },
             notifyPlatform = { tag, id, n -> posted += Triple(tag, id, n) },
         )
@@ -310,6 +317,25 @@ class ProactivePushMessageTest {
         assertTrue(posted.isEmpty())
         assertTrue(marked.isEmpty())
         assertEquals(listOf("push"), pollReasons)
+    }
+
+    @Test
+    fun `only resumed cloud stages matching the current pairing suppress notifications`() {
+        val first = Any()
+        val second = Any()
+        val other = pairedConnection.copy(deviceId = "new-device")
+        try {
+            ProactiveForegroundStageTracker.enter(first, pairedConnection)
+            ProactiveForegroundStageTracker.enter(second, other)
+            assertTrue(ProactiveForegroundStageTracker.isVisible(pairedConnection))
+            ProactiveForegroundStageTracker.leave(first)
+            assertFalse(ProactiveForegroundStageTracker.isVisible(pairedConnection))
+            assertTrue(ProactiveForegroundStageTracker.isVisible(other))
+        } finally {
+            ProactiveForegroundStageTracker.leave(first)
+            ProactiveForegroundStageTracker.leave(second)
+        }
+        assertFalse(ProactiveForegroundStageTracker.isVisible(other))
     }
 
     @Test
@@ -327,8 +353,8 @@ class ProactivePushMessageTest {
             currentConnection = { pairedConnection },
             isCloudMainStageVisible = { false },
             requestImmediatePoll = {},
-            findLocalCard = { _, signalId -> cards[signalId] },
-            markCardNotified = { _, signalId, _ -> marked += signalId },
+            alreadyHandled = { _, _, signalId -> cards[signalId]?.let { it.notifiedAt != null || it.feedbackState != null } == true },
+            markCardNotified = { _, _, signalId, _ -> marked += signalId },
             hasNotificationPermission = { true },
             notifyPlatform = { tag, id, n -> posted += Triple(tag, id, n) },
         )

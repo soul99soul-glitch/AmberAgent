@@ -31,6 +31,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.compose.runtime.LaunchedEffect
+import app.amber.feature.macgateway.ProactiveForegroundStageTracker
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.PersonalAgentMainSessionStore
 import app.amber.agent.R
@@ -73,7 +76,7 @@ fun PersonalAgentPage(
     val proactiveRepository: CloudProactiveRepository = koinInject()
     val proactiveDeepLinkInbox: ProactiveDeepLinkInbox = koinInject()
     val gatewayState by macGatewayRepository.state.collectAsStateWithLifecycle()
-    val pendingProactiveSignalId by proactiveDeepLinkInbox.pending.collectAsStateWithLifecycle()
+    val pendingDetail by proactiveDeepLinkInbox.pending.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     if (!gatewayState.loaded) {
@@ -83,6 +86,13 @@ fun PersonalAgentPage(
 
     val activeConnection = gatewayState.connection
     val isCloudActive = gatewayState.isCloudDialogueActive && activeConnection != null
+    if (isCloudActive) {
+        LifecycleResumeEffect(activeConnection) {
+            val owner = Any()
+            ProactiveForegroundStageTracker.enter(owner, activeConnection)
+            onPauseOrDispose { ProactiveForegroundStageTracker.leave(owner) }
+        }
+    }
     val resolvedId = remember(isCloudActive, activeConnection?.gatewayId) {
         if (isCloudActive) {
             mainSessionStore.cloudMainConversationId(activeConnection.gatewayId)
@@ -101,7 +111,7 @@ fun PersonalAgentPage(
 
     CompositionLocalProvider(
         LocalProactiveCardDetailOpener provides { signalId ->
-            proactiveDeepLinkInbox.submit(signalId)
+            proactiveDeepLinkInbox.submit(signalId, activeConnection?.gatewayId, activeConnection?.deviceId)
         },
         LocalPersonalAgentMoreMenu provides { hasMessages, onToggleShelf ->
             PersonalAgentOverflowMenu(
@@ -125,7 +135,7 @@ fun PersonalAgentPage(
                     topBarLeading = {
                         PersonalAgentHostPill(
                             isCloudSelected = isCloudActive,
-                            cloudAvailable = activeConnection != null,
+                            cloudAvailable = gatewayState.canSelectCloud,
                             gatewayName = activeConnection?.name,
                             onSelectCloud = { enabled ->
                                 scope.launch {
@@ -139,17 +149,19 @@ fun PersonalAgentPage(
             )
         }
 
-        val detailSignalId = pendingProactiveSignalId
-        if (detailSignalId != null) {
-            val detailConversationId = activeConnection?.let {
-                mainSessionStore.cloudMainConversationId(it.gatewayId)
-            } ?: resolvedId
-            ProactiveDetailSheet(
-                signalId = detailSignalId,
-                conversationId = detailConversationId,
-                repository = proactiveRepository,
-                onDismiss = { proactiveDeepLinkInbox.consume(detailSignalId) },
-            )
+        pendingDetail?.let { request ->
+            if (request.matches(activeConnection)) {
+                key(activeConnection?.gatewayId, activeConnection?.deviceId, request) {
+                    ProactiveDetailSheet(
+                        request = request.copy(gatewayId = activeConnection?.gatewayId, deviceId = activeConnection?.deviceId),
+                        conversationId = activeConnection?.let { mainSessionStore.cloudMainConversationId(it.gatewayId) },
+                        repository = proactiveRepository,
+                        onDismiss = { proactiveDeepLinkInbox.consume(request) },
+                    )
+                }
+            } else {
+                LaunchedEffect(request) { proactiveDeepLinkInbox.consume(request) }
+            }
         }
     }
 }

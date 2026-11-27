@@ -69,6 +69,7 @@ val chatModule = module {
             pendingMessageQueue = get(),
             errorStore = get(),
             restoreWriteGate = get(),
+            isMainConversation = get<app.amber.agent.PersonalAgentMainSessionStore>()::ownsMainConversation,
         )
     }
     single {

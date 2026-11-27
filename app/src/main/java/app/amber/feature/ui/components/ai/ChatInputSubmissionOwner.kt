@@ -39,7 +39,7 @@ internal class ChatInputSubmissionOwner(private val input: ChatInputState) {
     suspend fun submit(
         conversationId: String,
         validate: suspend (List<UIMessagePart>) -> Boolean,
-        send: (parts: List<UIMessagePart>, editingMessageId: Uuid?) -> Boolean,
+        send: suspend (parts: List<UIMessagePart>, editingMessageId: Uuid?) -> Boolean,
     ): Boolean {
         if (inFlight || !input.isCurrentConversation(conversationId)) return false
         currentCoroutineContext().ensureActive()

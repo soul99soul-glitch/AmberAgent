@@ -35,6 +35,16 @@ class VirtualDisplayFrameSourceTest {
     }
 
     @Test
+    fun listenerRegistrationFailureReleasesTheReader() {
+        val port = FakeFrameReaderPort(maxImages = 2)
+        port.failRegistration = true
+        assertThrows(IllegalStateException::class.java) {
+            VirtualDisplayFrameSource(4, 4, port, ownWorkerThread = false)
+        }
+        assertTrue(port.closed)
+    }
+
+    @Test
     fun cropsStridePaddingCorrectlyAndDetectsMarkerAndUnobservableFrames() {
         val port = FakeFrameReaderPort(maxImages = 2)
         val source = VirtualDisplayFrameSource(width = 4, height = 4, readerPort = port, ownWorkerThread = false)
@@ -100,7 +110,8 @@ class VirtualDisplayFrameSourceTest {
         // Even if a stale callback fires directly after close(), zero listener deliveries happen.
         source.onImageAvailable()
         assertEquals(1, delivered.get())
-        assertTrue(port.droppedCount >= 1)
+        assertEquals(0, port.droppedCount) // A queued callback must not touch the closed reader.
+        assertNull(source.latestStats.value)
     }
 
     @Test
@@ -163,8 +174,10 @@ class VirtualDisplayFrameSourceTest {
         var onInsideAcquire: (() -> Unit)? = null
         var closed: Boolean = false
         var droppedCount: Int = 0
+        var failRegistration = false
 
         override fun setListener(handler: Handler?, listener: (() -> Unit)?) {
+            if (failRegistration && listener != null) error("reader registration failed")
             registeredListener = listener
         }
 

@@ -469,7 +469,7 @@ internal class ScreenAppScopeTools(
             },
             onResumeRequested = {
                 operations.takeoverController?.requestResume()
-                virtualDisplayRunNotifier?.showRunning(ownerRun, packageName, goal, paused = false)
+                virtualDisplayRunNotifier?.showRunning(it, paused = false)
             },
             onTakeoverRequested = {
                 controlInterruptReason.compareAndSet(null, "user_takeover")
@@ -483,7 +483,7 @@ internal class ScreenAppScopeTools(
                 runnerJobRef.get()?.cancel(CancellationException("virtual_display_user_takeover"))
                 operations.takeoverController?.finishSession(ownerRun)
                 session.close("user_takeover")
-                virtualDisplayRunNotifier?.cancel(ownerRun)
+                virtualDisplayRunNotifier?.cancel(it)
             },
             onEmergencyStopRequested = {
                 controlInterruptReason.compareAndSet(null, "emergency_stop")
@@ -498,39 +498,15 @@ internal class ScreenAppScopeTools(
                 runnerJobRef.get()?.cancel(CancellationException("virtual_display_emergency_stop"))
                 operations.takeoverController?.finishSession(ownerRun)
                 session.close("emergency_stop")
-                virtualDisplayRunNotifier?.cancel(ownerRun)
+                virtualDisplayRunNotifier?.cancel(it)
             },
         )
 
         VirtualDisplayRunRegistry.register(activeRun)
-        virtualDisplayRunNotifier?.showRunning(
-            runId = ownerRun,
-            packageName = packageName,
-            goal = goal,
-            paused = false,
-        )
+        virtualDisplayRunNotifier?.showRunning(activeRun)
 
         var closeReason = "completed"
         try {
-            // R3 L3: If the target package is already in the foreground on Display 0, stop instead of
-            // risking cross-display state conflicts or accidental input dispatch.
-            if (!dryRun) {
-                val display0Foreground = runCatching {
-                    withContext(Dispatchers.Main.immediate) {
-                        getActiveAccessibilityController()?.captureScreenSnapshot()?.packageName
-                    }
-                }.getOrNull()
-                if (display0Foreground == packageName) {
-                    closeReason = "target_already_foreground_on_main_display"
-                    return virtualFaultJson(
-                        status = "SAFE_PAUSED",
-                        packageName = packageName,
-                        session = session,
-                        reason = "target_already_foreground_on_main_display",
-                    )
-                }
-            }
-
             if (!dryRun && runner.canExecute()) {
                 // Launch strictly on the virtual display — ZERO context.startActivity on Display 0.
                 val launched = session.launchTarget()
@@ -653,7 +629,7 @@ internal class ScreenAppScopeTools(
             withContext(NonCancellable) {
                 runCatching { virtualOcrEngine?.close() }
                 VirtualDisplayRunRegistry.unregister(ownerRun, activeRun)
-                virtualDisplayRunNotifier?.cancel(ownerRun)
+                virtualDisplayRunNotifier?.cancel(activeRun)
                 runCatching { session.close(closeReason) }
             }
         }

@@ -12,6 +12,7 @@ import app.amber.core.automation.display.PhoneDisplaySession
 import app.amber.core.automation.display.VirtualDisplayRunNotifier
 import app.amber.core.automation.display.VirtualDisplayRunRegistry
 import app.amber.core.automation.AccessibilityController
+import app.amber.feature.macgateway.ProactiveDetailRequest
 import app.amber.feature.macgateway.ProactiveDeepLinkInbox
 import app.amber.feature.system.AmberQuickTileService
 import org.junit.After
@@ -88,11 +89,11 @@ class ProactiveDeepLinkTest {
         val coldIntent = Intent(Intent.ACTION_VIEW, Uri.parse("amber://proactive/cold_sig_1"))
         val firstConsume = consumeProactiveDeepLink(coldIntent, inbox, alreadyConsumed = false)
         assertEquals("cold_sig_1", firstConsume)
-        assertEquals("cold_sig_1", inbox.pending.value)
+        assertEquals("cold_sig_1", inbox.pending.value?.signalId)
         assertNull("Intent data must be cleared after one-shot consumption", coldIntent.data)
 
         // UI consumes it once
-        inbox.consume("cold_sig_1")
+        inbox.consume(ProactiveDetailRequest("cold_sig_1", null, null))
         assertNull(inbox.pending.value)
 
         // Re-running cold consume on the same Intent (e.g. Activity recreation) must NOT re-submit.
@@ -118,8 +119,24 @@ class ProactiveDeepLinkTest {
         applyProactiveDeepLinkToBackStack(warmStack)
 
         assertEquals(listOf<NavKey>(Screen.PersonalAgent), warmStack)
-        assertEquals("warm_sig_2", inbox.pending.value)
+        assertEquals("warm_sig_2", inbox.pending.value?.signalId)
         assertNull(warmIntent.data)
+    }
+
+    @Test
+    fun `clicking an old notification cannot resolve the same signal on another device`() {
+        val inbox = ProactiveDeepLinkInbox()
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("amber://proactive/test"))
+            .putExtra(app.amber.feature.macgateway.ProactiveNotificationPresenter.EXTRA_GATEWAY_ID, "gw")
+            .putExtra(app.amber.feature.macgateway.ProactiveNotificationPresenter.EXTRA_DEVICE_ID, "old")
+        consumeProactiveDeepLink(intent, inbox)
+        val request = requireNotNull(inbox.pending.value)
+        val otherDevice = app.amber.feature.macgateway.MacGatewayConnection("gw", "Cloud", emptyList(), 123, "fp", "new")
+        assertFalse(request.matches(otherDevice))
+        assertTrue(request.matches(otherDevice.copy(deviceId = "old")))
+        inbox.submit("test", "gw", "new")
+        inbox.consume(request)
+        assertEquals("new", inbox.pending.value?.deviceId)
     }
 
     @Test
@@ -144,10 +161,13 @@ class ProactiveDeepLinkTest {
             goal = "check status",
             session = fakeSession,
         )
+        VirtualDisplayRunRegistry.register(activeRun)
         val liveIntent = AmberQuickTileService.buildLaunchIntent(context, activeRun = activeRun)
         assertEquals(RouteActivity::class.java.name, liveIntent.component?.className)
         assertEquals(VirtualDisplayRunNotifier.ACTION_VIEW_VIRTUAL_RUN, liveIntent.action)
         assertEquals(Screen.PhoneUseLive("vd_run_42"), phoneUseLiveScreenFromIntent(liveIntent))
         assertFalse(openPersonalAgentFromIntent(liveIntent))
+        VirtualDisplayRunRegistry.unregister(activeRun.runId, activeRun)
+        assertNull(phoneUseLiveScreenFromIntent(liveIntent))
     }
 }

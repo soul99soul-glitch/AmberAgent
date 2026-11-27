@@ -475,7 +475,7 @@ private class HoldReadingOnTailGrowthNode(
                 // 216px intermediate jump on the same fixture that is 0px
                 // on b4477f42b. Keep the coroutine so we are not inside
                 // OnPositionedDispatcher (Issue #21).
-                if (userGestureOwnsScroll() || requestedIndex < 0) return@launch
+                if (sendStage?.isActive == true || userGestureOwnsScroll() || requestedIndex < 0) return@launch
                 if (state.firstVisibleItemIndex != requestedIndex) return@launch
                 val stillMissed = requestedOffset - state.firstVisibleItemScrollOffset
                 if (stillMissed == 0) return@launch

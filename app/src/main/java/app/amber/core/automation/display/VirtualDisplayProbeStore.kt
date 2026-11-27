@@ -17,16 +17,25 @@ data class IsolationProbeResult(
     val residualAfterDisconnect: Int,
     val leakedToDefaultOnDestroy: Boolean,
     val detail: String,
+    val disconnectObserved: Boolean = false,
+    val targetDestroyed: Boolean = false,
+    val mainInputObserved: Boolean = false,
 ) {
     fun meetsAllStrictCriteria(requiredTaps: Int = REQUIRED_PROBE_TAPS): Boolean =
-        passed &&
-            mainScreenInjectedEvents == 0 &&
-            targetReceivedEvents >= requiredTaps &&
-            textReadBackOk &&
-            frameMarkerOk &&
-            focusStable &&
-            residualAfterDisconnect == 0 &&
-            !leakedToDefaultOnDestroy
+        passed && evidenceFailures(requiredTaps).isEmpty()
+
+    internal fun evidenceFailures(requiredTaps: Int = REQUIRED_PROBE_TAPS): List<String> = buildList {
+        if (mainScreenInjectedEvents != 0) add("mainScreenInjectedEvents=$mainScreenInjectedEvents")
+        if (targetReceivedEvents != requiredTaps) add("targetReceivedEvents=$targetReceivedEvents/$requiredTaps")
+        if (!textReadBackOk) add("textReadBackOk=false")
+        if (!frameMarkerOk) add("frameMarkerOk=false")
+        if (!focusStable) add("focusStable=false")
+        if (!mainInputObserved) add("mainInputObserved=false")
+        if (!disconnectObserved) add("disconnectObserved=false")
+        if (!targetDestroyed) add("targetDestroyed=false")
+        if (residualAfterDisconnect != 0) add("residualAfterDisconnect=$residualAfterDisconnect")
+        if (leakedToDefaultOnDestroy) add("leakedToDefaultOnDestroy=true")
+    }
 
     companion object {
         const val REQUIRED_PROBE_TAPS = 20
@@ -130,6 +139,9 @@ class VirtualDisplayProbeStore internal constructor(
                 KEY_RESIDUAL_AFTER_DISCONNECT to result.residualAfterDisconnect,
                 KEY_LEAKED_TO_DEFAULT to result.leakedToDefaultOnDestroy,
                 KEY_DETAIL to result.detail,
+                KEY_DISCONNECT_OBSERVED to result.disconnectObserved,
+                KEY_TARGET_DESTROYED to result.targetDestroyed,
+                KEY_MAIN_INPUT_OBSERVED to result.mainInputObserved,
             ),
         )
     }
@@ -151,7 +163,8 @@ class VirtualDisplayProbeStore internal constructor(
     }
 
     private fun readStoredResultLocked(): IsolationProbeResult? {
-        if (!kv.contains(KEY_PASSED)) return null
+        // Older probes treated an orderly local close as a Shizuku disconnect.
+        if (!kv.contains(KEY_PASSED) || !kv.contains(KEY_DISCONNECT_OBSERVED)) return null
         return IsolationProbeResult(
             passed = kv.getBoolean(KEY_PASSED, false),
             mainScreenInjectedEvents = kv.getInt(KEY_MAIN_INJECTED, -1),
@@ -162,6 +175,9 @@ class VirtualDisplayProbeStore internal constructor(
             residualAfterDisconnect = kv.getInt(KEY_RESIDUAL_AFTER_DISCONNECT, -1),
             leakedToDefaultOnDestroy = kv.getBoolean(KEY_LEAKED_TO_DEFAULT, true),
             detail = kv.getString(KEY_DETAIL).orEmpty(),
+            disconnectObserved = kv.getBoolean(KEY_DISCONNECT_OBSERVED, false),
+            targetDestroyed = kv.getBoolean(KEY_TARGET_DESTROYED, false),
+            mainInputObserved = kv.getBoolean(KEY_MAIN_INPUT_OBSERVED, false),
         )
     }
 
@@ -178,6 +194,9 @@ class VirtualDisplayProbeStore internal constructor(
         private const val KEY_RESIDUAL_AFTER_DISCONNECT = "residual_after_disconnect"
         private const val KEY_LEAKED_TO_DEFAULT = "leaked_to_default_on_destroy"
         private const val KEY_DETAIL = "detail"
+        private const val KEY_DISCONNECT_OBSERVED = "disconnect_observed"
+        private const val KEY_TARGET_DESTROYED = "target_destroyed"
+        private const val KEY_MAIN_INPUT_OBSERVED = "main_input_observed"
 
         internal fun resolveAppVersionCode(context: Context): Long {
             val fromPkg = runCatching {

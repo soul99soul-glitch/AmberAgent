@@ -44,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -436,6 +437,7 @@ internal fun TextInputRow(
         TextField(
             state = state.textContent,
             modifier = Modifier
+                .testTag("chat-composer-input")
                 .fillMaxWidth()
                 // Graphite 修：Material3 TextField 内部写死 MinHeight=56dp（无视 contentPadding /
                 // LocalMinimumInteractiveComponentSize）。这里只需传入一个「非零」minHeight 即可绕过

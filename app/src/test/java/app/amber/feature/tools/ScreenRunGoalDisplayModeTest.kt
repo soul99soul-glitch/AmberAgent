@@ -32,6 +32,8 @@ import app.amber.core.automation.display.RawRgbaPlane
 import app.amber.core.automation.display.VirtualDisplayCompatibility
 import app.amber.core.automation.display.VirtualDisplayFrameSource
 import app.amber.core.automation.display.VirtualDisplayRunControlReceiver
+import app.amber.core.automation.display.ActiveVirtualDisplayRun
+import app.amber.core.automation.display.VirtualDisplayRunControlState
 import app.amber.core.automation.display.VirtualDisplayRunNotifier
 import app.amber.core.automation.display.VirtualDisplayRunRegistry
 import app.amber.core.automation.display.VirtualDisplaySession
@@ -311,7 +313,7 @@ class ScreenRunGoalDisplayModeTest {
             dpi = 320,
             bridge = disconnectBridge,
             frameSource = frameSource,
-            windowsProvider = { emptyList() },
+            windowsProvider = { id -> listOf(app.amber.core.automation.display.appWindow(id, baseContext.packageName)) },
         )
 
         val runner = createRunner(responses = mutableListOf(verifiedDoneResponse()))
@@ -447,7 +449,11 @@ class ScreenRunGoalDisplayModeTest {
     fun notifierNotificationActionsContainOnlyViewPauseEmergencyStopAndNeverApprove() {
         val notifier = VirtualDisplayRunNotifier(baseContext)
         val runId = "run-notif-check"
-        val specs = notifier.buildActionSpecs(runId)
+        val pkg = "com.example.target"
+        val session = FakeVirtualPhoneDisplaySession(8, 1L, FakeAccessibilityController(targetSnapshot(pkg, "n1")))
+        val run = ActiveVirtualDisplayRun(runId, pkg, "Search item", session)
+        VirtualDisplayRunRegistry.register(run)
+        val specs = notifier.buildActionSpecs(run)
         assertEquals(
             listOf(
                 VirtualDisplayRunNotifier.ActionKind.VIEW,
@@ -457,12 +463,7 @@ class ScreenRunGoalDisplayModeTest {
             specs.map { it.kind },
         )
 
-        val notification = notifier.buildNotification(
-            runId = runId,
-            packageName = "com.example.target",
-            goal = "Search item",
-            paused = false,
-        )
+        val notification = notifier.buildNotification(run)
         assertEquals(PHONE_USE_RUN_CHANNEL_ID, notification.channelId)
         val actions = notification.actions
         assertNotNull(actions)
@@ -500,6 +501,16 @@ class ScreenRunGoalDisplayModeTest {
         assertEquals(VirtualDisplayRunControlReceiver::class.java.name, stopShadow.savedIntent.component?.className)
         assertEquals(VirtualDisplayRunNotifier.ACTION_EMERGENCY_STOP_VIRTUAL_RUN, stopShadow.savedIntent.action)
         assertEquals(runId, stopShadow.savedIntent.getStringExtra(VirtualDisplayRunNotifier.EXTRA_RUN_ID))
+
+        val stalePause = pauseShadow.savedIntent
+        assertEquals(run, VirtualDisplayRunRegistry.forIntent(stalePause))
+        val replacement = ActiveVirtualDisplayRun(runId, pkg, "Next step", session)
+        VirtualDisplayRunRegistry.register(replacement)
+        val nextPause = notifier.buildActionSpecs(replacement).single { it.kind == VirtualDisplayRunNotifier.ActionKind.PAUSE }
+        assertFalse(nextPause.pendingIntent == actions[1].actionIntent)
+        VirtualDisplayRunControlReceiver().onReceive(baseContext, stalePause)
+        assertEquals(VirtualDisplayRunControlState.RUNNING, replacement.controlState.value)
+        assertEquals(replacement, VirtualDisplayRunRegistry.forIntent(Shadows.shadowOf(nextPause.pendingIntent).savedIntent))
     }
 
     private suspend fun executeGoal(
@@ -689,6 +700,7 @@ class ScreenRunGoalDisplayModeTest {
 
         override fun createDisplay(
             runId: String,
+            authorizedPackageName: String,
             generation: Long,
             width: Int,
             height: Int,
@@ -702,8 +714,8 @@ class ScreenRunGoalDisplayModeTest {
             return 0
         }
 
-        override fun injectMotion(generation: Long, displayId: Int, event: MotionEvent): Boolean = true
-        override fun injectKey(generation: Long, displayId: Int, event: KeyEvent): Boolean = true
+        override fun injectMotion(generation: Long, displayId: Int, observedPackageName: String, event: MotionEvent): Boolean = true
+        override fun injectKey(generation: Long, displayId: Int, observedPackageName: String, event: KeyEvent): Boolean = true
 
         override fun release(generation: Long, reason: String) {
             releaseCount++

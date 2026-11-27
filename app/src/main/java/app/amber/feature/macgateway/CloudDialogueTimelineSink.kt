@@ -20,6 +20,9 @@ interface CloudDialogueTimelineSink {
         eventId: String? = null,
     )
 
+    suspend fun appendLocalUserMessage(conversationId: String, text: String, eventId: String?, requestId: String) =
+        appendUserMessage(conversationId, text, eventId)
+
     suspend fun appendAssistantReply(
         conversationId: String,
         text: String,
@@ -67,12 +70,24 @@ class ConversationStoreCloudDialogueSink(
         eventId: String?,
     ) {
         val uuid = runCatching { Uuid.parse(conversationId) }.getOrNull() ?: return
+        appendUserNode(uuid, text, Uuid.random())
+    }
+
+    override suspend fun appendLocalUserMessage(conversationId: String, text: String, eventId: String?, requestId: String) {
+        val messageId = runCatching { Uuid.parse(requestId) }.getOrElse { Uuid.random() }
+        check(appendUserNode(Uuid.parse(conversationId), text, messageId)) {
+            "The conversation changed before the message could be saved."
+        }
+    }
+
+    private suspend fun appendUserNode(conversationId: Uuid, text: String, messageId: Uuid): Boolean {
         val node = UIMessage(
+            id = messageId,
             role = MessageRole.USER,
             parts = listOf(UIMessagePart.Text(text)),
         ).toMessageNode()
-        conversationStore.appendCloudDialogueNode(
-            conversationId = uuid,
+        return conversationStore.appendCloudDialogueNode(
+            conversationId = conversationId,
             node = node,
             titleHint = text,
         )

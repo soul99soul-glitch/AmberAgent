@@ -41,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
@@ -291,6 +292,7 @@ internal fun HomeSessionRow(
                 Row(
                     modifier = Modifier
                         .chatPerfHomeRow(conversation.id.toString())
+                        .testTag("home-session-row")
                         .fillMaxWidth()
                         .amberPressHighlight(rowInteraction, rowShape, scaleOnPress = false)
                         .background(rowSurface)

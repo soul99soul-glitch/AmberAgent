@@ -36,21 +36,21 @@ class CloudProactiveRepositoryTest {
             return state.value.size.toLong()
         }
 
-        override fun observeForGateway(gatewayId: String): Flow<List<ProactiveCardEntity>> =
+        override fun observeForGateway(gatewayId: String, deviceId: String): Flow<List<ProactiveCardEntity>> =
             state.map { list ->
-                list.filter { it.gatewayId == gatewayId }
+                list.filter { it.gatewayId == gatewayId && it.deviceId == deviceId }
                     .sortedWith(compareBy<ProactiveCardEntity> { it.receivedAt }.thenBy { it.seq })
             }
 
-        override suspend fun findBySignal(gatewayId: String, signalId: String): ProactiveCardEntity? =
+        override suspend fun findBySignal(gatewayId: String, deviceId: String, signalId: String): ProactiveCardEntity? =
             state.value
-                .filter { it.gatewayId == gatewayId && it.signalId == signalId }
+                .filter { it.gatewayId == gatewayId && it.deviceId == deviceId && it.signalId == signalId }
                 .maxWithOrNull(compareBy<ProactiveCardEntity> { it.receivedAt }.thenBy { it.seq })
 
-        override suspend fun markNotified(gatewayId: String, signalId: String, notifiedAt: Long): Int {
+        override suspend fun markNotified(gatewayId: String, deviceId: String, signalId: String, notifiedAt: Long): Int {
             var count = 0
             state.value = state.value.map { row ->
-                if (row.gatewayId == gatewayId && row.signalId == signalId && row.notifiedAt == null) {
+                if (row.gatewayId == gatewayId && row.deviceId == deviceId && row.signalId == signalId && row.notifiedAt == null) {
                     count++
                     row.copy(notifiedAt = notifiedAt)
                 } else {
@@ -60,10 +60,10 @@ class CloudProactiveRepositoryTest {
             return count
         }
 
-        override suspend fun setFeedback(gatewayId: String, signalId: String, feedbackState: String): Int {
+        override suspend fun setFeedback(gatewayId: String, deviceId: String, signalId: String, feedbackState: String): Int {
             var count = 0
             state.value = state.value.map { row ->
-                if (row.gatewayId == gatewayId && row.signalId == signalId) {
+                if (row.gatewayId == gatewayId && row.deviceId == deviceId && row.signalId == signalId) {
                     count++
                     row.copy(feedbackState = feedbackState)
                 } else {
@@ -133,7 +133,6 @@ class CloudProactiveRepositoryTest {
             val repo = CloudProactiveRepository(
                 dao = dao,
                 gateway = null,
-                tokenVault = null,
                 clientProviderOverride = { client },
                 connectionProviderOverride = { conn },
                 generationProviderOverride = { 1L },
@@ -142,6 +141,8 @@ class CloudProactiveRepositoryTest {
                 nowMs = { 5_000L },
             )
 
+            // A notification from a prior device cannot read the current device's card or hit the network.
+            assertNull(repo.loadSignal(ProactiveDetailRequest("sig_local_1", "gw-1", "old-device")))
             // 1. Local hit avoids network entirely.
             val local = repo.loadSignal("sig_local_1")
             assertNotNull(local)
@@ -155,14 +156,14 @@ class CloudProactiveRepositoryTest {
             assertEquals("远端详情", remote.text)
             assertEquals(1, remoteCalls.get())
             assertEquals(1, dao.snapshot().size)
-            assertNull(dao.findBySignal("gw-1", "sig_remote_1"))
+            assertNull(dao.findBySignal("gw-1", "dev-1", "sig_remote_1"))
 
             // 3. 404 returns null cleanly.
             assertNull(repo.loadSignal("sig_missing"))
             assertEquals(2, remoteCalls.get())
 
             // 4. cards() observes DAO sorted by receivedAt, seq.
-            val observed = repo.cards("gw-1").first()
+            val observed = repo.cards("gw-1", "dev-1").first()
             assertEquals(listOf("sig_local_1"), observed.map { it.signalId })
         } finally {
             server.stop(0)
@@ -199,7 +200,6 @@ class CloudProactiveRepositoryTest {
             val repo = CloudProactiveRepository(
                 dao = dao,
                 gateway = null,
-                tokenVault = null,
                 clientProviderOverride = { client },
                 connectionProviderOverride = { conn },
                 generationProviderOverride = { gen.get() },
@@ -208,14 +208,14 @@ class CloudProactiveRepositoryTest {
             )
 
             // applied=false still counts as success and updates local feedback_state.
-            assertTrue(repo.sendFeedback("gw-1", "sig_fb_1", ProactiveFeedbackAction.SNOOZE, snoozeMinutes = 60))
-            assertEquals("snooze", dao.findBySignal("gw-1", "sig_fb_1")?.feedbackState)
+            assertTrue(repo.sendFeedback("gw-1", "sig_fb_1", ProactiveFeedbackAction.SNOOZE, deviceId = "dev-1", snoozeMinutes = 60))
+            assertEquals("snooze", dao.findBySignal("gw-1", "dev-1", "sig_fb_1")?.feedbackState)
 
-            assertTrue(repo.sendFeedback("gw-1", "sig_fb_1", ProactiveFeedbackAction.MUTE_TOPIC, muteHours = 168))
-            assertEquals("mute_topic", dao.findBySignal("gw-1", "sig_fb_1")?.feedbackState)
+            assertTrue(repo.sendFeedback("gw-1", "sig_fb_1", ProactiveFeedbackAction.MUTE_TOPIC, deviceId = "dev-1", muteHours = 168))
+            assertEquals("mute_topic", dao.findBySignal("gw-1", "dev-1", "sig_fb_1")?.feedbackState)
 
             // Gateway mismatch is rejected without hitting network.
-            assertFalse(repo.sendFeedback("gw-other", "sig_fb_1", ProactiveFeedbackAction.DISMISS))
+            assertFalse(repo.sendFeedback("gw-other", "sig_fb_1", ProactiveFeedbackAction.DISMISS, deviceId = "dev-1"))
             assertEquals(2, feedbackCalls.size)
         } finally {
             server.stop(0)
@@ -262,7 +262,6 @@ class CloudProactiveRepositoryTest {
             val repo = CloudProactiveRepository(
                 dao = dao,
                 gateway = null,
-                tokenVault = null,
                 clientProviderOverride = { client },
                 connectionProviderOverride = { conn },
                 generationProviderOverride = { 1L },
@@ -280,7 +279,7 @@ class CloudProactiveRepositoryTest {
             acceptSend = false
             assertFalse(repo.act(promptCard))
             assertTrue(feedbackActions.isEmpty())
-            assertNull(dao.findBySignal("gw-1", "sig_prompt")?.feedbackState)
+            assertNull(dao.findBySignal("gw-1", "dev-1", "sig_prompt")?.feedbackState)
 
             // 2. Send accepted with checkPrompt -> sends exact checkPrompt and reports replied.
             acceptSend = true
@@ -288,13 +287,13 @@ class CloudProactiveRepositoryTest {
             assertEquals("conv-cloud-main" to "请直接帮我 review PR #42", sentMessages.last())
             assertEquals(1, feedbackActions.size)
             assertTrue(feedbackActions.last().contains("\"replied\""))
-            assertEquals("replied", dao.findBySignal("gw-1", "sig_prompt")?.feedbackState)
+            assertEquals("replied", dao.findBySignal("gw-1", "dev-1", "sig_prompt")?.feedbackState)
 
             // 3. Send accepted without checkPrompt -> uses frozen §4.4 template truncated to 600 chars.
             assertTrue(repo.act(fallbackCard))
             val expectedFallback = "关于这条主动提醒「版本发布」，请帮我处理：\n\n" + "X".repeat(600)
             assertEquals("conv-cloud-main" to expectedFallback, sentMessages.last())
-            assertEquals("replied", dao.findBySignal("gw-1", "sig_fallback")?.feedbackState)
+            assertEquals("replied", dao.findBySignal("gw-1", "dev-1", "sig_fallback")?.feedbackState)
         } finally {
             server.stop(0)
         }
@@ -309,13 +308,13 @@ class CloudProactiveRepositoryTest {
         assertNull(inbox.pending.value)
 
         inbox.submit("wt_valid_1")
-        assertEquals("wt_valid_1", inbox.pending.value)
+        assertEquals("wt_valid_1", inbox.pending.value?.signalId)
 
         // Consuming a different id keeps the pending signal intact.
-        inbox.consume("other_id")
-        assertEquals("wt_valid_1", inbox.pending.value)
+        inbox.consume(app.amber.feature.macgateway.ProactiveDetailRequest("other_id", null, null))
+        assertEquals("wt_valid_1", inbox.pending.value?.signalId)
 
-        inbox.consume("wt_valid_1")
+        inbox.consume(app.amber.feature.macgateway.ProactiveDetailRequest("wt_valid_1", null, null))
         assertNull(inbox.pending.value)
     }
 }

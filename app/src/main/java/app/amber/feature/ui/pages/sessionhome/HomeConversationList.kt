@@ -19,6 +19,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
@@ -86,7 +87,7 @@ internal fun LazyListScope.homeConversationItems(
             }
         } else if (!isRefreshLoading && refreshError == null && conversations.itemCount == 0) {
             item(key = "home_empty") {
-                HomeEmptyState(modifier = Modifier.padding(vertical = 56.dp))
+                HomeEmptyState(modifier = Modifier.padding(vertical = 56.dp).testTag("home-session-empty"))
             }
         }
 
@@ -246,6 +247,7 @@ private fun HomeConversationHeader() {
         )
         Text(
             text = stringResource(R.string.amber_redesign_conversations),
+            modifier = Modifier.testTag("home-conversations-header"),
             fontFamily = homeChromeFontFamily(JetBrainsMonoFamily),
             fontSize = 11.sp,
             lineHeight = 14.sp,

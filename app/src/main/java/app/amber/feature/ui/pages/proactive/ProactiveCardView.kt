@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.dp
 import app.amber.agent.R
 import app.amber.feature.macgateway.CloudProactiveRepository
 import app.amber.feature.macgateway.ProactiveCard
-import app.amber.feature.macgateway.ProactiveDeepLinkInbox
+import app.amber.feature.macgateway.ProactiveDetailRequest
 import app.amber.feature.macgateway.ProactiveFeedbackAction
 import app.amber.feature.ui.pages.chat.LocalChatTheme
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -204,7 +204,6 @@ internal fun TimelineProactiveCardItem(
 ) {
     val koin = remember { GlobalContext.getOrNull() }
     val repository = remember(koin) { koin?.getOrNull<CloudProactiveRepository>() }
-    val deepLinkInbox = remember(koin) { koin?.getOrNull<ProactiveDeepLinkInbox>() }
     val hostDetailOpener = LocalProactiveCardDetailOpener.current
     var localDetailSignalId by remember(card.signalId) { mutableStateOf<String?>(null) }
 
@@ -213,11 +212,7 @@ internal fun TimelineProactiveCardItem(
         modifier = modifier,
         maxBodyLines = 6,
         onOpenDetail = { selected ->
-            when {
-                hostDetailOpener != null -> hostDetailOpener(selected.signalId)
-                deepLinkInbox != null -> deepLinkInbox.submit(selected.signalId)
-                else -> localDetailSignalId = selected.signalId
-            }
+            if (hostDetailOpener != null) hostDetailOpener(selected.signalId) else localDetailSignalId = selected.signalId
         },
         onAct = { target ->
             repository?.act(target, conversationId = conversationId) ?: false
@@ -225,6 +220,7 @@ internal fun TimelineProactiveCardItem(
         onSnooze = { target ->
             repository?.sendFeedback(
                 gatewayId = target.gatewayId,
+                deviceId = target.deviceId,
                 signalId = target.signalId,
                 action = ProactiveFeedbackAction.SNOOZE,
                 snoozeMinutes = DEFAULT_SNOOZE_MINUTES,
@@ -233,6 +229,7 @@ internal fun TimelineProactiveCardItem(
         onMute = { target ->
             repository?.sendFeedback(
                 gatewayId = target.gatewayId,
+                deviceId = target.deviceId,
                 signalId = target.signalId,
                 action = ProactiveFeedbackAction.MUTE_TOPIC,
                 muteHours = DEFAULT_MUTE_HOURS,
@@ -243,7 +240,7 @@ internal fun TimelineProactiveCardItem(
     val fallbackSignal = localDetailSignalId
     if (fallbackSignal != null && repository != null) {
         ProactiveDetailSheet(
-            signalId = fallbackSignal,
+            request = ProactiveDetailRequest(fallbackSignal, card.gatewayId, card.deviceId),
             conversationId = conversationId,
             repository = repository,
             onDismiss = { localDetailSignalId = null },

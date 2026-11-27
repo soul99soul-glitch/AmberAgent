@@ -23,4 +23,5 @@
     <string name="setting_display_launch_start_mode_last_session_desc">Return directly to the last visited chat</string>
     <string name="setting_display_launch_start_mode_new_chat">New chat</string>
     <string name="setting_display_launch_start_mode_new_chat_desc">Start a fresh conversation on launch</string>
+    <string name="personal_agent_host_cloud_unsupported">This gateway does not support cloud chat.</string>
 </resources>

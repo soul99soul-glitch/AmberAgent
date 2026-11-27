@@ -6,6 +6,8 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.automation.PhoneAutomationSessionState
 import app.amber.core.automation.PhoneTakeoverPhase
+import app.amber.feature.runtime.argsDigest
+import app.amber.feature.runtime.requiresIndividualScreenApproval
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
 import kotlinx.serialization.json.contentOrNull
@@ -24,6 +26,7 @@ data class AgentBubbleUiState(
     /** 需回到 App 内查看完整参数后审批（SSH 写工具 / 屏幕 L3 动作工具）：气泡隐藏直接“同意”。 */
     val requiresInAppApproval: Boolean = false,
     val approvalToolCallId: String? = null,
+    val approvalArgsDigest: String? = null,
     val approvalToolTitle: String = "",
     /** 当前正在执行的步骤标题（仅运行中的工具），空串 = 无步骤信息。 */
     val stepTitle: String = "",
@@ -171,8 +174,9 @@ object AgentBubbleReducer {
             conversationId = pickedConversationId,
             waitingApproval = pendingTool != null,
             waitingAskUser = pendingTool != null && pendingTool.toolName == ASK_USER_TOOL,
-            requiresInAppApproval = pendingTool != null && requiresInAppApproval(pendingTool.toolName),
+            requiresInAppApproval = pendingTool != null && requiresInAppApproval(pendingTool),
             approvalToolCallId = pendingTool?.toolCallId,
+            approvalArgsDigest = pendingTool?.let { argsDigest(it.input) },
             approvalToolTitle = pendingTool?.toolName.orEmpty(),
             stepTitle = runningStepTitle(activity?.takeIf { it.conversationId == pickedConversationId }),
             stepRunning = shouldPassthroughTouch,
@@ -189,6 +193,9 @@ object AgentBubbleReducer {
     /**
      * SSH 写工具与无障碍屏幕 L3 动作工具必须在 App 内审批，禁止在悬浮气泡中直接批准。
      */
+    fun requiresInAppApproval(tool: UIMessagePart.Tool): Boolean =
+        tool.requiresIndividualScreenApproval() || requiresInAppApproval(tool.toolName)
+
     fun requiresInAppApproval(toolName: String?): Boolean =
         !toolName.isNullOrBlank() && (
             toolName in app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES ||

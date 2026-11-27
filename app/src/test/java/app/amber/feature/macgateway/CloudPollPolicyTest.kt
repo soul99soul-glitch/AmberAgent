@@ -24,6 +24,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -170,6 +171,54 @@ class CloudPollPolicyTest {
         } finally {
             server.stop(0)
             ioScope.cancel()
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun onlyAnEvents404DisablesCloudAndRecoveryDoesNotSwitchHost() = runBlocking {
+        val tempDir = Files.createTempDirectory("macgw-capability").toFile()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val code = AtomicInteger(503)
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/v2/dialogue/events") { exchange ->
+            val result = code.get()
+            val body = (if (result == 200) """{"items":[],"nextCursor":0}""" else "{}").toByteArray()
+            exchange.sendResponseHeaders(result, body.size.toLong())
+            exchange.responseBody.use { it.write(body) }
+        }
+        server.start()
+        try {
+            val data = PreferenceDataStoreFactory.create(scope = scope) { File(tempDir, "mac_gateway.preferences_pb") }
+            val connection = MacGatewayConnection("paired", "Gateway", listOf("127.0.0.1"), server.address.port, "fp", "device")
+            val secrets = SecretStore(MemoryBackend(), PrefixCipher())
+            GatewayTokenVault(secrets).write(connection.gatewayId, "credential")
+            data.edit { it[stringPreferencesKey("connection")] = MacGatewayJson.encodeToString(MacGatewayConnection.serializer(), connection) }
+            val repo = MacGatewayRepository(
+                context = ContextWrapper(null), appScope = scope, dataStore = data,
+                secretStore = secrets, foregroundFlow = MutableStateFlow(false),
+                clientFactory = { conn, token -> MacGatewayClient(conn.addrs, conn.port, conn.fingerprint, token, scheme = "http") },
+            )
+            repo.pollCloudDialogueOnce()
+            assertNull(repo.state.value.cloudDialogueSupported)
+            assertTrue(repo.state.value.canSelectCloud)
+
+            code.set(404)
+            repo.setCloudDialogueEnabled(true)
+            assertEquals(false, repo.state.value.cloudDialogueSupported)
+            assertFalse(repo.state.value.canSelectCloud)
+            assertFalse(repo.state.value.isCloudDialogueActive)
+
+            code.set(200)
+            repo.pollCloudDialogueOnce()
+            assertEquals(true, repo.state.value.cloudDialogueSupported)
+            assertTrue(repo.state.value.canSelectCloud)
+            assertFalse(repo.state.value.isCloudDialogueActive)
+            repo.setCloudDialogueEnabled(true)
+            assertTrue(repo.state.value.isCloudDialogueActive)
+        } finally {
+            server.stop(0)
+            scope.cancel()
             tempDir.deleteRecursively()
         }
     }

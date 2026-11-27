@@ -35,6 +35,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -81,6 +82,13 @@ import org.koin.androidx.compose.koinViewModel
 fun CloudProactiveCenterPage(
     vm: CloudProactiveCenterVM = koinViewModel(),
 ) {
+    val session by vm.session.collectAsStateWithLifecycle()
+    key(session) { CloudProactiveCenterContent(session) }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CloudProactiveCenterContent(vm: ProactiveCenterSession) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -437,7 +445,7 @@ private fun WakeupsSection(
         }
         wakeups.forEach { wakeup ->
             val busy = "wakeup:${wakeup.id}" in mutatingKeys
-            val sourceLabel = when (CloudProactiveCenterVM.classifyWakeupSource(wakeup.kind)) {
+            val sourceLabel = when (ProactiveCenterSession.classifyWakeupSource(wakeup.kind)) {
                 WakeupSourceKind.COMMITMENT -> stringResource(R.string.proactive_center_wakeup_source_commitment)
                 WakeupSourceKind.SNOOZE -> stringResource(R.string.proactive_center_wakeup_source_snooze)
                 WakeupSourceKind.AGENT -> stringResource(R.string.proactive_center_wakeup_source_agent)
@@ -595,7 +603,7 @@ private fun RestraintAndPulseSection(
             val capBusy = "restraint:dailyMaxPushes" in mutatingKeys
             OutlinedButton(
                 onClick = { onDailyMaxPushesChanged(restraint.dailyMaxPushes - 1) },
-                enabled = !capBusy && restraint.dailyMaxPushes > CloudProactiveCenterVM.MIN_DAILY_MAX_PUSHES,
+                enabled = !capBusy && restraint.dailyMaxPushes > ProactiveCenterSession.MIN_DAILY_MAX_PUSHES,
                 modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp),
             ) {
@@ -608,7 +616,7 @@ private fun RestraintAndPulseSection(
             )
             OutlinedButton(
                 onClick = { onDailyMaxPushesChanged(restraint.dailyMaxPushes + 1) },
-                enabled = !capBusy && restraint.dailyMaxPushes < CloudProactiveCenterVM.MAX_DAILY_MAX_PUSHES,
+                enabled = !capBusy && restraint.dailyMaxPushes < ProactiveCenterSession.MAX_DAILY_MAX_PUSHES,
                 modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp),
             ) {

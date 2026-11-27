@@ -277,6 +277,7 @@ data class CloudDialoguePersistedState(
     val topicToConversation: Map<String, String> = emptyMap(),
     val tasks: List<CloudTaskSession> = emptyList(),
     val submissions: List<CloudDialogueSubmission> = emptyList(),
+    @kotlinx.serialization.Transient val connectionGeneration: Long? = null,
 )
 
 data class CloudDialogueUiState(
@@ -315,9 +316,10 @@ class CloudDialogueCoordinator(
     private val clientProvider: suspend () -> MacGatewayClient?,
     private val timelineSink: CloudDialogueTimelineSink,
     private val persistState: suspend (CloudDialoguePersistedState) -> Unit,
-    private val onUnauthorized: suspend () -> Unit = {},
+    private val onUnauthorized: suspend (MacGatewayClient) -> Unit = {},
+    private val onDialogueSupport: suspend (MacGatewayClient, Boolean) -> Unit = { _, _ -> },
     private val onStateChanged: (CloudDialogueUiState) -> Unit = {},
-    private val onSoulRevision: suspend (Long) -> Unit = {},
+    private val onSoulRevision: suspend (Long, MacGatewayClient) -> Unit = { _, _ -> },
     private val persistScope: CoroutineScope? = null,
     private val persistCoalesceWindowMs: Long = DEFAULT_PERSIST_COALESCE_WINDOW_MS,
     private val maxSettledTasks: Int = DEFAULT_MAX_SETTLED_TASKS,
@@ -387,28 +389,34 @@ class CloudDialogueCoordinator(
     private var lastError: String? = null
     private var lastMonotonicTimestampMs: Long = 0L
 
-    private fun effectiveProactiveCardStore(): (suspend (ProactiveCardEntity) -> Unit)? =
-        onProactiveCard ?: defaultProactiveCardStore.get()
-
-    private fun effectiveConnectionGeneration(): Long? =
-        (connectionGenerationProvider ?: defaultConnectionGenerationProvider.get())?.invoke()
+    private var restoredGeneration: Long? = null
 
     private fun capturePollGenerationLocked(): PollGeneration =
         PollGeneration(
             sessionEpoch = sessionEpoch.get(),
-            externalGeneration = effectiveConnectionGeneration(),
+            externalGeneration = restoredGeneration,
             gatewayId = gatewayId,
             deviceId = deviceId,
         )
 
     private fun isGenerationCurrentFast(captured: PollGeneration): Boolean =
         sessionEpoch.get() == captured.sessionEpoch &&
-            effectiveConnectionGeneration() == captured.externalGeneration
+            connectionGenerationProvider?.invoke() == captured.externalGeneration
 
     private fun isGenerationCurrentLocked(captured: PollGeneration): Boolean =
         isGenerationCurrentFast(captured) &&
             gatewayId == captured.gatewayId &&
             deviceId == captured.deviceId
+
+    private fun captureSendGenerationLocked(expected: Long?): PollGeneration {
+        val current = capturePollGenerationLocked()
+        if (expected != null && current.externalGeneration != expected) throw MacGatewayException.Server("gateway_pairing_changed")
+        return current
+    }
+
+    private fun requireCurrentSession(generation: PollGeneration) {
+        if (!isGenerationCurrentFast(generation)) throw MacGatewayException.Server("gateway_pairing_changed")
+    }
 
     private fun nextMonotonicTimestampLocked(): Long {
         val next = maxOf(nowMs(), lastMonotonicTimestampMs + 1L)
@@ -420,8 +428,13 @@ class CloudDialogueCoordinator(
         enabled: Boolean,
         connection: MacGatewayConnection?,
         persisted: CloudDialoguePersistedState?,
+        publishPairing: () -> Unit = {},
     ) = mutex.withLock {
+        // Finish applying the old session's Room/timeline writes before publishing the new pairing.
+        publishPairing()
         sessionEpoch.incrementAndGet()
+        restoredGeneration = connectionGenerationProvider?.invoke()
+        activeConversationId = null
         latestPendingPersist.set(null)
         cancelCoalescedPersist()
         this.enabled = enabled
@@ -483,10 +496,14 @@ class CloudDialogueCoordinator(
         conversationId: String,
         text: String,
         requestId: String,
+        expectedConnectionGeneration: Long? = null,
+        onLocalEcho: () -> Unit = {},
     ): CloudDialogueSubmission {
+        val generation = mutex.withLock { captureSendGenerationLocked(expectedConnectionGeneration) }
         val client = clientProvider() ?: throw MacGatewayException.Unreachable()
         val now = System.currentTimeMillis()
         val (initialSubmission, initialPending) = mutex.withLock {
+            requireCurrentSession(generation)
             activeConversationId = conversationId
             val existing = submissionsByRequestId[requestId]
             val echoed = existing?.localEchoed == true
@@ -502,23 +519,24 @@ class CloudDialogueCoordinator(
                 updatedAtMs = now,
                 error = null,
             )
+            if (!echoed) timelineSink.appendLocalUserMessage(conversationId, text, sub.eventId, requestId)
             submissionsByRequestId[requestId] = sub
             val pending = capturePersistLocked()
             publishLocked()
-            if (!echoed) {
-                timelineSink.appendUserMessage(conversationId, text, eventId = sub.eventId)
-            }
             sub to pending
         }
+        onLocalEcho()
         commitPersist(initialPending, immediate = true)
 
         return try {
+            requireCurrentSession(generation)
             val receipt = client.messages(
                 requestId = initialSubmission.requestId,
                 text = initialSubmission.text,
                 conversationId = conversationId,
             )
             val (updated, receiptPending) = mutex.withLock {
+                requireCurrentSession(generation)
                 localEchoedEventIds.add(receipt.eventId)
                 val resolvedConversation = receipt.conversationId?.takeIf { it.isNotBlank() } ?: conversationId
                 topicToConversation[receipt.topicId] = resolvedConversation
@@ -543,7 +561,7 @@ class CloudDialogueCoordinator(
             commitPersist(receiptPending, immediate = true)
             updated
         } catch (error: Throwable) {
-            handleRequestFailure(requestId, error)
+            handleRequestFailure(requestId, error, client, generation)
             throw error
         }
     }
@@ -553,15 +571,20 @@ class CloudDialogueCoordinator(
         workItemId: String,
         text: String,
         requestId: String,
+        expectedConnectionGeneration: Long? = null,
+        onLocalEcho: () -> Unit = {},
     ): CloudDialogueSubmission {
+        val generation = mutex.withLock { captureSendGenerationLocked(expectedConnectionGeneration) }
         val client = clientProvider() ?: throw MacGatewayException.Unreachable()
         val now = System.currentTimeMillis()
         val (initialSubmission, initialPending) = mutex.withLock {
+            requireCurrentSession(generation)
             activeConversationId = conversationId
             val existing = submissionsByRequestId[requestId]
             val echoed = existing?.localEchoed == true
             val task = tasksById[workItemId]
             val targetConv = task?.conversationId ?: conversationId
+            if (expectedConnectionGeneration != null && targetConv != conversationId) throw MacGatewayException.Conflict("task_conversation_changed")
             val sub = (existing ?: CloudDialogueSubmission(
                 requestId = requestId,
                 topicId = task?.topicId,
@@ -577,20 +600,20 @@ class CloudDialogueCoordinator(
                 updatedAtMs = now,
                 error = null,
             )
+            if (!echoed) timelineSink.appendLocalUserMessage(targetConv, text, sub.eventId, requestId)
             submissionsByRequestId[requestId] = sub
             if (selectedFollowupWorkItemId == workItemId) {
                 selectedFollowupWorkItemId = null
             }
             val pending = capturePersistLocked()
             publishLocked()
-            if (!echoed) {
-                timelineSink.appendUserMessage(targetConv, text, eventId = sub.eventId)
-            }
             sub to pending
         }
+        onLocalEcho()
         commitPersist(initialPending, immediate = true)
 
         return try {
+            requireCurrentSession(generation)
             val receipt = client.inputs(
                 workItemId = workItemId,
                 requestId = initialSubmission.requestId,
@@ -598,6 +621,7 @@ class CloudDialogueCoordinator(
                 conversationId = initialSubmission.conversationId,
             )
             val (updated, receiptPending) = mutex.withLock {
+                requireCurrentSession(generation)
                 localEchoedEventIds.add(receipt.eventId)
                 val resolvedConversation = receipt.conversationId?.takeIf { it.isNotBlank() }
                     ?: initialSubmission.conversationId
@@ -623,7 +647,7 @@ class CloudDialogueCoordinator(
             commitPersist(receiptPending, immediate = true)
             updated
         } catch (error: Throwable) {
-            handleRequestFailure(requestId, error)
+            handleRequestFailure(requestId, error, client, generation)
             throw error
         }
     }
@@ -632,9 +656,11 @@ class CloudDialogueCoordinator(
         workItemId: String,
         requestId: String,
     ): CloudDialogueSubmission {
+        val generation = mutex.withLock { capturePollGenerationLocked() }
         val client = clientProvider() ?: throw MacGatewayException.Unreachable()
         val now = System.currentTimeMillis()
         val (initialSubmission, initialPending) = mutex.withLock {
+            requireCurrentSession(generation)
             val task = tasksById[workItemId]
             val targetConv = task?.conversationId ?: activeConversationId.orEmpty()
             val existing = submissionsByRequestId[requestId]
@@ -664,12 +690,14 @@ class CloudDialogueCoordinator(
         commitPersist(initialPending, immediate = true)
 
         return try {
+            requireCurrentSession(generation)
             val receipt = client.stop(
                 workItemId = workItemId,
                 requestId = initialSubmission.requestId,
                 conversationId = initialSubmission.conversationId.takeIf { it.isNotBlank() },
             )
             val (updated, receiptPending) = mutex.withLock {
+                requireCurrentSession(generation)
                 localEchoedEventIds.add(receipt.eventId)
                 val next = (submissionsByRequestId[requestId] ?: initialSubmission).withReceipt(receipt)
                 submissionsByRequestId[requestId] = next
@@ -681,7 +709,7 @@ class CloudDialogueCoordinator(
             commitPersist(receiptPending, immediate = true)
             updated
         } catch (error: Throwable) {
-            handleRequestFailure(requestId, error)
+            handleRequestFailure(requestId, error, client, generation)
             throw error
         }
     }
@@ -751,23 +779,26 @@ class CloudDialogueCoordinator(
     }
 
     suspend fun pollOnce(reportFailure: Boolean = false) {
-        val client = clientProvider() ?: if (reportFailure) throw MacGatewayException.Unreachable() else return
         val (currentCursor, boundConversationId, pollGen) = mutex.withLock {
             Triple(cursor, activeConversationId, capturePollGenerationLocked())
         }
+        val client = clientProvider() ?: if (reportFailure) throw MacGatewayException.Unreachable() else return
+        if (!isGenerationCurrentFast(pollGen)) return
         try {
-            val page = client.events(
-                after = currentCursor,
-                limit = 100,
-                conversationId = boundConversationId,
-            )
+            val page = try {
+                client.events(after = currentCursor, limit = 100, conversationId = boundConversationId)
+            } catch (missing: MacGatewayException.NotFound) {
+                if (isGenerationCurrentFast(pollGen)) onDialogueSupport(client, false)
+                throw missing
+            }
             if (!isGenerationCurrentFast(pollGen)) return
+            onDialogueSupport(client, true)
             val hasOnlyProactiveItems = page.items.isNotEmpty() &&
                 page.items.all { it.kind == PROACTIVE_MESSAGE_KIND }
             if (!hasOnlyProactiveItems) {
                 page.soulRevision?.let { rev ->
                     if (isGenerationCurrentFast(pollGen)) {
-                        runCatching { onSoulRevision(rev) }
+                        runCatching { onSoulRevision(rev, client) }
                     }
                 }
             }
@@ -946,7 +977,7 @@ class CloudDialogueCoordinator(
             }
         } catch (error: MacGatewayException.Unauthorized) {
             if (isGenerationCurrentFast(pollGen)) {
-                onUnauthorized()
+                onUnauthorized(client)
                 if (reportFailure) throw error
             }
         } catch (error: MacGatewayException) {
@@ -1231,17 +1262,14 @@ class CloudDialogueCoordinator(
             notifiedAt = null,
             feedbackState = null,
         )
-        val store = effectiveProactiveCardStore()
-        if (store != null) {
-            if (!isGenerationCurrentLocked(pollGen)) return ApplyEventOutcome.StaleGeneration
-            try {
-                store(entity)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                onDiagnostic("Failed to persist proactive_message seq=${event.seq} id=${event.id}: ${error.javaClass.simpleName}")
-                return ApplyEventOutcome.ProactivePersistFailed(error)
-            }
+        if (!isGenerationCurrentLocked(pollGen)) return ApplyEventOutcome.StaleGeneration
+        try {
+            checkNotNull(onProactiveCard) { "Proactive card storage is unavailable" }(entity)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            onDiagnostic("Failed to persist proactive_message seq=${event.seq}: ${error.javaClass.simpleName}")
+            return ApplyEventOutcome.ProactivePersistFailed(error)
         }
         return ApplyEventOutcome.AppliedProactive
     }
@@ -1344,12 +1372,18 @@ class CloudDialogueCoordinator(
         return legacyId?.takeIf(String::isNotBlank)?.let(::findInput)
     }
 
-    private suspend fun handleRequestFailure(requestId: String, error: Throwable) {
+    private suspend fun handleRequestFailure(
+        requestId: String,
+        error: Throwable,
+        client: MacGatewayClient,
+        generation: PollGeneration,
+    ) {
         if (error is MacGatewayException.Unauthorized) {
-            onUnauthorized()
+            onUnauthorized(client)
             return
         }
         val pending = mutex.withLock {
+            if (!isGenerationCurrentLocked(generation)) return
             val existing = submissionsByRequestId[requestId]
             if (existing != null) {
                 submissionsByRequestId[requestId] = existing.copy(
@@ -1490,6 +1524,7 @@ class CloudDialogueCoordinator(
             topicToConversation = topicToConversation.toMap(),
             tasks = tasksById.values.toList(),
             submissions = submissionsByRequestId.values.toList(),
+            connectionGeneration = restoredGeneration,
         )
         val pending = PendingPersist(
             sessionEpoch = sessionEpoch.get(),
@@ -1566,19 +1601,6 @@ class CloudDialogueCoordinator(
         private const val DEFAULT_MAX_SETTLED_TASKS = 100
         private const val DEFAULT_MAX_SETTLED_SUBMISSIONS = 200
         private const val DEFAULT_MAX_TOPIC_MAPPINGS = 200
-
-        private val defaultProactiveCardStore =
-            AtomicReference<(suspend (ProactiveCardEntity) -> Unit)?>(null)
-        private val defaultConnectionGenerationProvider =
-            AtomicReference<(() -> Long)?>(null)
-
-        fun setDefaultProactiveCardStore(store: (suspend (ProactiveCardEntity) -> Unit)?) {
-            defaultProactiveCardStore.set(store)
-        }
-
-        fun setDefaultConnectionGenerationProvider(provider: (() -> Long)?) {
-            defaultConnectionGenerationProvider.set(provider)
-        }
 
         private fun normalizedTitle(raw: String?, fallback: String): String {
             val line = raw

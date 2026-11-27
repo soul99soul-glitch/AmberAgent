@@ -61,7 +61,8 @@ class AmberDisplayUserService internal constructor(
         val generation: Long,
         val displayId: Int,
         val handle: VirtualDisplayHandle,
-        var boundPackageName: String? = null,
+        val authorizedPackageName: String,
+        var launched: Boolean = false,
     )
 
     override fun uid(): Int = backend.uid()
@@ -80,6 +81,7 @@ class AmberDisplayUserService internal constructor(
 
     override fun createDisplay(
         runId: String?,
+        authorizedPackageName: String?,
         generation: Long,
         width: Int,
         height: Int,
@@ -97,6 +99,9 @@ class AmberDisplayUserService internal constructor(
         }
         if (runId.isNullOrBlank() || generation <= 0L || width <= 0 || height <= 0 || dpi <= 0 || surface == null || !surface.isValid) {
             return ERR_INVALID_ARGS
+        }
+        if (authorizedPackageName == null || !isAllowedLaunchTarget(authorizedPackageName)) {
+            return ERR_INVALID_PACKAGE
         }
         if (!caps.secondaryActivities) {
             return ERR_NO_SECONDARY_ACTIVITIES
@@ -146,6 +151,7 @@ class AmberDisplayUserService internal constructor(
                         generation = generation,
                         displayId = displayId,
                         handle = created.handle,
+                        authorizedPackageName = authorizedPackageName,
                     )
                     displayId
                 }
@@ -163,34 +169,32 @@ class AmberDisplayUserService internal constructor(
         if (active.generation != generation || active.displayId != displayId) {
             return ERR_STALE_GENERATION
         }
-        val target = packageName?.trim().orEmpty()
+        val target = packageName.orEmpty()
         if (target.isEmpty() || !isAllowedLaunchTarget(target)) {
             return ERR_INVALID_PACKAGE
         }
-        val existingBound = active.boundPackageName
-        if (existingBound != null && existingBound != target) {
+        if (target != active.authorizedPackageName) {
             return ERR_PACKAGE_MISMATCH
         }
-        val launched = backend.launchPackageOnDisplay(displayId, target)
-        if (launched) {
-            active.boundPackageName = target
+        active.launched = backend.launchPackageOnDisplay(displayId, target)
+        if (active.launched) {
             0
         } else {
             ERR_LAUNCH_FAILED
         }
     }
 
-    override fun injectMotion(generation: Long, displayId: Int, event: MotionEvent?): Boolean {
+    override fun injectMotion(generation: Long, displayId: Int, observedPackageName: String?, event: MotionEvent?): Boolean {
         if (event == null) return false
-        return injectInputInternal(generation, displayId, event)
+        return injectInputInternal(generation, displayId, observedPackageName, event)
     }
 
-    override fun injectKey(generation: Long, displayId: Int, event: KeyEvent?): Boolean {
+    override fun injectKey(generation: Long, displayId: Int, observedPackageName: String?, event: KeyEvent?): Boolean {
         if (event == null) return false
-        return injectInputInternal(generation, displayId, event)
+        return injectInputInternal(generation, displayId, observedPackageName, event)
     }
 
-    private fun injectInputInternal(generation: Long, displayId: Int, event: InputEvent): Boolean = synchronized(lock) {
+    private fun injectInputInternal(generation: Long, displayId: Int, observedPackageName: String?, event: InputEvent): Boolean = synchronized(lock) {
         if (destroyed) return false
         if (backend.uid() != SHELL_UID) return false
         if (displayId <= Display.DEFAULT_DISPLAY) return false
@@ -198,6 +202,10 @@ class AmberDisplayUserService internal constructor(
         if (active.generation != generation || active.displayId != displayId) {
             return false
         }
+        val target = active.authorizedPackageName
+        // The non-exported probe Activity can also be launched by its own app UID.
+        if (!active.launched && target != probeTargetToken(app.amber.agent.BuildConfig.APPLICATION_ID)) return false
+        if (observedPackageName != target.removeSuffix(PROBE_TARGET_SUFFIX)) return false
         // Mandatory setDisplayId + immediate readback verification before injection.
         val verifiedDisplayId = backend.setAndReadBackDisplayId(event, displayId)
         if (verifiedDisplayId != displayId || verifiedDisplayId <= Display.DEFAULT_DISPLAY) {
@@ -210,7 +218,7 @@ class AmberDisplayUserService internal constructor(
     override fun release(generation: Long, reason: String?) {
         synchronized(lock) {
             val active = activeDisplay ?: return
-            if (generation == 0L || active.generation == generation) {
+            if (active.generation == generation) {
                 releaseActiveLocked(reason.orEmpty())
             }
         }
@@ -271,12 +279,7 @@ class AmberDisplayUserService internal constructor(
         fun probeTargetToken(appPackageName: String): String = "$appPackageName$PROBE_TARGET_SUFFIX"
 
         internal fun isAllowedLaunchTarget(target: String): Boolean {
-            val basePackage = if (target.endsWith(PROBE_TARGET_SUFFIX)) {
-                target.removeSuffix(PROBE_TARGET_SUFFIX)
-            } else {
-                target
-            }
-            return PACKAGE_NAME_REGEX.matches(basePackage)
+            return PACKAGE_NAME_REGEX.matches(target) || target == probeTargetToken(app.amber.agent.BuildConfig.APPLICATION_ID)
         }
 
         fun describeError(code: Int): String = when (code) {

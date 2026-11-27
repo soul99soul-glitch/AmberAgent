@@ -50,6 +50,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.unit.IntOffset
@@ -104,7 +107,6 @@ import app.amber.core.utils.openUrl
 import app.amber.feature.ui.pages.novel.NovelLaunchCurtain
 import app.amber.feature.board.worker.BoardNotifier
 import app.amber.feature.macgateway.ProactiveDeepLinkInbox
-import app.amber.feature.macgateway.ProactiveForegroundStageTracker
 import app.amber.feature.runtime.RunTerminalStore
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.feature.ui.theme.AmberAgentTheme
@@ -165,6 +167,9 @@ class RouteActivity : FragmentActivity() {
         const val EXTRA_OPEN_CHAT_PROMPT = "openChatPrompt"
         const val EXTRA_OPEN_LIVE_COMPANION = "openLiveCompanion"
         private const val STATE_SHARE_INTENT_CONSUMED = "shareIntentConsumed"
+        private const val STATE_DETAIL_SIGNAL = "pendingProactiveSignal"
+        private const val STATE_DETAIL_GATEWAY = "pendingProactiveGateway"
+        private const val STATE_DETAIL_DEVICE = "pendingProactiveDevice"
         private const val STATE_PROACTIVE_DEEP_LINK_CONSUMED = "proactiveDeepLinkConsumed"
     }
 
@@ -214,6 +219,10 @@ class RouteActivity : FragmentActivity() {
         if (StandaloneSurfaces.current != StandaloneSurfaces.NOVEL &&
             StandaloneSurfaces.current != StandaloneSurfaces.DEEP_READ
         ) {
+            savedInstanceState?.getString(STATE_DETAIL_SIGNAL)?.let { pending ->
+                proactiveDeepLinkInbox.submit(pending, savedInstanceState.getString(STATE_DETAIL_GATEWAY),
+                    savedInstanceState.getString(STATE_DETAIL_DEVICE))
+            }
             val coldSignalId = consumeProactiveDeepLink(
                 intent = intent,
                 inbox = proactiveDeepLinkInbox,
@@ -397,19 +406,14 @@ class RouteActivity : FragmentActivity() {
         }
     }
 
-    override fun onStart() {
-        super.onStart()
-        ProactiveForegroundStageTracker.onActivityForegroundChanged(true)
-    }
-
-    override fun onStop() {
-        ProactiveForegroundStageTracker.onActivityForegroundChanged(false)
-        super.onStop()
-    }
-
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean(STATE_SHARE_INTENT_CONSUMED, shareIntentConsumed)
         outState.putBoolean(STATE_PROACTIVE_DEEP_LINK_CONSUMED, proactiveDeepLinkConsumed)
+        proactiveDeepLinkInbox.pending.value?.let { request ->
+            outState.putString(STATE_DETAIL_SIGNAL, request.signalId)
+            outState.putString(STATE_DETAIL_GATEWAY, request.gatewayId)
+            outState.putString(STATE_DETAIL_DEVICE, request.deviceId)
+        }
         super.onSaveInstanceState(outState)
     }
 
@@ -424,54 +428,26 @@ class RouteActivity : FragmentActivity() {
         intent.data?.takeIf { it.scheme == "amberagent" && it.host == "oauth" }?.let { uri ->
             oauthCallbackDispatcher.dispatch(uri)
         }
-        if (StandaloneSurfaces.current != StandaloneSurfaces.NOVEL &&
-            StandaloneSurfaces.current != StandaloneSurfaces.DEEP_READ
-        ) {
-            val warmProactiveSignalId = consumeProactiveDeepLink(
-                intent = intent,
-                inbox = proactiveDeepLinkInbox,
-                alreadyConsumed = false,
-            )
-            if (warmProactiveSignalId != null) {
-                proactiveDeepLinkConsumed = true
-                navStack?.let(::applyProactiveDeepLinkToBackStack)
+        launchedFromProactiveDeepLink = !StandaloneSurfaces.isStandalone && consumeProactiveDeepLink(
+            intent = intent,
+            inbox = proactiveDeepLinkInbox,
+        ) != null
+        proactiveDeepLinkConsumed = launchedFromProactiveDeepLink
+        val notification = notificationDeepLinkFrom(intent)
+        val target = explicitIntentScreen(intent, notification, coldStart = false)
+        when {
+            target is Screen.Chat -> {
+                openExternalChat(target)
+                notification?.let { validateNotificationRunOwnership(intent, it) }
             }
-            phoneUseLiveScreenFromIntent(intent)?.let { screen ->
-                if (navStack?.lastOrNull() != screen) navStack?.add(screen)
+            target == Screen.PersonalAgent -> navStack?.let(::applyProactiveDeepLinkToBackStack)
+            target != null -> {
+                if (target == Screen.LiveCompanion) LiveCompanionDeepLink.request()
+                if (navStack?.lastOrNull() != target) navStack?.add(target)
             }
-            if (openPersonalAgentFromIntent(intent)) {
-                navStack?.let(::applyProactiveDeepLinkToBackStack)
+            !StandaloneSurfaces.isStandalone -> app.amber.feature.tools.DynamicShortcutPublisher.screenFromIntent(intent)?.let {
+                navigateToShortcutRoute(it, intent)
             }
-        }
-        // Notification deep links use the same parser as cold start. A
-        // malformed conversation identity is ignored; a valid conversation is
-        // always the exact landing target, even when its runId is stale or
-        // belongs to another conversation (the latter only loses run focus).
-        notificationDeepLinkFrom(intent)?.let { link ->
-            navStack?.add(Screen.Chat(link.conversationId))
-            validateNotificationRunOwnership(intent, link)
-        }
-        taskSessionScreenFromIntent(intent)?.let { screen ->
-            navStack?.add(screen)
-        }
-        if (intent.getBooleanExtra(MemoryDreamNotifier.EXTRA_OPEN_AGENT_MEMORY, false)) {
-            navStack?.add(Screen.SettingAgentMemory)
-        }
-        if (intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)) {
-            navStack?.add(Screen.TodayBoard)
-        }
-        if (intent.getBooleanExtra(EXTRA_OPEN_LIVE_COMPANION, false)) {
-            LiveCompanionDeepLink.request()
-            if (navStack?.lastOrNull() != Screen.LiveCompanion) navStack?.add(Screen.LiveCompanion)
-        }
-        deepReadScreenFromIntent(intent)?.let { screen ->
-            navStack?.add(screen)
-        }
-        app.amber.feature.novel.workspace.NovelWorkspaceNotificationRoute.screenFrom(intent)?.let { screen ->
-            if (navStack?.lastOrNull() != screen) navStack?.add(screen)
-        }
-        app.amber.feature.tools.DynamicShortcutPublisher.screenFromIntent(intent)?.let { route ->
-            navigateToShortcutRoute(route)
         }
         newIntentHandler?.invoke(intent)
     }
@@ -481,10 +457,10 @@ class RouteActivity : FragmentActivity() {
      * notifications - a conversation shortcut opens that exact conversation,
      * prompts prefill a fresh chat draft without bypassing the send gate.
      */
-    private fun navigateToShortcutRoute(route: app.amber.feature.tools.DynamicShortcutPublisher.Route) {
+    private fun navigateToShortcutRoute(route: app.amber.feature.tools.DynamicShortcutPublisher.Route, source: Intent) {
         when (route) {
             app.amber.feature.tools.DynamicShortcutPublisher.Route.NewChat ->
-                navStack?.add(Screen.Chat(Uuid.random().toString()))
+                openExternalChat(Screen.Chat(Uuid.random().toString()))
             is app.amber.feature.tools.DynamicShortcutPublisher.Route.Conversation -> {
                 // A stale shortcut must not resurrect a deleted conversation
                 // with its old UUID; land on a fresh chat instead.
@@ -492,16 +468,71 @@ class RouteActivity : FragmentActivity() {
                     val exists = runCatching {
                         conversationRepository.existsConversationById(route.conversationId)
                     }.getOrDefault(false)
+                    if (intent !== source) return@launch
                     if (exists) {
-                        navStack?.add(Screen.Chat(route.conversationId.toString()))
+                        openExternalChat(Screen.Chat(route.conversationId.toString()))
                     } else {
-                        navStack?.add(Screen.Chat(Uuid.random().toString()))
+                        openExternalChat(Screen.Chat(Uuid.random().toString()))
                     }
                 }
             }
             is app.amber.feature.tools.DynamicShortcutPublisher.Route.QuickPrompt ->
-                navStack?.add(Screen.Chat(Uuid.random().toString(), route.prompt.base64Encode()))
+                openExternalChat(Screen.Chat(Uuid.random().toString(), route.prompt.base64Encode()))
         }
+    }
+
+    private fun openExternalChat(chat: Screen.Chat) {
+        navStack?.let { applyExternalChatToBackStack(it, chat, readLaunchStartMode()) }
+    }
+
+    private fun readLaunchStartMode(): LaunchStartMode = migrateLaunchStartMode(
+        storedMode = readStringPreference(LAUNCH_START_MODE_PREF),
+        legacyCreateNewConversationOnStart = if (containsPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF)) {
+            readBooleanPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF, true)
+        } else null,
+    )
+
+    private fun explicitIntentScreen(intent: Intent, notificationLink: NotificationDeepLink?, coldStart: Boolean): Screen? {
+        // Standalone products (app.amber.novel / app.amber.deepread) resolve
+        // only their own surface deep-links; everything else lands on the
+        // product home.
+        if (StandaloneSurfaces.isStandalone) {
+            return standaloneStartScreen(intent, fallbackToHome = coldStart)
+        }
+        if (launchedFromProactiveDeepLink) {
+            return Screen.PersonalAgent
+        }
+        phoneUseLiveScreenFromIntent(intent)?.let { screen ->
+            return screen
+        }
+        if (openPersonalAgentFromIntent(intent)) {
+            return Screen.PersonalAgent
+        }
+        // Cold-start notification taps must win over launch-mode/last-
+        // conversation resolution. This prevents a mismatched run from
+        // being hidden by an unrelated last session.
+        notificationLink?.let { link ->
+            return Screen.Chat(link.conversationId)
+        }
+        if (intent.getBooleanExtra(MemoryDreamNotifier.EXTRA_OPEN_AGENT_MEMORY, false)) {
+            return Screen.SettingAgentMemory
+        }
+        if (intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)) {
+            return Screen.TodayBoard
+        }
+        if (intent.getBooleanExtra(EXTRA_OPEN_LIVE_COMPANION, false)) {
+            return Screen.LiveCompanion
+        }
+        taskSessionScreenFromIntent(intent)?.let { screen ->
+            return screen
+        }
+        deepReadScreenFromIntent(intent)?.let { screen ->
+            return screen
+        }
+        app.amber.feature.novel.workspace.NovelWorkspaceNotificationRoute.screenFrom(intent)?.let { screen ->
+            return screen
+        }
+        return null
     }
 
     private fun shortcutStartScreen(route: app.amber.feature.tools.DynamicShortcutPublisher.Route): Screen =
@@ -552,6 +583,7 @@ class RouteActivity : FragmentActivity() {
         }
     }
 
+    @OptIn(ExperimentalComposeUiApi::class)
     @Composable
     fun AppRoutes() {
         val toastState = rememberToasterState()
@@ -563,60 +595,12 @@ class RouteActivity : FragmentActivity() {
         val appModalOverlay = rememberAppModalOverlayHostState()
 
         val notificationLink = remember { notificationDeepLinkFrom(intent) }
-        val startMode = remember {
-            val legacyCreateNew = if (containsPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF)) {
-                readBooleanPreference(LEGACY_CREATE_NEW_CONVERSATION_ON_START_PREF, true)
-            } else {
-                null
-            }
-            migrateLaunchStartMode(
-                storedMode = readStringPreference(LAUNCH_START_MODE_PREF),
-                legacyCreateNewConversationOnStart = legacyCreateNew,
-            )
-        }
+        val startMode = remember { readLaunchStartMode() }
         val startScreen = remember {
             if (ChatPerfHomeEntry.enabled && intent?.getStringExtra("perfPathId") == HOME_FIRST_PATH) {
                 return@remember Screen.SessionHome
             }
-            // Standalone products (app.amber.novel / app.amber.deepread) resolve
-            // only their own surface deep-links; everything else lands on the
-            // product home.
-            standaloneStartScreen(intent)?.let { screen ->
-                return@remember screen
-            }
-            if (launchedFromProactiveDeepLink) {
-                return@remember Screen.PersonalAgent
-            }
-            phoneUseLiveScreenFromIntent(intent)?.let { screen ->
-                return@remember screen
-            }
-            if (openPersonalAgentFromIntent(intent)) {
-                return@remember Screen.PersonalAgent
-            }
-            // Cold-start notification taps must win over launch-mode/last-
-            // conversation resolution. This prevents a mismatched run from
-            // being hidden by an unrelated last session.
-            notificationLink?.let { link ->
-                return@remember Screen.Chat(link.conversationId)
-            }
-            if (intent.getBooleanExtra(MemoryDreamNotifier.EXTRA_OPEN_AGENT_MEMORY, false)) {
-                return@remember Screen.SettingAgentMemory
-            }
-            if (intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)) {
-                return@remember Screen.TodayBoard
-            }
-            if (intent.getBooleanExtra(EXTRA_OPEN_LIVE_COMPANION, false)) {
-                return@remember Screen.LiveCompanion
-            }
-            taskSessionScreenFromIntent(intent)?.let { screen ->
-                return@remember screen
-            }
-            deepReadScreenFromIntent(intent)?.let { screen ->
-                return@remember screen
-            }
-            app.amber.feature.novel.workspace.NovelWorkspaceNotificationRoute.screenFrom(intent)?.let { screen ->
-                return@remember screen
-            }
+            explicitIntentScreen(intent, notificationLink, coldStart = true)?.let { return@remember it }
             app.amber.feature.tools.DynamicShortcutPublisher.screenFromIntent(intent)?.let { route ->
                 return@remember shortcutStartScreen(route)
             }
@@ -660,7 +644,6 @@ class RouteActivity : FragmentActivity() {
             else -> "Other"
         }
         SideEffect {
-            ProactiveForegroundStageTracker.onTopRouteChanged(currentTopEntry == Screen.PersonalAgent)
             if (ChatPerfHomeEntry.enabled) {
                 val c = resources.configuration
                 val d = settings.displaySetting
@@ -710,7 +693,7 @@ class RouteActivity : FragmentActivity() {
             }
         }
 
-        SharedTransitionLayout {
+        SharedTransitionLayout(modifier = Modifier.semantics { testTagsAsResourceId = true }) {
             CompositionLocalProvider(
                 LocalUriHandler provides appUriHandler,
                 LocalNavController provides navigator,

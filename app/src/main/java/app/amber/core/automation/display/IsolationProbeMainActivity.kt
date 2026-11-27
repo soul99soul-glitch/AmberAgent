@@ -1,6 +1,7 @@
 package app.amber.core.automation.display
 
 import android.os.Bundle
+import android.view.Display
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.Button
@@ -9,6 +10,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.core.widget.doOnTextChanged
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
@@ -54,6 +56,16 @@ class IsolationProbeMainActivity : ComponentActivity() {
             hint = "请保持主屏中文输入焦点（自测期间请勿离开本页）"
             setText("主屏中文焦点监测")
             setSelection(text.length)
+            doOnTextChanged { value, start, _, count ->
+                if (value != null && hasFocus() && count > 0) {
+                    val inserted = value.subSequence(start, start + count)
+                    if (IsolationProbeRunner.PROBE_CHINESE_TEXT in inserted) {
+                        IsolationProbeChannel.recordMainScreenInjectedTouch()
+                    } else if (inserted.any { it in '\u3400'..'\u9fff' }) {
+                        IsolationProbeChannel.recordMainInput()
+                    }
+                }
+            }
             setOnFocusChangeListener { _, hasFocus ->
                 if (!hasFocus) {
                     IsolationProbeChannel.recordMainFocusLost()
@@ -100,7 +112,11 @@ class IsolationProbeMainActivity : ComponentActivity() {
         }
     }
 
+    internal fun hasMainInputFocus(): Boolean =
+        display?.displayId == Display.DEFAULT_DISPLAY && hasWindowFocus() && chineseFocusInput.hasFocus()
+
     private fun runProbe() {
+        if (!startButton.isEnabled) return
         startButton.isEnabled = false
         chineseFocusInput.requestFocus()
         lifecycleScope.launch {

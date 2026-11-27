@@ -49,6 +49,16 @@ class PersonalAgentBackStackTest {
     }
 
     @Test
+    fun `warm external chat replaces stale routes and repeated tap does not duplicate chat`() {
+        val chat = Screen.Chat("11111111-1111-1111-1111-111111111111")
+        for (mode in LaunchStartMode.entries) {
+            val stack = mutableListOf<NavKey>(Screen.SessionHome, Screen.TodayBoard, Screen.Setting)
+            repeat(2) { applyExternalChatToBackStack(stack, chat, mode) }
+            assertEquals(initialBackStackFor(chat, mode), stack)
+        }
+    }
+
+    @Test
     fun `PersonalAgent root has single entry so system back exits app`() {
         val stack = initialBackStackFor(
             startScreen = Screen.PersonalAgent,

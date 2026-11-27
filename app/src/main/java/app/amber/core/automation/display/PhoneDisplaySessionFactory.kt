@@ -1,10 +1,15 @@
 package app.amber.core.automation.display
 
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
+import android.os.PowerManager
 import android.os.Looper
 import android.view.Display
 import android.view.accessibility.AccessibilityWindowInfo
@@ -36,6 +41,7 @@ class PhoneDisplaySessionFactory internal constructor(
     private val accessibilityServiceAvailableProvider: () -> Boolean,
     private val frameSourceCreator: (Int, Int) -> VirtualDisplayFrameSource,
     private val displayWatcherFactory: (displayId: Int, width: Int, height: Int, onInvalidated: (String) -> Unit) -> Closeable?,
+    private val deviceReadyForInput: () -> Boolean = { true },
 ) {
 
     constructor(
@@ -65,6 +71,11 @@ class PhoneDisplaySessionFactory internal constructor(
         },
         accessibilityServiceAvailableProvider = { AmberAccessibilityService.getActiveService() != null },
         frameSourceCreator = { width, height -> VirtualDisplayFrameSource(width, height) },
+        deviceReadyForInput = {
+            val keyguard = context.getSystemService(KeyguardManager::class.java)
+            val power = context.getSystemService(PowerManager::class.java)
+            power?.isInteractive == true && keyguard != null && !keyguard.isKeyguardLocked && !keyguard.isDeviceLocked
+        },
         displayWatcherFactory = { displayId, expectedW, expectedH, onInvalidated ->
             PhoneDisplaySessionFactory.registerDisplayChangeWatcher(context, displayId, expectedW, expectedH, onInvalidated)
         },
@@ -125,7 +136,9 @@ class PhoneDisplaySessionFactory internal constructor(
         if (!virtualDisplayBuildAllowed()) {
             return DisplaySessionOutcome.Unavailable("virtual_display_disabled_by_build")
         }
-        if (runId.isBlank() || packageName.isBlank()) {
+        if (runId.isBlank() || !AmberDisplayUserService.isAllowedLaunchTarget(packageName) ||
+            (requireProbeVerified && packageName.endsWith(AmberDisplayUserService.PROBE_TARGET_SUFFIX))
+        ) {
             return DisplaySessionOutcome.Unavailable("invalid_run_or_package")
         }
         val localApi = apiLevelProvider()
@@ -150,10 +163,16 @@ class PhoneDisplaySessionFactory internal constructor(
             return DisplaySessionOutcome.Unavailable("accessibility_service_unavailable")
         }
 
+        if (!deviceReadyForInput()) {
+            return DisplaySessionOutcome.Unavailable("device_locked_or_screen_off")
+        }
         val sessionRef = AtomicReference<VirtualDisplaySession?>(null)
-        val connected = displayBridge.connect { disconnectReason ->
-            sessionRef.get()?.invalidate(disconnectReason)
-        }.getOrElse { error ->
+        val invalidationReason = AtomicReference<String?>(null)
+        fun invalidate(reason: String) {
+            invalidationReason.compareAndSet(null, reason)
+            sessionRef.get()?.invalidate(reason)
+        }
+        val connected = displayBridge.connect(::invalidate).getOrElse { error ->
             return DisplaySessionOutcome.Unavailable(
                 "shizuku_unavailable:${error.message ?: error.javaClass.simpleName}",
             )
@@ -197,6 +216,7 @@ class PhoneDisplaySessionFactory internal constructor(
         val generation = generationCounter.incrementAndGet()
         val displayId = connected.createDisplay(
             runId = runId,
+            authorizedPackageName = packageName,
             generation = generation,
             width = width,
             height = height,
@@ -214,8 +234,12 @@ class PhoneDisplaySessionFactory internal constructor(
             return DisplaySessionOutcome.Unavailable("create_display_failed:$detail")
         }
 
-        val watcher = displayWatcherFactory(displayId, width, height) { changeReason ->
-            sessionRef.get()?.invalidate(changeReason)
+        val watcher = runCatching { displayWatcherFactory(displayId, width, height, ::invalidate) }.getOrNull()
+        if (watcher == null) {
+            runCatching { connected.release(generation, "display_watcher_unavailable") }
+            runCatching { frameSource.close() }
+            connected.disconnect()
+            return DisplaySessionOutcome.Unavailable("display_watcher_unavailable")
         }
 
         val session = VirtualDisplaySession(
@@ -230,8 +254,16 @@ class PhoneDisplaySessionFactory internal constructor(
             frameSource = frameSource,
             windowsProvider = virtualWindowsProvider,
             displayWatcherCloser = watcher,
+            deviceReadyForInput = deviceReadyForInput,
         )
         sessionRef.set(session)
+        invalidationReason.get()?.let { reason ->
+            session.invalidate(reason)
+            return DisplaySessionOutcome.Unavailable(reason)
+        }
+        if (!session.isGenerationValid) {
+            return DisplaySessionOutcome.Unavailable(session.invalidationReason ?: "generation_invalidated")
+        }
         return DisplaySessionOutcome.Ready(session)
     }
 
@@ -244,7 +276,8 @@ class PhoneDisplaySessionFactory internal constructor(
             onInvalidated: (String) -> Unit,
         ): Closeable? {
             val dm = context.getSystemService(DisplayManager::class.java) ?: return null
-            val initialRotation = dm.getDisplay(targetDisplayId)?.rotation
+            val initialRotation = dm.getDisplay(targetDisplayId)?.rotation ?: return null
+            val mainRotation = dm.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: return null
             val listener = object : DisplayManager.DisplayListener {
                 override fun onDisplayAdded(displayId: Int) = Unit
 
@@ -255,6 +288,10 @@ class PhoneDisplaySessionFactory internal constructor(
                 }
 
                 override fun onDisplayChanged(displayId: Int) {
+                    if (displayId == Display.DEFAULT_DISPLAY && dm.getDisplay(displayId)?.rotation != mainRotation) {
+                        onInvalidated("main_display_rotation_changed")
+                        return
+                    }
                     if (displayId != targetDisplayId) return
                     val display = dm.getDisplay(displayId)
                     if (display == null) {
@@ -262,7 +299,7 @@ class PhoneDisplaySessionFactory internal constructor(
                         return
                     }
                     val mode = display.mode
-                    val rotationChanged = initialRotation != null && display.rotation != initialRotation
+                    val rotationChanged = display.rotation != initialRotation
                     val sizeChanged = mode != null &&
                         (mode.physicalWidth != expectedWidth || mode.physicalHeight != expectedHeight)
                     if (rotationChanged || sizeChanged) {
@@ -271,8 +308,23 @@ class PhoneDisplaySessionFactory internal constructor(
                 }
             }
             val handler = Handler(Looper.getMainLooper())
+            val screenOff = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    if (intent.action == Intent.ACTION_SCREEN_OFF) onInvalidated("device_locked_or_screen_off")
+                }
+            }
             dm.registerDisplayListener(listener, handler)
+            try {
+                context.registerReceiver(screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), Context.RECEIVER_NOT_EXPORTED)
+            } catch (e: RuntimeException) {
+                dm.unregisterDisplayListener(listener)
+                throw e
+            }
+            // Recheck after registration so removal/rotation during observer setup cannot be missed.
+            listener.onDisplayChanged(targetDisplayId)
+            listener.onDisplayChanged(Display.DEFAULT_DISPLAY)
             return Closeable {
+                runCatching { context.unregisterReceiver(screenOff) }
                 runCatching { dm.unregisterDisplayListener(listener) }
             }
         }

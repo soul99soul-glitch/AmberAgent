@@ -1,7 +1,11 @@
 package app.amber.core.service
 
 import android.content.ContextWrapper
+import android.net.Uri
 import app.amber.ai.ui.UIMessage
+import app.amber.ai.ui.UIMessagePart
+import app.amber.agent.data.db.fts.MessageFtsManager
+import app.amber.core.files.FileFolders
 import app.amber.core.files.FilesManager
 import app.amber.core.infra.AppScope
 import app.amber.core.model.Conversation
@@ -13,6 +17,7 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.sync.core.SyncRestoreWriteEpoch
 import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.sync.core.SyncRestoreWriteRejectedException
+import app.amber.feature.macgateway.ConversationStoreCloudDialogueSink
 import app.amber.feature.runtime.DurableRuntimeTestBase
 import app.amber.review.ReflectionFixture
 import kotlin.uuid.Uuid
@@ -153,6 +158,100 @@ class ConversationStoreTest : DurableRuntimeTestBase() {
     }
 
     @Test
+    fun `local cloud echo requires a committed node and late remote echo is ignored on a tombstone`() = runBlocking {
+        val original = conversation(0)
+        val fixture = fixture()
+        val sink = ConversationStoreCloudDialogueSink(fixture.store)
+        val id = original.id.toString()
+        val acceptedId = Uuid.random()
+        sink.appendLocalUserMessage(id, "accepted", null, acceptedId.toString())
+        val saved = fixture.repo.getConversationById(original.id)!!
+        assertEquals(acceptedId, saved.currentMessages.single().id)
+        assertEquals("accepted", saved.title)
+        val flow = fixture.store.getConversationFlow(original.id)
+        val before = flow.value
+        val epoch = fixture.gate.currentEpoch()
+        fixture.store.markDeleted(original.id, epoch)
+        fixture.store.deletePersisted(saved, deferCleanup = false, expectedRestoreEpoch = epoch)
+
+        val rejected = runCatching { sink.appendLocalUserMessage(id, "new", null, Uuid.random().toString()) }
+        assertTrue(rejected.exceptionOrNull() is IllegalStateException)
+        sink.appendUserMessage(id, "late remote echo", "old-event")
+        assertSame(before, flow.value)
+        assertNull(fixture.repo.getConversationById(original.id))
+    }
+
+    @Test
+    fun `deleted main session reopens empty and saves new input without resurrecting old files or index`() = runBlocking {
+        val seeded = conversation(90)
+        val fixture = fixture(isMainConversation = { it == seeded.id })
+        val attachment = context.filesDir.resolve(FileFolders.UPLOAD).resolve("${seeded.id}.txt")
+        attachment.parentFile!!.mkdirs()
+        attachment.writeText("old attachment")
+        val old = UIMessage.user("old text").let { message ->
+            message.copy(parts = message.parts + UIMessagePart.Document(Uri.fromFile(attachment).toString(), attachment.name))
+        }
+        val original = seeded.copy(messageNodes = listOf(MessageNode.of(old)) + seeded.messageNodes)
+        fixture.repo.insertConversation(original)
+        fixture.store.ensureInitialized(original.id)
+        val displayed = fixture.store.getConversationFlow(original.id)
+        val tail = displayed.value
+        assertTrue(tail.messageNodes.size < original.messageNodes.size)
+        val fts = MessageFtsManager(database)
+        assertNotNull(fts.findNodeIdForMessage(original.id.toString(), old.id.toString()))
+
+        val epoch = fixture.gate.currentEpoch()
+        fixture.store.markDeleted(original.id, epoch)
+        fixture.store.deletePersisted(tail, deferCleanup = false, expectedRestoreEpoch = epoch)
+        fixture.store.ensureInitialized(original.id)
+        assertTrue(displayed.value.messageNodes.isEmpty())
+        assertFalse(attachment.exists())
+        assertNull(fts.findNodeIdForMessage(original.id.toString(), old.id.toString()))
+        assertNull(fixture.repo.getConversationById(original.id))
+
+        val first = MessageNode.of(UIMessage.user("first after delete"))
+        fixture.store.appendUserNode(original.id, first)
+        fixture.store.updateConversation(original.id, tail)
+        fixture.store.checkpointConversation(original.id, tail, force = true)
+        fixture.store.saveConversation(original.id, original)
+        assertEquals(listOf(first), displayed.value.messageNodes)
+        assertEquals(listOf(first), fixture.repo.getConversationById(original.id)!!.messageNodes)
+    }
+
+    @Test
+    fun `new main input waits for deferred attachment cleanup before becoming durable`() = runBlocking {
+        val original = conversation(2)
+        val fixture = fixture(isMainConversation = { it == original.id })
+        fixture.repo.insertConversation(original)
+        fixture.store.ensureInitialized(original.id)
+        val epoch = fixture.gate.currentEpoch()
+        fixture.store.markDeleted(original.id, epoch)
+        fixture.store.deletePersisted(original, deferCleanup = true, expectedRestoreEpoch = epoch)
+        val first = MessageNode.of(UIMessage.user("sent while leaving History"))
+        val write = async(start = CoroutineStart.UNDISPATCHED) { fixture.store.appendUserNode(original.id, first) }
+        assertFalse(write.isCompleted)
+        fixture.store.purgeDeletedConversation(original)
+        write.await()
+        assertEquals(listOf(first), fixture.repo.getConversationById(original.id)!!.messageNodes)
+    }
+
+    @Test
+    fun `undo of a deleted main conversation reloads its original timeline`() = runBlocking {
+        val original = conversation(2)
+        val fixture = fixture(isMainConversation = { it == original.id })
+        fixture.repo.insertConversation(original)
+        fixture.store.ensureInitialized(original.id)
+        val epoch = fixture.gate.currentEpoch()
+        fixture.store.markDeleted(original.id, epoch)
+        fixture.store.deletePersisted(original, deferCleanup = true, expectedRestoreEpoch = epoch)
+        fixture.store.ensureInitialized(original.id)
+        fixture.repo.insertConversation(original)
+        fixture.store.markConversationRestored(original.id)
+        fixture.store.ensureInitialized(original.id)
+        assertEquals(original.messageNodes, fixture.store.getConversationFlow(original.id).value.messageNodes)
+    }
+
+    @Test
     fun `committed restore invalidates the same subscriptions and rejects old writers`() = runBlocking {
         val fixture = fixture()
         val original = conversation(2)
@@ -215,6 +314,7 @@ class ConversationStoreTest : DurableRuntimeTestBase() {
     private fun fixture(
         scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
         settings: MutableStateFlow<Settings> = MutableStateFlow(Settings()),
+        isMainConversation: (Uuid) -> Boolean = { false },
     ): Fixture {
         val gate = SyncRestoreWriteGate()
         val repo = conversationRepository(gate)
@@ -226,7 +326,7 @@ class ConversationStoreTest : DurableRuntimeTestBase() {
             override fun getFilesDir() = pendingDirectory
         }, Json)
         val queue = PendingMessageQueue(scope, pendingStore, gate)
-        val store = ConversationStore(repo, aggregator, scope, files, queue, ChatErrorStore(), gate)
+        val store = ConversationStore(repo, aggregator, scope, files, queue, ChatErrorStore(), gate, isMainConversation)
         return Fixture(store, queue, repo, gate, scope).also(fixtures::add)
     }
 

@@ -1,5 +1,6 @@
 package app.amber.agent
 
+import androidx.navigation3.runtime.NavKey
 import kotlin.uuid.Uuid
 
 const val LAUNCH_START_MODE_PREF = "launch_start_mode"
@@ -48,6 +49,13 @@ fun initialBackStackFor(
 ): List<Screen> =
     if (startScreen is Screen.Chat) listOf(homeScreenFor(startMode), startScreen)
     else listOf(startScreen)
+
+internal fun applyExternalChatToBackStack(stack: MutableList<NavKey>, chat: Screen.Chat, mode: LaunchStartMode) {
+    val landing = initialBackStackFor(chat, mode)
+    if (stack == landing) return
+    stack.clear()
+    stack.addAll(landing)
+}
 
 fun resolveLaunchStartScreen(
     mode: LaunchStartMode,

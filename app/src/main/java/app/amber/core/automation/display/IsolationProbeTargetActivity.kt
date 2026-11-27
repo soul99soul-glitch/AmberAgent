@@ -26,13 +26,16 @@ class IsolationProbeTargetActivity : ComponentActivity() {
     private lateinit var tapCounterView: TextView
     private lateinit var editableField: EditText
     private var localTapCount = 0
+    private var probeToken: String = ""
+    private var resumedDisplayId: Int = Display.INVALID_DISPLAY
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        probeToken = intent.getStringExtra(IsolationProbeRunner.EXTRA_PROBE_TOKEN) ?: IsolationProbeChannel.currentToken()
         val currentDisplayId = currentDisplayId()
         if (currentDisplayId == Display.DEFAULT_DISPLAY) {
-            IsolationProbeChannel.recordLeakedToDefaultDisplay()
+            IsolationProbeChannel.recordLeakedToDefaultDisplay(probeToken)
         }
 
         val root = LinearLayout(this).apply {
@@ -68,7 +71,7 @@ class IsolationProbeTargetActivity : ComponentActivity() {
                     localTapCount++
                     val tapDisplayId = currentDisplayId()
                     text = "Virtual Target display=$tapDisplayId taps=$localTapCount"
-                    IsolationProbeChannel.recordTargetTap(tapDisplayId)
+                    IsolationProbeChannel.recordTargetTap(probeToken, tapDisplayId)
                 }
                 true
             }
@@ -86,7 +89,7 @@ class IsolationProbeTargetActivity : ComponentActivity() {
                     override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                     override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
                     override fun afterTextChanged(s: Editable?) {
-                        IsolationProbeChannel.recordTargetText(s?.toString().orEmpty())
+                        IsolationProbeChannel.recordTargetText(probeToken, s?.toString().orEmpty())
                     }
                 },
             )
@@ -100,20 +103,27 @@ class IsolationProbeTargetActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        IsolationProbeChannel.recordTargetResumed(currentDisplayId())
+        resumedDisplayId = currentDisplayId()
+        IsolationProbeChannel.recordTargetResumed(probeToken, resumedDisplayId)
         editableField.requestFocus()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        IsolationProbeChannel.recordTargetResumed(currentDisplayId())
+        resumedDisplayId = currentDisplayId()
+        IsolationProbeChannel.recordTargetResumed(probeToken, resumedDisplayId)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (currentDisplayId() == Display.DEFAULT_DISPLAY) {
-            IsolationProbeChannel.recordLeakedToDefaultDisplay()
+            IsolationProbeChannel.recordLeakedToDefaultDisplay(probeToken)
         }
+    }
+
+    override fun onDestroy() {
+        IsolationProbeChannel.recordTargetDestroyed(probeToken, resumedDisplayId)
+        super.onDestroy()
     }
 
     private fun currentDisplayId(): Int = runCatching {

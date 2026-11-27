@@ -84,6 +84,10 @@ class ChatApprovalActionsTest : DurableRuntimeTestBase() {
         assertEquals(earlier, persisted.messageNodes.dropLast(1))
         assertEquals(ToolApprovalState.Approved, persisted.currentMessages.last().getTools().first().approvalState)
         assertTrue(persisted.currentMessages.last().getTools().last().isPending)
+        assertEquals(
+            app.amber.feature.runtime.argsDigest(approved.input),
+            fixture.approvals.approvalFor(null, approved.toolCallId)?.argsDigest,
+        )
         assertTrue("approval creates trust only for the owning conversation", "screen_click" in fixture.actions.trustedToolNames(conversation.id))
         assertTrue(fixture.actions.trustedToolNames(Uuid.random()).isEmpty())
         assertNull("persisting approval must not launch a run", fixture.store.session(conversation.id).getJob())
@@ -122,6 +126,20 @@ class ChatApprovalActionsTest : DurableRuntimeTestBase() {
             assertFalse(fixture.actions.applyToolApprovalDecision(conversation.id, waiting.toolCallId, true, "", null).applied)
             assertTrue(fixture.actions.applyToolApprovalDecision(conversation.id, waiting.toolCallId, false, "deny", null).applied)
         } finally { shadow.setKeyguardLocked(false) }
+    }
+
+    @Test
+    fun `approval revalidates the selected pending tool at persistence`() = runBlocking {
+        val fixture = fixture()
+        val tool = tool("reissued", "screen_click")
+        val conversation = Conversation.ofId(Uuid.random()).copy(messageNodes = listOf(assistantTools(tool)))
+        fixture.repo.insertConversation(conversation)
+
+        val stale = fixture.actions.applyToolApprovalDecision(conversation.id, tool.toolCallId, true, "", null) {
+            it.toolName == "web_fetch"
+        }
+        assertFalse(stale.applied)
+        assertTrue(fixture.repo.getConversationById(conversation.id)!!.currentMessages.last().getTools().single().isPending)
     }
 
     @Test
@@ -255,16 +273,18 @@ class ChatApprovalActionsTest : DurableRuntimeTestBase() {
         ReflectionFixture.set(settings, "_settingsFlow", MutableStateFlow(Settings()))
         val queue = PendingMessageQueue(scope, PendingMessageStore(fileContext, Json), gate)
         val store = ConversationStore(repo, settings, scope, files, queue, ChatErrorStore(), gate)
-        val flags = CapabilityFlags(object : DataStore<Preferences> {
+        val preferences = object : DataStore<Preferences> {
             override val data = MutableStateFlow(emptyPreferences())
             override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
                 transform(data.value).also { data.value = it }
-        })
+        }
+        val flags = CapabilityFlags(preferences)
+        val approvals = app.amber.feature.runtime.CapabilityPermissionStore(preferences)
         val recovery = RunRecoveryService(ledger, runTerminalStore, repo, Json)
         val actions = ChatApprovalActions(
-            context, Json, store, ledger, runTerminalStore, recovery, flags, restoreWriteGate = gate,
+            context, Json, store, ledger, runTerminalStore, recovery, flags, approvals, restoreWriteGate = gate,
         )
-        return Fixture(actions, repo, store, queue, gate, scope).also(fixtures::add)
+        return Fixture(actions, repo, store, queue, gate, scope, approvals).also(fixtures::add)
     }
 
     private class Fixture(
@@ -274,6 +294,7 @@ class ChatApprovalActionsTest : DurableRuntimeTestBase() {
         val queue: PendingMessageQueue,
         val gate: SyncRestoreWriteGate,
         val scope: AppScope,
+        val approvals: app.amber.feature.runtime.CapabilityPermissionStore,
     ) {
         fun close() {
             store.cleanup()

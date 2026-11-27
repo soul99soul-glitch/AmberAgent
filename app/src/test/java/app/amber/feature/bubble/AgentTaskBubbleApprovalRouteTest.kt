@@ -60,7 +60,7 @@ class AgentTaskBubbleApprovalRouteTest {
             activityStore = AgentToolActivityStore(),
             settingsStore = ReflectionFixture.allocate<SettingsAggregator>(),
             appScope = AppScope(),
-            approvalDispatcher = { uuid, toolCallId, approved ->
+            approvalDispatcher = { uuid, toolCallId, approved, _ ->
                 approvalCalls += ApprovalCall(uuid, toolCallId, approved)
             },
         )

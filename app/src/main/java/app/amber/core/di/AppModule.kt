@@ -15,10 +15,10 @@ import app.amber.core.utils.JsonInstant
 import android.content.Context
 import app.amber.agent.data.db.dao.ProactiveCardDao
 import app.amber.core.settings.secret.SecretStore
-import app.amber.feature.macgateway.CloudDialogueCoordinator
 import app.amber.feature.macgateway.CloudProactiveRepository
 import app.amber.feature.macgateway.ConversationStoreCloudDialogueSink
 import app.amber.feature.macgateway.MacGatewayRepository
+import app.amber.feature.macgateway.ProactiveDeliveryReceipts
 import app.amber.feature.macgateway.ProactiveDeepLinkInbox
 import app.amber.feature.macgateway.ProactiveFeedbackExecutor
 import app.amber.feature.macgateway.ProactiveNotificationPresenter
@@ -51,21 +51,22 @@ val appModule = module {
     }
 
     single {
-        val proactiveCardDao = get<ProactiveCardDao>()
-        CloudDialogueCoordinator.setDefaultProactiveCardStore { entity ->
-            proactiveCardDao.insert(entity)
-        }
+        ProactiveDeliveryReceipts(
+            dao = get<ProactiveCardDao>(),
+            pending = get<Context>().getSharedPreferences("pending_proactive_receipts", Context.MODE_PRIVATE),
+        )
+    }
+
+    single {
+        val receipts = get<ProactiveDeliveryReceipts>()
         MacGatewayRepository(
             context = get(),
             appScope = get<AppScope>(),
             timelineSink = ConversationStoreCloudDialogueSink(get()),
             agentSoulStore = get<AgentSoulStore>(),
             secretStore = get<SecretStore>(),
-        ).also { repo ->
-            CloudDialogueCoordinator.setDefaultConnectionGenerationProvider {
-                repo.connectionGeneration.value
-            }
-        }
+            onProactiveCard = receipts::insertEvent,
+        )
     }
 
     single {
@@ -76,7 +77,7 @@ val appModule = module {
         CloudProactiveRepository(
             dao = get<ProactiveCardDao>(),
             gateway = get<MacGatewayRepository>(),
-            secretStore = get<SecretStore>(),
+            receipts = get(),
         )
     }
 
@@ -84,15 +85,14 @@ val appModule = module {
         ProactiveNotificationPresenter(
             context = get<Context>(),
             gatewayRepository = get<MacGatewayRepository>(),
-            proactiveRepository = get<CloudProactiveRepository>(),
+            receipts = get<ProactiveDeliveryReceipts>(),
         )
     }
 
     single {
         ProactiveFeedbackExecutor(
             gatewayRepository = get<MacGatewayRepository>(),
-            proactiveCardDao = get<ProactiveCardDao>(),
-            secretStore = get<SecretStore>(),
+            receipts = get<ProactiveDeliveryReceipts>(),
             presenter = get<ProactiveNotificationPresenter>(),
         )
     }

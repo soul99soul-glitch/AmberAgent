@@ -60,7 +60,8 @@ private data class SendAppendSnapshot(
     val nodeCount: Int,
     val lastNodeId: Uuid?,
     val lastNodeRole: MessageRole?,
-    val lastUserNodeId: Uuid?,
+    val lastMessageId: Uuid?,
+    val submittedNodeId: Uuid?,
     val pendingIntent: SendStageIntent?,
     val sendStageActive: Boolean,
 )
@@ -183,24 +184,22 @@ internal fun ChatTimelineScrollEffects(
         if (sendStage == null) return@LaunchedEffect
         var prevBranchById: Map<Uuid, Int>? = null
         snapshotFlow {
-            val active = sendStage.isActive
-            val stagedKey = sendStage.stagedMessageKey
+            val stagedKey = sendStage.stagedMessageKey ?: return@snapshotFlow null
             val nodes = currentConversationState.messageNodes
-            Triple(active, stagedKey, nodes.map { it.id to it.selectIndex })
+            val stagedIndex = nodes.indexOfLast { it.id == stagedKey }
+            if (stagedIndex < 0) emptyMap() else nodes.subList(0, stagedIndex + 1).associate { it.id to it.selectIndex }
         }
             .distinctUntilChanged()
-            .collect { (active, stagedKey, branchPairs) ->
-                if (!active || stagedKey == null) {
+            .collect { currentUpToStaged ->
+                if (currentUpToStaged == null) {
                     prevBranchById = null
                     return@collect
                 }
-                val stagedIndex = branchPairs.indexOfLast { it.first == stagedKey }
-                if (stagedIndex < 0) {
+                if (currentUpToStaged.isEmpty()) {
                     sendStage.reset()
                     prevBranchById = null
                     return@collect
                 }
-                val currentUpToStaged = branchPairs.take(stagedIndex + 1).toMap()
                 val previous = prevBranchById
                 if (previous != null) {
                     val branchSwitched = currentUpToStaged.any { (nodeId, selectIdx) ->
@@ -229,18 +228,24 @@ internal fun ChatTimelineScrollEffects(
         var prevPendingCount = -1
         var prevNodeCount = -1
         var prevLastNodeId: Uuid? = null
-        var prevLastUserNodeId: Uuid? = null
         snapshotFlow {
             val nodes = currentConversationState.messageNodes
             val lastNode = nodes.lastOrNull()
-            val lastUserNode = nodes.lastOrNull { it.currentMessage.role == MessageRole.USER }
+            val pendingIntent = sendStage?.pendingIntent
+            val submittedNode = pendingIntent?.takeIf { it.conversationId == conversationId }?.let { intent ->
+                nodes.lastOrNull { node ->
+                    val message = node.currentMessage
+                    message.id == intent.messageId && message.role == MessageRole.USER
+                }
+            }
             SendAppendSnapshot(
                 pendingCount = currentPendingUserMessages.size,
                 nodeCount = nodes.size,
                 lastNodeId = lastNode?.id,
                 lastNodeRole = lastNode?.currentMessage?.role,
-                lastUserNodeId = lastUserNode?.id,
-                pendingIntent = sendStage?.pendingIntent,
+                lastMessageId = lastNode?.currentMessage?.id,
+                submittedNodeId = submittedNode?.id,
+                pendingIntent = pendingIntent,
                 sendStageActive = sendStage?.isActive == true,
             )
         }.collect { snap ->
@@ -251,31 +256,23 @@ internal fun ChatTimelineScrollEffects(
                 snap.lastNodeId != null &&
                 snap.lastNodeId != prevLastNodeId &&
                 snap.lastNodeRole == MessageRole.USER
-            val newUserNodeAppeared = prevNodeCount >= 0 &&
-                snap.nodeCount > prevNodeCount &&
-                snap.lastUserNodeId != null &&
-                snap.lastUserNodeId != prevLastUserNodeId
-            val stageMatchesPending = sendStage != null &&
-                snap.pendingIntent?.conversationId == conversationId &&
-                prevPendingCount == 0 &&
-                newUserNodeAppeared
             prevPendingCount = snap.pendingCount
             prevNodeCount = snap.nodeCount
             prevLastNodeId = snap.lastNodeId
-            prevLastUserNodeId = snap.lastUserNodeId
 
-            if (stageMatchesPending) {
-                val appearedKey = snap.lastUserNodeId!!
-                sendStage!!.onUserNodeAppeared(appearedKey)
+            if (snap.submittedNodeId != null && sendStage != null && snap.pendingIntent == sendStage.pendingIntent) {
+                sendStage.onUserNodeAppeared(snap.submittedNodeId)
                 if (sendStage.consumeInitialScroll()) {
                     state.requestScrollToItem(0)
                 }
             } else if (
                 shouldAutoScrollOnSendAppend(
-                    enableAutoScroll = enableAutoScrollState,
+                    enableAutoScroll = enableAutoScrollState && !state.isScrollInProgress &&
+                        (snap.lastMessageId == null || (snap.lastMessageId != sendStage?.releasedMessageId &&
+                            snap.lastMessageId != sendStage?.admittingMessageId)),
                     pendingAdded = pendingAdded,
                     directSendAppend = directSendAppend,
-                    sendStageActive = snap.sendStageActive || (sendStage?.isActive == true),
+                    sendStageActive = snap.sendStageActive || snap.pendingIntent != null || sendStage?.isActive == true,
                 )
             ) {
                 state.requestScrollToItem(0)

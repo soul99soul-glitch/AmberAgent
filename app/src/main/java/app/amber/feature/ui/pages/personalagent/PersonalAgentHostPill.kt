@@ -195,6 +195,8 @@ fun PersonalAgentHostPill(
                                     R.string.personal_agent_host_cloud_desc_paired,
                                     gatewayName?.takeIf { it.isNotBlank() } ?: cloudLabel,
                                 )
+                            } else if (gatewayName != null) {
+                                stringResource(R.string.personal_agent_host_cloud_unsupported)
                             } else {
                                 stringResource(R.string.personal_agent_host_cloud_desc_unpaired)
                             },

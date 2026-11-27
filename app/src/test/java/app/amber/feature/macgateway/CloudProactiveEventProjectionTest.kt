@@ -8,6 +8,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -246,7 +247,7 @@ class CloudProactiveEventProjectionTest {
                 clientProvider = { client },
                 timelineSink = CloudDialogueTimelineSink.NoOp,
                 persistState = { persisted = it },
-                onSoulRevision = { soulCalls.incrementAndGet() },
+                onSoulRevision = { _, _ -> soulCalls.incrementAndGet() },
                 persistCoalesceWindowMs = 0L,
                 onProactiveCard = { cardStore.insert(it) },
             )
@@ -397,7 +398,7 @@ class CloudProactiveEventProjectionTest {
                 timelineSink = CloudDialogueTimelineSink.NoOp,
                 persistState = { persistedStates += it },
                 onStateChanged = { latestUi = it },
-                onSoulRevision = { soulCalls.incrementAndGet() },
+                onSoulRevision = { _, _ -> soulCalls.incrementAndGet() },
                 persistCoalesceWindowMs = 0L,
                 onProactiveCard = { cardStore.insert(it) },
                 connectionGenerationProvider = { generation.get() },
@@ -419,6 +420,67 @@ class CloudProactiveEventProjectionTest {
             assertEquals(0L, latestUi.cursor)
             assertTrue(persistedStates.isEmpty())
             assertEquals(0, soulCalls.get())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun changingPairingWhileObtainingClientCannotBindOldClientToNewGeneration() = runBlocking {
+        val requests = AtomicInteger()
+        val server = startServer { _, _, _ ->
+            requests.incrementAndGet()
+            401 to "{}"
+        }
+        try {
+            val client = MacGatewayClient(listOf("127.0.0.1"), server.address.port, "fp", "old", scheme = "http")
+            val acquiring = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val rejected = AtomicInteger()
+            val generation = AtomicLong(1)
+            val coordinator = CloudDialogueCoordinator(
+                clientProvider = {
+                    acquiring.complete(Unit)
+                    release.await()
+                    client
+                },
+                timelineSink = CloudDialogueTimelineSink.NoOp,
+                persistState = { error("stale poll wrote a cursor") },
+                onUnauthorized = { rejected.incrementAndGet() },
+                connectionGenerationProvider = generation::get,
+            )
+            val first = MacGatewayConnection("A", "A", listOf("127.0.0.1"), server.address.port, "fp", "device")
+            coordinator.restore(true, first, null)
+            val poll = async { coordinator.pollOnce() }
+            acquiring.await()
+            generation.incrementAndGet()
+            coordinator.restore(true, first.copy(gatewayId = "B"), null)
+            release.complete(Unit)
+            poll.await()
+            assertEquals(0, requests.get())
+            assertEquals(0, rejected.get())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun missingCardWriterKeepsCursorForReplay() = runBlocking {
+        val server = startServer { _, _, _ ->
+            200 to """{"items":[{"seq":1,"id":"proactive:x","kind":"proactive_message","proactive":{"signalId":"x","topicKey":"topic","category":"test","title":"Card"}}],"nextCursor":1}"""
+        }
+        try {
+            val client = MacGatewayClient(listOf("127.0.0.1"), server.address.port, "fp", "token", scheme = "http")
+            var latestUi = CloudDialogueUiState()
+            val coordinator = CloudDialogueCoordinator(
+                clientProvider = { client }, timelineSink = CloudDialogueTimelineSink.NoOp,
+                persistState = { error("cursor advanced without storing the card") },
+                onStateChanged = { latestUi = it },
+            )
+            coordinator.restore(true, MacGatewayConnection("A", "A", listOf("127.0.0.1"), server.address.port, "fp", "D"), null)
+            val failure = runCatching { coordinator.pollOnce(reportFailure = true) }.exceptionOrNull()
+            assertEquals("Proactive card storage is unavailable", failure?.message)
+            assertEquals(0L, latestUi.cursor)
         } finally {
             server.stop(0)
         }

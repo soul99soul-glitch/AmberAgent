@@ -211,6 +211,7 @@ class ChatRunCoordinator(
         content: List<UIMessagePart>,
         answer: Boolean = true,
         queueMode: PendingUserMessageMode = PendingUserMessageMode.FOLLOWUP,
+        messageId: Uuid = Uuid.random(),
     ): Boolean {
         if (content.isEmptyInputMessage()) return false
 
@@ -219,7 +220,7 @@ class ChatRunCoordinator(
         val waitingForCleanup = previousDispatch != null && !previousDispatch.isActive && !previousDispatch.isCompleted
         val processedContent = userInputPreprocessor.process(content)
         val pendingMessage = PendingUserMessage(
-            id = Uuid.random().toString(),
+            id = messageId.toString(),
             parts = processedContent,
             answer = answer,
             mode = if (session.isGenerating) queueMode else PendingUserMessageMode.FOLLOWUP,
@@ -774,6 +775,7 @@ class ChatRunCoordinator(
             initializeConversation(conversationId)
         }
         val userNode = UIMessage(
+            id = runCatching { Uuid.parse(message.id) }.getOrElse { Uuid.random() },
             role = MessageRole.USER,
             parts = message.parts,
         ).toMessageNode()
@@ -909,6 +911,7 @@ class ChatRunCoordinator(
         approved: Boolean,
         reason: String = "",
         answer: String? = null,
+        matchesPending: (UIMessagePart.Tool) -> Boolean = { true },
     ) {
         val session = getOrCreateSession(conversationId)
         val writeContext = restoreWriteContext()
@@ -922,6 +925,7 @@ class ChatRunCoordinator(
             ) { decisionPersisted ->
                 applyToolApprovalDecision(
                     conversationId, toolCallId, approved, reason, answer,
+                    matchesPending = matchesPending,
                     onDecisionPersisted = decisionPersisted,
                 )
             }
@@ -948,36 +952,6 @@ class ChatRunCoordinator(
     ): Boolean = withCapturedRestoreWriteContext restore@{
         val registry = notificationApprovalTokens ?: return@restore false
         val binding = registry.consume(token) ?: return@restore false
-        val conversation = ensureFullConversationLoaded(conversationId)
-        val toolPart = conversation.messageNodes
-            .asSequence()
-            .flatMap { node -> node.messages.asSequence() }
-            .flatMap { message -> message.parts.asSequence() }
-            .filterIsInstance<UIMessagePart.Tool>()
-            .firstOrNull { it.toolCallId == toolCallId }
-        if (!NotificationApprovalCheck.isValid(
-                binding = binding,
-                intentRunId = runId,
-                conversationId = conversationId.toString(),
-                toolCallId = toolCallId,
-                currentArgsDigest = toolPart?.let { argsDigest(it.input) },
-                toolStillPending = toolPart?.isPending == true,
-            )
-        ) {
-            Log.w(
-                TAG,
-                "handleNotificationApproval: rejected token conversation=$conversationId run=$runId toolCall=$toolCallId"
-            )
-            return@restore false
-        }
-        if (approved && toolPart != null && app.amber.feature.runtime.AgentLiveStatusNotifier.requiresInAppApprovalOnly(toolPart)) {
-            Log.w(
-                TAG,
-                "handleNotificationApproval: rejected high-risk/mandatory approval from notification " +
-                    "conversation=$conversationId run=$runId tool=${toolPart.toolName} toolCall=$toolCallId"
-            )
-            return@restore false
-        }
         val session = getOrCreateSession(conversationId)
         session.dispatchToolApproval(
             scope = appScope,
@@ -986,8 +960,17 @@ class ChatRunCoordinator(
                 errorStore.addError(error, conversationId, title = context.getString(R.string.error_title_tool_approval))
             },
         ) { decisionPersisted ->
+            // The predecessor may have settled or changed runs while this receiver waited for the session.
+            if (binding.isExpired() || (binding.runId != null &&
+                    runTerminalStore?.activeForConversation(conversationId.toString())?.runId != binding.runId)
+            ) return@dispatchToolApproval
             applyToolApprovalDecision(
                 conversationId, toolCallId, approved, reason, answer,
+                matchesPending = { tool ->
+                    NotificationApprovalCheck.isValid(
+                        binding, runId, conversationId.toString(), toolCallId, argsDigest(tool.input), tool.isPending,
+                    ) && (!approved || !app.amber.feature.runtime.AgentLiveStatusNotifier.requiresInAppApprovalOnly(tool))
+                },
                 onDecisionPersisted = decisionPersisted,
             )
         }
@@ -1004,10 +987,11 @@ class ChatRunCoordinator(
         approved: Boolean,
         reason: String,
         answer: String?,
+        matchesPending: (UIMessagePart.Tool) -> Boolean = { true },
         onDecisionPersisted: () -> Unit = {},
     ) {
         val result = approvalActions.applyToolApprovalDecision(
-            conversationId, toolCallId, approved, reason, answer,
+            conversationId, toolCallId, approved, reason, answer, matchesPending,
         )
         if (!result.applied) return
         onDecisionPersisted()

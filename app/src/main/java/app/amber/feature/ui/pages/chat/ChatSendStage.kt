@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import app.amber.core.model.Conversation
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlin.uuid.Uuid
 import kotlinx.coroutines.launch
 
 @Immutable
@@ -32,11 +33,16 @@ data class SendStageIntent(
     val host: String, // "local" | "cloud"
     val conversationId: String,
     val sendRevision: Long,
+    val messageId: Uuid,
 )
 
 @Stable
 class ChatSendStageState {
     private var _pendingIntent by mutableStateOf<SendStageIntent?>(null)
+    internal var admittingMessageId: Uuid? by mutableStateOf(null)
+        private set
+    internal var releasedMessageId: Uuid? by mutableStateOf(null)
+        private set
     private var _activeIntent by mutableStateOf<SendStageIntent?>(null)
     private var _stagedMessageKey by mutableStateOf<Any?>(null)
     private var _isActive by mutableStateOf(false)
@@ -75,7 +81,16 @@ class ChatSendStageState {
     internal val isPending: Boolean
         get() = _pendingIntent != null
 
+    internal fun beginLocalAdmission(messageId: Uuid) {
+        admittingMessageId = messageId
+    }
+
+    internal fun endLocalAdmission(messageId: Uuid) {
+        if (admittingMessageId == messageId) admittingMessageId = null
+    }
+
     fun onSubmitAccepted(intent: SendStageIntent) {
+        releasedMessageId = null
         _isActive = false
         _activeIntent = null
         _stagedMessageKey = null
@@ -100,6 +115,8 @@ class ChatSendStageState {
     }
 
     fun onUserDrag() {
+        (admittingMessageId ?: _pendingIntent?.messageId)?.let { releasedMessageId = it }
+        admittingMessageId = null
         _pendingIntent = null
         _activeIntent = null
         _stagedMessageKey = null
@@ -110,6 +127,8 @@ class ChatSendStageState {
     }
 
     fun reset() {
+        admittingMessageId = null
+        releasedMessageId = null
         _pendingIntent = null
         _activeIntent = null
         _stagedMessageKey = null

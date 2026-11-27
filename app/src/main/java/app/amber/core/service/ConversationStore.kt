@@ -15,6 +15,7 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
 import kotlin.uuid.Uuid
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -45,6 +46,7 @@ class ConversationStore(
     private val pendingMessageQueue: PendingMessageQueue,
     private val errorStore: ChatErrorStore,
     private val restoreWriteGate: SyncRestoreWriteGate? = null,
+    private val isMainConversation: (Uuid) -> Boolean = { false },
 ) : ConversationAccess {
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
     private val _sessionsVersion = MutableStateFlow(0L)
@@ -53,6 +55,10 @@ class ConversationStore(
     private val conversationInitMutexes = ConcurrentHashMap<Uuid, Mutex>()
     private val deletedConversationIds = ConcurrentHashMap.newKeySet<Uuid>()
     private val deletedConversationRestoreEpochs = ConcurrentHashMap<Uuid, Long>()
+    // A Personal Agent main ID can be reused. Room stores createAt to millisecond precision.
+    // Keep its new creation time across window eviction to reject old checkpoint snapshots.
+    private val reopenedMainStarts = ConcurrentHashMap<Uuid, Instant>()
+    private val pendingMainCleanup = ConcurrentHashMap<Uuid, CompletableDeferred<Unit>>()
 
     private val restoreRegistration = restoreWriteGate?.addRestoreLifecycleListener(
         onStarted = {
@@ -64,6 +70,9 @@ class ConversationStore(
                 generationCheckpointAt.clear()
                 deletedConversationIds.clear()
                 deletedConversationRestoreEpochs.clear()
+                reopenedMainStarts.clear()
+                pendingMainCleanup.values.forEach { it.cancel() }
+                pendingMainCleanup.clear()
             } else {
                 deletedConversationRestoreEpochs.clear()
             }
@@ -181,11 +190,13 @@ class ConversationStore(
             } else {
                 // 新建对话, 并添加预设消息
                 val currentSettings = settingsStore.settingsFlow.filterNot { it.init }.first()
-                val newConversation = Conversation.ofId(
+                val fresh = Conversation.ofId(
                     id = conversationId,
                     assistantId = AMBER_AGENT_ID,
                     newConversation = true
-                ).updateCurrentMessages(currentSettings.presetMessages)
+                )
+                val newConversation = (reopenedMainStarts[conversationId]?.let { fresh.copy(createAt = it) } ?: fresh)
+                    .updateCurrentMessages(currentSettings.presetMessages)
                 updateConversation(conversationId, newConversation)
                 session.setTimelineLoadState(
                     ConversationTimelineLoadState(
@@ -339,6 +350,10 @@ class ConversationStore(
     }
 
     internal suspend fun appendUserNode(conversationId: Uuid, userNode: MessageNode) {
+        pendingMainCleanup[conversationId]?.let {
+            it.await()
+            ensureInitialized(conversationId)
+        }
         val currentConversation = session(conversationId).state.value
         val newConversation = currentConversation.copy(
             messageNodes = currentConversation.messageNodes + userNode,
@@ -356,21 +371,25 @@ class ConversationStore(
         conversationId: Uuid,
         node: MessageNode,
         titleHint: String? = null,
-    ) {
+    ): Boolean {
+        val mainStart = reopenedMainStarts[conversationId]
+        if (conversationId in deletedConversationIds) return false
         ensureInitialized(conversationId)
-        val currentConversation = session(conversationId).state.value
-        val resolvedTitle = if (currentConversation.title.isBlank() && !titleHint.isNullOrBlank()) {
-            titleHint.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(48).orEmpty()
-        } else {
-            currentConversation.title
+        return withConversationWrite {
+            val window = session(conversationId)
+            if (mainStart != reopenedMainStarts[conversationId] || !window.timelineLoadState.value.initialized) {
+                return@withConversationWrite false
+            }
+            val current = window.state.value
+            val title = current.title.ifBlank {
+                titleHint?.lineSequence()?.map(String::trim)?.firstOrNull { it.isNotEmpty() }?.take(48).orEmpty()
+            }
+            val updated = current.copy(title = title, messageNodes = current.messageNodes + node, updateAt = Instant.now())
+            val written = persistConversationWindowInternal(conversationId, updated, indexFts = true, titleOverride = title)
+            if (!written || conversationId in deletedConversationIds || isSuperseded(updated)) return@withConversationWrite false
+            updateConversation(conversationId, updated)
+            true
         }
-        val newConversation = currentConversation.copy(
-            title = resolvedTitle,
-            messageNodes = currentConversation.messageNodes + node,
-            updateAt = Instant.now(),
-        )
-        updateConversation(conversationId, newConversation)
-        persistConversationWindow(conversationId, newConversation, indexFts = true)
     }
 
     internal suspend fun checkpointConversation(
@@ -417,26 +436,25 @@ class ConversationStore(
         conversationId: Uuid,
         conversation: Conversation,
         indexFts: Boolean,
-    ) {
-        if (conversationId in deletedConversationIds) return
+        titleOverride: String? = null,
+    ): Boolean {
+        if (conversationId in deletedConversationIds || isSuperseded(conversation)) return false
         val exists = conversationRepo.existsConversationById(conversation.id)
         if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) {
-            return
+            return false
         }
         if (!exists) {
-            conversationRepo.insertConversation(conversation)
-            return
+            return conversationRepo.insertConversation(conversation)
         }
         val loadState = session(conversationId).timelineLoadState.value
         if (!loadState.initialized) {
-            saveConversationInternal(conversationId, conversation)
-            return
+            return saveConversationInternal(conversationId, conversation)
         }
         // A window checkpoint may have queued before a metadata command. It owns
         // message content; the current session owns the latest title and suggestions.
         val current = getConversationFlow(conversationId).value
         val checkpoint = conversation.copy(
-            title = current.title,
+            title = titleOverride ?: current.title,
             chatSuggestions = current.chatSuggestions,
             updateAt = maxOf(conversation.updateAt, current.updateAt),
         )
@@ -445,6 +463,7 @@ class ConversationStore(
             firstNodeIndex = loadState.oldestLoadedIndex,
             indexFts = indexFts,
         )
+        return true
     }
 
     private suspend fun <T> withConversationWrite(block: suspend () -> T): T {
@@ -461,7 +480,7 @@ class ConversationStore(
         conversation: Conversation,
         checkDeletedFiles: Boolean,
     ) {
-        if (conversation.id != conversationId) return
+        if (conversation.id != conversationId || isSuperseded(conversation)) return
         val session = session(conversationId)
         // This API only projects the conversation into the in-memory session.
         // Physical attachment cleanup belongs to saveConversationInternal,
@@ -531,11 +550,11 @@ class ConversationStore(
         }
     }
 
-    private suspend fun saveConversationInternal(conversationId: Uuid, conversation: Conversation) {
-        if (conversationId in deletedConversationIds) return
+    private suspend fun saveConversationInternal(conversationId: Uuid, conversation: Conversation): Boolean {
+        if (conversationId in deletedConversationIds || isSuperseded(conversation)) return false
         val exists = conversationRepo.existsConversationById(conversation.id)
         if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) {
-            return // 新会话且为空时不保存
+            return false // 新会话且为空时不保存
         }
 
         val loadState = session(conversationId).timelineLoadState.value
@@ -551,12 +570,13 @@ class ConversationStore(
         val previousConversation = getConversationFlow(conversationId).value
         updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
         if (!exists) {
-            conversationRepo.insertConversation(updatedConversation)
+            if (!conversationRepo.insertConversation(updatedConversation)) return false
         } else {
             conversationRepo.updateConversation(updatedConversation)
         }
         // Removing old attachments is only safe after the new references commit.
         checkFilesDelete(updatedConversation, previousConversation, expectedRestoreEpoch)
+        return true
     }
 
     private fun mergeConversationWindowIntoFull(
@@ -584,8 +604,29 @@ class ConversationStore(
     }
 
     fun markConversationRestored(conversationId: Uuid) {
+        if (reopenedMainStarts.remove(conversationId) != null) {
+            sessions[conversationId]?.invalidateAfterRestore()
+        }
         deletedConversationIds.remove(conversationId)
         deletedConversationRestoreEpochs.remove(conversationId)
+        pendingMainCleanup.remove(conversationId)?.complete(Unit)
+    }
+
+    private fun isSuperseded(conversation: Conversation): Boolean =
+        reopenedMainStarts[conversation.id]?.let { it.toEpochMilli() != conversation.createAt.toEpochMilli() } == true
+
+    private suspend fun finishDeletion(conversation: Conversation, deferCleanup: Boolean) {
+        val id = conversation.id
+        if (isMainConversation(id)) {
+            conversationInitMutexes.computeIfAbsent(id) { Mutex() }.withLock {
+                val start = Instant.ofEpochMilli(maxOf(System.currentTimeMillis(), conversation.createAt.toEpochMilli() + 1))
+                if (deferCleanup) pendingMainCleanup[id] = CompletableDeferred()
+                reopenedMainStarts[id] = start
+                sessions[id]?.invalidateAfterRestore()
+                if (!deferCleanup) deletedConversationIds.remove(id)
+            }
+        }
+        if (!deferCleanup) deletedConversationRestoreEpochs.remove(id)
     }
 
     suspend fun purgeDeletedConversation(conversation: Conversation) {
@@ -595,12 +636,20 @@ class ConversationStore(
         // epoch as a new user write and deleting restored attachments.
         if (conversation.id !in deletedConversationIds) return
         val expectedRestoreEpoch = deletedConversationRestoreEpochs[conversation.id] ?: invocationEpoch
-        withRestoreEpoch(expectedRestoreEpoch) {
-            conversationRepo.cleanupDeletedConversation(
-                conversation = conversation,
-                expectedRestoreEpoch = expectedRestoreEpoch,
-            )
+        val pending = pendingMainCleanup[conversation.id]
+        try {
+            withRestoreEpoch(expectedRestoreEpoch) {
+                conversationRepo.cleanupDeletedConversation(
+                    conversation = conversation,
+                    expectedRestoreEpoch = expectedRestoreEpoch,
+                )
+            }
+        } catch (e: Throwable) {
+            pending?.completeExceptionally(e)
+            throw e
         }
+        if (reopenedMainStarts.containsKey(conversation.id)) deletedConversationIds.remove(conversation.id)
+        pendingMainCleanup.remove(conversation.id)?.complete(Unit)
         if (expectedRestoreEpoch == null) {
             deletedConversationRestoreEpochs.remove(conversation.id)
         } else {
@@ -663,7 +712,7 @@ class ConversationStore(
         withRestoreEpoch(expectedRestoreEpoch) {
             conversationRepo.deleteConversation(conversation, deferCleanup = deferCleanup)
         }
-        if (!deferCleanup) deletedConversationRestoreEpochs.remove(conversation.id)
+        finishDeletion(conversation, deferCleanup)
     }
 
     internal suspend fun rollbackDeletionIfPresent(conversationId: Uuid) {
@@ -675,9 +724,10 @@ class ConversationStore(
 
     internal suspend fun listConversations(): List<Conversation> = conversationRepo.getConversations().first()
 
-    internal suspend fun deleteAllPersisted(conversationIds: List<Uuid>, expectedRestoreEpoch: Long?) {
-        withRestoreEpoch(expectedRestoreEpoch) { conversationRepo.deleteAllConversations() }
-        conversationIds.forEach(deletedConversationRestoreEpochs::remove)
+    internal suspend fun deleteAllPersisted(conversations: List<Conversation>, expectedRestoreEpoch: Long?) {
+        for (conversation in conversations) {
+            deletePersisted(conversation, deferCleanup = false, expectedRestoreEpoch = expectedRestoreEpoch)
+        }
     }
 
     private suspend fun captureRestoreEpoch(): Long? {

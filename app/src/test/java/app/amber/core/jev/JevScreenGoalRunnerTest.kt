@@ -666,6 +666,7 @@ class JevScreenGoalRunnerTest {
         assertEquals("takeover_session_ended", result["reason"]!!.jsonPrimitive.content)
         assertEquals("0", result["actions_dispatched"]!!.jsonPrimitive.content)
         assertTrue(controller.actions.isEmpty())
+        assertEquals(1, transport.calls)
         assertEquals(PhoneTakeoverPhase.IDLE, takeover.state.value.phase)
     }
 
@@ -713,7 +714,7 @@ class JevScreenGoalRunnerTest {
 
     @Test
     fun actionDispatchFailureIsReportedAsOutcomeUnknownNotVerified() = runTest {
-        val transport = ScriptedTransport(mutableListOf(answer("a0")))
+        val transport = ScriptedTransport(actionStepAnswers(answer("a0")))
         val controller = FakeAccessibilityController(
             snapshot("s1"),
             actionError = IllegalStateException("binder died"),
@@ -735,7 +736,7 @@ class JevScreenGoalRunnerTest {
 
     @Test
     fun targetAppDisappearingAfterTheTapReportsOutcomeUnknown() = runTest {
-        val transport = ScriptedTransport(mutableListOf(answer("a0")))
+        val transport = ScriptedTransport(actionStepAnswers(answer("a0")))
         val first = snapshot("s1")
         val controller = FakeAccessibilityController(
             first,

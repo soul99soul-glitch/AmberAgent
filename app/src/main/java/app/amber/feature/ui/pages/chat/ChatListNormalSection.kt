@@ -44,6 +44,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -338,6 +339,7 @@ internal fun ChatListNormal(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(0.dp),
                         modifier = Modifier
+                            .testTag("chat-timeline-list")
                             .fillMaxSize()
                             .amberTraceMeasure("Amber Chat list measure")
                             .then(

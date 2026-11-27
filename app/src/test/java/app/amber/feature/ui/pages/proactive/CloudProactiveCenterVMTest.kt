@@ -20,8 +20,11 @@ import app.amber.feature.macgateway.ProactiveFeedbackAction
 import com.sun.net.httpserver.HttpServer
 import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -31,6 +34,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -58,6 +62,8 @@ class CloudProactiveCenterVMTest {
     private class FakeCenterGateway(
         var summaryResponse: CloudProactiveSummary = sampleSummary(),
     ) : CloudProactiveCenterGateway {
+        var waitingSummary: CompletableDeferred<CloudProactiveSummary>? = null
+        var summaryReturns = 0
         var summaryCalls = 0
         var summaryError: Throwable? = null
         var restraintError: Throwable? = null
@@ -78,7 +84,9 @@ class CloudProactiveCenterVMTest {
         override suspend fun summary(): CloudProactiveSummary {
             summaryCalls++
             summaryError?.let { throw it }
-            return summaryResponse
+            val response = waitingSummary?.let { withContext(NonCancellable) { it.await() } } ?: summaryResponse
+            summaryReturns++
+            return response
         }
 
         override suspend fun unmute(topicKey: String): CloudProactiveRestraintSnapshot {
@@ -182,16 +190,37 @@ class CloudProactiveCenterVMTest {
         }
     }
 
-    private fun createVm(
-        gateway: FakeCenterGateway,
-        paired: Boolean = true,
-    ): CloudProactiveCenterVM = CloudProactiveCenterVM(
-        gateway = gateway,
-        pairedFlow = MutableStateFlow(paired),
-        gatewayNameFlow = MutableStateFlow(if (paired) "My Cloud" else null),
-        ioDispatcher = testDispatcher,
-        autoLoad = true,
-    )
+    private val pairing = ProactiveCenterPairing("gw-1", "dev-1", 1, "My Cloud")
+
+    private fun createVm(gateway: FakeCenterGateway) = ProactiveCenterSession(
+        CoroutineScope(testDispatcher), gateway, pairing, testDispatcher,
+    ).also { it.loadSummary() }
+
+    @Test
+    fun newPairingDropsDraftsAndLateSummaryAndOldActionsStayWithTheirOriginalSession() = runTest(testDispatcher) {
+        val pairings = MutableStateFlow<ProactiveCenterPairing?>(pairing)
+        val late = CompletableDeferred<CloudProactiveSummary>()
+        val old = FakeCenterGateway().apply { waitingSummary = late }
+        val current = FakeCenterGateway(sampleSummary().copy(monitors = emptyList()))
+        val vm = CloudProactiveCenterVM(pairings, { if (it == pairing) old else current }, testDispatcher)
+        advanceUntilIdle()
+        val originalPage = vm.session.value
+        originalPage.onGithubRepoInputChanged("old/secret")
+        // Same IDs and label after re-pair: generation alone invalidates the old page.
+        pairings.value = pairing.copy(generation = 2)
+        advanceUntilIdle()
+        val newPage = vm.session.value
+        late.complete(sampleSummary())
+        originalPage.deleteMonitor("mon_1")
+        advanceUntilIdle()
+
+        assertEquals(1, old.summaryReturns)
+        assertEquals("", newPage.uiState.value.githubRepoInput)
+        assertEquals(emptyList<String>(), newPage.uiState.value.summary!!.monitors.map { it.id })
+        assertNull(newPage.uiState.value.notice)
+        assertTrue(current.deletedMonitors.isEmpty())
+        assertTrue(old.deletedMonitors.isEmpty())
+    }
 
     @Test
     fun loadsSummaryAndSupportsRefreshAndPreservesUnknownRunOutcome() = runTest(testDispatcher) {
@@ -259,10 +288,10 @@ class CloudProactiveCenterVMTest {
 
     @Test
     fun unmutesMutedTopicAndCancelsWakeupsWithSourceClassification() = runTest(testDispatcher) {
-        assertEquals(WakeupSourceKind.COMMITMENT, CloudProactiveCenterVM.classifyWakeupSource("commitment"))
-        assertEquals(WakeupSourceKind.SNOOZE, CloudProactiveCenterVM.classifyWakeupSource("snooze"))
-        assertEquals(WakeupSourceKind.AGENT, CloudProactiveCenterVM.classifyWakeupSource("agent"))
-        assertEquals(WakeupSourceKind.UNKNOWN, CloudProactiveCenterVM.classifyWakeupSource("future_kind"))
+        assertEquals(WakeupSourceKind.COMMITMENT, ProactiveCenterSession.classifyWakeupSource("commitment"))
+        assertEquals(WakeupSourceKind.SNOOZE, ProactiveCenterSession.classifyWakeupSource("snooze"))
+        assertEquals(WakeupSourceKind.AGENT, ProactiveCenterSession.classifyWakeupSource("agent"))
+        assertEquals(WakeupSourceKind.UNKNOWN, ProactiveCenterSession.classifyWakeupSource("future_kind"))
 
         val gateway = FakeCenterGateway()
         val vm = createVm(gateway)
@@ -427,7 +456,6 @@ class CloudProactiveCenterVMTest {
             val repo = CloudProactiveRepository(
                 dao = dao,
                 gateway = null,
-                tokenVault = null,
                 clientProviderOverride = { client },
                 connectionProviderOverride = { conn },
                 generationProviderOverride = { 1L },
@@ -437,12 +465,12 @@ class CloudProactiveCenterVMTest {
 
             val inbox = ProactiveDeepLinkInbox()
             inbox.submit("sig_remote_detail")
-            assertEquals("sig_remote_detail", inbox.pending.value)
+            assertEquals("sig_remote_detail", inbox.pending.value?.signalId)
 
             val session = ProactiveDetailSession(
                 loadSignal = repo::loadSignal,
-                sendOpenedFeedback = { gwId, sigId ->
-                    repo.sendFeedback(gwId, sigId, ProactiveFeedbackAction.OPENED)
+                sendOpenedFeedback = { card ->
+                    repo.sendFeedback(card.gatewayId, card.signalId, ProactiveFeedbackAction.OPENED, card.deviceId)
                 },
             )
 
@@ -450,6 +478,8 @@ class CloudProactiveCenterVMTest {
             val first = session.load("sig_remote_detail")
             assertTrue(first is ProactiveDetailLoadState.Loaded)
             assertEquals("远端详情", (first as ProactiveDetailLoadState.Loaded).card.meta.title)
+            assertTrue(feedbackCalls.isEmpty())
+            session.opened(first.card)
             assertEquals(1, feedbackCalls.size)
             assertTrue(feedbackCalls.first().contains("\"opened\""))
             assertTrue("Detail sheet load must never insert into DAO", dao.rows.value.isEmpty())
@@ -457,6 +487,7 @@ class CloudProactiveCenterVMTest {
             // Reloading the same signal in the same detail session does NOT duplicate opened feedback.
             val second = session.load("sig_remote_detail")
             assertTrue(second is ProactiveDetailLoadState.Loaded)
+            session.opened((second as ProactiveDetailLoadState.Loaded).card)
             assertEquals(1, feedbackCalls.size)
 
             // Missing signal returns NotFound cleanly.
@@ -464,7 +495,7 @@ class CloudProactiveCenterVMTest {
             assertEquals(ProactiveDetailLoadState.NotFound, missing)
 
             // Closing consumes pending inbox slot.
-            inbox.consume("sig_remote_detail")
+            inbox.consume(app.amber.feature.macgateway.ProactiveDetailRequest("sig_remote_detail", null, null))
             assertNull(inbox.pending.value)
         } finally {
             server.stop(0)
@@ -479,14 +510,14 @@ class CloudProactiveCenterVMTest {
             return rows.value.size.toLong()
         }
 
-        override fun observeForGateway(gatewayId: String): Flow<List<ProactiveCardEntity>> =
-            rows.map { list -> list.filter { it.gatewayId == gatewayId } }
+        override fun observeForGateway(gatewayId: String, deviceId: String): Flow<List<ProactiveCardEntity>> =
+            rows.map { list -> list.filter { it.gatewayId == gatewayId && it.deviceId == deviceId } }
 
-        override suspend fun findBySignal(gatewayId: String, signalId: String): ProactiveCardEntity? =
-            rows.value.firstOrNull { it.gatewayId == gatewayId && it.signalId == signalId }
+        override suspend fun findBySignal(gatewayId: String, deviceId: String, signalId: String): ProactiveCardEntity? =
+            rows.value.firstOrNull { it.gatewayId == gatewayId && it.deviceId == deviceId && it.signalId == signalId }
 
-        override suspend fun markNotified(gatewayId: String, signalId: String, notifiedAt: Long): Int = 0
-        override suspend fun setFeedback(gatewayId: String, signalId: String, feedbackState: String): Int = 0
+        override suspend fun markNotified(gatewayId: String, deviceId: String, signalId: String, notifiedAt: Long): Int = 0
+        override suspend fun setFeedback(gatewayId: String, deviceId: String, signalId: String, feedbackState: String): Int = 0
     }
 
     companion object {

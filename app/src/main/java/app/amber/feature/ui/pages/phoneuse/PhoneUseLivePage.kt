@@ -1,7 +1,6 @@
 package app.amber.feature.ui.pages.phoneuse
 
 import android.content.Intent
-import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -25,9 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,7 +42,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import app.amber.agent.R
 import app.amber.core.automation.display.VirtualDisplayRunControlState
 import app.amber.core.automation.display.VirtualDisplayRunRegistry
@@ -56,6 +56,8 @@ import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -71,67 +73,43 @@ fun PhoneUseLivePage(runId: String) {
     val activeRuns by VirtualDisplayRunRegistry.activeRuns.collectAsStateWithLifecycle()
     val activeRun = activeRuns[runId]
 
-    var previewBitmap by remember(runId) { mutableStateOf<Bitmap?>(null) }
-    var previewImage by remember(runId) { mutableStateOf<ImageBitmap?>(null) }
-    var previewActive by remember(runId) { mutableStateOf(true) }
+    var previewImage by remember(activeRun) { mutableStateOf<ImageBitmap?>(null) }
     var takeoverPromptPackage by remember(runId) { mutableStateOf<String?>(null) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
 
-    fun releasePreviewBitmap() {
-        val old = previewBitmap
-        previewBitmap = null
-        previewImage = null
-        if (old != null && !old.isRecycled) {
-            runCatching { old.recycle() }
-        }
+    val controlState = activeRun?.controlState?.collectAsStateWithLifecycle()?.value
+        ?: VirtualDisplayRunControlState.STOPPED
+    val sessionState = activeRun?.sessionState?.collectAsStateWithLifecycle()?.value
+        ?: VirtualDisplaySessionState.CLOSED
+    val frameSource = activeRun?.frameSource
+    val blankFrames = remember(frameSource) {
+        frameSource?.latestStats?.map { it?.unobservable == true }?.distinctUntilChanged()
     }
-
-    // R3 L9: Immediately halt preview subscription & release frame bitmap when leaving the page.
-    DisposableEffect(runId) {
-        previewActive = true
-        onDispose {
-            previewActive = false
-            releasePreviewBitmap()
-        }
-    }
-
-    val controlState by (activeRun?.controlState?.collectAsState()
-        ?: remember { mutableStateOf(VirtualDisplayRunControlState.STOPPED) })
-    val sessionState by (activeRun?.sessionState?.collectAsState()
-        ?: remember { mutableStateOf(VirtualDisplaySessionState.CLOSED) })
-    val frameStats by (activeRun?.frameSource?.latestStats?.collectAsState()
-        ?: remember { mutableStateOf(null) })
-
     val isUnobservable = sessionState == VirtualDisplaySessionState.UNOBSERVABLE ||
-        frameStats?.unobservable == true
+        blankFrames?.collectAsStateWithLifecycle(initialValue = false)?.value == true
 
-    LaunchedEffect(activeRun, previewActive, isUnobservable) {
-        val frameSource = activeRun?.frameSource
-        if (frameSource == null || !previewActive || isUnobservable) {
-            releasePreviewBitmap()
-            return@LaunchedEffect
-        }
-        var lastSequence = -1L
-        while (isActive && previewActive && !frameSource.isClosed) {
-            val stats = frameSource.latestStats.value
-            if (stats?.unobservable == true) {
-                releasePreviewBitmap()
-                break
-            }
-            if (stats != null && stats.sequence != lastSequence) {
-                val nextBitmap = withContext(Dispatchers.Default) {
-                    frameSource.copyLatestBitmap()
-                }
-                if (nextBitmap != null) {
-                    lastSequence = stats.sequence
-                    val old = previewBitmap
-                    previewBitmap = nextBitmap
-                    previewImage = nextBitmap.asImageBitmap()
-                    if (old != null && old !== nextBitmap && !old.isRecycled) {
-                        runCatching { old.recycle() }
+    LaunchedEffect(lifecycle, frameSource, isUnobservable) {
+        if (frameSource == null || isUnobservable) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            var lastSequence = -1L
+            try {
+                while (isActive && !frameSource.isClosed) {
+                    val stats = frameSource.latestStats.value
+                    if (stats?.unobservable == true) {
+                        previewImage = null
+                    } else if (stats != null && stats.sequence != lastSequence) {
+                        previewImage = withContext(Dispatchers.Default) {
+                            frameSource.copyLatestBitmap()?.asImageBitmap()
+                        }
+                        lastSequence = stats.sequence
                     }
+                    delay(PREVIEW_FRAME_INTERVAL_MS)
                 }
+            } finally {
+                // Compose may still draw the previous frame. Release the reference and let the
+                // renderer determine when the bitmap's backing storage is no longer in use.
+                previewImage = null
             }
-            delay(PREVIEW_FRAME_INTERVAL_MS)
         }
     }
 
@@ -312,7 +290,7 @@ fun PhoneUseLivePage(runId: String) {
                             val targetPkg = activeRun.packageName
                             scope.launch {
                                 activeRun.takeover()
-                                releasePreviewBitmap()
+                                previewImage = null
                                 takeoverPromptPackage = targetPkg
                             }
                         },
@@ -332,7 +310,7 @@ fun PhoneUseLivePage(runId: String) {
                         onClick = {
                             scope.launch {
                                 activeRun.emergencyStop()
-                                releasePreviewBitmap()
+                                previewImage = null
                             }
                         },
                         enabled = controlState != VirtualDisplayRunControlState.STOPPED,

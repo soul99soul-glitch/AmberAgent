@@ -186,11 +186,12 @@ class LocalAsyncTaskCoordinator(
         conversationId: Uuid,
         content: List<UIMessagePart>,
         answer: Boolean = true,
+        messageId: Uuid = Uuid.random(),
     ): Boolean {
         if (content.isEmptyInputMessage()) return false
 
         val processed = userInputPreprocessor.process(content)
-        val userMessage = UIMessage(role = MessageRole.USER, parts = processed)
+        val userMessage = UIMessage(id = messageId, role = MessageRole.USER, parts = processed)
         val userNode = userMessage.toMessageNode()
         val userText = userMessage.toText().trim()
         val hasNonTextParts = processed.any { it !is UIMessagePart.Text }

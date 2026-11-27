@@ -6,6 +6,7 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessagePart
 import android.util.Log
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
@@ -150,14 +151,16 @@ private fun rememberScopedProactiveCards(conversationId: String): List<Proactive
     val mainSessionStore = remember(koin) { koin.getOrNull<PersonalAgentMainSessionStore>() } ?: return emptyList()
     val proactiveRepository = remember(koin) { koin.getOrNull<CloudProactiveRepository>() } ?: return emptyList()
 
-    val pairedGatewayIdFlow = remember(gatewayRepository) {
+    val pairedConnectionFlow = remember(gatewayRepository) {
         gatewayRepository.state
-            .map { it.connection?.gatewayId }
+            .map { it.connection }
             .distinctUntilChanged()
     }
-    val pairedGatewayId by pairedGatewayIdFlow.collectAsStateWithLifecycle(
-        initialValue = gatewayRepository.state.value.connection?.gatewayId,
+    val pairedConnection by pairedConnectionFlow.collectAsStateWithLifecycle(
+        initialValue = gatewayRepository.state.value.connection,
     )
+    val pairedGatewayId = pairedConnection?.gatewayId
+    val deviceId = pairedConnection?.deviceId
     val scopedGatewayId = remember(conversationId, pairedGatewayId, mainSessionStore) {
         resolveCloudMainGatewayIdForProactiveCards(
             conversationId = conversationId,
@@ -165,15 +168,17 @@ private fun rememberScopedProactiveCards(conversationId: String): List<Proactive
             peekCloudMainConversationId = mainSessionStore::peekCloudMainConversationId,
         )
     }
-    val cardsFlow = remember(proactiveRepository, scopedGatewayId) {
-        if (scopedGatewayId != null) {
-            proactiveRepository.cards(scopedGatewayId)
+    val cardsFlow = remember(proactiveRepository, scopedGatewayId, deviceId) {
+        if (scopedGatewayId != null && deviceId != null) {
+            proactiveRepository.cards(scopedGatewayId, deviceId)
         } else {
             flowOf(emptyList())
         }
     }
-    val cards by cardsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
-    return cards
+    return key(scopedGatewayId, deviceId) {
+        val cards by cardsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+        cards
+    }
 }
 
 internal data class PostSendTimelineState(

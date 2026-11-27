@@ -402,13 +402,14 @@ class ChatVM(
         content: List<UIMessagePart>,
         answer: Boolean = true,
         queueMode: PendingUserMessageMode = PendingUserMessageMode.FOLLOWUP,
+        messageId: Uuid = Uuid.random(),
     ): Boolean {
         if (content.isEmptyInputMessage()) return false
         analytics.logEvent("ai_send_message", null)
         val accepted = if (parseDeepReadSlashCommand(content)?.let { eventBus.tryEmit(it) } == true) {
             true
         } else {
-            chatService.sendMessage(_conversationId, content, answer, queueMode)
+            chatService.sendMessage(_conversationId, content, answer, queueMode, messageId)
         }
         // P3-03: once anything is actually sent, a MiniApp-hosted composer
         // draft is consumed and must not come back on the next open.

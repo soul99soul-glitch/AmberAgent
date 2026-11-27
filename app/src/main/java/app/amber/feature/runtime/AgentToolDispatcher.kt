@@ -140,7 +140,7 @@ class AgentToolDispatcher(
         retrySetting: GenerationRetrySetting = GenerationRetrySetting(enabled = false),
         ledgerContext: ToolLedgerContext? = null,
         capabilityPermissions: CapabilityPermissionState? = null,
-        approvalHistory: CapabilityPermissionStore? = null,
+        approvalHistoryFor: (UIMessagePart.Tool) -> CapabilityPermissionStore? = { null },
         permissionContext: CapabilityPermissionContext? = null,
         executionPolicy: ExecutionPolicy = ExecutionPolicy.permissive(),
         shouldAbortRemaining: () -> Boolean = { false },
@@ -193,7 +193,7 @@ class AgentToolDispatcher(
                                         retrySetting = retrySetting,
                                         ledgerContext = ledgerContext,
                                         capabilityPermissions = capabilityPermissions,
-                                        approvalHistory = approvalHistory,
+                                        approvalHistory = approvalHistoryFor(tool),
                                         permissionContext = permissionContext,
                                         executionPolicy = executionPolicy,
                                     )
@@ -235,7 +235,7 @@ class AgentToolDispatcher(
                             retrySetting = retrySetting,
                             ledgerContext = ledgerContext,
                             capabilityPermissions = capabilityPermissions,
-                            approvalHistory = approvalHistory,
+                            approvalHistory = approvalHistoryFor(tool),
                             permissionContext = permissionContext,
                             executionPolicy = executionPolicy,
                         )
@@ -524,6 +524,9 @@ class AgentToolDispatcher(
                     execute = executeNested,
                 )
             } else {
+                if (tool.requiresIndividualScreenApproval()) {
+                    staleApprovalResult(tool, ledgerContext?.runId, approvalHistory, effectId = null)?.let { return it }
+                }
                 // Recipe-like composite tools write their nested effects
                 // through the same dispatcher. Keep the outer PREPARED
                 // effect reusable while a nested approval is pending, and
@@ -770,7 +773,7 @@ class AgentToolDispatcher(
         if (tool.approvalState !is ToolApprovalState.Approved || approvalHistory == null) return null
         val currentDigest = argsDigest(tool.input)
         val record = runCatching { approvalHistory.approvalFor(runId, tool.toolCallId) }.getOrNull()
-        if (ApprovalGuard.isValid(record?.argsDigest, currentDigest, record?.decision)) return null
+        if (record?.toolName == tool.toolName && ApprovalGuard.isValid(record.argsDigest, currentDigest, record.decision)) return null
         logInfo("execute: blocking ${tool.toolName} ${tool.toolCallId} (stale approval)")
         return tool.copy(
             output = listOf(

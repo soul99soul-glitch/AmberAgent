@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.proactive
 
+import kotlinx.coroutines.CancellationException
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import app.amber.agent.R
 import app.amber.feature.macgateway.CloudProactiveRepository
 import app.amber.feature.macgateway.ProactiveCard
+import app.amber.feature.macgateway.ProactiveDetailRequest
 import app.amber.feature.macgateway.ProactiveFeedbackAction
 import app.amber.feature.ui.theme.LocalAmberTokens
 import com.composables.icons.lucide.CircleAlert
@@ -59,41 +61,48 @@ sealed interface ProactiveDetailLoadState {
  */
 internal class ProactiveDetailSession(
     private val loadSignal: suspend (String) -> ProactiveCard?,
-    private val sendOpenedFeedback: suspend (gatewayId: String, signalId: String) -> Boolean,
+    private val sendOpenedFeedback: suspend (ProactiveCard) -> Boolean,
 ) {
     private val reportedOpenedSignalIds = HashSet<String>()
 
     suspend fun load(signalId: String): ProactiveDetailLoadState {
         val card = try {
             loadSignal(signalId)
-        } catch (error: Throwable) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
             return ProactiveDetailLoadState.Error(error.message)
         } ?: return ProactiveDetailLoadState.NotFound
 
-        if (reportedOpenedSignalIds.add(card.signalId)) {
-            runCatching { sendOpenedFeedback(card.gatewayId, card.signalId) }
-        }
         return ProactiveDetailLoadState.Loaded(card)
+    }
+
+    suspend fun opened(card: ProactiveCard) {
+        if (card.signalId !in reportedOpenedSignalIds && sendOpenedFeedback(card)) {
+            reportedOpenedSignalIds.add(card.signalId)
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProactiveDetailSheet(
-    signalId: String,
+    request: ProactiveDetailRequest,
     conversationId: String?,
     repository: CloudProactiveRepository,
     onDismiss: () -> Unit,
 ) {
+    val signalId = request.signalId
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val tokens = LocalAmberTokens.current
-    val detailSession = remember(repository) {
+    val detailSession = remember(repository, request) {
         ProactiveDetailSession(
-            loadSignal = repository::loadSignal,
-            sendOpenedFeedback = { gatewayId, id ->
+            loadSignal = { repository.loadSignal(request) },
+            sendOpenedFeedback = { card ->
                 repository.sendFeedback(
-                    gatewayId = gatewayId,
-                    signalId = id,
+                    gatewayId = card.gatewayId,
+                    deviceId = card.deviceId,
+                    signalId = card.signalId,
                     action = ProactiveFeedbackAction.OPENED,
                 )
             },
@@ -226,6 +235,7 @@ fun ProactiveDetailSheet(
 
                 is ProactiveDetailLoadState.Loaded -> {
                     val card = current.card
+                    LaunchedEffect(card.gatewayId, card.deviceId, card.signalId) { detailSession.opened(card) }
                     ProactiveCardView(
                         card = card,
                         maxBodyLines = Int.MAX_VALUE,
@@ -237,6 +247,7 @@ fun ProactiveDetailSheet(
                         onSnooze = { target ->
                             repository.sendFeedback(
                                 gatewayId = target.gatewayId,
+                                deviceId = target.deviceId,
                                 signalId = target.signalId,
                                 action = ProactiveFeedbackAction.SNOOZE,
                                 snoozeMinutes = DEFAULT_SNOOZE_MINUTES,
@@ -245,6 +256,7 @@ fun ProactiveDetailSheet(
                         onMute = { target ->
                             repository.sendFeedback(
                                 gatewayId = target.gatewayId,
+                                deviceId = target.deviceId,
                                 signalId = target.signalId,
                                 action = ProactiveFeedbackAction.MUTE_TOPIC,
                                 muteHours = DEFAULT_MUTE_HOURS,

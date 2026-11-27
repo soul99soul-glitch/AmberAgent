@@ -1,15 +1,19 @@
 package app.amber.core.automation.display
 
-import android.app.Activity
 import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
+import android.hardware.display.DisplayManager
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import android.view.Display
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import rikka.shizuku.Shizuku
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -34,6 +38,9 @@ internal object IsolationProbeChannel {
 
     private val mainScreenInjectedEvents = AtomicInteger(0)
     private val mainFocusLost = AtomicBoolean(false)
+    private val monitorMainFocus = AtomicBoolean(false)
+    private val mainInputObserved = AtomicBoolean(false)
+    private val targetDestroyed = AtomicBoolean(false)
     private val residualAfterDisconnect = AtomicInteger(0)
     private val leakedToDefaultOnDestroy = AtomicBoolean(false)
 
@@ -47,7 +54,7 @@ internal object IsolationProbeChannel {
     )
 
     fun resetForNewRun(): Pair<String, Int> {
-        val token = UUID.randomUUID().toString().take(8)
+        val token = UUID.randomUUID().toString()
         val rgb = markerPalette[Random.nextInt(markerPalette.size)]
         activeToken.set(token)
         markerRgb.set(rgb)
@@ -59,6 +66,9 @@ internal object IsolationProbeChannel {
         targetText.set("")
         mainScreenInjectedEvents.set(0)
         mainFocusLost.set(false)
+        monitorMainFocus.set(true)
+        mainInputObserved.set(false)
+        targetDestroyed.set(false)
         residualAfterDisconnect.set(0)
         leakedToDefaultOnDestroy.set(false)
         return token to rgb
@@ -80,28 +90,31 @@ internal object IsolationProbeChannel {
         disconnectPhaseActive.set(true)
     }
 
-    fun recordTargetResumed(displayId: Int) {
+    fun recordTargetResumed(token: String, displayId: Int) {
+        if (token != activeToken.get()) return
+        targetDestroyed.set(false)
         targetResumedDisplayId.set(displayId)
         if (displayId == Display.DEFAULT_DISPLAY) {
             leakedToDefaultOnDestroy.set(true)
         }
     }
 
-    fun recordTargetTap(displayId: Int) {
+    fun recordTargetTap(token: String, displayId: Int) {
+        if (token != activeToken.get()) return
         if (disconnectPhaseActive.get()) {
             residualAfterDisconnect.incrementAndGet()
             return
         }
         val expected = expectedDisplayId.get()
-        if (displayId > Display.DEFAULT_DISPLAY && (expected == Display.INVALID_DISPLAY || displayId == expected)) {
+        if (injectionBurstActive.get() && displayId > Display.DEFAULT_DISPLAY && displayId == expected) {
             targetTapCount.incrementAndGet()
         } else if (displayId == Display.DEFAULT_DISPLAY) {
             mainScreenInjectedEvents.incrementAndGet()
         }
     }
 
-    fun recordTargetText(text: String) {
-        targetText.set(text)
+    fun recordTargetText(token: String, text: String) {
+        if (token == activeToken.get()) targetText.set(text)
     }
 
     fun recordMainScreenInjectedTouch() {
@@ -113,13 +126,29 @@ internal object IsolationProbeChannel {
     }
 
     fun recordMainFocusLost() {
-        if (injectionBurstActive.get() || targetResumedDisplayId.get() > Display.DEFAULT_DISPLAY) {
+        if (monitorMainFocus.get()) {
             mainFocusLost.set(true)
         }
     }
 
-    fun recordLeakedToDefaultDisplay() {
-        leakedToDefaultOnDestroy.set(true)
+    fun recordMainInput() {
+        if (injectionBurstActive.get()) mainInputObserved.set(true)
+    }
+
+    fun endRun() {
+        monitorMainFocus.set(false)
+        injectionBurstActive.set(false)
+        disconnectPhaseActive.set(false)
+    }
+
+    fun recordTargetDestroyed(token: String, displayId: Int) {
+        if (token == activeToken.get() && displayId > Display.DEFAULT_DISPLAY && displayId == expectedDisplayId.get()) {
+            targetDestroyed.set(true)
+        }
+    }
+
+    fun recordLeakedToDefaultDisplay(token: String) {
+        if (token == activeToken.get()) leakedToDefaultOnDestroy.set(true)
     }
 
     fun targetDisplayId(): Int = targetResumedDisplayId.get()
@@ -127,6 +156,8 @@ internal object IsolationProbeChannel {
     fun targetText(): String = targetText.get()
     fun mainScreenInjectedEvents(): Int = mainScreenInjectedEvents.get()
     fun isMainFocusStable(): Boolean = !mainFocusLost.get()
+    fun mainInputObserved(): Boolean = mainInputObserved.get()
+    fun targetDestroyed(): Boolean = targetDestroyed.get()
     fun residualAfterDisconnect(): Int = residualAfterDisconnect.get()
     fun leakedToDefaultOnDestroy(): Boolean = leakedToDefaultOnDestroy.get()
 }
@@ -150,11 +181,24 @@ class IsolationProbeRunner(
 ) {
 
     suspend fun run(
-        hostActivity: Activity? = null,
+        hostActivity: IsolationProbeMainActivity,
         onProgress: (String) -> Unit = {},
+    ): IsolationProbeResult = probeMutex.withLock {
+        probeStore.clear()
+        try {
+            runProbe(hostActivity, onProgress)
+        } finally {
+            IsolationProbeChannel.endRun()
+        }
+    }
+
+    private suspend fun runProbe(
+        hostActivity: IsolationProbeMainActivity,
+        onProgress: (String) -> Unit,
     ): IsolationProbeResult {
         val (token, expectedRgb) = IsolationProbeChannel.resetForNewRun()
         val runId = "isolation-probe-$token"
+        if (!hostActivity.hasMainInputFocus()) IsolationProbeChannel.recordMainFocusLost()
         onProgress("1/6 创建虚拟屏 (720x1600 / 320dpi)...")
 
         val targetToken = AmberDisplayUserService.probeTargetToken(context.packageName)
@@ -175,8 +219,8 @@ class IsolationProbeRunner(
                         targetReceivedEvents = 0,
                         textReadBackOk = false,
                         frameMarkerOk = false,
-                        focusStable = true,
-                        residualAfterDisconnect = 0,
+                        focusStable = false,
+                        residualAfterDisconnect = -1,
                         leakedToDefaultOnDestroy = false,
                         detail = "open_virtual_display_failed:${outcome.reason}",
                     ),
@@ -189,15 +233,14 @@ class IsolationProbeRunner(
                 targetReceivedEvents = 0,
                 textReadBackOk = false,
                 frameMarkerOk = false,
-                focusStable = true,
-                residualAfterDisconnect = 0,
+                focusStable = false,
+                residualAfterDisconnect = -1,
                 leakedToDefaultOnDestroy = false,
                 detail = "unexpected_non_virtual_session",
             ),
         )
 
         IsolationProbeChannel.setExpectedDisplayId(session.displayId)
-        var postDisconnectTapRejected = true
         var detail = "ok"
 
         try {
@@ -226,19 +269,20 @@ class IsolationProbeRunner(
                 false
             }
 
-            onProgress("4/6 注入 20 次点击 + 1 次中文 ACTION_SET_TEXT...")
+            onProgress("4/6 请持续在主屏输入中文，正在验证虚拟屏点击和输入…")
             IsolationProbeChannel.setInjectionBurstActive(true)
             val tapX = session.width * 0.5f
             val tapY = session.height * 0.45f
-            if (resumedOnVirtual) {
-                repeat(IsolationProbeResult.REQUIRED_PROBE_TAPS) {
-                    session.controller.tap(tapX, tapY, durationMillis = 40L)
-                    delay(45L)
-                }
-                delay(250L)
+            fun safeToTestInput() = resumedOnVirtual && frameMarkerOk && session.isGenerationValid &&
+                IsolationProbeChannel.isMainFocusStable() && hostActivity.hasMainInputFocus() &&
+                IsolationProbeChannel.mainScreenInjectedEvents() == 0
+
+            for (tap in 1..IsolationProbeResult.REQUIRED_PROBE_TAPS) {
+                if (!safeToTestInput() || !session.controller.tap(tapX, tapY, durationMillis = 40L)) break
+                delay(200L)
             }
 
-            val textReadBackOk = if (resumedOnVirtual) {
+            val textReadBackOk = if (safeToTestInput()) {
                 val controllerOk = withContext(Dispatchers.Main) {
                     session.controller.setFocusedText(PROBE_CHINESE_TEXT)
                 }
@@ -251,52 +295,59 @@ class IsolationProbeRunner(
             }
             IsolationProbeChannel.setInjectionBurstActive(false)
 
-            onProgress("5/6 断开 Shizuku 并校验无残留输入与无主屏回流...")
-            IsolationProbeChannel.enterDisconnectPhase()
-            session.close("isolation_probe_disconnect_test")
-            // Attempt one extra tap after disconnect — MUST be rejected.
-            postDisconnectTapRejected = !session.controller.tap(tapX, tapY, durationMillis = 40L)
-            delay(POST_DESTROY_SETTLE_MS)
+            val mainInputObserved = IsolationProbeChannel.mainInputObserved()
+            val readyForDisconnect = frameMarkerOk && textReadBackOk && mainInputObserved &&
+                IsolationProbeChannel.isMainFocusStable() && hostActivity.hasMainInputFocus() &&
+                IsolationProbeChannel.targetTapCount() == IsolationProbeResult.REQUIRED_PROBE_TAPS &&
+                IsolationProbeChannel.mainScreenInjectedEvents() == 0 && session.isGenerationValid &&
+                runCatching { Shizuku.pingBinder() }.getOrNull() == true
 
+            // The operator stops Shizuku externally. A local session.close() suppresses binder
+            // callbacks and cannot establish how a real disconnect affects either display.
+            IsolationProbeChannel.enterDisconnectPhase()
+            val disconnected = if (readyForDisconnect) {
+                onProgress("5/6 请在 45 秒内从外部停止 Shizuku，保持本页打开。")
+                waitUntil(DISCONNECT_TIMEOUT_MS, 100L) {
+                    !session.isGenerationValid && runCatching { Shizuku.pingBinder() }.getOrNull() == false
+                }
+            } else {
+                false
+            }
+            val displayManager = context.getSystemService(DisplayManager::class.java)
+            val destroyed = disconnected && displayManager != null && waitUntil(TARGET_RESUME_TIMEOUT_MS, 100L) {
+                IsolationProbeChannel.targetDestroyed() && displayManager.getDisplay(session.displayId) == null
+            }
+            val postDisconnectTapRejected = disconnected && !session.controller.tap(tapX, tapY, durationMillis = 40L)
+            if (disconnected) delay(POST_DESTROY_SETTLE_MS)
+
+            val focusStable = IsolationProbeChannel.isMainFocusStable() && hostActivity.hasMainInputFocus()
             val mainInjected = IsolationProbeChannel.mainScreenInjectedEvents()
             val targetReceived = IsolationProbeChannel.targetTapCount()
-            val focusStable = IsolationProbeChannel.isMainFocusStable()
-            val residual = IsolationProbeChannel.residualAfterDisconnect() + if (postDisconnectTapRejected) 0 else 1
-            val leakedToDefault = IsolationProbeChannel.leakedToDefaultOnDestroy()
-
-            val passed = resumedOnVirtual &&
-                mainInjected == 0 &&
-                targetReceived >= IsolationProbeResult.REQUIRED_PROBE_TAPS &&
-                textReadBackOk &&
-                frameMarkerOk &&
-                focusStable &&
-                residual == 0 &&
-                !leakedToDefault
-
-            if (!passed && detail == "ok") {
-                detail = buildFailureDetail(
-                    mainInjected = mainInjected,
-                    targetReceived = targetReceived,
-                    textReadBackOk = textReadBackOk,
-                    frameMarkerOk = frameMarkerOk,
-                    focusStable = focusStable,
-                    residual = residual,
-                    leakedToDefault = leakedToDefault,
-                )
+            val residual = if (disconnected) {
+                IsolationProbeChannel.residualAfterDisconnect() + if (postDisconnectTapRejected) 0 else 1
+            } else {
+                -1 // No disconnect observation window.
             }
-
+            val observed = IsolationProbeResult(
+                passed = false,
+                mainScreenInjectedEvents = mainInjected,
+                targetReceivedEvents = targetReceived,
+                textReadBackOk = textReadBackOk,
+                frameMarkerOk = frameMarkerOk,
+                focusStable = focusStable,
+                disconnectObserved = disconnected,
+                mainInputObserved = mainInputObserved,
+                targetDestroyed = destroyed,
+                residualAfterDisconnect = residual,
+                leakedToDefaultOnDestroy = IsolationProbeChannel.leakedToDefaultOnDestroy(),
+                detail = detail,
+            )
+            val failures = observed.evidenceFailures()
             onProgress("6/6 写入探测结论...")
             return recordAndReturn(
-                IsolationProbeResult(
-                    passed = passed,
-                    mainScreenInjectedEvents = mainInjected,
-                    targetReceivedEvents = targetReceived,
-                    textReadBackOk = textReadBackOk,
-                    frameMarkerOk = frameMarkerOk,
-                    focusStable = focusStable,
-                    residualAfterDisconnect = residual,
-                    leakedToDefaultOnDestroy = leakedToDefault,
-                    detail = detail,
+                observed.copy(
+                    passed = resumedOnVirtual && failures.isEmpty(),
+                    detail = if (detail != "ok" || failures.isEmpty()) detail else failures.joinToString(","),
                 ),
             )
         } finally {
@@ -306,7 +357,7 @@ class IsolationProbeRunner(
     }
 
     private suspend fun launchProbeTargetFromHost(
-        hostActivity: Activity?,
+        hostActivity: IsolationProbeMainActivity,
         displayId: Int,
         token: String,
     ) {
@@ -318,8 +369,7 @@ class IsolationProbeRunner(
         val options = ActivityOptions.makeBasic().setLaunchDisplayId(displayId)
         withContext(Dispatchers.Main) {
             runCatching {
-                val launcher: Context = hostActivity ?: context
-                launcher.startActivity(intent, options.toBundle())
+                hostActivity.startActivity(intent, options.toBundle())
             }.onFailure {
                 Log.w(TAG, "Host-side launch onto virtual display $displayId failed", it)
             }
@@ -331,8 +381,8 @@ class IsolationProbeRunner(
         pollMs: Long,
         predicate: () -> Boolean,
     ): Boolean {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline) {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
             if (predicate()) return true
             delay(pollMs)
         }
@@ -345,27 +395,9 @@ class IsolationProbeRunner(
         return result
     }
 
-    private fun buildFailureDetail(
-        mainInjected: Int,
-        targetReceived: Int,
-        textReadBackOk: Boolean,
-        frameMarkerOk: Boolean,
-        focusStable: Boolean,
-        residual: Int,
-        leakedToDefault: Boolean,
-    ): String = buildList {
-        if (mainInjected != 0) add("mainScreenInjectedEvents=$mainInjected")
-        if (targetReceived < IsolationProbeResult.REQUIRED_PROBE_TAPS) {
-            add("targetReceivedEvents=$targetReceived/${IsolationProbeResult.REQUIRED_PROBE_TAPS}")
-        }
-        if (!textReadBackOk) add("textReadBackOk=false")
-        if (!frameMarkerOk) add("frameMarkerOk=false")
-        if (!focusStable) add("focusStable=false")
-        if (residual != 0) add("residualAfterDisconnect=$residual")
-        if (leakedToDefault) add("leakedToDefaultOnDestroy=true")
-    }.joinToString(",")
-
     companion object {
+        private val probeMutex = Mutex()
+        private const val DISCONNECT_TIMEOUT_MS = 45_000L
         private const val TAG = "IsolationProbe"
         const val EXTRA_PROBE_TOKEN = "probe_token"
         const val PROBE_CHINESE_TEXT = "琥珀双屏隔离测试中文"

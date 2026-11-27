@@ -61,7 +61,7 @@ class ProactiveFeedbackExecutionTest {
 
         assertEquals(1, enqueued.size)
         val (workName, request) = enqueued.single()
-        assertEquals("proactive-feedback-gw-1-sig_42-snooze", workName)
+        assertEquals("proactive-feedback/gw-1/dev-1/sig_42/snooze", workName)
 
         val data = request.workSpec.input
         assertEquals("gw-1", data.getString(ProactiveFeedbackWorker.KEY_GATEWAY_ID))
@@ -89,7 +89,6 @@ class ProactiveFeedbackExecutionTest {
 
     @Test
     fun `pairing mismatch aborts immediately without reading token or calling network and notifies incomplete`() = runBlocking {
-        val tokenReads = AtomicInteger(0)
         val networkCalls = AtomicInteger(0)
         val incompleteAlerts = CopyOnWriteArrayList<Pair<String, ProactiveFeedbackAction>>()
 
@@ -97,15 +96,11 @@ class ProactiveFeedbackExecutionTest {
             awaitGatewayReady = {},
             currentConnection = { activeConnection },
             currentGeneration = { 2L },
-            readToken = {
-                tokenReads.incrementAndGet()
-                "secret-token-new-pairing"
-            },
             submitFeedback = { _, _, _, _, _, _ ->
                 networkCalls.incrementAndGet()
                 ProactiveFeedbackResult(ok = true, action = "snooze", applied = true)
             },
-            recordLocalFeedback = { _, _, _ -> },
+            recordLocalFeedback = { _, _, _, _ -> },
             onTerminalIncomplete = { signalId, action -> incompleteAlerts += signalId to action },
         )
 
@@ -129,7 +124,6 @@ class ProactiveFeedbackExecutionTest {
         )
         assertEquals(ProactiveFeedbackOutcome.PairingMismatch, devMismatch)
 
-        assertEquals(0, tokenReads.get())
         assertEquals(0, networkCalls.get())
         assertEquals(
             listOf(
@@ -138,6 +132,27 @@ class ProactiveFeedbackExecutionTest {
             ),
             incompleteAlerts,
         )
+    }
+
+    @Test
+    fun `pairing rotation while acquiring bound client or waiting for feedback never updates new pairing`() = runBlocking {
+        val generation = AtomicLong(1)
+        var clientReplaced = true
+        val executor = ProactiveFeedbackExecutor(
+            awaitGatewayReady = {},
+            currentConnection = { activeConnection },
+            currentGeneration = generation::get,
+            submitFeedback = { _, expected, _, _, _, _ ->
+                assertEquals(generation.get(), expected)
+                generation.incrementAndGet()
+                if (clientReplaced) null else ProactiveFeedbackResult(ok = true, action = "snooze", applied = true)
+            },
+            recordLocalFeedback = { _, _, _, _ -> error("stale receipt") },
+            onCompletedCancelNotification = { _, _, _ -> error("stale notification") },
+        )
+        assertEquals(ProactiveFeedbackOutcome.PairingMismatch, executor.execute("gw-1", "dev-1", "signal", "snooze", 0))
+        clientReplaced = false
+        assertEquals(ProactiveFeedbackOutcome.PairingMismatch, executor.execute("gw-1", "dev-1", "signal", "snooze", 0))
     }
 
     @Test
@@ -151,13 +166,12 @@ class ProactiveFeedbackExecutionTest {
             awaitGatewayReady = {},
             currentConnection = { activeConnection },
             currentGeneration = { 5L },
-            readToken = { "tok-ok" },
             submitFeedback = { _, _, _, action, snoozeMinutes, _ ->
                 capturedSnoozeMinutes = snoozeMinutes
                 ProactiveFeedbackResult(ok = true, action = action.wire, applied = false)
             },
-            recordLocalFeedback = { gw, sig, state -> recorded += Triple(gw, sig, state) },
-            onCompletedCancelNotification = { cancelled += it },
+            recordLocalFeedback = { gw, _, sig, state -> recorded += Triple(gw, sig, state) },
+            onCompletedCancelNotification = { _, _, signal -> cancelled += signal },
             onTerminalIncomplete = { sig, action -> incompleteAlerts += sig to action },
         )
 
@@ -183,9 +197,8 @@ class ProactiveFeedbackExecutionTest {
             awaitGatewayReady = {},
             currentConnection = { activeConnection },
             currentGeneration = { 1L },
-            readToken = { "tok-expired" },
             submitFeedback = { _, _, _, _, _, _ -> throw MacGatewayException.Unauthorized() },
-            recordLocalFeedback = { _, _, _ -> },
+            recordLocalFeedback = { _, _, _, _ -> },
             onTerminalIncomplete = { sig, action -> incomplete401 += sig to action },
         )
         val outcome401 = executor401.execute("gw-1", "dev-1", "sig_401", "snooze", runAttemptCount = 0)
@@ -197,9 +210,8 @@ class ProactiveFeedbackExecutionTest {
             awaitGatewayReady = {},
             currentConnection = { activeConnection },
             currentGeneration = { 1L },
-            readToken = { "tok-ok" },
             submitFeedback = { _, _, _, _, _, _ -> throw MacGatewayException.NotFound("signal_not_found") },
-            recordLocalFeedback = { _, _, _ -> },
+            recordLocalFeedback = { _, _, _, _ -> },
             onTerminalIncomplete = { sig, action -> incomplete404 += sig to action },
         )
         val outcome404 = executor404.execute("gw-1", "dev-1", "sig_404", "mute_topic", runAttemptCount = 0)
@@ -216,9 +228,8 @@ class ProactiveFeedbackExecutionTest {
             awaitGatewayReady = {},
             currentConnection = { activeConnection },
             currentGeneration = { generation.get() },
-            readToken = { "tok-ok" },
             submitFeedback = { _, _, _, _, _, _ -> throw MacGatewayException.Unreachable() },
-            recordLocalFeedback = { _, _, _ -> },
+            recordLocalFeedback = { _, _, _, _ -> },
             onTerminalIncomplete = { sig, action -> incompleteAlerts += sig to action },
             maxRetryAttempts = 3,
         )
@@ -240,9 +251,8 @@ class ProactiveFeedbackExecutionTest {
             awaitGatewayReady = {},
             currentConnection = { activeConnection },
             currentGeneration = { 1L },
-            readToken = { "tok-ok" },
             submitFeedback = { _, _, _, _, _, _ -> throw IOException("offline") },
-            recordLocalFeedback = { _, _, _ -> },
+            recordLocalFeedback = { _, _, _, _ -> },
             maxRetryAttempts = 2,
         )
         val ioRetry = ioExecutor.execute("gw-1", "dev-1", "sig_io", "mute_topic", runAttemptCount = 0)

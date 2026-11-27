@@ -6,7 +6,6 @@ import app.amber.agent.R
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.agent.runtime.AgentRunId
-import app.amber.core.model.Conversation
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.core.sync.core.SyncRestoreWriteEpoch
@@ -108,15 +107,17 @@ class ChatApprovalActions(
         approved: Boolean,
         reason: String,
         answer: String?,
+        matchesPending: (UIMessagePart.Tool) -> Boolean = { true },
     ): ApprovalDecisionResult {
         val conversation = conversationStore.ensureFullConversationLoaded(conversationId)
         // The predecessor can finish another decision while this request waits for its handoff.
         // Only a still-pending tool on the selected history can consume this user action.
-        if (conversation.currentMessages.none { message ->
-                message.getTools().any { it.toolCallId == toolCallId && it.isPending }
-            }
-        ) return ApprovalDecisionResult(shouldResume = false, applied = false)
-        val approvedToolName = conversation.findToolName(toolCallId)
+        val pendingTool = conversation.currentMessages.asSequence()
+            .flatMap { it.getTools().asSequence() }
+            .singleOrNull { it.toolCallId == toolCallId && it.isPending }
+            ?: return ApprovalDecisionResult(shouldResume = false, applied = false)
+        if (!matchesPending(pendingTool)) return ApprovalDecisionResult(shouldResume = false, applied = false)
+        val approvedToolName = pendingTool.toolName
         if (approved && !canApproveSensitiveTool(approvedToolName)) {
             return ApprovalDecisionResult(shouldResume = false, applied = false)
         }
@@ -130,34 +131,21 @@ class ChatApprovalActions(
         }
 
         // Update the tool approval state
-        val approvedInputs = mutableListOf<Pair<String, String>>() // toolCallId to approved input
+        val resumeInput = if (approved && answer == null) recipeResumeInputForApproval(pendingTool) else pendingTool.input
+        val settledTool = pendingTool.copy(input = resumeInput, approvalState = newApprovalState)
+            .withSettledCredentialArgumentsRedacted()
         val updatedNodes = conversation.messageNodes.map { node ->
-            val messages = node.messages.map { message ->
-                val parts = message.parts.map { part ->
-                    if (part !is UIMessagePart.Tool || part.toolCallId != toolCallId) {
-                        part
-                    } else {
-                        // A recipe's nested step uses the same top-level pending tool as its
-                        // durable approval checkpoint. Grant only that pending nested step.
-                        val resumeInput = if (approved && answer == null) {
-                            recipeResumeInputForApproval(part)
-                        } else {
-                            part.input
-                        }
-                        approvedInputs += part.toolCallId to resumeInput
-                        part.copy(input = resumeInput, approvalState = newApprovalState)
-                            .withSettledCredentialArgumentsRedacted()
-                    }
-                }
-                message.copy(parts = parts)
-            }
+            val selected = node.messages.getOrNull(node.selectIndex)
+            if (selected == null || selected.parts.none { it === pendingTool }) return@map node
+            val messages = node.messages.toMutableList()
+            messages[node.selectIndex] = selected.copy(parts = selected.parts.map { if (it === pendingTool) settledTool else it })
             node.copy(messages = messages)
         }
-        val updatedConversation = conversation.copy(messageNodes = updatedNodes)
-        conversationStore.saveConversation(conversationId, updatedConversation)
-        approvedInputs.forEach { (callId, input) ->
-            recordCapabilityApproval(callId, approvedToolName, input, approved, source = "user")
-        }
+        conversationStore.saveConversation(conversationId, conversation.copy(messageNodes = updatedNodes))
+        recordCapabilityApproval(
+            toolCallId, approvedToolName, resumeInput, approved, source = "user",
+            bindScreenApproval = pendingTool.requiresIndividualScreenApproval(),
+        )
 
         // Check if there are still pending tools
         val hasPendingTools = updatedNodes.any { node -> node.currentMessage.getTools().any { it.isPending } }
@@ -243,12 +231,13 @@ class ChatApprovalActions(
         input: String,
         approved: Boolean,
         source: String,
+        bindScreenApproval: Boolean = false,
     ) {
         if (toolName == null) return
         val store = capabilityPermissionStore ?: return
-        if (capabilityFlags?.isEnabled(Capability.CapabilityPermissions) != true) return
+        if (!bindScreenApproval && capabilityFlags?.isEnabled(Capability.CapabilityPermissions) != true) return
         val effect = runCatching { toolEffectLedger?.getByToolCallId(toolCallId) }.getOrNull()
-        val digest = effect?.argsDigest ?: runCatching { argsDigest(input) }.getOrNull() ?: return
+        val digest = if (bindScreenApproval) argsDigest(input) else effect?.argsDigest ?: argsDigest(input)
         val capability = capabilityForTool(toolName)
         val entry = if (approved) {
             ApprovalHistoryEntry.approved(
@@ -560,11 +549,3 @@ internal suspend fun chatDurableRuntimeEnabled(
     runRecovery != null &&
     capabilityFlags.isEnabled(Capability.DurableToolEffects) &&
     capabilityFlags.isEnabled(Capability.TypedRunTerminal)
-
-private fun Conversation.findToolName(toolCallId: String): String? =
-    messageNodes.asSequence()
-        .flatMap { it.messages.asSequence() }
-        .flatMap { it.parts.asSequence() }
-        .filterIsInstance<UIMessagePart.Tool>()
-        .firstOrNull { it.toolCallId == toolCallId }
-        ?.toolName

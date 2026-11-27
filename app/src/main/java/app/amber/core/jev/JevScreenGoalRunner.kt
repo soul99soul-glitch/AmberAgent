@@ -368,6 +368,9 @@ class JevScreenGoalRunner(
                             requiredScopes = VERIFY_SCOPES,
                             assets = assets,
                         ) ?: return@withTimeoutOrNull finish("handback", "jev_disabled")
+                        if (!dryRun && takeoverController?.state?.value?.isActive == false) {
+                            return@withTimeoutOrNull finish("handback", "takeover_session_ended")
+                        }
                         if (verifyOutcome.stale || !phoneConfigsUnchanged()) {
                             return@withTimeoutOrNull finish("handback", "configuration_changed")
                         }
@@ -445,6 +448,9 @@ class JevScreenGoalRunner(
                         assets = assets,
                     ) ?: return@withTimeoutOrNull finish("handback", "jev_disabled")
                     val evaluated = outcome.evaluated
+                    if (!dryRun && takeoverController?.state?.value?.isActive == false) {
+                        return@withTimeoutOrNull finish("handback", "takeover_session_ended")
+                    }
                     if (outcome.stale || !phoneConfigsUnchanged()) {
                         return@withTimeoutOrNull finish("handback", "configuration_changed")
                     }

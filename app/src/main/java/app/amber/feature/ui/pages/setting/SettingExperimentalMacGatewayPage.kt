@@ -265,6 +265,7 @@ fun SettingExperimentalMacGatewayPage(
                         CloudDialogueSection(
                             enabled = state.cloudDialogueEnabled,
                             paired = true,
+                            supported = state.cloudDialogueSupported != false,
                             onEnabledChange = { checked ->
                                 scope.launch { repository.setCloudDialogueEnabled(checked) }
                             },
@@ -352,6 +353,7 @@ internal fun CloudDialogueSection(
     paired: Boolean,
     onEnabledChange: (Boolean) -> Unit,
     onOpenProactiveCenter: (() -> Unit)? = null,
+    supported: Boolean = true,
 ) {
     val workspace = workspaceColors()
     ExperimentSectionCard(title = stringResource(R.string.mac_gateway_cloud_dialogue_section)) {
@@ -371,16 +373,20 @@ internal fun CloudDialogueSection(
                 )
                 Text(
                     text = stringResource(
-                        if (paired) R.string.mac_gateway_cloud_dialogue_desc
-                        else R.string.mac_gateway_cloud_dialogue_unpaired_hint,
+                        when {
+                            !paired -> R.string.mac_gateway_cloud_dialogue_unpaired_hint
+                            !supported -> R.string.personal_agent_host_cloud_unsupported
+                            else -> R.string.mac_gateway_cloud_dialogue_desc
+                        },
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = workspace.muted,
                 )
             }
             Switch(
-                checked = enabled && paired,
-                onCheckedChange = { if (paired) onEnabledChange(it) },
+                checked = enabled && paired && supported,
+                enabled = paired && supported,
+                onCheckedChange = onEnabledChange,
             )
         }
         if (onOpenProactiveCenter != null) {

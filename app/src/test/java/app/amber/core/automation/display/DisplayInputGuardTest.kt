@@ -34,24 +34,30 @@ class DisplayInputGuardTest {
         val motion = MotionEvent.obtain(0L, 0L, MotionEvent.ACTION_DOWN, 100f, 100f, 0)
         val key = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_B)
         try {
-            val displayId = service.createDisplay("run-1", 1L, 720, 1600, 320, surface)
+            val displayId = service.createDisplay("run-1", "com.example.app", 1L, 720, 1600, 320, surface)
             assertEquals(12, displayId)
 
+            backend.readBackDisplayIdOverride = { it }
+            assertFalse(service.injectMotion(1L, displayId, "com.example.app", motion))
+            assertEquals(0, service.launchOnDisplay(1L, displayId, "com.example.app"))
+            assertFalse(service.injectKey(1L, displayId, "com.other.app", key))
+            backend.readBackDisplayIdOverride = { Display.DEFAULT_DISPLAY }
+
             // Readback returned 0 instead of 12 -> MUST refuse injection and invoke injectInputEvent 0 times.
-            assertFalse(service.injectMotion(1L, displayId, motion))
-            assertFalse(service.injectKey(1L, displayId, key))
+            assertFalse(service.injectMotion(1L, displayId, "com.example.app", motion))
+            assertFalse(service.injectKey(1L, displayId, "com.example.app", key))
             assertEquals(0, backend.injectedEvents.size)
 
             // Readback returns wrong non-zero display (99 != 12) -> still refused.
             backend.readBackDisplayIdOverride = { 99 }
-            assertFalse(service.injectMotion(1L, displayId, motion))
-            assertFalse(service.injectKey(1L, displayId, key))
+            assertFalse(service.injectMotion(1L, displayId, "com.example.app", motion))
+            assertFalse(service.injectKey(1L, displayId, "com.example.app", key))
             assertEquals(0, backend.injectedEvents.size)
 
             // Readback matches 12 -> injection succeeds.
             backend.readBackDisplayIdOverride = { it }
-            assertTrue(service.injectMotion(1L, displayId, motion))
-            assertTrue(service.injectKey(1L, displayId, key))
+            assertTrue(service.injectMotion(1L, displayId, "com.example.app", motion))
+            assertTrue(service.injectKey(1L, displayId, "com.example.app", key))
             assertEquals(2, backend.injectedEvents.size)
         } finally {
             motion.recycle()
@@ -71,23 +77,23 @@ class DisplayInputGuardTest {
         try {
             assertEquals(
                 AmberDisplayUserService.ERR_INVALID_UID,
-                rootService.createDisplay("run-root", 1L, 720, 1600, 320, surface),
+                rootService.createDisplay("run-root", "com.example.app", 1L, 720, 1600, 320, surface),
             )
 
             val shellBackend = FakeDisplayServiceBackend(uidValue = AmberDisplayUserService.SHELL_UID)
             val shellService = AmberDisplayUserService(shellBackend, onDestroyProcess = {})
-            val displayId = shellService.createDisplay("run-shell", 5L, 720, 1600, 320, surface)
+            val displayId = shellService.createDisplay("run-shell", "com.example.app", 5L, 720, 1600, 320, surface)
             assertEquals(12, displayId)
 
             // Display 0 is always forbidden.
-            assertFalse(shellService.injectMotion(5L, Display.DEFAULT_DISPLAY, motion))
+            assertFalse(shellService.injectMotion(5L, Display.DEFAULT_DISPLAY, "com.example.app", motion))
             assertEquals(
                 AmberDisplayUserService.ERR_INVALID_DISPLAY_ID,
                 shellService.launchOnDisplay(5L, Display.DEFAULT_DISPLAY, "com.example.app"),
             )
 
             // Stale generation is forbidden.
-            assertFalse(shellService.injectMotion(4L, displayId, motion))
+            assertFalse(shellService.injectMotion(4L, displayId, "com.example.app", motion))
             assertEquals(
                 AmberDisplayUserService.ERR_STALE_GENERATION,
                 shellService.launchOnDisplay(4L, displayId, "com.example.app"),
@@ -103,7 +109,12 @@ class DisplayInputGuardTest {
                 shellService.launchOnDisplay(5L, displayId, "com.example.app; rm -rf /"),
             )
 
-            // First valid package binds generation; switching package on same generation is rejected.
+            // The package is immutable from display creation, including the very first launch.
+            assertEquals(
+                AmberDisplayUserService.ERR_PACKAGE_MISMATCH,
+                shellService.launchOnDisplay(5L, displayId, "com.other.app"),
+            )
+            assertTrue(shellBackend.launchedPackages.isEmpty())
             assertEquals(0, shellService.launchOnDisplay(5L, displayId, "com.example.app"))
             assertEquals(
                 AmberDisplayUserService.ERR_PACKAGE_MISMATCH,
@@ -113,12 +124,12 @@ class DisplayInputGuardTest {
             // destroy() releases virtual display and rejects further calls.
             var processExited = false
             val destroyable = AmberDisplayUserService(shellBackend, onDestroyProcess = { processExited = true })
-            val vd2 = destroyable.createDisplay("run-2", 6L, 720, 1600, 320, surface)
+            val vd2 = destroyable.createDisplay("run-2", "com.example.app", 6L, 720, 1600, 320, surface)
             assertEquals(12, vd2)
             destroyable.destroy()
             assertTrue(processExited)
             assertTrue(shellBackend.releaseCount >= 1)
-            assertFalse(destroyable.injectMotion(6L, vd2, motion))
+            assertFalse(destroyable.injectMotion(6L, vd2, "com.example.app", motion))
         } finally {
             motion.recycle()
             surface.release()
@@ -134,7 +145,7 @@ class DisplayInputGuardTest {
             // 1. Verify required flags are set and AUTO_MIRROR / SECURE are never set.
             val backend = FakeDisplayServiceBackend()
             val service = AmberDisplayUserService(backend, onDestroyProcess = {})
-            val vd = service.createDisplay("run-flags", 1L, 720, 1600, 320, surface)
+            val vd = service.createDisplay("run-flags", "com.example.app", 1L, 720, 1600, 320, surface)
             assertEquals(12, vd)
             val usedFlags = backend.requestedFlags.last()
             assertTrue((usedFlags and DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC) != 0)
@@ -147,7 +158,7 @@ class DisplayInputGuardTest {
             // 2. When TRUSTED is rejected, retries with ALL 4 mandatory flags intact.
             val rejectTrustedBackend = FakeDisplayServiceBackend(rejectTrustedFlag = true)
             val rejectTrustedService = AmberDisplayUserService(rejectTrustedBackend, onDestroyProcess = {})
-            assertEquals(12, rejectTrustedService.createDisplay("run-no-trusted", 2L, 720, 1600, 320, surface))
+            assertEquals(12, rejectTrustedService.createDisplay("run-no-trusted", "com.example.app", 2L, 720, 1600, 320, surface))
             val fallbackFlags = rejectTrustedBackend.requestedFlags.last()
             assertEquals(0, fallbackFlags and FakeDisplayServiceBackend.FLAG_TRUSTED)
             assertTrue((fallbackFlags and FakeDisplayServiceBackend.FLAG_OWN_FOCUS) != 0)
@@ -158,7 +169,7 @@ class DisplayInputGuardTest {
             val rejectAllService = AmberDisplayUserService(rejectAllBackend, onDestroyProcess = {})
             assertEquals(
                 AmberDisplayUserService.ERR_FLAG_REJECTED,
-                rejectAllService.createDisplay("run-reject", 3L, 720, 1600, 320, surface),
+                rejectAllService.createDisplay("run-reject", "com.example.app", 3L, 720, 1600, 320, surface),
             )
             assertTrue(
                 rejectAllBackend.requestedFlags.all { flags ->
@@ -172,7 +183,7 @@ class DisplayInputGuardTest {
             val missingFlagService = AmberDisplayUserService(missingFlagBackend, onDestroyProcess = {})
             assertEquals(
                 AmberDisplayUserService.ERR_MISSING_REQUIRED_FLAG,
-                missingFlagService.createDisplay("run-missing", 4L, 720, 1600, 320, surface),
+                missingFlagService.createDisplay("run-missing", "com.example.app", 4L, 720, 1600, 320, surface),
             )
 
             // 5. API < 34 -> ERR_API_UNSUPPORTED.
@@ -180,7 +191,7 @@ class DisplayInputGuardTest {
             val lowApiService = AmberDisplayUserService(lowApiBackend, onDestroyProcess = {})
             assertEquals(
                 AmberDisplayUserService.ERR_API_UNSUPPORTED,
-                lowApiService.createDisplay("run-low-api", 5L, 720, 1600, 320, surface),
+                lowApiService.createDisplay("run-low-api", "com.example.app", 5L, 720, 1600, 320, surface),
             )
         } finally {
             surface.release()
@@ -238,6 +249,7 @@ class DisplayInputGuardTest {
     ) : DisplayServiceBackend {
         val requestedFlags = mutableListOf<Int>()
         val injectedEvents = mutableListOf<InputEvent>()
+        val launchedPackages = mutableListOf<String>()
         var releaseCount = 0
 
         override fun uid(): Int = uidValue
@@ -280,7 +292,10 @@ class DisplayInputGuardTest {
             )
         }
 
-        override fun launchPackageOnDisplay(displayId: Int, target: String): Boolean = true
+        override fun launchPackageOnDisplay(displayId: Int, target: String): Boolean {
+            launchedPackages += target
+            return true
+        }
 
         override fun setAndReadBackDisplayId(event: InputEvent, displayId: Int): Int? =
             readBackDisplayIdOverride(displayId)

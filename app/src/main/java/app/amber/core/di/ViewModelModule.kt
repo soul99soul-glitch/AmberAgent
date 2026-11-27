@@ -101,6 +101,6 @@ val viewModelModule = module {
     viewModelOf(::SearchVM)
     viewModelOf(::StatsVM)
     viewModelOf(::ProfileVM)
-    viewModel { CloudProactiveCenterVM(repository = get(), gatewayRepository = get()) }
+    viewModel { CloudProactiveCenterVM(repository = get()) }
     single { PersonalAgentMainSessionStore(get()) }
 }

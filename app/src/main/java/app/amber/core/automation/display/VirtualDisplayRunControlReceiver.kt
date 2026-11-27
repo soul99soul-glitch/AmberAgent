@@ -16,29 +16,22 @@ import kotlinx.coroutines.launch
  */
 class VirtualDisplayRunControlReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val runId = intent.getStringExtra(VirtualDisplayRunNotifier.EXTRA_RUN_ID)
-            ?.takeIf { it.isNotBlank() }
-            ?: return
-        val activeRun = VirtualDisplayRunRegistry.get(runId) ?: return
+        val activeRun = VirtualDisplayRunRegistry.forIntent(intent) ?: return
         val notifier = VirtualDisplayRunNotifier(context.applicationContext)
 
         when (intent.action) {
             VirtualDisplayRunNotifier.ACTION_PAUSE_VIRTUAL_RUN -> {
                 activeRun.pause()
-                notifier.showRunning(
-                    runId = activeRun.runId,
-                    packageName = activeRun.packageName,
-                    goal = activeRun.goal,
-                    paused = true,
-                )
+                notifier.showRunning(activeRun, paused = true)
             }
 
             VirtualDisplayRunNotifier.ACTION_EMERGENCY_STOP_VIRTUAL_RUN -> {
                 val pendingResult = goAsync()
                 receiverScope.launch {
                     try {
+                        if (VirtualDisplayRunRegistry.forIntent(intent) !== activeRun) return@launch
                         activeRun.emergencyStop()
-                        notifier.cancel(runId)
+                        notifier.cancel(activeRun)
                     } finally {
                         pendingResult.finish()
                     }

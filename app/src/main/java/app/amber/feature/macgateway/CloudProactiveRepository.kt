@@ -1,11 +1,9 @@
 package app.amber.feature.macgateway
 
 import app.amber.agent.data.db.dao.ProactiveCardDao
-import app.amber.core.settings.secret.SecretStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /**
  * Data repository for Cloud Proactive P1-P3 cards, feedback, and management APIs.
@@ -17,22 +15,22 @@ import kotlinx.coroutines.sync.withLock
 class CloudProactiveRepository internal constructor(
     private val dao: ProactiveCardDao,
     private val gateway: MacGatewayRepository?,
-    private val tokenVault: GatewayTokenVault?,
     private val clientProviderOverride: (suspend () -> MacGatewayClient?)?,
     private val connectionProviderOverride: (() -> MacGatewayConnection?)?,
     private val generationProviderOverride: (() -> Long)?,
     private val activeConversationIdProviderOverride: (() -> String?)?,
     private val sendCloudMainMessageOverride: (suspend (conversationId: String, text: String) -> Boolean)?,
+    private val receipts: ProactiveDeliveryReceipts = ProactiveDeliveryReceipts(dao, null),
     private val nowMs: () -> Long = { System.currentTimeMillis() },
 ) {
     constructor(
         dao: ProactiveCardDao,
         gateway: MacGatewayRepository,
-        secretStore: SecretStore,
+        receipts: ProactiveDeliveryReceipts,
     ) : this(
         dao = dao,
         gateway = gateway,
-        tokenVault = GatewayTokenVault(secretStore),
+        receipts = receipts,
         clientProviderOverride = null,
         connectionProviderOverride = null,
         generationProviderOverride = null,
@@ -40,18 +38,8 @@ class CloudProactiveRepository internal constructor(
         sendCloudMainMessageOverride = null,
     )
 
-    private data class CachedClient(
-        val generation: Long,
-        val gatewayId: String,
-        val deviceId: String,
-        val client: MacGatewayClient,
-    )
-
-    private val clientCacheMutex = Mutex()
-    private var cachedClient: CachedClient? = null
-
-    fun cards(gatewayId: String): Flow<List<ProactiveCard>> =
-        dao.observeForGateway(gatewayId).map { entities ->
+    fun cards(gatewayId: String, deviceId: String): Flow<List<ProactiveCard>> =
+        dao.observeForGateway(gatewayId, deviceId).map { entities ->
             entities.mapNotNull(ProactiveCard::fromEntityOrNull)
         }
 
@@ -60,22 +48,28 @@ class CloudProactiveRepository internal constructor(
      * `GET /v2/proactive/signals/{signalId}`. Returns `null` on invalid ID or 404.
      * Never writes to the dialogue timeline, Room cache, or dialogue cursor.
      */
-    suspend fun loadSignal(signalId: String): ProactiveCard? {
-        val trimmed = signalId.trim()
+    suspend fun loadSignal(signalId: String): ProactiveCard? =
+        loadSignal(ProactiveDetailRequest(signalId, null, null))
+
+    suspend fun loadSignal(request: ProactiveDetailRequest): ProactiveCard? {
+        val trimmed = request.signalId.trim()
         if (!ProactiveContract.isValidSignalId(trimmed)) return null
 
         val connection = currentConnection() ?: return null
-        val local = dao.findBySignal(connection.gatewayId, trimmed)
+        if (!request.matches(connection)) return null
+        val generation = currentGeneration()
+        val local = dao.findBySignal(connection.gatewayId, connection.deviceId, trimmed)
             ?.let(ProactiveCard::fromEntityOrNull)
-        if (local != null) return local
+        if (local != null) return local.takeIf { currentGeneration() == generation && currentConnection() == connection }
 
-        val client = resolveClient() ?: return null
+        val client = resolveClient(connection, generation) ?: return null
         val event = try {
             client.proactiveSignal(trimmed)
         } catch (_: MacGatewayException.NotFound) {
             return null
         } ?: return null
 
+        if (currentGeneration() != generation || currentConnection() != connection || event.proactive?.signalId != trimmed) return null
         return ProactiveCard.fromEventOrNull(
             event = event,
             gatewayId = connection.gatewayId,
@@ -92,16 +86,17 @@ class CloudProactiveRepository internal constructor(
         gatewayId: String,
         signalId: String,
         action: ProactiveFeedbackAction,
+        deviceId: String,
         snoozeMinutes: Int? = null,
         muteHours: Int? = null,
     ): Boolean {
         val trimmedSignalId = signalId.trim()
         if (!ProactiveContract.isValidSignalId(trimmedSignalId)) return false
         val connection = currentConnection() ?: return false
-        if (connection.gatewayId != gatewayId) return false
+        if (connection.gatewayId != gatewayId || connection.deviceId != deviceId) return false
 
         val generationBefore = currentGeneration()
-        val client = resolveClient() ?: return false
+        val client = resolveClient(connection, generationBefore) ?: return false
         val result = try {
             client.proactiveFeedback(
                 signalId = trimmedSignalId,
@@ -109,17 +104,15 @@ class CloudProactiveRepository internal constructor(
                 snoozeMinutes = snoozeMinutes,
                 muteHours = muteHours,
             )
-        } catch (_: Throwable) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
             return false
         }
         if (!result.ok) return false
         if (currentGeneration() != generationBefore) return false
 
-        dao.setFeedback(
-            gatewayId = gatewayId,
-            signalId = trimmedSignalId,
-            feedbackState = action.wire,
-        )
+        receipts.feedback(gatewayId, deviceId, trimmedSignalId, action.wire)
         return true
     }
 
@@ -135,12 +128,17 @@ class CloudProactiveRepository internal constructor(
         val targetConversationId = conversationId?.trim()?.takeIf { it.isNotEmpty() }
             ?: currentActiveConversationId()?.trim()?.takeIf { it.isNotEmpty() }
             ?: return false
+        val generation = currentGeneration()
+        val connection = currentConnection() ?: return false
+        if (connection.gatewayId != card.gatewayId || connection.deviceId != card.deviceId) return false
         val prompt = card.buildActPrompt()
         if (prompt.isBlank()) return false
 
         val accepted = try {
-            submitCloudMainMessage(targetConversationId, prompt)
-        } catch (_: Throwable) {
+            submitCloudMainMessage(targetConversationId, prompt, generation)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
             return false
         }
         if (!accepted) return false
@@ -149,20 +147,12 @@ class CloudProactiveRepository internal constructor(
             sendFeedback(
                 gatewayId = card.gatewayId,
                 signalId = card.signalId,
+                deviceId = card.deviceId,
                 action = ProactiveFeedbackAction.REPLIED,
             )
         }
         return true
     }
-
-    suspend fun markNotified(
-        gatewayId: String,
-        signalId: String,
-        notifiedAt: Long = nowMs(),
-    ): Int = dao.markNotified(gatewayId = gatewayId, signalId = signalId, notifiedAt = notifiedAt)
-
-    suspend fun findLocalCard(gatewayId: String, signalId: String): ProactiveCard? =
-        dao.findBySignal(gatewayId, signalId)?.let(ProactiveCard::fromEntityOrNull)
 
     suspend fun summary(): CloudProactiveSummary =
         requireClient().proactiveSummary()
@@ -201,10 +191,10 @@ class CloudProactiveRepository internal constructor(
         requireClient().proactiveCancelWakeup(id)
     }
 
-    private suspend fun submitCloudMainMessage(conversationId: String, text: String): Boolean {
+    private suspend fun submitCloudMainMessage(conversationId: String, text: String, generation: Long): Boolean {
         sendCloudMainMessageOverride?.let { return it(conversationId, text) }
         val repo = gateway ?: return false
-        val submission = repo.sendCloudMessage(conversationId = conversationId, text = text)
+        val submission = repo.sendCloudMessage(conversationId = conversationId, text = text, expectedConnectionGeneration = generation)
         return submission.error == null && !submission.eventId.isNullOrBlank()
     }
 
@@ -227,42 +217,15 @@ class CloudProactiveRepository internal constructor(
         return repo.cloudDialogueState.value.activeConversationId
     }
 
-    private suspend fun requireClient(): MacGatewayClient =
-        resolveClient() ?: throw MacGatewayException.Unreachable()
+    private suspend fun requireClient(): MacGatewayClient {
+        val connection = currentConnection() ?: throw MacGatewayException.Unreachable()
+        return resolveClient(connection, currentGeneration()) ?: throw MacGatewayException.Unreachable()
+    }
 
-    private suspend fun resolveClient(): MacGatewayClient? {
-        clientProviderOverride?.let { return it() }
-        val repo = gateway ?: return null
-        val vault = tokenVault ?: return null
-        repo.awaitReady()
-        val connection = repo.state.value.connection ?: return null
-        val generation = repo.connectionGeneration.value
-        return clientCacheMutex.withLock {
-            val existing = cachedClient
-            if (existing != null &&
-                existing.generation == generation &&
-                existing.gatewayId == connection.gatewayId &&
-                existing.deviceId == connection.deviceId
-            ) {
-                return@withLock existing.client
-            }
-            val token = runCatching { vault.read(connection.gatewayId) }
-                .getOrNull()
-                ?.takeIf { it.isNotBlank() }
-                ?: return@withLock null
-            val created = MacGatewayClient(
-                addrs = connection.addrs,
-                port = connection.port,
-                fingerprint = connection.fingerprint,
-                token = token,
-            )
-            cachedClient = CachedClient(
-                generation = generation,
-                gatewayId = connection.gatewayId,
-                deviceId = connection.deviceId,
-                client = created,
-            )
-            created
+    private suspend fun resolveClient(connection: MacGatewayConnection, generation: Long): MacGatewayClient? {
+        clientProviderOverride?.let {
+            return it().takeIf { currentGeneration() == generation && currentConnection() == connection }
         }
+        return gateway?.clientForPairing(connection.gatewayId, connection.deviceId, generation)
     }
 }

@@ -134,6 +134,21 @@ class AgentBubbleReducerTest {
     }
 
     @Test
+    fun `parked recipe with a pending screen action must be approved in app`() {
+        val recipe = pendingToolPart(toolName = "recipe_draft").copy(
+            input = """{"__amber_recipe_checkpoint":{"pending_step":"step1","step_results":{"step1":{"permission_trace":{"tool_name":"screen_click"}}}}}""",
+        )
+        val state = AgentBubbleReducer.reduce(
+            previous = AgentBubbleUiState(),
+            pickedConversationId = conversationA,
+            activity = null,
+            messages = listOf(assistantMessage(recipe)),
+            nowMillis = 1_000L,
+        )
+        assertTrue(state.requiresInAppApproval)
+    }
+
+    @Test
     fun `all ssh profile write tools require in-app approval without ask user state`() {
         assertTrue(SSH_PROFILE_WRITE_TOOL_NAMES.isNotEmpty())
         SSH_PROFILE_WRITE_TOOL_NAMES.forEach { toolName ->

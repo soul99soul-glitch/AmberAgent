@@ -17,6 +17,41 @@ class DialogueContractV1Test {
     private val json = Json { ignoreUnknownKeys = true }
 
     @Test
+    fun localAdmissionWaitsForTimelineStorageAndSurvivesSubsequentMetadataFailure() = runBlocking {
+        var rejectStorage = true
+        var latest = CloudDialogueUiState()
+        val sequence = mutableListOf<String>()
+        val sink = object : CloudDialogueTimelineSink by CloudDialogueTimelineSink.NoOp {
+            override suspend fun appendLocalUserMessage(conversationId: String, text: String, eventId: String?, requestId: String) {
+                check(!rejectStorage) { "storage unavailable" }
+                sequence += "stored $conversationId"
+            }
+        }
+        val coordinator = CloudDialogueCoordinator(
+            clientProvider = { MacGatewayClient(listOf("127.0.0.1"), 1, "unused", "token", scheme = "http") },
+            timelineSink = sink,
+            persistState = { error("metadata unavailable") },
+            onStateChanged = { latest = it },
+            connectionGenerationProvider = { 3L },
+        )
+        coordinator.restore(true, MacGatewayConnection("gw", "name", emptyList(), 1, "fp", "device"), null)
+        suspend fun submit(generation: Long): Throwable? = runCatching {
+            coordinator.sendMessage("conv", "text", "req", expectedConnectionGeneration = generation) {
+                sequence += "admitted"
+            }
+        }.exceptionOrNull()
+
+        assertEquals("gateway_pairing_changed", submit(2)?.message)
+        assertEquals("storage unavailable", submit(3)?.message)
+        assertTrue(sequence.isEmpty())
+        assertTrue(latest.submissions.isEmpty())
+        rejectStorage = false
+        assertEquals("metadata unavailable", submit(3)?.message)
+        assertEquals(listOf("stored conv", "admitted"), sequence)
+        assertTrue(latest.submissions.single().localEchoed)
+    }
+
+    @Test
     fun cloudDialogueRequestsAlwaysSendVersionHeaderAndStableConversationId() = runBlocking {
         data class CapturedRequest(
             val method: String,

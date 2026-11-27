@@ -7,6 +7,10 @@ import android.view.Display
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
+import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import org.robolectric.Shadows.shadowOf
+import java.io.Closeable
 import app.amber.core.automation.AccessibilityController
 import app.amber.core.automation.AccessibilityTextMatch
 import app.amber.core.automation.ScreenAction
@@ -43,7 +47,9 @@ class VirtualDisplaySessionStateTest {
         assertEquals(7, session.displayId)
         assertEquals(VirtualDisplaySessionState.OPEN, session.state.value)
 
+        assertEquals("com.example.target", bridge.authorizedPackage)
         assertTrue(session.launchTarget())
+        assertEquals("com.example.target", bridge.launchedPackage)
         assertEquals(1, bridge.launchCount)
 
         val down = MotionEvent.obtain(0L, 0L, MotionEvent.ACTION_DOWN, 100f, 200f, 0)
@@ -103,6 +109,7 @@ class VirtualDisplaySessionStateTest {
             .session as VirtualDisplaySession
         val event = MotionEvent.obtain(0L, 0L, MotionEvent.ACTION_DOWN, 50f, 50f, 0)
         try {
+            assertTrue(session.launchTarget())
             val injected = session.injectMotion(event)
             assertFalse(injected)
             assertEquals(VirtualDisplaySessionState.OUTCOME_UNKNOWN, session.state.value)
@@ -113,6 +120,86 @@ class VirtualDisplaySessionStateTest {
             event.recycle()
             session.close("test_end")
         }
+    }
+
+    @Test
+    fun motionAndKeyRequireAuthorizedTopWindowOnTheSameDisplay() = runTest {
+        val bridge = FakeConnectedBridge()
+        var currentWindows: (Int) -> List<AccessibilityWindowInfo> = { emptyList() }
+        val factory = createFactory(FakeBridgeConnector(bridge), windows = { currentWindows(it) })
+        val session = (factory.open("run", "com.example.target", PhoneDisplayMode.VIRTUAL) as DisplaySessionOutcome.Ready)
+            .session as VirtualDisplaySession
+        val key = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_A)
+        try {
+            assertTrue(session.launchTarget())
+            assertFalse(session.injectKey(key))
+            currentWindows = { id -> listOf(appWindow(id, "com.example.target"), appWindow(id, "com.example.other", 1)) }
+            assertFalse(session.injectKey(key))
+            currentWindows = { listOf(appWindow(Display.DEFAULT_DISPLAY, "com.example.target")) }
+            assertFalse(session.injectKey(key))
+            assertEquals(0, bridge.keyCount)
+            currentWindows = { id -> listOf(appWindow(id, "com.example.target")) }
+            assertTrue(session.injectKey(key))
+            assertEquals(1, bridge.keyCount)
+        } finally {
+            session.close("done")
+        }
+    }
+
+    @Test
+    fun earlyDisconnectAndWatcherFailureReleaseAllAcquiredResources() = runTest {
+        for (disconnectBeforePublication in listOf(true, false)) {
+            val bridge = FakeConnectedBridge()
+            val port = StubFrameReaderPort()
+            val factory = createFactory(
+                FakeBridgeConnector(bridge) { callback ->
+                    if (disconnectBeforePublication) callback("shizuku_binder_dead")
+                },
+                framePortFactory = { port },
+                watcherFactory = { _, _, _, _ ->
+                    if (disconnectBeforePublication) Closeable {} else error("listener registration failed")
+                },
+            )
+            assertTrue(factory.open("run", "com.example.target", PhoneDisplayMode.VIRTUAL) is DisplaySessionOutcome.Unavailable)
+            assertTrue(port.closed)
+            assertTrue(bridge.disconnected)
+            assertEquals(1, bridge.releaseCount)
+            assertEquals(0, bridge.launchCount)
+        }
+    }
+
+    @Test
+    fun launchRejectsAnUnobservableMainDisplayOrAlreadyForegroundTarget() = runTest {
+        for (foreground in listOf(null, "com.example.target")) {
+            val bridge = FakeConnectedBridge()
+            val factory = createFactory(FakeBridgeConnector(bridge), mainWindows = {
+                foreground?.let { listOf(appWindow(Display.DEFAULT_DISPLAY, it)) }.orEmpty()
+            })
+            val session = (factory.open("run", "com.example.target", PhoneDisplayMode.VIRTUAL) as DisplaySessionOutcome.Ready)
+                .session as VirtualDisplaySession
+            assertFalse(session.launchTarget())
+            assertEquals(0, bridge.launchCount)
+            assertEquals(
+                if (foreground == null) "main_display_unobservable" else "target_already_foreground_on_main_display",
+                session.invalidationReason,
+            )
+        }
+    }
+
+    @Test
+    fun deviceLockPermanentlyInvalidatesGenerationBeforeNextDispatch() = runTest {
+        val bridge = FakeConnectedBridge()
+        var unlocked = true
+        val factory = createFactory(FakeBridgeConnector(bridge), deviceReadyForInput = { unlocked })
+        val session = (factory.open("run", "com.example.target", PhoneDisplayMode.VIRTUAL) as DisplaySessionOutcome.Ready)
+            .session as VirtualDisplaySession
+        unlocked = false
+        assertFalse(session.launchTarget())
+        unlocked = true
+        assertFalse(session.launchTarget())
+        assertEquals(VirtualDisplaySessionState.SAFE_PAUSED, session.state.value)
+        assertTrue(bridge.disconnected)
+        assertEquals(0, bridge.launchCount)
     }
 
     @Test
@@ -240,6 +327,11 @@ class VirtualDisplaySessionStateTest {
         physicalController: AccessibilityController = RecordingPhysicalController(),
         physicalLauncher: suspend (String) -> Boolean = { true },
         framePortFactory: () -> FrameReaderPort = { StubFrameReaderPort() },
+        windows: (Int) -> List<AccessibilityWindowInfo> = { displayId -> listOf(appWindow(displayId, "com.example.target")) },
+        mainWindows: () -> List<AccessibilityWindowInfo> = { listOf(appWindow(Display.DEFAULT_DISPLAY, "com.example.host")) },
+        deviceReadyForInput: () -> Boolean = { true },
+        watcherFactory: (Int, Int, Int, (String) -> Unit) -> Closeable? = { _, _, _, _ -> Closeable {} },
+
     ): PhoneDisplaySessionFactory {
         val kv = InMemoryProbeKvStore()
         val probeStore = VirtualDisplayProbeStore(
@@ -252,6 +344,9 @@ class VirtualDisplaySessionStateTest {
             probeStore.record(
                 IsolationProbeResult(
                     passed = true,
+                    disconnectObserved = true,
+                    targetDestroyed = true,
+                    mainInputObserved = true,
                     mainScreenInjectedEvents = 0,
                     targetReceivedEvents = 20,
                     textReadBackOk = true,
@@ -271,10 +366,11 @@ class VirtualDisplaySessionStateTest {
             secondaryActivitiesFeatureProvider = { true },
             physicalControllerProvider = { physicalController },
             physicalSessionCreator = { pkg, ctrl -> PhysicalDisplaySession(pkg, ctrl, physicalLauncher) },
-            virtualWindowsProvider = { emptyList() },
+            virtualWindowsProvider = { id -> if (id == Display.DEFAULT_DISPLAY) mainWindows() else windows(id) },
             accessibilityServiceAvailableProvider = { true },
             frameSourceCreator = { w, h -> VirtualDisplayFrameSource(w, h, framePortFactory(), ownWorkerThread = false) },
-            displayWatcherFactory = { _, _, _, _ -> null },
+            displayWatcherFactory = watcherFactory,
+            deviceReadyForInput = deviceReadyForInput,
         )
     }
 
@@ -302,6 +398,8 @@ class VirtualDisplaySessionStateTest {
         private val onMotionSideEffect: () -> Unit = {},
     ) : ConnectedDisplayBridge {
         var launchCount = 0
+        var authorizedPackage: String? = null
+        var launchedPackage: String? = null
         var motionCount = 0
         var keyCount = 0
         var releaseCount = 0
@@ -309,21 +407,32 @@ class VirtualDisplaySessionStateTest {
 
         override fun uid(): Int = uidValue
         override fun capabilities(): DisplayCapabilities = caps
-        override fun createDisplay(runId: String, generation: Long, width: Int, height: Int, dpi: Int, surface: Surface): Int =
-            displayIdToReturn
+        override fun createDisplay(
+            runId: String,
+            authorizedPackageName: String,
+            generation: Long,
+            width: Int,
+            height: Int,
+            dpi: Int,
+            surface: Surface,
+        ): Int {
+            authorizedPackage = authorizedPackageName
+            return displayIdToReturn
+        }
 
         override fun launchOnDisplay(generation: Long, displayId: Int, packageName: String): Int {
             launchCount++
+            launchedPackage = packageName
             return 0
         }
 
-        override fun injectMotion(generation: Long, displayId: Int, event: MotionEvent): Boolean {
+        override fun injectMotion(generation: Long, displayId: Int, observedPackageName: String, event: MotionEvent): Boolean {
             motionCount++
             onMotionSideEffect()
             return true
         }
 
-        override fun injectKey(generation: Long, displayId: Int, event: KeyEvent): Boolean {
+        override fun injectKey(generation: Long, displayId: Int, observedPackageName: String, event: KeyEvent): Boolean {
             keyCount++
             return true
         }
@@ -378,5 +487,19 @@ internal class InMemoryProbeKvStore : ProbeKvStore {
 
     override fun clear() {
         map.clear()
+    }
+}
+
+internal fun appWindow(displayId: Int, pkg: String, layer: Int = 0): AccessibilityWindowInfo {
+    val node = AccessibilityNodeInfo.obtain().apply { packageName = pkg }
+    return AccessibilityWindowInfo.obtain().also { window ->
+        shadowOf(window).apply {
+            setType(AccessibilityWindowInfo.TYPE_APPLICATION)
+            setId(1)
+            setLayer(layer)
+            setActive(true)
+            setDisplayId(displayId)
+            setRoot(node)
+        }
     }
 }

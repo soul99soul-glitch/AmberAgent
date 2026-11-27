@@ -3,28 +3,31 @@ package app.amber.feature.ui.pages.proactive
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.amber.feature.macgateway.CloudProactiveMonitorRecord
-import app.amber.feature.macgateway.CloudProactiveRepository
 import app.amber.feature.macgateway.CloudProactiveRestraintPatch
 import app.amber.feature.macgateway.CloudProactiveRestraintSnapshot
 import app.amber.feature.macgateway.CloudProactiveSummary
 import app.amber.feature.macgateway.CloudProactiveWebhookRecord
+import app.amber.feature.macgateway.MacGatewayClient
 import app.amber.feature.macgateway.MacGatewayException
 import app.amber.feature.macgateway.MacGatewayRepository
 import app.amber.feature.macgateway.ProactiveContract
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
  * Narrow management gateway abstraction for [CloudProactiveCenterVM], allowing fast deterministic
- * JVM tests while production delegates directly to [CloudProactiveRepository].
+ * JVM tests while production binds each operation to the displayed pairing.
  */
 internal interface CloudProactiveCenterGateway {
     suspend fun summary(): CloudProactiveSummary
@@ -43,28 +46,28 @@ internal interface CloudProactiveCenterGateway {
     suspend fun cancelWakeup(id: String)
 }
 
-private class RepositoryProactiveCenterGateway(
-    private val repository: CloudProactiveRepository,
+private class PairedCenterGateway(
+    private val client: suspend () -> MacGatewayClient,
 ) : CloudProactiveCenterGateway {
-    override suspend fun summary(): CloudProactiveSummary = repository.summary()
-    override suspend fun unmute(topicKey: String): CloudProactiveRestraintSnapshot = repository.unmute(topicKey)
+    override suspend fun summary(): CloudProactiveSummary = client().proactiveSummary()
+    override suspend fun unmute(topicKey: String): CloudProactiveRestraintSnapshot = client().proactiveUnmute(topicKey)
     override suspend fun patchRestraint(patch: CloudProactiveRestraintPatch): CloudProactiveRestraintSnapshot =
-        repository.patchRestraint(patch)
+        client().proactivePatchRestraint(patch)
     override suspend fun setMonitorEnabled(id: String, enabled: Boolean): CloudProactiveMonitorRecord =
-        repository.setMonitorEnabled(id, enabled)
-    override suspend fun deleteMonitor(id: String) = repository.deleteMonitor(id)
+        client().proactiveSetMonitorEnabled(id, enabled)
+    override suspend fun deleteMonitor(id: String) = client().proactiveDeleteMonitor(id)
     override suspend fun setMonitorDeliveryMode(id: String, mode: String): CloudProactiveMonitorRecord =
-        repository.setMonitorDeliveryMode(id, mode)
+        client().proactiveSetMonitorDeliveryMode(id, mode)
     override suspend fun createGithubReleaseMonitor(
         owner: String,
         repo: String,
         deliveryMode: String,
     ): CloudProactiveMonitorRecord =
-        repository.createGithubReleaseMonitor(owner, repo, deliveryMode)
+        client().proactiveCreateGithubReleaseMonitor(owner, repo, deliveryMode)
     override suspend fun setWebhookEnabled(id: String, enabled: Boolean): CloudProactiveWebhookRecord =
-        repository.setWebhookEnabled(id, enabled)
-    override suspend fun deleteWebhook(id: String) = repository.deleteWebhook(id)
-    override suspend fun cancelWakeup(id: String) = repository.cancelWakeup(id)
+        client().proactiveSetWebhookEnabled(id, enabled)
+    override suspend fun deleteWebhook(id: String) = client().proactiveDeleteWebhook(id)
+    override suspend fun cancelWakeup(id: String) = client().proactiveCancelWakeup(id)
 }
 
 enum class ProactiveFeature {
@@ -138,76 +141,63 @@ data class CloudProactiveCenterUiState(
     val creatingGithubMonitor: Boolean = false,
 )
 
+internal data class ProactiveCenterPairing(
+    val gatewayId: String,
+    val deviceId: String,
+    val generation: Long,
+    val name: String,
+)
+
 class CloudProactiveCenterVM internal constructor(
-    private val gateway: CloudProactiveCenterGateway,
-    private val pairedFlow: StateFlow<Boolean>,
-    private val gatewayNameFlow: StateFlow<String?>,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-    autoLoad: Boolean = true,
+    pairings: Flow<ProactiveCenterPairing?>,
+    gatewayFor: (ProactiveCenterPairing?) -> CloudProactiveCenterGateway,
+    ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
-
-    constructor(
-        repository: CloudProactiveRepository,
-        gatewayRepository: MacGatewayRepository,
-    ) : this(
-        gateway = RepositoryProactiveCenterGateway(repository),
-        pairedFlow = MutableStateFlow(gatewayRepository.state.value.connection != null).also { pairedState ->
-            // Mirrored below in init via gatewayRepository.state collection.
-            pairedState.value = gatewayRepository.state.value.connection != null
+    constructor(repository: MacGatewayRepository) : this(
+        pairings = combine(repository.state, repository.connectionGeneration) { state, generation ->
+            state.connection?.let { ProactiveCenterPairing(it.gatewayId, it.deviceId, generation, it.name) }
+        }.distinctUntilChanged(),
+        gatewayFor = { pairing ->
+            PairedCenterGateway {
+                pairing?.let { repository.clientForPairing(it.gatewayId, it.deviceId, it.generation) }
+                    ?: throw MacGatewayException.Unreachable()
+            }
         },
-        gatewayNameFlow = MutableStateFlow(gatewayRepository.state.value.connection?.name),
-        ioDispatcher = Dispatchers.IO,
-        autoLoad = false,
-    ) {
-        viewModelScope.launch {
-            gatewayRepository.state
-                .map { it.connection?.let { conn -> conn.gatewayId to conn.name } }
-                .distinctUntilChanged()
-                .collect { pair ->
-                    val paired = pair != null
-                    _uiState.update {
-                        it.copy(
-                            isPaired = paired,
-                            gatewayName = pair?.second,
-                            summary = if (paired) it.summary else null,
-                            loadError = if (paired) it.loadError else null,
-                            unsupportedFeatures = if (paired) it.unsupportedFeatures else emptySet(),
-                        )
-                    }
-                    if (paired) {
-                        loadSummary(isRefresh = false)
-                    }
-                }
-        }
-    }
-
-    private val _uiState = MutableStateFlow(
-        CloudProactiveCenterUiState(
-            isPaired = pairedFlow.value,
-            gatewayName = gatewayNameFlow.value,
-        ),
     )
-    val uiState: StateFlow<CloudProactiveCenterUiState> = _uiState.asStateFlow()
+
+    private val _session = MutableStateFlow(
+        ProactiveCenterSession(viewModelScope, gatewayFor(null), null, ioDispatcher),
+    )
+    internal val session = _session.asStateFlow()
 
     init {
-        if (autoLoad) {
-            viewModelScope.launch {
-                pairedFlow.collect { paired ->
-                    _uiState.update {
-                        it.copy(
-                            isPaired = paired,
-                            gatewayName = gatewayNameFlow.value,
-                            summary = if (paired) it.summary else null,
-                            loadError = if (paired) it.loadError else null,
-                        )
-                    }
-                    if (paired) {
-                        loadSummary(isRefresh = false)
-                    }
-                }
+        viewModelScope.launch {
+            var requests: Job? = null
+            pairings.collect { pairing ->
+                requests?.cancel()
+                val job = SupervisorJob(coroutineContext[Job])
+                requests = job
+                val session = ProactiveCenterSession(
+                    CoroutineScope(coroutineContext + job), gatewayFor(pairing), pairing, ioDispatcher,
+                )
+                _session.value = session
+                if (pairing != null) session.loadSummary()
             }
         }
     }
+}
+
+/** Page callbacks and request completions always capture the session that produced the UI. */
+internal class ProactiveCenterSession(
+    private val scope: CoroutineScope,
+    private val gateway: CloudProactiveCenterGateway,
+    pairing: ProactiveCenterPairing?,
+    private val ioDispatcher: CoroutineDispatcher,
+) {
+    private val _uiState = MutableStateFlow(
+        CloudProactiveCenterUiState(isPaired = pairing != null, gatewayName = pairing?.name),
+    )
+    val uiState = _uiState.asStateFlow()
 
     fun clearNotice() {
         _uiState.update { it.copy(notice = null) }
@@ -220,7 +210,7 @@ class CloudProactiveCenterVM internal constructor(
 
     fun loadSummary(isRefresh: Boolean = false) {
         if (!_uiState.value.isPaired) return
-        viewModelScope.launch {
+        scope.launch {
             _uiState.update {
                 it.copy(
                     loading = !isRefresh && it.summary == null,
@@ -351,7 +341,7 @@ class CloudProactiveCenterVM internal constructor(
         feature: ProactiveFeature,
     ) {
         if (mutationKey in _uiState.value.mutatingKeys) return
-        viewModelScope.launch {
+        scope.launch {
             _uiState.update { it.copy(mutatingKeys = it.mutatingKeys + mutationKey, notice = null) }
             try {
                 val updated = withContext(ioDispatcher) { gateway.patchRestraint(patch) }
@@ -392,7 +382,7 @@ class CloudProactiveCenterVM internal constructor(
         if (trimmed.isEmpty()) return
         val mutationKey = "unmute:$trimmed"
         if (mutationKey in _uiState.value.mutatingKeys) return
-        viewModelScope.launch {
+        scope.launch {
             _uiState.update { it.copy(mutatingKeys = it.mutatingKeys + mutationKey, notice = null) }
             try {
                 val updatedRestraint = withContext(ioDispatcher) { gateway.unmute(trimmed) }
@@ -413,7 +403,7 @@ class CloudProactiveCenterVM internal constructor(
     fun cancelWakeup(wakeupId: String) {
         val mutationKey = "wakeup:$wakeupId"
         if (mutationKey in _uiState.value.mutatingKeys) return
-        viewModelScope.launch {
+        scope.launch {
             _uiState.update { it.copy(mutatingKeys = it.mutatingKeys + mutationKey, notice = null) }
             try {
                 withContext(ioDispatcher) { gateway.cancelWakeup(wakeupId) }
@@ -437,7 +427,7 @@ class CloudProactiveCenterVM internal constructor(
     fun setMonitorEnabled(monitorId: String, enabled: Boolean) {
         val mutationKey = "monitor:toggle:$monitorId"
         if (mutationKey in _uiState.value.mutatingKeys) return
-        viewModelScope.launch {
+        scope.launch {
             _uiState.update { it.copy(mutatingKeys = it.mutatingKeys + mutationKey, notice = null) }
             try {
                 val updated = withContext(ioDispatcher) { gateway.setMonitorEnabled(monitorId, enabled) }
@@ -460,7 +450,7 @@ class CloudProactiveCenterVM internal constructor(
             .getOrNull() ?: return
         val mutationKey = "monitor:delivery:$monitorId"
         if (mutationKey in _uiState.value.mutatingKeys) return
-        viewModelScope.launch {
+        scope.launch {
             _uiState.update { it.copy(mutatingKeys = it.mutatingKeys + mutationKey, notice = null) }
             try {
                 val updated = withContext(ioDispatcher) {
@@ -492,7 +482,7 @@ class CloudProactiveCenterVM internal constructor(
     fun deleteMonitor(monitorId: String) {
         val mutationKey = "monitor:delete:$monitorId"
         if (mutationKey in _uiState.value.mutatingKeys) return
-        viewModelScope.launch {
+        scope.launch {
             _uiState.update { it.copy(mutatingKeys = it.mutatingKeys + mutationKey, notice = null) }
             try {
                 withContext(ioDispatcher) { gateway.deleteMonitor(monitorId) }
@@ -545,7 +535,7 @@ class CloudProactiveCenterVM internal constructor(
             }
 
             is GithubRepoParseResult.Valid -> {
-                viewModelScope.launch {
+                scope.launch {
                     _uiState.update {
                         it.copy(
                             creatingGithubMonitor = true,
@@ -601,7 +591,7 @@ class CloudProactiveCenterVM internal constructor(
     fun setWebhookEnabled(webhookId: String, enabled: Boolean) {
         val mutationKey = "webhook:toggle:$webhookId"
         if (mutationKey in _uiState.value.mutatingKeys) return
-        viewModelScope.launch {
+        scope.launch {
             _uiState.update { it.copy(mutatingKeys = it.mutatingKeys + mutationKey, notice = null) }
             try {
                 val updated = withContext(ioDispatcher) { gateway.setWebhookEnabled(webhookId, enabled) }
@@ -622,7 +612,7 @@ class CloudProactiveCenterVM internal constructor(
     fun deleteWebhook(webhookId: String) {
         val mutationKey = "webhook:delete:$webhookId"
         if (mutationKey in _uiState.value.mutatingKeys) return
-        viewModelScope.launch {
+        scope.launch {
             _uiState.update { it.copy(mutatingKeys = it.mutatingKeys + mutationKey, notice = null) }
             try {
                 withContext(ioDispatcher) { gateway.deleteWebhook(webhookId) }

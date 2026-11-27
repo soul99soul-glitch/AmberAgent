@@ -159,6 +159,7 @@ class VirtualDisplayAccessibilityController(
                 val args = Bundle().apply {
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
                 }
+                if (!canDispatch()) return@withDisplayAppRoot false
                 val dispatched = runCatching {
                     target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
                 }.getOrDefault(false)
@@ -204,6 +205,7 @@ class VirtualDisplayAccessibilityController(
                     ?: "virtual_display_snapshot_invalidated",
             )
         }
+        if (snapshot.id != lastSnapshotId) return staleReceipt("superseded_snapshot")
         val expected = snapshot.nodes.firstOrNull { it.ref == action.ref }
             ?: return rejectedReceipt("unknown_ref")
         if (snapshot.packageName.isBlank() || action.ref.isBlank()) {
@@ -365,19 +367,15 @@ class VirtualDisplayAccessibilityController(
     /**
      * Checks whether the expected target package currently has an application window on [displayId].
      */
-    fun hasTargetWindowOnDisplay(targetPackageName: String = expectedPackageName): Boolean {
-        if (!canDispatch()) return false
-        val normalizedTarget = targetPackageName.removeSuffix(AmberDisplayUserService.PROBE_TARGET_SUFFIX)
-        if (normalizedTarget.isBlank()) return false
-        return withDisplayAppRoot { _, _, packageName ->
-            packageName == normalizedTarget
-        } == true
+    internal fun observedTargetPackage(): String? {
+        if (!canDispatch()) return null
+        return withDisplayAppRoot { _, _, packageName -> packageName }
     }
 
     private fun canDispatch(): Boolean = displayId > Display.DEFAULT_DISPLAY && isGenerationValid()
 
     private fun matchesExpectedPackage(packageName: String): Boolean {
-        if (expectedPackageName.isBlank()) return true
+        if (expectedPackageName.isBlank()) return false
         val normalized = expectedPackageName.removeSuffix(AmberDisplayUserService.PROBE_TARGET_SUFFIX)
         return packageName == normalized
     }
@@ -419,29 +417,21 @@ class VirtualDisplayAccessibilityController(
         val windows = runCatching { windowsProvider(displayId) }.getOrDefault(emptyList())
         if (windows.isEmpty()) return null
 
-        val normalizedExpected = expectedPackageName.removeSuffix(AmberDisplayUserService.PROBE_TARGET_SUFFIX)
-        val candidates = mutableListOf<Pair<AccessibilityWindowInfo, AccessibilityNodeInfo>>()
+        // An authorized package underneath another window cannot receive a coordinate gesture safely.
         try {
-            for (window in windows) {
-                if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
-                val root = runCatching { window.root }.getOrNull() ?: continue
-                candidates += window to root
+            val window = windows.maxByOrNull { it.layer } ?: return null
+            if (window.displayId != displayId || window.type != AccessibilityWindowInfo.TYPE_APPLICATION || window.id < 0) {
+                return null
             }
-            val selected = candidates.maxWithOrNull(
-                compareBy<Pair<AccessibilityWindowInfo, AccessibilityNodeInfo>>(
-                    { (_, root) -> normalizedExpected.isNotBlank() && root.packageName?.toString() == normalizedExpected },
-                    { (window, _) -> window.isActive },
-                    { (window, _) -> window.isFocused },
-                    { (window, _) -> window.layer },
-                ),
-            ) ?: return null
-            val (window, root) = selected
-            val packageName = root.packageName?.toString().orEmpty()
-            val windowId = window.id
-            if (packageName.isBlank() || windowId < 0) return null
-            return block(root, windowId, packageName)
+            val root = window.root ?: return null
+            try {
+                val packageName = root.packageName?.toString() ?: return null
+                if (!matchesExpectedPackage(packageName)) return null
+                return block(root, window.id, packageName)
+            } finally {
+                runCatching { root.recycle() }
+            }
         } finally {
-            candidates.forEach { (_, root) -> runCatching { root.recycle() } }
             windows.forEach { window -> runCatching { window.recycle() } }
         }
     }
@@ -647,6 +637,7 @@ class VirtualDisplayAccessibilityController(
         arguments: Bundle? = null,
         expectedReadBack: String? = null,
     ): ScreenActionReceipt {
+        if (!canDispatch()) return staleReceipt("virtual_display_generation_invalid")
         val dispatched = runCatching { node.performAction(action, arguments) }
             .getOrElse { return unknownReceipt("dispatch_exception") }
         if (!dispatched) return rejectedReceipt("action_rejected")
