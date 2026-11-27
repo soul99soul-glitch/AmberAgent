@@ -16,6 +16,7 @@ import app.amber.feature.ui.pages.search.SearchVM
 import app.amber.feature.ui.pages.sessionhome.HomeCouncilRoomCreator
 import app.amber.feature.ui.pages.sessionhome.SessionHomeVM
 import app.amber.feature.ui.pages.history.HistoryVM
+import app.amber.feature.ui.pages.proactive.CloudProactiveCenterVM
 import app.amber.feature.ui.pages.profile.ProfileVM
 import app.amber.feature.ui.pages.stats.StatsVM
 import app.amber.feature.ui.pages.extensions.PromptVM
@@ -100,5 +101,6 @@ val viewModelModule = module {
     viewModelOf(::SearchVM)
     viewModelOf(::StatsVM)
     viewModelOf(::ProfileVM)
+    viewModel { CloudProactiveCenterVM(repository = get(), gatewayRepository = get()) }
     single { PersonalAgentMainSessionStore(get()) }
 }

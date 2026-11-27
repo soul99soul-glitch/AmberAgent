@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -51,6 +53,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import app.amber.agent.R
+import app.amber.agent.Screen
 import app.amber.core.utils.plus
 import app.amber.feature.macgateway.MacGatewayException
 import app.amber.feature.macgateway.MacGatewayPairingPayload
@@ -62,9 +65,12 @@ import app.amber.feature.ui.components.ui.permission.PermissionManager
 import app.amber.feature.ui.components.ui.permission.PermissionNotification
 import app.amber.feature.ui.components.ui.permission.rememberPermissionState
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.context.LocalNavController
+import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.Laptop
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ShieldAlert
+import com.composables.icons.lucide.Sparkles
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -84,6 +90,7 @@ fun SettingExperimentalMacGatewayPage(
     repository: MacGatewayRepository = koinInject(),
 ) {
     val state by repository.state.collectAsStateWithLifecycle()
+    val navController = LocalNavController.current
     val context = LocalContext.current
     val activity = LocalActivity.current as? FragmentActivity
     val scope = rememberCoroutineScope()
@@ -207,6 +214,7 @@ fun SettingExperimentalMacGatewayPage(
                             enabled = false,
                             paired = false,
                             onEnabledChange = {},
+                            onOpenProactiveCenter = { navController.navigate(Screen.CloudProactiveCenter) },
                         )
                     }
                 }
@@ -260,6 +268,7 @@ fun SettingExperimentalMacGatewayPage(
                             onEnabledChange = { checked ->
                                 scope.launch { repository.setCloudDialogueEnabled(checked) }
                             },
+                            onOpenProactiveCenter = { navController.navigate(Screen.CloudProactiveCenter) },
                         )
                     }
                     status?.health?.let { health -> item { HealthSection(health) } }
@@ -342,6 +351,7 @@ internal fun CloudDialogueSection(
     enabled: Boolean,
     paired: Boolean,
     onEnabledChange: (Boolean) -> Unit,
+    onOpenProactiveCenter: (() -> Unit)? = null,
 ) {
     val workspace = workspaceColors()
     ExperimentSectionCard(title = stringResource(R.string.mac_gateway_cloud_dialogue_section)) {
@@ -372,6 +382,49 @@ internal fun CloudDialogueSection(
                 checked = enabled && paired,
                 onCheckedChange = { if (paired) onEnabledChange(it) },
             )
+        }
+        if (onOpenProactiveCenter != null) {
+            ExperimentDivider(startPadding = 0.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clickable(onClick = onOpenProactiveCenter)
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Lucide.Sparkles,
+                    contentDescription = null,
+                    tint = workspace.muted,
+                    modifier = Modifier.size(18.dp),
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.proactive_center_title),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = workspace.ink,
+                    )
+                    Text(
+                        text = stringResource(
+                            if (paired) R.string.proactive_center_entry_desc
+                            else R.string.proactive_center_entry_unpaired_desc,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = workspace.muted,
+                    )
+                }
+                Icon(
+                    imageVector = Lucide.ChevronRight,
+                    contentDescription = null,
+                    tint = workspace.faint,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
         }
     }
 }

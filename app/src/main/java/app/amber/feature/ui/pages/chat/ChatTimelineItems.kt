@@ -44,6 +44,7 @@ import kotlin.uuid.Uuid
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.State
 import app.amber.feature.ui.components.message.ThemeTryOnCardTarget
+import app.amber.feature.ui.pages.proactive.TimelineProactiveCardItem
 
 // iMessage-style send entrance: the just-sent user bubble springs up from the
 // input bar's direction into its slot. The distance approximates the visual
@@ -65,6 +66,7 @@ internal fun ChatTimelineEntry.lazyItemKey(
         "post-send-waiting-${postSendState.sentUserMessageId ?: conversationId}"
     is ChatTimelineEntry.Pending -> "pending-${pendingMessages[pendingIndex].id}"
     ChatTimelineEntry.TailCompactMarkers -> tailCompactItemKey
+    is ChatTimelineEntry.ProactiveCard -> "proactive:${card.eventId}"
     ChatTimelineEntry.TimelineTail -> TimelineTailKey
 }
 
@@ -77,6 +79,7 @@ internal fun ChatTimelineEntry.lazyContentType(): String = when (this) {
     ChatTimelineEntry.PostSendWaitingAssistant -> "post-send-waiting-assistant"
     is ChatTimelineEntry.Pending -> "pending"
     ChatTimelineEntry.TailCompactMarkers -> "compact-timeline-tail"
+    is ChatTimelineEntry.ProactiveCard -> "proactive_card"
     ChatTimelineEntry.TimelineTail -> "timeline-tail"
 }
 
@@ -429,6 +432,14 @@ internal fun LazyListScope.chatTimelineItems(
                     // lazyItemMessageIndexes against real lazy indexes.
                     Spacer(Modifier.fillMaxWidth())
                 }
+            }
+
+            is ChatTimelineEntry.ProactiveCard -> {
+                TimelineProactiveCardItem(
+                    card = entry.card,
+                    conversationId = conversationId,
+                    modifier = Modifier.padding(bottom = TimelineItemSpacing),
+                )
             }
 
             ChatTimelineEntry.TimelineTail -> {
