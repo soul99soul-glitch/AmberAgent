@@ -4,6 +4,8 @@ import android.content.Intent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -26,6 +28,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -34,11 +37,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -408,18 +411,29 @@ internal fun MessagePartsBlock(
                                                 val bubbleSegments = remember(visibleAssistantText) {
                                                     splitConversationalAssistantBubbles(visibleAssistantText)
                                                 }
+                                                val renderedSegmentCountRef = remember {
+                                                    intArrayOf(if (appearedDuringLiveTurn) 0 else bubbleSegments.size)
+                                                }
+                                                val batchBaseIndex = renderedSegmentCountRef[0]
+                                                SideEffect {
+                                                    renderedSegmentCountRef[0] = bubbleSegments.size
+                                                }
                                                 Column(
                                                     verticalArrangement = Arrangement.spacedBy(7.dp),
                                                     horizontalAlignment = Alignment.Start,
                                                 ) {
                                                     bubbleSegments.fastForEachIndexed { bubbleIndex, segmentText ->
+                                                        val batchStaggerIndex = computeBatchBubbleStaggerIndex(
+                                                            bubbleIndex = bubbleIndex,
+                                                            previouslyRenderedCount = batchBaseIndex,
+                                                        )
                                                         key(bubbleIndex) {
                                                             Surface(
                                                                 modifier = Modifier
                                                                     .chatBubbleWidth(0.90f)
                                                                     .assistantBubbleEntrance(
                                                                         animate = appearedDuringLiveTurn,
-                                                                        staggerIndex = bubbleIndex,
+                                                                        staggerIndex = batchStaggerIndex,
                                                                     ),
                                                                 shape = assistantBubbleShape,
                                                                 color = amberTokens.surface,
@@ -775,23 +789,29 @@ private fun UIMessagePart.Tool.stableStepKey(): String =
         streamToolIndex()?.let { "stream-tool-$it" } ?: hashCode().toString()
     }
 
-internal const val AssistantBubbleEntranceAlphaDurationMs = 420
-internal const val AssistantBubbleEntranceSlideDurationMs = 460
-internal val AssistantBubbleEntranceSlideDistance = 12.dp
-internal const val AssistantBubbleEntranceInitialScale = 0.988f
-internal const val AssistantBubbleEntranceStaggerStepMs = 90
-internal const val AssistantBubbleEntranceMaxStaggerMs = 270
-internal val AssistantBubbleEntranceAlphaEasing: Easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
-internal val AssistantBubbleEntranceMotionEasing: Easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+internal const val AssistantBubbleEntranceAlphaDurationMs = 240
+internal val AssistantBubbleEntranceSlideDistance = 10.dp
+internal const val AssistantBubbleEntranceSpringDampingRatio = Spring.DampingRatioNoBouncy
+internal const val AssistantBubbleEntranceSpringStiffness = 280f
+internal const val AssistantBubbleEntranceSpringVisibilityThreshold = 0.005f
+internal const val AssistantBubbleEntranceStaggerStepMs = 65
+internal const val AssistantBubbleEntranceMaxStaggerMs = 195
+internal val AssistantBubbleEntranceAlphaEasing: Easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
+
+internal fun computeBatchBubbleStaggerIndex(
+    bubbleIndex: Int,
+    previouslyRenderedCount: Int,
+): Int = (bubbleIndex - previouslyRenderedCount.coerceAtLeast(0)).coerceAtLeast(0)
 
 internal fun computeAssistantBubbleEntranceDelayMs(staggerIndex: Int): Int =
     (staggerIndex.coerceAtLeast(0) * AssistantBubbleEntranceStaggerStepMs)
         .coerceAtMost(AssistantBubbleEntranceMaxStaggerMs)
 
 /**
- * Gentle, decelerating whole-bubble entrance with decoupled alpha and vertical glide when a
- * newly generated assistant bubble appears. Multi-bubble turns stagger softly by [staggerIndex].
- * Historical messages skip animation (`animate == false`).
+ * Silky whole-bubble entrance pairing a shorter, soft-start alpha reveal (240ms) with a
+ * critically damped spring glide (10dp -> 0dp, no scale jitter). Yields one frame before
+ * ticking so initial Markdown layout finishes prior to frame 0 of the motion. Historical
+ * messages skip animation (`animate == false`).
  */
 internal fun Modifier.assistantBubbleEntrance(
     animate: Boolean,
@@ -801,6 +821,7 @@ internal fun Modifier.assistantBubbleEntrance(
     val motionProgress = remember { Animatable(if (animate) 0f else 1f) }
     LaunchedEffect(Unit) {
         if (animate && (alphaProgress.value < 1f || motionProgress.value < 1f)) {
+            withFrameNanos { }
             val delayMs = computeAssistantBubbleEntranceDelayMs(staggerIndex)
             if (delayMs > 0) {
                 delay(delayMs.toLong())
@@ -818,9 +839,10 @@ internal fun Modifier.assistantBubbleEntrance(
                 launch {
                     motionProgress.animateTo(
                         targetValue = 1f,
-                        animationSpec = tween(
-                            durationMillis = AssistantBubbleEntranceSlideDurationMs,
-                            easing = AssistantBubbleEntranceMotionEasing,
+                        animationSpec = spring(
+                            dampingRatio = AssistantBubbleEntranceSpringDampingRatio,
+                            stiffness = AssistantBubbleEntranceSpringStiffness,
+                            visibilityThreshold = AssistantBubbleEntranceSpringVisibilityThreshold,
                         ),
                     )
                 }
@@ -828,15 +850,8 @@ internal fun Modifier.assistantBubbleEntrance(
         }
     }
     this.graphicsLayer {
-        val a = alphaProgress.value
-        val m = motionProgress.value
-        alpha = a
-        translationY = AssistantBubbleEntranceSlideDistance.toPx() * (1f - m)
-        val scale = AssistantBubbleEntranceInitialScale +
-            (1f - AssistantBubbleEntranceInitialScale) * m
-        scaleX = scale
-        scaleY = scale
-        transformOrigin = TransformOrigin(0f, 0.5f)
+        alpha = alphaProgress.value
+        translationY = AssistantBubbleEntranceSlideDistance.toPx() * (1f - motionProgress.value)
     }
 }
 

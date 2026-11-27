@@ -2,6 +2,7 @@ package app.amber.feature.ui.pages.chat
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.animation.core.Spring
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -10,12 +11,14 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.ReplyDeliveryMode
 import app.amber.feature.ui.components.message.AssistantBubbleEntranceAlphaDurationMs
-import app.amber.feature.ui.components.message.AssistantBubbleEntranceInitialScale
+import app.amber.feature.ui.components.message.AssistantBubbleEntranceAlphaEasing
 import app.amber.feature.ui.components.message.AssistantBubbleEntranceMaxStaggerMs
 import app.amber.feature.ui.components.message.AssistantBubbleEntranceSlideDistance
-import app.amber.feature.ui.components.message.AssistantBubbleEntranceSlideDurationMs
+import app.amber.feature.ui.components.message.AssistantBubbleEntranceSpringDampingRatio
+import app.amber.feature.ui.components.message.AssistantBubbleEntranceSpringStiffness
 import app.amber.feature.ui.components.message.AssistantBubbleEntranceStaggerStepMs
 import app.amber.feature.ui.components.message.computeAssistantBubbleEntranceDelayMs
+import app.amber.feature.ui.components.message.computeBatchBubbleStaggerIndex
 import app.amber.feature.ui.components.message.resolveAgentPersonaDisplayName
 import app.amber.feature.ui.components.message.splitConversationalAssistantBubbles
 import app.amber.feature.ui.theme.AmberAccents
@@ -416,19 +419,32 @@ class ChatListIndicatorsTest {
     }
 
     @Test
-    fun `assistant bubble entrance uses gentle decoupled timing and bounded multi-bubble stagger`() {
-        assertEquals(420, AssistantBubbleEntranceAlphaDurationMs)
-        assertEquals(460, AssistantBubbleEntranceSlideDurationMs)
-        assertEquals(12.dp, AssistantBubbleEntranceSlideDistance)
-        assertEquals(0.988f, AssistantBubbleEntranceInitialScale, 0.0001f)
-        assertEquals(90, AssistantBubbleEntranceStaggerStepMs)
-        assertEquals(270, AssistantBubbleEntranceMaxStaggerMs)
+    fun `assistant bubble entrance pairs shorter soft alpha with critically damped spring glide and batch stagger`() {
+        assertEquals(240, AssistantBubbleEntranceAlphaDurationMs)
+        assertEquals(10.dp, AssistantBubbleEntranceSlideDistance)
+        assertEquals(Spring.DampingRatioNoBouncy, AssistantBubbleEntranceSpringDampingRatio, 0.0001f)
+        assertTrue(AssistantBubbleEntranceSpringStiffness in 260f..320f)
+        assertEquals(65, AssistantBubbleEntranceStaggerStepMs)
+        assertEquals(195, AssistantBubbleEntranceMaxStaggerMs)
 
+        // Soft alpha curve avoids first-frame jump while settling cleanly before glide finishes.
+        assertTrue(AssistantBubbleEntranceAlphaEasing.transform(0.05f) < 0.10f)
+        assertTrue(AssistantBubbleEntranceAlphaEasing.transform(0.50f) in 0.70f..0.88f)
+        assertEquals(1f, AssistantBubbleEntranceAlphaEasing.transform(1f), 0.0001f)
+
+        // Same-batch multi-bubble stagger ripples at 65ms capped at 195ms.
         assertEquals(0, computeAssistantBubbleEntranceDelayMs(-1))
         assertEquals(0, computeAssistantBubbleEntranceDelayMs(0))
-        assertEquals(90, computeAssistantBubbleEntranceDelayMs(1))
-        assertEquals(180, computeAssistantBubbleEntranceDelayMs(2))
-        assertEquals(270, computeAssistantBubbleEntranceDelayMs(3))
-        assertEquals(270, computeAssistantBubbleEntranceDelayMs(4))
+        assertEquals(65, computeAssistantBubbleEntranceDelayMs(1))
+        assertEquals(130, computeAssistantBubbleEntranceDelayMs(2))
+        assertEquals(195, computeAssistantBubbleEntranceDelayMs(3))
+        assertEquals(195, computeAssistantBubbleEntranceDelayMs(4))
+
+        // Later incrementally streamed segments start immediately (batch index 0) rather than waiting.
+        assertEquals(0, computeBatchBubbleStaggerIndex(bubbleIndex = 0, previouslyRenderedCount = 0))
+        assertEquals(1, computeBatchBubbleStaggerIndex(bubbleIndex = 1, previouslyRenderedCount = 0))
+        assertEquals(0, computeBatchBubbleStaggerIndex(bubbleIndex = 1, previouslyRenderedCount = 1))
+        assertEquals(0, computeBatchBubbleStaggerIndex(bubbleIndex = 2, previouslyRenderedCount = 2))
+        assertEquals(1, computeBatchBubbleStaggerIndex(bubbleIndex = 3, previouslyRenderedCount = 2))
     }
 }
