@@ -79,6 +79,7 @@ import org.koin.compose.koinInject
 @Composable
 internal fun ChatListNormal(
     innerPadding: PaddingValues,
+    floatingTopContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
     conversation: Conversation,
     timelineLoadState: ConversationTimelineLoadState,
     pendingUserMessages: List<PendingUserMessage>,
@@ -312,17 +313,19 @@ internal fun ChatListNormal(
                             stagedMessageKey = sendStage?.stagedMessageKey,
                         )
                     }
-                    val timelineTopPaddingPx = with(density) { TimelineTopPadding.roundToPx() }
+                    val effectiveTopPadding = TimelineTopPadding + floatingTopContentPadding
+                    val timelineTopPaddingPx = with(density) { effectiveTopPadding.roundToPx() }
                     val timelineBaseBottomPaddingPx = with(density) { timelineBottomPadding.roundToPx() }
                     val timelineContentPadding = remember(
                         readingGutter,
+                        effectiveTopPadding,
                         timelineBottomPadding,
                         density,
                         sendStage,
                     ) {
                         SendStageContentPaddingValues(
                             start = TimelineHorizontalPadding + readingGutter,
-                            top = TimelineTopPadding,
+                            top = effectiveTopPadding,
                             end = TimelineHorizontalPadding + readingGutter,
                             baseBottom = timelineBottomPadding,
                             density = density,
@@ -491,7 +494,7 @@ internal fun ChatListNormal(
                         // bottom overlay while the input panel has its own height animation;
                         // animating both during send makes the timeline feel like it is
                         // being tugged from two places.
-                        if (visibleSuggestions.isNotEmpty()) {
+                        if (visibleSuggestions.isNotEmpty() && LocalChatStageMode.current !is ChatStageMode.PersonalAgent) {
                             ChatSuggestionsRow(
                                 modifier = Modifier.align(Alignment.BottomCenter),
                                 suggestions = visibleSuggestions,

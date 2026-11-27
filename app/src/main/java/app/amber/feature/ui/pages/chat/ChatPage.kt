@@ -49,17 +49,35 @@ import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
 import kotlin.uuid.Uuid
 
+data class PersonalAgentTopBarState(
+    val title: String,
+    val modelShortName: String?,
+    val generating: Boolean,
+    val recapEligible: Boolean,
+    val soulDisplayName: String,
+    val onOpenWorkspace: () -> Unit,
+    val onOpenAgentSoul: () -> Unit,
+    val onToggleModelMenu: () -> Unit,
+    val onOpenRecap: () -> Unit,
+)
+
 sealed interface ChatStageMode {
     data object Standard : ChatStageMode
     data class PersonalAgent(
-        val topBarLeading: @Composable () -> Unit,
-        val onOpenSessions: () -> Unit,
+        val topChrome: @Composable (PersonalAgentTopBarState) -> Unit,
+        val bottomChrome: @Composable (imeVisible: Boolean) -> Unit,
+        val workspaceSheet: @Composable (
+            visible: Boolean,
+            hasMessages: Boolean,
+            soulDisplayName: String,
+            onDismiss: () -> Unit,
+            onToggleShelf: () -> Unit,
+            onOpenAgentSoul: () -> Unit,
+        ) -> Unit,
     ) : ChatStageMode
 }
 
 internal val LocalChatStageMode = compositionLocalOf<ChatStageMode> { ChatStageMode.Standard }
-internal val LocalPersonalAgentMoreMenu =
-    compositionLocalOf<(@Composable (hasMessages: Boolean, onToggleShelf: () -> Unit) -> Unit)?> { null }
 
 @Composable
 fun ChatPage(

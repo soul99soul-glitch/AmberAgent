@@ -140,6 +140,8 @@ internal fun ChatInput(
     onDismissWebMount: () -> Unit = {},
     onOpenWebMountSession: (sessionId: String, reopen: Boolean) -> Unit = { _, _ -> },
     aboveComposerContent: @Composable () -> Unit = {},
+    belowComposerContent: @Composable (imeVisible: Boolean) -> Unit = {},
+    duetStyle: Boolean = false,
     modifier: Modifier = Modifier,
     onUpdateChatModel: (Model) -> Unit,
     onUpdateSettings: (Settings) -> Unit,
@@ -332,29 +334,33 @@ internal fun ChatInput(
     }
 
     val tokens = LocalAmberTokens.current
-    // Continue the conversation paper under the composer and navigation inset, with
-    // the same fine accent rule used below the chat header.
+    // Continue the conversation paper under the composer and navigation inset.
+    // Standard chat keeps the fine accent rule; Amber Duet Personal Agent uses a seamless floating tray.
     Column(modifier = modifier.imePadding()) {
         aboveComposerContent()
         Surface(
             color = tokens.bg,
-            modifier = Modifier.drawWithContent {
-                drawContent()
-                drawLine(
-                    color = tokens.accent.copy(alpha = 0.10f),
-                    start = Offset(0f, 0f),
-                    end = Offset(size.width, 0f),
-                    strokeWidth = 1.dp.toPx(),
-                )
+            modifier = if (duetStyle) {
+                Modifier
+            } else {
+                Modifier.drawWithContent {
+                    drawContent()
+                    drawLine(
+                        color = tokens.accent.copy(alpha = 0.10f),
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width, 0f),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+                }
             },
         ) {
             Column(
                 modifier = Modifier
                     .navigationBarsPadding()
                     // breathing room below the gesture/nav inset
-                    .padding(bottom = 6.dp)
+                    .padding(bottom = if (duetStyle) 8.dp else 6.dp)
                     .padding(horizontal = 16.dp)
-                    .padding(top = 10.dp),
+                    .padding(top = if (duetStyle) 6.dp else 10.dp),
                 // spacedBy 控制 SandboxPeekBar 与 composer pill 之间的间距。
                 // 设计稿是预览卡紧贴输入框，2dp 足够留一条 hair 缝
                 verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -381,10 +387,6 @@ internal fun ChatInput(
 
                 val pulseFraction = suggestionFillPulse.value
                 val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-                // Graphite §6.2 / §7.4 composer: three separate `surface-2` surfaces on the tray,
-                // separated by gaps — circular [+] · pill input · circular send. Flat & hairline
-                // only (no shadow / glow on any of them). The suggestion-fill pulse now tints the
-                // input pill's hairline border (resting = `line`).
                 val attachmentsExpanded = expand == ExpandState.Files
                 val hideComposerPlaceholder = attachmentsExpanded || keepPlaceholderHiddenDuringAttachmentExit
                 val addRotation by animateFloatAsState(
@@ -397,81 +399,139 @@ internal fun ChatInput(
                     stop = chatTheme.accent.copy(alpha = 0.42f),
                     fraction = pulseFraction,
                 )
+                val composerRowHeight = if (duetStyle) 48.dp else 44.dp
+                val sendButtonSize = if (duetStyle) 48.dp else ComposerButtonSize
+                val duetPlaceholder = if (duetStyle) {
+                    stringResource(R.string.personal_agent_composer_placeholder)
+                } else {
+                    null
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 44.dp),
+                        .heightIn(min = composerRowHeight),
                     verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (duetStyle) 10.dp else 9.dp),
                 ) {
-                    // ── attach chip — `surface-2` circle that morphs into the [× · image · file]
-                    //    capsule (animated width via animateContentSize; + rotates to ×).
-                    Row(
-                        modifier = Modifier
-                            .heightIn(min = 44.dp)
-                            .clip(CircleShape)
-                            .background(tokens.surface2)
-                            .border(BorderStroke(1.dp, tokens.line), CircleShape)
-                            .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
+                    if (!duetStyle) {
+                        // Standard mode: separate circular [+] chip morphing into [× · image · file]
+                        Row(
                             modifier = Modifier
+                                .heightIn(min = 44.dp)
                                 .clip(CircleShape)
-                                .clickable { expandToggle(ExpandState.Files) }
-                                .minimumInteractiveComponentSize()
-                                .size(44.dp),
-                            contentAlignment = Alignment.Center,
+                                .background(tokens.surface2)
+                                .border(BorderStroke(1.dp, tokens.line), CircleShape)
+                                .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(
-                                imageVector = Lucide.Plus,
-                                contentDescription = stringResource(R.string.more_options),
-                                // Collapsed attachment entry stays neutral; the open state uses the
-                                // active accent to make the expanded affordance easy to scan.
-                                tint = if (attachmentsExpanded) chatTheme.accent else tokens.ink2,
+                            Box(
                                 modifier = Modifier
-                                    .size(24.dp)
-                                    .graphicsLayer {
-                                        rotationZ = addRotation
-                                    },
-                            )
-                        }
+                                    .clip(CircleShape)
+                                    .clickable { expandToggle(ExpandState.Files) }
+                                    .minimumInteractiveComponentSize()
+                                    .size(44.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Lucide.Plus,
+                                    contentDescription = stringResource(R.string.more_options),
+                                    tint = if (attachmentsExpanded) chatTheme.accent else tokens.ink2,
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .graphicsLayer {
+                                            rotationZ = addRotation
+                                        },
+                                )
+                            }
 
-                        AnimatedVisibility(
-                            visible = attachmentsExpanded,
-                            enter = fadeIn(animationSpec = tween(160)) + scaleIn(
-                                initialScale = 0.92f,
-                                animationSpec = tween(220, easing = FastOutSlowInEasing),
-                            ),
-                            exit = fadeOut(animationSpec = tween(120)) + scaleOut(
-                                targetScale = 0.94f,
-                                animationSpec = tween(160, easing = FastOutSlowInEasing),
-                            ),
-                        ) {
-                            InlineAttachmentActions(
-                                onTakePic = attachmentLaunchers.takePicture,
-                                onPickImage = attachmentLaunchers.pickImages,
-                                onPickFile = attachmentLaunchers.pickFiles,
-                                modifier = Modifier.padding(end = 4.dp),
-                            )
+                            AnimatedVisibility(
+                                visible = attachmentsExpanded,
+                                enter = fadeIn(animationSpec = tween(160)) + scaleIn(
+                                    initialScale = 0.92f,
+                                    animationSpec = tween(220, easing = FastOutSlowInEasing),
+                                ),
+                                exit = fadeOut(animationSpec = tween(120)) + scaleOut(
+                                    targetScale = 0.94f,
+                                    animationSpec = tween(160, easing = FastOutSlowInEasing),
+                                ),
+                            ) {
+                                InlineAttachmentActions(
+                                    onTakePic = attachmentLaunchers.takePicture,
+                                    onPickImage = attachmentLaunchers.pickImages,
+                                    onPickFile = attachmentLaunchers.pickFiles,
+                                    modifier = Modifier.padding(end = 4.dp),
+                                )
+                            }
                         }
                     }
 
-                    // ── center input pill — `surface-2`, 26dp radius, 1dp hairline, flat.
+                    // ── center input pill — unified [+ · input] in Duet mode, standalone pill in Standard
                     val pillShape = RoundedCornerShape(26.dp)
                     Row(
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = 44.dp)
+                            .heightIn(min = composerRowHeight)
                             .clip(pillShape)
-                            .background(tokens.surface2)
+                            .background(if (duetStyle) tokens.surface else tokens.surface2)
                             .border(BorderStroke(1.dp, pillBorder), pillShape)
-                            // 26dp 大圆角下，文字左内距给足 18dp 才不贴边；右侧留 16dp 对称
-                            .padding(start = 18.dp, end = 16.dp),
-                        // 文字在药丸内垂直居中（TextField 取自然高度，多出的空隙上下均分）
+                            .padding(
+                                start = if (duetStyle) 6.dp else 18.dp,
+                                end = 16.dp,
+                            ),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(modifier = Modifier.weight(1f)) {
+                        if (duetStyle) {
+                            Row(
+                                modifier = Modifier.animateContentSize(
+                                    animationSpec = tween(220, easing = FastOutSlowInEasing),
+                                ),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .clickable { expandToggle(ExpandState.Files) }
+                                        .size(40.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Lucide.Plus,
+                                        contentDescription = stringResource(R.string.more_options),
+                                        tint = if (attachmentsExpanded) chatTheme.accent else tokens.ink2,
+                                        modifier = Modifier
+                                            .size(21.dp)
+                                            .graphicsLayer {
+                                                rotationZ = addRotation
+                                            },
+                                    )
+                                }
+
+                                AnimatedVisibility(
+                                    visible = attachmentsExpanded,
+                                    enter = fadeIn(animationSpec = tween(160)) + scaleIn(
+                                        initialScale = 0.92f,
+                                        animationSpec = tween(220, easing = FastOutSlowInEasing),
+                                    ),
+                                    exit = fadeOut(animationSpec = tween(120)) + scaleOut(
+                                        targetScale = 0.94f,
+                                        animationSpec = tween(160, easing = FastOutSlowInEasing),
+                                    ),
+                                ) {
+                                    InlineAttachmentActions(
+                                        onTakePic = attachmentLaunchers.takePicture,
+                                        onPickImage = attachmentLaunchers.pickImages,
+                                        onPickFile = attachmentLaunchers.pickFiles,
+                                        modifier = Modifier.padding(end = 4.dp),
+                                    )
+                                }
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = if (duetStyle) 4.dp else 0.dp),
+                        ) {
                             TextInputRow(
                                 state = state,
                                 onSendMessage = { sendMessage() },
@@ -480,6 +540,7 @@ internal fun ChatInput(
                                 modifier = Modifier.fillMaxWidth(),
                                 minimalChrome = true,
                                 hidePlaceholder = hideComposerPlaceholder,
+                                placeholderOverride = duetPlaceholder,
                                 onUpdateSettings = onUpdateSettings,
                                 onImportAttachment = { uri, kind ->
                                     importer.importAttachment(
@@ -501,30 +562,22 @@ internal fun ChatInput(
                     if (loading && state.isEmpty()) {
                         KeepScreenOn()
                     }
-                    // Graphite §6.2 composer: a FLAT circular send button (no halo/glow/shadow).
-                    // Fills with accent when there is a draft (!isEmpty); neutral surface2 when
-                    // empty. Stop-state (loading & empty) keeps the cancel affordance like before.
-                    // pressable only exposes onClick, but send needs both onClick (send) and
-                    // onLongClick (send-without-answer) — so we drive press feedback (scale .975,
-                    // design §5) from a shared MutableInteractionSource that also feeds
-                    // combinedClickable, rather than stacking pressable + combinedClickable.
                     val sendEmpty = state.isEmpty()
                     val sendStopState = loading && sendEmpty
                     val hasUnresolvedAttachments = state.hasUnresolvedAttachmentImports()
                     val sendEnabled = sendStopState ||
                         (!hasUnresolvedAttachments && composerSendEnabled(sendEmpty, loading))
+                    val sendIsActiveFill = sendEnabled && (!sendEmpty || loading)
                     val sendFill by animateColorAsState(
-                        targetValue = if (!sendEnabled || (sendEmpty && !loading)) {
-                            tokens.surface2
+                        targetValue = if (!sendIsActiveFill) {
+                            if (duetStyle) tokens.surface else tokens.surface2
                         } else {
                             tokens.accent
                         },
                         label = "sendButtonFill",
                     )
                     val sendIconTint by animateColorAsState(
-                        // 有效发送键使用主题为当前 accent 计算的前景色，确保 terracotta 等
-                        // accent 仍保持原稿的 AA 对比；空态仍用中性 ink3。
-                        targetValue = if (!sendEnabled || (sendEmpty && !loading)) tokens.ink3 else tokens.accentInk,
+                        targetValue = if (!sendIsActiveFill) tokens.ink3 else tokens.accentInk,
                         label = "sendButtonIconTint",
                     )
                     val sendInteraction = remember { MutableInteractionSource() }
@@ -550,7 +603,7 @@ internal fun ChatInput(
                                 },
                             )
                             .minimumInteractiveComponentSize()
-                            .size(ComposerButtonSize),
+                            .size(sendButtonSize),
                         contentAlignment = Alignment.Center,
                     ) {
                         Box(
@@ -559,9 +612,16 @@ internal fun ChatInput(
                                     scaleX = sendScale
                                     scaleY = sendScale
                                 }
-                                .size(ComposerButtonSize)
+                                .size(sendButtonSize)
                                 .clip(CircleShape)
-                                .background(sendFill),
+                                .background(sendFill)
+                                .then(
+                                    if (duetStyle && !sendIsActiveFill) {
+                                        Modifier.border(BorderStroke(1.dp, tokens.line), CircleShape)
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
@@ -595,6 +655,8 @@ internal fun ChatInput(
                         dismissExpand()
                     }
                 }
+
+                belowComposerContent(imeVisible)
             }
         }
     }

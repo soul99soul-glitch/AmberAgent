@@ -1,10 +1,15 @@
 package app.amber.feature.ui.pages.chat
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -12,9 +17,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -75,7 +84,63 @@ internal fun rememberChatConfigurationIssue(model: Model?, providers: List<Provi
 }
 
 @Composable
-internal fun ChatConfigurationHint(issue: ChatConfigurationIssue, onConfigure: () -> Unit) {
+internal fun ChatConfigurationHint(
+    issue: ChatConfigurationIssue,
+    compactPill: Boolean = false,
+    onConfigure: () -> Unit,
+) {
+    val actionLabel = stringResource(
+        if (issue == ChatConfigurationIssue.MissingModel) R.string.chat_setup_choose_model else R.string.chat_setup_configure,
+    )
+    val actionTestTag = if (issue == ChatConfigurationIssue.MissingModel) {
+        "chat_setup_choose_model"
+    } else {
+        "chat_setup_configure"
+    }
+    if (compactPill) {
+        val tokens = app.amber.feature.ui.theme.LocalAmberTokens.current
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                modifier = Modifier
+                    .testTag("chat-configuration-hint")
+                    .clip(CircleShape)
+                    .clickable(onClick = onConfigure),
+                shape = CircleShape,
+                color = tokens.surface,
+                border = BorderStroke(1.dp, tokens.line),
+                tonalElevation = 0.dp,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = stringResource(issue.messageRes),
+                        color = tokens.ink3,
+                        fontSize = 12.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Text(
+                        text = actionLabel,
+                        color = tokens.accent,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        modifier = Modifier.testTag(actionTestTag),
+                    )
+                }
+            }
+        }
+        return
+    }
     val colors = workspaceColors()
     Row(
         modifier = Modifier.fillMaxWidth().testTag("chat-configuration-hint").padding(start = 18.dp, end = 8.dp),
@@ -88,8 +153,11 @@ internal fun ChatConfigurationHint(issue: ChatConfigurationIssue, onConfigure: (
             style = MaterialTheme.typography.bodySmall,
             color = colors.muted,
         )
-        TextButton(onClick = onConfigure) {
-            Text(stringResource(if (issue == ChatConfigurationIssue.MissingModel) R.string.chat_setup_choose_model else R.string.chat_setup_configure))
+        TextButton(
+            onClick = onConfigure,
+            modifier = Modifier.testTag(actionTestTag),
+        ) {
+            Text(actionLabel)
         }
     }
 }

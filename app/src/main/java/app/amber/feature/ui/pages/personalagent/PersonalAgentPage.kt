@@ -2,66 +2,42 @@ package app.amber.feature.ui.pages.personalagent
 
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.Transition
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
-import androidx.compose.runtime.LaunchedEffect
-import app.amber.feature.macgateway.ProactiveForegroundStageTracker
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.PersonalAgentMainSessionStore
-import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.core.service.LocalAsyncTaskCoordinator
 import app.amber.feature.macgateway.CloudProactiveRepository
 import app.amber.feature.macgateway.MacGatewayRepository
 import app.amber.feature.macgateway.ProactiveDeepLinkInbox
+import app.amber.feature.macgateway.ProactiveForegroundStageTracker
+import app.amber.feature.ui.components.ai.SubAgentDockState
 import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.pages.chat.ChatPage
 import app.amber.feature.ui.pages.chat.ChatStageMode
-import app.amber.feature.ui.pages.chat.LocalPersonalAgentMoreMenu
 import app.amber.feature.ui.pages.proactive.LocalProactiveCardDetailOpener
 import app.amber.feature.ui.pages.proactive.ProactiveDetailSheet
-import app.amber.feature.ui.theme.LocalAmberTokens
-import com.composables.icons.lucide.EllipsisVertical
-import com.composables.icons.lucide.Layers
-import com.composables.icons.lucide.LayoutDashboard
-import com.composables.icons.lucide.Link2
-import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.Settings
-import com.composables.icons.lucide.Sparkles
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
 /**
- * Default Personal Agent home stage.
+ * Default Personal Agent home stage aligned with iOS & HarmonyOS Amber Duet.
  *
  * Reuses [ChatPage] in [ChatStageMode.PersonalAgent] and resolves one stable main conversation ID
  * per host (local vs paired gateway) via [PersonalAgentMainSessionStore].
@@ -75,6 +51,8 @@ fun PersonalAgentPage(
     val macGatewayRepository: MacGatewayRepository = koinInject()
     val proactiveRepository: CloudProactiveRepository = koinInject()
     val proactiveDeepLinkInbox: ProactiveDeepLinkInbox = koinInject()
+    val localAsyncTaskCoordinator: LocalAsyncTaskCoordinator = koinInject()
+    val subAgentDockState: SubAgentDockState = koinInject()
     val gatewayState by macGatewayRepository.state.collectAsStateWithLifecycle()
     val pendingDetail by proactiveDeepLinkInbox.pending.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -100,6 +78,36 @@ fun PersonalAgentPage(
             mainSessionStore.localMainConversationId()
         }
     }
+    val resolvedUuid = remember(resolvedId) { Uuid.parse(resolvedId) }
+
+    val proactiveBadgeCountFlow = remember(activeConnection?.gatewayId, activeConnection?.deviceId, proactiveRepository) {
+        if (activeConnection != null) {
+            proactiveRepository
+                .cards(activeConnection.gatewayId, activeConnection.deviceId)
+                .map { cards -> cards.count { it.feedbackState == null } }
+                .distinctUntilChanged()
+        } else {
+            flowOf(0)
+        }
+    }
+    val proactiveBadgeCount by proactiveBadgeCountFlow.collectAsStateWithLifecycle(initialValue = 0)
+
+    val activeTaskCountFlow = remember(macGatewayRepository, localAsyncTaskCoordinator, subAgentDockState) {
+        combine(
+            macGatewayRepository.cloudDialogueState
+                .map { state -> state.tasks.count { it.active } }
+                .distinctUntilChanged(),
+            localAsyncTaskCoordinator.uiState
+                .map { state -> state.tasks.count { it.active } }
+                .distinctUntilChanged(),
+            subAgentDockState.uiState
+                .map { state -> if (state.enabled) state.tasks.size else 0 }
+                .distinctUntilChanged(),
+        ) { cloudActiveCount, localActiveCount, subAgentCount ->
+            cloudActiveCount + localActiveCount + subAgentCount
+        }.distinctUntilChanged()
+    }
+    val activeTaskCount by activeTaskCountFlow.collectAsStateWithLifecycle(initialValue = 0)
 
     val openSessions = remember(navController) {
         {
@@ -113,38 +121,117 @@ fun PersonalAgentPage(
         LocalProactiveCardDetailOpener provides { signalId ->
             proactiveDeepLinkInbox.submit(signalId, activeConnection?.gatewayId, activeConnection?.deviceId)
         },
-        LocalPersonalAgentMoreMenu provides { hasMessages, onToggleShelf ->
-            PersonalAgentOverflowMenu(
-                pairedGatewayName = activeConnection?.name,
-                hasMessages = hasMessages,
-                onToggleShelf = onToggleShelf,
-                onOpenTodayBoard = { navController.navigate(Screen.TodayBoard) },
-                onOpenProactiveCenter = { navController.navigate(Screen.CloudProactiveCenter) },
-                onOpenPairedGateway = { navController.navigate(Screen.SettingExperimentalMacGateway) },
-                onOpenSettings = { navController.navigate(Screen.Setting) },
-            )
-        },
     ) {
         key(resolvedId) {
             ChatPage(
-                id = Uuid.parse(resolvedId),
+                id = resolvedUuid,
                 text = null,
                 files = emptyList(),
                 enterTransition = enterTransition,
                 stage = ChatStageMode.PersonalAgent(
-                    topBarLeading = {
-                        PersonalAgentHostPill(
+                    topChrome = { headerState ->
+                        val topicLabel = headerState.title.ifBlank {
+                            headerState.modelShortName?.takeIf { it.isNotBlank() }
+                                ?: headerState.soulDisplayName.ifBlank { "Amber" }
+                        }
+                        PersonalAgentTopChrome(
+                            topicLabel = topicLabel,
+                            generating = headerState.generating,
+                            recapEligible = headerState.recapEligible,
+                            proactiveBadgeCount = proactiveBadgeCount,
+                            onOpenWorkspace = headerState.onOpenWorkspace,
+                            onOpenAgentSoul = headerState.onOpenAgentSoul,
+                            onToggleModelMenu = headerState.onToggleModelMenu,
+                            onOpenRecap = headerState.onOpenRecap,
+                            onOpenProactiveCenter = {
+                                navController.navigate(Screen.CloudProactiveCenter) {
+                                    launchSingleTop = true
+                                }
+                            },
+                        )
+                    },
+                    bottomChrome = { imeVisible ->
+                        PersonalAgentBottomBar(
+                            visible = !imeVisible,
+                            selectedTab = PersonalAgentModeTab.CHAT,
+                            activeTaskCount = activeTaskCount,
                             isCloudSelected = isCloudActive,
                             cloudAvailable = gatewayState.canSelectCloud,
                             gatewayName = activeConnection?.name,
+                            onSelectChat = {},
+                            onOpenTasks = {
+                                navController.navigate(Screen.TodayBoard) {
+                                    launchSingleTop = true
+                                }
+                            },
+                            onOpenCenter = {
+                                navController.navigate(Screen.CloudProactiveCenter) {
+                                    launchSingleTop = true
+                                }
+                            },
                             onSelectCloud = { enabled ->
                                 scope.launch {
                                     macGatewayRepository.setCloudDialogueEnabled(enabled)
                                 }
                             },
+                            onOpenGatewayPairing = {
+                                navController.navigate(Screen.SettingExperimentalMacGateway) {
+                                    launchSingleTop = true
+                                }
+                            },
                         )
                     },
-                    onOpenSessions = openSessions,
+                    workspaceSheet = { visible, hasMessages, soulDisplayName, onDismiss, onToggleShelf, onOpenAgentSoul ->
+                        if (visible) {
+                            PersonalAgentWorkspaceSheet(
+                                currentConversationId = resolvedUuid,
+                                soulDisplayName = soulDisplayName,
+                                pairedGatewayName = activeConnection?.name,
+                                hasMessages = hasMessages,
+                                proactiveBadgeCount = proactiveBadgeCount,
+                                onDismiss = onDismiss,
+                                onOpenSearch = {
+                                    navController.navigate(Screen.MessageSearch) {
+                                        launchSingleTop = true
+                                    }
+                                },
+                                onOpenSettings = {
+                                    navController.navigate(Screen.Setting) {
+                                        launchSingleTop = true
+                                    }
+                                },
+                                onOpenAgentSoul = onOpenAgentSoul,
+                                onNewTopic = {
+                                    navController.navigate(Screen.Chat(id = Uuid.random().toString()))
+                                },
+                                onOpenPhoneAutomation = {
+                                    navController.navigate(Screen.SettingPhoneUseDisplay) {
+                                        launchSingleTop = true
+                                    }
+                                },
+                                onOpenTodayBoard = {
+                                    navController.navigate(Screen.TodayBoard) {
+                                        launchSingleTop = true
+                                    }
+                                },
+                                onOpenProactiveCenter = {
+                                    navController.navigate(Screen.CloudProactiveCenter) {
+                                        launchSingleTop = true
+                                    }
+                                },
+                                onOpenPairedGateway = {
+                                    navController.navigate(Screen.SettingExperimentalMacGateway) {
+                                        launchSingleTop = true
+                                    }
+                                },
+                                onOpenAllSessions = openSessions,
+                                onToggleShelf = onToggleShelf,
+                                onSelectConversation = { targetId ->
+                                    navController.navigate(Screen.Chat(id = targetId.toString()))
+                                },
+                            )
+                        }
+                    },
                 ),
             )
         }
@@ -162,177 +249,6 @@ fun PersonalAgentPage(
             } else {
                 LaunchedEffect(request) { proactiveDeepLinkInbox.consume(request) }
             }
-        }
-    }
-}
-
-@Composable
-private fun PersonalAgentOverflowMenu(
-    pairedGatewayName: String?,
-    hasMessages: Boolean,
-    onToggleShelf: () -> Unit,
-    onOpenTodayBoard: () -> Unit,
-    onOpenProactiveCenter: () -> Unit,
-    onOpenPairedGateway: () -> Unit,
-    onOpenSettings: () -> Unit,
-) {
-    val tokens = LocalAmberTokens.current
-    var expanded by remember { mutableStateOf(false) }
-    val moreLabel = stringResource(R.string.personal_agent_more)
-
-    Box {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .testTag("personal-agent-more")
-                .clickable(role = Role.Button) { expanded = true }
-                .semantics { contentDescription = moreLabel },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Lucide.EllipsisVertical,
-                contentDescription = null,
-                tint = tokens.ink,
-                modifier = Modifier.size(20.dp),
-            )
-        }
-
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            DropdownMenuItem(
-                modifier = Modifier.heightIn(min = 48.dp),
-                leadingIcon = {
-                    Icon(
-                        imageVector = Lucide.LayoutDashboard,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-                text = {
-                    Text(
-                        text = stringResource(R.string.personal_agent_menu_today_board),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                },
-                onClick = {
-                    expanded = false
-                    onOpenTodayBoard()
-                },
-            )
-            DropdownMenuItem(
-                modifier = Modifier
-                    .heightIn(min = 48.dp)
-                    .testTag("personal-agent-menu-proactive-center"),
-                leadingIcon = {
-                    Icon(
-                        imageVector = Lucide.Sparkles,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-                text = {
-                    Column {
-                        Text(
-                            text = stringResource(R.string.proactive_center_title),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Text(
-                            text = stringResource(
-                                if (!pairedGatewayName.isNullOrBlank()) {
-                                    R.string.proactive_center_entry_desc
-                                } else {
-                                    R.string.proactive_center_entry_unpaired_desc
-                                },
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = tokens.ink3,
-                        )
-                    }
-                },
-                onClick = {
-                    expanded = false
-                    onOpenProactiveCenter()
-                },
-            )
-            DropdownMenuItem(
-                modifier = Modifier.heightIn(min = 48.dp),
-                leadingIcon = {
-                    Icon(
-                        imageVector = Lucide.Link2,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-                text = {
-                    Column {
-                        Text(
-                            text = stringResource(R.string.personal_agent_menu_paired_gateway),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Text(
-                            text = if (!pairedGatewayName.isNullOrBlank()) {
-                                stringResource(
-                                    R.string.personal_agent_menu_paired_gateway_connected,
-                                    pairedGatewayName,
-                                )
-                            } else {
-                                stringResource(R.string.personal_agent_menu_paired_gateway_unpaired)
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = tokens.ink3,
-                        )
-                    }
-                },
-                onClick = {
-                    expanded = false
-                    onOpenPairedGateway()
-                },
-            )
-            if (hasMessages) {
-                DropdownMenuItem(
-                    modifier = Modifier.heightIn(min = 48.dp),
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Lucide.Layers,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    },
-                    text = {
-                        Text(
-                            text = stringResource(R.string.personal_agent_menu_shelf),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    },
-                    onClick = {
-                        expanded = false
-                        onToggleShelf()
-                    },
-                )
-            }
-            DropdownMenuItem(
-                modifier = Modifier.heightIn(min = 48.dp),
-                leadingIcon = {
-                    Icon(
-                        imageVector = Lucide.Settings,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-                text = {
-                    Text(
-                        text = stringResource(R.string.personal_agent_menu_settings),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                },
-                onClick = {
-                    expanded = false
-                    onOpenSettings()
-                },
-            )
         }
     }
 }

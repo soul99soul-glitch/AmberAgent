@@ -96,6 +96,7 @@ internal fun TextInputRow(
     modifier: Modifier = Modifier,
     minimalChrome: Boolean = false,
     hidePlaceholder: Boolean = false,
+    placeholderOverride: String? = null,
     // Kept for the shared composer call contract; reasoning level lives in the model menu.
     onUpdateSettings: ((app.amber.core.settings.Settings) -> Unit)? = null,
     onImportAttachment: ((Uri, ChatInputAttachmentKind) -> Unit)? = null,
@@ -463,7 +464,7 @@ internal fun TextInputRow(
             placeholder = {
                 if (!hidePlaceholder) {
                     Text(
-                        text = if (minimalChrome) {
+                        text = placeholderOverride ?: if (minimalChrome) {
                             stringResource(R.string.chat_input_compose_placeholder)
                         } else {
                             stringResource(R.string.chat_input_placeholder)

@@ -142,6 +142,7 @@ internal fun ChatPageTimelineHost(
     onPreviewWorkspaceFile: (String) -> Unit,
     onSaveToWorkspace: ((UIMessage) -> Unit)?,
     innerPadding: PaddingValues,
+    floatingTopContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
     previewMode: Boolean,
     onExitPreview: () -> Unit,
     jumpTarget: TimelineJumpTarget?,
@@ -274,6 +275,7 @@ internal fun ChatPageTimelineHost(
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = timelineFade.value }) {
                 ChatList(
                     innerPadding = innerPadding,
+                    floatingTopContentPadding = floatingTopContentPadding,
                     conversation = timelineConversation,
                     timelineLoadState = timelineLoadState,
                     contextCompacts = contextCompacts,
@@ -384,25 +386,44 @@ internal fun ChatPageTimelineHost(
                 // 半透蒙层 spinner 反馈), 直到第一个 chunk 落 (messageNodes 非空) 再切到 ChatList.
                 if (!hasMessages) {
                     SideEffect { ChatPerfTrace.onEmptyHeroComposed() }
-                    val startSuggestions by rememberChatStartSuggestions(vm, setting)
-                    val nick = setting.displaySetting.userNickname.trim()
-                    val heroText = if (nick.isNotEmpty()) {
-                        stringResource(R.string.chat_page_hero_greeting_with_name, nick)
+                    val isPersonalAgentStage = LocalChatStageMode.current is ChatStageMode.PersonalAgent
+                    if (isPersonalAgentStage) {
+                        if (loading) {
+                            val chatTheme = LocalChatTheme.current
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(innerPadding),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    color = chatTheme.accent,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(28.dp),
+                                )
+                            }
+                        }
                     } else {
-                        stringResource(R.string.chat_page_hero_greeting)
+                        val startSuggestions by rememberChatStartSuggestions(vm, setting)
+                        val nick = setting.displaySetting.userNickname.trim()
+                        val heroText = if (nick.isNotEmpty()) {
+                            stringResource(R.string.chat_page_hero_greeting_with_name, nick)
+                        } else {
+                            stringResource(R.string.chat_page_hero_greeting)
+                        }
+                        val inputHasContent = inputState.textContent.text.isNotEmpty() ||
+                            inputState.messageContent.isNotEmpty() || inputState.attachmentImports.isNotEmpty()
+                        ChatEmptyContent(
+                            heroText = heroText,
+                            generatedSuggestions = startSuggestions,
+                            loading = loading,
+                            showSuggestions = !loading && !WindowInsets.isImeVisible && !inputHasContent,
+                            onSelect = { suggestion ->
+                                onFillSuggestion(suggestion)
+                            },
+                            modifier = Modifier.fillMaxSize().padding(innerPadding),
+                        )
                     }
-                    val inputHasContent = inputState.textContent.text.isNotEmpty() ||
-                        inputState.messageContent.isNotEmpty() || inputState.attachmentImports.isNotEmpty()
-                    ChatEmptyContent(
-                        heroText = heroText,
-                        generatedSuggestions = startSuggestions,
-                        loading = loading,
-                        showSuggestions = !loading && !WindowInsets.isImeVisible && !inputHasContent,
-                        onSelect = { suggestion ->
-                            onFillSuggestion(suggestion)
-                        },
-                        modifier = Modifier.fillMaxSize().padding(innerPadding),
-                    )
                 }
             }  // end timeline fade Box
             }  // end first-draw Box

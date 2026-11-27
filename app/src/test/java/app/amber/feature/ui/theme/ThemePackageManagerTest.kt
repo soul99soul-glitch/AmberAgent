@@ -92,8 +92,8 @@ class ThemePackageManagerTest {
         assertNull(applied.appliedThemePackageId)
         assertEquals(ThemePackageApplyResult.AlreadyApplied, manager.applyBuiltin("WARM"))
 
-        assertEquals(androidx.compose.ui.graphics.Color(0xFFEFE7D6), baseTokens(AmberBase.LIGHT).bg)
-        assertEquals(androidx.compose.ui.graphics.Color(0xFFFFFDF7), baseTokens(AmberBase.LIGHT).surface)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFFBF9F5), baseTokens(AmberBase.LIGHT).bg)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFFF3EFEA), baseTokens(AmberBase.LIGHT).surface)
         assertEquals(androidx.compose.ui.graphics.Color(0xFF14110E), baseTokens(AmberBase.DARK).bg)
     }
 

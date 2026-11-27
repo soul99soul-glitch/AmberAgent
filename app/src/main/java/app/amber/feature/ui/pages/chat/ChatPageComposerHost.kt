@@ -1,10 +1,22 @@
 package app.amber.feature.ui.pages.chat
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
@@ -16,8 +28,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
 import app.amber.ai.provider.Model
@@ -143,6 +160,9 @@ internal fun ChatPageComposerHost(
     onNextSandbox: (() -> Unit)?,
     onCancelSandbox: (() -> Unit)?,
     suggestionFillPulseKey: Int,
+    startSuggestions: List<String> = emptyList(),
+    onFillSuggestion: (String) -> Unit = {},
+    onSendSuggestion: (String) -> Boolean = { false },
     onConfigureModel: () -> Unit,
     onOpenConversation: (Uuid) -> Unit,
     onOpenWebMountSession: (sessionId: String, reopen: Boolean) -> Unit,
@@ -181,6 +201,28 @@ internal fun ChatPageComposerHost(
         if (subAgentDockHasTasks) subAgentDockEverShown = true
     }
 
+    val stage = LocalChatStageMode.current
+    val isPersonalAgentStage = stage is ChatStageMode.PersonalAgent
+    val imeVisible = WindowInsets.isImeVisible
+    val inputHasContent = inputState.textContent.text.isNotEmpty() ||
+        inputState.messageContent.isNotEmpty() || inputState.attachmentImports.isNotEmpty()
+    val defaultBoardSuggestion = stringResource(R.string.amber_redesign_suggestion_board)
+    val defaultReplySuggestion = stringResource(R.string.amber_redesign_suggestion_reply)
+    val defaultConceptSuggestion = stringResource(R.string.amber_redesign_suggestion_concept)
+    val duetSuggestions = if (isPersonalAgentStage && !loading && !imeVisible && !inputHasContent && !inputState.isEditing()) {
+        if (conversation.messageNodes.isEmpty()) {
+            startSuggestions.ifEmpty {
+                listOf(defaultBoardSuggestion, defaultReplySuggestion, defaultConceptSuggestion)
+            }
+        } else {
+            remember(conversation.messageNodes, conversation.chatSuggestions) {
+                conversation.actionSuggestionTexts()
+            }
+        }
+    } else {
+        emptyList()
+    }
+
     // Same reading column as the timeline on tablets; phones are narrower than it.
     Column(
         Modifier
@@ -214,12 +256,29 @@ internal fun ChatPageComposerHost(
                 },
             )
         }
+        if (isPersonalAgentStage && duetSuggestions.isNotEmpty()) {
+            PersonalAgentSuggestionStrip(
+                suggestions = duetSuggestions,
+                onClickSuggestion = onFillSuggestion,
+                onLongClickSuggestion = { onSendSuggestion(it) },
+            )
+        }
         if (!loading && configurationIssue != null &&
             (inputState.isEditing() || !inputActions.canSendWithoutChatModel(inputState.getContents()))) {
-            ChatConfigurationHint(configurationIssue, onConfigureModel)
+            ChatConfigurationHint(
+                issue = configurationIssue,
+                compactPill = isPersonalAgentStage,
+                onConfigure = onConfigureModel,
+            )
         }
         ChatInput(
             submissionOwner = inputSubmissionOwner,
+            duetStyle = isPersonalAgentStage,
+            belowComposerContent = { composerImeVisible ->
+                if (stage is ChatStageMode.PersonalAgent) {
+                    stage.bottomChrome(composerImeVisible)
+                }
+            },
             aboveComposerContent = {
                 ChatComposerCloudStatusDockHost(
                     conversationId = conversation.id,
@@ -382,4 +441,52 @@ private fun ChatComposerCloudStatusDockHost(
             }
         },
     )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PersonalAgentSuggestionStrip(
+    suggestions: List<String>,
+    onClickSuggestion: (String) -> Unit,
+    onLongClickSuggestion: (String) -> Unit,
+) {
+    val tokens = app.amber.feature.ui.theme.LocalAmberTokens.current
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, bottom = 6.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(
+            items = suggestions,
+            key = { it },
+        ) { suggestion ->
+            Surface(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .combinedClickable(
+                        onClick = { onClickSuggestion(suggestion) },
+                        onLongClick = { onLongClickSuggestion(suggestion) },
+                    ),
+                shape = CircleShape,
+                color = if (tokens.isDark) tokens.surface else tokens.raised,
+                contentColor = tokens.ink2,
+                border = BorderStroke(1.dp, tokens.line),
+                tonalElevation = 0.dp,
+            ) {
+                Text(
+                    text = suggestion,
+                    color = tokens.ink2,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    fontWeight = FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
+        }
+    }
 }

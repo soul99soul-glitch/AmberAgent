@@ -5,10 +5,14 @@ import app.amber.feature.ui.utils.ChatPerfCommandBridge
 import app.amber.feature.ui.utils.ChatPerfTrace
 import app.amber.feature.ui.utils.amberTraceMeasure
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -21,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
@@ -373,6 +378,20 @@ internal fun ChatPageScaffold(
             chatListState.animateScrollToItem(0)
         }
     }
+    val stage = LocalChatStageMode.current
+    val isPersonalAgentStage = stage is ChatStageMode.PersonalAgent
+    var workspaceSheetOpen by rememberSaveable { mutableStateOf(false) }
+    val floatingTopInset = if (isPersonalAgentStage) {
+        WindowInsets.statusBars.asPaddingValues().calculateTopPadding() +
+            app.amber.feature.ui.pages.personalagent.PersonalAgentTopChromeHeight
+    } else {
+        0.dp
+    }
+    val personalAgentStartSuggestions = if (isPersonalAgentStage && conversation.messageNodes.isEmpty()) {
+        rememberChatStartSuggestions(vm, setting).value
+    } else {
+        emptyList()
+    }
     fun closeHeaderPanels() {
         recapOpen = false
         shelfOpen = false
@@ -398,7 +417,9 @@ internal fun ChatPageScaffold(
         ) {
             Scaffold(
                 modifier = Modifier.amberTraceMeasure("Amber ChatPage measure"),
+                contentWindowInsets = if (isPersonalAgentStage) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
                 topBar = {
+                    if (!isPersonalAgentStage) {
                     AmberTraceSection("Amber ChatTopBar compose") {
                     ChatPageTopBar(
                         conversationFlow = vm.conversation,
@@ -465,6 +486,7 @@ internal fun ChatPageScaffold(
                         },
                     )
                     }
+                    }
                 },
                 bottomBar = {
                     AmberTraceSection("Amber ChatComposer compose") {
@@ -496,6 +518,14 @@ internal fun ChatPageScaffold(
                         } else null,
                         onCancelSandbox = if (canCancelSandbox) { { vm.stopGeneration() } } else null,
                         suggestionFillPulseKey = suggestionFillPulseKey,
+                        startSuggestions = personalAgentStartSuggestions,
+                        onFillSuggestion = { suggestion ->
+                            inputState.setMessageText(suggestion)
+                            suggestionFillPulseKey += 1
+                        },
+                        onSendSuggestion = { suggestion ->
+                            inputActions.sendSuggestion(suggestion)
+                        },
                         onConfigureModel = {
                             if (configurationIssue == ChatConfigurationIssue.MissingModel && chatProvidersForMenu.isNotEmpty()) {
                                 modelMenuOpen = true
@@ -524,9 +554,13 @@ internal fun ChatPageScaffold(
                 },
                 containerColor = Color.Transparent,
             ) { innerPadding ->
-                val topInset = innerPadding.calculateTopPadding()
-                if (headerInset != topInset) {
-                    SideEffect { headerInset = topInset }
+                val effectiveTopInset = if (isPersonalAgentStage) {
+                    floatingTopInset
+                } else {
+                    innerPadding.calculateTopPadding()
+                }
+                if (headerInset != effectiveTopInset) {
+                    SideEffect { headerInset = effectiveTopInset }
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
                     ChatPageTimelineHost(
@@ -557,6 +591,7 @@ internal fun ChatPageScaffold(
                         onPreviewWorkspaceFile = onPreviewWorkspaceFile,
                         onSaveToWorkspace = onSaveToWorkspace,
                         innerPadding = innerPadding,
+                        floatingTopContentPadding = floatingTopInset,
                         previewMode = previewMode,
                         onExitPreview = { previewMode = false },
                         jumpTarget = jumpTarget,
@@ -567,6 +602,43 @@ internal fun ChatPageScaffold(
                             suggestionFillPulseKey += 1
                         },
                     )
+
+                    if (stage is ChatStageMode.PersonalAgent) {
+                        PersonalAgentTopChromeOverlay(
+                            stage = stage,
+                            conversationFlow = vm.conversation,
+                            currentChatModel = currentChatModel,
+                            generating = loadingJob != null,
+                            recapEligible = recapEligible,
+                            soulDisplayName = soulState.displayName,
+                            onOpenWorkspace = {
+                                closeHeaderPanels()
+                                modelMenuOpen = false
+                                workspaceSheetOpen = true
+                            },
+                            onOpenAgentSoul = {
+                                closeHeaderPanels()
+                                modelMenuOpen = false
+                                agentSoulSheetOpen = true
+                            },
+                            onToggleModelMenu = {
+                                closeHeaderPanels()
+                                modelMenuOpen = !modelMenuOpen
+                            },
+                            onOpenRecap = {
+                                if (recapOpen) {
+                                    recapOpen = false
+                                } else {
+                                    modelMenuOpen = false
+                                    shelfOpen = false
+                                    activityOpen = false
+                                    recapOpen = true
+                                    vm.requestRecap()
+                                }
+                            },
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                    }
 
                     ChatRecapPanelHost(
                         conversationFlow = vm.conversation,
@@ -591,7 +663,7 @@ internal fun ChatPageScaffold(
                             suggestionFillPulseKey += 1
                         },
                         modifier = Modifier.padding(
-                            top = innerPadding.calculateTopPadding(),
+                            top = effectiveTopInset,
                             bottom = innerPadding.calculateBottomPadding(),
                         ),
                     )
@@ -610,7 +682,7 @@ internal fun ChatPageScaffold(
                             }
                         },
                         modifier = Modifier.padding(
-                            top = innerPadding.calculateTopPadding(),
+                            top = effectiveTopInset,
                             bottom = innerPadding.calculateBottomPadding(),
                         ),
                     )
@@ -620,7 +692,7 @@ internal fun ChatPageScaffold(
                         notices = otherActivity,
                         onDismiss = { activityOpen = false },
                         modifier = Modifier.padding(
-                            top = innerPadding.calculateTopPadding(),
+                            top = effectiveTopInset,
                             bottom = innerPadding.calculateBottomPadding(),
                         ),
                         onOpen = { notice ->
@@ -721,6 +793,67 @@ internal fun ChatPageScaffold(
             if (agentSoulSheetOpen) {
                 AgentSoulSheet(onDismiss = { agentSoulSheetOpen = false })
             }
+
+            if (stage is ChatStageMode.PersonalAgent) {
+                stage.workspaceSheet(
+                    workspaceSheetOpen,
+                    conversation.messageNodes.isNotEmpty(),
+                    soulState.displayName,
+                    { workspaceSheetOpen = false },
+                    {
+                        workspaceSheetOpen = false
+                        modelMenuOpen = false
+                        recapOpen = false
+                        activityOpen = false
+                        shelfOpen = true
+                    },
+                    {
+                        workspaceSheetOpen = false
+                        closeHeaderPanels()
+                        modelMenuOpen = false
+                        agentSoulSheetOpen = true
+                    },
+                )
+            }
         }
     }  // end CompositionLocalProvider(LocalTimelineHighlight)
+}
+
+@Composable
+private fun PersonalAgentTopChromeOverlay(
+    stage: ChatStageMode.PersonalAgent,
+    conversationFlow: kotlinx.coroutines.flow.StateFlow<Conversation>,
+    currentChatModel: Model?,
+    generating: Boolean,
+    recapEligible: Boolean,
+    soulDisplayName: String,
+    onOpenWorkspace: () -> Unit,
+    onOpenAgentSoul: () -> Unit,
+    onToggleModelMenu: () -> Unit,
+    onOpenRecap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val titleFlow = remember(conversationFlow) {
+        conversationFlow.map { it.title }.distinctUntilChanged()
+    }
+    val title by titleFlow.collectAsStateWithLifecycle(initialValue = conversationFlow.value.title)
+    val modelShortName = remember(currentChatModel) {
+        currentChatModel?.displayName?.takeIf { it.isNotBlank() }
+            ?: currentChatModel?.modelId?.substringAfterLast('/')
+    }
+    Box(modifier = modifier) {
+        stage.topChrome(
+            PersonalAgentTopBarState(
+                title = title,
+                modelShortName = modelShortName,
+                generating = generating,
+                recapEligible = recapEligible,
+                soulDisplayName = soulDisplayName,
+                onOpenWorkspace = onOpenWorkspace,
+                onOpenAgentSoul = onOpenAgentSoul,
+                onToggleModelMenu = onToggleModelMenu,
+                onOpenRecap = onOpenRecap,
+            ),
+        )
+    }
 }

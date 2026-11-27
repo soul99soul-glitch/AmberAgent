@@ -43,13 +43,13 @@ enum class AmberBase { LIGHT, DARK, SAGE, SAGE_DARK }
 
 internal const val SIT_TERRACOTTA_ACCENT_HEX = "#B8623A"
 
-// Default warm canvas: iOS "点阵 · 陶土" (AmberTheme.paperLight / paperDark).
+// Default warm canvas: iOS Argon Warm Editorial (`AmberPalette.paperLight` / `paperDark`).
 // Accent remains independently editable; selecting the built-in restores terracotta.
 internal val AmberLight = AmberTokens(
-    bg = Color(0xFFEFE7D6), surface = Color(0xFFFFFDF7), surface2 = Color(0xFFF0EBE2), raised = Color(0xFFFFFFFF),
-    ink = Color(0xFF1B1813), ink2 = Color(0xFF5B5449), ink3 = Color(0xFF746D62), ink4 = Color(0xFF918A80),
-    line = Color(0xFFECE3D6), line2 = Color(0xFFDBCEBC),
-    userBg = Color(0xFF1B1813), userInk = Color(0xFFFFFDF7), codeBg = Color(0xFFF0EBE2),
+    bg = Color(0xFFFBF9F5), surface = Color(0xFFF3EFEA), surface2 = Color(0xFFEAE4DC), raised = Color(0xFFFFFFFF),
+    ink = Color(0xFF1E1B18), ink2 = Color(0xFF3D3731), ink3 = Color(0xFF787067), ink4 = Color(0xFF9E958B),
+    line = Color(0xFFE6E0D6), line2 = Color(0xFFEFEAE1),
+    userBg = Color(0xFFB8623A), userInk = Color(0xFFFFFFFF), codeBg = Color(0xFFEAE4DC),
     signal = Color(0xFF5E9C6E), accent = Color(0xFFB8623A), accentInk = Color(0xFFFFFFFF), isDark = false,
 )
 
@@ -129,13 +129,20 @@ internal fun buildAmberTokens(
 ): AmberTokens {
     val palette = if (base.isDark) design?.dark else design?.light
     val themedBase = palette?.toTokens(base) ?: base
-    return themedBase.copy(accent = accent, accentInk = accentInkFor(accent), signal = accent)
+    val resolvedAccentInk = accentInkFor(accent)
+    return themedBase.copy(
+        accent = accent,
+        accentInk = resolvedAccentInk,
+        signal = accent,
+        userBg = if (!themedBase.isDark) accent else themedBase.userBg,
+        userInk = if (!themedBase.isDark) resolvedAccentInk else themedBase.userInk,
+    )
 }
 
 /** Returns one of the five portable document paper presets for the active color mode. */
 internal fun themePackPaperTokens(paper: String, isDark: Boolean): AmberTokens? {
     val colors = when (paper to isDark) {
-        "paper" to false -> PaperPalette(0xEFE7D6, 0xFFFDF7, 0xF0EBE2, 0x1B1813, 0x5B5449, 0x746D62, 0x918A80, 0xDBCEBC, 0xECE3D6)
+        "paper" to false -> PaperPalette(0xFBF9F5, 0xF3EFEA, 0xEAE4DC, 0x1E1B18, 0x3D3731, 0x787067, 0x9E958B, 0xE6E0D6, 0xEFEAE1)
         "neutral" to false -> PaperPalette(0xECE8E4, 0xF6F5F3, 0xEDEBE7, 0x161514, 0x55524D, 0x716D67, 0x8F8B85, 0xD9D5CF, 0xE4E1DC)
         "white" to false -> PaperPalette(0xF5F5F4, 0xFFFFFF, 0xEEEEED, 0x1A1A1A, 0x5C5C5C, 0x737373, 0x8E8E8E, 0xD4D4D4, 0xE5E5E5)
         "pi" to false -> PaperPalette(0xF3F0EB, 0xFAF9F7, 0xEBE7E0, 0x1C1B19, 0x4A4640, 0x6A6560, 0x9A948C, 0xD4CFC7, 0xE8E4DC)
@@ -151,15 +158,15 @@ internal fun themePackPaperTokens(paper: String, isDark: Boolean): AmberTokens? 
         bg = colors.background.color(),
         surface = colors.surface.color(),
         surface2 = colors.surface2.color(),
-        raised = colors.surface.color(),
+        raised = if (!isDark) Color(0xFFFFFFFF) else colors.surface2.color(),
         ink = colors.foreground.color(),
         ink2 = colors.foreground2.color(),
         ink3 = colors.muted.color(),
         ink4 = colors.muted2.color(),
         line = colors.border.color(),
         line2 = colors.borderSoft.color(),
-        userBg = colors.foreground.color(),
-        userInk = colors.background.color(),
+        userBg = if (!isDark) Color(0xFFB8623A) else colors.foreground.color(),
+        userInk = if (!isDark) Color(0xFFFFFFFF) else colors.background.color(),
         codeBg = colors.surface2.color(),
         signal = Color(0xFF5E9C6E),
         accent = Color(0xFFB8623A),

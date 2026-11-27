@@ -72,6 +72,7 @@ internal fun Modifier.dashedRoundedBorder(color: Color, radius: androidx.compose
 @Composable
 internal fun ChatList(
     innerPadding: PaddingValues,
+    floatingTopContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
     conversation: Conversation,
     timelineLoadState: ConversationTimelineLoadState = ConversationTimelineLoadState(),
     pendingUserMessages: List<PendingUserMessage> = emptyList(),
@@ -138,6 +139,7 @@ internal fun ChatList(
     } else {
         ChatListNormal(
             innerPadding = innerPadding,
+            floatingTopContentPadding = floatingTopContentPadding,
             conversation = conversation,
             timelineLoadState = timelineLoadState,
             pendingUserMessages = pendingUserMessages,

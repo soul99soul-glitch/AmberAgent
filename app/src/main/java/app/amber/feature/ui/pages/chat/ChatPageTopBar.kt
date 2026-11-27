@@ -213,8 +213,6 @@ private fun TopBar(
     val newSessionLabel = stringResource(R.string.chat_page_new_session)
     val amberTokens = LocalAmberTokens.current
     val amberType = LocalAmberType.current
-    val stage = LocalChatStageMode.current
-    val personalAgentMoreMenu = LocalPersonalAgentMoreMenu.current
     // V3 phone-screen.jsx header 没有 surface —— 直接坐在 chatTheme.bg 之上
     // 之前用 workspace.paper@96% (legacy 硬编码白底)，用户反馈"顶栏没变暖纸色"
     // ——其实是被白 Surface 罩住了
@@ -233,24 +231,19 @@ private fun TopBar(
                     .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                when (stage) {
-                    is ChatStageMode.PersonalAgent -> stage.topBarLeading()
-                    ChatStageMode.Standard -> {
-                        if (!bigScreen) {
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(androidx.compose.foundation.shape.CircleShape)
-                                    .testTag("chat-header-back")
-                                    .clickable { onBack() },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                AmberHeaderBackArrow()
-                            }
-                        } else {
-                            Spacer(Modifier.size(48.dp))
-                        }
+                if (!bigScreen) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .testTag("chat-header-back")
+                            .clickable { onBack() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        AmberHeaderBackArrow()
                     }
+                } else {
+                    Spacer(Modifier.size(48.dp))
                 }
 
                 // Two touch targets: the island (status / recap) and the model row below it.
@@ -363,42 +356,13 @@ private fun TopBar(
                     onClick = onToggleActivity,
                 )
 
-                when (stage) {
-                    is ChatStageMode.PersonalAgent -> {
-                        val sessionsLabel = stringResource(R.string.personal_agent_sessions)
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(androidx.compose.foundation.shape.CircleShape)
-                                .testTag("personal-agent-sessions")
-                                .clickable(role = Role.Button, onClick = stage.onOpenSessions)
-                                .semantics { contentDescription = sessionsLabel },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = Lucide.MessagesSquare,
-                                contentDescription = null,
-                                tint = amberTokens.ink,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                        if (personalAgentMoreMenu != null) {
-                            personalAgentMoreMenu(hasMessages, onToggleShelf)
-                        } else if (hasMessages) {
-                            ChatShelfButton(open = shelfOpen, onClick = onToggleShelf)
-                        }
-                    }
-
-                    ChatStageMode.Standard -> {
-                        // The shelf replaces the context ring; usage now lives in the model menu.
-                        Box(
-                            modifier = Modifier.widthIn(min = 48.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (hasMessages) {
-                                ChatShelfButton(open = shelfOpen, onClick = onToggleShelf)
-                            }
-                        }
+                // The shelf replaces the context ring; usage now lives in the model menu.
+                Box(
+                    modifier = Modifier.widthIn(min = 48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (hasMessages) {
+                        ChatShelfButton(open = shelfOpen, onClick = onToggleShelf)
                     }
                 }
             }

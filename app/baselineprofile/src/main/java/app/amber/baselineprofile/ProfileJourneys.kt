@@ -38,7 +38,7 @@ internal fun isExplicitHomeLaunchMode(): Boolean =
 
 internal fun MacrobenchmarkScope.waitForPersonalAgentReady(packageName: String): UiObject2 {
     waitForNode(tag(packageName, ProfileTestTags.PERSONAL_AGENT_HOST_PILL))
-    waitForNode(tag(packageName, ProfileTestTags.PERSONAL_AGENT_SESSIONS))
+    waitForNode(tag(packageName, ProfileTestTags.PERSONAL_AGENT_MORE))
     waitForNode(tag(packageName, ProfileTestTags.CHAT_COMPOSER_SEND))
     return waitForNode(tag(packageName, ProfileTestTags.CHAT_COMPOSER_INPUT).enabled(true))
 }
@@ -79,6 +79,9 @@ internal fun MacrobenchmarkScope.openExplicitSessionHome(
 ) {
     if (!directHomeLaunch) {
         waitForPersonalAgentReady(packageName)
+        if (!device.hasObject(tag(packageName, ProfileTestTags.PERSONAL_AGENT_SESSIONS))) {
+            waitForNode(tag(packageName, ProfileTestTags.PERSONAL_AGENT_MORE)).click()
+        }
         waitForNode(tag(packageName, ProfileTestTags.PERSONAL_AGENT_SESSIONS)).click()
     }
     waitForNode(tag(packageName, ProfileTestTags.SESSION_HOME_SEARCH))
